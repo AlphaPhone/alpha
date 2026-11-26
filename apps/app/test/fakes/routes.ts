@@ -9,14 +9,15 @@ export type Answering = (request: Request) => Promise<Response>;
  * HttpClient of world.vibe.
  * @throws {never}
  */
-export function fetched(answer: Answering, url: URL, init: { method: string; headers: Record<string, string>; body: Uint8Array | undefined; signal: AbortSignal }): Promise<Response> {
-  return answer(new Request(url, init as RequestInit));
+export function fetched(answer: Answering, url: URL, init: { method: string; headers: Record<string, string>; body: BodyInit | Uint8Array | undefined; signal: AbortSignal }): Promise<Response> {
+  const requestInit = init.body instanceof ReadableStream ? { ...init, duplex: "half" } : init;
+  return answer(new Request(url, requestInit as RequestInit));
 }
 
 /** What the dev server answers under `prefix`, asked as a plugin's native code would ask the service it stands for. */
 export const servedUnder = (prefix: string): Answering => async (request) => {
   const { pathname, search } = new URL(request.url);
-  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
   return fetch(`${prefix}${pathname}${search}`, { method: request.method, headers: request.headers, body, signal: request.signal });
 };
 
@@ -35,19 +36,34 @@ export function answering(routes: readonly Route[]): Answering {
 /** A Server-Sent Events answer that stays open; each `send` is one event, until the client goes away. */
 export function feed(opened: (send: (data: unknown) => void) => () => void): Response {
   const encoder = new TextEncoder();
+  let closed = false;
   let close = () => {};
   const body = new ReadableStream<Uint8Array>({
-    start: (controller) => { close = opened((data) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))); },
-    cancel: () => close(),
+    start: (controller) => {
+      close = opened((data) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          closed = true;
+          close();
+        }
+      });
+    },
+    cancel: () => {
+      if (closed) return;
+      closed = true;
+      close();
+    },
   });
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
-/** Parse a request JSON body into a plain record, returning an empty object on missing or invalid JSON. */
+/** Parse a request JSON body into a plain record, returning an empty object on missing, array, or invalid JSON. */
 export async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
   try {
     const parsed = (await request.json()) as unknown;
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

@@ -40,8 +40,7 @@ export function SettingsTextSizePicker({ size, busy = false, onChoose }: Setting
               disabled={busy || !onChoose}
               className={cn(
                 focusRing,
-                "flex min-h-14 min-w-11 shrink-0 grow basis-auto items-center justify-center rounded-drawer-icon px-1.5 leading-tight text-foreground disabled:pointer-events-none aria-pressed:bg-alpha aria-pressed:text-alpha-foreground",
-                busy && "opacity-50",
+                "flex min-h-14 min-w-11 shrink-0 grow basis-auto items-center justify-center rounded-drawer-icon px-1.5 leading-tight text-foreground disabled:pointer-events-none disabled:opacity-50 aria-pressed:bg-alpha aria-pressed:text-alpha-foreground",
               )}
               onClick={() => onChoose?.(percent)}
             >
@@ -49,7 +48,7 @@ export function SettingsTextSizePicker({ size, busy = false, onChoose }: Setting
             </button>
           ))}
         </div>
-        {busy ? <Spinner size="sm" label="Applying" /> : null}
+        {busy ? <div className="flex justify-center py-1"><Spinner size="sm" label="Applying" /></div> : null}
       </div>
     </ListGroup>
   );

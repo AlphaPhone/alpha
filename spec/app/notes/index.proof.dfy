@@ -70,6 +70,7 @@ lemma openRow_ensures(s: Notes, id: int, covered: bool, by_: app__notes__note_Ac
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepTheListNeverGoesBack(s, "openRow", openRow(s, id, covered, by_).state))
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepOnlyAReadingChangesTheList(s, "openRow", openRow(s, id, covered, by_).state))
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepANoteOpensAsListed(s, "openRow", openRow(s, id, covered, by_).state, openRow(s, id, covered, by_).out))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepTheAgentOpensOnceForTheCurrentTurn(s, "openRow", openRow(s, id, covered, by_).state, openRow(s, id, covered, by_).out))
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepOneSoundChangeAtATime(s, "openRow", openRow(s, id, covered, by_).state, openRow(s, id, covered, by_).out))
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepAnUnknownChangeStaysUnknown(s, "openRow", openRow(s, id, covered, by_).state))
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepTheAgentOnlyProposes(s, "openRow", openRow(s, id, covered, by_).state, openRow(s, id, covered, by_).out))

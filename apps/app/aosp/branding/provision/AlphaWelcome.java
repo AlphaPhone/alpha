@@ -2,17 +2,21 @@ package com.android.provision;
 
 import android.app.Activity;
 import android.app.role.RoleManager;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.os.Process;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.Gravity;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -28,17 +32,24 @@ final class AlphaWelcome {
         return Math.round(value * a.getResources().getDisplayMetrics().density);
     }
 
-    static void show(Activity activity, Runnable completed) {
+    /** Installs the welcome view and returns a destroy cleanup callback that cancels pending timeouts. */
+    static Runnable show(Activity activity, Runnable completed) {
         AlphaFreshPresets.defaultToGestureNavigation(activity);
-        activity.getWindow().setStatusBarColor(BACKGROUND);
-        activity.getWindow().setNavigationBarColor(BACKGROUND);
         ScrollView scroll = new ScrollView(activity);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BACKGROUND);
         LinearLayout column = new LinearLayout(activity);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_VERTICAL);
-        column.setPadding(dp(activity, 28), dp(activity, 48), dp(activity, 28), dp(activity, 32));
+        int padH = dp(activity, 28);
+        int padTop = dp(activity, 48);
+        int padBottom = dp(activity, 32);
+        column.setPadding(padH, padTop, padH, padBottom);
+        scroll.setOnApplyWindowInsetsListener((view, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(WindowInsets.Type.systemBars());
+            column.setPadding(padH + bars.left, padTop + bars.top, padH + bars.right, padBottom + bars.bottom);
+            return windowInsets;
+        });
         scroll.addView(column);
         ImageView mark = new ImageView(activity);
         mark.setImageResource(R.drawable.alpha_mark);
@@ -62,14 +73,19 @@ final class AlphaWelcome {
         Button settings = button(activity, column, R.string.alpha_home_settings,
                 () -> open(activity, Settings.ACTION_HOME_SETTINGS));
         settings.setVisibility(View.GONE);
-        Button next = button(activity, column, R.string.alpha_continue, () -> {});
+        Button next = button(activity, column, R.string.alpha_continue, null);
         Completion completion = new Completion(activity, completed, next, settings, notice);
         next.setOnClickListener(view -> completion.begin());
         next.setBackgroundTintList(ColorStateList.valueOf(Color.BLUE));
         TextView footer = text(activity, activity.getString(R.string.alpha_setup_footer), 14, Color.rgb(180, 180, 194));
         footer.setPadding(0, dp(activity, 24), 0, 0);
         column.addView(footer);
+        scroll.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {}
+            @Override public void onViewDetachedFromWindow(View v) { completion.cancel(); }
+        });
         activity.setContentView(scroll);
+        return completion::cancel;
     }
 
     private static final class Completion {
@@ -216,10 +232,18 @@ final class AlphaWelcome {
             } catch (IllegalStateException | SecurityException failure) { fail(R.string.alpha_appearance_preset_failed); return; }
             if (!verifyRoles(roles, required) || !eligible()) return;
             AlphaFreshPresets.defaultToGestureNavigation(activity);
+            handler.removeCallbacksAndMessages(null);
             waiting = false;
             completed.run();
         }
+        private void cancel() {
+            waiting = false;
+            ++generation;
+            handler.removeCallbacksAndMessages(null);
+        }
+
         private void fail(int message) {
+            handler.removeCallbacksAndMessages(null);
             waiting = false;
             next.setEnabled(true); next.setText(R.string.alpha_retry_setup);
             boolean home = message == R.string.alpha_home_failed;
@@ -250,12 +274,18 @@ final class AlphaWelcome {
         LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
         layout.bottomMargin = dp(a, 12);
         parent.addView(result, layout);
-        result.setOnClickListener(view -> action.run());
+        if (action != null) result.setOnClickListener(view -> action.run());
         return result;
     }
 
     private static void open(Activity a, String action) {
         Intent intent = new Intent(action);
-        if (intent.resolveActivity(a.getPackageManager()) != null) a.startActivity(intent);
+        if (intent.resolveActivity(a.getPackageManager()) != null) {
+            try {
+                a.startActivity(intent);
+            } catch (ActivityNotFoundException | SecurityException failure) {
+                Log.w("AlphaWelcome", "Unable to open settings action " + action, failure);
+            }
+        }
     }
 }

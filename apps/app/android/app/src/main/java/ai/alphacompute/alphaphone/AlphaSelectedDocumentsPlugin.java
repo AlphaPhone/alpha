@@ -69,8 +69,26 @@ public final class AlphaSelectedDocumentsPlugin extends Plugin {
  @PluginMethod public void pdfSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.pdf(call, this::documents)); }
  @PluginMethod public void readSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.read(call, this::documents)); }
  @PluginMethod public void forgetSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.forget(call, this::documents)); }
- @PluginMethod public void openSelected(PluginCall call) { foreground(call, () -> SelectedDocumentCalls.open(call, this::documents, getActivity())); }
- @PluginMethod public void shareSelected(PluginCall call) { foreground(call, () -> SelectedDocumentCalls.share(call, this::documents, getActivity())); }
+ @PluginMethod public void openSelected(PluginCall call) {
+  foreground(call, () -> work(call, () -> {
+   Activity activity = getActivity();
+   if (!AlphaDevicePlugin.shareForeground(activity)) {
+    call.reject("Open and unlock Alpha before using this document.");
+    return;
+   }
+   SelectedDocumentCalls.open(call, this::documents, activity);
+  }));
+ }
+ @PluginMethod public void shareSelected(PluginCall call) {
+  foreground(call, () -> work(call, () -> {
+   Activity activity = getActivity();
+   if (!AlphaDevicePlugin.shareForeground(activity)) {
+    call.reject("Open and unlock Alpha before using this document.");
+    return;
+   }
+   SelectedDocumentCalls.share(call, this::documents, activity);
+  }));
+ }
 
  @PluginMethod public void pickSelected(PluginCall call) {
   foreground(call, () -> {

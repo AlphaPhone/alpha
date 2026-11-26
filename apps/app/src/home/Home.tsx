@@ -1,7 +1,7 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os-bridges";
 import { AppsDrawer, type AppsDrawerProps, type DrawerApp, HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
-import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
 import { useMachine as useDrawer } from "../../gen/app__home__drawer.react.ts";
@@ -21,11 +21,13 @@ import { homeFrame } from "./firstFrame.ts";
 import { actOnAddHome, addLayerAt, openAddHome, reconcileAddHome } from "./addHome.vibe";
 import { catalog, labelOf } from "./catalog.vibe";
 import { type AppsInput, type HomeEditInput, actInApps, chooseApp, closeApps, editHome, openApps, openHomeFavorite, openOwnInApps, openOwnTile, told } from "./home.vibe";
-import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
+import { launcherHeld, openNotifications, phoneLocked, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
 
 const owner = "Owner" as const;
+const noop = () => undefined;
+const noSnapshot = () => null;
 
 /** A tile's id on the screen: `view:<View>` for one of Alpha's own apps, `app:<key>` for an installed one. */
 const idOf = (tile: Tile): string => (tile.tag === "Own" ? `view:${tile.view}` : `app:${tile.app}`);
@@ -68,7 +70,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const landscapePhone = landscapeHomeInput(canvas);
   const alongside = s !== undefined && Home.besideHomeSheet(s, landscapePhone);
   const { cards: day, settled } = useDayCards(runtime, s, alongside);
-  const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: false, now: untimed }, owner);
+  const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: phoneLocked(), now: untimed }, owner);
   const [mount, setMount] = useState<{ frame: HTMLElement; current: () => boolean }>();
   const homeScroller = useCallback((node: HTMLDivElement | null) => {
     const frame = node?.closest("main");
@@ -86,11 +88,12 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     const fiber = alpha.runtime.runFork(launcherHeld(held));
     return () => fiber.interruptUnsafe();
   }, [alpha]);
-  // Home's first complete frame: the tiles read and the cards' place known, told before the browser paints it.
   const whole = h !== undefined && s !== undefined && (h.host === "AssistantOnly" || (ready(h.tiles) && (!Home.showsCards(h) || settled)));
-  useLayoutEffect(() => {
+  const markWhole = useCallback(() => {
     if (whole) homeFrame.drawn();
+    return noop;
   }, [whole]);
+  useSyncExternalStore(markWhole, noSnapshot, noSnapshot);
   if (!h || !s || h.host === "AssistantOnly") return null;
   const can = (event: Home.Event) => home.can(event, owner);
   const editVisible = Home.editSite(s, alongside) && homeEditFrame(canvas) && layers !== undefined && !pageInert(layers);
@@ -154,7 +157,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       covered={h.editing && !editVisible}
       held={s.trail.length > 0}
       editing={editing || (h.editing && addLayer !== undefined)}
-      tileGestureScope={`${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}`}
+      tileGestureScope={h.editing ? `${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}` : "home"}
       onPressTile={(id) => { if (id.startsWith("view:")) homeFrame.want(id as `view:${View}`); }}
       onOpenTile={(id) => {
         const tile = tileOf(id);
@@ -181,7 +184,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   );
   return (
     <>
-      <div inert={showingApps || undefined} className="contents">
+      <div inert={showingApps || undefined} className="flex min-h-0 flex-1 flex-col">
         {deck}
       </div>
       {showingApps && (

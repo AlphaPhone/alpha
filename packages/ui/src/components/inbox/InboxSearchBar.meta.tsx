@@ -5,7 +5,7 @@ import type { InboxSearchBarProps } from "./InboxSearchBar.tsx";
 const onSearch = fn();
 
 export const meta: ComponentMeta<InboxSearchBarProps> = {
-  args: { value: "tax", onSearch },
+  args: { value: "tax", onValueChange: fn(), onSearch },
   examples: { Empty: { value: "" }, "Cannot search": { onSearch: undefined } },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

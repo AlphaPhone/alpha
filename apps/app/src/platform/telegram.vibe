@@ -430,8 +430,8 @@ export effect function assertTelegramUserToken(token: string): string!Msg.BotTok
 function telegramErrorFromCode(code: string, status: number, retryAfter: string | undefined): Msg.MessagingFailure {
   const floodMatch = FLOOD_WAIT_PATTERN.exec(code)
   if (floodMatch !== null || status === 429) {
-    const floodSeconds = floodMatch !== null ? Number(floodMatch[1]) : Msg.parseRetryAfter(retryAfter, 1)
-    return new Msg.RateLimited({ provider: "telegram", retryAfter: floodSeconds, code })
+    const floodSeconds = floodMatch !== null ? Msg.boundWaitSeconds(Number(floodMatch[1])) : Msg.parseRetryAfter(retryAfter)
+    return new Msg.RateLimited({ provider: "telegram", ...(floodSeconds === undefined ? {} : { retryAfter: floodSeconds }), code })
   }
   if (code === "BOT_TOKENS_NOT_SUPPORTED") return new Msg.BotTokenRejected({ provider: "telegram", reason: code })
   if (TELEGRAM_AUTH_ERRORS.includes(code) || status === 401) return new Msg.AuthRevoked({ provider: "telegram", code })

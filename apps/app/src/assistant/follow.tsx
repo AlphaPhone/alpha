@@ -193,7 +193,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   };
   if (seen.detent !== detent) {
     const tap = live === undefined && !voice && !comms && animates();
-    const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: sectionRef.current?.getBoundingClientRect().height || undefined } : undefined);
+    const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true } : undefined);
     setSeen({
       detent,
       growing: leaving ? undefined : !tap || !isOpen(detent) ? seen.growing : isOpen(seen.detent) ? { from: "shown" } : {},

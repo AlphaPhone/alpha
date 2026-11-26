@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { cn, focusRing } from "../../lib/cn.ts";
 
 export type PhotoSelectionAction = {
   /** What the action does, under its mark. */
@@ -18,9 +19,9 @@ export type PhotoSelectionBarProps = {
 /** What can be done with the items selected: a bar of marks and words above the Ask Alpha bar. */
 export function PhotoSelectionBar({ actions }: PhotoSelectionBarProps) {
   return (
-    <div role="toolbar" aria-label="Selection actions" className="absolute inset-x-0 bottom-27 z-20 flex h-18 items-start justify-around bg-background px-3 pt-2.5 border-t border-border">
+    <div role="toolbar" aria-label="Selection actions" className="absolute inset-x-0 bottom-[calc(--spacing(27)+var(--alpha-safe-bottom))] z-20 flex h-18 items-start justify-around border-t border-border bg-popover px-3 pt-2.5 text-popover-foreground">
       {actions.map(({ label, description, icon: Icon, onPress }) => (
-        <button key={label} type="button" aria-description={description} disabled={!onPress} onClick={onPress} className="flex min-h-12 min-w-16 flex-col items-center gap-0.75 text-xs text-foreground disabled:opacity-40">
+        <button key={label} type="button" aria-description={description} disabled={!onPress} onClick={onPress} className={cn(focusRing, "flex min-h-12 min-w-16 flex-col items-center gap-0.75 rounded-lg text-xs text-foreground disabled:opacity-40")}>
           <Icon aria-hidden className="size-5.5" />
           {label}
         </button>

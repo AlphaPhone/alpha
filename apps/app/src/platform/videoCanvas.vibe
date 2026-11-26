@@ -1,6 +1,7 @@
 // spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"
 module clips {
   import * as Effect from "effect/Effect"
+  import { boundedSignal } from "./cloud.vibe"
   import type { BrowserEditFrame } from "./photoCanvas.vibe"
 
   export type ClipTransform = { readonly start: number; readonly end: number; readonly turns: number; readonly crop: boolean }
@@ -21,15 +22,8 @@ module clips {
   }
 
   function within(parent: AbortSignal, milliseconds: number) {
-    const deadline = AbortSignal.timeout(milliseconds)
-    const merged = new AbortController()
-    const relay = () => merged.abort(parent.aborted ? parent.reason : deadline.reason)
-    if (parent.aborted) relay()
-    else {
-      parent.addEventListener("abort", relay, { once: true })
-      deadline.addEventListener("abort", relay, { once: true })
-    }
-    return { signal: merged.signal, release: () => { parent.removeEventListener("abort", relay); deadline.removeEventListener("abort", relay) } }
+    const { signal, release } = boundedSignal(parent, milliseconds)
+    return { signal: signal ?? parent, release }
   }
 
   function drawFrame(video: HTMLVideoElement, edit: ClipTransform) {
@@ -104,8 +98,10 @@ module clips {
       let bytes = 0, stopped = false, finished = false
       let cancelFrame: (() => void) | undefined
       let reached = edit.start
+      const usesVideoFrame = typeof video.requestVideoFrameCallback === "function"
       const cleanup = () => {
         cancelFrame?.()
+        cancelFrame = undefined
         video.pause()
         video.onended = null
         video.onerror = null
@@ -114,11 +110,16 @@ module clips {
         recorder.onerror = null
         signal.removeEventListener("abort", aborted)
       }
+      const stopRecorder = () => {
+        if (recorder.state !== "inactive") {
+          try { recorder.stop() } catch { return }
+        }
+      }
       const finish = (error?: unknown) => {
         if (finished) return
         finished = true
         cleanup()
-        if (recorder.state !== "inactive") recorder.stop()
+        stopRecorder()
         const mime = (recorder.mimeType || chunks[0]?.type || "").split(";")[0] ?? ""
         if (error !== undefined) reject(error)
         else if (bytes === 0 || (mime !== "video/mp4" && mime !== "video/webm")) reject(new Error("The edited video could not be encoded."))
@@ -130,12 +131,12 @@ module clips {
         stopped = true
         reached = video.currentTime
         video.pause()
-        if (recorder.state !== "inactive") recorder.stop()
+        stopRecorder()
       }
       const next = () => {
-        if (typeof video.requestVideoFrameCallback === "function") {
+        if (usesVideoFrame) {
           const frame = video.requestVideoFrameCallback(paint)
-          cancelFrame = () => video.cancelVideoFrameCallback(frame)
+          cancelFrame = typeof video.cancelVideoFrameCallback === "function" ? () => video.cancelVideoFrameCallback(frame) : undefined
         } else {
           cancelFrame = Effect.runCallback(Effect.andThen(Effect.sleep("16 millis"), Effect.sync(paint)))
         }

@@ -31,7 +31,6 @@ const onThisComputer = /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost|\[::1\])(
 export function loopbackOnly(settings: EnvironmentProfile): boolean {
   const providers = [
     settings.billing?.apiUrl,
-    // A Workers AI provider is a Cloudflare binding, never on this computer.
     ...(settings.inference?.providers.map((provider) => provider.kind === "workers-ai" ? `workers-ai:${provider.binding}` : provider.baseUrl) ?? []),
     settings.speech?.baseUrl, settings.speech?.realtimeUrl,
     settings.maps !== undefined && settings.maps.provider !== "none" ? settings.maps.baseUrl : undefined,

@@ -78,21 +78,23 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
       <ListGroup>
         <ListRow leading={<Globe />} title="Internet" trailing={reading ? <Spinner size="sm" label="Reading" /> : onlines[online]} />
       </ListGroup>
-      <ListGroup heading="Nearby">
-        {scanning ? <ListRow title="Scanning" trailing={<Spinner size="sm" label="Scanning" />} /> : null}
-        {networks.map((network) => (
-          <ListRow
-            key={network.name}
-            leading={unsecured(network.security) ? <LockOpen /> : <Lock />}
-            title={network.name}
-            detail={securities[network.security]}
-            selected={chosen?.name === network.name}
-            onClick={() => {
-              setSelection({ name: network.name, security: network.security, passphrase: "" });
-            }}
-          />
-        ))}
-      </ListGroup>
+      {scanning || networks.length > 0 ? (
+        <ListGroup heading="Nearby">
+          {scanning ? <ListRow title="Scanning" trailing={<Spinner size="sm" label="Scanning" />} /> : null}
+          {networks.map((network) => (
+            <ListRow
+              key={`${network.name}\0${network.security}`}
+              leading={unsecured(network.security) ? <LockOpen /> : <Lock />}
+              title={network.name}
+              detail={securities[network.security]}
+              selected={chosen?.name === network.name && chosen.security === network.security}
+              onClick={() => {
+                setSelection({ name: network.name, security: network.security, passphrase: "" });
+              }}
+            />
+          ))}
+        </ListGroup>
+      ) : null}
       {chosen ? (
         <form
           className="flex flex-col gap-2 px-4"
@@ -104,12 +106,15 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
           }}
         >
           {unsecured(chosen.security) ? null : (
-            <Input type="password" autoComplete="off" aria-label={`Password for ${chosen.name}`} value={passphrase} onChange={(event) => {
+            <Input type="password" autoComplete="off" placeholder="Password" aria-label={`Password for ${chosen.name}`} value={passphrase} onChange={(event) => {
               const next = event.target.value;
               setSelection((current) => current && { ...current, passphrase: next });
             }} />
           )}
-          <Button type="submit" disabled={!ready} loading={joining}>{`Join ${chosen.name}`}</Button>
+          <div className="flex gap-2">
+            {!joining ? <Button variant="secondary" onClick={() => setSelection(undefined)}>Cancel</Button> : null}
+            <Button type="submit" className="flex-1" disabled={!ready} loading={joining}>{`Join ${chosen.name}`}</Button>
+          </div>
         </form>
       ) : null}
       <ListGroup>

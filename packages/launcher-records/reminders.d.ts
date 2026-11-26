@@ -67,4 +67,5 @@ export interface RemindersSnapshot {
   readonly updatedAtMs: number;
   readonly lists: readonly ReminderListRecord[];
   readonly items: readonly ReminderItemRecord[];
+  readonly deletedAgentTaskIds?: readonly string[];
 }

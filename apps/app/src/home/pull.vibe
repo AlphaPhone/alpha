@@ -112,17 +112,22 @@ module page {
       home.removeEventListener("click", click, true)
     }
   }
+  /** Whether the native host currently marks the phone as locked. @throws {never} */
+  export function phoneLocked(): boolean {
+    return typeof document !== "undefined" && document.documentElement.hasAttribute("data-alpha-locked")
+  }
 }
-import { watchHomePull } from page
-export { watchHomePull }
+import { phoneLocked, watchHomePull } from page
+export { phoneLocked, watchHomePull }
 
 // spec/app/home/index.md, "A pull on bare Home asks Android for its shade only when Alpha is the launcher; on a locked phone it asks nothing and says to unlock first"
 /** Ask for the shade only where this Home and this shell still admit the completed pull. */
 export effect function openNotifications(): void!!(Home.Machine | Shell) {
   const shell = try (try Shell).get()
   const home = try Home.Machine
-  if (Home.canPullDown(try home.get(), shell, false, "Owner")) {
-    try contained(home.send({ type: "pullDown", shell, locked: false, now: untimed }, "Owner"), "Android's notifications")
+  const locked = phoneLocked()
+  if (Home.canPullDown(try home.get(), shell, locked, "Owner")) {
+    try contained(home.send({ type: "pullDown", shell, locked, now: untimed }, "Owner"), "Android's notifications")
   }
 }
 

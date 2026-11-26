@@ -62,10 +62,7 @@ export function SettingsAppPage({ app, onPhone = true, calendarStatus, grants = 
   const android = { starting, onAndroid };
   const deviceSettings = app !== "calendar" || onPhone;
   const detail = calendarStatus === undefined || calendarStatus === "checking" ? undefined : calendarDetails[calendarStatus];
-  const used = (deviceSettings ? accesses[app] : []).flatMap((access) => {
-    const grant = grants[access];
-    return grant ? [{ access, grant }] : [];
-  });
+  const used = (deviceSettings ? accesses[app] : []).map((access) => ({ access, grant: grants[access] ?? ("unavailable" as const) }));
   return (
     <SettingsPage title={titles[app]} told={told} onBack={onBack} backLabel="Back to Apps">
       {app === "inbox" ? (

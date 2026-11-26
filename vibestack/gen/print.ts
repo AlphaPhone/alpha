@@ -122,11 +122,33 @@ const tag = (variant: string) => JSON.stringify(variant.split("::").pop());
 /** A list that is or joins a list literal: `List("a").concat(xs)`, `xs.append("a")`. */
 const holdsLiteral = (e: Json): boolean =>
   e.kind === "app" && (e.opcode === "List" || e.opcode === "append" || (e.opcode === "concat" && (holdsLiteral(e.args[0]) || holdsLiteral(e.args[1]))));
+const forSimulator = (n: string): never => fail(`\`${n}\` is for the simulator only (a sample set or a weight_, fair_ or within_ setting) and cannot be used in a definition`);
+const renderMatch = (
+  a: Json[],
+  subject: string,
+  subjectOwnerName: string,
+  isTagged: boolean,
+  renamed: Map<string, string>,
+  matchedAs: Map<string, { owner: string; variant: string }>,
+  evalArm: (expr: Json) => string,
+): [string, number] => {
+  const arms: { test?: string; result: string }[] = [];
+  for (let i = 1; i < a.length; i += 2) {
+    const binder = a[i + 1].params[0]?.name;
+    const bound = binder && binder !== "_";
+    const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] as const : undefined;
+    if (bound) { renamed.set(binder, subject); matchedAs.set(binder, { owner: subjectOwnerName, variant: a[i].value }); }
+    const result = evalArm(a[i + 1].expr);
+    if (bound) { restore(renamed, binder, outer![0]); restore(matchedAs, binder, outer![1]); }
+    arms.push({ test: a[i].value === "_" ? undefined : `${subject}${isTagged ? ".tag" : ""} === ${JSON.stringify(a[i].value)}`, result });
+  }
+  const last = arms.pop()!;
+  return [arms.reduceRight((rest, arm) => `${arm.test} ? ${arm.result} : ${rest}`, last.result), arms.length ? TERNARY : OR];
+};
 
 export function printer({ types, inferred, importedConstantType, ref, helper, bind, variants, definitions, simulatorOnly, proof }: Scope) {
   const { fields, payload, typedef, resolve, tagged, isScalar, setElem, keyOf, storedKey, holdsSet, named, ownerOf, typeName, tsType } = types;
   const typeOf = typeOfIn(inferred);
-  const forSimulator = (n: string): never => fail(`\`${n}\` is for the simulator only (a sample set or a weight_, fair_ or within_ setting) and cannot be used in a definition`);
   /** Which helpers the printed code needs (see typescript.ts), and the types of the maps it looks things up in. */
   const helpers = new Set<string>();
   const lookups: { map: string; key: string; of: string; stored: string }[] = [];
@@ -298,7 +320,11 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
         const empty = proof ? `(new Map<${tsType(keyOf(t))}, ${tsType(t.res)}>() as unknown as ${map})` : `({} as ${map})`;
         return [at("none", () => a.reduce((m, pair) => put(m, typeOf(e.id), mapKey(e, pair.args[0]), ex(pair.args[1], TERNARY)), empty)), ATOM];
       }
-      case "put": case "set": return [put(recv(), typeOf(a[0].id), ...at("none", () => [mapKey(a[0], a[1]), ex(a[2], TERNARY)] as const)), ATOM];
+      case "put": return [put(recv(), typeOf(a[0].id), ...at("none", () => [mapKey(a[0], a[1]), ex(a[2], TERNARY)] as const)), ATOM];
+      case "set": {
+        const [key, val] = at("none", () => [mapKey(a[0], a[1]), ex(a[2], TERNARY)] as const);
+        return proof ? [put(recv(), typeOf(a[0].id), key, val), ATOM] : [`(${helper("set")}(${(helpers.add("set"), recv())}, ${key}, ${val}) as ${tsType(typeOf(a[0].id))})`, ATOM];
+      }
       case "get": return partial("get", recv(), at("none", () => mapKey(a[0], a[1])));
       case "keys": return fail("a map cannot be listed or iterated, only asked about one key: write `m.keys().contains(k)`, and keep a list of keys beside the map if you need to go through them");
       case "not": return [`!${ex(a[0], ATOM)}`, UNARY];
@@ -370,21 +396,7 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
       const subject = ex(a[0], ATOM);
       const subjectType = typeOf(a[0].id);
       const subjectOwner = subjectType.kind === "const" ? typedef(subjectType.name) : named(resolve(subjectType), "sum");
-      const subjectOwnerName = subjectOwner ? typeName(subjectOwner) : "";
-      const isTagged = tagged(resolve(subjectType));
-      const arms: { test?: string; result: string }[] = [];
-      for (let i = 1; i < a.length; i += 2) {
-        const binder = a[i + 1].params[0]?.name;
-        // Inside the arm the binder stands for the matched value; an outer arm's binder of the same name comes back after.
-        const bound = binder && binder !== "_";
-        const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] as const : undefined;
-        if (bound) { renamed.set(binder, subject); matchedAs.set(binder, { owner: subjectOwnerName, variant: a[i].value }); }
-        const result = ex(a[i + 1].expr, OR);
-        if (bound) { restore(renamed, binder, outer![0]); restore(matchedAs, binder, outer![1]); }
-        arms.push({ test: a[i].value === "_" ? undefined : `${subject}${isTagged ? ".tag" : ""} === ${JSON.stringify(a[i].value)}`, result });
-      }
-      const last = arms.pop()!;
-      return [arms.reduceRight((rest, arm) => `${arm.test} ? ${arm.result} : ${rest}`, last.result), arms.length ? TERNARY : OR];
+      return renderMatch(a, subject, subjectOwner ? typeName(subjectOwner) : "", tagged(resolve(subjectType)), renamed, matchedAs, (expr) => ex(expr, OR));
     }
     const [x, y] = members(op, a);
     if ((op === "contains" || op === "in") && x.opcode === "keys") return [at("none", () => `(${mapKey(x.args[0], y)}) in ${ex(x.args[0], COMPARE + 1)}`), COMPARE];

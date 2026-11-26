@@ -192,6 +192,10 @@ export function checkSecrets({ funs, vals, sig, inferred, where, variants, impor
       const outer = own || secret(ft) || base.outer;
       return taint(outer, outer || containsSecret(ft));
     }
+    if (op === "contains" || op === "in" || op === "subseteq") {
+      const args = all(a);
+      return taint(own || args.inner || a.some((x) => containsSecret(inferred(x.id))));
+    }
     const imp = importedTypes.get(op);
     const args = all(a, op === "matchVariant" ? slot : undefined);
     return taint(own || secret(imp) || args.outer, ownInner || containsSecret(imp) || args.inner);

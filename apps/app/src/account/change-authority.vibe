@@ -1,4 +1,4 @@
-// spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in"
+// spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
 import { type SignInAttempt, type SignInReceipt, signInCode } from "@elizaos/os-bridges"
 import { type Account, Cloud } from "../platform/cloud.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"

@@ -9,7 +9,7 @@ import home from "./home/index.tsx";
  * top. `<area>/<name>` is a place an area's screen offers the others, drawn with `alpha.slot`, such as
  * `settings/account` or `home/cards`.
  */
-export type Place = `view:${View}` | "home" | "assistant" | "overlay" | "notice" | `${string}/${string}`;
+export type Place = `view:${View}` | "home" | "assistant" | "overlay" | "notice" | `layer:${string}` | `${string}/${string}`;
 
 /** One screen at one place, loaded the first time it is drawn, so that Home ships no area's screen. */
 export interface Mount {

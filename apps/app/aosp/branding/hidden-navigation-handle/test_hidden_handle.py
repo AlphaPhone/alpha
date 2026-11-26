@@ -1,9 +1,10 @@
 from pathlib import Path
-import hashlib, json, os, re, shutil, subprocess, sys, tempfile, unittest, xml.etree.ElementTree as ET
+import hashlib, json, os, shutil, subprocess, sys, tempfile, unittest, xml.etree.ElementTree as ET
 
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT.parent/'system-entry'))
-from portable_tools import java_binary, android_api_jar
+from portable_tools import java_binary, android_api_jar, find_repo_root, require
+REPO=find_repo_root(ROOT)
 DATA=Path(os.environ.get('ALPHA_HIDDEN_HANDLE_INPUTS',ROOT/'.cache')).resolve()
 MANIFEST=json.loads((ROOT/'manifest.json').read_text())
 ROW=MANIFEST['files'][0]
@@ -130,5 +131,10 @@ public class DrawTest {
   framework=ET.parse(branding/'overlay/frameworks/base/core/res/res/values/config.xml').getroot()
   self.assertEqual([n.text for n in framework.findall('integer')if n.attrib.get('name')=='config_navBarInteractionMode'],['0'])
   self.assertFalse([n for n in framework.findall('dimen')if n.attrib['name'].startswith('navigation_bar')],'Android navigation-mode dimensions apply')
+
+ def test_require_enforced_under_optimize_flag(self):
+  with self.assertRaisesRegex(RuntimeError, 'unconditional guard'):
+   require(False, 'unconditional guard')
+  self.assertTrue((REPO / 'pnpm-workspace.yaml').is_file())
 
 if __name__=='__main__':unittest.main(verbosity=2)

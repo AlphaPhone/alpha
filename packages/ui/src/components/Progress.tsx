@@ -23,7 +23,7 @@ export function Progress({ value, max = 100, className, ...props }: ProgressProp
       <ProgressPrimitive.Indicator
         className={cn(
           "size-full origin-left rounded-full",
-          done === null ? "bg-linear-to-r from-accent via-alpha to-accent bg-size-[200%_100%] motion-safe:animate-shimmer" : "bg-alpha transition-transform duration-base ease-standard",
+          done === null ? "bg-linear-to-r from-accent via-alpha to-accent bg-size-[200%_100%] motion-safe:animate-shimmer" : "bg-alpha transition-transform duration-base ease-standard motion-reduce:transition-none",
         )}
         style={done === null ? undefined : { transform: `scaleX(${done / limit})` }}
       />

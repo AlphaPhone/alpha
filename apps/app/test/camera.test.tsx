@@ -32,16 +32,21 @@ async function onCamera(world = { ...scene(), phone: true }, ...places: Place[])
 
 type CameraSession = Awaited<ReturnType<typeof onCamera>>;
 
-async function takeCapture({ alpha, runtime, world }: CameraSession, kind: "photo" | "video") {
+async function startVideoRecording({ alpha, runtime }: CameraSession) {
+  await press("Video mode");
+  await until(alpha, runtime, Machine, (state) => state.mode === "Video");
+  await press("Start recording");
+  await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+}
+
+async function takeCapture(session: CameraSession, kind: "photo" | "video") {
+  const { alpha, runtime, world } = session;
   if (kind === "photo") {
     await press("Take photo");
     await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
     return;
   }
-  await press("Video mode");
-  await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-  await press("Start recording");
-  await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+  await startVideoRecording(session);
   await press("Stop recording");
   await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
 }
@@ -82,10 +87,7 @@ describe("Camera on a phone", () => {
     expect(world.camera.photos).toMatchObject([{ saveToGallery: true, thumbnailOnly: true }]);
 
     // spec/app/camera/index.md, "Story: Take photos and videos"
-    await press("Video mode");
-    await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-    await press("Start recording");
-    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    await startVideoRecording(cameraSession);
     // spec/app/camera/recording.md, "Story: Read the clock"
     expect(timerText()).toBe("0:00");
     await later(alpha, 1000);
@@ -430,6 +432,36 @@ describe("Camera on a phone", () => {
     await expect.poll(() => review.receipts).toStrictEqual([{ outcome: "applied", operationId: id, result: wireEvidence }]);
     await expect.poll(() => review.journal.get(id)).toMatchObject({ acknowledged: true, evidence: { result: evidence } });
     expect(world.camera.photos).toHaveLength(0);
+  });
+
+  it("Recovers tap-to-focus after a lost pointer capture during pinch (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
+    const { alpha, runtime, world } = await onCamera();
+
+    const viewfinder = button("Viewfinder. Tap to focus or pinch to zoom");
+    if (!viewfinder) throw new Error("viewfinder button is missing");
+    viewfinder.getBoundingClientRect = () => new DOMRect(0, 52, 390, 500);
+
+    await drawn(() => {
+      viewfinder.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 100, clientY: 200 }));
+      viewfinder.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 2, clientX: 200, clientY: 200 }));
+      viewfinder.dispatchEvent(new PointerEvent("lostpointercapture", { bubbles: true, pointerId: 1 }));
+      viewfinder.dispatchEvent(new PointerEvent("lostpointercapture", { bubbles: true, pointerId: 2 }));
+      viewfinder.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, clientX: 180, clientY: 250 }));
+      viewfinder.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, clientX: 195, clientY: 300 }));
+    });
+    await until(alpha, runtime, Machine, (state) => state.focus > 0 && state.confirmed === state.focus);
+    expect(world.camera.focus.length).toBeGreaterThan(0);
+  });
+
+  it("Checks and saves a truncated recording when size exceeds 100 MB (spec/app/camera/recording.md, \"Reaching 100 MB stops the recording and keeps what fits: a piece that would not fit is left out, never the whole video\")", async () => {
+    const cameraSession = await onCamera();
+    const { alpha, runtime, world } = cameraSession;
+    await startVideoRecording(cameraSession);
+
+    await drawn(() => runtime.runPromise(Effect.flatMap(Machine, (m) => m.send({ type: "chunk", piece: 10_000, now: 0 }, "Phone"))));
+    await drawn(() => runtime.runPromise(Effect.flatMap(Machine, (m) => m.send({ type: "chunk", piece: 104_857_600, now: 0 }, "Phone"))));
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved" && state.film.truncated && state.film.checked);
+    expect(world.camera.savedVideos).toHaveLength(1);
   });
 
   it("Returns Blocked Denied immediately when agent capture runs with camera permission denied (spec/app/camera/agent.md, \"Story: Take a photo for Alpha\")", async () => {

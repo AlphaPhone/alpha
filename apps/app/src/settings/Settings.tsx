@@ -45,7 +45,7 @@ import { type ReactNode, useState, useSyncExternalStore } from "react";
 import * as Records from "../../gen/app__account__records.ts";
 import { useMachine as useRecords } from "../../gen/app__account__records.react.ts";
 import type { Machine as RecordsMachine } from "../../gen/app__account__records.effect.vibe";
-import * as ActivityGen from "../../gen/app__settings__activity.ts";
+import type * as ActivityGen from "../../gen/app__settings__activity.ts";
 import { useMachine as useActivity } from "../../gen/app__settings__activity.react.ts";
 import type { Machine as ActivityMachine } from "../../gen/app__settings__activity.effect.vibe";
 import type * as AndroidGen from "../../gen/app__settings__android.ts";
@@ -82,9 +82,11 @@ import { ListenerControls } from "./ListenerControls.tsx";
 import type { AccessSurface } from "../startup/settingsAccess.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { closeLayer, openLayer } from "../shell/shell.vibe";
 import { Layers, Over, Under } from "../shell/Layers.tsx";
 import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
+import type { PasswordProviderShelf } from "./passwords.vibe";
 import { PasswordEntries } from "./PasswordEntries.tsx";
 import { ProtonPass } from "./ProtonPass.tsx";
 import { InboxNotices } from "../inbox/notices.vibe";
@@ -92,7 +94,7 @@ import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effec
 import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessSurface | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | PasswordProviderShelf | AccessSurface | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -204,10 +206,29 @@ function deviceRead(prefs: PrefsGen.Preferences): SettingsDeviceRead {
   return status === "Loaded" ? "loaded" : status === "Failed" ? "failed" : "reading";
 }
 
-/** The device preferences as the Privacy and Inbox pages show and change them, each change offered exactly when the rules allow it. */
-function useDevice(runtime: SettingsRuntime) {
-  const { state, can, send } = useTimed(runtime, usePrefs);
+/** Manage a Settings ConfirmDialog's open state, shell DialogLayer registration, and Back handler. */
+export function useConfirmDialogLayer(alpha: Alpha, layerId: string) {
   const [asking, setAsking] = useState(false);
+  const closeDialog = () => {
+    setAsking(false);
+    alpha.taking(`layer:${layerId}`, () => Promise.resolve(false));
+    void alpha.runtime.runPromiseExit(closeLayer(layerId));
+  };
+  const openDialog = () => {
+    setAsking(true);
+    alpha.taking(`layer:${layerId}`, () => {
+      closeDialog();
+      return Promise.resolve(true);
+    });
+    void alpha.runtime.runPromiseExit(openLayer(layerId, "DialogLayer", true));
+  };
+  return { asking, openDialog, closeDialog };
+}
+
+/** The device preferences as the Privacy and Inbox pages show and change them, each change offered exactly when the rules allow it. */
+function useDevice(runtime: SettingsRuntime, alpha: Alpha) {
+  const { state, can, send } = useTimed(runtime, usePrefs);
+  const { asking, openDialog, closeDialog } = useConfirmDialogLayer(alpha, "settings-recover-confirm");
   if (!state) return undefined;
   const read = deviceRead(state);
   const offer = <E extends PrefsGen.Event>(event: (value: boolean) => E) => (value: boolean) => {
@@ -224,17 +245,18 @@ function useDevice(runtime: SettingsRuntime) {
     onAskFirstChange: offer((askFirst) => ({ type: "setAskFirst", askFirst, at: untimed })),
     onImagesChange: offer((images) => ({ type: "setImages", images, at: untimed })),
     onShareChange: (share: SettingsShare, on: boolean) => offer((value) => ({ type: "setShare", share: sharesNamed[share], on: value, at: untimed }))(on),
-    onRecover: can(recover, "Owner") ? () => setAsking(true) : undefined,
+    onRecover: can(recover, "Owner") ? openDialog : undefined,
     recovery: (
       <ConfirmDialog
         open={asking && can(recover, "Owner")}
         title="Recover device settings?"
         confirmLabel="Recover"
+        destructive
         onConfirm={() => {
-          setAsking(false);
+          closeDialog();
           if (can(recover, "Owner")) void send(recover, "Owner");
         }}
-        onCancel={() => setAsking(false)}
+        onCancel={closeDialog}
       >
         Ask before Alpha acts, Inbox images and what Alpha may share go back to how a new phone has them.
       </ConfirmDialog>
@@ -319,7 +341,7 @@ function Display({ runtime, common }: PageProps) {
 
 // spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review"; spec/app/settings/index.md, "Each page links to what another area owns there"
 function Privacy({ runtime, alpha, common }: PageProps) {
-  const device = useDevice(runtime);
+  const device = useDevice(runtime, alpha);
   const { state: pages, can, send } = usePages(runtime);
   if (!device) return null;
   const { recovery, ...shown } = device;
@@ -424,14 +446,18 @@ const inboxCheckedAt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium",
 const noInboxWatch = () => undefined;
 const noInboxChanges = () => noInboxWatch;
 
-function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
+function App({ runtime, alpha, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
   const facts = useFacts(runtime).state;
   const phone = usePages(runtime).state?.phone;
-  const device = useDevice(runtime);
+  const device = useDevice(runtime, alpha);
   const calendar = runtime.runSync(CalendarAccount);
-  const status = useSyncExternalStore(calendar.subscribe, calendar.snapshot, calendar.snapshot);
+  const status = useSyncExternalStore((listener) => calendar.subscribe(listener), () => calendar.snapshot(), () => calendar.snapshot());
   const notices = app === "inbox" ? runtime.runSync(InboxNotices) : undefined;
-  const watching = useSyncExternalStore(notices?.subscribe ?? noInboxChanges, notices?.snapshot ?? noInboxWatch, noInboxWatch);
+  const watching = useSyncExternalStore(
+    (listener) => (notices ? notices.subscribe(listener) : noInboxChanges()),
+    () => (notices ? notices.snapshot() : noInboxWatch()),
+    noInboxWatch,
+  );
   const delivery = watching?.delivery;
   return (
     <>
@@ -531,6 +557,7 @@ function Activity({ runtime, alpha, common }: PageProps) {
         open={review.showing && (canConfirm || archiving)}
         title="Restart Alpha?"
         confirmLabel="Archive and restart"
+        destructive
         loading={archiving}
         onConfirm={() => { if (canConfirm) void records.send(archive); }}
         onCancel={dismiss}
@@ -625,15 +652,23 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
     const shownAgain = entered.page !== undefined && pagesTo(entered.page).includes(state.page);
     setEntered({ page: state.page, depth: state.places.length, opened, mounts: entered.mounts + 1, layers: { ...entered.layers, [state.page]: { mount: entered.mounts + 1, rises: !shownAgain } } });
   }
-  if (cause) return <Banner variant="destructive" className="m-4">Alpha could not open Settings</Banner>;
+  if (cause) return (
+    <div className="flex h-full flex-col gap-3 bg-background p-4 pt-[max(--spacing(4),var(--alpha-safe-top))] text-foreground">
+      <div className="flex items-center">
+        <AppBack alpha={alpha} />
+      </div>
+      <Banner variant="destructive">Alpha could not open Settings</Banner>
+    </div>
+  );
   if (!state) return <section aria-label="Settings" aria-busy className="relative flex h-full min-h-0 flex-col"><SettingsPage title="Settings" top leading={<AppBack alpha={alpha} firstPage />} /></section>;
   const page = state.page;
   const goBack = { type: "goBack" } as const;
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
+  const micMayBeOn = facts.state?.grants.some((grant) => grant.access === "MicrophoneAccess" && (grant.grant === "Granted" || grant.grant === "Limited")) ?? false;
   const common: Common = {
     actions: state.development && state.phone && (page === "Top" || page === "General" || passwordPage(page)) && facts.can(refresh)
-      ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
+      ? <Button variant="ghost" size="sm" className="min-h-11" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
     onOpen: (name) => {
@@ -642,7 +677,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
       if (can(open)) void send(open);
     },
     onHandOver: (name) => {
-      const hand = { type: "handOver", neighbour: neighboursNamed[name], micMayBeOn: false } as const;
+      const hand = { type: "handOver", neighbour: neighboursNamed[name], micMayBeOn } as const;
       if (can(hand)) void send(hand);
     },
     starting: start,
@@ -667,7 +702,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   };
   return (
     <section aria-label="Settings" className="relative flex h-full min-h-0 flex-col">
-      {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn">The phone did not answer</Banner> : null}
+      {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn" className="mx-4 mt-[max(--spacing(3),var(--alpha-safe-top))]">The phone did not answer</Banner> : null}
       <Layers>{pagesTo(page).map(layer)}</Layers>
       <AccessReview runtime={runtime} />
     </section>

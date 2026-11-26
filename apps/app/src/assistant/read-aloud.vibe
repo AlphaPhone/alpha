@@ -1,12 +1,13 @@
 // spec/app/voice/output.md, "Story: Listen to a message, a note or a page"; spec/app/voice/output.md, "Stopping, or losing what is read (another conversation, another screen, a hidden page, a closed chat), stops the reading"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
+import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, type Shell as ShellState } from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import * as Speaker from "../../gen/app__voice__output.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { type NativePageSpeech, VoiceBridge } from "../platform/voice.vibe"
 import { type Job, answer, contained, hearing, reacting, started, stream, together } from "../runtime/reactor.vibe"
-import { type PageSpeech, VoiceWords } from "../voice/voice.vibe"
+import { type PageSpeech, VoiceWords, speakableText, spokenForm } from "../voice/voice.vibe"
 import { Talk } from "./talk.vibe"
 import { wordsOf } from "./words.ts"
 
@@ -132,7 +133,10 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
     } else if (text === "Message") {
       const { board } = try Talk
       const line = board.line(conversation, item)
-      if (line !== undefined && !line.mine) words = wordsOf(line, true)
+      if (line !== undefined && !line.mine) {
+        const spoken = spokenForm(speakableText(wordsOf(line, true))).trim()
+        if (spoken !== "") words = spoken
+      }
     }
     const bridge = try VoiceBridge
     const audio = words === undefined ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
@@ -140,10 +144,12 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
         if (event.kind === "ended" && event.ok) completed = true
         return { type: event.kind, ticket, ok: event.ok }
       })
-    return Stream.concat(audio, Stream.fromEffect(effect {
-      const confirmed = try bridge.silenceReading(ticket)
+    return Stream.concat(audio, Stream.unwrap(effect {
+      const latest = try speaker.get()
       if (retire !== undefined) try retire()
-      return { type: "cleaned", confirmed } as Speaker.Event
+      if (!latest.retiring || latest.ticket !== ticket) return Stream.empty
+      const confirmed = try bridge.silenceReading(ticket)
+      return Stream.succeed<Speaker.Event>({ type: "cleaned", confirmed })
     }))
   })
 }
@@ -163,14 +169,20 @@ const left = started(effect {
   const shell = try Shell
   const voice = try Voice.Machine
   const speaker = try Speaker.Machine
+  const phone = Option.getOrUndefined(try Effect.serviceOption(Phone))
+  const calls = phone === undefined
+    ? Stream.succeed(false)
+    : Stream.map(phone.changes, (state) => state.telecom === "OrdinaryCall" || state.telecom === "MaybeEmergencyCall")
   let previous: string | undefined
-  const reading = Stream.zipLatest(Stream.zipLatest(chat.changes, shell.changes), voice.changes)
-  try Stream.runForEach(reading, effect ([[chat, shell], voice]) => {
+  const reading = Stream.zipLatest(Stream.zipLatest(chat.changes, shell.changes), Stream.zipLatest(voice.changes, calls))
+  try Stream.runForEach(reading, effect ([[chat, shell], [voice, onCall]]) => {
     const key = `${chat.chosen}/${shell.trail.at(-1) ?? "home"}/${shell.assistant === "Bar"}/${Voice.quiet(voice)}/${voice.recorder.stage === "Closed"}`
-    const reading = try speaker.get()
-    if (reading.text === "Transcript") {
-      if (voice.recorder.stage !== "Review" || voice.recorder.ticket !== reading.item || (previous !== undefined && key !== previous)) try stopTranscript(reading.item)
-    } else if (previous !== undefined && key !== previous && Speaker.canStop(reading)) try contained(speaker.send({ type: "stop" }), "stopping Read aloud")
+    const current = try speaker.get()
+    if (current.text === "Transcript") {
+      if (onCall || voice.recorder.stage !== "Review" || voice.recorder.ticket !== current.item || (previous !== undefined && key !== previous)) try stopTranscript(current.item)
+    } else if ((onCall || (previous !== undefined && key !== previous)) && Speaker.canStop(current)) {
+      try contained(speaker.send({ type: "stop" }), "stopping Read aloud")
+    }
     previous = key
   })
 }, "following the reading's screen")

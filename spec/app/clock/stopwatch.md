@@ -24,9 +24,11 @@ pure val initial: Stopwatch = { status: Reset, startedAt: 0, accumulatedMs: 0, l
 
 pure val nowValues = Set(1000, 2000, 3500, 5000, 8000)
 
+pure def maxInt(a: int, b: int): int = if (a >= b) a else b
+
 pure def elapsedAt(s: Stopwatch, now: int): int =
-  if (s.status == Running and now >= s.startedAt) s.accumulatedMs + (now - s.startedAt)
-  else s.accumulatedMs
+  val base = if (s.status == Running and now >= s.startedAt) s.accumulatedMs + (now - s.startedAt) else s.accumulatedMs
+  maxInt(base, lastLapTotal(s.laps))
 
 pure def lastLapTotal(laps: List[Lap]): int =
   if (laps.length() == 0) 0 else laps.nthOr(laps.length() - 1, noLap).totalMs
@@ -66,10 +68,10 @@ pure def start(s: Stopwatch, now: int): Stopwatch =
   { status: Running, startedAt: now, accumulatedMs: 0, laps: List() }
 
 pure def canPause(s: Stopwatch, now: int): bool =
-  s.status == Running and now >= s.startedAt and elapsedAt(s, now) >= lastLapTotal(s.laps)
+  s.status == Running and now >= 0
 
 pure def pause(s: Stopwatch, now: int): Stopwatch =
-  { ...s, status: Paused, accumulatedMs: s.accumulatedMs + (now - s.startedAt), startedAt: 0 }
+  { ...s, status: Paused, accumulatedMs: elapsedAt(s, now), startedAt: 0 }
 
 pure def canResume(s: Stopwatch, now: int): bool = s.status == Paused and now >= 0
 
@@ -77,8 +79,7 @@ pure def resume(s: Stopwatch, now: int): Stopwatch =
   { ...s, status: Running, startedAt: now }
 
 pure def canLap(s: Stopwatch, now: int): bool =
-  s.status == Running and now >= s.startedAt and s.laps.length() < maxLaps
-    and elapsedAt(s, now) >= lastLapTotal(s.laps)
+  s.status == Running and now >= 0 and s.laps.length() < maxLaps
 
 pure def lap(s: Stopwatch, now: int): Stopwatch =
   val total = elapsedAt(s, now)

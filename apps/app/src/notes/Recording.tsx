@@ -2,15 +2,20 @@
 import { Alert, Button } from "@repo/ui";
 import { Check, Mic, Pause, Square } from "lucide-react";
 import { type ReactNode, type Ref, useCallback, useRef, useSyncExternalStore } from "react";
+import { useMachine as useMic } from "../../gen/app__notes__microphone.react.ts";
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
 import type { Event } from "../../gen/app__notes__recording.ts";
+import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
+import { NoteDevice } from "../platform/noteDevice.vibe";
 import type { Alpha } from "../runtime/area.tsx";
 import { RecordingDisplay, control, levelCount } from "./recording.vibe";
 
-function elapsed(seconds: number) {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor(seconds / 60) % 60;
-  const remainder = String(seconds % 60).padStart(2, "0");
+function elapsed(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
+  const whole = Math.floor(seconds);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor(whole / 60) % 60;
+  const remainder = String(whole % 60).padStart(2, "0");
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${remainder}` : `${minutes}:${remainder}`;
 }
 
@@ -40,7 +45,8 @@ function RecorderFrame({ seconds, levels, measuring, status, onDiscard, discardR
         <span role="timer" className="whitespace-nowrap font-display text-recorder-timer font-light tabular-nums" aria-label="Recording duration" style={{ fontSize: "min(var(--text-recorder-timer), 20cqw)" }}>{elapsed(seconds)}</span>
         <div role="img" aria-label="Microphone levels" className="mt-6.5 flex h-24 shrink-0 items-center gap-0.75">
           {Array.from({ length: levelCount }, (_, index) => {
-            const peak = levels[levels.length - levelCount + index] ?? 0;
+            const raw = levels[levels.length - levelCount + index] ?? 0;
+            const peak = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0;
             return <span key={index} aria-hidden className="flex-1 rounded-clip bg-alpha motion-safe:transition-[height] motion-safe:duration-fast"
               style={{ height: Math.max(4, Math.round(Math.sqrt(peak) * 92)), opacity: measuring ? 1 : 0.35 }} />;
           })}
@@ -66,6 +72,9 @@ export function MicrophoneUnavailable({ onRecord, onDiscard }: { readonly onReco
 
 export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const recording = useMachine(runtime);
+  const mic = useMic(runtime);
+  const voice = useVoice(runtime);
+  const device = runtime.runSync(NoteDevice);
   const display = runtime.runSync(RecordingDisplay);
   const meters = useSyncExternalStore(display.subscribe, display.snapshot, display.snapshot);
   const state = recording.state;
@@ -85,7 +94,13 @@ export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const send = (event: Event) => void recording.send(event, "Owner");
   const can = (event: Event) => recording.can(event, "Owner");
   const run = (action: "pause" | "resume" | "stop") => void runtime.runPromise(control(action, state.take));
-  const resume = { type: "resume", take: state.take, room: { allowed: true, free: true, front: true, silent: true } } as const;
+  const room = {
+    allowed: mic.state?.mic.grant === "Granted",
+    free: device.available,
+    front: true,
+    silent: voice.state?.play.status !== "Loading",
+  } as const;
+  const resume = { type: "resume", take: state.take, room } as const;
   const active = state.phase === "Recording";
   const paused = state.phase === "Paused";
   const turning = state.phase === "Stopping" || (state.phase === "Keeping" && state.keeping.outcome !== "Unknown");

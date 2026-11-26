@@ -1,0 +1,176 @@
+// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+import type { ReminderItemRecord, ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "@repo/launcher-records"
+import type { DeleteMode } from "../../gen/app__reminders.effect.vibe"
+import { type Shelf, createShelf } from "../runtime/shelf.vibe"
+import { together } from "../runtime/reactor.vibe"
+import {
+  DEFAULT_LIST_ID,
+  type RemindersStoreApi,
+  attachRemindersShelf,
+  createRemindersStore,
+  emptyStoreView,
+} from "./store.ts"
+
+/** Banner snapshot observed synchronously by the global AlertBanner overlay. */
+export interface RingingBannerState {
+  readonly specId: number
+  readonly revision: number
+  readonly item: ReminderItemRecord
+}
+
+/** Editable field payload kept beside the verified Editor draft machine. */
+export interface ReminderEditorFields {
+  readonly itemId: string | null
+  readonly title: string
+  readonly notes: string
+  readonly listId: string
+  readonly dueDate: string | null
+  readonly dueMinute: number | null
+  readonly alertMinutes: number | null
+  readonly recurrence: ReminderRecurrence
+  readonly priority: ReminderPriority
+  readonly flagged: boolean
+  readonly subtasks: readonly ReminderSubtaskRecord[]
+  readonly revision: number
+}
+
+/** Create a clean blank editor draft payload for `listId`. */
+export function blankEditorFields(listId = DEFAULT_LIST_ID): ReminderEditorFields {
+  return {
+    itemId: null,
+    title: "",
+    notes: "",
+    listId,
+    dueDate: null,
+    dueMinute: null,
+    alertMinutes: 0,
+    recurrence: "none",
+    priority: "none",
+    flagged: false,
+    subtasks: [],
+    revision: 0,
+  }
+}
+
+/** Pending HTTP write request correlated by machine attempt id. */
+export type PendingRequest =
+  | { readonly kind: "createItem"; readonly item: ReminderItemRecord; readonly createOnly?: boolean }
+  | { readonly kind: "updateItem"; readonly item: ReminderItemRecord }
+  | { readonly kind: "completeItem"; readonly id: string; readonly item: ReminderItemRecord }
+  | { readonly kind: "reopenItem"; readonly id: string }
+  | { readonly kind: "restoreItem"; readonly id: string; readonly item: ReminderItemRecord }
+  | { readonly kind: "snoozeItem"; readonly id: string; readonly snoozedUntilMs: number }
+  | { readonly kind: "deleteItem"; readonly id: string }
+  | { readonly kind: "clearCompleted"; readonly ids: readonly string[] }
+  | { readonly kind: "createList"; readonly list: ReminderListRecord }
+  | { readonly kind: "updateList"; readonly list: ReminderListRecord }
+  | { readonly kind: "deleteList"; readonly id: string; readonly mode: DeleteMode }
+
+/** Currently held Undo snapshot beside the Reminders machine. */
+export interface ActiveUndo {
+  readonly kind: "delete" | "complete"
+  readonly itemId: string
+  readonly prior: ReminderItemRecord
+  readonly about: number
+  readonly until?: number
+}
+
+/** Native alarm metadata remembered when arming so cancellation passes exact identifiers. */
+export interface ArmedNativeAlarm {
+  readonly occurrenceId: string
+  readonly bindingHash: string
+  readonly revision: string
+}
+
+/** Scoped reactive store for Reminders lists, items, and spec IDs. */
+export service RemindersShelf {
+  readonly store: RemindersStoreApi
+}
+
+/** Scoped reactive shelf for the currently ringing reminder alert banner. */
+export service AlertBannerShelf {
+  readonly shelf: Shelf<RingingBannerState | undefined>
+}
+
+/** Scoped reactive shelf for the reminder editor draft fields. */
+export service EditorDraftShelf {
+  readonly shelf: Shelf<ReminderEditorFields>
+}
+
+/** Scoped reactive shelf for the current clock instant observed by Reminders UI. */
+export service RemindersNowShelf {
+  readonly shelf: Shelf<number>
+}
+
+/** Scoped per-runtime mutable correlation maps (cleared automatically on scope close). */
+export service RemindersLedger {
+  readonly pendingWrites: Map<number, PendingRequest>
+  readonly armedNative: Map<string, ArmedNativeAlarm>
+  readonly hydrated: Deferred.Deferred<void>
+  readonly turn: Semaphore.Semaphore
+  getActiveUndo(): ActiveUndo | undefined
+  setActiveUndo(next: ActiveUndo | undefined): void
+  nextUndoAbout(): number
+}
+
+const remindersShelfLayer = Layer.effect(RemindersShelf, effect {
+  const shelf = createShelf(emptyStoreView(), { reset: emptyStoreView })
+  const store = createRemindersStore(shelf)
+  const detach = attachRemindersShelf(shelf)
+  try Effect.addFinalizer(() => sync(() => {
+    store.reset()
+    detach()
+  }))
+  return { store }
+})
+
+const alertBannerLayer = Layer.effect(AlertBannerShelf, effect {
+  const shelf = createShelf<RingingBannerState | undefined>(undefined, { reset: () => undefined })
+  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+  return { shelf }
+})
+
+const editorDraftLayer = Layer.effect(EditorDraftShelf, effect {
+  const shelf = createShelf<ReminderEditorFields>(blankEditorFields(), { reset: () => blankEditorFields() })
+  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+  return { shelf }
+})
+
+const remindersNowLayer = Layer.effect(RemindersNowShelf, effect {
+  const shelf = createShelf<number>(0, { reset: () => 0 })
+  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+  return { shelf }
+})
+
+const remindersLedgerLayer = Layer.effect(RemindersLedger, effect {
+  const pendingWrites = new Map<number, PendingRequest>()
+  const armedNative = new Map<string, ArmedNativeAlarm>()
+  const hydrated = Deferred.makeUnsafe<void>()
+  const turn = Semaphore.makeUnsafe(1)
+  let activeUndo: ActiveUndo | undefined
+  let undoCounter = 1
+  try Effect.addFinalizer(() => sync(() => {
+    pendingWrites.clear()
+    armedNative.clear()
+    activeUndo = undefined
+    undoCounter = 1
+  }))
+  return {
+    pendingWrites,
+    armedNative,
+    hydrated,
+    turn,
+    getActiveUndo: () => activeUndo,
+    setActiveUndo: (next: ActiveUndo | undefined) => { activeUndo = next },
+    nextUndoAbout: () => undoCounter++,
+  }
+})
+
+/** Scoped shelves and ledger for Reminders, mounted inside `remindersResident`. */
+export const remindersShelves = together(
+  remindersShelfLayer,
+  alertBannerLayer,
+  editorDraftLayer,
+  remindersNowLayer,
+  remindersLedgerLayer,
+)

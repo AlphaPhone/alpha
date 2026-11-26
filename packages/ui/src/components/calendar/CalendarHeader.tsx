@@ -30,11 +30,13 @@ export function CalendarHeader({ title, expanded = false, onTitle, titleRef, lea
   return (
     <header data-host-chrome="" className={cn("flex min-h-13 shrink-0 flex-wrap items-center gap-x-0.5 gap-y-1 px-2 in-data-[alpha-title-row]:in-data-[alpha-launcher]:@container", launcherHeader, className)} {...props}>
       {leading}
-      <button ref={titleRef} type="button" aria-label={`Choose date: ${title}`} aria-expanded={expanded} disabled={!onTitle} onClick={onTitle}
-        className={cn(focusRing, "flex min-h-12 min-w-0 max-w-full grow items-center gap-1.5 rounded-lg text-left disabled:cursor-default in-data-[alpha-title-row]:order-last in-data-[alpha-title-row]:basis-full")}>
-        <h1 className="m-0 min-w-0 text-xl leading-plain font-semibold wrap-anywhere in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-3xl in-data-[alpha-launcher]:font-light in-data-[alpha-title-row]:in-data-[alpha-launcher]:[font-size:min(var(--text-3xl),calc((100cqi_-_30px)/4.4*var(--alpha-own-text-scale,1)/var(--alpha-text-scale,1)))]">{title}</h1>
-        <Chevron aria-hidden className="mt-1 size-4.5 shrink-0 text-muted-foreground" />
-      </button>
+      <h1 className="m-0 flex min-w-0 max-w-full grow items-center text-xl leading-plain font-semibold wrap-anywhere in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-3xl in-data-[alpha-launcher]:font-light in-data-[alpha-title-row]:order-last in-data-[alpha-title-row]:basis-full in-data-[alpha-title-row]:in-data-[alpha-launcher]:[font-size:min(var(--text-3xl),calc((100cqi_-_30px)/4.4*var(--alpha-own-text-scale,1)/var(--alpha-text-scale,1)))]">
+        <button ref={titleRef} type="button" aria-label={`Choose date: ${title}`} aria-expanded={expanded} disabled={!onTitle} onClick={onTitle}
+          className={cn(focusRing, "flex min-h-12 min-w-0 max-w-full grow items-center gap-1.5 rounded-lg text-left disabled:cursor-default")}>
+          <span className="min-w-0">{title}</span>
+          <Chevron aria-hidden className="mt-1 size-4.5 shrink-0 text-muted-foreground" />
+        </button>
+      </h1>
       <div className="ms-auto flex shrink-0 gap-0.5 empty:hidden">{children}</div>
     </header>
   );

@@ -78,12 +78,14 @@ pure def barPhase(b: CallBar): BarPhase =
 
 pure def ringingIn(calls: List[LiveCall]): bool = calls.some(c => c.phase == Ringing)
 
-pure def withCalls(calls: List[LiveCall], wellFormed: bool, b: CallBar): CallBar =
+pure def withCalls(calls: List[LiveCall], wellFormed: bool, at: int, b: CallBar): CallBar =
+  val now = if (at > b.now) at else b.now
   val kept = if (wellFormed) calls else List()
   val live = b.eligible and wellFormed and kept.length() > 0
   val endedNow = b.eligible and wellFormed and b.shown and not(ringingIn(b.calls)) and not(live) and not(ringingIn(kept))
-  { ...b, calls: kept, trusted: wellFormed, ending: if (kept.some(c => c.id == b.ending)) b.ending else "", shown: live,
-    endedUntil: if (live or ringingIn(kept)) 0 else if (endedNow) b.now + endedHold else if (b.eligible and wellFormed) b.endedUntil else 0 }
+  val priorEnded = if (b.endedUntil > now) b.endedUntil else 0
+  { ...b, now: now, calls: kept, trusted: wellFormed, ending: if (kept.some(c => c.id == b.ending)) b.ending else "", shown: live,
+    endedUntil: if (live or ringingIn(kept)) 0 else if (endedNow) now + endedHold else if (b.eligible and wellFormed) priorEnded else 0 }
 
 pure def refresh(b: CallBar): Moved =
   { state: { ...b, generation: b.generation + 1 }, out: List(ReadCalls({ ticket: b.generation + 1 })) }
@@ -128,9 +130,9 @@ reads Telecom when it opens and when the page shows again.
 
 pure def canRefreshAnswered(b: CallBar, ticket: int): bool = ticket == b.generation
 
-pure def refreshAnswered(b: CallBar, ticket: int, calls: List[LiveCall], wellFormed: bool): CallBar = withCalls(calls, wellFormed, b)
+pure def refreshAnswered(b: CallBar, ticket: int, calls: List[LiveCall], wellFormed: bool, at: int): CallBar = withCalls(calls, wellFormed, at, b)
 
-pure def callsReported(b: CallBar, calls: List[LiveCall], wellFormed: bool): CallBar = withCalls(calls, wellFormed, { ...b, generation: b.generation + 1 })
+pure def callsReported(b: CallBar, calls: List[LiveCall], wellFormed: bool, at: int): CallBar = withCalls(calls, wellFormed, at, { ...b, generation: b.generation + 1 })
 
 pure def stepTheTicketNeverGoesBack(before: CallBar, after: CallBar): bool = after.generation >= before.generation
 ```

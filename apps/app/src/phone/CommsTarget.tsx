@@ -1,6 +1,6 @@
 // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "The sheet is closed, open or full, and full never compacts an emergency call"; spec/app/phone/comms.md, "Story: Never lose End"
 import { Button } from "@repo/ui";
-import { type ManagedRuntime, Option } from "effect";
+import { Effect, type ManagedRuntime, Option } from "effect";
 import { Phone } from "lucide-react";
 import type { Machine as CallMachine } from "../../gen/app__phone__call.effect.vibe";
 import { useMachine as useCall } from "../../gen/app__phone__call.react.ts";
@@ -49,10 +49,10 @@ export function CommsTarget({ runtime, placement }: {
   if (view !== "Phone" && view !== "Messages" && view !== "Contacts") return null;
   const call = calls.state && barDrawn(calls.state) === "LiveBar" ? shownCall(calls.state.calls) : undefined;
   const current = view === "Messages" && messages?.pane === "Conversation"
-    ? Option.getOrUndefined(runtime.runSync(Conversations.use((list) => list.get(messages.thread))))
+    ? Option.getOrUndefined(runtime.runSync(Effect.flatMap(Conversations, (list) => list.get(messages.thread))))
     : undefined;
-  const person = current ? titleOf(current.addresses, runtime.runSync(Inbox.use((held) => held.get())).names)
-    : view === "Contacts" && contacts?.opened ? runtime.runSync(Rows.use((held) => held.get())).card?.displayName ?? ""
+  const person = current ? titleOf(current.addresses, runtime.runSync(Effect.flatMap(Inbox, (held) => held.get())).names)
+    : view === "Contacts" && contacts?.opened ? runtime.runSync(Effect.flatMap(Rows, (held) => held.get())).card?.displayName ?? ""
     : view === "Messages" ? recipient : "";
   const shouldShowCall = call !== undefined && (view === "Phone" || placement === "strip");
   if (placement === "context") return <>{call !== undefined && view === "Phone" ? "Call" : person === "" ? view : `${person} · ${view}`}</>;
@@ -68,7 +68,7 @@ export function CommsTarget({ runtime, placement }: {
   const end = { type: "endAsked", callId: call?.id ?? "" } as const;
   return (
     <div aria-label="Current view" className="flex h-13 items-center gap-1 border-b border-border bg-background px-3">
-      <Button variant="ghost" className="min-w-0 flex-1 justify-start" onClick={shell.can(lower) ? () => void shell.send(lower) : undefined}>
+      <Button variant="ghost" className="min-w-0 flex-1 justify-start" disabled={!shell.can(lower)} onClick={() => { if (shell.can(lower)) void shell.send(lower); }}>
         {shouldShowCall ? <Phone /> : person === "" ? null : <CallAvatar name={person} />}
         <span className="min-w-0 flex-1 truncate text-left">{shouldShowCall ? "Ongoing call" : person === "" ? view : `${person} · ${view}`}</span>
       </Button>

@@ -1,8 +1,9 @@
 # Hide Alpha's taskbar navigation indicator
 
-This patch changes only drawing for Launcher3's `R.id.stashed_handle` when the
-`config_alpha_hide_taskbar_handle` product flag is true. The Launcher3 default is false
-and AlphaNavigationOverlay enables it. Other uses of `StashedHandleView`,
+This patch changes only drawing for Launcher3's `R.id.stashed_handle` when the dedicated
+`config_alpha_hide_taskbar_handle` product flag is true (decoupled from
+`config_alpha_home_back_only`, which stays `false` so Recents remains enabled). The Launcher3
+default is false and AlphaNavigationOverlay enables it. Other uses of `StashedHandleView`,
 including the bubble-bar handle, call the original `View.draw()`. The view, its layout,
 visibility, sampling, animations, touch regions, insets and accessibility properties stay
 unchanged. No Home, Back, Recents or horizontal-switch behavior is changed here.

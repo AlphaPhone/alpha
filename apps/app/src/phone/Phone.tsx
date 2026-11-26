@@ -48,7 +48,7 @@ const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
   const label = `${row.number ? "Call " : ""}${title}`;
   return (
     <button type="button" disabled={!enabled} aria-label={label} aria-description={`${direction} ${date}`} data-alpha-stage-last={first || undefined}
-      className={cn(focusRing, "flex min-h-16 w-full items-center gap-3 px-5 py-2 text-left disabled:cursor-default")}
+      className={cn(focusRing, "flex min-h-16 w-full items-center gap-3 px-5 py-2 text-left focus-visible:-outline-offset-focus disabled:cursor-default")}
       onClick={() => call(row.number)}>
       <CallAvatar name={title} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -178,7 +178,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
                 ))}
               </div>
               <div className="grid shrink-0 grid-cols-3 items-center justify-items-center gap-x-[min(5.825vw,1.5rem)] px-[min(10.68vw,2.75rem)] pt-[min(3.88vw,1rem)]">
-                <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80 disabled:opacity-100"
+                <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80"
                   size="icon" data-alpha-phone-call="" aria-label="Call" disabled={!can({ type: "dialTyped" }) || !dialable(state)}
                   onClick={() => void send({ type: "dialTyped" })}><Handset className="size-7.5" /></Button>
                 {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14 rounded-none"

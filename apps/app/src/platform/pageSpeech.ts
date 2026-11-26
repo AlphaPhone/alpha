@@ -54,7 +54,7 @@ export async function pageMicrophone(request: boolean): Promise<"granted" | "den
     for (const track of stream?.getTracks() ?? []) track.stop();
     return stream === undefined ? "denied" : "granted";
   }
-  const status = await navigator.permissions?.query({ name: "microphone" as PermissionName }).catch(() => undefined);
+  const status = await navigator.permissions?.query({ name: "microphone" }).catch(() => undefined);
   return status?.state ?? "prompt";
 }
 
@@ -282,35 +282,44 @@ export function pageSpeechRelay(base: string): CloudStreamPort {
         throw failure;
       }
     },
-    async stopCloudSpeech({ sessionId }) {
+    stopCloudSpeech({ sessionId }) {
       if (live?.sessionId === sessionId) close(live);
+      return Promise.resolve();
     },
-    async setCloudSpeechOutputMuted({ sessionId, muted }) {
+    setCloudSpeechOutputMuted({ sessionId, muted }) {
       if (live?.sessionId === sessionId) live.gain.gain.value = muted ? 0 : 1;
+      return Promise.resolve();
     },
-    async setCloudSpeechMuted({ sessionId, muted }) {
+    setCloudSpeechMuted({ sessionId, muted }) {
       if (live?.sessionId === sessionId) live.muted = muted;
+      return Promise.resolve();
     },
-    async speakCloudSpeech({ sessionId, utteranceId, text }) {
+    speakCloudSpeech({ sessionId, utteranceId, text }) {
       const own = live;
-      if (own?.sessionId !== sessionId || own.ended) throw Object.assign(new Error("Cloud speech is not connected"), { code: "not-connected" });
-      if (!identity.test(utteranceId)) throw new Error("Invalid speech identity");
-      own.utterances.set(utteranceId, { started: false, complete: false, playing: 0, sources: new Set() });
-      for (const phrase of phrases(text)) own.socket.send(JSON.stringify({ t: "tts", id: utteranceId, text: phrase, flush: true }));
-      own.socket.send(JSON.stringify({ t: "finish", id: utteranceId }));
+      if (own?.sessionId !== sessionId || own.ended) return Promise.reject(Object.assign(new Error("Cloud speech is not connected"), { code: "not-connected" }));
+      if (!identity.test(utteranceId)) return Promise.reject(new Error("Invalid speech identity"));
+      try {
+        own.utterances.set(utteranceId, { started: false, complete: false, playing: 0, sources: new Set() });
+        for (const phrase of phrases(text)) own.socket.send(JSON.stringify({ t: "tts", id: utteranceId, text: phrase, flush: true }));
+        own.socket.send(JSON.stringify({ t: "finish", id: utteranceId }));
+        return Promise.resolve();
+      } catch (failure) {
+        return Promise.reject(failure instanceof Error ? failure : new Error("Cloud speech failed to send"));
+      }
     },
-    async cancelCloudSpeech({ sessionId, utteranceId }) {
+    cancelCloudSpeech({ sessionId, utteranceId }) {
       const own = live;
-      if (own?.sessionId !== sessionId) return;
+      if (own?.sessionId !== sessionId) return Promise.resolve();
       const utterance = own.utterances.get(utteranceId);
       own.utterances.delete(utteranceId);
       for (const source of utterance?.sources ?? []) source.stop();
       own.playhead = 0;
       if (own.socket.readyState === WebSocket.OPEN) own.socket.send(JSON.stringify({ t: "cancel", id: utteranceId }));
+      return Promise.resolve();
     },
-    async addListener(_event, callback): Promise<CloudSpeechListenerHandle> {
+    addListener(_event, callback): Promise<CloudSpeechListenerHandle> {
       listeners.add(callback);
-      return { remove: async () => { listeners.delete(callback); } };
+      return Promise.resolve({ remove: () => { listeners.delete(callback); return Promise.resolve(); } });
     },
   };
 }

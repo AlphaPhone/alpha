@@ -1,6 +1,8 @@
 import type { ComponentProps, ReactNode } from "react";
 import { RotateCw, Search, StickyNote, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
+import { Skeleton } from "../Skeleton.tsx";
 
 export type NotesListProps = Omit<ComponentProps<"div">, "children"> & {
   /** What the list shows: the notes, nothing while the first reading is under way, or the notes out of reach. */
@@ -36,7 +38,14 @@ export function NotesList({ state, pinned = [], others = [], filter, onClearFilt
           </span>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-47.5">
+      <div className={cn(dockClearance, "min-h-0 flex-1 overflow-y-auto px-4")}>
+        {state === "loading" && (
+          <div role="status" aria-label="Loading notes" aria-busy className="flex flex-col gap-2 pt-2">
+            <Skeleton className="h-14" />
+            <Skeleton className="h-14" />
+            <Skeleton className="h-14" />
+          </div>
+        )}
         {state === "unavailable" && (
           <div className="flex flex-col items-center gap-2.5 px-2 py-12 text-center">
             <span aria-hidden className="relative flex text-muted-foreground">
@@ -59,9 +68,9 @@ export function NotesList({ state, pinned = [], others = [], filter, onClearFilt
             <h2 className="m-0 text-body leading-chat font-semibold">{filter === undefined ? "No notes" : "No matches"}</h2>
           </div>
         )}
-        {state === "listed" && pinned.length > 0 && <div className={heading}>Pinned</div>}
+        {state === "listed" && pinned.length > 0 && <h2 className={heading}>Pinned</h2>}
         {state === "listed" && pinned}
-        {state === "listed" && pinned.length > 0 && others.length > 0 && <div className={cn(heading, "pt-3.5")}>Notes</div>}
+        {state === "listed" && pinned.length > 0 && others.length > 0 && <h2 className={cn(heading, "pt-3.5")}>Notes</h2>}
         {state === "listed" && others}
       </div>
     </div>

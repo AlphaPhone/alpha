@@ -243,24 +243,31 @@ pure def ackMissed(s: Alarms, id: int): Alarms =
   { ...s, items: s.items.listMap(a => if (a.id != id) a else { ...a, missed: false }) }
 ```
 
-### Reopening after a restart clears pending Undo and settles timed-out rings without double-firing
+### Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing
 
 Timed-out repeating alarms settle to `Idle` with `fireAt: 0` so they never double-fire on restart; `reschedule` arms their next future fire time while preserving `missed`.
 
 ```quint
+pure def timedOutAt(a: Alarm, now: int): bool =
+  (a.phase == Ringing and now >= a.fireAt + ringTimeout)
+    or (a.enabled and a.phase != Ringing and dueAtOf(a) > 0 and now >= dueAtOf(a) + ringTimeout)
+
 pure def reopen(s: Alarms, now: int): Alarms =
   { ...s, hidden: noAlarm, hasHidden: false, undo: U::free,
     items: s.items.listMap(a =>
-      if (a.phase == Ringing and now >= a.fireAt + ringTimeout)
+      if (timedOutAt(a, now))
         { ...a, enabled: a.daysMask > 0, phase: Idle, fireAt: 0, snoozeUntil: 0, missed: true }
       else a) }
 
-pure def canReschedule(s: Alarms, id: int, fireAt: int): bool =
-  hasAlarm(s.items, id) and alarmOf(s.items, id).enabled and alarmOf(s.items, id).phase == Idle
-    and alarmOf(s.items, id).daysMask > 0 and alarmOf(s.items, id).fireAt == 0 and fireAt > 0
+pure def canReschedule(s: Alarms, id: int, nextFireAt: int, now: int): bool =
+  hasAlarm(s.items, id) and alarmOf(s.items, id).enabled and alarmOf(s.items, id).daysMask > 0
+    and alarmOf(s.items, id).phase == Idle and alarmOf(s.items, id).fireAt == 0
+    and now >= 0 and nextFireAt > now
 
-pure def reschedule(s: Alarms, id: int, fireAt: int): Alarms =
-  { ...s, items: s.items.listMap(a => if (a.id != id) a else { ...a, fireAt: fireAt }) }
+pure def reschedule(s: Alarms, id: int, nextFireAt: int, now: int): Alarms =
+  { ...s, items: s.items.listMap(a =>
+      if (a.id != id) a
+      else { ...a, fireAt: nextFireAt }) }
 ```
 
 ### Syncing from the resident agent admits only valid, unique, bounded alarm lists

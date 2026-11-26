@@ -51,7 +51,7 @@ export function InboxRecipientField({ label, recipients, value, onValueChange, o
           <button
             key={address}
             type="button"
-            aria-label={`Remove ${address}`}
+            aria-label={valid ? `Remove ${address}` : `Remove invalid address ${address}`}
             onClick={() => onRemove(address)}
             className={cn(focusRing, "flex min-h-8.5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-secondary py-1.5 pr-2 pl-3 text-left text-sm font-semibold text-secondary-foreground", !valid && "text-destructive ring-1 ring-destructive")}
           >
@@ -69,7 +69,7 @@ export function InboxRecipientField({ label, recipients, value, onValueChange, o
             autoComplete="off"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
-            className="h-9.5 w-full bg-transparent p-0 text-md text-foreground outline-0 placeholder:text-muted-foreground"
+            className={cn(focusRing, "min-h-11 w-full rounded-sm bg-transparent p-0 text-md leading-tight text-foreground placeholder:text-muted-foreground")}
           />
         </form>
       </div>

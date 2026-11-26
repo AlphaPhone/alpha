@@ -1,8 +1,7 @@
 // spec/app/workflows/index.md, "Story: Change a workflow"
-import { Effect } from "effect";
 import { Alert, Button, Input, Switch, WorkflowAction, WorkflowActions, cn, focusRing } from "@repo/ui";
 import { Pencil, Trash2 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__workflows.react.ts";
 import { type Change, type Event } from "../../gen/app__workflows.ts";
 import type { Machine } from "../../gen/app__workflows.effect.vibe";
@@ -33,10 +32,12 @@ function reviewCopy(change: Change, outcomeUnknown: boolean, name: string) {
 
 function useLifecycle({ runtime, row, owner }: Pick<LifecycleProps, "runtime" | "row" | "owner">) {
   const model = useMachine(runtime);
+  const definition = runtime.runSync(DefinitionWords);
+  const snapshot = useSyncExternalStore(definition.subscribe, definition.snapshot, definition.snapshot);
   const state = model.state;
   const shown = state !== undefined && state.owner === owner && state.target === row && state.open ? state : undefined;
   const send = (event: Event) => { if (model.can(event)) void model.send(event); };
-  return { model, state: shown, send };
+  return { model, state: shown, send, snapshot };
 }
 
 /** The header switch that turns the workflow on or off; turning a schedule on is reviewed first. */
@@ -51,16 +52,22 @@ export function LifecyclePower({ runtime, row, owner, title, unfinished, interru
 
 /** The review of a change under the workflow's title: what it does, then confirm or cancel. */
 export function LifecycleReview({ runtime, row, owner, unfinished }: Pick<LifecycleProps, "runtime" | "row" | "owner" | "unfinished">) {
-  const { state, send } = useLifecycle({ runtime, row, owner });
+  const { state, send, snapshot } = useLifecycle({ runtime, row, owner });
   if (state === undefined || !state.review.showing) return null;
+  const reviewNameText = state.proposed === "Rename" && snapshot.edit?.row === row ? snapshot.edit.name : "";
   const confirmation: Event = state.change.offered ? { type: "confirmResend" } : { type: "confirmChange", unfinished };
-  const name = state.proposed === "Rename" ? runtime.runSync(Effect.flatMap(DefinitionWords, (definition) => definition.name(row))) : "";
   return (
     <div role="group" aria-label="Review workflow change" className="mt-4.5 rounded-action bg-secondary p-4">
-      <p className="text-base leading-chat">{reviewCopy(state.proposed, state.unknownShown, name)}</p>
+      <p className="text-base leading-chat">
+        {state.change.offered
+          ? `Alpha will send the same change again. ${reviewCopy(state.proposed, state.unknownShown, reviewNameText)}`
+          : reviewCopy(state.proposed, state.unknownShown, reviewNameText)}
+      </p>
       <div className="mt-3.5 flex flex-wrap gap-2">
         <button type="button" onClick={() => send(confirmation)}
-          className={cn(focusRing, "min-h-11 rounded-full bg-primary px-4 py-2.5 font-semibold text-primary-foreground")}>{state.change.offered ? "Send again" : labels[state.proposed]}</button>
+          className={cn(focusRing, "min-h-11 rounded-full bg-primary px-4 py-2.5 font-semibold text-primary-foreground")}>
+          {state.change.offered ? "Send again" : labels[state.proposed]}
+        </button>
         <button type="button" onClick={() => send({ type: "cancelReview" })}
           className={cn(focusRing, "min-h-11 rounded-full bg-background px-4 py-2.5 font-semibold")}>Cancel</button>
       </div>
@@ -88,7 +95,7 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted,
     <section aria-label="Workflow controls">
       {state.detail.status === "Failed" && (
         <Alert role="status" variant="warn" className="mt-3.5">The workflow couldn’t be opened.
-          <Button variant="secondary" size="sm" onClick={() => send({ type: "readWorkflow" })}>Retry</Button>
+          {model.can({ type: "readWorkflow" }) && <Button variant="secondary" size="sm" onClick={() => send({ type: "readWorkflow" })}>Retry</Button>}
         </Alert>
       )}
       <div className="mt-3.5 flex items-center gap-2">
@@ -122,11 +129,15 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted,
           <Button variant="secondary" size="sm" onClick={() => send({ type: "checkChange" })}>Check change</Button>
         </Alert>
       )}
-      {model.can({ type: "reviewResend" }) && (
-        <Button variant="secondary" onClick={() => send({ type: "reviewResend" })}>Review the same change</Button>
-      )}
-      {model.can({ type: "letGo" }) && (
-        <Button variant="secondary" className="mt-3" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>
+      {(model.can({ type: "reviewResend" }) || model.can({ type: "letGo" })) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {model.can({ type: "reviewResend" }) && (
+            <Button variant="secondary" onClick={() => send({ type: "reviewResend" })}>Review the same change</Button>
+          )}
+          {model.can({ type: "letGo" }) && (
+            <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>
+          )}
+        </div>
       )}
       {state.change.attempt.outcome === "Refused" && !state.change.offered && (
         <p role="status" className="mt-3 text-sm text-muted-foreground">Your agent didn’t apply the change.</p>

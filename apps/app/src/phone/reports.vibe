@@ -1,7 +1,7 @@
 // spec/app/phone/index.md, "The phone reports missed calls not yet seen"; spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"; spec/app/messages/index.md, "The phone reports how many conversations are unread, for the list and Home"; spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import type { Row } from "../../gen/app__home__cards.effect.vibe"
-import { Conversations } from "../messages/messages.vibe"
+import { Conversations, titleOf } from "../messages/messages.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
@@ -10,7 +10,7 @@ import { type Telephony, namesOf, telephony } from "../platform/telephony.vibe"
 import { fromAreas } from "../home/cards.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { applying, contained, started, together } from "../runtime/reactor.vibe"
-import { recentsLimit } from "./phone.vibe"
+import { Dialer, recentsLimit } from "./phone.vibe"
 import { clockLength, displayNumber } from "./words.ts"
 
 /** Who called, as Home's Phone card names them: the contact's name, the name the phone cached, or the number. */
@@ -38,9 +38,10 @@ function phoneRows(
 
 // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"
 /** The phone's existing native reports are the source of both the counts and the Home card rows. */
-effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
+effect function report(): void!!(Telephony | Dialer | Phone | Messages | Voicemail) {
+  const seenAt = try (try Dialer).seenMissedAt()
   const calls = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
-  const missed = calls?.calls.filter((call) => call.type === "missed" && call.isNew)
+  const missed = calls?.calls.filter((call) => call.type === "missed" && call.isNew && call.date > seenAt)
   const threads = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   const unread = threads?.rows.flatMap((row) => "incomplete" in row || !row.unread ? [] : [row]).sort((a, b) => b.date - a.date)
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
@@ -48,7 +49,7 @@ effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
   if (unread !== undefined) {
     const names = try namesOf("messages", unread.flatMap((row) => row.addresses))
     fromAreas.messages(
-      unread.slice(0, 2).map((row) => ({ title: row.addresses.map((address) => names.get(address) ?? displayNumber(address)).join(", ") || "Unknown", detail: row.snippet })),
+      unread.slice(0, 2).map((row) => ({ title: titleOf(row.addresses, names) || "Unknown", detail: row.snippet })),
       unread.length, unread[0]?.date ?? 0,
     )
   }
@@ -70,7 +71,7 @@ effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
 const reporting = started(effect {
   const shell = try Shell
   const device = try Device
-  const visible = Stream.concat(Stream.succeed(true), device.visible)
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
   const home = Stream.map(Stream.zipLatest(Stream.map(shell.changes, (where) => where.trail.length === 0), visible), ([bare, seen]) => bare && seen)
   try Stream.runForEach(Stream.changesWith(home, (a, b) => a === b), effect (shown) => {
     if (shown) try report()
@@ -105,7 +106,8 @@ export effect function openCalls(): void!!(Phone | Voicemail | Shell) {
 export effect function openUnread(): void!!(Telephony | Messages | Conversations | Shell) {
   try contained((try Shell).send({ type: "openView", view: "Messages" }), "the unread card")
   const messages = try Messages
-  try Stream.runHead(Stream.filter(messages.changes, (s) => s.front && s.pane === "Threads" && s.sms.grant === "Granted"))
+  const ready = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (s) => s.front && s.pane === "Threads" && s.sms.grant === "Granted")), "3 seconds")
+  if (Option.isNone(ready) || Option.isNone(ready.value)) return
   const page = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   const unread = (page?.rows ?? []).flatMap((row) => ("incomplete" in row || !row.unread ? [] : [row]))
   const only = unread.length === 1 ? try (try Conversations).of({ id: unread[0].id, addresses: unread[0].addresses }) : 0

@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Machine as Home } from "../gen/app__home.effect.vibe";
-import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
-import { Machine as List } from "../gen/app__notes.effect.vibe";
 import home from "../src/home/index.tsx";
 import notes from "../src/notes/index.tsx";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { Machine as List } from "../gen/app__notes.effect.vibe";
+import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -62,9 +62,9 @@ describe(`The note's header stays steady while its saves land (${steady}; ${fres
 
     await rendered(() => expect(header()).toEqual([["Back to notes", true], ["Turn into checklist", true], ["More", true], ["Done", true]]));
 
-    await fill("Note", "Pick up the keys");
+    await fill("Note", "Pack the spare charger");
     await later(alpha, 800);
-    await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0 && !waiting(state));
+    await until(alpha, runtime, Editor, (state) => !waiting(state) && state.showing && !state.fresh && state.note > 0);
     await rendered(() => expect(header()).toEqual([["Back to notes", true], ["Turn into checklist", true], ["More", true], ["Done", true]]));
 
     for (const words of ["Pick up the keys and the post", "Pick up the keys, the post and bread"]) {

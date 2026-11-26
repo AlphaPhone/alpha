@@ -16,7 +16,7 @@ export function Chip({ onClear, clearLabel, disabled, className, children, ...pr
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full bg-secondary text-secondary-foreground transition-colors duration-fast ease-standard has-disabled:opacity-50 has-data-[state=on]:bg-foreground has-data-[state=on]:text-background",
+        "inline-flex items-center rounded-full bg-secondary text-secondary-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none has-disabled:opacity-50 has-data-[state=on]:bg-foreground has-data-[state=on]:text-background",
         onClear ? "h-8 gap-1 pl-3 text-caption" : "h-11 text-sm font-semibold",
         className,
       )}

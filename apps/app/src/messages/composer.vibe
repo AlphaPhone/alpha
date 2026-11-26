@@ -11,7 +11,8 @@ import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import { busy, sentAll, uncertain } from "../../gen/app__messages__sending.effect.vibe"
-import { say } from "../notices/toasts.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
@@ -238,8 +239,21 @@ module text {
   export function canDigest(): boolean {
     return typeof globalThis.crypto?.subtle?.digest === "function"
   }
+
+  /** A distinct name when the owner attaches another file with the same filename, such as a second camera capture. @throws {never} */
+  export function uniquePictureName(name: string, taken: ReadonlySet<string>): string {
+    if (!taken.has(name)) return name
+    const dot = name.lastIndexOf(".")
+    const stem = dot > 0 ? name.slice(0, dot) : name
+    const ext = dot > 0 ? name.slice(dot) : ""
+    for (let n = 2; n < 1000; n += 1) {
+      const candidate = `${stem}-${n}${ext}`
+      if (!taken.has(candidate)) return candidate
+    }
+    return `${stem}-${taken.size + 1}${ext}`
+  }
 }
-import { canDigest, keepSend, keptNewDraft, keptSend, matchesBinding, withDraftCustody, withNewSource } from text
+import { canDigest, keepSend, keptNewDraft, keptSend, matchesBinding, uniquePictureName, withDraftCustody, withNewSource } from text
 
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
@@ -519,10 +533,33 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
 
 // spec/app/messages/sending.md, "The radio reports each part sent or failed, and the send ends when every recipient has an answer"
 effect function radioed(id: number): Event!!(Drafts | Telephony) {
-  const held = try (try Drafts).outgoing()
+  const store = try Drafts
+  const held = try store.outgoing()
   if (Option.isNone(held)) return { type: "lost" }
   const send = held.value
-  const status = send.status === "submitted" && send.sim !== null && send.operation !== undefined ? try receiptOf(send, send.sim, send.operation) : send.status
+  let status = send.status
+  if (status === "submitted" && send.sim !== null && send.operation !== undefined) {
+    const sim = send.sim
+    const operation = send.operation
+    status = try receiptOf(send, sim, operation)
+    if (status === "submitted" && !usingMms(send.to.length, send.pictured)) {
+      const noticed = Stream.runHead(Stream.filter(
+        Stream.callback<OperationId, never, Telephony>((queue) => Effect.asVoid(acquireRelease(
+          Effect.orElseSucceed(telephony("observeMessages", (c) => c.messages.observeMessages(() => {}, (op) => { Queue.offerUnsafe(queue, op) }, (op) => { Queue.offerUnsafe(queue, op) })), () => undefined),
+          (unsubscribe) => (unsubscribe === undefined ? Effect.void : ignore(tryPromise(() => unsubscribe()))),
+        ))),
+        (op) => op === operation,
+      ))
+      for (let attempt = 0; status === "submitted" && attempt < 3; attempt += 1) {
+        try race(noticed, sleep("100 millis"))
+        status = try receiptOf(send, sim, operation)
+      }
+    }
+    if (status !== undefined && status !== "submitted") {
+      const latest = try store.outgoing()
+      if (Option.isSome(latest) && latest.value.operation === operation) try store.setOutgoing({ ...latest.value, status })
+    }
+  }
   return status === undefined || status === "unknown" || status === "submitted" ? { type: "lost" } : { type: "partSent", id, ok: sentStatuses.has(status) }
 }
 
@@ -1297,17 +1334,36 @@ effect function attachPicture(thread: number, picture: Picture): boolean!!(Draft
 
 // spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
 /** Attach the owner's chosen files in turn: each the phone's MMS takes, a JPEG, PNG or GIF within its size with those before, is attached while the composer takes one. */
-export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
+export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine | Toasts | Said) {
   const machine = try Composer.Machine
+  const store = try Drafts
   const thread = (try machine.get()).thread
+  let skipped: string | undefined
   for (const file of files) {
     const contentType = MMS_ATTACHMENT_TYPES.find((type) => type === file.type)
-    if (contentType === undefined || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
+    if (contentType === undefined || file.size <= 0) {
+      skipped ??= "Only JPEG, PNG, and GIF pictures can be attached"
+      continue
+    }
+    if (file.size > MMS_MAX_TOTAL_BYTES) {
+      skipped ??= "That picture is too large to send"
+      continue
+    }
     const bytes = tryPromise(() => file.arrayBuffer()) catch () => undefined
-    if (bytes === undefined) continue
+    if (bytes === undefined) {
+      skipped ??= "Could not read the selected picture"
+      continue
+    }
     if ((try machine.get()).thread !== thread) return
-    try attachPicture(thread, { name: file.name, contentType, bytes: new Uint8Array(bytes) })
+    const held = try store.pictures(thread)
+    const taken = new Set(held.flatMap((one) => [one.name, one.wireName ?? one.name]))
+    const name = uniquePictureName(file.name || "image.jpg", taken)
+    const attached = try attachPicture(thread, { name, contentType, bytes: new Uint8Array(bytes) })
+    if (!attached) {
+      skipped ??= (try machine.get()).pictures >= 5 ? "You can attach up to 5 pictures" : "That picture does not fit in this message"
+    }
   }
+  if (skipped !== undefined) try say(skipped, true)
 }
 
 // spec/app/messages/composer.md, "An edited draft is saved for its conversation, one save at a time"

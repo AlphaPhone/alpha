@@ -3,11 +3,11 @@ import type { DeviceLibraryClient, PhotosClient, Reviewed } from "@elizaos/os-br
 import { registered } from "./device.vibe"
 
 module native {
-  import { registerPlugin } from "@capacitor/core"
   import { Schema } from "effect"
   import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
-  import { deviceLibraryClient, deviceLibraryPlugin, photosClient } from "@elizaos/os-bridges"
-  import type { DeviceLibraryClient, PhotosClient, PhotosPlugin, Reviewed } from "@elizaos/os-bridges"
+  import { deviceLibraryClient, photosClient } from "@elizaos/os-bridges"
+  import type { DeviceLibraryClient, DeviceLibraryPlugin, PhotosClient, PhotosPlugin, Reviewed } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export const photoEmailMaxBytes = 5 * 1024 * 1024
   const OriginalPicture = Schema.Struct({
@@ -22,10 +22,9 @@ module native {
     readMessagePicture(input: Reviewed): Promise<unknown>
     readEmailPicture(input: Reviewed): Promise<unknown>
   }
-  let nativePictures: (PhotosPlugin & NativePictures) | undefined
 
   function selectedPhotos(name: string): PhotosPlugin & NativePictures {
-    return (nativePictures ??= registerPlugin<PhotosPlugin & NativePictures>(name))
+    return capacitorPlugin<PhotosPlugin & NativePictures>(name)
   }
 
   export async function readOriginalPicture(pluginName: string, picture: Reviewed, use: PhotoAttachmentUse): Promise<PhotoOriginalPicture> {
@@ -46,7 +45,7 @@ module native {
 
   /** @throws {never} */
   export function reviewedLibrary(name: string): DeviceLibraryClient {
-    return (reviewed ??= deviceLibraryClient(deviceLibraryPlugin(name), name))
+    return (reviewed ??= deviceLibraryClient(capacitorPlugin<DeviceLibraryPlugin>(name), name))
   }
 }
 import { phoneLibrary, photoEmailMaxBytes, readOriginalPicture, reviewedLibrary, type PhotoAttachmentUse, type PhotoOriginalPicture } from native
@@ -54,6 +53,7 @@ export { photoEmailMaxBytes }
 export type { PhotoAttachmentUse }
 
 module browser {
+  import { Clock, Effect } from "effect"
   import { browserPhotoThumbnail, type BrowserEditFrame } from "./photoCanvas.vibe"
 
   /** A browser capture, stored in the origin with its original pixels and optional camera thumbnail. */
@@ -90,51 +90,97 @@ module browser {
   /** @throws {never} */
   export const captureEvent = (): string => event
 
+  function openWithGuard(
+    request: IDBOpenDBRequest,
+    onUpgrade: (event: IDBVersionChangeEvent, isBlocked: () => boolean) => void,
+    onOpen: (database: IDBDatabase) => void,
+    onError: (error: DOMException | null) => void,
+    onBlocked: (error: Error) => void,
+  ): void {
+    let blocked = false
+    request.onblocked = () => {
+      blocked = true
+      onBlocked(new Error("The photo library is open in another tab."))
+    }
+    request.onupgradeneeded = (event) => onUpgrade(event, () => blocked)
+    request.onsuccess = () => {
+      const database = request.result
+      database.onversionchange = () => database.close()
+      if (blocked) database.close()
+      else onOpen(database)
+    }
+    request.onerror = () => onError(request.error)
+  }
+
   async function storage(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open("alpha-photo-library", 4)
-      let blocked = false
-      request.onblocked = () => {
-        blocked = true
-        reject(new Error("The photo library is open in another tab."))
-      }
-      request.onupgradeneeded = (event) => {
-        const database = request.result
-        const upgrade = request.transaction
-        if (!database.objectStoreNames.contains(store)) database.createObjectStore(store, { keyPath: "id" })
-        if (!database.objectStoreNames.contains(edits)) database.createObjectStore(edits)
-        if (!database.objectStoreNames.contains(albums)) database.createObjectStore(albums, { keyPath: "id" })
-        if (!database.objectStoreNames.contains(originals)) database.createObjectStore(originals)
-        const data = upgrade?.objectStore(originals)
-        if (event.oldVersion !== 1 || upgrade === null || data === undefined) return
-        const walk = upgrade.objectStore(store).openCursor()
-        walk.onsuccess = () => {
-          const cursor = walk.result
-          if (!cursor) return
-          const row: unknown = cursor.value
-          if (typeof row === "object" && row !== null && "file" in row && row.file instanceof Blob) {
-            const { file, ...facts } = row
-            data.add(file, cursor.primaryKey)
-            cursor.update({ ...facts, mimeType: file.type, size: file.size })
+      openWithGuard(
+        request,
+        (event) => {
+          const database = request.result
+          const upgrade = request.transaction
+          if (!database.objectStoreNames.contains(store)) database.createObjectStore(store, { keyPath: "id" })
+          if (!database.objectStoreNames.contains(edits)) database.createObjectStore(edits)
+          if (!database.objectStoreNames.contains(albums)) database.createObjectStore(albums, { keyPath: "id" })
+          if (!database.objectStoreNames.contains(originals)) database.createObjectStore(originals)
+          const data = upgrade?.objectStore(originals)
+          if (event.oldVersion !== 1 || upgrade === null || data === undefined) return
+          const walk = upgrade.objectStore(store).openCursor()
+          walk.onsuccess = () => {
+            const cursor = walk.result
+            if (!cursor) return
+            const row: unknown = cursor.value
+            if (typeof row === "object" && row !== null && "file" in row && row.file instanceof Blob) {
+              const { file, ...facts } = row
+              data.add(file, cursor.primaryKey)
+              cursor.update({ ...facts, mimeType: file.type, size: file.size })
+            }
+            cursor.continue()
           }
-          cursor.continue()
-        }
-      }
-      request.onsuccess = () => {
-        const database = request.result
-        database.onversionchange = () => database.close()
-        if (blocked) database.close()
-        else resolve(database)
-      }
-      request.onerror = () => reject(request.error)
+        },
+        resolve,
+        reject,
+        reject,
+      )
     })
   }
 
+  let lastTimestamp = 0
+
+  function monotonicNow(provided?: number): number {
+    const candidate = provided !== undefined && Number.isSafeInteger(provided) ? provided : Effect.runSync(Clock.currentTimeMillis)
+    lastTimestamp = Math.max(lastTimestamp, candidate)
+    return lastTimestamp
+  }
+
+  function decodeDataUri(uri: string): Blob | undefined {
+    if (!uri.startsWith("data:")) return undefined
+    const comma = uri.indexOf(",")
+    if (comma < 0) return undefined
+    const header = uri.slice(5, comma)
+    const payload = uri.slice(comma + 1)
+    const parts = header.split(";")
+    const mimeType = parts[0] || "application/octet-stream"
+    const isBase64 = parts.some((part) => part.toLowerCase() === "base64")
+    try {
+      if (isBase64) {
+        const binary = atob(payload)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+        return new Blob([bytes], { type: mimeType })
+      }
+      return new Blob([decodeURIComponent(payload)], { type: mimeType })
+    } catch {
+      return undefined
+    }
+  }
+
   /** Keep the original before the capture is reported as saved. */
-  export async function saveBrowserCapture(file: Blob, name: string, width: number, height: number, duration?: number, thumbnail?: string): Promise<string> {
+  export async function saveBrowserCapture(file: Blob, name: string, width: number, height: number, duration?: number, thumbnail?: string, now?: number): Promise<string> {
     const preview = thumbnail ?? await browserPhotoThumbnail(file).catch(() => undefined)
     const database = await storage()
-    const created = Date.now()
+    const created = monotonicNow(now)
     const id = `browser:${created}:${crypto.randomUUID()}`
     try {
       await new Promise<void>((resolve, reject) => {
@@ -202,9 +248,10 @@ module browser {
     return new Promise((resolve, reject) => {
       const tx = database.transaction([...tables], mode)
       let result: T
-      tx.oncomplete = () => resolve(result)
+      let settled = false
+      tx.oncomplete = () => settled ? resolve(result) : reject(new Error("The photo library transaction produced no result."))
       tx.onabort = () => reject(tx.error ?? new Error("The photo library transaction was interrupted."))
-      try { use(tx, (value) => { result = value }) }
+      try { use(tx, (value) => { result = value; settled = true }) }
       catch (cause) { tx.abort(); reject(cause) }
     })
   }
@@ -359,7 +406,7 @@ module browser {
               const sourceRevision = item.id.startsWith(earlierPrefix) ? item.sourceRevision ?? item.revision : undefined
               const next = operation === "favorite" || operation === "unfavorite"
                 ? { ...item, favorite: operation === "favorite", sourceRevision, revision: crypto.randomUUID() }
-                : { ...item, trashedAt: operation === "trash" ? Date.now() : undefined, sourceRevision, revision: crypto.randomUUID() }
+                : { ...item, trashedAt: operation === "trash" ? monotonicNow() : undefined, sourceRevision, revision: crypto.randomUUID() }
               media.put(next)
               changed.push({ id: item.id, status: "done", item: next })
             }
@@ -543,22 +590,27 @@ module browser {
     return undefined
   }
 
-  type EditRead = {
-    readonly transaction: IDBTransaction
-    readonly receipts: IDBObjectStore
+  type EditReceiptContext = {
+    readonly tx: IDBTransaction
+    readonly results: IDBObjectStore
     readonly prior: unknown
-    readonly record: (receipt: BrowserEditReceipt) => void
+    readonly setResult: (next: BrowserEditReceipt) => void
   }
 
-  function editReceipt(database: IDBDatabase, stores: string | string[], operation: string, read: (edit: EditRead) => void): Promise<BrowserEditReceipt> {
+  function runEditReceiptTx(
+    database: IDBDatabase,
+    stores: string | readonly string[],
+    operation: string,
+    run: (context: EditReceiptContext) => void,
+  ): Promise<BrowserEditReceipt> {
     return new Promise((resolve, reject) => {
-      const transaction = database.transaction(stores, "readwrite")
-      const receipts = transaction.objectStore(edits)
+      const tx = database.transaction(stores, "readwrite")
+      const results = tx.objectStore(edits)
       let result: BrowserEditReceipt = { status: "not-started" }
-      transaction.oncomplete = () => resolve(result)
-      transaction.onabort = () => reject(transaction.error)
-      const prior = receipts.get(operation)
-      prior.onsuccess = () => read({ transaction, receipts, prior: prior.result, record: (receipt) => { result = receipt } })
+      tx.oncomplete = () => resolve(result)
+      tx.onabort = () => reject(tx.error)
+      const prior = results.get(operation)
+      prior.onsuccess = () => run({ tx, results, prior: prior.result, setResult: (next) => { result = next } })
     })
   }
 
@@ -568,13 +620,13 @@ module browser {
     const database = await storage()
     const { source, frame, replace, operation } = request
     try {
-      const receipt = await editReceipt(database, [store, originals, edits], operation, ({ transaction, receipts, prior, record }) => {
+      const receipt = await runEditReceiptTx(database, [store, originals, edits], operation, ({ tx, results, prior, setResult }) => {
         if (prior !== undefined) {
-          const receipt = readReceipt(prior)
-          if (receipt !== undefined) record(receipt)
+          const saved = readReceipt(prior)
+          if (saved !== undefined) setResult(saved)
           return
         }
-        const captures = transaction.objectStore(store)
+        const captures = tx.objectStore(store)
         const current = captures.get(source.id)
         current.onsuccess = () => {
           const original: unknown = current.result
@@ -582,12 +634,12 @@ module browser {
             ? matching(valid(original) ? original : undefined, source)
             : !replace && (original === undefined || matching(valid(original) ? original : undefined, source)))
           if (!isCurrent) {
-            const stale = { status: "stale" } as const
-            record(stale)
-            receipts.add(stale, operation)
+            const stale: BrowserEditReceipt = { status: "stale" }
+            setResult(stale)
+            results.add(stale, operation)
             return
           }
-          const created = replace ? source.created : Date.now()
+          const created = replace ? source.created : monotonicNow()
           const id = replace ? source.id : `browser:${created}:${crypto.randomUUID()}`
           const extension = frame.file.type === "video/mp4" ? "mp4" : frame.file.type.startsWith("video/") ? "webm" : "jpg"
           const name = `${replace ? "" : "Edited "}${source.name.replace(/\.[^.]+$/, "")}.${extension}`
@@ -595,14 +647,14 @@ module browser {
             width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail, revision: operation, favorite: replace && source.favorite === true }
           if (replace) {
             captures.put(item)
-            transaction.objectStore(originals).put(frame.file, id)
+            tx.objectStore(originals).put(frame.file, id)
           } else {
             captures.add(item)
-            transaction.objectStore(originals).add(frame.file, id)
+            tx.objectStore(originals).add(frame.file, id)
           }
-          const saved = { status: "saved", id, name, replaced: replace } as const
-          record(saved)
-          receipts.add(saved, operation)
+          const saved: BrowserEditReceipt = { status: "saved", id, name, replaced: replace }
+          setResult(saved)
+          results.add(saved, operation)
         }
       })
       if (receipt.status === "saved") window.dispatchEvent(new Event(event))
@@ -615,10 +667,10 @@ module browser {
     if (!isBrowserEdit(operation)) throw new Error("Invalid photo edit identity.")
     const database = await storage()
     try {
-      return await editReceipt(database, edits, operation, ({ receipts, prior, record }) => {
+      return await runEditReceiptTx(database, edits, operation, ({ results, prior, setResult }) => {
         const receipt = readReceipt(prior)
-        if (receipt !== undefined) record(receipt)
-        else receipts.put({ status: "not-started" }, operation)
+        if (receipt !== undefined) setResult(receipt)
+        else results.put({ status: "not-started" } satisfies BrowserEditReceipt, operation)
       })
     } finally { database.close() }
   }
@@ -633,13 +685,17 @@ module browser {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(name)
       let absent = false
-      request.onupgradeneeded = (event) => {
-        if (event.oldVersion !== 0) return
-        absent = true
-        request.transaction?.abort()
-      }
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => { if (absent) resolve(undefined); else reject(request.error) }
+      openWithGuard(
+        request,
+        (event, isBlocked) => {
+          if (isBlocked() || event.oldVersion !== 0) return
+          absent = true
+          request.transaction?.abort()
+        },
+        resolve,
+        (error) => { if (absent) resolve(undefined); else reject(error) },
+        reject,
+      )
     })
   }
 
@@ -749,7 +805,8 @@ module browser {
         }
       })
       if (found?.uri === undefined) return undefined
-      const file = await (await fetch(found.uri)).blob()
+      const file = decodeDataUri(found.uri)
+      if (file === undefined) return undefined
       const extension = file.type === "video/mp4" ? "mp4" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : undefined
       const name = extension === undefined ? found.item.name : `Camera.${extension}`
       return { item: { ...found.item, mimeType: file.type || found.item.mimeType, size: file.size, name }, file }

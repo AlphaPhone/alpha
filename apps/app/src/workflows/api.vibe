@@ -7,7 +7,16 @@ import { ask } from "../platform/remote.vibe"
 export service WorkflowsApi {
   readonly workflow: WorkflowClient
   readonly request: WorkflowRequest
+  scope(owner: string): void!!
 }
+
+module zone {
+  /** The device's current IANA time zone, falling back to UTC. @throws {never} */
+  export function localTimeZone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  }
+}
+export { localTimeZone } from zone
 
 /** Read and keep the reply only while the same owner still holds the request. */
 export function checkedWorkflowRequest(request: WorkflowRequest, current: boolean!!): WorkflowRequest {
@@ -27,11 +36,15 @@ export function sendChangeWhenReady(ready: boolean): { readonly type: "sendChang
 export const workflowsApi = Layer.effect(WorkflowsApi, effect {
   const { runtime } = try Agent
   const inFlight = new Map<string, Promise<unknown>>()
+  let currentOwner = ""
   const read = (path: string) => {
-    const pending = inFlight.get(path)
+    const key = `${currentOwner}\0${path}`
+    const pending = inFlight.get(key)
     if (pending !== undefined) return pending
-    const fresh = runtime.request(path).finally(() => { inFlight.delete(path) })
-    inFlight.set(path, fresh)
+    const fresh = runtime.request(path).finally(() => {
+      if (inFlight.get(key) === fresh) inFlight.delete(key)
+    })
+    inFlight.set(key, fresh)
     return fresh
   }
   const request: WorkflowRequest = effect (path: string, body: unknown) => try tryPromise({
@@ -40,7 +53,15 @@ export const workflowsApi = Layer.effect(WorkflowsApi, effect {
       ? workflowHttpError(error.status, { code: error.code, error: error.message })
       : workflowHttpError(0, {}),
   })
-  return { workflow: workflowClient(request), request }
+  return {
+    workflow: workflowClient(request),
+    request,
+    scope: (owner: string) => sync(() => {
+      if (owner === currentOwner) return
+      currentOwner = owner
+      inFlight.clear()
+    }),
+  }
 })
 
 const Identifier = Schema.NonEmptyString

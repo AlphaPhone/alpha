@@ -303,7 +303,7 @@ export const SIMULATIONS = "gen/traces";
 
 /** A token of a script, and how many brackets it sits in. */
 interface Token { text: string; pos: number; start: number; depth: number; fresh: boolean }
-const JSX_FILE = /\.[cm]?[jt]sx$/i;
+const JSX_FILE = /\.[cm]?[jt]sx$|\.vibex$/i;
 
 function tokenizeJsx(text: string): Token[] | undefined {
   const ts = tsApi();
@@ -337,9 +337,10 @@ function tokenizeJsx(text: string): Token[] | undefined {
   return balanced && !open.length ? out : undefined;
 }
 
-/** A script's tokens, or nothing if its brackets do not balance; TypeScript's scanner reads VibeLang's too. */
-export function tokenize(text: string, file?: string): Token[] | undefined {
-  if (file !== undefined && JSX_FILE.test(file)) return tokenizeJsx(text);
+/** A script's tokens, or nothing if its brackets do not balance; TypeScript's scanner reads VibeLang's too, and TSX/JSX uses TypeScript's parser. */
+export function tokenize(text: string, file?: string | boolean): Token[] | undefined {
+  const isJsx = typeof file === "boolean" ? file : file !== undefined && JSX_FILE.test(file);
+  if (isJsx) return tokenizeJsx(text);
   const K = tsApi().SyntaxKind;
   const scanner = tsApi().createScanner(tsApi().ScriptTarget.Latest, true, tsApi().LanguageVariant.Standard, text);
   const out: Token[] = [];

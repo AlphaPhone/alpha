@@ -26,7 +26,7 @@ import {
 
 function sendTroubleOf(failure: MessagingFailure): SendOutcome {
   return match (failure) {
-    when RateLimited: { tag: "SendFailed", trouble: "FloodWait", wait: Math.max(1, failure.retryAfter) * 1000 };
+    when RateLimited: { tag: "SendFailed", trouble: "FloodWait", wait: Math.max(1, failure.retryAfter ?? 1) * 1000 };
     when BotTokenRejected: { tag: "SendFailed", trouble: "BotTokenRejected", wait: 0 };
     when ProviderError: {
       tag: "SendFailed",
@@ -41,7 +41,7 @@ function sendTroubleOf(failure: MessagingFailure): SendOutcome {
 
 function authFailureOutcomeOf(failure: MessagingFailure, fallback: Trouble): AuthOutcome {
   return match (failure) {
-    when RateLimited: { tag: "AuthFailed", trouble: "FloodWait", wait: Math.max(1, failure.retryAfter) * 1000 };
+    when RateLimited: { tag: "AuthFailed", trouble: "FloodWait", wait: Math.max(1, failure.retryAfter ?? 1) * 1000 };
     when BotTokenRejected: { tag: "AuthBot" };
     when ProviderError: {
       tag: "AuthFailed",
@@ -65,7 +65,7 @@ effect function persistUserSession(
   sessionToken: string,
   user: TelegramUser,
 ): AuthOutcome!!(MessagingSessions | TelegramStore) {
-  const valid = assertTelegramUserToken(sessionToken) catch () => undefined
+  const valid = Option.getOrUndefined(try Effect.option(assertTelegramUserToken(sessionToken)))
   if (valid === undefined) return { tag: "AuthBot" }
   try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(valid))
   try (try TelegramStore).update((snap) => ({
@@ -217,7 +217,7 @@ function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore
       { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed },
     );
     when { tag: "StoreSession", let session }: run("store-session", effect {
-      const valid = assertTelegramUserToken(session) catch () => undefined
+      const valid = Option.getOrUndefined(try Effect.option(assertTelegramUserToken(session)))
       if (valid !== undefined) try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(valid))
     });
     when { tag: "LogOutRemote", let ticket }: answer("logout", logOutRemote(ticket), { type: "loggedOut", ticket });

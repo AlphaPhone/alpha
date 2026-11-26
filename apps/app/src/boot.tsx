@@ -1,10 +1,12 @@
+import { AppHeader, Skeleton } from "@repo/ui";
 import { Context, Effect, Layer, Stream } from "effect";
-import { type ComponentType, type ReactElement, Suspense, useLayoutEffect, useState } from "react";
+import { type ComponentType, type ReactElement, Suspense, useSyncExternalStore } from "react";
 import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
 import { readPage, stopPage } from "./assistant/read-aloud.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { FileContext } from "./assistant/file-context.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
+import type { View } from "../gen/app__shell.ts";
 import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.vibe";
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
@@ -19,13 +21,98 @@ import { resident } from "./resident.vibe";
 import type { Alpha, Area } from "./runtime/area.tsx";
 import { Contained } from "./runtime/contained.tsx";
 import { rooted } from "./runtime/root.vibe";
+import { AppBack } from "./shell/AppBack.tsx";
 import { accessCover, startupAccessLifecycle } from "./startup/settingsAccess.vibe";
 import { startupSignIn, StartupSignIn } from "./startup/signIn.vibe";
 import * as Access from "../gen/app__startup__access.effect.vibe";
 import { back, taking } from "./shell/shell.vibe";
+import { viewHasHeader, views } from "./shell/views.tsx";
+
+function ViewLoading({ alpha, place }: { alpha: Alpha; place: `view:${View}` }) {
+  const view = place.slice("view:".length) as View;
+  const label = views[view]?.label ?? view;
+  return (
+    <div role="status" aria-label={`Loading ${label}`} className="flex min-h-0 flex-1 flex-col bg-background pt-[var(--alpha-safe-top)] text-foreground">
+      {viewHasHeader(view) && <AppHeader title={label} leading={<AppBack alpha={alpha} />} className="shrink-0" />}
+      <div className="mx-auto flex w-full max-w-(--breakpoint-md) flex-col gap-3 px-4 py-4">
+        <Skeleton className="h-12 w-full rounded-xl" />
+        <Skeleton className="h-12 w-4/5 rounded-xl" />
+        <Skeleton className="h-12 w-3/5 rounded-xl" />
+      </div>
+    </div>
+  );
+}
 
 /** How long an idle moment may wait before a screen's chunk is fetched anyway, in milliseconds. */
 const idleWait = 2000;
+
+/**
+ * The screen of `mount`, opened the first time it is drawn (on commit via external store subscription, never during render),
+ * and shown once the runtime opening it made is built, so its machines have started and it never draws a state they have
+ * not reached (an unread month, an owner not known yet); at once on every later draw. A runtime that fails to build shows
+ * the screen too, whose machines then say so. One whose chunk cannot be loaded, or that cannot be opened, throws to its
+ * Contained; a chunk that failed is fetched again on the next draw. Unlike React's lazy, no Suspense reveal throttle
+ * holds a screen that is ready.
+ */
+function openedScreen(
+  mount: Mount,
+  fetched: ReadonlyMap<Mount, Area>,
+  fetch: (mount: Mount) => Promise<Area>,
+  openWith: (loaded: Area, at: Place) => { Screen?: ComponentType; broken?: { cause: unknown }; built: Promise<void> },
+): ComponentType {
+  let Opened: ComponentType | undefined;
+  let broken: { cause: unknown } | undefined;
+  let built: Promise<void> | undefined;
+  let ready = false;
+  type ShownState = { readonly Screen?: ComponentType; readonly failed?: { cause: unknown } };
+  let snapshot: ShownState = {};
+  const listeners = new Set<() => void>();
+  const setSnapshot = (next: ShownState) => {
+    snapshot = next;
+    for (const listener of listeners) listener();
+  };
+  const open = (loaded: Area): Promise<void> => {
+    if (built) return built;
+    const opened = openWith(loaded, mount.at);
+    Opened = opened.Screen;
+    broken = opened.broken;
+    built = opened.built.then(() => { ready = true; }, () => { ready = true; });
+    return built;
+  };
+  let inFlight = false;
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    if (broken) {
+      if (snapshot.failed !== broken) setSnapshot({ failed: broken });
+    } else if (ready && Opened) {
+      if (snapshot.Screen !== Opened) setSnapshot({ Screen: Opened });
+    } else if (!inFlight) {
+      inFlight = true;
+      const reveal = (loaded: Area) => {
+        void open(loaded).then(() => {
+          inFlight = false;
+          setSnapshot(broken ? { failed: broken } : { Screen: Opened });
+        });
+      };
+      const loaded = fetched.get(mount);
+      if (loaded) reveal(loaded);
+      else void fetch(mount).then(reveal, (cause: unknown) => {
+        inFlight = false;
+        setSnapshot({ failed: { cause } });
+      });
+    }
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0 && snapshot.failed && !broken) snapshot = {};
+    };
+  };
+  const getSnapshot = () => snapshot;
+  return function Later() {
+    const shown = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+    if (shown.failed) throw shown.failed.cause;
+    return shown.Screen ? <shown.Screen /> : null;
+  };
+}
 
 /**
  * Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, opened
@@ -131,9 +218,7 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       await calendar.runtime(alpha).runPromise(relistRequests);
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  // The resident's Settings pages read StartupSignIn, and StartupSignIn is built over the resident's own machines
-  // (Page, Device, …). The resident gets a late-bound StartupSignIn that forwards each call to the one built over it;
-  // nothing in the resident calls it while the root is being built.
+  /** Late-bound StartupSignIn forwarded to the resident layer while the root is being built. */
   let builtSignIn: Context.Service.Shape<typeof StartupSignIn> | undefined;
   const signedIn = () => {
     if (builtSignIn === undefined) throw new Error("StartupSignIn was read before the root was built");
@@ -141,6 +226,8 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
   };
   const lateSignIn = Layer.succeed(StartupSignIn, {
     changes: Stream.unwrap(Effect.sync(() => signedIn().changes)),
+    shelf: () => Effect.suspend(() => signedIn().shelf()),
+    clock: () => Effect.suspend(() => signedIn().clock()),
     active: () => Effect.suspend(() => signedIn().active()),
     confirmedAccount: () => Effect.suspend(() => signedIn().confirmedAccount()),
     check: () => Effect.suspend(() => signedIn().check()),
@@ -208,87 +295,63 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
   const later = mounts.filter((mount) => mount.first === undefined);
   let idle: (() => void) | undefined;
   let prefetching = false;
+  let disposed = false;
   /** The chunks the idle sweep has asked for: each once, so one that cannot be loaded is left to its first draw. */
   const swept = new Set<Mount>();
   /** Fetch the chunk at `place`, or with no place every chunk not fetched yet, one per idle moment, in the order of areas.ts. */
   const prefetch = (place?: Place) => {
+    if (disposed) return;
     if (place !== undefined) {
       for (const mount of later) if (mount.at === place) void fetch(mount).catch(() => undefined);
       return;
     }
-    if (prefetching || typeof requestIdleCallback !== "function") return;
+    if (prefetching) return;
     prefetching = true;
-    const next = () => {
-      const mount = later.find((candidate) => !swept.has(candidate) && !fetched.has(candidate));
-      if (mount === undefined) return;
-      swept.add(mount);
-      const asked = requestIdleCallback(() => {
-        idle = undefined;
-        void fetch(mount).catch(() => undefined).finally(() => { if (prefetching) next(); });
-      }, { timeout: idleWait });
-      idle = () => cancelIdleCallback(asked);
-    };
-    next();
+    const fiber = root.runtime.runFork(Effect.gen(function* () {
+      for (const mount of later) {
+        if (!prefetching || disposed) return;
+        if (swept.has(mount) || fetched.has(mount)) continue;
+        swept.add(mount);
+        yield* Effect.sleep(idleWait);
+        if (!prefetching || disposed) return;
+        yield* Effect.ignore(Effect.promise(() => fetch(mount)));
+      }
+    }));
+    idle = () => { fiber.interruptUnsafe(); };
   };
   const unserve = homeFrame.serve(prefetch);
   const unwatch = homeFrame.subscribe(() => { if (homeFrame.snapshot()) prefetch(); });
   if (homeFrame.snapshot()) prefetch();
   function quiet() {
+    disposed = true;
     prefetching = false;
     idle?.();
     unserve();
     unwatch();
   }
-  /**
-   * The screen of `mount`, opened the first time it is drawn (in a layout effect, never during a render), and shown once
-   * the runtime opening it made is built, so its machines have started and it never draws a state they have not reached
-   * (an unread month, an owner not known yet); at once on every later draw. A runtime that fails to build shows the
-   * screen too, whose machines then say so. One whose chunk cannot be loaded, or that cannot be opened, throws to its
-   * Contained; a chunk that failed is fetched again on the next draw. Unlike React's lazy, no Suspense reveal throttle
-   * holds a screen that is ready.
-   */
-  const opened = (mount: Mount): ComponentType => {
-    let Opened: ComponentType | undefined;
+  const openWith = (loaded: Area, at: Place) => {
+    let Screen: ComponentType | undefined;
     let broken: { cause: unknown } | undefined;
-    let built: Promise<void> | undefined;
-    let ready = false;
-    const open = (loaded: Area): Promise<void> => {
-      if (built) return built;
-      making = [];
-      try {
-        Opened = loaded.open(alpha, mount.at);
-      } catch (cause) {
-        broken = { cause };
-      } finally {
-        const made = making ?? [];
-        making = undefined;
-        built = Promise.all(made.map((runtime) => runtime.context())).then(() => { ready = true; }, () => { ready = true; });
-      }
-      return built;
-    };
-    return function Later() {
-      const [shown, show] = useState<{ readonly Screen?: ComponentType; readonly failed?: { cause: unknown } }>(() => (broken ? { failed: broken } : { Screen: ready ? Opened : undefined }));
-      useLayoutEffect(() => {
-        if (shown.Screen || shown.failed) return;
-        let live = true;
-        const reveal = (loaded: Area) => {
-          if (!live) return;
-          void open(loaded).then(() => { if (live) show(broken ? { failed: broken } : { Screen: Opened }); });
-        };
-        const loaded = fetched.get(mount);
-        if (loaded) reveal(loaded);
-        else void fetch(mount).then(reveal, (cause: unknown) => { if (live) show({ failed: { cause } }); });
-        return () => { live = false; };
-      }, [shown]);
-      if (shown.failed) throw shown.failed.cause;
-      return shown.Screen ? <shown.Screen /> : null;
-    };
+    let built: Promise<void>;
+    making = [];
+    try {
+      Screen = loaded.open(alpha, at);
+    } catch (cause) {
+      broken = { cause };
+    } finally {
+      const made = making ?? [];
+      making = undefined;
+      built = Promise.all(made.map((runtime) => runtime.context())).then(() => undefined, () => undefined);
+    }
+    return { Screen, broken, built };
   };
   for (const mount of mounts) {
-    const Screen = mount.first?.open(alpha, mount.at) ?? opened(mount);
+    const Screen = mount.first?.open(alpha, mount.at) ?? openedScreen(mount, fetched, fetch, openWith);
+    const isView = mount.at.startsWith("view:");
+    const fallback = isView ? <ViewLoading alpha={alpha} place={mount.at as `view:${View}`} /> : null;
     const drawn = (
-      <Contained key={`${mount.at} ${placed.get(mount.at)?.length ?? 0}`} place={mount.at} told={mount.at.startsWith("view:")} onStopped={stopped}>
-        <Suspense fallback={null}><Screen /></Suspense>
+      <Contained key={`${mount.at} ${placed.get(mount.at)?.length ?? 0}`} place={mount.at} told={isView} onStopped={stopped}>
+        <Suspense fallback={fallback}><Screen /></Suspense>
       </Contained>
     );
     placed.set(mount.at, [...(placed.get(mount.at) ?? []), drawn]);

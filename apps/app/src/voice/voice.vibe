@@ -18,11 +18,12 @@ import { MediaReview, ranDirect, sameFiles } from "../assistant/media-review.vib
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { interruptedByCall, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/voice.vibe"
+import { classifyVoiceFault, interruptedByCall, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/voice.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
 import { signedIn } from "./account.vibe"
 import { replyBlocks } from "../assistant/words.ts"
 import { replyWords } from "@repo/ui"
@@ -36,6 +37,12 @@ interface SpokenNavigation {
   readonly opened: Deferred.Deferred<boolean>
   readonly apply: Effect.Effect<boolean>
   readonly decline: Effect.Effect<void>
+}
+
+export interface VoiceSnapshot {
+  readonly dictatedText: string
+  readonly dictatedDurationMs: number | undefined
+  readonly heardText: string
 }
 
 export interface SpokenChatLease {
@@ -90,6 +97,7 @@ export interface VoiceMemory {
   readonly publishSaid: (value: InterimWords | undefined) => void
   readonly retireSaid: (session: number, turn: number) => void
   chat: SpokenChat | undefined
+  activeController: TurnController | undefined
   heardText: { readonly session: number; readonly turn: number; readonly text: string } | undefined
   lastReply: string
   readonly queuedSentences: string[]
@@ -115,6 +123,9 @@ export interface VoiceMemory {
   cueWaiting: boolean
   /** The turn's spoken acknowledgment, from queued to audible to ended or dropped; `ended` settles when it is no longer heard, and `followed` once a sentence of the reply came after it. */
   cue: SpokenCue | undefined
+  setDictated(text: string, durationMs: number | undefined): void
+  setHeard(value: { readonly session: number; readonly turn: number; readonly text: string } | undefined): void
+  abortTurn(): void!!
   enqueueSentence(turn: number, text: string): void
   /** Queue the turn's acknowledgment to speak at once, before any sentence of its reply; false when the turn already has speech. */
   enqueueCue(turn: number, text: string): boolean
@@ -136,10 +147,16 @@ interface SpokenCue {
 
 export service VoiceWords {
   readonly memory: VoiceMemory
+  readonly snapshot: (this: void) => VoiceSnapshot
+  readonly subscribe: (this: void, listener: () => void) => () => void
 }
 
 export const voiceWords = Layer.effect(VoiceWords, effect {
   const playLock = try Semaphore.make(1)
+  const shelf = createShelf<VoiceSnapshot>({ dictatedText: "", dictatedDurationMs: undefined, heardText: "" })
+  const publish = () => {
+    shelf.set({ dictatedText: memory.dictatedText, dictatedDurationMs: memory.dictatedDurationMs, heardText: memory.heardText?.text ?? "" })
+  }
   let interim: InterimWords | undefined
   const interimListeners = new Set<() => void>()
   let said: InterimWords | undefined
@@ -171,6 +188,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
       if (said?.session === session && said.turn === turn) memory.publishSaid(undefined)
     },
     chat: undefined,
+    activeController: undefined,
     heardText: undefined,
     lastReply: "",
     queuedSentences: [],
@@ -189,6 +207,23 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     screen: undefined,
     cueWaiting: false,
     cue: undefined,
+    setDictated(text: string, durationMs: number | undefined) {
+      memory.dictatedText = text
+      memory.dictatedDurationMs = durationMs
+      publish()
+    },
+    setHeard(value: { readonly session: number; readonly turn: number; readonly text: string } | undefined) {
+      memory.heardText = value
+      publish()
+    },
+    abortTurn: () => effect {
+      const active = memory.activeTurn
+      const controller = memory.activeController
+      memory.activeTurn = undefined
+      memory.activeController = undefined
+      if (active !== undefined) try active.stop()
+      else if (controller !== undefined) try ignore(tryPromise(() => controller.interrupt()))
+    },
     enqueueSentence(turn: number, text: string) {
       if (!prepareTurn(turn, true)) return
       // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": a cue still queued is dropped here; one already handed to speech is dropped or bounded when this sentence plays.
@@ -250,7 +285,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     }
     return true
   }
-  return { memory }
+  return { memory, snapshot: shelf.snapshot, subscribe: shelf.subscribe }
 })
 
 // spec/app/voice/index.md, "What the owner says is shown as it is heard"
@@ -358,8 +393,7 @@ export effect function openDictation<R>(field: Field, apply: (words: string) => 
   const context = try Effect.context<R>()
   const filling = (try voice.get()).recorder.filled + 1
   if (!(try contained(voice.send({ type: "openRecorder", target: field }), "opening dictation"))) return false
-  memory.dictatedText = ""
-  memory.dictatedDurationMs = undefined
+  memory.setDictated("", undefined)
   memory.fillTarget = { field, filling, apply: (words) => Effect.provideContext(apply(words), context) }
   return true
 }
@@ -426,6 +460,7 @@ module pure {
   const unfinishedWeekday = new RegExp(String.raw`\b(?:${weekdayNames})\.,?(?:[ \t]+([A-Z][A-Za-z]*)\.?(?:[ \t]+0)?)?[ \t]*$`, "u")
   const unfinishedMonth = new RegExp(String.raw`\b(?:${monthNames})\.(?:[ \t]+0)?[ \t]*$`, "u")
   const unfinishedClock = new RegExp(String.raw`${clockStart}${clock}[ \t]*[ap](?:\.|\.?[ \t]*m\.(?:[ \t]+t(?:o)?)?)[ \t]*$`, "iu")
+  const abbreviation = /\b(?:Dr|Mr|Mrs|Ms|Prof|Jr|Sr|St|vs|e\.g|i\.e)\./gi
 
   function hidePeriods(text: string): string {
     return text.replaceAll(".", "·")
@@ -438,6 +473,7 @@ module pure {
         month === undefined || months.some((name) => name.startsWith(month) || name.toUpperCase().startsWith(month)) ? hidePeriods(tail) : tail)
       .replace(unfinishedMonth, hidePeriods)
       .replace(unfinishedClock, hidePeriods))
+      .replace(abbreviation, hidePeriods)
       .replace(namedDate, hidePeriods)
       .replace(clockRange, hidePeriods)
       .replace(clockWithMeridiem, hidePeriods)
@@ -491,6 +527,7 @@ module pure {
   }
 }
 import { requestedDestination, speakableText, spokenForm, takeCompleteSentences } from pure
+export { speakableText, spokenForm }
 
 function placeForDestination(name: string): number | undefined {
   const lowered = name.toLowerCase()
@@ -648,6 +685,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     },
   }
   const controller = new TurnController(transport)
+  memory.activeController = controller
   try ignore(tryPromise(() => controller.bind(record)))
   let settled = false
   const stopActive = () => effect {
@@ -717,6 +755,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     const first = try sent(direct)
     return resendWithoutMode(first, direct !== undefined) && (try lease.verified) && (try currentRequest) ? try sent(undefined) : first
   }, stopped), effect {
+    if (memory.activeController === controller) memory.activeController = undefined
     if (memory.activeTurn === active) memory.activeTurn = undefined
     if (controller.pending) try stopActive()
     else settled = true
@@ -833,7 +872,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const { memory } = try VoiceWords
     const voice = try Voice.Machine
     const heard = memory.heardText
-    memory.heardText = undefined
+    memory.setHeard(undefined)
     const spoken = heard?.session === session && heard.turn === turn ? heard.text.trim() : ""
     // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": every spoken turn goes to the agent, and a review is decided only by the owner's touch on it.
     const finishLocally = () => {
@@ -863,7 +902,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       try Effect.ensuring(Effect.provideContext(send(queue, shared), shared.context), sync(() => memory.retireSaid(session, turn)))
       return
     }
-    memory.heardText = undefined
+    memory.setHeard(undefined)
     memory.retireSaid(session, turn)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false, says: false })
     Queue.endUnsafe(queue)
@@ -949,16 +988,22 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     }, { type: "answerPrompt", granted: false });
     when { tag: "OpenSettings" }: run("openSettings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "Listen", let session, let network }: answer("mic", effect {
+      const bridge = try VoiceBridge
       const prepare = (try VoiceWords).memory.prepareInterim
       const preview = prepare === undefined ? undefined : try prepare(session)
       return effect {
-        try (try VoiceBridge).openMic(session, network, preview)
-        return { type: "micOpened", session } as const
+        try bridge.openMic(session, network, preview)
+        return { type: "micOpened", session } as Voice.Event
       } catch effect (failure) => {
         preview?.retire()
-        return interruptedByCall(failure.cause)
-          ? { type: "callInterrupted", session, foreground: try (try Device).showing() } as const
-          : { type: "micFailed", session } as const
+        if (interruptedByCall(failure.cause)) {
+          return { type: "callInterrupted", session, foreground: try (try Device).showing() } as Voice.Event
+        }
+        if (!network) return { type: "micFailed", session } as Voice.Event
+        const { fault, waitMs } = classifyVoiceFault(failure, true)
+        if (fault === "NotTheNetwork") return { type: "micFailed", session } as Voice.Event
+        const status = try bridge.probeStatus(false)
+        return { type: "speechFailed", session, fault, wait: waitMs, deviceReady: status.ready && status.liveCapture, now: untimed } as Voice.Event
       }
     }, { type: "micFailed", session });
     when { tag: "SetSpeakerOutput", let session, let speakerTicket, let muted }: answer(`speaker ${session}:${speakerTicket}`, effect {
@@ -1018,13 +1063,15 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     when { tag: "Hush", let turn }: run("hush", effect {
       const { memory } = try VoiceWords
       memory.clearQueued(turn)
+      if (memory.heardText !== undefined && memory.heardText.turn <= turn) memory.setHeard(undefined)
       if (memory.activeTurn !== undefined && memory.activeTurn.turn <= turn) try memory.activeTurn.stop()
       try (try VoiceBridge).hush(turn)
     });
     when { tag: "Shut", let session }: answer("shut", effect {
       const { memory } = try VoiceWords
       memory.clearQueued()
-      if (memory.activeTurn !== undefined) try memory.activeTurn.stop()
+      memory.setHeard(undefined)
+      try memory.abortTurn()
       const confirmed = try (try VoiceBridge).shut(session)
       return { type: "stopped", confirmed }
     }, { type: "stopped", confirmed: false });
@@ -1039,9 +1086,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     when { tag: "Record", let ticket }: answer("record", effect {
       const current = try (try Voice.Machine).get()
       if (Voice.canRecordingStarted(current, ticket)) {
-        const { memory } = try VoiceWords
-        memory.dictatedText = ""
-        memory.dictatedDurationMs = undefined
+        (try VoiceWords).memory.setDictated("", undefined)
       }
       const started = effect { try (try VoiceBridge).startRecording(ticket); return true } catch () => false
       return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
@@ -1054,9 +1099,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const failure = result.kind === "obscured" ? "AgentUnavailable" : result.kind === "failed" ? "Recognition" : trimmed === "" ? "NoSpeech" : "NoFailure"
       const current = try (try Voice.Machine).get()
       if (Voice.canTranscribed(current, ticket, failure)) {
-        const { memory } = try VoiceWords
-        memory.dictatedText = trimmed
-        memory.dictatedDurationMs = result.durationMs
+        (try VoiceWords).memory.setDictated(trimmed, result.durationMs)
       }
       return { type: "transcribed", ticket, failure } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
@@ -1067,8 +1110,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       if (target?.field !== field || target.filling !== filling) return
       const words = memory.dictatedText.trim()
       memory.fillTarget = undefined
-      memory.dictatedText = ""
-      memory.dictatedDurationMs = undefined
+      memory.setDictated("", undefined)
       if (words !== "") try target.apply(words)
     });
   }
@@ -1128,6 +1170,7 @@ export const voiceWithCalls = started(effect {
   const phone = try Phone
   const device = try Device
   const voice = try Voice.Machine
+  const { memory } = try VoiceWords
   const calls = Stream.changes(Stream.map(phone.changes, (state) => liveCall(state.telecom)))
   try Stream.runForEach(Stream.zipLatest(calls, voice.changes), effect ([live, speech]) => {
     if (!live) return
@@ -1137,6 +1180,8 @@ export const voiceWithCalls = started(effect {
     }
     const foreground = try device.showing()
     if (Voice.canCallInterrupted(speech, speech.session, foreground)) {
+      memory.setHeard(undefined)
+      try memory.abortTurn()
       try contained(voice.send({ type: "callInterrupted", session: speech.session, foreground }), "stopping Talk for a call")
     }
   })
@@ -1159,10 +1204,26 @@ const discardedDictation = applying(Voice.Machine, (voice) => voice.recorder, ef
   const { memory } = try VoiceWords
   if (memory.fillTarget === undefined || memory.fillTarget.filling <= recorder.filled) return
   memory.fillTarget = undefined
-  memory.dictatedText = ""
-  memory.dictatedDurationMs = undefined
+  memory.setDictated("", undefined)
   memory.transcriptReading = undefined
 })
+
+const permissions = started(effect {
+  const bridge = try VoiceBridge
+  const device = try Device
+  const voice = try Voice.Machine
+  const syncGrant = effect {
+    const raw = try bridge.checkPermission()
+    if (raw === "unknown") return
+    const grant = raw === "granted" ? "Granted" : raw === "denied" ? "Denied" : "Unasked"
+    const current = try voice.get()
+    if (current.permission.grant !== grant && Voice.canPermissionChanged(current, grant)) {
+      try contained(voice.send({ type: "permissionChanged", grant }), "syncing microphone permission")
+    }
+  }
+  try syncGrant
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), () => syncGrant)
+}, "syncing microphone permission")
 
 const bridgeEvents = hearing(
   Stream.unwrap(effect {
@@ -1173,19 +1234,26 @@ const bridgeEvents = hearing(
       if (event.kind === "speechEnd" && event.text !== "") {
         const state = try voice.get()
         if (Voice.canTurnEnded(state, event.session)) {
-          memory.heardText = { session: state.session, turn: state.turn, text: event.text }
+          memory.setHeard({ session: state.session, turn: state.turn, text: event.text })
           // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it"
           memory.publishSaid({ session: state.session, turn: state.turn, text: event.text.trim() })
         }
+      }
+      if (event.kind === "ended") {
+        if (event.reason === "ended") return undefined
+        if (event.reason === "call-active") return { type: "callInterrupted", session: event.session, foreground: try (try Device).showing() }
+        const live = try voice.get()
+        const classified = event.fault !== undefined
+          ? { fault: event.fault, waitMs: event.waitMs ?? 0 }
+          : classifyVoiceFault(event.reason, live.network)
+        const status = classified.fault === "NotTheNetwork" ? undefined : try bridge.probeStatus(false)
+        const deviceReady = status !== undefined && status.ready && status.liveCapture
+        return { type: "speechFailed", session: event.session, fault: classified.fault, wait: classified.waitMs, deviceReady, now: untimed }
       }
       return match (event) {
         when { kind: "speechStart", let session }: { type: "speechHeard", session };
         when { kind: "speechEnd", let session }: { type: "turnEnded", session };
         when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
-        when { kind: "ended", let session, let reason }: reason === "ended"
-          ? undefined
-          : reason === "call-active" ? { type: "callInterrupted", session, foreground: try (try Device).showing() }
-            : { type: "speechFailed", session, fault: "NotTheNetwork", wait: 0, deviceReady: false, now: untimed };
         when { kind: "recordingStopped", let ticket, let recorded }: recorded
           ? { type: "recordingStopped", ticket, showing: try dictationVisible(), now: untimed }
           : { type: "recordingFailed", ticket, failure: "NoMicrophone" };
@@ -1236,6 +1304,7 @@ export const voicing = Layer.provideMerge(
     dictationClock,
     visibility,
     navigation,
+    permissions,
     bridgeEvents,
     signedIn,
     quietly,

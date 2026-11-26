@@ -1,0 +1,60 @@
+// spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/timers.md, "Story: Run multiple countdown timers"; spec/app/clock/stopwatch.md, "Story: Time laps with the stopwatch"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type Shelf, createShelf } from "../runtime/shelf.vibe"
+import { type ClockRecordsStore, clockRecords, createClockRecords } from "./records.ts"
+import { detectHour24 } from "./time.ts"
+
+/** KeyValueStore key holding Clock's persisted label, sound, tombstone, version, and dirty metadata. */
+export const metaStoreKey = "alpha/app/clock/meta@1"
+
+/** Scoped reactive Clock metadata store bound to a single runtime lifecycle. */
+export service ClockRecords {
+  readonly store: ClockRecordsStore
+}
+
+/** Scoped reactive Clock ticker shelves bound to a single runtime lifecycle. */
+export service ClockTicks {
+  readonly clockNow: Shelf<number>
+  readonly stopwatchNow: Shelf<number>
+}
+
+/** Fallback 1-second Clock timestamp shelf when mounted without ClockTicks. */
+export const fallbackClockNow: Shelf<number> = createShelf(0)
+
+/** Fallback 50ms Stopwatch timestamp shelf when mounted without ClockTicks. */
+export const fallbackStopwatchNow: Shelf<number> = createShelf(0)
+
+/** Provides a freshly created `ClockRecords` store hydrated from KeyValueStore that resets when its runtime scope closes. */
+export const clockRecordsLayer = Layer.effect(ClockRecords, effect {
+  const store = createClockRecords(detectHour24())
+  const kv = try KeyValueStore.KeyValueStore
+  const kept = kv.get(metaStoreKey) catch () => undefined
+  if (kept !== undefined) store.restore(kept)
+  try Effect.addFinalizer(() => sync(() => { store.reset() }))
+  return { store }
+})
+
+/** Provides freshly created `ClockTicks` shelves that reset when their runtime scope closes. */
+export const clockTicksLayer = Layer.effect(ClockTicks, effect {
+  const clockNow = createShelf(0)
+  const stopwatchNow = createShelf(0)
+  try Effect.addFinalizer(() => sync(() => {
+    clockNow.reset()
+    stopwatchNow.reset()
+  }))
+  return { clockNow, stopwatchNow }
+})
+
+/** Resolve the runtime's scoped `ClockRecords` store, falling back to the standalone store when absent. */
+export effect function activeClockRecords(): ClockRecordsStore!! {
+  const ctx = try Effect.context<never>()
+  const found = Context.getOption(ctx, ClockRecords)
+  return Option.isSome(found) ? found.value.store : clockRecords
+}
+
+/** Resolve the runtime's scoped `ClockTicks` shelves, falling back to standalone shelves when absent. */
+export effect function activeClockTicks(): { readonly clockNow: Shelf<number>; readonly stopwatchNow: Shelf<number> }!! {
+  const ctx = try Effect.context<never>()
+  const found = Context.getOption(ctx, ClockTicks)
+  return Option.isSome(found) ? found.value : { clockNow: fallbackClockNow, stopwatchNow: fallbackStopwatchNow }
+}

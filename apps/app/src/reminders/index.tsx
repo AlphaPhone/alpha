@@ -1,17 +1,17 @@
 // spec/app/reminders/index.md, "Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import { Effect } from "effect";
 import * as RemindersMachine from "../../gen/app__reminders.effect.vibe";
-import * as EditorMachine from "../../gen/app__reminders__editor.effect.vibe";
 import { area } from "../runtime/area.tsx";
 import { stepping } from "../shell/shell.vibe";
+import { closeReminderEditor } from "./editor.vibe";
 import { Reminders } from "./Reminders.tsx";
 
 const back = Effect.gen(function* () {
-  const editor = yield* EditorMachine.Machine;
+  if (yield* closeReminderEditor()) return true;
   const reminders = yield* RemindersMachine.Machine;
   const tried: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
-    editor.send({ type: "close" }),
     reminders.send({ type: "closeItem" }),
+    reminders.send({ type: "setSearchOpen", open: false }),
     reminders.send({ type: "showLists" }),
   ];
   for (const step of tried) {

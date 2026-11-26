@@ -22,6 +22,7 @@ import home from "../src/home/index.tsx";
 import { agentOpen } from "../src/notes/agent.vibe";
 import { reviewNoteSchedule } from "../src/notes/calendar.vibe";
 import notes from "../src/notes/index.tsx";
+import { clock, dated, preview } from "../src/notes/present.ts";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
@@ -29,6 +30,7 @@ import { untimed } from "../src/runtime/reactor.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, notesRoutes, prepared } from "./fakes/notes.ts";
 import { answering, fetched } from "./fakes/routes.ts";
+import type * as Ui from "@repo/ui";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -36,7 +38,7 @@ afterEach(closeAll);
 
 const rowDrawn = vi.hoisted(() => vi.fn());
 vi.mock("@repo/ui", async (original) => {
-  const ui = await original<typeof import("@repo/ui")>();
+  const ui = await original<typeof Ui>();
   return { ...ui, NoteRow: (props: Parameters<typeof ui.NoteRow>[0]) => { rowDrawn(); return <ui.NoteRow {...props} />; } };
 });
 
@@ -70,21 +72,34 @@ async function openNamedShoppingNote(world: Scene) {
   return { alpha, runtime: assistant.runtime(alpha) };
 }
 
+async function openLoadedNotes(world: Scene) {
+  const opened = await openNotesFromHome(world);
+  await until(opened.alpha, opened.runtime, List, (state) => state.read.status === "Loaded");
+  return opened;
+}
+
 async function openSavedVoiceNote(world: Scene) {
-  const { alpha, runtime } = await openNotesFromHome(world);
-  await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+  const opened = await openLoadedNotes(world);
+  await control("Open Design sync");
   await press("Open Design sync");
-  await until(alpha, runtime, Voice, (state) => state.showing);
-  return { alpha, runtime };
+  await until(opened.alpha, opened.runtime, Voice, (state) => state.showing);
+  return opened;
+}
+
+async function startFreshNote(world: Scene) {
+  const opened = await openLoadedNotes(world);
+  await control("New note");
+  await press("New note");
+  await until(opened.alpha, opened.runtime, Editor, (state) => state.showing && state.fresh && state.note === 0);
+  return opened;
 }
 
 /** Notes opened from Home on `world`, once its list is read, choosing notes to delete. */
 async function selectingNotes(world: Scene) {
   world.notes.deleteRequests = [];
-  const { alpha, runtime } = await openNotesFromHome(world);
-  await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+  const opened = await openLoadedNotes(world);
   await chooseNotesOption("Notes options", "Select", true);
-  return { alpha, runtime };
+  return opened;
 }
 
 /** Copy the shared note's text after the notes changed under the share: it is refused, and `copy` was not called again. */
@@ -258,11 +273,7 @@ describe("Notes", () => {
 
   it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    await control("New note");
-    await press("New note");
-    await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
+    const { alpha, runtime } = await startFreshNote(world);
     await fill("Title", "Studio invoice");
     await fill("Note", "Send by Friday");
     await press("Done");
@@ -342,8 +353,7 @@ describe("Notes", () => {
 
   it("Pins the open note from its own menu, as v121's note menu held Pin (spec/app/notes/index.md, \"Story: Organise my notes\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    const { alpha, runtime } = await openLoadedNotes(world);
     // spec/app/notes/index.md, "Story: Organise my notes": rows carry no menu of their own, as v121's had none.
     expect(button("Gift ideas · Priya options")).toBeUndefined();
     await press("Open Gift ideas · Priya");
@@ -541,7 +551,8 @@ describe("Notes", () => {
     await askAgainAboutSync();
     expect(button("Remove Design sync")).toBeDefined();
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe(question);
-    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
+    await until(alpha, runtime, Conversation, (state) => state.ready && state.observing && state.context.selected);
+    await rendered(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question])));
     expect(world.ask.said[0]).not.toContain("Use the transcript");
@@ -642,11 +653,16 @@ describe("Notes", () => {
     expect(button("Save recording summary")).toBeUndefined();
   });
 
-  it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
+  async function openShoppingChat() {
     const world = scene();
     const { alpha, runtime } = await openNamedShoppingNote(world);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
+    return { world, alpha, runtime };
+  }
+
+  it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
+    const { world, alpha, runtime } = await openShoppingChat();
     const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
     const list = () => alpha.runtime.runPromise(Effect.flatMap(List, (l) => l.get()));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
@@ -781,10 +797,7 @@ describe("Notes", () => {
 
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
   it("A note the agent opens keeps Ask Alpha's sheet, also over Notes, and lowers the full screen, while asking for Notes itself under its sheet lowers it", async () => {
-    const world = scene();
-    const { alpha, runtime } = await openNamedShoppingNote(world);
-    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
-    await until(alpha, runtime, Conversation, (s) => s.ready);
+    const { world, alpha, runtime } = await openShoppingChat();
     const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
     const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent }))));
     const ask = async (text: string, viewId: string, saved: boolean) => {
@@ -799,33 +812,42 @@ describe("Notes", () => {
       return shell();
     };
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": from Home under the sheet, Notes opens on the named note and the sheet stays.
     await raise("Sheet");
     expect(await ask("open the note titled shopping list", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
     await rendered(() => expect(editorTitle()).toBe("shopping list"));
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": Notes already showing under the sheet keeps the sheet for a named note, as in v119.
     world.notes.target = "enclave";
     expect(await ask("open my enclave launch note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
     await rendered(() => expect(editorTitle()).toBe("Enclave launch"));
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": Full over Notes lowers when opening a named note.
     await raise("Full");
     world.notes.target = "groceries";
     expect(await ask("open my groceries note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
     await rendered(() => expect(editorTitle()).toBe("Groceries"));
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": asked for Notes itself under the sheet, Ask Alpha lowers so Notes shows.
     await raise("Sheet");
     expect(await ask("show me notes", "notes", false)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
   });
 
-  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/shell/index.md, "Only a spoken move from its exact source route is marked as Talk's navigation"
-  it("A note the agent opens aloud keeps Ask Alpha's sheet, also over Notes, and lowers the full screen, while Talk keeps listening", async () => {
+  async function startSpokenShoppingNote() {
     const world = { ...scene(), phone: true };
     const { alpha, runtime } = await openNamedShoppingNote(world);
     await until(alpha, runtime, Conversation, (s) => s.ready && s.observing);
     await until(alpha, runtime, Talk, (s) => s.warmed);
-    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "chooseNetworkSpeech", agree: false }))));
-    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "permissionChanged", grant: "Granted" }))));
-    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "startTalking", now: untimed }))));
+    await drawn(() => runtime.runPromise(Effect.flatMap(Talk, (v) => v.send({ type: "chooseNetworkSpeech", agree: false }))));
+    await drawn(() => runtime.runPromise(Effect.flatMap(Talk, (v) => v.send({ type: "permissionChanged", grant: "Granted" }))));
+    await drawn(() => runtime.runPromise(Effect.flatMap(Talk, (v) => v.send({ type: "startTalking", now: untimed }))));
     await until(alpha, runtime, Talk, (s) => s.phase === "Listening" && s.mic === "On");
+    return { world, alpha, runtime };
+  }
+
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/shell/index.md, "Only a spoken move from its exact source route is marked as Talk's navigation"
+  it("A note the agent opens aloud keeps Ask Alpha's sheet, also over Notes, and lowers the full screen, while Talk keeps listening", async () => {
+    const { world, alpha, runtime } = await startSpokenShoppingNote();
     const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
     const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent }))));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
@@ -838,18 +860,18 @@ describe("Notes", () => {
       return shell();
     };
 
-    await raise("Sheet");
-    expect(await say("open my shopping list note", 1)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
-    await rendered(() => expect(editorTitle()).toBe("shopping list"));
-
-    world.notes.target = "enclave";
-    expect(await say("open my enclave launch note", 2)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
-    await rendered(() => expect(editorTitle()).toBe("Enclave launch"));
-
-    await raise("Full");
-    world.notes.target = "groceries";
-    expect(await say("open my groceries note", 3)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
-    await rendered(() => expect(editorTitle()).toBe("Groceries"));
+    const checks: ReadonlyArray<readonly [string | undefined, "Sheet" | "Full" | undefined, string, "Sheet" | "Bar", string]> = [
+      [undefined, "Sheet", "open my shopping list note", "Sheet", "shopping list"],
+      ["enclave", undefined, "open my enclave launch note", "Sheet", "Enclave launch"],
+      ["groceries", "Full", "open my groceries note", "Bar", "Groceries"],
+    ];
+    for (const [index, [target, lift, phrase, expectedAssistant, expectedTitle]] of checks.entries()) {
+      if (lift !== undefined) await raise(lift);
+      if (target !== undefined) world.notes.target = target;
+      expect(await say(phrase, index + 1)).toMatchObject({ trail: ["Notes"], assistant: expectedAssistant });
+      await rendered(() => expect(editorTitle()).toBe(expectedTitle));
+      await until(alpha, runtime, Conversation, (c) => c.context.showing.tag === "App" && c.context.showing.view === "Notes" && c.context.selected);
+    }
     expect(results()).toEqual([
       { switched: true, shown: { kind: "saved-note", noteId: "shopping" } },
       { switched: true, shown: { kind: "saved-note", noteId: "enclave" } },
@@ -858,14 +880,7 @@ describe("Notes", () => {
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
-    const world = { ...scene(), phone: true };
-    const { alpha, runtime } = await openNamedShoppingNote(world);
-    await until(alpha, runtime, Conversation, (s) => s.ready && s.observing);
-    await until(alpha, runtime, Talk, (s) => s.warmed);
-    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "chooseNetworkSpeech", agree: false }))));
-    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "permissionChanged", grant: "Granted" }))));
-    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "startTalking", now: untimed }))));
-    await until(alpha, runtime, Talk, (s) => s.phase === "Listening" && s.mic === "On");
+    const { world, alpha } = await startSpokenShoppingNote();
     world.ask.metadata = [];
     world.ask.nextReplyChunks = ["Here it is."];
     world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)];
@@ -880,6 +895,40 @@ describe("Notes", () => {
       const editor = await alpha.runtime.runPromise(Editor.use((machine) => machine.get()));
       expect([showing(shell, "Notes"), editor.showing, editorTitle()]).toEqual([true, true, "shopping list"]);
     });
+  });
+
+  it("Keeps editor input mounted across first autosave, deletes a voice note from More, and closes open views when leaving Notes (spec/app/notes/editor.md, \"Story: Write a note\"; spec/app/notes/voice.md, \"Story: Leave a voice note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await startFreshNote(world);
+    const titleInput = document.querySelector<HTMLInputElement>("input[aria-label='Title']");
+    expect(titleInput).not.toBeNull();
+    titleInput?.focus();
+    await fill("Title", "Stable draft");
+    await later(alpha, 700);
+    await until(alpha, runtime, Editor, (state) => state.note > 0 && state.draft.sync === "Kept");
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Title']")).toBe(titleInput);
+    expect(editorTitle()).toBe("Stable draft");
+
+    await hardware("home");
+    await until(alpha, runtime, Editor, (state) => !state.showing);
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+
+    await control("Open Design sync");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing);
+    await chooseNotesOption("More", "Delete", true);
+    await rendered(() => expect(world.notes.trash.some((entry) => entry.note.id === "sync")).toBe(true));
+    await until(alpha, runtime, Voice, (state) => !state.showing);
+  });
+
+  it("Guards non-finite durations and invalid timestamps when presenting notes (spec/app/notes/index.md, \"Story: See my notes\")", () => {
+    expect(clock(Number.NaN)).toBe("0:00");
+    expect(clock(-5)).toBe("0:00");
+    expect(clock(65)).toBe("1:05");
+    const bad = { ...note("bad", "", "", 0), updatedAt: "not-a-date" };
+    expect(dated(bad, 1_700_000_000_000)).toBe("");
+    expect(preview(bad)).toBe("");
   });
 
   it("Empties all notes in Recently deleted when confirmed (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {
@@ -934,8 +983,7 @@ describe("Notes", () => {
 
   it("Closes the Note Actions menu on hardware Back before closing the editor (spec/app/notes/actions.md, \"Back and leaving Notes close the menu, and so do a restart and another owner taking the phone\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    const { alpha, runtime } = await openLoadedNotes(world);
     await control("Open Enclave launch");
     await press("Open Enclave launch");
     await until(alpha, runtime, Editor, (state) => state.showing);

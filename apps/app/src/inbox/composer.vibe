@@ -56,8 +56,40 @@ module pure {
   export function acceptable(address: string): boolean {
     return /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/u.test(address)
   }
+
+  /** Whether a storage write failed because browser storage quota was exceeded. @throws {never} */
+  export function isQuotaError(cause: unknown): boolean {
+    if (typeof DOMException !== "undefined" && cause instanceof DOMException) {
+      return cause.name === "QuotaExceededError" || cause.name === "NS_ERROR_DOM_QUOTA_REACHED"
+    }
+    if (typeof cause === "object" && cause !== null) {
+      const record = cause as { name?: unknown; message?: unknown; cause?: unknown }
+      if (record.name === "QuotaExceededError" || record.name === "NS_ERROR_DOM_QUOTA_REACHED") return true
+      if (typeof record.message === "string" && /quota/iu.test(record.message)) return true
+      if (record.cause !== undefined && record.cause !== cause) return isQuotaError(record.cause)
+    }
+    return false
+  }
+
+  /** Parse one draft record kept under its own storage key. @throws {never} */
+  export function readOneWords(text: string | undefined): Words | undefined {
+    if (text === undefined) return undefined
+    try {
+      const found = JSON.parse(text) as unknown
+      return found !== null && typeof found === "object" && !Array.isArray(found) ? found as Words : undefined
+    } catch { return undefined }
+  }
+
+  /** Parse the list of stored draft IDs. @throws {never} */
+  export function readDraftIds(text: string | undefined): string[] | undefined {
+    if (text === undefined) return undefined
+    try {
+      const found = JSON.parse(text) as unknown
+      return Array.isArray(found) && found.every((one): one is string => typeof one === "string") ? found : undefined
+    } catch { return undefined }
+  }
 }
-import { type Attached, type Words, acceptable, readWords } from pure
+import { type Attached, type Words, acceptable, isQuotaError, readDraftIds, readOneWords, readWords } from pure
 export { type Attached, type Words, acceptable }
 
 /** A draft with nothing written yet. */
@@ -67,6 +99,8 @@ export const nothing: Words = { to: [], cc: [], bcc: [], subject: "", text: "", 
 export const policy: Policy = { files: 10, mib: 5 }
 
 const key = "alpha/inbox/letters"
+const draftKeyPrefix = "alpha/inbox/letter/"
+const draftIdsKey = "alpha/inbox/letter-ids"
 const copyKey = "alpha/inbox/gmail-draft-copies"
 const SavedWords = Schema.Struct({
   to: Schema.Array(Schema.String), cc: Schema.Array(Schema.String), bcc: Schema.Array(Schema.String),
@@ -77,7 +111,6 @@ const CopySchema = Schema.Struct({ account: Schema.Number, id: Schema.String, di
 type Copy = typeof CopySchema.Type
 type Seen = typeof SeenSchema.Type
 const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(CopySchema)))
-
 /** The storage charged to the draft for a file. */
 export const mibOf = (bytes: number) => Math.max(1, Math.ceil(bytes / 1_048_576))
 
@@ -88,8 +121,12 @@ export const mibOf = (bytes: number) => Math.max(1, Math.ceil(bytes / 1_048_576)
 export service Letters {
   words(draft: number): Words
   set(draft: number, words: Words): void
+  subscribe(listener: () => void): () => void
+  version(): number
   /** Write the words of `draft` to the phone; whether the phone kept them. */
   keep(draft: number): boolean!!
+  /** Write the words of `draft` to the phone, distinguishing quota exhaustion. */
+  keepDraft(draft: number): { readonly ok: boolean; readonly full: boolean }!!
   /** Read back what the phone kept; whether it could be read. */
   load(): boolean!!
   forget(drafts: ReadonlyArray<number>): void!!
@@ -107,46 +144,103 @@ export service Letters {
 export const letters = Layer.effect(Letters, effect {
   const store = try KeyValueStore.KeyValueStore
   let held: Record<string, Words> = readWords(store.get(key) catch () => undefined) ?? {}
+  const initialIds = readDraftIds(store.get(draftIdsKey) catch () => undefined) ?? []
+  for (const id of initialIds) {
+    const one = readOneWords(store.get(`${draftKeyPrefix}${id}`) catch () => undefined)
+    if (one !== undefined) held = { ...held, [id]: one }
+  }
   const savedCopies = (store.get(copyKey) catch () => undefined) ?? "[]"
   const copies = [...(readCopies(savedCopies) catch () => [])]
   const knownCopy = (account: number, id: string) => copies.findIndex((copy) => copy.account === account && copy.id === id) + 1
   let copiesChanged = false
-  const keepCopies = effect () => {
-    if (!copiesChanged) return true
-    const written = store.set(copyKey, JSON.stringify(copies)) catch () => false
-    if (written === false) return false
-    copiesChanged = false
-    return true
+  let revision = 0
+  const listeners = new Set<() => void>()
+  const notify = () => {
+    revision += 1
+    for (const listener of [...listeners]) listener()
   }
-  const kept = effect () => {
-    if (!(try keepCopies())) return false
-    const written = store.set(key, JSON.stringify(held)) catch () => false
-    return written !== false
+  const writeKey = effect (name: string, value: string): { readonly ok: boolean; readonly full: boolean }!! => {
+    const res = try exit(store.set(name, value))
+    return Exit.isSuccess(res) ? { ok: true, full: false } : { ok: false, full: isQuotaError(res.cause) }
+  }
+  const persistCopies = effect () => {
+    if (!copiesChanged) return { ok: true, full: false }
+    const written = try writeKey(copyKey, JSON.stringify(copies))
+    if (written.ok) copiesChanged = false
+    return written
+  }
+  const keepCopies = effect () => (try persistCopies()).ok
+  const keepDraft = effect (draft: number) => {
+    const copied = try persistCopies()
+    if (!copied.ok) return copied
+    const id = String(draft)
+    const entry = held[id]
+    if (entry !== undefined) {
+      const wrote = try writeKey(`${draftKeyPrefix}${id}`, JSON.stringify(entry))
+      if (!wrote.ok) return wrote
+    }
+    const ids = Object.keys(held)
+    return try writeKey(draftIdsKey, JSON.stringify(ids))
   }
   return {
     words: (draft: number) => held[String(draft)] ?? nothing,
     set(draft: number, words: Words) {
       held = { ...held, [String(draft)]: words }
+      notify()
     },
-    effect keep(_draft: number) {
-      return try kept()
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
     },
+    version: () => revision,
+    effect keep(draft: number) {
+      return (try keepDraft(draft)).ok
+    },
+    keepDraft,
     effect load() {
-      const text = store.get(key) catch () => null
-      if (text === null) return false
-      held = { ...readWords(text), ...held }
+      const legacyText = store.get(key) catch () => null
+      if (legacyText === null) return false
+      if (legacyText !== undefined && legacyText !== "") {
+        const parsedLegacy = readWords(legacyText)
+        if (parsedLegacy === undefined) return false
+        held = { ...parsedLegacy, ...held }
+      }
+      const idsText = store.get(draftIdsKey) catch () => null
+      if (idsText === null) return false
+      if (idsText !== undefined && idsText !== "") {
+        const ids = readDraftIds(idsText)
+        if (ids === undefined) return false
+        for (const id of ids) {
+          const itemText = store.get(`${draftKeyPrefix}${id}`) catch () => null
+          if (itemText === null) return false
+          if (itemText !== undefined && itemText !== "") {
+            const parsed = readOneWords(itemText)
+            if (parsed === undefined) return false
+            if (!(id in held)) held = { ...held, [id]: parsed }
+          }
+        }
+      }
+      notify()
       return true
     },
     effect forget(drafts: ReadonlyArray<number>) {
       const gone = new Set(drafts.map(String))
       held = Object.fromEntries(Object.entries(held).filter(([id]) => !gone.has(id)))
-      try ignore(kept())
+      notify()
+      for (const id of gone) try ignore(store.remove(`${draftKeyPrefix}${id}`))
+      try ignore(store.set(draftIdsKey, JSON.stringify(Object.keys(held))))
+      try ignore(persistCopies())
     },
     effect clear() {
+      const ids = Object.keys(held)
       held = {}
       copies.length = 0
       copiesChanged = true
-      try ignore(kept())
+      notify()
+      for (const id of ids) try ignore(store.remove(`${draftKeyPrefix}${id}`))
+      try ignore(store.remove(draftIdsKey))
+      try ignore(store.remove(key))
+      try ignore(persistCopies())
     },
     copy: (gmail: number) => copies[gmail - 1],
     knownCopy,
@@ -156,6 +250,7 @@ export const letters = Layer.effect(Letters, effect {
       const at = same === 0 ? copies.length : same - 1
       copies[at] = { account, id, digest }
       copiesChanged = true
+      notify()
       return at + 1
     },
     observed(gmail: number, seen: Seen) {
@@ -163,12 +258,14 @@ export const letters = Layer.effect(Letters, effect {
       if (copy === undefined) return
       copies[gmail - 1] = { ...copy, seen }
       copiesChanged = true
+      notify()
     },
     keepObserved(gmail: number) {
       const copy = copies[gmail - 1]
       if (copy?.seen === undefined) return
       copies[gmail - 1] = { account: copy.account, id: copy.id, digest: copy.seen.digest }
       copiesChanged = true
+      notify()
     },
   }
 })
@@ -188,7 +285,7 @@ effect function lookedUp(ticket: number, draft: number, account: number, gmail: 
   const ledger = try Mail
   const composer = try Drafts.Machine
   const list = try Inbox.Machine
-  const copy = letters.copy(gmail)
+  const cloud = try Cloud
   const grant = ledger.grant(account)
   const generation = ledger.generation(account)
   const before = try composer.get()
@@ -201,6 +298,7 @@ effect function lookedUp(ticket: number, draft: number, account: number, gmail: 
   }
   const letter = try current
   if (letter === undefined || grant === undefined) return copyFailed(ticket)
+  const copy = letters.copy(gmail)
   if (letter.unsure) {
     if (attempt === 0 || (gmail !== 0 && copy?.account !== account)) return copyFailed(ticket)
     const kind = letter.use === "ToDelete" ? "DeleteDraft" : gmail === 0 ? "SaveDraft" : "ReplaceDraft"
@@ -222,7 +320,7 @@ effect function lookedUp(ticket: number, draft: number, account: number, gmail: 
     return read
   }
   if (copy?.account !== account) return copyFailed(ticket)
-  const found = (Effect.map(provider(try Cloud).gmailDraftContent(grant, copy.id), (content) => ({ content })) catch (failure) =>
+  const found = (Effect.map(provider(cloud).gmailDraftContent(grant, copy.id), (content) => ({ content })) catch (failure) =>
     failure instanceof MailProtocolFailed && failure.status === 404 ? { content: undefined } : undefined)
   const after = try current
   if (found === undefined || after === undefined) return copyFailed(ticket)
@@ -328,8 +426,8 @@ effect function inSent(ticket: number, draft: number, account: number, attempt: 
 }
 
 effect function written(ticket: number, draft: number): Event!!Letters {
-  const ok = try (try Letters).keep(draft)
-  return { type: "written", ticket, ok, full: false }
+  const result = try (try Letters).keepDraft(draft)
+  return { type: "written", ticket, ok: result.ok, full: result.full }
 }
 
 effect function loaded(ticket: number): Event!!Letters {

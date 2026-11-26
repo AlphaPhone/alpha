@@ -1,6 +1,9 @@
 // spec/app/files/shared.md, "A file has a number, a name, a revision that changes whenever the file does, a kind, its size, and the storage volume it is on"
 import type { Kind } from "../../gen/app__files__shared.effect.vibe"
 
+/** The maximum note text length admitted by Notes when creating a note from scanned text. */
+export const scanNoteLimit = 20_241
+
 /** What a file is, from what the phone says of it. */
 export function kindOf(entry: { readonly directory: boolean; readonly mimeType: string }): Kind {
   if (entry.directory) return "Folder"
@@ -19,6 +22,40 @@ export function childrenOf(entry: { readonly directory: boolean; readonly childr
 }
 
 module presentation {
+  import type * as FilesClient from "@elizaos/plugin-files-client";
+  let filesClientPromise: Promise<typeof FilesClient> | undefined;
+
+  /** Load `@elizaos/plugin-files-client` lazily so heavy PDF/OCR code stays off cold Files/Camera/Photos navigation. */
+  export function loadFilesClient(): Promise<typeof FilesClient> {
+    return (filesClientPromise ??= import("@elizaos/plugin-files-client"));
+  }
+
+  // eslint-disable-next-line no-control-regex -- rejects path separators and ASCII control characters in filenames
+  const invalidNameCharacter = /[/\\\u0000-\u001f\u007f]/;
+
+  /** Whether `value` is a safe single path segment for Files rename and folder creation. @throws {never} */
+  export function validFileName(value: unknown): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const name = value.trim();
+    return name !== "" && name.length <= 255 && name !== "." && name !== ".." && !invalidNameCharacter.test(name) ? name : undefined;
+  }
+
+  /** Whether `value` is a safe relative storage path. @throws {never} */
+  export function validStoragePath(value: unknown, allowRoot = false): string | undefined {
+    if (typeof value !== "string" || value.length > 1024) return undefined;
+    const path = value.replace(/^\/+|\/+$/g, "");
+    if (path === "") return allowRoot ? "" : undefined;
+    return path.split("/").every((part) => validFileName(part) === part) ? path : undefined;
+  }
+
+  /** Parse a date-only or ISO filter bound into epoch milliseconds. @throws {never} */
+  export function filterTimeOf(value: string, end = false): number {
+    if (value.length !== 10) return Date.parse(value);
+    const [year, month, day] = value.split("-").map(Number);
+    if (year === undefined || month === undefined || day === undefined) return Number.NaN;
+    return end ? new Date(year, month - 1, day + 1).getTime() - 1 : new Date(year, month - 1, day).getTime();
+  }
+
   /** A size in the units the owner reads, to one decimal above a kilobyte. @throws {never} */
   export function sized(bytes: number): string {
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -51,4 +88,4 @@ module presentation {
     return [volume, ...folder.split("/").filter(Boolean)].join(" › ");
   }
 }
-export { changedOn, folderLocation, itemCount, parentPath, sized } from presentation
+export { changedOn, filterTimeOf, folderLocation, itemCount, loadFilesClient, parentPath, sized, validFileName, validStoragePath } from presentation

@@ -89,6 +89,10 @@ export function alphaPhotos(scene: PhotosScene): Faked {
     };
     const session = "alpha-test-photo-edit";
     const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };
+    let nextRowId = Math.max(0, ...scene.rows.map((item) => Number(ownedKey(item).replace(/^v:/, "")) || 0));
+    let activeSession: string | undefined;
+    let beganEdit = false;
+    const savedEdits = new Map<string, { id: string; revision: string; replaced: boolean }>();
     return {
       ...photoPermissions(scene),
       watchLibrary({ active }) {
@@ -125,26 +129,41 @@ export function alphaPhotos(scene: PhotosScene): Faked {
           return candidates.find((item) => item.id === id);
         });
       },
-      beginEdit: ({ id, revision }) => scene.rows.some((item) => item.id === id && item.revision === revision)
-        ? Promise.resolve(preview) : Promise.reject(new Error("This item changed")),
-      previewEdit: ({ sessionId, filter }) => sessionId === session
+      beginEdit: ({ id, revision }) => {
+        if (!scene.rows.some((item) => item.id === id && item.revision === revision)) return Promise.reject(new Error("This item changed"));
+        activeSession = session;
+        beganEdit = true;
+        savedEdits.delete(session);
+        return Promise.resolve(preview);
+      },
+      previewEdit: ({ sessionId, filter }) => activeSession === session && sessionId === session
         ? Promise.resolve({ ...preview, filter }) : Promise.reject(new Error("The session closed")),
       saveEdit({ sessionId, filter }) {
-        if (sessionId !== session) return Promise.reject(new Error("The session closed"));
-        const copy = row(scene.rows.length + 1, "Edited copy.jpg", true);
+        if (activeSession !== session || sessionId !== session) return Promise.reject(new Error("The session closed"));
+        nextRowId = Math.max(nextRowId, ...scene.rows.map((item) => Number(ownedKey(item).replace(/^v:/, "")) || 0)) + 1;
+        const copy = row(nextRowId, "Edited copy.jpg", true);
         scene.rows.unshift(copy);
         scene.saves.push(filter);
+        savedEdits.set(session, { id: copy.id, revision: copy.revision, replaced: false });
         return Promise.resolve({ status: "saved", operationId: session, id: copy.id, revision: copy.revision, replaced: false });
       },
       editResult({ operationId }) {
         scene.editLookups.push(operationId);
-        const saved = owned()[0];
-        return Promise.resolve(operationId === session && saved !== undefined
-          ? { status: "saved", operationId, id: saved.id, revision: saved.revision, replaced: false }
-          : { status: "not-started" });
+        const saved = savedEdits.get(operationId);
+        if (saved !== undefined) return Promise.resolve({ status: "saved", operationId, id: saved.id, revision: saved.revision, replaced: saved.replaced });
+        if (!beganEdit && operationId === session) {
+          const persisted = owned()[0];
+          if (persisted !== undefined) return Promise.resolve({ status: "saved", operationId, id: persisted.id, revision: persisted.revision, replaced: false });
+        }
+        return Promise.resolve({ status: "not-started" });
       },
       changeMany: (input) => scene.changeMany?.(input) ?? Promise.reject(new Error("No matching photo change")),
-      cancelEdit: () => Promise.resolve(),
+      cancelEdit: () => {
+        activeSession = undefined;
+        beganEdit = true;
+        savedEdits.delete(session);
+        return Promise.resolve();
+      },
       albums: () => Promise.resolve({ items: [] }),
     };
   });

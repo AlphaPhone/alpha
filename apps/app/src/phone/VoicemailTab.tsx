@@ -1,7 +1,7 @@
 // spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
 import type { ListedVoicemail } from "@elizaos/os-bridges";
 import { Banner, Button, Slider, Spinner, cn, focusRing } from "@repo/ui";
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import { Phone as Handset, Play, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -20,11 +20,11 @@ const action = "flex-1 bg-background hover:bg-accent";
 
 function Position({ runtime, length, enabled }: Pick<Props, "runtime"> & { length: number; enabled: boolean }) {
   const player = runtime.runSync(Effect.flatMap(Player, (service) => service.controls()));
-  const position = useSyncExternalStore(player.subscribe, player.position, () => 0);
+  const position = useSyncExternalStore((wake) => player.subscribe(wake), () => player.position(), () => 0);
   return (
     <>
       <Slider variant="playback" aria-label="Position" aria-valuetext={clockLength(position)} className="min-w-0 flex-1"
-        min={0} max={Math.max(1, length)} value={Math.min(position, length)} disabled={!enabled || length === 0} onValueChange={player.seek} />
+        min={0} max={Math.max(1, length)} value={Math.min(position, length)} disabled={!enabled || length === 0} onValueChange={(value) => player.seek(value)} />
       <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{clockLength(position)} / {clockLength(length)}</span>
     </>
   );
@@ -68,8 +68,6 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
           <Button size="icon" className={cn("bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80", state.confirming && "disabled:opacity-100")} data-alpha-phone-play=""
             aria-label={state.playback === "Playing" ? "Pause" : "Play"} disabled={!can(pause) && !can(play)}
             onClick={() => void send(can(pause) ? pause : play)}>
-            {/* v119 (45f6bed30) phone-adapter.ts:322 draws Pause as its own two strokes, and dc-lite.js:145-168 swaps Play's
-                path for lucide's play.svg (icon-catalog.json "play"), so Play is lucide's rounded triangle at 18px. */}
             {state.playback === "Playing" ? <PauseGlyph className="size-4.5" /> : <Play className="size-4.5" />}
           </Button>
         )}
@@ -108,8 +106,10 @@ export function VoicemailTab({ runtime, now }: Props) {
   const open = async (row: ListedVoicemail) => {
     const opening = { type: "open", carrierText: row.carrierTranscript !== null } as const;
     if (!can(opening)) return;
+    const previous = { open: held.open, audio: held.audio, transcript: held.transcript };
     runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set({ open: row.id, audio: "", transcript: "" })));
-    await send(opening);
+    const result = await send(opening);
+    if (Exit.isFailure(result)) runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set(previous)));
   };
   return (
     <div>
@@ -132,8 +132,8 @@ export function VoicemailTab({ runtime, now }: Props) {
         if (current) return <OpenVoicemail key={row.id} runtime={runtime} row={row} label={label} title={title} date={date} />;
         return (
           <button type="button" key={row.id} aria-label={label} aria-expanded="false" onClick={() => void open(row)}
-            disabled={state.confirming || state.removal.outcome === "Sent"}
-            className={cn(focusRing, "flex min-h-16 w-full items-start gap-3 px-5 py-2.5 text-left")}>
+            disabled={!can({ type: "open", carrierText: row.carrierTranscript !== null })}
+            className={cn(focusRing, "flex min-h-16 w-full items-start gap-3 px-5 py-2.5 text-left focus-visible:-outline-offset-focus")}>
             <CallAvatar name={title} />
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="flex items-center gap-1.5">

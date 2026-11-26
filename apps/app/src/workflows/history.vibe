@@ -1,6 +1,7 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"; spec/app/workflows/sheet.md, "Story: Keep the sheet to its owner"
-import type { RemoteWorkflow, WorkflowApproval, WorkflowRun } from "@elizaos/plugin-workflow-client"
+import { type RemoteWorkflow, type WorkflowApproval, type WorkflowRun, parseWorkflowRun } from "@elizaos/plugin-workflow-client"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import * as Definition from "../../gen/app__workflows.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Effect as Out, Event, Output } from "../../gen/app__workflows__sheet.effect.vibe"
@@ -12,8 +13,10 @@ import type { Agent } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { VoiceBridge, nativeReadingAvailable } from "../platform/voice.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { type Job, answer, applying, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
 import { WorkflowsApi, type PromptRun, readPromptRuns } from "./api.vibe"
+import { DefinitionWords } from "./lifecycle.vibe"
 import { Rows } from "./list.vibe"
 import { WorkflowTaps, currentTap, settleWorkflowTap } from "./native-approval.vibe"
 
@@ -38,31 +41,40 @@ const empty: HistoryWords = { owner: 0, row: 0, all: [] }
 
 export service HistoryWordsPort {
   view(owner: number, row: number): HistoryWords!!
+  snapshot(this: void): HistoryWords
+  subscribe(this: void, listener: () => void): () => void
   store(owner: number, row: number, newest: RemoteWorkflow | undefined, runs: readonly Omit<RunWords, "number">[]): readonly RunWords[]!!
   output(owner: number, row: number, opened: NonNullable<HistoryWords["opened"]>): void!!
   clear(): void!!
 }
 
 const remembered = Layer.sync(HistoryWordsPort, () => {
-  let words = empty
+  const shelf = createShelf(empty)
   let next = 0
   const numbers = new Map<string, number>()
   return {
-    view: (owner: number, row: number) => succeed(words.owner === owner && words.row === row ? words : empty),
+    view: (owner: number, row: number) => sync(() => {
+      const words = shelf.get()
+      return words.owner === owner && words.row === row ? words : empty
+    }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
     store: (owner: number, row: number, newest: RemoteWorkflow | undefined, runs: readonly Omit<RunWords, "number">[]) => sync(() => {
+      const words = shelf.get()
       if (owner !== words.owner || row !== words.row) numbers.clear()
       const all = runs.map((run) => {
         const number = numbers.get(run.id) ?? ++next
         numbers.set(run.id, number)
         return { ...run, number }
       })
-      words = { owner, row, all, ...(newest === undefined ? {} : { workflow: newest }), ...(words.owner === owner && words.row === row && words.opened ? { opened: words.opened } : {}) }
+      shelf.set({ owner, row, all, ...(newest === undefined ? {} : { workflow: newest }), ...(words.owner === owner && words.row === row && words.opened ? { opened: words.opened } : {}) })
       return all
     }),
     output: (owner: number, row: number, opened: NonNullable<HistoryWords["opened"]>) => sync(() => {
-      if (words.owner === owner && words.row === row) words = { ...words, opened }
+      const words = shelf.get()
+      if (words.owner === owner && words.row === row) shelf.set({ ...words, opened })
     }),
-    clear: () => sync(() => { words = empty; numbers.clear() }),
+    clear: () => sync(() => { shelf.set(empty); numbers.clear() }),
   }
 })
 
@@ -87,13 +99,18 @@ function promptRun(record: PromptRun, index: number): Omit<RunWords, "number"> {
 module speech {
   /** @throws {never} */
   export function browserCanSpeak(): boolean {
-    return typeof speechSynthesis !== "undefined" && typeof SpeechSynthesisUtterance !== "undefined"
+    return typeof globalThis.speechSynthesis !== "undefined" && typeof globalThis.SpeechSynthesisUtterance !== "undefined"
+  }
+
+  /** Cancel any in-flight or queued speech synthesis immediately. @throws {never} */
+  export function silence(): void {
+    globalThis.speechSynthesis?.cancel()
   }
 
   export function said(text: string, signal: AbortSignal): Promise<void> {
     if (!browserCanSpeak() || signal.aborted) return Promise.resolve()
     return new Promise((resolve) => {
-      const words = new SpeechSynthesisUtterance(text)
+      const words = new globalThis.SpeechSynthesisUtterance(text)
       const ended = () => {
         signal.removeEventListener("abort", stopped)
         words.onend = null
@@ -101,17 +118,17 @@ module speech {
         resolve()
       }
       const stopped = () => {
-        speechSynthesis.cancel()
+        silence()
         ended()
       }
       signal.addEventListener("abort", stopped, { once: true })
       words.onend = ended
       words.onerror = ended
-      speechSynthesis.speak(words)
+      globalThis.speechSynthesis.speak(words)
     })
   }
 }
-import { browserCanSpeak, said } from speech
+import { browserCanSpeak, said, silence } from speech
 
 /** Android reads through Alpha's on-device speech bridge. */
 export const canSpeak = (): boolean => native() ? nativeReadingAvailable() : browserCanSpeak()
@@ -170,13 +187,34 @@ export effect function workflowsVisible(): boolean!!RunVisibility {
   return showing(try shell.get(), "Workflows") && (try (try Device).showing())
 }
 
+function rawExecution(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const nested = record.execution
+  return typeof nested === "object" && nested !== null && !Array.isArray(nested)
+    ? nested as Record<string, unknown> : undefined
+}
+
+function outputTruncated(raw: Record<string, unknown>, parsed: WorkflowRun): boolean {
+  if (typeof raw.truncated === "boolean") return raw.truncated
+  if (typeof raw.outputTruncated === "boolean") return raw.outputTruncated
+  if (typeof raw.output === "string") return raw.output.length > 4000
+  if (Array.isArray(raw.output) && raw.output.length === 1) {
+    const first = raw.output[0]
+    if (typeof first === "object" && first !== null && "text" in first && typeof (first as { text?: unknown }).text === "string") {
+      return ((first as { text: string }).text).length > 4000
+    }
+  }
+  return "truncated" in parsed && (parsed as { truncated?: unknown }).truncated === true
+}
+
 effect function output(ticket: number, number: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | RunVisibility) {
   const failed: Event = { type: "outputRead", ticket, ok: false, text: "Empty", status: "NoRun" }
   const listing = try Listing.Machine
   const sheet = try Sheet.Machine
   const held = try Rows
   const history = try HistoryWordsPort
-  const { workflow } = try WorkflowsApi
+  const { workflow, request } = try WorkflowsApi
   const reading = try sheet.get()
   const owner = reading.owner
   const current = try listing.get()
@@ -186,13 +224,16 @@ effect function output(ticket: number, number: number): Event!!(Agent | Workflow
   if (current.owner !== owner || reading.runId !== number || selected === undefined) return failed
   const before = ownerAt() catch () => ""
   if (!(try held.sameOwner(before, owner)) || !(try workflowsVisible())) return failed
-  const receipt = (workflow.receipt(selected.id, selected.workflowId) catch () => undefined)
-  if (receipt === undefined || receipt.versionId !== selected.versionId) return failed
+  const payload = (request(`/api/workflow/executions/${encodeURIComponent(selected.id)}`, undefined) catch () => undefined)
+  const exec = rawExecution(payload)
+  const receipt = exec === undefined ? undefined : (parseWorkflowRun(exec) catch () => undefined)
+  if (receipt === undefined || receipt.id !== selected.id || receipt.workflowId !== selected.workflowId || receipt.versionId !== selected.versionId) return failed
   const approvalRead = !receipt.finished && receipt.status === "waiting-approval" ? (workflow.approvals(receipt) catch () => undefined) : null
   if (approvalRead === undefined) return failed
   const after = ownerAt() catch () => ""
   const final = try listing.get()
-  const text: Output = receipt.output === undefined || receipt.output.trim() === "" ? "Empty" : receipt.output.length === 4000 ? "Truncated" : "Text"
+  const truncated = exec !== undefined && outputTruncated(exec, receipt)
+  const text: Output = receipt.output === undefined || receipt.output.trim() === "" ? "Empty" : truncated ? "Truncated" : "Text"
   const live = try sheet.get()
   if (after !== before || final.owner !== owner || selectedRow(final.place) !== row ||
     live.owner !== owner || live.runId !== number || !Sheet.canOutputRead(live, ticket, text) || !(try workflowsVisible())) return failed
@@ -228,7 +269,10 @@ effect function speak(id: number, runId: number): Event!!SpeechNeeds {
   }, context)
   if (!(try current())) return done
   if (!native()) {
-    try ignore(tryPromise((signal) => said(text, signal)))
+    try Effect.ensuring(
+      ignore(tryPromise((signal) => said(text, signal))),
+      sync(() => silence()),
+    )
     return done
   }
   const handoff = try MediaHandoff
@@ -271,7 +315,7 @@ function carry(fx: Out): Job<Event, Needs, []> {
     when { tag: "ReadRuns", let ticket, let owner, let after }: answer("workflow history", reading(ticket, owner, after), { type: "runsRead", ticket, ok: false, count: 0, more: false });
     when { tag: "ReadOutput", let ticket, let runId }: answer("workflow output", output(ticket, runId), { type: "outputRead", ticket, ok: false, text: "Empty", status: "NoRun" });
     when { tag: "Speak", let id, let runId }: answer("workflow speech", speak(id, runId), { type: "speechEnded", id });
-    when { tag: "Silence" }: stop("workflow speech");
+    when { tag: "Silence" }: run("workflow speech", sync(() => silence()));
     when { tag: "AskAlpha", let runId }: run("workflow question", askAboutRun(runId));
   }
 }
@@ -283,12 +327,34 @@ const followRow = applying(
     const sheet = try Sheet.Machine
     const held = try Rows
     const history = try HistoryWordsPort
+    silence()
     try ignore(sheet.send({ type: "closeRun" }))
     try ignore(sheet.send({ type: "restart" }))
     try ignore(sheet.send({ type: "ownerChanged", owner }))
     try history.clear()
     const selected = try held.row(owner, row)
     if (selected?.kind === "Routine" || selected?.kind === "Prompt") try ignore(sheet.send({ type: "readHistory", removed: selected.removed }))
+  },
+)
+
+const followVersion = applying(
+  Definition.Machine,
+  (state) => ({ owner: state.owner, target: state.target, version: state.version }),
+  effect ({ owner, target, version }: { owner: number; target: number; version: number }) => {
+    if (target <= 0 || version <= 0) return
+    const sheet = try Sheet.Machine
+    const live = try sheet.get()
+    if (live.runId <= 0 || live.owner !== owner) return
+    const listing = try (try Listing.Machine).get()
+    if (listing.owner !== owner || selectedRow(listing.place) !== target) return
+    const history = try (try HistoryWordsPort).view(owner, target)
+    const opened = history.opened
+    const latest = try (try DefinitionWords).read(target)
+    if (opened?.number !== live.runId || latest === undefined) return
+    if (latest.workflow.versionId !== opened.raw.versionId && live.newest <= live.version) {
+      const next = live.newest + 1
+      if (Sheet.canWorkflowChanged(live, next)) try ignore(sheet.send({ type: "workflowChanged", newest: next }))
+    }
   },
 )
 
@@ -364,4 +430,4 @@ const followSpeech = started(effect {
   })
 }, "stopping speech when the workflow is covered")
 
-export const history = together(reacting(Sheet, { carry }), remembered, followRow, followRun, followTap, followSpeech)
+export const history = together(reacting(Sheet, { carry }), remembered, followRow, followVersion, followRun, followTap, followSpeech)

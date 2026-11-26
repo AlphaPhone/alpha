@@ -281,8 +281,8 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
       if (runs && world.prompts.has(decodeURIComponent(runs[1] ?? ""))) return Response.json({ runs: [] });
       const task = world.tasks.find((one) => url.pathname === `/api/scheduled-tasks/${one.taskId}`);
       if (task !== undefined) return Response.json({ task });
-      const prompt = world.prompts.get(url.pathname.slice("/api/triggers/".length));
-      if (url.pathname.startsWith("/api/triggers/") && prompt !== undefined) return Response.json({ trigger: prompt });
+      const prompt = url.pathname.startsWith("/api/triggers/") ? world.prompts.get(decodeURIComponent(url.pathname.slice("/api/triggers/".length))) : undefined;
+      if (prompt !== undefined) return Response.json({ trigger: prompt });
       switch (url.pathname) {
         case "/api/notifications": {
           if (url.searchParams.get("nativeTransport") !== "true" || world.nativeNotices === undefined) return;
@@ -331,7 +331,7 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
     },
     (request, url) => {
       if (request.method !== "PUT" || !url.pathname.startsWith("/api/triggers/")) return;
-      const id = url.pathname.slice("/api/triggers/".length);
+      const id = decodeURIComponent(url.pathname.slice("/api/triggers/".length));
       const current = world.prompts.get(id);
       if (!current) return Response.json({}, { status: 404 });
       return readJsonBody(request).then((body) => {
@@ -396,10 +396,17 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
       }
       if (url.pathname === `${executionPath}/approvals/${approvalNode}/0`) {
         return readJsonBody(request).then(async (body) => {
-          if (world.stage !== "Waiting" || body.expectedVersionId !== record.versionId || body.requestDigest !== approvalDigest || body.approved !== true) {
+          if (world.stage !== "Waiting" || body.expectedVersionId !== record.versionId || body.requestDigest !== approvalDigest || typeof body.approved !== "boolean") {
             return Response.json({}, { status: 409 });
           }
           world.decisions.push({ version: body.expectedVersionId, digest: body.requestDigest, approved: body.approved });
+          if (!body.approved) {
+            world.stage = "Done";
+            const out = review(world);
+            const first = out.approvals[0];
+            if (first !== undefined) first.status = "rejected";
+            return Response.json(out, { status: 202 });
+          }
           world.stage = world.phoneReview === undefined ? "Done" : "Device";
           await world.deviceReceipt;
           return Response.json(review(world), { status: 202 });

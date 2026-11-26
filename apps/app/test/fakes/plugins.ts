@@ -48,7 +48,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
     ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
-    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera), takeBillingReturn: () => {
+    AlphaDevice: (emit, onUnplug) => ({ ...alphaDevice(world.update, () => world.now)(emit, onUnplug), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera), takeBillingReturn: () => {
       const session = world.checkout?.returned ?? null;
       if (world.checkout) world.checkout.returned = null;
       return Promise.resolve({ session });

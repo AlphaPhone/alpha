@@ -1,5 +1,5 @@
 import { Folder, Images } from "lucide-react";
-import { cn } from "../../lib/cn.ts";
+import { cn, focusRing } from "../../lib/cn.ts";
 
 export type PhotosSection = "library" | "albums";
 
@@ -27,7 +27,8 @@ export function PhotosSections({ value, onChange }: PhotosSectionsProps) {
           disabled={!onChange}
           onClick={() => onChange?.(id)}
           className={cn(
-            "flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-segment-option px-3 py-2 text-center text-sm leading-snug font-semibold transition-colors duration-200",
+            focusRing,
+            "flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-segment-option px-3 py-2 text-center text-sm leading-snug font-semibold transition-colors duration-base ease-standard motion-reduce:transition-none disabled:opacity-50",
             value === id ? "bg-foreground text-background" : "text-foreground",
           )}
         >

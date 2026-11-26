@@ -199,10 +199,10 @@ effect function navigated(ticket: number, place: Place, inside = false): boolean
   const conversation = try Conversation.Machine
   if (place === "Home") {
     if (!Conversation.canNavigateHome(try conversation.get(), ticket)) return false
-    try ignore(conversation.send({ type: "navigateHome", ticket }))
+    if (!(try contained(conversation.send({ type: "navigateHome", ticket }), "returning Home for a reply"))) return false
   } else {
     if (!Conversation.canNavigate(try conversation.get(), ticket, place, inside)) return false
-    try ignore(conversation.send({ type: "navigate", ticket, view: place, inside }))
+    if (!(try contained(conversation.send({ type: "navigate", ticket, view: place, inside }), "opening the view a reply prepared"))) return false
   }
   return try navigationEnded(conversation, ticket)
 }
@@ -210,7 +210,7 @@ effect function navigated(ticket: number, place: Place, inside = false): boolean
 // spec/app/assistant/index.md, "An explicit Files continuation opens only from the same app trail and Ask Alpha panel"
 export effect function navigateFilesForReply(conversation: ConversationMachine.Shape, ticket: number, source: View[], panel: Detent, route: number): boolean!! {
   if (!Conversation.canNavigateFiles(try conversation.get(), ticket, source, panel, route)) return false
-  try ignore(conversation.send({ type: "navigateFiles", ticket, source, panel, route }))
+  if (!(try contained(conversation.send({ type: "navigateFiles", ticket, source, panel, route }), "opening Files for a reply"))) return false
   return try navigationEnded(conversation, ticket)
 }
 
@@ -272,7 +272,8 @@ effect function openPrepared(ticket: number) {
   if ("continueFiles" in held.value) return try held.value.continueFiles
   if ("openAsked" in held.value) return try held.value.openAsked
   if ("page" in held.value) {
-    if (try navigated(ticket, "Browser")) try (try AgentPages).open(try asAllowed(held.value.page), Effect.map(views.current(), (now) => now === held.value.asked))
+    const allowed = try asAllowed(held.value.page)
+    if (try navigated(ticket, "Browser", !allowed.atOnce)) try (try AgentPages).open(allowed, Effect.map(views.current(), (now) => now === held.value.asked))
     return
   }
   const place = placeFor(held.value.handoff)
@@ -295,7 +296,8 @@ export const carriedAloud = started(effect {
     const held = work.held
     if (held.asked !== (try views.current()) || !(try work.current)) return
     if ("page" in held) {
-      if (try work.front("Browser", false)) try (try AgentPages).open(try asAllowed(held.page), Effect.map(views.current(), (now) => now === held.asked))
+      const allowed = try asAllowed(held.page)
+      if (try work.front("Browser", !allowed.atOnce)) try (try AgentPages).open(allowed, Effect.map(views.current(), (now) => now === held.asked))
       return
     }
     const place = placeFor(held.handoff)

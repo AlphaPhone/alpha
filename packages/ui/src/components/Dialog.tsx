@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn.ts";
+import { useLayerSurface } from "../lib/layers.tsx";
 import { dialogPanel, overlay, surfaceDescription, surfaceTitle } from "../lib/styles.ts";
 import { Button } from "./Button.tsx";
 
@@ -37,19 +38,21 @@ export function DialogOverlay({ className, ...props }: DialogOverlayProps) {
 }
 
 /** The panel in the middle of a dimmed page. Needs a `DialogTitle`; without a `DialogDescription`, pass `aria-describedby={undefined}`. Escape and a press outside dismiss it. */
-export function DialogContent({ closeLabel, container, overlayClassName, className, children, ...props }: DialogContentProps) {
+export function DialogContent({ closeLabel, container, overlayClassName, className, children, ref, onPointerDownOutside, onInteractOutside, ...props }: DialogContentProps) {
+  const surface = useLayerSurface("DialogLayer", { container, ref, onPointerDownOutside, onInteractOutside });
   return (
-    <DialogPrimitive.Portal container={container}>
+    <DialogPrimitive.Portal container={surface.container}>
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
-        className={cn(dialogPanel, closeLabel && "[&>h2]:pr-8", className)}
+        className={cn(dialogPanel, closeLabel && "[&>h2]:pr-11", className)}
+        {...surface.contentProps}
         {...props}
       >
         {children}
         {closeLabel ? (
           <DialogPrimitive.Close asChild>
             <Button variant="ghost" size="icon" aria-label={closeLabel} className="absolute top-1.5 right-1.5 text-muted-foreground">
-              <X />
+              <X aria-hidden />
             </Button>
           </DialogPrimitive.Close>
         ) : null}

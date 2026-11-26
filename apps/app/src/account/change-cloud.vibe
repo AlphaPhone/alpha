@@ -1,4 +1,4 @@
-// spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in"
+// spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
 import {
   commandFromResponse, type PlanChangeReview, pathOf, paymentFromResponse, reviewFromResponse,
   routesByName, type SnapshotSubscription, type SubscriptionCommand,
@@ -35,14 +35,14 @@ export type PlanAction =
 export const planTier = (subscription: SnapshotSubscription): Tier | undefined =>
   subscription.planKey === "pro_monthly" ? "Pro" : subscription.planKey === "plus_monthly" ? "Plus" : undefined
 
-export const CommandBinding = Schema.Struct({
+export const CommandBindingSchema = Schema.Struct({
   owner: Schema.NonEmptyString,
   commandId: Schema.String.check(Schema.isPattern(/^cmd_[a-f0-9]{32}$/)),
   subscriptionId: Schema.NonEmptyString,
   expectedRevision: Schema.Int.check(Schema.isGreaterThan(0)),
   kind: Schema.Literals(["upgrade", "downgrade", "cancel", "undo"]),
 })
-export type CommandBinding = typeof CommandBinding.Type
+export type CommandBinding = typeof CommandBindingSchema.Type
 
 export effect function bindCommand(action: PlanAction, buyer: Buyer, key: string): CommandBinding!! {
   const subscription = action.tag === "Change" ? action.quote.subscription : action.subscription

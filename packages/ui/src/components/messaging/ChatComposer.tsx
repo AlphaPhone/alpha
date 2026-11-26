@@ -129,7 +129,7 @@ export function ChatComposer({
   return (
     <div className={cn("flex flex-col gap-2 border-t border-border bg-background px-3 py-2", className)} {...props}>
       {stagedDraft ? (
-        <div role="region" aria-label="Alpha draft review" className="flex flex-col gap-2 rounded-tile border border-dashed border-alpha bg-card p-3 text-card-foreground">
+        <div role="region" aria-label="Alpha draft review" className="flex flex-col gap-2 rounded-tile border border-dashed border-primary bg-card p-3 text-card-foreground">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
             <Mark aria-hidden className="size-4 shrink-0" />
             <span>Alpha&apos;s draft · not sent</span>
@@ -149,7 +149,7 @@ export function ChatComposer({
         </div>
       ) : null}
       {context ? (
-        <div className="flex min-h-11 items-center gap-2 rounded-lg bg-secondary pl-3 text-sm text-secondary-foreground">
+        <div className={cn("flex min-h-11 items-center gap-2 rounded-lg bg-secondary pl-3 text-sm text-secondary-foreground", !onCancelContext && "pr-3")}>
           {context.kind === "reply" ? (
             <CornerUpLeft aria-hidden className="size-4 shrink-0 text-muted-foreground" />
           ) : (
@@ -167,7 +167,7 @@ export function ChatComposer({
               aria-label={context.kind === "reply" ? "Cancel reply" : "Cancel edit"}
               disabled={disabled}
               onClick={onCancelContext}
-              className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard hover:bg-accent disabled:pointer-events-none disabled:opacity-50")}
+              className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent disabled:pointer-events-none disabled:opacity-50")}
             >
               <X aria-hidden className="size-4" />
             </button>
@@ -191,7 +191,7 @@ export function ChatComposer({
               type="button"
               disabled={disabled}
               onClick={onSwapTarget}
-              className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard hover:bg-accent disabled:pointer-events-none disabled:opacity-50")}
+              className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent disabled:pointer-events-none disabled:opacity-50")}
             >
               <span className="sr-only">{swapLabel}</span>
               {targetAvatar ? (
@@ -217,15 +217,15 @@ export function ChatComposer({
         />
         {written || sending ? (
           <Button size="icon" aria-label={sendLabel} loading={sending} disabled={disabled || !onSend} onClick={onSend}>
-            <ArrowUp />
+            <ArrowUp aria-hidden />
           </Button>
         ) : onTalk ? (
           <Button variant="secondary" size="icon" aria-label="Talk" disabled={disabled} onClick={onTalk}>
-            <Mic />
+            <Mic aria-hidden />
           </Button>
         ) : (
           <Button size="icon" aria-label={sendLabel} disabled>
-            <ArrowUp />
+            <ArrowUp aria-hidden />
           </Button>
         )}
       </div>

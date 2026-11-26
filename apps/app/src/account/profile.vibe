@@ -9,6 +9,8 @@ import { type Account, Cloud } from "../platform/cloud.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
 import { contained, started } from "../runtime/reactor.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
+import { Time } from "../runtime/time.vibe"
 
 /** The account sheet's entry in the shell's stack. */
 export const accountLayer = "account"
@@ -57,35 +59,56 @@ export interface Catalog {
   readonly buyer: Buyer | undefined
 }
 
-/** Display details from the current read, held for the Settings row and Account sheet. */
-export function profileShelf() {
-  let current: Profile = reading
-  let offers: Catalog | undefined
-  const listeners = new Set<() => void>()
+export interface ProfileShelf {
+  readonly refresh: () => void
+  readonly refreshed: Stream.Stream<void>
+  readonly snapshot: () => Profile
+  readonly catalog: () => Catalog | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly publish: (value: Profile) => void
+  readonly publishCatalog: (value: Catalog | undefined) => void
+}
+
+/** Resident reactive shelf holding the verified account profile and plan catalog for Settings and Account. */
+service AccountProfile {
+  readonly shelf: ProfileShelf
+}
+
+/** Read the runtime-scoped account profile shelf. */
+export const profileShelf = effect {
+  return (try AccountProfile).shelf
+}
+
+/** Runtime-scoped Account profile and catalog shelf, reset when the runtime closes. */
+export const accountProfile = Layer.effect(AccountProfile, effect {
+  const store = createShelf<{ readonly profile: Profile; readonly catalog: Catalog | undefined }>(
+    { profile: reading, catalog: undefined },
+    { reset: () => ({ profile: reading, catalog: undefined }) },
+  )
   const checks = new Set<() => void>()
-  return {
+  try Effect.addFinalizer(() => sync(() => {
+    checks.clear()
+    store.reset()
+  }))
+  const shelf: ProfileShelf = {
     refresh: (): void => { for (const check of checks) check() },
     refreshed: Stream.callback<void>((queue) => acquireRelease(sync(() => {
       const check = () => { Queue.offerUnsafe(queue, undefined) }
       checks.add(check)
       return check
     }), (check) => sync(() => { checks.delete(check) }))),
-    snapshot: (): Profile => current,
-    catalog: (): Catalog | undefined => offers,
-    subscribe: (listener: () => void): (() => void) => {
-      listeners.add(listener)
-      return (): void => { listeners.delete(listener) }
-    },
+    snapshot: (): Profile => store.snapshot().profile,
+    catalog: (): Catalog | undefined => store.snapshot().catalog,
+    subscribe: store.subscribe,
     publish: (value: Profile): void => {
-      current = value
-      for (const listener of listeners) listener()
+      store.update((current) => ({ ...current, profile: value }))
     },
     publishCatalog: (value: Catalog | undefined): void => {
-      offers = value
-      for (const listener of listeners) listener()
+      store.update((current) => ({ ...current, catalog: value }))
     },
   }
-}
+  return { shelf }
+})
 
 /** Opens the owner's account. The shell retires the layer on Back and Home. */
 export effect function openAccount(): void!!Layers.Machine {
@@ -169,13 +192,13 @@ export const sameBuyer = (one: Buyer, other: Buyer | undefined): boolean => othe
 
 const planUnavailable: Plan = { tag: "PlanUnavailable" }
 
-effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfile): Profile!! {
+effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfile): Profile!!Time {
   const found = try readForOwner(cloud, owner, profile, (signal) => cloud.client.snapshot({ signal }))
   if (found.tag === "Unconfirmed") return found.profile.tag === "Read" ? { ...found.profile, plan: planUnavailable } : found.profile
   const snapshot = found.answer
   const unavailable = { ...profile, plan: planUnavailable }
   if (snapshot.account.status !== "active") return unavailable
-  const now = try Clock.currentTimeMillis
+  const now = try (try Time).now()
   const view = subscriptionView(snapshot, now)
   if (view.credit.kind === "unavailable" || (view.planEffectiveUntil !== null && view.planEffectiveUntil <= now)) return unavailable
   const shown = view.plan
@@ -200,36 +223,52 @@ effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfi
   }
 }
 
-function untilExpiry(profile: Profile): Stream.Stream<Profile> {
+function untilExpiry(profile: Profile): Stream.Stream<Profile, never, Time> {
   if (profile.tag !== "Read" || profile.plan?.tag !== "PlanRead") return Stream.succeed(profile)
   const plan = profile.plan
   return Stream.unwrap(effect {
-    const now = try Clock.currentTimeMillis
+    const time = try Time
     const expiresAt = plan.expiresAt ?? Number.POSITIVE_INFINITY
     const resetsAt = plan.allowance?.resetsAt ?? Number.POSITIVE_INFINITY
     const retirement = { ...profile, plan: planUnavailable }
     const expires = Number.isFinite(expiresAt)
-      ? Stream.fromEffect(Effect.as(sleep(Math.max(0, expiresAt - now)), retirement))
+      ? Stream.fromEffect(Effect.as(time.until(expiresAt), retirement))
       : Stream.empty
     if (resetsAt >= expiresAt) return Stream.concat(Stream.succeed<Profile>(profile), expires)
     const withoutAllowance = { ...profile, plan: { ...plan, allowance: null } }
     return Stream.concat(
       Stream.succeed<Profile>(profile),
-      Stream.concat(Stream.fromEffect(Effect.as(sleep(Math.max(0, resetsAt - now)), withoutAllowance)),
-        Number.isFinite(expiresAt) ? Stream.fromEffect(Effect.as(sleep(expiresAt - resetsAt), retirement)) : Stream.empty),
+      Stream.concat(Stream.fromEffect(Effect.as(time.until(resetsAt), withoutAllowance)),
+        Number.isFinite(expiresAt) ? Stream.fromEffect(Effect.as(time.until(expiresAt), retirement)) : Stream.empty),
     )
   })
 }
 
-function visit<R>(cloud: Account, details: boolean, checkPurchase: (owner: CloudProfile) => { readonly purchase: PurchaseVisibility; readonly codesAvailable: boolean }!!R): Stream.Stream<Profile, never, R> {
+function visit<R>(
+  cloud: Account,
+  details: boolean,
+  checkPurchase: (owner: CloudProfile) => { readonly purchase: PurchaseVisibility; readonly codesAvailable: boolean }!!R,
+  cached: { last: Profile | undefined },
+): Stream.Stream<Profile, never, R | Time> {
   return Stream.unwrap(effect {
     const opened = try exit(readAccount(cloud))
-    if (Exit.isFailure(opened)) return Stream.succeed(profileFailure(Cause.squash(opened.cause)))
+    if (Exit.isFailure(opened)) {
+      const failed = profileFailure(Cause.squash(opened.cause))
+      cached.last = failed
+      return Stream.succeed<Profile>(failed)
+    }
     const owner = opened.value
     const profile = profileOf(owner)
-    if (!details) return Stream.succeed<Profile>(profile)
+    if (!details) {
+      cached.last = profile
+      return Stream.succeed<Profile>(profile)
+    }
     const current = { ...profile, ...(try checkPurchase(owner)) }
-    return Stream.concat(Stream.succeed<Profile>({ ...current, plan: { tag: "CheckingPlan" } }), Stream.flatMap(Stream.fromEffect(readPlan(cloud, owner, current)), untilExpiry))
+    const planStream = Stream.flatMap(Stream.fromEffect(readPlan(cloud, owner, current)), untilExpiry)
+    return Stream.concat(
+      Stream.succeed<Profile>({ ...current, plan: { tag: "CheckingPlan" } }),
+      Stream.tap(planStream, (value) => sync(() => { cached.last = value })),
+    )
   })
 }
 
@@ -282,6 +321,7 @@ export function profileLive<R>(publish: (value: Profile) => void, publishCatalog
     const device = try Device
     const shell = try Shell.Machine
     const settings = try Settings.Machine
+    const cached: { last: Profile | undefined } = { last: undefined }
     const pages = Stream.zipLatest(shell.changes, settings.changes)
     const active = Stream.changes(Stream.map(Stream.zipLatest(changes, pages), ([layers, [shell, settings]]) => {
       const accountOpen = Layers.top(layers).id === accountLayer
@@ -293,10 +333,22 @@ export function profileLive<R>(publish: (value: Profile) => void, publishCatalog
       : Stream.map(Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)), (showing) => showing ? place : "Away" as const))
     const watched = Stream.switchMap(visible, (place) => Stream.unwrap(effect {
       if (place !== "Account") try closeCatalog(publishCatalog)
-      return place === "Away"
-        ? Stream.succeed<Profile>(reading)
-        : Stream.switchMap(Stream.concat(Stream.succeed(undefined), refreshed), () =>
-          Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place === "Account", checkPurchase)))
+      if (place === "Away") {
+        cached.last = undefined
+        return Stream.succeed<Profile>(reading)
+      }
+      return Stream.switchMap(Stream.merge(Stream.succeed(false), Stream.map(refreshed, () => true)), (forced) => {
+        if (!forced && place === "Settings" && cached.last !== undefined && cached.last.tag !== "Reading") {
+          return Stream.succeed(cached.last)
+        }
+        if (!forced && place === "Account" && cached.last?.tag === "Read") {
+          return Stream.concat(
+            Stream.succeed<Profile>({ ...cached.last, plan: { tag: "CheckingPlan" } }),
+            visit(cloud, true, checkPurchase, cached),
+          )
+        }
+        return Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place === "Account", checkPurchase, cached))
+      })
     }))
     try Stream.runForEach(watched, (value) => sync(() => publish(value)))
   }, "reading Account")

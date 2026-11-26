@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { useLayerRef } from "../../lib/layers.tsx";
 
 type BrowserMenuRow = {
   /** What the row does, as it reads. */
@@ -30,18 +31,29 @@ export type BrowserMenuProps = {
  * 24px corners, 6px padding, 50px rows with 20px icons 14px apart.
  */
 export function BrowserMenu({ items, onClose }: BrowserMenuProps) {
+  const layerRef = useLayerRef("MenuLayer");
+  const panelRef = useCallback((node: HTMLDivElement | null) => {
+    const cleanup = layerRef(node);
+    if (node && !node.contains(node.ownerDocument.activeElement)) {
+      node.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    }
+    return cleanup;
+  }, [layerRef]);
   return (
     <>
-      <button type="button" tabIndex={-1} aria-label="Close menu" onClick={onClose} className="absolute inset-x-0 top-0 bottom-[max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))] z-20 bg-transparent" />
-      <div role="dialog" aria-label="Browser menu"
+      <button type="button" tabIndex={-1} aria-label="Close menu" onClick={onClose} className="absolute inset-x-0 top-0 bottom-[max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))] z-dialog bg-transparent" />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-label="Browser menu"
         onKeyDown={(event) => {
-          if (event.key === "Escape" && !event.defaultPrevented) {
-            event.preventDefault();
-            event.stopPropagation();
-            onClose();
-          }
+          if (event.key !== "Escape" || event.defaultPrevented) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
         }}
-        className="absolute top-12.5 right-2.5 z-20 flex max-h-[min(calc(100%-7.5rem),calc(100%-3.125rem-max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))))] in-data-[alpha-launcher]:top-24.5 in-data-[alpha-launcher]:max-h-[min(calc(100%-7.5rem),calc(100%-6.125rem-max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))))] w-59 max-w-[calc(100%-1.25rem)] flex-col overflow-y-auto rounded-panel bg-card p-1.5 shadow-panel ring-1 ring-border motion-safe:animate-drop dark:shadow-panel-dark">
+        className="absolute top-12.5 right-2.5 z-dialog flex max-h-[min(calc(100%-7.5rem),calc(100%-3.125rem-max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))))] w-59 max-w-[calc(100%-1.25rem)] flex-col overflow-y-auto rounded-panel border border-border/60 bg-popover p-1.5 text-popover-foreground shadow-panel motion-safe:animate-drop in-data-[alpha-launcher]:top-24.5 in-data-[alpha-launcher]:max-h-[min(calc(100%-7.5rem),calc(100%-6.125rem-max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))))] dark:border-border dark:shadow-panel-dark"
+      >
         {items.map((item) => item.reason !== undefined ? (
           <p key={item.name ?? item.label} role="note" aria-label={item.name ?? item.label} className="m-0 flex shrink-0 items-center gap-3.5 px-3.5 pt-1.5 pb-3 text-caption leading-normal text-muted-foreground">
             <span aria-hidden className="relative flex shrink-0 [&_svg]:size-5">
@@ -52,8 +64,8 @@ export function BrowserMenu({ items, onClose }: BrowserMenuProps) {
           </p>
         ) : (
           <button key={item.name ?? item.label} type="button" aria-label={item.name ?? item.label} disabled={item.disabled} onClick={item.onSelect}
-            className={cn(focusRing, "flex min-h-12.5 shrink-0 items-center gap-3.5 rounded-action px-3.5 text-left text-base active:bg-accent disabled:opacity-45 [&_svg:not([class*='size-'])]:size-5 [&_svg]:shrink-0")}>
-            {item.icon}{item.label}
+            className={cn(focusRing, "flex min-h-12.5 shrink-0 items-center gap-3.5 rounded-action px-3.5 text-left text-base transition-colors duration-fast ease-standard motion-reduce:transition-none active:bg-accent disabled:opacity-45 [&_svg:not([class*='size-'])]:size-5 [&_svg]:shrink-0")}>
+            <span aria-hidden className="flex shrink-0">{item.icon}</span>{item.label}
           </button>
         ))}
       </div>

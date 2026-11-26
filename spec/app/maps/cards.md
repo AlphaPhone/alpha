@@ -89,9 +89,11 @@ pure def ownerMessage(s: ChatCards): ChatCards = { ...s, newest: s.newest + 1, f
 pure def canReplaceText(s: ChatCards, question: bool): bool = s.newest > 0 and s.fromAgent
 pure def replaceText(s: ChatCards, question: bool): ChatCards = { ...s, revision: s.revision + 1, question: question }
 pure def canChangeSession(s: ChatCards, session: int): bool = session != s.session
-pure def changeSession(s: ChatCards, session: int): ChatCards = { ...s, session: session }
+pure def changeSession(s: ChatCards, session: int): ChatCards =
+  { ...s, session: session, newest: 0, fromAgent: false, question: false, revision: 0 }
 pure def canChangeConversation(s: ChatCards, conversation: int): bool = conversation != s.conversation
-pure def changeConversation(s: ChatCards, conversation: int): ChatCards = { ...s, conversation: conversation }
+pure def changeConversation(s: ChatCards, conversation: int): ChatCards =
+  { ...s, conversation: conversation, newest: 0, fromAgent: false, question: false, revision: 0 }
 pure def canSetComposer(s: ChatCards, composer: Composer): bool = composer != s.composer
 pure def setComposer(s: ChatCards, composer: Composer): ChatCards = { ...s, composer: composer }
 pure def canOpenCard(s: ChatCards, message: int, session: int, conversation: int, revision: int): bool =

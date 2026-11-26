@@ -1,34 +1,29 @@
 // @vitest-environment happy-dom
 import type { ClockSnapshot } from "@repo/launcher-records";
-import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { type Context, Effect, Layer, type Stream } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import { TestClock } from "effect/testing";
-import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import * as ClockView from "../gen/app__clock.effect.vibe";
 import * as Alarms from "../gen/app__clock__alarms.effect.vibe";
 import * as Stopwatch from "../gen/app__clock__stopwatch.effect.vibe";
 import * as Timers from "../gen/app__clock__timers.effect.vibe";
 import * as World from "../gen/app__clock__world.effect.vibe";
-import { useMachine as useToasts } from "../gen/app__notices__toasts.react.ts";
+import * as Toasts from "../gen/app__notices__toasts.effect.vibe";
+import * as Shell from "../gen/app__shell.effect.vibe";
+import { at } from "../src/areas.ts";
 import alertOverlayArea from "../src/clock/alertOverlay.tsx";
 import clockCardsArea from "../src/clock/cards.tsx";
+import { WORLD_CITIES } from "../src/clock/cities.ts";
 import clockArea from "../src/clock/index.tsx";
-import { Clock } from "../src/clock/Clock.tsx";
-import { ClockAlertOverlay } from "../src/clock/ClockAlertOverlay.tsx";
-import { ClockHomeCard } from "../src/clock/ClockHomeCard.tsx";
-import { clockRecords } from "../src/clock/records.ts";
-import { clockResident, syncClockNow } from "../src/clock/sync.vibe";
-import { stopwatch } from "../src/clock/stopwatch.vibe";
-import { clockScreenTick } from "../src/clock/ticker.vibe";
-import { toasts } from "../src/notices/toasts.vibe";
+import { createClockRecords } from "../src/clock/records.ts";
+import { activeClockRecords, activeClockTicks } from "../src/clock/shelf.vibe";
+import { syncClockNow } from "../src/clock/sync.vibe";
+import { nextAlarmFireAt } from "../src/clock/time.ts";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
-import { together, whole } from "../src/runtime/reactor.vibe";
-import { haptics } from "../src/shell/haptics.vibe";
-import { shell } from "../src/shell/shell.vibe";
-import { button, drawn, fill, press, pressOnTop, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, only, openOver, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { answering, fetched } from "./fakes/routes.ts";
 
 underAct();
@@ -37,6 +32,7 @@ interface RemoteClock {
   snapshot: ClockSnapshot;
   puts: number;
   gets: number;
+  offline: boolean;
   waitForPut: () => Promise<void>;
   notifyPut: () => void;
 }
@@ -47,6 +43,7 @@ function emptyRemote(nowMs: number): RemoteClock {
     snapshot: { version: 0, updatedAtMs: nowMs, alarms: [], timers: [], world: [], deletedAlarmIds: [], deletedTimerIds: [] },
     puts: 0,
     gets: 0,
+    offline: false,
     waitForPut() {
       return new Promise((resolve) => {
         waiters.push(resolve);
@@ -65,11 +62,19 @@ function fakeHttp(answer: ReturnType<typeof answering>) {
   }).pipe(Effect.map((response) => HttpClientResponse.fromWeb(request, response)))));
 }
 
-function makeHarness(startMs: number, remote: RemoteClock) {
+const withClock = [
+  ...only("home", "notice"),
+  at("view:Clock", () => Promise.resolve({ default: clockArea })),
+  at("overlay", () => Promise.resolve({ default: alertOverlayArea })),
+  at("home/cards", () => Promise.resolve({ default: clockCardsArea })),
+];
+
+function makePlatform(startMs: number, remote: RemoteClock) {
   const agentAnswer = answering([
     (request, url) => (request.method === "GET" && url.pathname === "/api/health" ? Response.json({ ready: true }) : undefined),
     (request, url) => {
       if (url.pathname !== "/api/alpha/clock") return undefined;
+      if (remote.offline) return new Response("offline", { status: 503 });
       if (request.method === "GET") {
         remote.gets += 1;
         return Response.json(remote.snapshot);
@@ -86,65 +91,38 @@ function makeHarness(startMs: number, remote: RemoteClock) {
     },
   ]);
   const cloudAnswer = answering([]);
-  const platform = Layer.provideMerge(
+  return Layer.provideMerge(
     pagePlatform(
       Layer.provide(agentAt("http://agent.test"), fakeHttp(agentAnswer)),
       Layer.provide(cloudAt("http://cloud.test"), fakeHttp(cloudAnswer)),
     ),
     Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(startMs)), TestClock.layer()),
   );
-  const appLayer = Layer.provideMerge(
-    whole(together(shell, toasts, haptics, clockResident, stopwatch, clockScreenTick)),
-    platform,
-  );
-  return ManagedRuntime.make(appLayer);
 }
-
-const cleanups: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanups.splice(0)) await close();
+  await closeAll();
   document.body.innerHTML = "";
-  localStorage.clear();
-  clockRecords.reset(false);
 });
 
-type HarnessRuntime = ReturnType<typeof makeHarness>;
-type HarnessServices = HarnessRuntime extends ManagedRuntime.ManagedRuntime<infer R, unknown> ? R : never;
-
-function UndoToastControl({ runtime }: { runtime: HarnessRuntime }) {
-  const { state, can, send } = useToasts(runtime);
-  if (!state?.showing || !can({ type: "tapUndo" })) return null;
-  return <button type="button" onClick={() => void send({ type: "tapUndo" })}>Undo</button>;
-}
-
 async function mountClock(startMs: number, remote: RemoteClock) {
-  const runtime = makeHarness(startMs, remote);
-  const host = document.body.appendChild(document.createElement("div"));
-  const root = createRoot(host);
-  await drawn(async () => {
-    root.render(
-      <div>
-        <ClockAlertOverlay runtime={runtime} />
-        <ClockHomeCard runtime={runtime} />
-        <Clock runtime={runtime} />
-        <UndoToastControl runtime={runtime} />
-      </div>,
-    );
-    await runtime.runPromise(Effect.void);
-  });
+  const platform = makePlatform(startMs, remote);
+  const { alpha, close } = await openOver(platform, withClock);
+  const runtime = clockArea.runtime(alpha);
+  const currentShell = await alpha.runtime.runPromise(Shell.Machine.use((m) => m.get()));
+  if (!Shell.showing(currentShell, "Clock")) {
+    await drawn(() => alpha.runtime.runPromise(Shell.Machine.use((m) => m.send({ type: "openView", view: "Clock" }))));
+  }
+  await until(alpha, alpha.runtime, Shell.Machine, (s) => Shell.showing(s, "Clock"));
+  await until(alpha, runtime, ClockView.Machine, () => true);
+
   const advance = async (ms: number) => {
-    await drawn(() => runtime.runPromise(TestClock.adjust(ms)));
+    await drawn(() => alpha.runtime.runPromise(TestClock.adjust(ms)));
   };
-  const waitFor = async <I extends HarnessServices, S>(key: Context.Key<I, { readonly changes: Stream.Stream<S> }>, ok: (state: S) => boolean) => {
-    await drawn(() => runtime.runPromise(Effect.flatMap(key, (machine) => Stream.runHead(Stream.filter(machine.changes, ok)))));
+  const waitFor = async <I, S>(key: Context.Key<I, { readonly changes: Stream.Stream<S> }>, ok: (state: S) => boolean) => {
+    await until(alpha, runtime as never, key as never, ok);
   };
-  const close = async () => {
-    await drawn(() => root.unmount());
-    await runtime.dispose();
-  };
-  cleanups.push(close);
-  return { runtime, advance, waitFor, close };
+  return { alpha, runtime, advance, waitFor, close };
 }
 
 function clickTab(name: string) {
@@ -158,7 +136,7 @@ function clickTab(name: string) {
 }
 
 describe("Clock journeys", () => {
-  it("Alarms create, edit, toggle, undoable delete, ring, snooze, dismiss, and missed recovery (spec/app/clock/alarms.md, \"Story: Manage my alarms\"; spec/app/clock/alarms.md, \"Story: Ring, snooze, dismiss, and recover alarms\")", async () => {
+  it("Alarms create, edit, toggle, undoable delete with real Toasts, ring, snooze, dismiss, and missed recovery (spec/app/clock/alarms.md, \"Story: Manage my alarms\"; spec/app/clock/alarms.md, \"Story: Ring, snooze, dismiss, and recover alarms\")", async () => {
     const startMs = new Date(2026, 10, 24, 6, 58, 0, 0).getTime();
     const remote = emptyRemote(startMs);
     const { runtime, advance, waitFor } = await mountClock(startMs, remote);
@@ -193,19 +171,36 @@ describe("Clock journeys", () => {
     await waitFor(Alarms.Machine, (s) => s.items[0]?.enabled === true);
 
     // spec/app/clock/alarms.md, "Deleting an alarm holds it for a five-second Undo window before committing removal"
-    const deleteBtn = [...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Delete alarm"));
-    if (!deleteBtn) throw new Error("missing delete alarm button");
-    await drawn(() => deleteBtn.click());
-    await waitFor(Alarms.Machine, (s) => s.items.length === 0 && s.hasHidden);
+    await press("Add alarm");
+    await fill("Alarm label", "Backup alarm");
+    await pressOnTop("Save");
+    await waitFor(Alarms.Machine, (s) => s.items.length === 2);
+
+    const deleteButtons = [...document.querySelectorAll<HTMLButtonElement>("button")].filter((b) => (b.getAttribute("aria-label") ?? "").startsWith("Delete alarm"));
+    if (deleteButtons.length < 2) throw new Error("missing delete alarm buttons");
+    await drawn(() => deleteButtons[0]?.click());
+    await waitFor(Alarms.Machine, (s) => s.items.length === 1 && s.hasHidden);
+    await waitFor(Toasts.Machine, (s) => s.showing && s.current.undo);
+
     await press("Undo");
-    await waitFor(Alarms.Machine, (s) => s.items.length === 1 && !s.hasHidden);
+    await waitFor(Alarms.Machine, (s) => s.items.length === 2 && !s.hasHidden);
     expect(document.body.textContent).toContain("Morning workout");
+
+    const secondDelete = [...document.querySelectorAll<HTMLButtonElement>("button")].filter((b) => (b.getAttribute("aria-label") ?? "").startsWith("Delete alarm"))[1];
+    await drawn(() => secondDelete?.click());
+    await waitFor(Alarms.Machine, (s) => s.items.length === 1 && s.hasHidden);
+    await advance(5_500);
+    await waitFor(Alarms.Machine, (s) => s.items.length === 1 && !s.hasHidden);
 
     // spec/app/clock/alarms.md, "An enabled alarm rings only once its scheduled or snoozed time has come"
     await advance(120_000);
     await waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Ringing");
     await waitFor(ClockView.Machine, (s) => s.ringingAlarm === 1 && s.soundOn);
-    expect(document.querySelector("[role=alertdialog][aria-label='Ringing alarm']")).not.toBeNull();
+    const alertEl = document.querySelector<HTMLElement>("[role=alertdialog][aria-label='Ringing alarm']");
+    expect(alertEl).not.toBeNull();
+    expect(alertEl?.className).toContain("z-alert");
+    expect(alertEl?.className).toContain("top-[var(--alpha-safe-top)]");
+    expect(alertEl?.className).not.toContain("z-50");
 
     // spec/app/clock/index.md, "Muting silences alert audio while keeping the alert visible"
     await press("Mute alarm sound");
@@ -261,7 +256,10 @@ describe("Clock journeys", () => {
     await advance(50_000);
     await waitFor(Timers.Machine, (s) => s.items[0]?.status === "Ringing");
     await waitFor(ClockView.Machine, (s) => s.ringingTimer === 1);
-    expect(document.querySelector("[role=alertdialog][aria-label='Ringing timer']")).not.toBeNull();
+    const timerAlert = document.querySelector<HTMLElement>("[role=alertdialog][aria-label='Ringing timer']");
+    expect(timerAlert).not.toBeNull();
+    expect(timerAlert?.className).toContain("z-alert");
+    expect(timerAlert?.className).toContain("top-[var(--alpha-safe-top)]");
 
     // spec/app/clock/timers.md, "Adding time extends a running or paused timer and restarts a ringing timer"
     await press("+1:00");
@@ -272,10 +270,10 @@ describe("Clock journeys", () => {
     await waitFor(Timers.Machine, (s) => s.items[0]?.status === "Ready");
   });
 
-  it("Stopwatch laps, fastest/slowest highlight, pause, resume, and reset (spec/app/clock/stopwatch.md, \"Story: Time laps with the stopwatch\")", async () => {
+  it("Stopwatch laps, fastest/slowest highlight, pause, resume, reset, and visibility ticker gating (spec/app/clock/stopwatch.md, \"Story: Time laps with the stopwatch\")", async () => {
     const startMs = new Date(2026, 10, 24, 10, 0, 0, 0).getTime();
     const remote = emptyRemote(startMs);
-    const { advance, waitFor } = await mountClock(startMs, remote);
+    const { runtime, advance, waitFor } = await mountClock(startMs, remote);
 
     await clickTab("Stopwatch");
     await waitFor(ClockView.Machine, (s) => s.tab === "Stopwatch");
@@ -294,6 +292,16 @@ describe("Clock journeys", () => {
     // spec/app/clock/stopwatch.md, "Best and worst lap indices are computed only when at least two laps exist"
     expect(document.body.textContent).toContain("Lap 2 · Fastest");
     expect(document.body.textContent).toContain("Lap 3 · Slowest");
+
+    const ticks = await runtime.runPromise(activeClockTicks());
+    await advance(150);
+    const tickWhileVisible = ticks.stopwatchNow.snapshot();
+    await seen(false);
+    await advance(500);
+    expect(ticks.stopwatchNow.snapshot()).toBe(tickWhileVisible);
+    await seen(true);
+    await advance(150);
+    expect(ticks.stopwatchNow.snapshot()).toBeGreaterThan(tickWhileVisible);
 
     await press("Pause");
     await waitFor(Stopwatch.Machine, (s) => s.status === "Paused");
@@ -334,9 +342,12 @@ describe("Clock journeys", () => {
     await press("Remove Tokyo");
     await waitFor(World.Machine, (s) => s.cities.length === 1);
     expect(document.body.textContent).not.toContain("Tokyo");
+
+    const hanoi = WORLD_CITIES.find((c) => c.city === "Hanoi");
+    expect(hanoi?.timeZone).toBe("Asia/Ho_Chi_Minh");
   });
 
-  it("Bidirectional agent sync and restart persistence (spec/app/clock/alarms.md, \"Syncing from the resident agent admits only valid, unique, bounded alarm lists\"; spec/app/clock/timers.md, \"Reopening after a restart finishes elapsed running timers and updates live remaining times\")", async () => {
+  it("Bidirectional agent sync, zero spurious PUTs on pull, deletedTimerIds tombstones, offline preservation, and restart persistence (spec/app/clock/alarms.md, \"Syncing from the resident agent admits only valid, unique, bounded alarm lists\"; spec/app/clock/timers.md, \"Reopening after a restart finishes elapsed running timers and updates live remaining times\")", async () => {
     const startMs = new Date(2026, 10, 24, 8, 0, 0, 0).getTime();
     const remote = emptyRemote(startMs);
     const first = await mountClock(startMs, remote);
@@ -351,6 +362,7 @@ describe("Clock journeys", () => {
     expect(remote.puts).toBeGreaterThanOrEqual(1);
     expect(remote.snapshot.alarms.some((a) => a.label === "Local alarm")).toBe(true);
 
+    const putsBeforePull = remote.puts;
     remote.snapshot = {
       version: remote.snapshot.version + 1,
       updatedAtMs: startMs + 5_000,
@@ -398,6 +410,76 @@ describe("Clock journeys", () => {
     await first.waitFor(Timers.Machine, (s) => s.items.length === 1);
     await first.waitFor(World.Machine, (s) => s.cities.length === 1);
     expect(document.body.textContent).toContain("Agent standup");
+    expect(remote.puts).toBe(putsBeforePull);
+
+    remote.offline = true;
+    await clickTab("Timers");
+    await first.waitFor(ClockView.Machine, (s) => s.tab === "Timers");
+    await press("Delete Agent pasta");
+    await first.waitFor(Timers.Machine, (s) => s.items.length === 0);
+
+    await clickTab("Alarms");
+    await first.waitFor(ClockView.Machine, (s) => s.tab === "Alarms");
+    await press("Add alarm");
+    await fill("Alarm label", "Offline alarm");
+    await pressOnTop("Save");
+    await first.waitFor(Alarms.Machine, (s) => s.items.length === 3);
+
+    remote.offline = false;
+    await drawn(() => first.runtime.runPromise(syncClockNow()));
+    await first.waitFor(Alarms.Machine, (s) => s.items.length === 3);
+    await first.waitFor(Timers.Machine, (s) => s.items.length === 0);
+    expect(remote.snapshot.alarms.some((a) => a.label === "Offline alarm")).toBe(true);
+    expect(remote.snapshot.timers.length).toBe(0);
+    expect(remote.snapshot.deletedTimerIds).toContain("timer-5");
+
+    remote.snapshot = {
+      ...remote.snapshot,
+      version: remote.snapshot.version + 1,
+      timers: [
+        {
+          id: "timer-5",
+          label: "Agent pasta",
+          durationMs: 120_000,
+          remainingMs: 120_000,
+          status: "ready",
+          startedAtMs: null,
+          endAtMs: null,
+          ringStartedAtMs: null,
+          revision: 1,
+          updatedAtMs: startMs + 5_000,
+        },
+        {
+          id: "timer-7",
+          label: "Bad timer",
+          durationMs: 0,
+          remainingMs: 0,
+          status: "ready",
+          startedAtMs: null,
+          endAtMs: null,
+          ringStartedAtMs: null,
+          revision: 1,
+          updatedAtMs: startMs + 6_000,
+        },
+        {
+          id: "timer-8",
+          label: "Restart pasta",
+          durationMs: 120_000,
+          remainingMs: 120_000,
+          status: "running",
+          startedAtMs: startMs,
+          endAtMs: startMs + 120_000,
+          ringStartedAtMs: null,
+          revision: 1,
+          updatedAtMs: startMs + 7_000,
+        },
+      ],
+      deletedTimerIds: ["timer-5"],
+    };
+    await drawn(() => first.runtime.runPromise(syncClockNow()));
+    await first.waitFor(Timers.Machine, (s) => s.items.length === 1);
+    const recordsAfterSync = await first.runtime.runPromise(activeClockRecords());
+    expect(recordsAfterSync.snapshot().timers.size).toBe(1);
 
     await first.close();
     const second = await mountClock(startMs + 150_000, remote);
@@ -406,16 +488,93 @@ describe("Clock journeys", () => {
     expect(document.querySelector("[role=alertdialog][aria-label='Ringing timer']")).not.toBeNull();
   });
 
-  it("Settles timed-out repeating alarms across restart without double-firing and auto-silences after clock jumps (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings without double-firing\"; spec/app/clock/alarms.md, \"A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed\")", async () => {
-    const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
+  async function mountWithDailyAlarm(startMs: number, label: string) {
     const remote = emptyRemote(startMs);
     const first = await mountClock(startMs, remote);
-
     await press("Add alarm");
-    await fill("Alarm label", "Daily standup");
+    await fill("Alarm label", label);
     await pressOnTop("Every day");
     await pressOnTop("Save");
     await first.waitFor(Alarms.Machine, (s) => s.items.length === 1);
+    return { remote, first };
+  }
+
+  it("Reopen settles timed-out repeating alarms into the future and missed Idle alarms without re-ringing (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing\")", async () => {
+    const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
+    const { first } = await mountWithDailyAlarm(startMs, "Daily ring");
+
+    await press("Add alarm");
+    for (let step = 0; step < 5; step++) await pressOnTop("Increase minute");
+    await fill("Alarm label", "One-off missed");
+    await pressOnTop("Save");
+    await first.waitFor(Alarms.Machine, (s) => s.items.length === 2);
+
+    await first.advance(60_000);
+    await first.waitFor(Alarms.Machine, (s) => s.items.some((a) => a.id === 1 && a.phase === "Ringing"));
+    await first.close();
+
+    const reopenMs = startMs + 2 * 3_600_000;
+    const offlineRemote = emptyRemote(reopenMs);
+    offlineRemote.offline = true;
+    const second = await mountClock(reopenMs, offlineRemote);
+    await second.waitFor(Alarms.Machine, (s) => {
+      const repeating = s.items.find((a) => a.id === 1);
+      const oneOff = s.items.find((a) => a.id === 2);
+      return Boolean(
+        repeating
+        && repeating.phase === "Idle"
+        && repeating.enabled
+        && repeating.missed
+        && repeating.fireAt > reopenMs
+        && oneOff
+        && oneOff.phase === "Idle"
+        && !oneOff.enabled
+        && oneOff.missed
+        && oneOff.fireAt === 0,
+      );
+    });
+    expect(document.querySelector("[role=alertdialog][aria-label='Ringing alarm']")).toBeNull();
+  });
+
+  it("Backward clock steps do not lock out Stopwatch or Timer pause, DST fire times stay strictly future, and Schema rejects corrupt metadata (spec/app/clock/stopwatch.md, \"Start, pause, resume, lap, reset, and reopen keep elapsed time and laps consistent\"; spec/app/clock/timers.md, \"Starting, pausing, and resuming preserve remaining time accurately\")", () => {
+    const runningSw = Stopwatch.start(Stopwatch.initial, 5000);
+    expect(Stopwatch.canLap(runningSw, 4000)).toBe(true);
+    const lapped = Stopwatch.lap(runningSw, 4000);
+    expect(lapped.laps[0]?.totalMs).toBe(0);
+    expect(Stopwatch.canPause(lapped, 3000)).toBe(true);
+    const pausedSw = Stopwatch.pause(lapped, 3000);
+    expect(pausedSw.status).toBe("Paused");
+    expect(pausedSw.accumulatedMs).toBe(0);
+
+    const runningTimer = Timers.create(Timers.initial, 60_000, true, 5000);
+    expect(Timers.canPause(runningTimer, 1, 4000)).toBe(true);
+    const pausedTimer = Timers.pause(runningTimer, 1, 4000);
+    expect(pausedTimer.items[0]?.status).toBe("Paused");
+    expect(pausedTimer.items[0]?.remainingMs).toBe(60_000);
+
+    const springMorning = new Date(2026, 2, 8, 1, 30, 0, 0).getTime();
+    const springFire = nextAlarmFireAt(2, 30, 0b1111111, springMorning);
+    expect(springFire).toBeGreaterThan(springMorning);
+    const afterSpringFire = nextAlarmFireAt(2, 30, 0b1111111, springFire + 5000);
+    expect(afterSpringFire).toBeGreaterThan(springFire + 12 * 3_600_000);
+
+    const fallNight = new Date(2026, 10, 1, 0, 30, 0, 0).getTime();
+    const fallFire = nextAlarmFireAt(1, 30, 0b1111111, fallNight);
+    expect(fallFire).toBeGreaterThan(fallNight);
+    const afterFallFire = nextAlarmFireAt(1, 30, 0b1111111, fallFire + 60_000);
+    expect(afterFallFire).toBeGreaterThan(fallFire + 12 * 3_600_000);
+
+    const store = createClockRecords();
+    store.setAlarm(1, { label: "Valid", sound: "chime", remoteId: "alarm-1", updatedAtMs: 100 });
+    store.restore("{not json");
+    expect(store.alarm(1).label).toBe("Valid");
+    store.restore(JSON.stringify({ alarms: [["bad", {}]], version: "oops" }));
+    expect(store.alarm(1).label).toBe("Valid");
+  });
+
+  it("Settles timed-out repeating alarms across restart without double-firing and auto-silences after clock jumps (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing\"; spec/app/clock/alarms.md, \"A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed\")", async () => {
+    const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
+    const { remote, first } = await mountWithDailyAlarm(startMs, "Daily standup");
     await first.advance(60_000);
     await first.waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Ringing");
     await first.close();

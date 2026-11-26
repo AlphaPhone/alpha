@@ -45,10 +45,10 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
   // spec/app/photos/index.md, "Story: Browse the library": the Library is headed by day as v121 headed it, counted back from Alpha's time
   expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section h2")].map((heading) => heading.textContent)).toEqual(["Yesterday"]);
-  // spec/app/photos/index.md, "each heading with the number of items under it beside it", as v119's live camera adapter drew it
+  // spec/app/photos/index.md, "each heading with the number of items under it beside it": as v119's live camera adapter drew it
   expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section header")].map((header) => [header.querySelector("h2")?.textContent, header.querySelector("span")?.textContent]))
     .toEqual([["Yesterday", "3"]]);
-  // v119's live camera adapter drew images.svg on the Library tab and folder.svg on Albums
+  // spec/app/photos/index.md, "Story: Browse the library": v119's live camera adapter drew images.svg on the Library tab and folder.svg on Albums
   expect([...document.querySelectorAll('[aria-label="Photos sections"] button')].map((tab) => [tab.textContent, tab.querySelector("svg")?.classList.contains("lucide-images"), tab.querySelector("svg")?.classList.contains("lucide-folder")]))
     .toEqual([["Library", true, false], ["Albums", false, true]]);
   const localNoon = new Date(2026, 10, 24, 12).getTime();
@@ -186,6 +186,42 @@ it("Resume an already-sent photo edit from an older viewer record (spec/app/phot
   expect(localStorage.getItem(kept + ".epoch")).toBe("earlier-viewer");
   expect(localStorage.getItem("alpha/photos/edit/4")).toBe(operationId);
   expect(localStorage.getItem(kept + ".unreadable")).toBeNull();
+});
+
+it("Keep Viewer open on Limited-to-Limited library updates and offer both Limited permission actions (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+  const world = { ...scene(), phone: true };
+  const { alpha } = await open(world, only("home", "view:Photos", "notice"));
+  await press("Photos");
+  const runtime = photosArea.runtime(alpha);
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Denied");
+  await press("Allow access");
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.asked);
+  world.photos.access = { scope: "selected", images: "selected", videos: "denied" };
+  await drawn(() => {
+    world.photos.changed();
+  });
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Limited");
+  expect([Boolean(button("Choose items or allow all")), Boolean(button("Allow all photos"))]).toEqual([true, true]);
+
+  await press("Park.jpg");
+  await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.open > 0);
+  const opened = runtime.runSync(Viewer.use((viewer) => viewer.get())).open;
+  await drawn(() => {
+    world.photos.changed();
+  });
+  await until(alpha, runtime, Library, (state) => state.access.grant === "Limited" && state.library.status === "Loaded");
+  expect(runtime.runSync(Viewer.use((viewer) => viewer.get())).open).toBe(opened);
+
+  const viewport = document.querySelector<HTMLElement>("[role=group][tabindex='0']");
+  expect(viewport).not.toBeNull();
+  if (viewport) {
+    viewport.setPointerCapture = () => { throw new DOMException("Not active", "InvalidStateError"); };
+    await drawn(() => {
+      viewport.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, pointerType: "touch", clientX: 50, clientY: 50 }));
+      viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, pointerType: "touch", clientX: 50, clientY: 50 }));
+    });
+  }
+  expect(runtime.runSync(Viewer.use((viewer) => viewer.get())).open).toBe(opened);
 });
 
 it("Stops playing when a video ends even if currentTime rounds slightly short of duration (spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {

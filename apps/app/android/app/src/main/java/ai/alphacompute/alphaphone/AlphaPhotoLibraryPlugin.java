@@ -46,14 +46,27 @@ public class AlphaPhotoLibraryPlugin extends Plugin {
   private final ExecutorService worker = Executors.newSingleThreadExecutor();
   private PermittedMediaCatalog catalog;
   private AlphaMediaReview review;
+  private CatalogObserver catalogObserver;
   private volatile boolean destroyed, watching;
   /** The scope last answered or announced; resume announces only a different one. */
   private volatile String lastScope = "";
   /** Library generations when the last page was read, or null before one. */
   private volatile String lastLibrary;
 
+  private static final class CatalogObserver implements Runnable {
+    private volatile AlphaPhotoLibraryPlugin owner;
+    CatalogObserver(AlphaPhotoLibraryPlugin owner) { this.owner = owner; }
+    void detach() { owner = null; }
+    @Override public void run() {
+      AlphaPhotoLibraryPlugin plugin = owner;
+      if (plugin != null && plugin.watching && !plugin.destroyed)
+        plugin.notifyListeners("libraryChanged", new JSObject());
+    }
+  }
+
   private AlphaPhotosPlugin photos() {
-    PluginHandle handle = getBridge().getPlugin(PHOTOS_PLUGIN);
+    com.getcapacitor.Bridge bridge = getBridge();
+    PluginHandle handle = bridge == null ? null : bridge.getPlugin(PHOTOS_PLUGIN);
     if (handle == null || !(handle.getInstance() instanceof AlphaPhotosPlugin))
       throw new IllegalStateException(PHOTOS_PLUGIN + " must be a registered AlphaPhotosPlugin");
     return (AlphaPhotosPlugin) handle.getInstance();
@@ -72,15 +85,15 @@ public class AlphaPhotoLibraryPlugin extends Plugin {
 
   @Override
   public void load() {
+    super.load();
     requireLibraryAliases();
     AlphaPhotosPlugin photos = photos();
     catalog = photos.permittedCatalog();
     review = photos.permittedReview();
     if (catalog == null || review == null)
       throw new IllegalStateException(PHOTOS_PLUGIN + " must load before the device library");
-    catalog.addListener(() -> {
-      if (watching && !destroyed) notifyListeners("libraryChanged", new JSObject());
-    });
+    catalogObserver = new CatalogObserver(this);
+    catalog.addListener(catalogObserver);
   }
 
   private interface ReadAction {
@@ -92,20 +105,22 @@ public class AlphaPhotoLibraryPlugin extends Plugin {
       call.reject("Device library closed");
       return;
     }
+    long ticket;
     try {
-      long ticket = catalog.readTicket();
-      worker.execute(() -> {
-        try {
-          catalog.requireReadTicket(ticket);
-          if (destroyed) throw new IllegalStateException();
-          action.run(ticket);
-        } catch (Exception changed) {
-          call.reject("Device library access changed");
-        }
-      });
+      ticket = catalog.readTicket();
     } catch (RuntimeException stopped) {
       call.reject("Device library closed");
+      return;
     }
+    PluginWorkers.submit(worker, () -> {
+      try {
+        catalog.requireReadTicket(ticket);
+        if (destroyed) throw new IllegalStateException();
+        action.run(ticket);
+      } catch (Exception changed) {
+        call.reject("Device library access changed");
+      }
+    }, () -> call.reject("Device library closed"));
   }
 
   private boolean locked() {
@@ -158,7 +173,7 @@ public class AlphaPhotoLibraryPlugin extends Plugin {
 
   @PluginMethod
   public void requestAccess(PluginCall call) {
-    if (destroyed || getActivity() == null || !getActivity().hasWindowFocus()) {
+    if (destroyed || !AlphaDevicePlugin.shareForeground(getActivity())) {
       call.reject("Return to Photos to choose access");
       return;
     }
@@ -309,30 +324,43 @@ public class AlphaPhotoLibraryPlugin extends Plugin {
   protected void handleOnPause() {
     watching = false;
     if (catalog != null) catalog.watch("library", false);
+    super.handleOnPause();
   }
 
   @Override
   protected void handleOnResume() {
-    new Handler(Looper.getMainLooper()).post(() -> {
+    super.handleOnResume();
+    PluginWorkers.submit(worker, () -> {
       if (destroyed) return;
       String before = lastScope, library = lastLibrary;
       JSObject scope = scopeResult();
       if (!scope.toString().equals(before)) {
-        notifyListeners("scopeChanged", scope);
+        new Handler(Looper.getMainLooper()).post(() -> {
+          if (!destroyed) notifyListeners("scopeChanged", scope);
+        });
         return;
       }
       if (library == null) return;
-      lastLibrary = generations();
-      if (library.isEmpty() || !library.equals(lastLibrary))
-        notifyListeners("libraryChanged", new JSObject());
-    });
+      String current = generations();
+      lastLibrary = current;
+      if (library.isEmpty() || !library.equals(current)) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+          if (!destroyed) notifyListeners("libraryChanged", new JSObject());
+        });
+      }
+    }, () -> {});
   }
 
   @Override
   protected void handleOnDestroy() {
     destroyed = true;
     watching = false;
+    if (catalogObserver != null) {
+      catalogObserver.detach();
+      catalogObserver = null;
+    }
     if (catalog != null) catalog.watch("library", false);
     worker.shutdown();
+    super.handleOnDestroy();
   }
 }

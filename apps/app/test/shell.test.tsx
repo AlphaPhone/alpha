@@ -189,11 +189,10 @@ describe("the shell", () => {
   it("Move from one app to another with nothing of Home between them, and back at once (spec/app/shell/index.md, \"The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits\")", async () => {
     const { alpha } = await open({ ...scene(), phone: true });
     const home = () => document.querySelector("[data-alpha-home-layer]");
-    let layer: Element | null | undefined;
-    const shown = () => ({ homeHidden: home()?.classList.contains("invisible"), sameLayer: home()?.nextElementSibling === layer, headings: document.querySelectorAll("h1").length });
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
-    layer = home()?.nextElementSibling;
+    const layer = home()?.nextElementSibling;
+    const shown = () => ({ homeHidden: home()?.classList.contains("invisible"), sameLayer: home()?.nextElementSibling === layer, headings: document.querySelectorAll("h1").length });
     expect([shown(), layer?.classList.contains("motion-safe:animate-rise")]).toEqual([{ homeHidden: false, sameLayer: true, headings: 1 }, true]);
     await drawn(() => alpha.runtime.runPromise(Shell.use((s) => s.send({ type: "openView", view: "Settings" }))));
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");

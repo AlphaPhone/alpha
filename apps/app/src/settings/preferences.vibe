@@ -50,6 +50,8 @@ effect function keptAppearance(): (Appearance | undefined)!!KeyValueStore.KeyVal
   const own = store.get(keys.appearance) catch () => undefined
   if (own !== undefined) return Schema.decodeUnknownOption(json(Appearance))(own) |> Option.getOrUndefined(%)
   const previous = store.get(keys.previousAppearance) catch () => undefined
+  if (previous === undefined) return { theme: "Light", legible: false }
+  if (previous !== "dark" && previous !== "system" && previous !== "light") return undefined
   return { theme: previous === "dark" ? "Dark" : previous === "system" ? "System" : "Light", legible: false }
 }
 
@@ -89,13 +91,18 @@ effect function readChoices(): (Choices | undefined)!KeyValueStore.KeyValueStore
 }
 
 /**
- * One turn at the device preferences and the host's consent at a time: a save, its host call and any putting back
- * finish before a read starts or the host is told another consent, as v121's lock kept them.
+ * One turn at the device preferences and the host's consent at a time, scoped per runtime so tests and restarts
+ * never share lock state.
  */
-const turn = Semaphore.makeUnsafe(1)
+service PrefsTurn {
+  readonly lock: Semaphore.Semaphore
+}
 
-effect function documentRead(docRead: number): Event!!KeyValueStore.KeyValueStore {
-  return try turn.withPermits(1)(effect {
+const prefsTurn = Layer.sync(PrefsTurn, () => ({ lock: Semaphore.makeUnsafe(1) }))
+
+effect function documentRead(docRead: number): Event!!(KeyValueStore.KeyValueStore | PrefsTurn) {
+  const { lock } = try PrefsTurn
+  return try lock.withPermits(1)(effect {
     const choices = readChoices() catch () => undefined
     const read: Event = choices === undefined
       ? { type: "documentRead", docRead, readable: false, askFirst: true, images: false, shares: [] }
@@ -105,8 +112,9 @@ effect function documentRead(docRead: number): Event!!KeyValueStore.KeyValueStor
 }
 
 // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
-effect function saved(save: number, choices: Choices, consent: AgentGoogle): Event!!(KeyValueStore.KeyValueStore | Device) {
-  return try Effect.uninterruptible(turn.withPermits(1)(effect {
+effect function saved(save: number, choices: Choices, consent: AgentGoogle): Event!!(KeyValueStore.KeyValueStore | Device | PrefsTurn) {
+  const { lock } = try PrefsTurn
+  return try Effect.uninterruptible(lock.withPermits(1)(effect {
     const store = try KeyValueStore.KeyValueStore
     const before = store.get(keys.choices) catch () => undefined
     const ok = effect { try store.set(keys.choices, JSON.stringify(choices)); return true } catch () => false
@@ -118,8 +126,9 @@ effect function saved(save: number, choices: Choices, consent: AgentGoogle): Eve
 }
 
 // spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
-effect function recovered(recovery: number): Event!!KeyValueStore.KeyValueStore {
-  return try turn.withPermits(1)(effect {
+effect function recovered(recovery: number): Event!!(KeyValueStore.KeyValueStore | PrefsTurn) {
+  const { lock } = try PrefsTurn
+  return try lock.withPermits(1)(effect {
     const store = try KeyValueStore.KeyValueStore
     const ok = effect { try store.set(keys.choices, JSON.stringify(fresh)); return true } catch () => false
     return { type: "recovered", recovery, ok, at: untimed } satisfies Event
@@ -143,15 +152,15 @@ const openDisplay = effect {
   try ignore((try Pages.Machine).send({ type: "openSection", page: "Display" }))
 }
 
-function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Device | Shell | Pages.Machine, [by: Sender]> {
+function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Device | Shell | Pages.Machine | PrefsTurn, [by: Sender]> {
   return match (fx) {
     when { tag: "KeepTheme", let keep, let chosen, let chosenLegible }: answer("keep", keepTheme(keep, chosen, chosenLegible), { type: "themeKept", keep, ok: false }, "Phone");
     when { tag: "OpenDisplay" }: run("display", openDisplay, "Phone");
     when { tag: "SetTextSize", let sizeAsk, let percent }: answer("size", sizeApplied(sizeAsk, percent), { type: "sizeApplied", sizeAsk, result: "NotConfirmed", percent, at: untimed }, "Phone");
-    when { tag: "ReadTextSize", let sizeRead }: answer("size", sizeAsked(sizeRead), { type: "giveUpOnSize", now: untimed, at: untimed }, "Phone");
-    when { tag: "ReadDocument", let docRead }: answer("document", documentRead(docRead), { type: "giveUpOnDocument", now: untimed }, "Phone");
+    when { tag: "ReadTextSize", let sizeRead }: answer("size", sizeAsked(sizeRead), { type: "sizeReported", sizeAsk: sizeRead, percent: 0 }, "Phone");
+    when { tag: "ReadDocument", let docRead }: answer("document", documentRead(docRead), { type: "documentRead", docRead, readable: false, askFirst: true, images: false, shares: [] }, "Phone");
     when { tag: "SaveDocument", let save, let saveAskFirst, let saveImages, let saveShares, let saveConsent }: answer("save", saved(save, { askFirst: saveAskFirst, images: saveImages, shares: saveShares }, saveConsent), { type: "documentSaved", save, ok: false }, "Phone");
-    when { tag: "RecoverDocument", let recovery }: answer("recover", recovered(recovery), { type: "giveUpOnRecovery", now: untimed, at: untimed }, "Phone");
+    when { tag: "RecoverDocument", let recovery }: answer("recover", recovered(recovery), { type: "recovered", recovery, ok: false, at: untimed }, "Phone");
   }
 }
 
@@ -220,11 +229,12 @@ const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
  */
 const consented = applying(Prefs.Machine, (state) => ({ read: state.document.read, consent: state.agentGoogle }), effect (fact) => {
   if (fact.read.status !== "Loaded" && fact.read.status !== "Failed") return
-  try turn.withPermits(1)(effect {
+  const { lock } = try PrefsTurn
+  try lock.withPermits(1)(effect {
     const said = (try (try Prefs.Machine).get()).agentGoogle
     if (said.tag === "Consents") try ignore((try Device).agentConsent({ gmailChanges: said.gmailChanges, calendarEdits: said.calendarEdits }))
   })
 })
 
 /** The owner's preferences, from launch: the look and the text the whole page follows, what other areas ask before they act, and what the agent is launched allowed to change. */
-export const preferences = together(machine, opened, resumed, phoneLook, looked, bars, legible, large, consented)
+export const preferences = Layer.provideMerge(together(machine, opened, resumed, phoneLook, looked, bars, legible, large, consented), prefsTurn)

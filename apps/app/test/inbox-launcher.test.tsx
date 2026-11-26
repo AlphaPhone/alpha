@@ -33,6 +33,13 @@ async function openInbox(world: Scene) {
 const folders = () => Boolean(document.querySelector("[role=group][aria-label=Folder]"));
 const searchField = () => document.querySelector("form[role=search]");
 
+async function runSearch(alpha: Awaited<ReturnType<typeof openInbox>>["alpha"], query: string) {
+  await press("Search email");
+  await fill("Search mail", query);
+  await drawn(() => searchField()?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === query);
+}
+
 it("On the launcher the open search draws no Back and no folders, and the phone's Back closes it, empty or typed, before leaving Inbox (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\")", async () => {
   const world = { ...scene(), phone: true };
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
@@ -49,10 +56,7 @@ it("On the launcher the open search draws no Back and no folders, and the phone'
   await hardware("back");
   await until(alpha, list, List, (state) => !state.searching);
   expect([searchField(), Boolean(button("Search email"))]).toEqual([null, true]);
-  await press("Search email");
-  await fill("Search mail", "tacos");
-  await drawn(() => searchField()?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-  await until(alpha, list, List, (state) => state.selected.query === "tacos");
+  await runSearch(alpha, "tacos");
   await hardware("back");
   await until(alpha, list, List, (state) => state.selected.query === "" && !state.searching);
   expect([searchField(), Boolean(button("Search email"))]).toEqual([null, true]);
@@ -64,10 +68,7 @@ it("Off the launcher the open search keeps its Back to the folder, and emptying 
   expect([Boolean(searchField()), Boolean(button("Back to inbox")), folders()]).toEqual([true, true, false]);
   await press("Back to inbox");
   expect([searchField(), Boolean(button("Search email"))]).toEqual([null, true]);
-  await press("Search email");
-  await fill("Search mail", "tacos");
-  await drawn(() => searchField()?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-  await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === "tacos");
+  await runSearch(alpha, "tacos");
   await press("Clear search");
   await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === "" && state.searching);
   expect(Boolean(searchField())).toBe(true);

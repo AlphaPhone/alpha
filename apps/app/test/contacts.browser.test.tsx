@@ -19,7 +19,7 @@ it("Approve a shown text by touch (spec/app/contacts/agent.md, \"Story: Approve 
   const send = page.getByRole("button", { name: "Send this text" });
   await expect.element(send).toBeVisible();
   expect(world.telephony.sent).toEqual([]);
-  // The startup cover lifts at the latest 2.5 s after start; a tap reaches Send only once it has.
+  // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call": the startup cover lifts at the latest 2.5 s after start; a tap reaches Send only once it has.
   const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
   for (let waited = 0; waited < 2500 && cover(); waited += 500) await later(alpha, 500);
   expect(cover()).toBeNull();

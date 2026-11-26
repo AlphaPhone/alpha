@@ -41,9 +41,11 @@ function AccessView({ runtime, review }: { runtime: AccessRuntime; review: boole
       access: key,
       word: word(key, step, grantOf(state, key)),
       busy: current === key && busy(state),
-      action: current === undefined ? "Settings" : current === key && mayAct && (review || step !== "Ready")
-        ? state.stalled ? "Check" : step === "Unavailable" ? "Try again" : step === "CanRequest" ? "Allow" : "Settings"
-        : undefined,
+      action: current === undefined
+        ? (step === "Checking" ? undefined : "Settings")
+        : current === key && mayAct && (review || step !== "Ready")
+          ? state.stalled ? "Check" : step === "Unavailable" ? "Try again" : step === "CanRequest" ? "Allow" : "Settings"
+          : undefined,
     };
   });
   return (

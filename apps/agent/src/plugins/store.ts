@@ -102,6 +102,15 @@ export function advanceDueDate(dueDate: string, recurrence: ReminderRecurrence):
   }
 }
 
+/** Error raised when a bounded Alpha store collection is at capacity. */
+export class AlphaStoreCapacityError extends Error {
+  readonly code = "capacity_exceeded";
+  constructor(message: string) {
+    super(message);
+    this.name = "AlphaStoreCapacityError";
+  }
+}
+
 /** Convert a civil date and optional minute-of-day into a UTC epoch millisecond timestamp in `timeZone`. */
 export function civilToEpochMs(dueDate: string, dueMinute: number | null, timeZone: string): number | null {
   const parsed = parseCivilDate(dueDate);
@@ -296,7 +305,7 @@ function parseWorldCityRecord(value: unknown, order: number): WorldCityRecord | 
   if (!isPlainRecord(value)) return undefined;
   if (typeof value.id !== "string" || value.id.trim() === "") return undefined;
   if (typeof value.city !== "string" || value.city.trim() === "") return undefined;
-  if (typeof value.timeZone !== "string" || value.timeZone.trim() === "") return undefined;
+  if (typeof value.timeZone !== "string" || value.timeZone.trim() === "" || !isValidTimeZone(value.timeZone.trim())) return undefined;
   return {
     id: value.id.trim(),
     city: value.city.trim(),
@@ -380,13 +389,71 @@ function emptyClock(nowMs: number): ClockSnapshot {
 }
 
 function emptyReminders(nowMs: number): RemindersSnapshot {
-  return { version: 0, updatedAtMs: nowMs, lists: [defaultList(nowMs)], items: [] };
+  return { version: 0, updatedAtMs: nowMs, lists: [defaultList(nowMs)], items: [], deletedAgentTaskIds: [] };
 }
 
 function appendTombstone(existing: readonly string[], id: string): string[] {
   const deduped = existing.filter((entry) => entry !== id);
   deduped.push(id);
   return deduped.slice(-MAX_TOMBSTONES);
+}
+
+function hasInvalidClockEntryField(entry: Record<string, unknown>, numericFields: readonly string[]): boolean {
+  for (const field of numericFields) {
+    const value = entry[field];
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) return true;
+  }
+  return false;
+}
+
+/** Validate and normalize a `PUT /api/alpha/clock` body; returns undefined when malformed. */
+export function parseClockSyncPayload(raw: unknown): Partial<ClockSnapshot> | undefined {
+  if (!isPlainRecord(raw)) return undefined;
+  let version: number | undefined;
+  if (raw.version !== undefined) {
+    if (typeof raw.version !== "number" || !Number.isFinite(raw.version)) return undefined;
+    version = Math.trunc(raw.version);
+  }
+  let alarms: ClockAlarmRecord[] | undefined;
+  if (raw.alarms !== undefined) {
+    if (!Array.isArray(raw.alarms)) return undefined;
+    alarms = [];
+    for (const entry of raw.alarms) {
+      if (isPlainRecord(entry) && hasInvalidClockEntryField(entry, ["hour", "minute", "revision", "updatedAtMs"])) return undefined;
+      const parsed = parseAlarmRecord(entry);
+      if (parsed !== undefined) alarms.push(parsed);
+    }
+  }
+  let timers: ClockTimerRecord[] | undefined;
+  if (raw.timers !== undefined) {
+    if (!Array.isArray(raw.timers)) return undefined;
+    timers = [];
+    for (const entry of raw.timers) {
+      if (isPlainRecord(entry) && hasInvalidClockEntryField(entry, ["durationMs", "revision", "updatedAtMs"])) return undefined;
+      const parsed = parseTimerRecord(entry);
+      if (parsed !== undefined) timers.push(parsed);
+    }
+  }
+  let world: WorldCityRecord[] | undefined;
+  if (raw.world !== undefined) {
+    if (!Array.isArray(raw.world)) return undefined;
+    world = [];
+    for (const entry of raw.world) {
+      const parsed = parseWorldCityRecord(entry, world.length);
+      if (parsed !== undefined) world.push(parsed);
+    }
+  }
+  let deletedAlarmIds: string[] | undefined;
+  if (raw.deletedAlarmIds !== undefined) {
+    if (!Array.isArray(raw.deletedAlarmIds) || raw.deletedAlarmIds.some((id) => typeof id !== "string" || id.trim() === "")) return undefined;
+    deletedAlarmIds = raw.deletedAlarmIds as string[];
+  }
+  let deletedTimerIds: string[] | undefined;
+  if (raw.deletedTimerIds !== undefined) {
+    if (!Array.isArray(raw.deletedTimerIds) || raw.deletedTimerIds.some((id) => typeof id !== "string" || id.trim() === "")) return undefined;
+    deletedTimerIds = raw.deletedTimerIds as string[];
+  }
+  return { version, alarms, timers, world, deletedAlarmIds, deletedTimerIds };
 }
 
 /** Persistent store for Alpha Clock and Reminders inside the resident agent's state directory. */
@@ -408,7 +475,11 @@ export class AlphaAppsStore {
     this.clock = loadedClock !== undefined && Array.isArray(loadedClock.alarms) ? loadedClock : emptyClock(nowMs);
     const loadedReminders = this.remindersFile === undefined ? undefined : readJsonFile<RemindersSnapshot>(this.remindersFile);
     this.reminders = loadedReminders !== undefined && Array.isArray(loadedReminders.items)
-      ? { ...loadedReminders, lists: ensureDefaultList(loadedReminders.lists ?? [], nowMs) }
+      ? {
+        ...loadedReminders,
+        lists: ensureDefaultList(loadedReminders.lists ?? [], nowMs),
+        deletedAgentTaskIds: Array.isArray(loadedReminders.deletedAgentTaskIds) ? loadedReminders.deletedAgentTaskIds : [],
+      }
       : emptyReminders(nowMs);
   }
 
@@ -509,8 +580,13 @@ export class AlphaAppsStore {
     const minute = clampInt(input.minute, 0, 59);
     const daysMask = clampInt(input.daysMask ?? 0, 0, 127);
     const enabled = input.enabled ?? true;
+    const alarmId = input.id?.trim() || `alarm-${randomUUID().slice(0, 8)}`;
+    const replacing = this.clock.alarms.some((entry) => entry.id === alarmId);
+    if (!replacing && this.clock.alarms.length >= MAX_ALARMS) {
+      throw new AlphaStoreCapacityError(`Maximum number of alarms reached (${MAX_ALARMS}).`);
+    }
     const alarm: ClockAlarmRecord = {
-      id: input.id?.trim() || `alarm-${randomUUID().slice(0, 8)}`,
+      id: alarmId,
       hour, minute, daysMask,
       label: (input.label ?? "").trim().slice(0, 200),
       sound: normalizeSound(input.sound),
@@ -524,7 +600,7 @@ export class AlphaAppsStore {
       revision: 1,
       updatedAtMs: nowMs,
     };
-    const alarms = [...this.clock.alarms.filter((entry) => entry.id !== alarm.id), alarm].slice(0, MAX_ALARMS);
+    const alarms = [...this.clock.alarms.filter((entry) => entry.id !== alarm.id), alarm];
     const deletedAlarmIds = this.clock.deletedAlarmIds.filter((id) => id !== alarm.id);
     this.saveClock({ ...this.clock, version: this.clock.version + 1, updatedAtMs: nowMs, alarms, deletedAlarmIds });
     return alarm;
@@ -540,7 +616,13 @@ export class AlphaAppsStore {
     const existing = this.reminders.items.find((entry) => entry.id === id);
     if (existing === undefined) return undefined;
     const nowMs = this.now();
+    this.deletedItems.delete(id);
     this.deletedItems.set(id, existing);
+    while (this.deletedItems.size > MAX_TOMBSTONES) {
+      const oldest = this.deletedItems.keys().next().value;
+      if (oldest === undefined) break;
+      this.deletedItems.delete(oldest);
+    }
     return { existing, nowMs };
   }
 
@@ -637,8 +719,9 @@ export class AlphaAppsStore {
     const nowMs = this.now();
     const durationMs = clampInt(input.durationMs, 1000, 86_400_000);
     const startNow = input.startImmediately ?? true;
+    const timerId = input.id?.trim() || `timer-${randomUUID().slice(0, 8)}`;
     const timer: ClockTimerRecord = {
-      id: input.id?.trim() || `timer-${randomUUID().slice(0, 8)}`,
+      id: timerId,
       label: (input.label ?? "").trim().slice(0, 200),
       durationMs,
       remainingMs: durationMs,
@@ -731,6 +814,9 @@ export class AlphaAppsStore {
     const nowMs = this.now();
     const existing = this.clock.world.find((entry) => entry.timeZone.toLowerCase() === input.timeZone.toLowerCase());
     if (existing !== undefined) return existing;
+    if (this.clock.world.length >= MAX_WORLD_CITIES) {
+      throw new AlphaStoreCapacityError(`Maximum number of world cities reached (${MAX_WORLD_CITIES}).`);
+    }
     const city: WorldCityRecord = {
       id: input.id?.trim() || input.timeZone.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
       city: input.city.trim(),
@@ -738,7 +824,7 @@ export class AlphaAppsStore {
       timeZone: input.timeZone.trim(),
       order: this.clock.world.length,
     };
-    const world = [...this.clock.world, city].slice(0, MAX_WORLD_CITIES).map((entry, idx) => ({ ...entry, order: idx }));
+    const world = [...this.clock.world, city].map((entry, idx) => ({ ...entry, order: idx }));
     this.saveClock({ ...this.clock, version: this.clock.version + 1, updatedAtMs: nowMs, world });
     return city;
   }
@@ -796,10 +882,18 @@ export class AlphaAppsStore {
     if (existing === undefined) return undefined;
     const nowMs = this.now();
     const lists = ensureDefaultList(this.reminders.lists.filter((entry) => entry.id !== id), nowMs);
+    let deletedAgentTaskIds = [...(this.reminders.deletedAgentTaskIds ?? [])];
+    if (mode === "cascade") {
+      for (const item of this.reminders.items) {
+        if (item.listId === id && item.agentTaskId !== null) {
+          deletedAgentTaskIds = appendTombstone(deletedAgentTaskIds, item.agentTaskId);
+        }
+      }
+    }
     const items = mode === "cascade"
       ? this.reminders.items.filter((item) => item.listId !== id)
       : this.reminders.items.map((item) => (item.listId === id ? { ...item, listId: DEFAULT_LIST_ID, revision: item.revision + 1, updatedAtMs: nowMs } : item));
-    this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, lists, items });
+    this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, lists, items, deletedAgentTaskIds });
     return existing;
   }
 
@@ -881,8 +975,12 @@ export class AlphaAppsStore {
       revision: existing.revision + 1,
       updatedAtMs: nowMs,
     };
+    let deletedAgentTaskIds = [...(this.reminders.deletedAgentTaskIds ?? [])];
+    if (existing.agentTaskId !== null && patch.agentTaskId !== undefined && patch.agentTaskId !== existing.agentTaskId) {
+      deletedAgentTaskIds = appendTombstone(deletedAgentTaskIds, existing.agentTaskId);
+    }
     const items = this.reminders.items.map((entry) => (entry.id === id ? updated : entry));
-    this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items });
+    this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items, deletedAgentTaskIds });
     return updated;
   }
 
@@ -943,7 +1041,10 @@ export class AlphaAppsStore {
     if (stashed === undefined) return undefined;
     const { existing, nowMs } = stashed;
     const items = this.reminders.items.filter((entry) => entry.id !== id);
-    this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items });
+    const deletedAgentTaskIds = existing.agentTaskId === null
+      ? (this.reminders.deletedAgentTaskIds ?? [])
+      : appendTombstone(this.reminders.deletedAgentTaskIds ?? [], existing.agentTaskId);
+    this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items, deletedAgentTaskIds });
     return existing;
   }
 
@@ -954,7 +1055,7 @@ export class AlphaAppsStore {
     if (prior === undefined) return undefined;
     this.deletedItems.delete(id);
     const listId = this.reminders.lists.some((list) => list.id === prior.listId) ? prior.listId : DEFAULT_LIST_ID;
-    const restored: ReminderItemRecord = { ...prior, id, listId, revision: prior.revision + 1, updatedAtMs: nowMs };
+    const restored: ReminderItemRecord = { ...prior, id, listId, agentTaskId: null, revision: prior.revision + 1, updatedAtMs: nowMs };
     const exists = this.reminders.items.some((entry) => entry.id === id);
     const items = exists
       ? this.reminders.items.map((entry) => (entry.id === id ? restored : entry))
@@ -975,6 +1076,7 @@ export class AlphaAppsStore {
     const nowMs = this.now();
     let changed = false;
     const items = [...this.reminders.items];
+    const tombstoned = new Set(this.reminders.deletedAgentTaskIds ?? []);
     for (const task of tasks) {
       if (task.kind !== "personal-assistant.reminder") continue;
       const existingIdx = items.findIndex((item) => item.agentTaskId === task.taskId);
@@ -985,6 +1087,7 @@ export class AlphaAppsStore {
         }
         continue;
       }
+      if (existingIdx < 0 && tombstoned.has(task.taskId)) continue;
       const completed = task.status === "Completed";
       if (existingIdx >= 0) {
         const current = items[existingIdx];

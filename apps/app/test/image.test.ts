@@ -45,7 +45,9 @@ describe("Stage Alpha into an image (spec/app/image/index.md, \"Story: Stage Alp
     // spec/app/image/index.md, "The Sense policy patch belongs only to a listener image, and the protected power and generic assist patches never come together"
     expect(await stage("--target", "pixel10a", "--factory-image", "factory.zip", "--development", "--patch", "protected-power", "--patch", "assist", "--patch", "sense-policy"))
       .toMatchObject({ ok: false, problems: ["SensePolicyWithoutAListenerImage", "PowerAndAssistTogether"] });
-    expect(await stage("--target", "pixel10a", "--factory-image", "factory.zip", "--development", "--listener-apk", "sense.apk", "--listener-voice-host", "voice.json"))
+    expect(await stage("--target", "pixel10a", "--factory-image", "factory.zip", "--development", "--listener-apk", "sense.apk"))
+      .toMatchObject({ ok: false, tag: "UsageError", said: "--listener-apk needs --listener-descriptor" });
+    expect(await stage("--target", "pixel10a", "--factory-image", "factory.zip", "--development", "--listener-apk", "sense.apk", "--listener-descriptor", "listener.json", "--listener-voice-host", "voice.json"))
       .toMatchObject({ ok: false, tag: "UsageError", said: "Listener speech needs its APK, both reviewed files, and their SHA-256 digests" });
     expect(await stage("--target", "pixel10a", "--development")).toMatchObject({ ok: false, tag: "UsageError", said: "--target pixel10a needs --factory-image" });
   });

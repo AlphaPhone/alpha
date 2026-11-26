@@ -45,18 +45,23 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 });
 
-// spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": with the agent's calendar connected New event does not ask; Save to the phone's calendar asks, and refused access stops it with the way to Settings
-it("Save to the phone's calendar asks for it, and a refusal says so and offers Settings (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
+async function draftPhoneCalendarEvent(title: string, denies: boolean) {
   const world = { ...scene(), phone: true };
-  world.calendar.denies = true;
+  if (denies) world.calendar.denies = true;
   const { alpha, runtime } = await onCalendar(world);
   await until(alpha, runtime, View, (state) => state.front && state.connected);
   await press("New event");
   await until(alpha, runtime, Editor, (state) => state.shown && state.form === "NewEvent" && state.receipts.status === "Loaded");
   expect(world.calendar.asked).toBe(0);
-  await fill("Title", "Piano");
+  await fill("Title", title);
   await press("This phone's calendar");
   await until(alpha, runtime, Editor, (state) => state.titled && state.kept);
+  return { world, alpha, runtime };
+}
+
+// spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": with the agent's calendar connected New event does not ask; Save to the phone's calendar asks, and refused access stops it with the way to Settings
+it("Save to the phone's calendar asks for it, and a refusal says so and offers Settings (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
+  const { world, alpha, runtime } = await draftPhoneCalendarEvent("Piano", true);
   await press("Save event");
   await until(alpha, runtime, View, (state) => state.access.asked && state.access.grant === "Denied");
   await drawn(() => expect([world.calendar.asked, document.body.textContent?.includes("No access"), button("Save event")?.getAttribute("aria-disabled"), Boolean(button("Open Calendar settings"))])
@@ -67,15 +72,7 @@ it("Save to the phone's calendar asks for it, and a refusal says so and offers S
 
 // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": with the agent's calendar connected New event does not ask, and Save to the phone's calendar asks and then goes out
 it("Save to the phone's calendar asks for it at Save, and a grant saves the event there (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
-  const world = { ...scene(), phone: true };
-  const { alpha, runtime } = await onCalendar(world);
-  await until(alpha, runtime, View, (state) => state.front && state.connected);
-  await press("New event");
-  await until(alpha, runtime, Editor, (state) => state.shown && state.form === "NewEvent" && state.receipts.status === "Loaded");
-  await fill("Title", "Swim");
-  await press("This phone's calendar");
-  await until(alpha, runtime, Editor, (state) => state.titled && state.kept);
-  expect(world.calendar.asked).toBe(0);
+  const { world, alpha, runtime } = await draftPhoneCalendarEvent("Swim", false);
   await press("Save event");
   await until(alpha, runtime, Editor, (state) => state.form === "NoForm" && state.write.outcome === "Confirmed");
   expect([world.calendar.asked, world.calendar.phoneEvents.map(({ title }) => title), world.calendar.events.some(({ title }) => title === "Swim")]).toEqual([1, ["Gym", "Swim"], false]);

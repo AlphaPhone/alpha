@@ -65,7 +65,7 @@ export function AssistantSearch({ words, hits, status = "idle", blocked = false,
           </div>
         </section>
       ) : null}
-      {status === "loading" ? <div aria-busy className="flex flex-col gap-2"><Skeleton className="h-13" /><Skeleton className="h-13" /></div> : null}
+      {status === "loading" ? <div role="status" aria-label="Searching chats" aria-busy className="flex flex-col gap-2"><Skeleton className="h-13" /><Skeleton className="h-13" /></div> : null}
       {status === "failed" ? <Banner variant="warn">Search did not finish</Banner> : null}
       {status === "loaded" && !hits.length ? <EmptyState icon={<SearchX />} title="Nothing found" /> : null}
       {status === "loaded" && onMore ? <Button variant="ghost" className="w-full" onClick={onMore}>More results</Button> : null}

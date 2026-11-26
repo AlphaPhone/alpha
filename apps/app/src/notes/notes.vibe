@@ -3,9 +3,9 @@ import * as Actions from "../../gen/app__notes__actions.effect.vibe"
 import * as Notes from "../../gen/app__notes.effect.vibe"
 import * as Editor from "../../gen/app__notes__editor.effect.vibe"
 import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
+import * as Mic from "../../gen/app__notes__microphone.effect.vibe"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
-import * as Mic from "../../gen/app__notes__microphone.effect.vibe"
 import * as Previous from "../../gen/app__notes__previous.effect.vibe"
 import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
 import * as Trash from "../../gen/app__notes__trash.effect.vibe"
@@ -139,7 +139,7 @@ effect function offerSelectionUndo(fx: DeleteSelection, result: SelectionDeleted
   try withdraw("notes", fx.turn)
 }
 
-effect function listed(owner: number, ticket: number): Notes.Event!!(Agent | Notes.Machine | Editor.Machine | NoteStore | NoteContent) {
+effect function listed(owner: number, ticket: number): Notes.Event!!(Agent | Notes.Machine | Editor.Machine | Link.Machine | NoteEditor | NoteStore | NoteContent) {
   const fail: Notes.Event = { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }
   const identity = ownerAt() catch () => ""
   if (identity === "" || numberOf("owner", identity) !== owner) return fail
@@ -151,16 +151,16 @@ effect function listed(owner: number, ticket: number): Notes.Event!!(Agent | Not
   const content = try NoteContent
   const read = content.publish(identity, snapshot) catch () => undefined
   if (read === undefined) return fail
-  const editor = try Editor.Machine
-  const active = try editor.get()
+  const active = try (try Editor.Machine).get()
   if (active.note > 0) {
     const row = read.rows.find((row) => row.id === active.note)
     const saved = read.noteByNumber.get(active.note)
-    const said: Editor.Event = { type: "noteRead", note: active.note, latest: read.version, present: row !== undefined, link: row?.source ?? unlinked }
-    if (Editor.canNoteRead(active, said.note, said.latest, said.present, said.link, phone)) {
-      if (!Editor.waiting(active) && saved !== undefined) try content.showDraft(fromSaved(saved, identity, read.version))
-      try ignore(editor.send(said, phone))
-    }
+    try (try NoteEditor).noteRead(active.note, read.version, row !== undefined, row?.source ?? unlinked, saved, identity)
+  }
+  const link = try Link.Machine
+  const linked = try link.get()
+  if (linked.showing && linked.note > 0 && Link.canNoteRead(linked, linked.note, read.version, phone)) {
+    try ignore(link.send({ type: "noteRead", note: linked.note, latest: read.version }, phone))
   }
   return { type: "listed", ticket, ok: true, version: read.version, rows: read.rows, folders: read.folders, shelf: read.shelf }
 }
@@ -228,7 +228,7 @@ effect function shown(row: Notes.Row, by: Actor, req: Request) {
   try Effect.ensuring(openedForAgent(row, req), opens.settle(req.turn, false))
 }
 
-function carry(fx: Notes.Effect): Job<Notes.Event, SelectionUndo | Notes.Machine | Editor.Machine | NoteContent | Shell | Layers | Device | Link.Machine | Voice.Machine | Opens, [Actor]> {
+function carry(fx: Notes.Effect): Job<Notes.Event, SelectionUndo | Notes.Machine | Editor.Machine | NoteEditor | NoteContent | Shell | Layers | Device | Link.Machine | Voice.Machine | Opens, [Actor]> {
   return match (fx) {
     when { tag: "Lists" }: answer("list", listed(fx.owner, fx.ticket), { type: "listed", ticket: fx.ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, phone);
     when { tag: "Writes" }: answer(`write ${fx.ticket}`, written(fx.owner, fx.ticket, fx.change), { type: "changeWritten", ticket: fx.ticket, ok: false, known: false }, phone);
@@ -241,6 +241,18 @@ function carry(fx: Notes.Effect): Job<Notes.Event, SelectionUndo | Notes.Machine
     }),
       { type: "selectionDeleted", turn: fx.turn, removedIds: [], known: false }, phone);
   }
+}
+
+/** Move a non-editor note (such as a voice or link note) into Recently deleted, closing its detail view if open. */
+export effect function discardNote(id: number, revision: number, recording: number): boolean!!(Trash.Machine | Voice.Machine | Link.Machine) {
+  const bin = try Trash.Machine
+  const sent = bin.send({ type: "discard", id, revision, recording, asked: 1, now: untimed, storage: true }, "Owner") catch () => undefined
+  if (sent === undefined) return false
+  const voice = try Voice.Machine
+  if ((try voice.get()).showing && (try voice.get()).note === id) try ignore(voice.send({ type: "back" }, "Owner"))
+  const link = try Link.Machine
+  if ((try link.get()).showing && (try link.get()).note === id) try ignore(link.send({ type: "back" }, "Owner"))
+  return true
 }
 
 export effect function enter() {
@@ -270,14 +282,31 @@ export effect function enter() {
   const recovered = try exit(content.readDraft(identity))
   const held = try editor.get()
   const draft = Exit.isSuccess(recovered) ? recovered.value : undefined
-  if (draft === undefined && held.owner === owner && Editor.waiting(held) && !held.showing) {
+  if (Exit.isFailure(recovered)) {
+    if (held.owner === owner && Editor.waiting(held) && !held.showing) {
+      try ignore(editor.send({ type: "restart", readable: false }, phone))
+    } else if (!Editor.waiting(held) && !held.showing) {
+      try ignore(editor.send({ type: "draftFound", note: 0, made: Math.max(1, held.issued + 1), kind: "Text", base: 0, edits: 1, folder: 0, link: unlinked, readable: false }, phone))
+    }
+  } else if (draft === undefined && held.owner === owner && Editor.waiting(held) && !held.showing) {
     try ignore(editor.send({ type: "restart", readable: false }, phone))
   }
   if (draft !== undefined && draft.owner === identity) {
-    if (Editor.waiting(held)) try content.showDraft(draft)
-    else {
-      const accepted = editor.send({ type: "draftFound", note: draft.id === "" ? 0 : numberOf("note", draft.id), made: draft.made,
-        kind: draft.kind, base: draft.base, edits: 1, folder: draft.folder, link: unlinked, readable: true }, phone) catch () => undefined
+    if (Editor.waiting(held)) {
+      if ((try content.draft()) === undefined) try content.showDraft(draft)
+    } else {
+      const noteNumber = draft.id === "" ? 0 : numberOf("note", draft.id)
+      const accepted = editor.send({
+        type: "draftFound",
+        note: noteNumber,
+        made: noteNumber === 0 ? Math.max(1, draft.made) : 0,
+        kind: draft.kind,
+        base: draft.base,
+        edits: 1,
+        folder: noteNumber === 0 ? draft.folder : 0,
+        link: draft.link ?? unlinked,
+        readable: true,
+      }, phone) catch () => undefined
       if (accepted !== undefined) try content.showDraft(draft)
     }
   }
@@ -286,23 +315,44 @@ export effect function enter() {
   try ignore(trash.send({ type: "maintain", now: untimed }, phone))
 }
 
+effect function leaveNotes() {
+  try ignore((try Notes.Machine).send({ type: "left" }, phone))
+  try (try NoteEditor).left()
+  try ignore((try Trash.Machine).send({ type: "left" }, phone))
+  try ignore((try Link.Machine).send({ type: "left" }, phone))
+  try ignore((try Actions.Machine).send({ type: "left" }, phone))
+  try ignore((try Previous.Machine).send({ type: "left" }, phone))
+  try ignore((try Mic.Machine).send({ type: "left" }, phone))
+  try ignore((try Recorder.Machine).send({ type: "left" }, phone))
+}
+
 const opening = started(effect {
   const shell = try Shell
   const device = try Device
   const changes = Stream.changes(Stream.map(shell.changes, (state) => showing(state, "Notes")))
   const visible = Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible))
+  let wasFront = false
   try Stream.runForEach(Stream.zipLatest(changes, visible), effect ([shown, front]) => {
-    if (shown && front) try enter()
-    if (!shown || !front) {
+    if (shown && front) {
+      wasFront = true
+      try enter()
+    } else if (!shown) {
+      if (wasFront) {
+        wasFront = false
+        try leaveNotes()
+      } else {
+        const menu = try Actions.Machine
+        const actions = try menu.get()
+        if (actions.open || actions.awaiting) try ignore(menu.send({ type: "left" }, phone))
+        try ignore((try Mic.Machine).send({ type: "left" }, phone))
+        const list = try Notes.Machine
+        const state = try list.get()
+        if (state.selection !== "NoSelection" || state.selectionResult !== "NotReported") try ignore(list.send({ type: "left" }, phone))
+      }
+    } else {
       const menu = try Actions.Machine
       const actions = try menu.get()
       if (actions.open || actions.awaiting) try ignore(menu.send({ type: "left" }, phone))
-    }
-    if (!shown) {
-      try ignore((try Mic.Machine).send({ type: "left" }, phone))
-      const list = try Notes.Machine
-      const state = try list.get()
-      if (state.selection !== "NoSelection" || state.selectionResult !== "NotReported") try ignore(list.send({ type: "left" }, phone))
     }
   })
 }, "enter Notes")
@@ -315,6 +365,7 @@ effect function took() {
   const recorder = try Recorder.Machine
   const link = try Link.Machine
   const voice = try Voice.Machine
+  const actionsMachine = try Actions.Machine
   const editor = try Editor.Machine
   const trash = try Trash.Machine
   const list = try Notes.Machine
@@ -343,9 +394,8 @@ effect function took() {
     try ignore(trash.send({ type: "back" }, "Owner"))
     return true
   }
-  const menu = try Actions.Machine
-  if (Actions.canBack(try menu.get())) {
-    try ignore(menu.send({ type: "back" }, "Owner"))
+  if (Actions.canBack(try actionsMachine.get())) {
+    try ignore(actionsMachine.send({ type: "back" }, "Owner"))
     return true
   }
   if (Editor.canBack(try editor.get())) {

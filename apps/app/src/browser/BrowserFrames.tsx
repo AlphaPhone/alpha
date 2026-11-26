@@ -1,4 +1,5 @@
 // spec/app/browser/share.md, "The owner can review opening a shown private web frame in another browser"; spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
+import { cn, focusRing } from "@repo/ui";
 import { ExternalLink } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { TabHost } from "../platform/browser.vibe";
@@ -8,7 +9,7 @@ import type { DesktopPreview } from "../shell/canvas.vibe";
 
 const noFrames = () => emptyFrames;
 const noChanges = () => () => {};
-const linkClass = "flex min-h-7.75 items-center justify-end gap-1.5 px-3 py-2 text-label underline";
+const linkClass = cn("flex min-h-7.75 items-center justify-end gap-1.5 px-3 py-2 text-label underline", focusRing);
 const linkContent = <>Open in browser <ExternalLink aria-hidden className="size-3.5" /></>;
 
 async function reviewPrivateFrame(alpha: Alpha, frame: FrameRequest) {
@@ -41,7 +42,7 @@ export function BrowserFrames({ alpha, preview }: { alpha: Alpha; preview?: Desk
           : <a href={url} rel="noopener noreferrer" target="_blank" className={linkClass}>{linkContent}</a>}
         {status !== undefined && <p role="status" className="m-0 p-3 font-sans text-sm leading-normal">{stopped ? "Stopped" : "Page blocked"}</p>}
         <iframe key={stopped ? "stopped" : load} title="Website" src={stopped ? "about:blank" : url} referrerPolicy="no-referrer"
-          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
           onLoad={stopped ? undefined : () => web?.loaded(id, load)} className="min-h-0 w-full flex-1 border-0" />
       </section>
     );

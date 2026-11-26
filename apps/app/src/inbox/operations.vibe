@@ -74,7 +74,7 @@ effect function sent(attempt: number, account: number, draft: number, gmail: num
   const ended = try operate(attempt, account, {
     kind: "send", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
     ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
-    ...(copy === undefined || copy.account !== account ? {} : { draftId: copy.id, expectedDigest: copy.digest }),
+    ...(copy?.account === account ? { draftId: copy.id, expectedDigest: copy.digest } : {}),
     ...files.fields,
   }, { matches: files.matches })
   return { type: "answered", attempt, done: ended.done, matches: ended.known, gmail: 0 }

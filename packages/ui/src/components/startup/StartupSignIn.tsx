@@ -37,8 +37,9 @@ type Challenge = {
 type Connection = { message: string; onOpen: () => Promise<boolean> };
 export type StartupSignInProps = (Choice | Challenge | { stage: "Browser"; message?: string }) & { connection?: Connection };
 
-const mainAction = "min-h-13 w-full rounded-md text-base leading-tight font-medium";
+const mainAction = "min-h-13 w-full rounded-list-icon text-base leading-tight font-medium";
 const textAction = "h-11 w-full text-base font-medium";
+const codeSlots = [0, 1, 2, 3, 4, 5] as const;
 
 function NetworkNotice({ message, onOpen }: Connection) {
   const [result, setResult] = useState<"idle" | "opening" | "failed">("idle");
@@ -49,7 +50,7 @@ function NetworkNotice({ message, onOpen }: Connection) {
   };
   return (
     <aside aria-label="Sign-in connection" className="mb-3 rounded-sm border border-border px-4 py-3">
-      <p role="status" className="text-sm leading-normal text-muted-foreground/97 dark:text-muted-foreground">{message}</p>
+      <p role="status" className="text-sm leading-status text-muted-foreground/97 dark:text-muted-foreground">{message}</p>
       <Button variant="ghost" className="h-11 rounded-md border border-transparent px-0 text-base leading-tight font-medium text-primary hover:bg-transparent active:bg-transparent"
         loading={result === "opening"} onClick={() => void open()}>Open Wi-Fi settings</Button>
       {result === "failed" ? <p role="alert">Couldn’t open Wi-Fi settings.</p> : null}
@@ -58,11 +59,11 @@ function NetworkNotice({ message, onOpen }: Connection) {
 }
 
 function Google({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
-  const focusWhenEnabled = useCallback((target: HTMLButtonElement | null) => {
-    if (target && !disabled && target.ownerDocument.activeElement === target.ownerDocument.body) target.focus({ preventScroll: true });
+  const buttonRef = useCallback((target: HTMLButtonElement | null) => {
+    if (!disabled && target && target.ownerDocument.activeElement === target.ownerDocument.body) target.focus({ preventScroll: true });
   }, [disabled]);
   return (
-    <Button ref={focusWhenEnabled} variant="outline" className={cn(mainAction, "gap-3 border-border")} disabled={disabled} onClick={onClick}>
+    <Button ref={buttonRef} variant="outline" className={cn(mainAction, "gap-3 border-border")} disabled={disabled} onClick={onClick}>
       <img className="size-5" src="/icons/senders/google.com.png" alt="" />
       Continue with Google
     </Button>
@@ -77,12 +78,15 @@ function Chooser(props: Choice) {
   const enabled = usingPhone ? phone : email;
   const canSwitch = usingPhone ? email : phone;
   const phoneNoteId = useId();
-  const switchedRef = useRef(false);
-  const focusAfterSwitch = useCallback((field: HTMLInputElement | null) => {
-    if (field && switchedRef.current) field.focus({ preventScroll: true });
+  const focusInputRef = useRef(false);
+  const attachInputRef = useCallback((node: HTMLInputElement | null) => {
+    if (node && focusInputRef.current) {
+      focusInputRef.current = false;
+      node.focus({ preventScroll: true });
+    }
   }, []);
   const switchMethod = () => {
-    switchedRef.current = true;
+    focusInputRef.current = true;
     setMethod(usingPhone ? "email" : "phone");
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -96,11 +100,11 @@ function Chooser(props: Choice) {
         {onGoogle && enabled ? <div aria-hidden="true" className="my-2 flex items-center gap-3.5 text-caption text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">or</div> : null}
         {enabled ? (
           <form className="flex flex-col gap-3" aria-label={usingPhone ? "Sign in with phone" : "Sign in with email"} onSubmit={submit}>
-            <label className="flex flex-col gap-2 text-sm leading-normal font-medium">
+            <label className="flex flex-col gap-2 text-sm leading-status font-medium">
               {usingPhone ? "Phone number" : "Email"}
               <Input
                 key={method}
-                ref={focusAfterSwitch}
+                ref={attachInputRef}
                 autoComplete={usingPhone ? "tel" : "email"}
                 type={usingPhone ? "tel" : "email"}
                 autoCapitalize="none"
@@ -113,7 +117,7 @@ function Chooser(props: Choice) {
                 disabled={busy}
                 value={draft[method]}
                 onChange={(event) => setDraft({ ...draft, [method]: event.currentTarget.value })}
-                className="h-13.5 rounded-sm border-border bg-background px-4 text-base font-normal focus:border-alpha"
+                className="h-13.5 rounded-md border-border bg-background px-4 text-base font-normal focus:border-alpha"
               />
             </label>
             {usingPhone ? <p id={phoneNoteId} className="text-sm">Include your country code.</p> : null}
@@ -141,10 +145,10 @@ function EnterCode(props: Challenge) {
   const { busy, problem, onVerify, onBack } = props;
   const [digits, setDigits] = useState("");
   const errorId = useId();
-  const focusWhenReady = useCallback((field: HTMLInputElement | null) => {
-    if (!field || busy) return;
-    field.focus({ preventScroll: true });
-    if (problem) field.select();
+  const inputRef = useCallback((node: HTMLInputElement | null) => {
+    if (!node || busy) return;
+    node.focus({ preventScroll: true });
+    if (problem) node.select();
   }, [busy, problem]);
   const first = props.stage === "Code";
   const phone = first ? props.method === "phone" : props.factor === "sms";
@@ -162,16 +166,16 @@ function EnterCode(props: Challenge) {
           {first ? <><span className="sr-only">Code sent to </span><strong>{props.address}</strong></> : phone ? "Phone code" : "Authenticator"}
         </p>
         <div className="relative mt-2 mb-3 grid grid-cols-6 gap-2 focus-within:[&_[data-active]]:outline-2 focus-within:[&_[data-active]]:outline-offset-1 focus-within:[&_[data-active]]:outline-alpha">
-          {Array.from({ length: 6 }, (_, index) => (
+          {codeSlots.map((slot) => (
             <span
-              key={index}
-              data-active={index === Math.min(digits.length, 5) ? "" : undefined}
+              key={slot}
+              data-active={slot === Math.min(digits.length, 5) ? "" : undefined}
               aria-hidden
-              className={cn("grid h-13.5 place-items-center rounded-sm border border-border bg-secondary text-panel-title tabular-nums data-[active]:border-alpha", problem && "border-destructive data-[active]:border-destructive")}
-            >{digits[index]}</span>
+              className={cn("grid h-13.5 place-items-center rounded-md border border-border bg-secondary text-panel-title tabular-nums data-[active]:border-alpha", problem && "border-destructive data-[active]:border-destructive")}
+            >{digits[slot]}</span>
           ))}
           <Input
-            ref={focusWhenReady}
+            ref={inputRef}
             aria-label="Code"
             aria-describedby={problem ? errorId : undefined}
             invalid={!!problem}
@@ -185,7 +189,7 @@ function EnterCode(props: Challenge) {
             className="absolute inset-0 size-full caret-transparent opacity-0"
           />
         </div>
-        {problem ? <p id={errorId} role="alert" className="rounded-sm bg-destructive/12 p-3 text-destructive">{problem}</p> : null}
+        {problem ? <p id={errorId} role="alert" className="rounded-md bg-destructive/12 p-3 text-destructive">{problem}</p> : null}
         <Button type="submit" className={mainAction} disabled={!onVerify} loading={busy}>Verify</Button>
         {first && props.onResend ? (
           <Button type="button" variant="ghost" className={cn(textAction, "text-sm text-alpha tabular-nums disabled:text-muted-foreground disabled:opacity-100")} disabled={busy || !!props.resendIn} onClick={props.onResend}>
@@ -203,11 +207,11 @@ export function StartupSignIn(props: StartupSignInProps) {
   const headingId = useId();
   const title = props.stage === "Choose" ? "Alpha" : props.stage === "Browser" ? "In browser" : "Enter code";
   return (
-    <section aria-labelledby={headingId} className="flex size-full flex-1 flex-col bg-background pb-[max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom,0px))] text-base leading-normal text-foreground">
-      <div className="size-full overflow-y-auto overscroll-contain pr-[max(1.5rem,env(safe-area-inset-right,0px))] pl-[max(1.5rem,env(safe-area-inset-left,0px))] pt-[max(calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))_+_2rem),8vh)] pb-8">
+    <section aria-labelledby={headingId} className="flex size-full flex-1 flex-col bg-background pb-[var(--alpha-safe-bottom)] text-base leading-status text-foreground">
+      <div className="size-full overflow-y-auto overscroll-contain pr-[max(1.5rem,env(safe-area-inset-right,0px))] pl-[max(1.5rem,env(safe-area-inset-left,0px))] pt-[max(calc(var(--alpha-safe-top)_+_2rem),8vh)] pb-8">
         <div className="mx-auto w-full max-w-lg">
           <AuthMark className="mb-6" />
-          <h1 id={headingId} className="mb-7 font-display text-4xl font-normal text-balance">{title}</h1>
+          <h1 id={headingId} className="mb-7 font-display text-4xl font-normal tracking-tight text-balance">{title}</h1>
           {props.connection ? <NetworkNotice {...props.connection} /> : null}
           {props.stage === "Choose" ? <Chooser {...props} /> : props.stage === "Browser" ? (
             <div className="flex flex-col items-center gap-4">

@@ -480,7 +480,7 @@ describe("Files on a phone", () => {
     await drawn(() => expect([...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === "Documents")?.querySelector("span.text-muted-foreground")?.textContent).toBe("2 items"));
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
-    // v119 live rows read size · date with no leading type word (files-browser-adapter.ts:1315-1324); the kind stays for screen readers.
+    /** v119 live rows read size · date with no leading type word (files-browser-adapter.ts:1315-1324); the kind stays for screen readers. */
     const notesRow = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === "notes.txt");
     const notesDetail = notesRow?.querySelector("span.text-muted-foreground")?.textContent ?? "";
     expect([notesDetail.startsWith("Document"), notesDetail.split(" · ").length, notesRow?.getAttribute("aria-description")]).toEqual([false, 2, `Document · ${notesDetail}`]);
@@ -489,8 +489,7 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
-    // v119 live left the 18px slot before the facts empty (selection-adapter.ts:282 `d: ''`): no kind icon, the words keep their place.
-    // spec/app/files/preview.md, "The caption and Details show facts for the exact document held": v119's live facts line (selection-adapter.ts:282, files-browser-adapter.ts:1797-1804)
+    // spec/app/files/preview.md, "The caption and Details show facts for the exact document held": v119's live facts line (selection-adapter.ts:282, files-browser-adapter.ts:1797-1804) with the 18px slot before the facts empty.
     const facts = document.querySelector("[data-facts-slot]")?.parentElement;
     expect([facts?.querySelector("svg"), facts?.querySelector("[data-facts-slot]")?.childNodes.length, facts?.textContent]).toEqual([null, 0, "text/plain · selected on this device · Internal storage › Documents"]);
 
@@ -1201,18 +1200,35 @@ describe("Files on a phone", () => {
     await hardware("home");
   });
 
-  it("Deletes selected files across different folders in a category (spec/app/files/trash.md, \"Story: Delete into the Trash\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
-    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
-    await press("Documents");
-    await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded" && s.items.length === 2);
+  it("Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/trash.md, \"Story: Delete into the Trash\")", async () => {
+    const { alpha, runtime, world } = await onDownloads();
 
-    await select("notes.txt");
+    const hiddenCheck = document.querySelector<HTMLElement>("[aria-label='Select lease.pdf']");
+    expect(hiddenCheck?.className).toContain("pointer-events-none");
+
+    await press("lease.pdf");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded");
+    expect(document.querySelector("[aria-label='Preview']")).not.toBeNull();
+    await choose("Add to folder", "File actions");
+    await until(alpha, runtime, Browser, (s) => s.sheet.open && s.sheet.reading.status === "Loaded");
+    expect(document.querySelector("[aria-label='Preview']")).toBeNull();
+    await hardware("back");
+    await until(alpha, runtime, Browser, (s) => !s.sheet.open);
+    expect(document.querySelector("[aria-label='Preview']")).not.toBeNull();
+    await press("Close");
+    await until(alpha, runtime, Shown, (s) => s.viewer === 0);
+    await press("Cancel");
+
+    await choose("Browse storage");
+    await until(alpha, runtime, Browser, (s) => s.trail.length === 0 && !s.inCategory);
+    await press("Documents");
+    await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded" && s.items.length >= 2);
     await select("lease.pdf");
+    await select("notes.txt");
     await press("Delete");
     await pressOnTop("Delete");
-    await until(alpha, runtime, Bin, (s) => s.attempt.outcome !== "Sent" && s.binned.length > 0);
-    expect(world.files.trash.map((one) => one.was.path).sort()).toEqual(["Documents/notes.txt", "Download/lease.pdf"]);
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.binned.length === 2);
+    expect(world.files.trash.map((one) => one.was.path).toSorted()).toEqual(["Documents/notes.txt", "Download/lease.pdf"]);
   });
 
   it("Preserves confirmed volume erasures when a later volume throws during Empty Trash (spec/app/files/trash.md, \"A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown\")", async () => {

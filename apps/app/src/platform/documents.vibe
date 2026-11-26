@@ -3,9 +3,10 @@ import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import { Capacitor, registerPlugin } from "@capacitor/core"
+  import { Capacitor } from "@capacitor/core"
   import type { SelectedDocumentsClient, SelectedDocumentsPlugin } from "@elizaos/os-bridges"
   import { selectedDocumentsClient } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export interface SelectedDocumentHost extends SelectedDocumentsPlugin {
     pickSelected(): Promise<unknown>
@@ -14,12 +15,11 @@ module held {
     readStorageAttachment(input: { readonly path: string; readonly volume?: string; readonly reviewed: string }): Promise<unknown>
   }
 
-  let plugin: SelectedDocumentHost | undefined
   let made: SelectedDocumentsClient | undefined
 
   /** @throws {never} */
   export function host(name: string): SelectedDocumentHost {
-    return (plugin ??= registerPlugin<SelectedDocumentHost>(name))
+    return capacitorPlugin<SelectedDocumentHost>(name)
   }
 
   /** @throws {never} */
@@ -104,20 +104,25 @@ export const browserDocuments = Layer.succeed(Documents, {
   readStorageAttachment: () => succeed(undefined),
 })
 
-export const phoneDocuments = Layer.sync(Documents, () => ({
-  client: registered(name) ? Option.some(client(name)) : Option.none(),
-  reviewStorageAttachment: reviewPhoneAttachment,
-  readStorageAttachment: readPhoneAttachment,
-  effect pick(): Option.Option<SelectionId>!! {
-    return effect {
-      const choice = try Schema.decodeUnknownEffect(Choice)(try tryPromise(() => host(name).pickSelected()))
-      return Option.some(try Schema.decodeUnknownEffect(Selection)(choice.selectionId))
-    } catch () => Option.none()
-  },
-  effect attachment(selectionId: SelectionId): Option.Option<DocumentAttachment>!! {
-    return effect {
-      const data = try Schema.decodeUnknownEffect(Attachment)(try tryPromise(() => host(name).attachmentSelected({ selectionId })))
-      return Option.some(data)
-    } catch () => Option.none()
-  },
-}))
+export const phoneDocuments = Layer.sync(Documents, () => {
+  const present = registered(name)
+  return {
+    client: present ? Option.some(client(name)) : Option.none(),
+    reviewStorageAttachment: reviewPhoneAttachment,
+    readStorageAttachment: readPhoneAttachment,
+    effect pick(): Option.Option<SelectionId>!! {
+      if (!present) return Option.none()
+      return effect {
+        const choice = try Schema.decodeUnknownEffect(Choice)(try tryPromise(() => host(name).pickSelected()))
+        return Option.some(try Schema.decodeUnknownEffect(Selection)(choice.selectionId))
+      } catch () => Option.none()
+    },
+    effect attachment(selectionId: SelectionId): Option.Option<DocumentAttachment>!! {
+      if (!present) return Option.none()
+      return effect {
+        const data = try Schema.decodeUnknownEffect(Attachment)(try tryPromise(() => host(name).attachmentSelected({ selectionId })))
+        return Option.some(data)
+      } catch () => Option.none()
+    },
+  }
+})

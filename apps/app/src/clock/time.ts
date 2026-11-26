@@ -16,6 +16,44 @@ export const DAYS_MASK_EVERY_DAY = 0b1111111;
 
 const pad2 = (value: number) => String(Math.max(0, Math.floor(value))).padStart(2, "0");
 
+const heroTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+const heroDateFormatters = new Map<string, Intl.DateTimeFormat>();
+const heroZoneFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function heroTimeFormatter(timeZone: string, hour24: boolean): Intl.DateTimeFormat {
+  const key = `${timeZone}|${hour24 ? "24" : "12"}`;
+  let fmt = heroTimeFormatters.get(key);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(undefined, {
+      timeZone,
+      hour: hour24 ? "2-digit" : "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: !hour24,
+    });
+    heroTimeFormatters.set(key, fmt);
+  }
+  return fmt;
+}
+
+function heroDateFormatter(timeZone: string): Intl.DateTimeFormat {
+  let fmt = heroDateFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(undefined, { timeZone, weekday: "long", month: "long", day: "numeric" });
+    heroDateFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+function heroZoneFormatter(timeZone: string): Intl.DateTimeFormat {
+  let fmt = heroZoneFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: "short" });
+    heroZoneFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
 /** Toggle a day index (0 = Sun .. 6 = Sat) in a 7-bit days mask. */
 export function toggleDayBit(daysMask: number, dayIndex: number): number {
   if (dayIndex < 0 || dayIndex > 6) return daysMask;
@@ -27,7 +65,7 @@ export function hasDayBit(daysMask: number, dayIndex: number): boolean {
   return (daysMask & (1 << dayIndex)) !== 0;
 }
 
-/** Human-readable repeat summary matching Apple and Google Clock conventions. */
+/** Human-readable repeat summary for an alarm's 7-bit weekday mask. */
 export function describeDaysMask(daysMask: number): string {
   const mask = daysMask & DAYS_MASK_EVERY_DAY;
   if (mask === 0) return "One-time";
@@ -45,22 +83,77 @@ export function formatAlarmTime(hour: number, minute: number, hour24: boolean): 
   return { time: `${displayHour}:${pad2(minute)}`, period };
 }
 
+function sameLocalWall(date: Date, year: number, month: number, day: number, hour: number, minute: number): boolean {
+  return date.getFullYear() === year
+    && date.getMonth() === month
+    && date.getDate() === day
+    && date.getHours() === hour
+    && date.getMinutes() === minute;
+}
+
+function resolveDayAlarmInstants(year: number, month: number, day: number, hour: number, minute: number): readonly number[] {
+  const probe = new Date(year, month, day, hour, minute, 0, 0);
+  const probeMs = probe.getTime();
+  if (!sameLocalWall(probe, year, month, day, hour, minute)) {
+    const targetMinutes = hour * 60 + minute;
+    let lo = probeMs - 120 * 60_000;
+    let hi = probeMs;
+    while (lo < hi) {
+      const mid = lo + Math.floor((hi - lo) / 2);
+      const d = new Date(mid);
+      const sameDay = d.getFullYear() === year && d.getMonth() === month && d.getDate() === day;
+      const ahead = d.getFullYear() > year
+        || (d.getFullYear() === year && d.getMonth() > month)
+        || (d.getFullYear() === year && d.getMonth() === month && d.getDate() > day)
+        || (sameDay && d.getHours() * 60 + d.getMinutes() >= targetMinutes);
+      if (ahead) hi = mid;
+      else lo = mid + 1;
+    }
+    return [hi];
+  }
+  const offsetBefore = new Date(probeMs - 120 * 60_000).getTimezoneOffset();
+  const offsetAt = probe.getTimezoneOffset();
+  const offsetAfter = new Date(probeMs + 120 * 60_000).getTimezoneOffset();
+  if (offsetAt > offsetBefore) {
+    const shiftMs = (offsetAt - offsetBefore) * 60_000;
+    const first = new Date(probeMs - shiftMs);
+    if (sameLocalWall(first, year, month, day, hour, minute)) {
+      return [first.getTime(), probeMs];
+    }
+  }
+  if (offsetAfter > offsetAt) {
+    const shiftMs = (offsetAfter - offsetAt) * 60_000;
+    const second = new Date(probeMs + shiftMs);
+    if (sameLocalWall(second, year, month, day, hour, minute)) {
+      return [probeMs, second.getTime()];
+    }
+  }
+  return [probeMs];
+}
+
 /**
- * Compute the next UTC epoch millisecond instant an alarm at `hour:minute` with `daysMask` fires strictly after `nowMs`.
+ * Compute the next UTC epoch millisecond instant an alarm at `hour:minute` with `daysMask` fires strictly after `nowMs`,
+ * resolving spring-forward gaps to the transition instant and avoiding double-firing across fall-back repeated hours.
  * @throws {never}
  */
 export function nextAlarmFireAt(hour: number, minute: number, daysMask: number, nowMs: number): number {
   const base = new Date(nowMs);
+  const nowOffset = base.getTimezoneOffset();
   const startYear = base.getFullYear();
   const startMonth = base.getMonth();
   const startDay = base.getDate();
   const mask = daysMask & DAYS_MASK_EVERY_DAY;
   for (let offset = 0; offset <= 8; offset += 1) {
-    const candidate = new Date(startYear, startMonth, startDay + offset, hour, minute, 0, 0);
-    const ts = candidate.getTime();
-    if (ts <= nowMs) continue;
-    if (mask === 0) return ts;
-    if ((mask & (1 << candidate.getDay())) !== 0) return ts;
+    const noon = new Date(startYear, startMonth, startDay + offset, 12, 0, 0, 0);
+    const y = noon.getFullYear();
+    const m = noon.getMonth();
+    const d = noon.getDate();
+    if (mask !== 0 && (mask & (1 << noon.getDay())) === 0) continue;
+    const instants = resolveDayAlarmInstants(y, m, d, hour, minute);
+    if (instants[0] > nowMs) return instants[0];
+    if (instants.length > 1 && instants[1] > nowMs && new Date(instants[1]).getTimezoneOffset() === nowOffset) {
+      return instants[1];
+    }
   }
   return nowMs + 86_400_000;
 }
@@ -112,17 +205,11 @@ export function formatLocalHero(nowMs: number, hour24: boolean, timeZone: string
   readonly zone: string;
 } {
   const dateObj = new Date(nowMs);
-  const parts = new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    hour: hour24 ? "2-digit" : "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: !hour24,
-  }).formatToParts(dateObj);
+  const parts = heroTimeFormatter(timeZone, hour24).formatToParts(dateObj);
   const period = parts.find((part) => part.type === "dayPeriod")?.value ?? "";
   const time = parts.filter((part) => part.type !== "dayPeriod").map((part) => part.value).join("").trim();
-  const date = new Intl.DateTimeFormat(undefined, { timeZone, weekday: "long", month: "long", day: "numeric" }).format(dateObj);
-  const zoneParts = new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: "short" }).formatToParts(dateObj);
+  const date = heroDateFormatter(timeZone).format(dateObj);
+  const zoneParts = heroZoneFormatter(timeZone).formatToParts(dateObj);
   const zone = zoneParts.find((part) => part.type === "timeZoneName")?.value ?? timeZone;
   return { time, period, date, zone };
 }

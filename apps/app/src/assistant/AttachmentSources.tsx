@@ -1,7 +1,7 @@
 // spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
-import { Button, Dialog, DialogContent, DialogTitle, SearchField, Skeleton, cn } from "@repo/ui";
+import { Button, Dialog, DialogContent, DialogTitle, Input, SearchField, Skeleton, cn } from "@repo/ui";
 import { Check, ChevronLeft, ChevronRight, File as FileIcon, Folder, Image, X } from "lucide-react";
-import { useRef } from "react";
+import { memo, useCallback, useRef } from "react";
 import type { Tab } from "../../gen/app__assistant__attachments.ts";
 
 /** A source row already admitted by the picker for this view. */
@@ -55,6 +55,16 @@ function sizeOf(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const PhotoThumb = memo(function PhotoThumb({ file }: { file: File }) {
+  const bind = useCallback((node: HTMLImageElement | null) => {
+    if (!node) return;
+    const url = URL.createObjectURL(file);
+    node.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return <img alt="" className="size-full object-cover" loading="lazy" ref={bind} />;
+});
+
 function SourceRow({ row, photos, reading }: { row: AttachmentSourceRow; photos: boolean; reading: boolean }) {
   const folder = row.kind === "folder";
   const icon = folder ? <Folder aria-hidden /> : <FileIcon aria-hidden />;
@@ -62,15 +72,12 @@ function SourceRow({ row, photos, reading }: { row: AttachmentSourceRow; photos:
     <button type="button" aria-label={row.selected && !folder ? `Remove ${row.name} from the selection` : row.name}
       aria-pressed={folder ? undefined : row.selected} disabled={reading || row.onPress === undefined}
       className={cn("relative min-w-0 overflow-hidden text-left text-base disabled:opacity-60",
-        photos ? "aspect-square rounded-frame bg-secondary" : "flex min-h-19 w-full items-center gap-3.5 border-b py-3 [&>svg]:size-6.5 [&>svg]:shrink-0",
+        photos ? "aspect-square rounded-frame bg-secondary" : "flex min-h-19 w-full items-center gap-3.5 border-b border-border py-3 [&>svg]:size-6.5 [&>svg]:shrink-0",
         photos && row.selected && "outline-2 -outline-offset-2 outline-alpha")}
       onClick={row.onPress}>
-      {photos && (row.thumbnail || row.thumbnailFile) ? <img src={row.thumbnail} alt="" className="size-full object-cover" loading="lazy" ref={row.thumbnailFile ? (node) => {
-        if (!node || !row.thumbnailFile) return;
-        const url = URL.createObjectURL(row.thumbnailFile);
-        node.src = url;
-        return () => URL.revokeObjectURL(url);
-      } : undefined} /> : photos ? <span aria-hidden className="flex h-full min-w-0 flex-col items-center justify-center gap-2 p-3 text-muted-foreground">
+      {photos && row.thumbnailFile ? <PhotoThumb file={row.thumbnailFile} />
+        : photos && row.thumbnail ? <img src={row.thumbnail} alt="" className="size-full object-cover" loading="lazy" />
+        : photos ? <span aria-hidden className="flex h-full min-w-0 flex-col items-center justify-center gap-2 p-3 text-muted-foreground">
         <Image className="size-6.5 shrink-0" />
         <span className="max-w-full truncate text-2xs">{row.name}</span>
       </span> : icon}
@@ -105,10 +112,9 @@ export function AttachmentSources({
         aria-label="Attach files"
         data-alpha-own-gesture=""
         aria-describedby={undefined}
-        aria-labelledby={undefined}
         overlayClassName="bg-black/28"
         style={{ top: "8dvh" }}
-        className={cn("inset-x-0 bottom-0 max-h-none max-w-103 translate-y-0 gap-0 overflow-hidden rounded-t-sheet rounded-b-none bg-background p-0 text-foreground",
+        className={cn("inset-x-0 bottom-0 max-h-none max-w-103 translate-y-0 gap-0 overflow-hidden rounded-t-sheet rounded-b-none border-t border-border bg-background p-0 text-foreground",
           "in-[body:has(main[data-alpha-native])]:max-w-none")}
         onOpenAutoFocus={(event) => { event.preventDefault(); openerRef.current?.focus(); }}
         onCloseAutoFocus={(event) => { event.preventDefault(); onReturnFocus(); }}
@@ -116,7 +122,7 @@ export function AttachmentSources({
         <header className="flex shrink-0 items-center gap-2.5 px-4 py-3">
           <Button ref={openerRef} variant="ghost" size="icon" aria-label="Close attachments" onClick={onClose}><X /></Button>
           <DialogTitle className="flex-1 font-display text-title font-normal">Attach</DialogTitle>
-          <Button aria-label="Attach selected files" size="icon" className="w-auto px-[1.125rem] text-base disabled:opacity-40"
+          <Button aria-label="Attach selected files" size="icon" className="w-auto px-[1.125rem] text-base disabled:opacity-50"
             disabled={!onAttach || selected === 0 || selected > room || reading || loading} onClick={onAttach}>Attach</Button>
         </header>
         <SearchField className="mx-5 mb-3 shrink-0" style={{ height: 46, minHeight: 46, borderRadius: 16 }} aria-label={`Search ${source}`}
@@ -132,7 +138,7 @@ export function AttachmentSources({
             aria-pressed={volume.selected} disabled={reading || !volume.onPress} onClick={volume.onPress}>{volume.name}</Button>)}
         </div>}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4" aria-busy={reading || loading || undefined}>
-          {onImport && <input ref={inputRef} type="file" aria-label={`Select ${source}`} accept={accept} multiple hidden onChange={(event) => {
+          {onImport && <Input ref={inputRef} type="file" aria-label={`Select ${source}`} accept={accept} multiple hidden onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
             if (files.length > 0) onImport(files);
@@ -155,7 +161,7 @@ export function AttachmentSources({
           {truncated && <p role="status" className="my-3 text-sm text-muted-foreground">Only some files are shown.</p>}
           {onMore && <Button variant="ghost" className="mx-auto my-3 flex" disabled={reading || loading} onClick={onMore}>{photos ? "More photos" : "More files"}</Button>}
         </div>
-        <footer style={{ minHeight: 81 }} className="flex shrink-0 items-center gap-3 border-t px-5 pt-2 pb-[max(--spacing(3.5),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_--spacing(2)))] text-meta">
+        <footer style={{ minHeight: 81 }} className="flex shrink-0 items-center gap-3 border-t border-border px-5 pt-2 pb-[max(--spacing(3.5),calc(var(--alpha-safe-bottom)+--spacing(2)))] text-meta">
           <span role="status" className="flex-1 text-muted-foreground">{selected > 0 ? `${selected} selected` : ""}</span>
           {selected > 0 && onClear && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm font-medium" disabled={reading} onClick={onClear}>Clear</Button>}
           {onBrowse && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={onBrowse}>{`Choose ${source}`}</Button>}

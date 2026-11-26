@@ -12,6 +12,7 @@ import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
 import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
+import { sheetOf } from "../src/contacts/contacts.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
@@ -49,6 +50,13 @@ const launch = (name: "Contacts" | "Messages") => drawn(() => {
   if (!tile) throw new Error(`no ${name} tile on Home`);
   tile.click();
 });
+
+async function openContacts(world: Scene) {
+  const running = await open(world);
+  await until(running.alpha, running.alpha.runtime, Shell, (s) => s.contacts);
+  await launch("Contacts");
+  return running;
+}
 
 describe("Contacts on an Alpha image", () => {
   it("Retries a contact's New message in the same Ask stage and keeps an addressed draft", async () => {
@@ -175,10 +183,8 @@ describe("Contacts on an Alpha image", () => {
   it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\"; spec/app/phone/comms.md, \"Story: Address the person or Alpha from one bar\")", async () => {
     const world = image();
     world.telephony.contacts = false;
-    const alpha = await mountedContacts(world);
-
     // spec/app/contacts/index.md, "Contacts reads the list each time it comes to the front"
-    await launch("Contacts");
+    const { alpha } = await openContacts(world);
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.list.status === "Failed" && s.rows === 0);
     await press("Allow");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
@@ -270,8 +276,7 @@ describe("Contacts on an Alpha image", () => {
   it("Add or change a contact in the phone's own editor where Alpha may not write contacts (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
     const world = image();
     world.telephony.editable = false;
-    const alpha = await mountedContacts(world);
-    await launch("Contacts");
+    const { alpha } = await openContacts(world);
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2 && !s.editable);
 
     // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
@@ -292,8 +297,7 @@ describe("Contacts on an Alpha image", () => {
       { ...first, id: "59", displayName: "7 Studio" },
       { ...first, id: "60", displayName: "Émile Amari" },
     );
-    const alpha = await mountedContacts(world);
-    await launch("Contacts");
+    const { alpha } = await openContacts(world);
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 50 && s.more);
     await press("More contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 53 && !s.more);
@@ -431,6 +435,28 @@ describe("Contacts on an Alpha image", () => {
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
+  });
+
+  it("Clamps >32 phone numbers in sheetOf and renders agent reviews inside a dialog (spec/app/contacts/index.md, \"Opening a contact reads it from the phone afresh\"; spec/app/contacts/agent.md, \"Every action is reviewed before anything is written\")", async () => {
+    const oversized = sheetOf({
+      givenName: "Maya",
+      familyName: "Chen",
+      phones: Array.from({ length: 35 }, (_, index) => `+14155550${String(index).padStart(3, "0")}`),
+      emails: [],
+      notes: "",
+    });
+    expect(oversized.phones).toBe(32);
+
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
+    await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "NoCall");
+
+    await alpha.runtime.runPromise(propose({ type: "contact_delete", query: "Ben" }, true));
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
+    const reviewDialog = document.querySelector("[role=dialog][data-alpha-review]");
+    expect(reviewDialog).not.toBeNull();
+    expect(reviewDialog?.textContent).toContain("Ben Ortiz");
   });
 
   it("Does not disclose full latest-sender address unless includeAddress is strictly true (spec/app/contacts/agent.md, \"The latest text's sender is named by its number alone, and the whole number only where the agent asked for it\")", async () => {

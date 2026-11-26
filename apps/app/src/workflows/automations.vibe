@@ -1,14 +1,18 @@
 // spec/app/workflows/automations.md, "Story: See my automations"; spec/app/workflows/automations.md, "Story: Act on an automation"; spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Model from "../../gen/app__workflows__automations.effect.vibe"
 import type { Change, Effect as Out, Event, Fired, Kind, Status } from "../../gen/app__workflows__automations.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
+import { canFile } from "../../gen/app__workflows__request.effect.vibe"
 import { daily, same, type Preset, type When } from "../../gen/app__workflows__schedule.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Garbled, Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
-import { type Prompt, PromptSchema, type PromptTiming, ScheduledTask, sendChangeWhenReady } from "./api.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type Prompt, PromptSchema, type PromptTiming, ScheduledTask, type WorkflowsApi, localTimeZone, readPromptRuns, readPrompts, sendChangeWhenReady } from "./api.vibe"
 import { type WorkflowRow, Rows, refresh } from "./list.vibe"
 
 type EditSource =
@@ -42,6 +46,12 @@ interface PromptPowerReview {
 
 const empty: EditorWords = { owner: 0, row: 0, title: "", text: "", zone: "UTC", source: { kind: "New" } }
 
+export interface AutomationWordsSnapshot {
+  readonly editor: EditorWords
+  readonly observed?: ObservedPrompt
+  readonly power?: PromptPowerReview
+}
+
 export service AutomationWords {
   view(): EditorWords!!
   hold(words: EditorWords): void!!
@@ -49,31 +59,26 @@ export service AutomationWords {
   remember(shown: ObservedPrompt): void!!
   powerReview(): (PromptPowerReview | undefined)!!
   keepPowerReview(review: PromptPowerReview): void!!
+  snapshot(this: void): AutomationWordsSnapshot
+  subscribe(this: void, listener: () => void): () => void
 }
 
 const words = Layer.sync(AutomationWords, () => {
-  let current = empty
-  let observed: ObservedPrompt | undefined
-  let power: PromptPowerReview | undefined
+  const shelf = createShelf<AutomationWordsSnapshot>({ editor: empty })
   return {
-    view: () => succeed(current),
-    hold: (words: EditorWords) => sync(() => { current = words }),
-    current: (owner: number, row: number, ticket: number) =>
-      succeed(observed?.owner === owner && observed.row === row && observed.ticket === ticket ? observed.prompt : undefined),
-    remember: (shown: ObservedPrompt) => sync(() => { observed = shown }),
-    powerReview: () => succeed(power),
-    keepPowerReview: (review: PromptPowerReview) => sync(() => { power = review }),
+    view: () => sync(() => shelf.get().editor),
+    hold: (editor: EditorWords) => sync(() => { shelf.update((cur) => ({ ...cur, editor })) }),
+    current: (owner: number, row: number, ticket: number) => sync(() => {
+      const observed = shelf.get().observed
+      return observed?.owner === owner && observed.row === row && observed.ticket === ticket ? observed.prompt : undefined
+    }),
+    remember: (observed: ObservedPrompt) => sync(() => { shelf.update((cur) => ({ ...cur, observed })) }),
+    powerReview: () => sync(() => shelf.get().power),
+    keepPowerReview: (power: PromptPowerReview) => sync(() => { shelf.update((cur) => ({ ...cur, power })) }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
   }
 })
-
-module local {
-  /** @throws {never} */
-  export function timezone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  }
-}
-import { timezone } from local
-
 const TriggerReply = Schema.Struct({ trigger: PromptSchema })
 const TaskReply = Schema.Struct({ task: ScheduledTask })
 const RemovedReply = Schema.Struct({ ok: Schema.Literal(true) })
@@ -119,7 +124,28 @@ export function rowOffers(row: WorkflowRow, wanted: Change): boolean {
 
 const selectedRow = (place: Listing.Place): number => place.tag === "ListingDetail" ? place.row : 0
 
-type Needs = Agent | Rows | Listing.Machine | Model.Machine | AutomationWords
+const HeldAutomationChange = Schema.fromJsonString(Schema.Struct({
+  id: Schema.Int,
+  wanted: Schema.Literals(["Create", "Edit", "Enable", "Disable", "Remove", "Fire", "Snooze", "Complete", "Dismiss", "Skip", "Reopen"]),
+  targetKind: Schema.Literals(["Prompt", "Task"]),
+  targetId: Schema.String,
+  expectedRevision: Schema.optionalKey(Schema.Int),
+  displayName: Schema.optionalKey(Schema.String),
+  instructions: Schema.optionalKey(Schema.String),
+  timezone: Schema.optionalKey(Schema.String),
+  timing: Schema.optionalKey(Schema.Union([
+    Schema.Struct({ triggerType: Schema.Literal("once"), scheduledAtIso: Schema.NonEmptyString }),
+    Schema.Struct({ triggerType: Schema.Literal("cron"), cronExpression: Schema.NonEmptyString }),
+    Schema.Struct({ triggerType: Schema.Literal("event"), eventKind: Schema.NonEmptyString }),
+  ])),
+  existingIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  startedAfter: Schema.optionalKey(Schema.Int),
+  previousFiredAt: Schema.optionalKey(Schema.String),
+}))
+
+const automationChangeKey = (owner: string) => `alpha/workflows/automation-change/${encodeURIComponent(owner)}`
+
+type Needs = Agent | WorkflowsApi | Rows | Listing.Machine | Model.Machine | AutomationWords | KeyValueStore.KeyValueStore | Time
 
 effect function read(ticket: number, owner: number): Event!!Needs {
   const failed: Event = {
@@ -212,11 +238,18 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
   const machine = try Model.Machine
   const state = try machine.get()
   const rows = try Rows
+  const store = try KeyValueStore.KeyValueStore
   const selected = try rows.row(state.owner, state.row)
   const scope = ownerAt() catch () => ""
   const failed: Event = { type: "changeAnswered", id, applied: false, fired: wanted === "Fire" ? "DispatchFailed" : "NotFired" }
   if (!(try rows.sameOwner(scope, state.owner)) || (selected !== undefined && !rowOffers(selected, wanted))) return failed
   const key = try (try Attempts).key(id)
+  const heldKey = automationChangeKey(scope)
+  const rawHeld = (store.get(heldKey) catch () => undefined)
+  const previousHeld = rawHeld === undefined ? undefined : (Schema.decodeUnknownEffect(HeldAutomationChange)(rawHeld) catch () => undefined)
+  const now = try (try Time).now()
+  const persistHeld = (record: typeof HeldAutomationChange.Type) =>
+    ignore(store.set(heldKey, JSON.stringify(record)))
   const resolved = effect {
     if (wanted === "Create" || wanted === "Edit") {
       const draft = try (try AutomationWords).view()
@@ -226,11 +259,22 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
         ? originalTiming(source.prompt) : { triggerType: "cron", cronExpression: cron(when) }
       const form = { kind: "prompt", displayName: draft.title.trim(), instructions: draft.text.trim(), timezone: draft.zone, ...timing }
       if (wanted === "Create" && source.kind === "New") {
+        const existingIds = state.change.again && previousHeld?.id === id && previousHeld.existingIds !== undefined
+          ? previousHeld.existingIds
+          : (try rows.view(state.owner)).rows.filter((item) => item.kind === "Prompt").map((item) => item.id)
+        try persistHeld({
+          id, wanted, targetKind: "Prompt", targetId: "", displayName: form.displayName,
+          instructions: form.instructions, timezone: form.timezone, timing, existingIds,
+        })
         const { trigger } = try ask(Agent, post("/api/triggers", { ...form, enabled: false, wakeMode: "inject_now" }), TriggerReply)
         return { ...failed, applied: !trigger.enabled }
       }
       if (wanted !== "Edit" || selected?.kind !== "Prompt" || source.kind !== "Existing" || source.prompt.id !== selected.id) return failed
       const original = source.prompt
+      try persistHeld({
+        id, wanted, targetKind: "Prompt", targetId: original.id, expectedRevision: original.revision,
+        displayName: form.displayName, instructions: form.instructions, timezone: form.timezone, timing,
+      })
       const { trigger } = try ask(Agent, put(promptPath(original.id), { ...form, expectedRevision: original.revision }), TriggerReply)
       const applied = trigger.id === original.id && trigger.revision === original.revision + 1 && trigger.enabled === original.enabled &&
         trigger.displayName === form.displayName && trigger.instructions === form.instructions &&
@@ -247,15 +291,18 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
         const enabled = wanted === "Enable"
         if (reviewed?.owner !== state.owner || reviewed.row !== state.row || reviewed.id !== selected.id || reviewed.enabled !== enabled ||
           observed?.id !== reviewed.id || observed.revision !== reviewed.revision || observed.enabled === enabled) return failed
+        try persistHeld({ id, wanted, targetKind: "Prompt", targetId: selected.id, expectedRevision: reviewed.revision })
         const { trigger } = try ask(Agent, put(path, { enabled, expectedRevision: reviewed.revision }), TriggerReply)
         return trigger.id === reviewed.id && trigger.enabled === enabled && trigger.revision === reviewed.revision + 1
           ? { ...failed, applied: true } : ({ type: "changeUnanswered" } as const)
       }
       if (wanted === "Remove") {
+        try persistHeld({ id, wanted, targetKind: "Prompt", targetId: selected.id, expectedRevision: selected.record.revision })
         try ask(Agent, HttpClientRequest.delete(path, { urlParams: { expectedRevision: String(selected.record.revision) } }), RemovedReply)
         return { ...failed, applied: true }
       }
       if (wanted === "Fire") {
+        try persistHeld({ id, wanted, targetKind: "Prompt", targetId: selected.id, startedAfter: now })
         const run = try ask(Agent, post(`${path}/execute`, {}), TriggerExecution)
         const state: Fired = run.ok && run.result.status === "success" ? "Dispatched" : run.result.status === "skipped" ? "SkippedRun" : "DispatchFailed"
         return { ...failed, fired: state, applied: state === "Dispatched" }
@@ -264,12 +311,17 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
     }
     const path = taskPath(selected.id)
     if (wanted === "Fire") {
+      try persistHeld({
+        id, wanted, targetKind: "Task", targetId: selected.id,
+        ...(selected.record.state.firedAt === undefined ? {} : { previousFiredAt: selected.record.state.firedAt }),
+      })
       const result = try ask(Agent, post(`${path}/fire`, {}), TaskFire)
       const outcome = fired(result.fire.kind)
       return { ...failed, fired: outcome, applied: outcome === "Dispatched" || outcome === "Deferred" }
     }
     const verb = verbOf[wanted]
     if (verb === undefined) return failed
+    try persistHeld({ id, wanted, targetKind: "Task", targetId: selected.id })
     const { task } = try ask(Agent, post(`${path}/${verb}`, { idempotencyKey: key, ...(wanted === "Snooze" ? { minutes } : {}) }), TaskReply)
     return { ...failed, applied: task.taskId === selected.id }
   } catch (error) => {
@@ -277,8 +329,75 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
     return outcome.known && !(error instanceof Garbled) ? failed : ({ type: "changeUnanswered" } as const)
   }
   if ((ownerAt() catch () => "") !== scope) return { type: "changeUnanswered" }
+  if (resolved.type === "changeAnswered") try ignore(store.remove(heldKey))
   try refresh()
   return resolved
+}
+
+effect function checkAutomationChange(ticket: number, id: number): Event!!Needs {
+  const failed: Event = { type: "changeChecked", ticket, ok: false, found: false }
+  const machine = try Model.Machine
+  const state = try machine.get()
+  const rows = try Rows
+  const store = try KeyValueStore.KeyValueStore
+  const scope = ownerAt() catch () => ""
+  if (!(try rows.sameOwner(scope, state.owner))) return failed
+  const heldKey = automationChangeKey(scope)
+  const raw = (store.get(heldKey) catch () => undefined)
+  const held = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldAutomationChange)(raw) catch () => undefined)
+  if (held === undefined || held.id !== id) return failed
+  const found: boolean | undefined = effect {
+    if (held.targetKind === "Prompt") {
+      if (held.wanted === "Create") {
+        const prompts = try readPrompts()
+        const prior = new Set(held.existingIds ?? [])
+        return prompts.some((prompt) => !prior.has(prompt.id) &&
+          (held.displayName === undefined || prompt.displayName === held.displayName) &&
+          (held.instructions === undefined || prompt.instructions === held.instructions) &&
+          (held.timezone === undefined || prompt.timezone === held.timezone) &&
+          (held.timing === undefined || sameTiming(prompt, held.timing)))
+      }
+      if (held.wanted === "Fire") {
+        const runs = try readPromptRuns(held.targetId)
+        const after = held.startedAfter ?? 0
+        return runs.some((run) => run.startedAt >= after)
+      }
+      const existing: Prompt | null | undefined = effect {
+        const { trigger } = try ask(Agent, HttpClientRequest.get(promptPath(held.targetId)), TriggerReply)
+        return trigger
+      } catch (error) => error instanceof Refused && error.status === 404 ? null : undefined
+      if (existing === undefined) return undefined
+      if (held.wanted === "Remove") return existing === null
+      if (existing === null) return false
+      const revOk = held.expectedRevision === undefined || existing.revision > held.expectedRevision
+      if (held.wanted === "Enable") return revOk && existing.enabled
+      if (held.wanted === "Disable") return revOk && !existing.enabled
+      if (held.wanted === "Edit") {
+        return revOk &&
+          (held.displayName === undefined || existing.displayName === held.displayName) &&
+          (held.instructions === undefined || existing.instructions === held.instructions) &&
+          (held.timezone === undefined || existing.timezone === held.timezone) &&
+          (held.timing === undefined || sameTiming(existing, held.timing))
+      }
+      return false
+    }
+    const { task } = try ask(Agent, HttpClientRequest.get(taskPath(held.targetId)), TaskReply)
+    if (task.taskId !== held.targetId) return false
+    if (held.wanted === "Fire") return task.state.firedAt !== undefined && task.state.firedAt !== held.previousFiredAt
+    const expected: Partial<Record<Change, Status>> = {
+      Complete: "Completed", Dismiss: "Dismissed", Skip: "Skipped", Reopen: "Scheduled", Snooze: "Scheduled",
+    }
+    const want = expected[held.wanted]
+    return want !== undefined && taskStatus(task.state.status) === want
+  } catch () => undefined
+  const confirmed = ownerAt() catch () => ""
+  const live = try machine.get()
+  if (found === undefined || confirmed !== scope || live.owner !== state.owner || !Model.canChangeChecked(live, ticket)) return failed
+  if (found) {
+    try ignore(store.remove(heldKey))
+    try refresh()
+  }
+  return { type: "changeChecked", ticket, ok: true, found }
 }
 
 function carry(fx: Out): Job<Event, Needs, []> {
@@ -287,8 +406,8 @@ function carry(fx: Out): Job<Event, Needs, []> {
       type: "automationsRead", ticket, ok: false, complete: false, count: 0, issues: 0, present: false, on: false, status: "Scheduled", issue: false, kind: "PromptTask",
     });
     when { tag: "AskAgent", let id, change: let wanted, when: let schedule, let minutes }: answer("change automation", change(id, wanted, schedule, minutes), { type: "changeUnanswered" });
-    when { tag: "ReadChangeRecord", let ticket }: answer("automation receipt",
-      succeed<Event>({ type: "changeChecked", ticket, ok: false, found: false }), { type: "changeChecked", ticket, ok: false, found: false });
+    when { tag: "ReadChangeRecord", let ticket, let id }: answer("automation receipt",
+      checkAutomationChange(ticket, id), { type: "changeChecked", ticket, ok: false, found: false });
   }
 }
 
@@ -327,7 +446,7 @@ export effect function editAutomation(owner: number, row: number): void!!(Model.
   if (prompt === undefined) {
     const event: Event = { type: "openEditor", kind: "PromptTask", zone: 0 }
     if (!Model.enabled(state, event)) return
-    try words.hold({ ...empty, owner, zone: timezone() })
+    try words.hold({ ...empty, owner, zone: localTimeZone() })
     try ignore(machine.send(event))
     return
   }
@@ -363,4 +482,15 @@ export effect function backAutomations(): boolean!!Model.Machine {
   return true
 }
 
-export const automations = together(reacting(Model, { carry }), words, choosing, sending)
+const clearSettled = applying(
+  Model.Machine,
+  (state) => ({ owner: state.owner, settled: canFile(state.change) }),
+  effect ({ owner, settled }: { owner: number; settled: boolean }) => {
+    if (!settled || owner <= 0) return
+    const scope = ownerAt() catch () => ""
+    if (!(try (try Rows).sameOwner(scope, owner))) return
+    try ignore((try KeyValueStore.KeyValueStore).remove(automationChangeKey(scope)))
+  },
+)
+
+export const automations = together(reacting(Model, { carry }), words, choosing, sending, clearSettled)

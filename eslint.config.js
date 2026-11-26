@@ -35,11 +35,12 @@ const timersOf = ["window", "globalThis", "self"].flatMap((object) => timers.map
 const clocks = [
   { selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']", message: 'A screen reads no clock: write `now: untimed`, and show a time the machine holds: AGENTS.md, "This project".' },
   { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: 'A screen reads no clock: write `now: untimed`, and show a time the machine holds: AGENTS.md, "This project".' },
+  { selector: "CallExpression[callee.object.name='performance'][callee.property.name='now']", message: 'A screen reads no clock: write `now: untimed`, and show a time the machine holds: AGENTS.md, "This project".' },
   { selector: "CallExpression[callee.property.name='format'][arguments.length=0]", message: 'A formatter with no date formats the clock, and a screen reads no clock: format a time the machine holds: AGENTS.md, "This project".' },
 ]
 const noReact = { patterns: [...imports.patterns, { regex: "^react(?:-dom)?(?:/|$)", message: `Tool and domain code does not import React: ${monorepo}.` }] }
 // What no tsconfig.json includes, so the type-aware rules cannot see it.
-const untyped = ["*.{js,ts}", "vibestack/studio/scripts/**", "**/.storybook/**", "packages/design-system/**", "vibestack/design/test/**", "vibestack/stories/test/**"]
+const untyped = ["*.{js,ts}", "apps/app/public/**/*.js", "vibestack/studio/scripts/**", "**/.storybook/**", "packages/design-system/**", "vibestack/design/test/**", "vibestack/stories/test/**"]
 // Every React interface: Studio's page is built on the same theme (vibestack/studio/vite.config.ts).
 const tsx = ["packages/ui/**/*.{ts,tsx}", "apps/**/*.{ts,tsx}", "vibestack/studio/src/page/**/*.{ts,tsx}"]
 const design = "packages/design-system"
@@ -108,7 +109,7 @@ const effects = {
 }
 const code = { rules: { comments, effects } }
 const own = ["apps/**", "packages/**"]
-const commented = { "apps/app/src/App.tsx": 2, "apps/app/test/app.browser.test.tsx": 1, "packages/ui/vite.config.ts": 1 }
+const commented = { "apps/app/test/app.browser.test.tsx": 1, "packages/ui/vite.config.ts": 1 }
 const scheduled = {}
 
 // The tool reads Quint's JSON and the TypeScript compiler API as `any` at its boundaries; packages and apps stay strict.
@@ -116,7 +117,7 @@ const loose = Object.fromEntries(["no-explicit-any", "no-unsafe-argument", "no-u
 
 export default withWorkspaceBarrels(defineConfig(
   // Generated or disposable, and .claude/worktrees holds other checkouts of this repository.
-  globalIgnores(["**/gen/", "!vibestack/gen/", "**/.vibe/", "**/dist/", "**/.cache/", "**/.spec-cache/", "**/generated/", "**/storybook-static/", "**/test/fixtures/", "vibestack/examples/", "vibestack/fixtures/", ".claude/", "legacy/", ".lemmascript/", ".studio/", ".turbo/", "_apalache-out/"]),
+  globalIgnores([".eliza/", "apps/app/android/", "apps/app/aosp/", "**/gen/", "!vibestack/gen/", "**/.vibe/", "**/dist/", "**/.cache/", "**/.spec-cache/", "**/generated/", "**/storybook-static/", "**/test/fixtures/", "vibestack/examples/", "vibestack/fixtures/", ".claude/", "legacy/", ".lemmascript/", ".studio/", ".turbo/", "_apalache-out/"]),
   { linterOptions: { reportUnusedDisableDirectives: "error", reportUnusedInlineConfigs: "error" } },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
@@ -155,6 +156,7 @@ export default withWorkspaceBarrels(defineConfig(
     },
   },
   { files: untyped, extends: [tseslint.configs.disableTypeChecked] },
+  { files: ["apps/app/public/voice/**/*.js"], languageOptions: { globals: { AudioWorkletProcessor: "readonly", registerProcessor: "readonly", sampleRate: "readonly" } } },
   // A ratchet at today's longest (Studio's server); a test's describe block holds its cases.
   { ignores: ["**/test/**", "vibestack/selftest.ts"], rules: { "max-lines-per-function": ["error", { max: 250, skipBlankLines: true, skipComments: true }] } },
   {

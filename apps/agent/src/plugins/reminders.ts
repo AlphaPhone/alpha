@@ -135,6 +135,13 @@ async function detachCompletedTask(store: AlphaAppsStore, runtime: AgentRuntimeL
   return followTask(store, runtime, before, before, timeZone, false);
 }
 
+async function snoozeMirroredTask(runtime: AgentRuntimeLike | undefined, agentTaskId: string | null, untilMs: number): Promise<void> {
+  if (agentTaskId === null) return;
+  const tasksApi = scheduledTasksOf(runtime);
+  if (tasksApi === undefined) return;
+  await answered(tasksApi, agentTaskId, { kind: "verb", verb: { tag: "SnoozeUntil", until: untilMs } }, "Scheduled");
+}
+
 async function notifyReminder(runtime: AgentRuntimeLike | undefined, title: string, body: string, itemId: string): Promise<void> {
   const notifier = notificationsOf(runtime);
   if (notifier === undefined) return;
@@ -379,6 +386,9 @@ async function handleRemindersManage(
     const mirrored = (await followTask(store, runtime, undefined, created, timeZone)).item ?? created;
     return { success: true, text: `Added reminder "${mirrored.title}"${formatDueSummary(mirrored, store.now(), timeZone)}.`, data: { op, item: mirrored } };
   }
+  if (op !== "complete" && op !== "reopen" && op !== "snooze" && op !== "flag" && op !== "move" && op !== "delete" && op !== "add_subtask" && op !== "toggle_subtask" && op !== "update") {
+    return { success: false, text: `Unknown reminders action "${op}".` };
+  }
   const target = findReminderTarget(store, params);
   if (target === undefined) return { success: false, text: "No matching reminder found." };
   if (op === "complete") {
@@ -402,7 +412,12 @@ async function handleRemindersManage(
   }
   if (op === "snooze") {
     const snoozed = store.snoozeItem(target.id, { minutes: readNumber(params, "minutes") ?? 10, untilMs: readNumber(params, "untilMs") });
-    if (snoozed !== undefined) await notifyReminder(runtime, `Snoozed: ${snoozed.title}`, "Reminder snoozed.", snoozed.id);
+    if (snoozed !== undefined) {
+      if (snoozed.snoozedUntilMs !== null) {
+        await snoozeMirroredTask(runtime, snoozed.agentTaskId, snoozed.snoozedUntilMs);
+      }
+      await notifyReminder(runtime, `Snoozed: ${snoozed.title}`, "Reminder snoozed.", snoozed.id);
+    }
     return { success: true, text: `Snoozed "${target.title}".`, data: { op, item: snoozed } };
   }
   if (op === "flag") {
@@ -557,7 +572,12 @@ export function remindersProvider(store: AlphaAppsStore, timeZone: string): Agen
           flaggedCount: flagged.length,
           listCount: snapshot.lists.length,
         },
-        data: { snapshot, selectedId: selectedItem?.id ?? null },
+        data: {
+          version: snapshot.version,
+          overdueIds: overdue.slice(0, 8).map((item) => item.id),
+          dueTodayIds: dueToday.slice(0, 8).map((item) => item.id),
+          selectedId: selectedItem?.id ?? null,
+        },
       };
     },
   };
@@ -786,6 +806,9 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
           untilMs: readNumber(body, "untilMs") ?? readNumber(body, "snoozedUntilMs"),
         });
         if (item === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+        if (item.snoozedUntilMs !== null) {
+          await snoozeMirroredTask(runtime, item.agentTaskId, item.snoozedUntilMs);
+        }
         await notifyReminder(runtime, `Snoozed: ${item.title}`, "Reminder snoozed.", item.id);
         return { status: 200, body: { item, snapshot: store.getReminders() } };
       },
@@ -794,9 +817,14 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       method: "POST",
       path: "/api/alpha/reminders/items/{id}/restore",
       handler: async (input) => {
+        const id = input.parameters.get("id") ?? "";
         const body = asRecord(input.body);
-        const before = itemNamed(store, input.parameters.get("id"));
-        const restored = store.restoreItem(input.parameters.get("id") ?? "", body.item);
+        const rawItem = asRecord(body.item);
+        if (rawItem.id !== undefined && (typeof rawItem.id !== "string" || rawItem.id.trim() !== id)) {
+          return { status: 400, body: { error: "invalid_reminder_item" } };
+        }
+        const before = itemNamed(store, id);
+        const restored = store.restoreItem(id, body.item);
         if (restored === undefined) return { status: 404, body: { error: "reminder_not_found" } };
         return taskAnswer(store, before === undefined
           ? await followTask(store, runtime, undefined, store.updateItem(restored.id, { agentTaskId: null }), timeZone)

@@ -1,9 +1,9 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
 import { Alert, AppHeader, AssistantChatActions, Avatar, Banner, Button, Chip, Input, ListGroup, ListRow, SearchField, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
+import { Effect, Exit, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER, type ContactDetail } from "@elizaos/os-bridges";
 import { Check, ChevronDown, ChevronLeft, MessageSquare, Minus, Pencil, Plus, Search, Trash2, X, createLucideIcon } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
 import { useMachine as useContacts } from "../../gen/app__contacts.react.ts";
@@ -64,8 +64,11 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const search = (typed: string) => {
     const event = { type: "search", typed: typed.trim() !== "" } as const;
     if (!can(event)) return;
+    const before = { sought: held.sought, filteredBy: held.filteredBy };
     set({ sought: typed, filteredBy: "Owner" });
-    void send(event);
+    void send(event).then((outcome) => {
+      if (Exit.isFailure(outcome)) set(before);
+    });
   };
   const safe = clear(phone);
   const editing = state.form !== "Shut";
@@ -97,7 +100,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const filtered = state.sought && !searching && applied;
   const chip = filtered && (
     <>
-      <Chip className="min-w-0 [&>button:first-child]:min-w-0" onClear={() => void send({ type: "endSearch" })} clearLabel={`Clear filter ${query}`}><span className="truncate">{query} · {state.rows}</span></Chip>
+      <Chip className="min-w-0 [&>button:first-child]:min-w-0" onClear={can({ type: "endSearch" }) ? () => void send({ type: "endSearch" }) : undefined} clearLabel={`Clear filter ${query}`}><span className="truncate">{query} · {state.rows}</span></Chip>
       <span className="flex-1" />
     </>
   );
@@ -108,13 +111,19 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     </form>
   ) : undefined;
   const header = phoneTabs ? (
-    // v119 (45f6bed30) prototype/phone-adapter.ts:276-277: the pill on Contacts shows no unheard voicemail dot.
     <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={false} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
   ) : searchHeader ?? (
     <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} firstPage label="Back to apps" />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
   const route = shell.state?.route;
+  const bar = !editing ? (
+    <CommsBar runtime={runtime}
+      person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
+      actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="comms" triggerId={contactChatActionsId(route, state.contact)}
+        onAttach={() => attachFromContact(alpha, route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
+      filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />
+  ) : null;
   const notices = <>
       {pending(state) && <p role="status" className="sr-only">Contact change pending</p>}
       {uncertain(state) && <Banner variant="warn" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Refresh</Button>}>Outcome unknown: refresh</Banner>}
@@ -153,11 +162,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
         {state.opened && <Over inert={editing} aria-hidden={editing || undefined}><div className="flex flex-1 flex-col">{notices}<Card runtime={runtime} safe={safe} route={route} /></div></Over>}
         {!fromPhone && editor}
       </Layers>
-      {!editing && <CommsBar runtime={runtime}
-        person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-        actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="comms" triggerId={contactChatActionsId(route, state.contact)}
-          onAttach={() => attachFromContact(alpha, route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
-        filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />}
+      {!fromPhone && bar}
     </section>
   );
   if (!fromPhone) return content;
@@ -165,6 +170,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="relative min-h-0 flex-1 gap-0">
       {phoneTabs && <div className="contents" inert={editing} aria-hidden={editing || undefined}>{header}</div>}
       <TabsContent value="Contacts" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</TabsContent>
+      {bar}
       {editor}
     </Tabs>
   );
@@ -194,7 +200,7 @@ function Card({ runtime, safe, route }: ContactsProps & { safe: boolean; route: 
   const initials = card ? callerInitials(card.displayName) : "";
   return (
     <div data-alpha-contact-detail="" data-alpha-compact={compact} className="flex flex-1 flex-col">
-      <div data-host-chrome="" className="mt-11 flex min-h-11 items-center gap-1 px-2">
+      <div data-host-chrome="" className="mt-[var(--alpha-safe-top)] flex min-h-11 items-center gap-1 px-2">
         {can({ type: "closeContact" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" onClick={() => void send({ type: "closeContact" })}><ChevronLeft /></Button>}
         {compact && showing && <>
           <span aria-hidden className="mr-1 flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary font-display text-sm">{initials}</span>
@@ -303,24 +309,32 @@ function ContactValues({ kind, values, base, locked, change }: ContactValuesProp
 function Editor({ runtime }: ContactsProps) {
   const { state, can, send } = useContacts(runtime);
   const phone = usePhone(runtime).state;
+  const [slotVersion, setSlotVersion] = useState(0);
   if (!state || !phone) return null;
   const { form, problem, editBase, refusedWrite } = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const safe = clear(phone);
   const locked = pending(state);
   const canSave = problem !== "stale" && problem !== "not-found" && can({ type: "save", clear: safe });
+  const addBlankSlot = (next: Form) => {
+    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ form: next })));
+    setSlotVersion((count) => count + 1);
+  };
   const update = (next: Form, part: "Names" | "Phones" | "Emails" | "Notes") => {
     const sheet = sheetOf(next);
     const count = part === "Names" ? sheet.names : part === "Phones" ? sheet.phones : part === "Emails" ? sheet.emails : sheet.notes;
     const event = { type: "fill", part, count } as const;
     if (!can(event)) return;
+    const before = { form, problem };
     runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ form: next, problem: problem === "stale" || problem === "not-found" ? problem : undefined })));
-    void send(event);
+    void send(event).then((outcome) => {
+      if (Exit.isFailure(outcome)) runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set(before)));
+    });
   };
   const title = state.form === "Adding" ? "New contact" : "Edit contact";
   const add = "h-11 flex-[1_1_140px] justify-start rounded-lg p-2 text-sm font-normal text-muted-foreground";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <form aria-label={title} noValidate className="flex min-h-0 flex-1 flex-col pt-[max(3.25rem,calc(env(safe-area-inset-top)+0.5rem))]" onSubmit={(event) => {
+      <form aria-label={title} data-slot-version={slotVersion} noValidate className="flex min-h-0 flex-1 flex-col pt-[max(3.25rem,calc(var(--alpha-safe-top)+0.5rem))]" onSubmit={(event) => {
         event.preventDefault();
         if (canSave) void send({ type: "save", clear: safe });
       }}>
@@ -328,7 +342,7 @@ function Editor({ runtime }: ContactsProps) {
           <Button type="button" variant="ghost" size="icon" aria-label="Cancel" disabled={!can({ type: "discard" })} onClick={() => void send({ type: "discard" })}><X /></Button>
           <h1 className="sr-only">{title}</h1>
           <span className="flex-1" />
-          <Button type="submit" aria-label="Save" className="mr-2 h-11 w-16 min-w-16 px-0 disabled:opacity-100" disabled={!canSave}><Check /></Button>
+          <Button type="submit" aria-label="Save" className="mr-2 h-11 w-16 min-w-16 px-0" disabled={!canSave}><Check /></Button>
         </div>
         <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-2.5 overflow-y-auto px-4 pb-4">
           {locked && <p role="status" className="sr-only">Contact change pending</p>}
@@ -340,8 +354,8 @@ function Editor({ runtime }: ContactsProps) {
           {state.sheet.notable ? <Textarea className="field-sizing-fixed min-h-24 resize-y rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg leading-normal focus-visible:outline-none" rows={3} autoComplete="off" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
             : <p data-alpha-contact-notes-unavailable="" className="rounded-tile bg-secondary px-4.5 py-3.5 text-base leading-normal text-muted-foreground">Notes can’t be edited here. Use Android Contacts to change them.</p>}
           <div className="flex flex-wrap gap-2.5">
-            {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => update({ ...form, phones: [...form.phones, ""] }, "Phones")}>Add another phone</Button>}
-            {form.emails.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => update({ ...form, emails: [...form.emails, ""] }, "Emails")}>Add another email</Button>}
+            {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => addBlankSlot({ ...form, phones: [...form.phones, ""] })}>Add another phone</Button>}
+            {form.emails.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => addBlankSlot({ ...form, emails: [...form.emails, ""] })}>Add another email</Button>}
           </div>
         </div>
       </form>

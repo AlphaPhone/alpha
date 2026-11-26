@@ -12,6 +12,7 @@ import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -20,6 +21,7 @@ import { stepping } from "../shell/shell.vibe"
 import { addHomeLayer, reconcileAddHome } from "./addHome.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
+import { waiting as homeWaiting } from "./waiting.vibe"
 
 module words {
   import { type HomeNoticeMessage, homeNoticeWords } from "@repo/ui"
@@ -105,23 +107,11 @@ export interface Told {
   readonly place: "InEditBar" | "InDrawer"
 }
 
-let last: Told | undefined
-const listeners = new Set<() => void>()
-
-function clearTold(): void {
-  if (last === undefined) return
-  last = undefined
-  for (const listener of [...listeners]) listener()
-}
-
-function subscribeTold(this: void, listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
+const toldShelf = createShelf<Told | undefined>(undefined)
 
 export const told = {
-  snapshot: (): Told | undefined => last,
-  subscribe: subscribeTold,
+  snapshot: toldShelf.snapshot,
+  subscribe: toldShelf.subscribe,
 }
 
 // spec/app/home/index.md, "The app in the menu can be added to Home or handed to Android as App info"
@@ -177,8 +167,7 @@ effect function tell(fx: Out) {
     try say(wordsOf(notice), true)
     return
   }
-  last = { notice, place }
-  for (const listener of [...listeners]) listener()
+  toldShelf.set({ notice, place })
 }
 
 export effect function homeInput(beside: boolean) {
@@ -208,9 +197,8 @@ export effect function editHome(input: HomeEditInput, route: number, beside: boo
   }
   if (!current()) return false
   const accepted = try contained(home.send(event, owner, current), "changing Home")
-  if (accepted && input.type === "beginEditing" && last?.place === "InEditBar") {
-    last = undefined
-    for (const listener of [...listeners]) listener()
+  if (accepted && input.type === "beginEditing" && toldShelf.get()?.place === "InEditBar") {
+    toldShelf.reset()
   }
   return accepted
 }
@@ -337,21 +325,25 @@ const presented = started(effect {
   })
 }, "presenting Home")
 
+const shelfReset = Layer.effectDiscard(Effect.addFinalizer(() => sync(() => { toldShelf.reset(); catalog.reset(); homeWaiting.reset() })))
+
 // spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing"
-const clearing = started(effect {
-  clearTold()
+/** Clear inline Home failure notices whenever the surface closes or the failed action succeeds. */
+const shelfLifecycle = started(effect {
+  toldShelf.reset()
   const home = try Home.Machine
   const shell = try Shell.Machine
   const canvas = try Canvas
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(home.changes, shell.changes), canvas.changes), ([[h, s], c]) => sync(() => {
-    if (last === undefined) return
+    const current = toldShelf.get()
+    if (current === undefined) return
     const beside = Home.besideHomeSheet(s, landscapeHomeInput(c))
-    if (Home.noticeAt(h, s, beside) !== last.place) clearTold()
-    else if (last.place === "InEditBar" && h.tiles.save.outcome === "Confirmed") clearTold()
-    else if (last.place === "InDrawer" && last.notice.tag === "TellAppsUnread" && h.installed.read.status === "Loaded") clearTold()
-    else if (last.place === "InDrawer" && last.notice.tag === "TellNotOpened" && h.handoff.attempt.outcome === "Confirmed") clearTold()
+    if (Home.noticeAt(h, s, beside) !== current.place) toldShelf.reset()
+    else if (current.place === "InEditBar" && h.tiles.save.outcome === "Confirmed") toldShelf.reset()
+    else if (current.place === "InDrawer" && current.notice.tag === "TellAppsUnread" && h.installed.read.status === "Loaded") toldShelf.reset()
+    else if (current.place === "InDrawer" && current.notice.tag === "TellNotOpened" && h.handoff.attempt.outcome === "Confirmed") toldShelf.reset()
   }))
-}, "clearing Home's inline notice")
+}, "clearing retired Home notices")
 
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
 export const home = together(
@@ -363,7 +355,8 @@ export const home = together(
     timers: (h) => (waiting(h.handoff) ? [due("android", h.handoff.until, { type: "stopWaiting", now: untimed }, owner)] : []),
   }),
   presented,
-  clearing,
+  shelfReset,
+  shelfLifecycle,
   reacting(Drawer, {}),
   following(Shell.Machine, (shell) => shell.drawer, Drawer.Machine, (open) => open ? undefined : { type: "clear" } as const),
   following(Home.Machine, (state) => state.installed.apps, Drawer.Machine, (listed) => ({ type: "appsChanged", listed } as const)),

@@ -46,8 +46,10 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
   const speaker = useSpeaker(runtime).state;
   const composer = useComposer(runtime);
   const telecom = usePhone(runtime).state?.telecom;
-  const bridge = runtime.runSync(VoiceBridge);
-  const available = runtime.runSync(bridge.available());
+  const { available, canRead } = useMemo(() => {
+    const bridge = runtime.runSync(VoiceBridge);
+    return { available: runtime.runSync(bridge.available()), canRead: runtime.runSync(bridge.canRead()) };
+  }, [runtime]);
   const audioFree = speaker !== undefined && speaker.stage === "Silent" && !speaker.retiring;
   const noCall = telecom !== "OrdinaryCall" && telecom !== "MaybeEmergencyCall";
   const talk = { type: "startTalking", now: untimed } as const;
@@ -55,17 +57,18 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
   const canDictate = available && noCall && audioFree && composer.state?.away === "Free" && composer.can({ type: "edit", blank: false, long: false }) && voice.can({ type: "openRecorder", target: "ComposerField" });
   const recorder = voice.state?.recorder;
   const dictating = recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField";
-  const preview = dictating && recorder.stage === "Review" && noCall && speaker !== undefined && !speaker.latched && runtime.runSync(bridge.canRead())
+  const preview = dictating && recorder.stage === "Review" && noCall && speaker !== undefined && !speaker.latched && canRead
     ? {
       playing: speaker.text === "Transcript" && speaker.item === recorder.ticket && speaker.stage !== "Silent",
       toggle: (ticket: number) => void runtime.runPromise(readTranscript(ticket)),
     } : undefined;
-  const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
+  const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && canRead;
   const messageActions = useMemo<MessageActions>(() => {
     const destination = emailDestination(inbox, drafts);
+    const emailAction = destination ? (selection: Parameters<typeof emailMessage>[0]) => void runtime.runPromise(emailMessage(selection, destination)) : undefined;
     return {
       copy: (selection) => void runtime.runPromise(copyMessage(selection)),
-      useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
+      useInEmail: emailAction,
       reading: speaker?.text === "Message" && reading(speaker)
         ? { message: speaker.item, stop: () => void runtime.runPromise(stopMessage(speaker.ticket)) } : undefined,
       openLink: registered("AlphaBrowser") ? (href) => void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])

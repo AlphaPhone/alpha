@@ -211,10 +211,16 @@ module documents {
 
   export function writeSession(saved: unknown): Promise<void> {
     return transaction("readwrite", [sessionKey], (store, [row]) => {
-      const before = readEnvelope(row)
-      const prior = normalizeBrowsing(content(before))
+      let before: Envelope
+      let priorVisitTimes: Readonly<Record<string, number>> = {}
+      try {
+        before = readEnvelope(row)
+        priorVisitTimes = normalizeBrowsing(content(before)).visitTimes ?? {}
+      } catch {
+        before = blank
+      }
       const next = normalizeBrowsing(saved)
-      put(store, sessionKey, before, normalizeBrowsing({ ...next, visitTimes: { ...prior.visitTimes, ...next.visitTimes } }))
+      put(store, sessionKey, before, normalizeBrowsing({ ...next, visitTimes: { ...priorVisitTimes, ...next.visitTimes } }))
     })
   }
 

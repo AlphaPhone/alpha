@@ -11,7 +11,7 @@ underAct();
 afterEach(closeAll);
 
 /** The toast region: the shell's one live status region, never another screen's quiet status such as Ask Alpha's composer while it connects. */
-const region = () => document.querySelector("[role=status][aria-live]");
+const region = () => document.querySelector("[data-alpha-toast-region][role=status][aria-live]");
 const toast = () => region()?.textContent;
 const live = () => region()?.getAttribute("aria-live");
 

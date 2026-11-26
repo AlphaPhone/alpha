@@ -1,6 +1,7 @@
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { ChevronLeft, ChevronRight, Ellipsis, Repeat } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { CalendarHeaderAction } from "./CalendarHeader.tsx";
 
 export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
@@ -35,7 +36,7 @@ export function CalendarEventPage({ title, onBack, actions, when, day, source, r
         <span className="grow" />
         {actions}
       </div>
-      <div className="min-w-0 grow touch-pan-y overflow-y-auto px-6 pt-1 pb-32.5 wrap-anywhere [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className={cn(dockClearance, "min-w-0 grow touch-pan-y overflow-y-auto px-6 pt-1 wrap-anywhere [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}>
         <h1 className="m-0 font-display text-display font-light">{title}</h1>
         <div className="mt-3.5 text-lg leading-plain">{when}</div>
         <div className="mt-1 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{day}</div>
@@ -75,13 +76,13 @@ export function CalendarEventRow({ icon, text, trailing, onOpen, openLabel, clas
       {onOpen ? <ChevronRight aria-hidden className="size-4.5 shrink-0 text-muted-foreground" /> : trailing}
     </>
   );
-  if (onOpen) return <button type="button" aria-label={openLabel} onClick={onOpen} className={cn(focusRing, "flex min-h-14 items-center gap-4 rounded-lg text-left", className)}>{inside}</button>;
+  if (onOpen) return <button type="button" aria-label={openLabel} onClick={onOpen} className={cn(focusRing, "flex min-h-14 items-center gap-4 rounded-lg text-left", className)} {...(props as ComponentProps<"button">)}>{inside}</button>;
   return <div className={cn("flex min-h-14 items-center gap-4", className)} {...props}>{inside}</div>;
 }
 
 /** The Join button of an event's video call. */
 export function CalendarJoin({ className, ...props }: ComponentProps<"button">) {
-  return <button type="button" className={cn(focusRing, "h-10 shrink-0 rounded-full bg-alpha px-4.5 text-sm leading-plain font-semibold text-alpha-foreground", className)} {...props} />;
+  return <button type="button" className={cn(focusRing, "min-h-11 min-w-11 shrink-0 rounded-full bg-alpha px-4.5 text-sm leading-plain font-semibold text-alpha-foreground", className)} {...props} />;
 }
 
 export type CalendarPersonProps = Omit<ComponentProps<"div">, "children"> & {
@@ -94,7 +95,7 @@ export type CalendarPersonProps = Omit<ComponentProps<"div">, "children"> & {
 /** One of an event's people: their initials, name and reply. */
 export function CalendarPerson({ initials, name, status, className, ...props }: CalendarPersonProps) {
   return (
-    <div aria-label={name} className={cn("flex min-h-13 items-center gap-3", className)} {...props}>
+    <div className={cn("flex min-h-13 items-center gap-3", className)} {...props}>
       <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs leading-plain font-bold whitespace-nowrap">{initials}</span>
       <span className="grow text-base leading-plain">{name}</span>
       {status ? <span className="text-meta leading-plain text-muted-foreground">{status}</span> : null}
@@ -125,7 +126,7 @@ export type CalendarAnswerProps = ComponentProps<"button"> & {
 /** One answer to an invitation. */
 export function CalendarAnswer({ chosen, className, ...props }: CalendarAnswerProps) {
   return (
-    <button type="button" className={cn(focusRing, "flex h-11 grow basis-0 items-center justify-center rounded-full text-sm leading-plain font-semibold disabled:opacity-50",
+    <button type="button" aria-pressed={Boolean(chosen)} className={cn(focusRing, "flex h-11 grow basis-0 items-center justify-center rounded-full text-sm leading-plain font-semibold disabled:opacity-50",
       chosen === "going" ? "bg-alpha text-alpha-foreground" : chosen === "declined" ? "bg-foreground text-background" : "bg-secondary", className)} {...props} />
   );
 }
@@ -163,7 +164,7 @@ export function CalendarEventMenu({ items, className, onKeyDown, ...props }: Omi
       {open ? (
         <>
           <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 cursor-default" />
-          <div role="menu" className="absolute top-full right-0 w-max rounded-lg bg-background p-1 text-foreground shadow-md">
+          <div role="menu" className="absolute top-full right-0 w-max rounded-lg border border-border/60 bg-popover p-1 text-popover-foreground shadow-md dark:border-border">
             {items.map((item) => (
               <button key={item.label} type="button" role="menuitem" aria-label={item.name} onClick={() => { setOpen(false); item.onSelect(); }}
                 className={cn(focusRing, "block min-h-11 w-full px-3.5 text-start active:bg-accent")}>{item.label}</button>

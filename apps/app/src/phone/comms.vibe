@@ -97,7 +97,12 @@ const subjects = started(effect {
     }
     const top = where.trail.at(-1)
     const event: Event | undefined = top === "Phone"
-      ? { type: "subjectShown", app: "PhoneApp", subject: dialer.tab === "Keypad" ? "KeypadSubject" : "RecentsSubject", key: dialer.tab === "Keypad" ? "phone:keypad:" : "phone:recents:" }
+      ? {
+        type: "subjectShown",
+        app: "PhoneApp",
+        subject: dialer.tab === "Keypad" ? "KeypadSubject" : "RecentsSubject",
+        key: dialer.tab === "Keypad" ? "phone:keypad:" : "phone:recents:",
+      }
       : top === "Messages"
         ? texts.pane === "Conversation"
           ? { type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: `messages:thread:${texts.thread}` }
@@ -150,7 +155,8 @@ const phoneBriefing = started(effect {
     if (page.trail.at(-1) !== "Phone" || (page.assistant !== "Sheet" && page.assistant !== "Full")
       || stage.app !== "PhoneApp" || !Comms.canBriefingShown(stage, stage.key, "Device")) return
     const log = calls.log.grant === "Granted" ? (try dialer.get()).source : undefined
-    const missed = calls.log.grant === "Granted" ? Math.max(calls.missed, log?.filter((entry) => entry.isNew && entry.type === "missed").length ?? 0) : 0
+    const seenAt = try dialer.seenMissedAt()
+    const missed = calls.log.grant === "Granted" ? Math.max(calls.missed, log?.filter((entry) => entry.isNew && entry.type === "missed" && entry.date > seenAt).length ?? 0) : 0
     const unheard = calls.voicemail ? messages.unheard : 0
     const text = [
       missed > 0 ? `You have ${missed} missed ${missed === 1 ? "call" : "calls"}.` : "",

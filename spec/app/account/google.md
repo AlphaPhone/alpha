@@ -38,7 +38,7 @@ pure val signInValues = Set(0, 1)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val tabValues = Set(1, 2)
 pure val accountValues = Set(1, 2)
-pure val nowValues = Set(0, 1000)
+pure val nowValues = Set(0, 1000000)
 pure val linksValues = Set(
   List(),
   List({ id: 1, read: true, modify: true, send: true }),
@@ -229,7 +229,7 @@ pure def stepABrowserReturnGrantsNothing(before: Google, via: str, after: Google
 ### The owner can stop waiting for the browser, and a visit not back within ten minutes ends; either way the accounts are read back
 
 ```quint
-pure val consentLimit = 600
+pure val consentLimit = 600000
 
 pure def canStopWaiting(g: Google): bool = g.tab.open
 

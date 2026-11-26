@@ -6,7 +6,7 @@ import { Machine as Contact } from "../../gen/app__contacts.effect.vibe"
 import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
 import { Machine as Composer, maxFiles } from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { Documents } from "../platform/documents.vibe"
 import { Files } from "../platform/files.vibe"
@@ -525,7 +525,7 @@ function picked(request: ReadFiles): Job<Picker.Event, PickerNeeds, []> {
         where.route !== visit.route || !canRaise(where, "Sheet") || !(try (try Device).showing()) || !(try targetCurrent(visit.target))) return
       try contained(shell.send({ type: "raise", detent: "Sheet" }, (live) => live.route === visit.route && canRaise(live, "Sheet")), "showing the selected files in the draft")
     }
-    // The reactor stops pulling answers if it refuses the read receipt.
+    // spec/app/assistant/attachments.md, "Attach reads the chosen files once, and adds only those within the type, name and size limits": the reactor stops pulling answers if it refuses the read receipt.
     return Stream.concat(answer, Stream.fromEffectDrain(reveal))
   })
   return stream("picker files", answers, filesRead(request, 0))

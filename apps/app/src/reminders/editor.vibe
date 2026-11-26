@@ -1,27 +1,13 @@
 // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
-import type { ReminderItemRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "@repo/launcher-records"
+import type { ReminderItemRecord } from "@repo/launcher-records"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
 import { contained, reacting, started, together } from "../runtime/reactor.vibe"
-import { externalStore } from "../runtime/store.ts"
 import { civilDayFromString } from "./recurrence.ts"
-import { DEFAULT_LIST_ID, remindersStore } from "./store.ts"
+import { EditorDraftShelf, type ReminderEditorFields, RemindersShelf, blankEditorFields } from "./shelf.vibe"
+import { DEFAULT_LIST_ID } from "./store.ts"
 
-/** Editable field payload kept beside the verified Editor draft machine. */
-export interface ReminderEditorFields {
-  readonly itemId: string | null
-  readonly title: string
-  readonly notes: string
-  readonly listId: string
-  readonly dueDate: string | null
-  readonly dueMinute: number | null
-  readonly alertMinutes: number | null
-  readonly recurrence: ReminderRecurrence
-  readonly priority: ReminderPriority
-  readonly flagged: boolean
-  readonly subtasks: readonly ReminderSubtaskRecord[]
-  readonly revision: number
-}
+export type { ReminderEditorFields }
 
 const draftKey = "alpha.reminders.editorDraft@1"
 
@@ -41,23 +27,6 @@ const DraftSchema = Schema.fromJsonString(Schema.Struct({
   revision: Schema.Int,
 }))
 
-function blankEditorFields(listId = DEFAULT_LIST_ID): ReminderEditorFields {
-  return {
-    itemId: null,
-    title: "",
-    notes: "",
-    listId,
-    dueDate: null,
-    dueMinute: null,
-    alertMinutes: 0,
-    recurrence: "none",
-    priority: "none",
-    flagged: false,
-    subtasks: [],
-    revision: 0,
-  }
-}
-
 function fieldsFromItem(item: ReminderItemRecord): ReminderEditorFields {
   return {
     itemId: item.id,
@@ -75,34 +44,59 @@ function fieldsFromItem(item: ReminderItemRecord): ReminderEditorFields {
   }
 }
 
-const draft = externalStore<ReminderEditorFields>(blankEditorFields())
-
-/** External store for the reminder editor's rich form values. */
-export const editorDraftStore = {
-  snapshot: draft.snapshot,
-  subscribe: draft.subscribe,
-  set: draft.set,
-  reset(listId = DEFAULT_LIST_ID): void {
-    draft.set(blankEditorFields(listId))
-  },
-}
-
 /** Persist the current draft fields in `KeyValueStore` for restart recovery. */
-effect function persistEditorDraft(fields: ReminderEditorFields): void!!KeyValueStore.KeyValueStore {
-  editorDraftStore.set(fields)
+effect function persistEditorDraft(fields: ReminderEditorFields): void!!(KeyValueStore.KeyValueStore | EditorDraftShelf) {
+  ;(try EditorDraftShelf).shelf.set(fields)
   const serialized = Effect.try(() => JSON.stringify(fields)) catch () => undefined
   if (serialized !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(draftKey, serialized))
 }
 
 /** Clear any saved draft fields from `KeyValueStore`. */
-export effect function clearPersistedDraft(): void!!KeyValueStore.KeyValueStore {
-  editorDraftStore.reset()
+export effect function clearPersistedDraft(): void!!(KeyValueStore.KeyValueStore | EditorDraftShelf) {
+  ;(try EditorDraftShelf).shelf.reset()
   try ignore((try KeyValueStore.KeyValueStore).remove(draftKey))
 }
 
+/** Close the editor sheet cleanly and discard any persisted draft in `KeyValueStore`. */
+export effect function closeReminderEditor(): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf) {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  if (!Editor.canClose(state)) return false
+  try contained(editor.send({ type: "close" }), "closing reminder editor")
+  try clearPersistedDraft()
+  return true
+}
+
+effect function resolveConflictDraft(
+  kind: "keepMine" | "takeSaved",
+  resolve: (current: ReminderEditorFields, latest: ReminderItemRecord) => ReminderEditorFields,
+): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  const allowed = kind === "keepMine" ? Editor.canKeepMine(state) : Editor.canTakeSaved(state)
+  if (!allowed) return false
+  try contained(editor.send({ type: kind }), kind === "keepMine" ? "keeping local reminder edits" : "taking saved reminder changes")
+  const current = (try EditorDraftShelf).shelf.snapshot()
+  const latest = current.itemId !== null ? (try RemindersShelf).store.findItem(current.itemId) : undefined
+  if (latest !== undefined) try persistEditorDraft(resolve(current, latest))
+  return true
+}
+
+/** Resolve an editor save conflict by keeping the owner's local edits on top of the latest revision. */
+export effect function keepMineReminderDraft(): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
+  return try resolveConflictDraft("keepMine", (current, latest) => ({ ...current, revision: latest.revision }))
+}
+
+/** Resolve an editor save conflict by reloading the latest saved reminder fields. */
+export effect function takeSavedReminderDraft(): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
+  return try resolveConflictDraft("takeSaved", (_current, latest) => fieldsFromItem(latest))
+}
+
 /** Apply field edits to the active draft, advancing the verified Editor machine and persisting the draft. */
-export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): void!!(Editor.Machine | KeyValueStore.KeyValueStore) {
-  const prev = editorDraftStore.snapshot()
+export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): void!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
+  const draftShelf = (try EditorDraftShelf).shelf
+  const store = (try RemindersShelf).store
+  const prev = draftShelf.snapshot()
   const next: ReminderEditorFields = { ...prev, ...patch }
   const editor = try Editor.Machine
   if (patch.title !== undefined && patch.title !== prev.title) {
@@ -114,7 +108,7 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
     if (Editor.canEditNotes(state)) try contained(editor.send({ type: "editNotes", ok: true }), "editing reminder notes")
   }
   if (patch.listId !== undefined && patch.listId !== prev.listId) {
-    const listId = Math.max(1, remindersStore.specIdForList(patch.listId))
+    const listId = Math.max(1, store.specIdForList(patch.listId))
     const state = try editor.get()
     if (Editor.canSetList(state, listId)) try contained(editor.send({ type: "setList", listId }), "changing reminder list")
   }
@@ -172,9 +166,10 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
 export effect function beginNewReminder(
   listId = DEFAULT_LIST_ID,
   presets: { readonly dueDate?: string | null; readonly flagged?: boolean } = {},
-): void!!(Editor.Machine | KeyValueStore.KeyValueStore) {
+): void!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
   const editor = try Editor.Machine
-  const listSpecId = Math.max(1, remindersStore.specIdForList(listId))
+  const store = (try RemindersShelf).store
+  const listSpecId = Math.max(1, store.specIdForList(listId))
   const cur = try editor.get()
   if (cur.open && Editor.canClose(cur)) try contained(editor.send({ type: "close" }), "closing previous editor")
   try contained(editor.send({ type: "openNew", listId: listSpecId }), "opening new reminder editor")
@@ -192,12 +187,13 @@ export effect function beginNewReminder(
 }
 
 /** Open the editor for an existing reminder item. */
-export effect function beginEditReminder(item: ReminderItemRecord): void!!(Editor.Machine | KeyValueStore.KeyValueStore) {
+export effect function beginEditReminder(item: ReminderItemRecord): void!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
   const editor = try Editor.Machine
+  const store = (try RemindersShelf).store
   const cur = try editor.get()
   if (cur.open && Editor.canClose(cur)) try contained(editor.send({ type: "close" }), "closing previous editor")
-  const itemSpecId = Math.max(1, remindersStore.specIdForItem(item.id))
-  const listSpecId = Math.max(1, remindersStore.specIdForList(item.listId))
+  const itemSpecId = Math.max(1, store.specIdForItem(item.id))
+  const listSpecId = Math.max(1, store.specIdForList(item.listId))
   const hasDueDate = item.dueDate !== null
   const dueDay = civilDayFromString(item.dueDate) ?? 0
   const hasDueTime = hasDueDate && item.dueMinute !== null
@@ -220,12 +216,13 @@ export effect function beginEditReminder(item: ReminderItemRecord): void!!(Edito
 }
 
 const restoredDraft = started(effect {
+  const draftShelf = (try EditorDraftShelf).shelf
   const raw = (try KeyValueStore.KeyValueStore).get(draftKey) catch () => undefined
   if (raw === undefined) return
   const decoded = Schema.decodeUnknownOption(DraftSchema)(raw)
   if (Option.isSome(decoded)) {
     const value = decoded.value
-    editorDraftStore.set({
+    draftShelf.set({
       ...value,
       subtasks: value.subtasks.map((sub) => ({ ...sub })),
     })

@@ -1,6 +1,6 @@
 // spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
 import type { CategoryFolder, StorageEntry } from "@elizaos/os-bridges"
-import { groupByFolder, validPath } from "@elizaos/plugin-files-client"
+import { loadFilesClient, validStoragePath } from "./entries.vibe"
 import { Handles } from "./handles.vibe"
 
 export interface CategoryGroup {
@@ -29,8 +29,10 @@ export const categoryGroups = Layer.sync(CategoryGroups, () => {
 
 /** Keep the phone's complete group counts even where it could return only some individual entries. */
 export effect function groupsFor(ticket: number, entries: ReadonlyArray<StorageEntry>, folders: ReadonlyArray<CategoryFolder> | undefined): void!!(CategoryGroups | Handles) {
-  const groups = groupByFolder([...entries], folders === undefined ? undefined : [...folders])
-    .filter((group) => validPath(group.folder, true) === group.folder && Number.isSafeInteger(group.count) && group.count > 0)
+  const client = tryPromise(() => loadFilesClient()) catch () => undefined
+  if (client === undefined) return
+  const groups = client.groupByFolder([...entries], folders === undefined ? undefined : [...folders])
+    .filter((group) => validStoragePath(group.folder, true) === group.folder && Number.isSafeInteger(group.count) && group.count > 0)
   const rows = groups.map((group) => {
     const segments = group.folder === "" ? [] : group.folder.split("/")
     return { group, paths: Array.from({ length: segments.length + 1 }, (_, depth) => segments.slice(0, depth).join("/")) }

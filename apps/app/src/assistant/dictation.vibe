@@ -29,13 +29,14 @@ export effect function dictate(): void!!(Voice.Machine | VoiceWords | Composer.M
 export effect function editDictation(text: string): void!!(Voice.Machine | VoiceWords | Speaker) {
   const voice = try Voice.Machine
   const current = try voice.get()
-  const event: Voice.Event = { type: "edit", words: text.trim() !== "" }
+  const words = text.trim() !== ""
+  const event: Voice.Event = { type: "edit", words }
   if (current.recorder.field !== "ComposerField" || !Voice.enabled(current, event)) return
   const { memory } = try VoiceWords
   const changed = memory.dictatedText !== text
-  memory.dictatedText = text
+  memory.setDictated(text, memory.dictatedDurationMs)
   if (changed) try stopTranscript(current.recorder.ticket)
-  try ignore(voice.send(event))
+  if (current.recorder.words !== words) try ignore(voice.send(event))
 }
 
 // spec/app/voice/index.md, "Closing the recorder abandons any recording or transcription it was waiting for"

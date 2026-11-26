@@ -99,15 +99,20 @@ async function tuckBar(
   await until(alpha, area, Dock, (s) => s.tucked);
 }
 
+async function openHeightWorld(signedIn = true) {
+  const world = { ...scene(), phone: true, ...(signedIn ? {} : { signedIn: false }) };
+  world.ask.metadata = [];
+  const { alpha } = await open(world, mounts);
+  const area = assistant.runtime(alpha);
+  await until(alpha, area, Conversation, (s) => s.ready && s.observing);
+  await until(alpha, area, Composer, (s) => s.slot === "Open");
+  return { world, alpha, area };
+}
+
 describe("observation.chatHeight", () => {
   // spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"
   it("reports bar, typing, sheet, full, and hidden across typed turns", async () => {
-    const world = { ...scene(), phone: true };
-    world.ask.metadata = [];
-    const { alpha } = await open(world, mounts);
-    const area = assistant.runtime(alpha);
-    await until(alpha, area, Conversation, (s) => s.ready && s.observing);
-    await until(alpha, area, Composer, (s) => s.slot === "Open");
+    const { world, alpha, area } = await openHeightWorld();
 
     await fill("Message Alpha", "Open the sheet from Home");
     await press("Send");
@@ -153,12 +158,7 @@ describe("observation.chatHeight", () => {
 
   // spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
   it("reports the live overlay height on spoken turns across bar, tucked hidden, notes hidden, typing, sheet, and full", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    world.ask.metadata = [];
-    const { alpha } = await open(world, mounts);
-    const area = assistant.runtime(alpha);
-    await until(alpha, area, Conversation, (s) => s.ready && s.observing);
-    await until(alpha, area, Composer, (s) => s.slot === "Open");
+    const { world, alpha, area } = await openHeightWorld(false);
     await until(alpha, area, Voice.Machine, (s) => s.warmed);
 
     await press("Talk");
@@ -199,12 +199,7 @@ describe("observation.chatHeight", () => {
 
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view"
   it("a typed reply that goes Home or opens a view lowers a raised Ask Alpha only where it would hide that view", async () => {
-    const world = { ...scene(), phone: true };
-    world.ask.metadata = [];
-    const { alpha } = await open(world, mounts);
-    const area = assistant.runtime(alpha);
-    await until(alpha, area, Conversation, (s) => s.ready && s.observing);
-    await until(alpha, area, Composer, (s) => s.slot === "Open");
+    const { world, alpha, area } = await openHeightWorld();
     await fill("Message Alpha", "Hello");
     await press("Send");
     await until(alpha, area, Conversation, (s) => s.turn.send.id === 1 && s.turn.reply === "Complete");
@@ -219,19 +214,23 @@ describe("observation.chatHeight", () => {
       return shell();
     };
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": Full at Home lowers so Home shows.
     await setShell(alpha, undefined, "Full");
     expect(await navigating("go home", "home", 2)).toMatchObject({ trail: [], drawer: false, assistant: "Bar" });
     expect(metaAt(world, 1)?.observation).toMatchObject({ view: "home", chatHeight: "full" });
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": a sheet over Home asked for Home lowers too.
     await setShell(alpha, undefined, "Sheet");
     expect(await navigating("go home", "home", 3)).toMatchObject({ trail: [], assistant: "Bar" });
     expect(metaAt(world, 2)?.observation).toMatchObject({ view: "home", chatHeight: "sheet" });
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": a sheet over Calendar asked for Calendar lowers; Full over Calendar asked for Notes opens Notes with Ask Alpha lowered.
     await setShell(alpha, "Calendar", "Sheet");
     expect(await navigating("show my calendar", "calendar", 4)).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
     await setShell(alpha, "Calendar", "Full");
     expect(await navigating("open notes", "notes", 5)).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Bar" });
 
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": a sheet stays raised when the view it opens is in sight above it, as in v119.
     await setShell(alpha, "Calendar", "Sheet");
     expect(await navigating("open notes", "notes", 6)).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Sheet" });
     await setShell(alpha, "Calendar", "Sheet");
@@ -249,17 +248,9 @@ describe("observation.chatHeight", () => {
     await until(sensitiveAlpha, sensitiveArea, Composer, (s) => s.slot === "Open");
     await until(sensitiveAlpha, sensitiveAlpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
     await setShell(sensitiveAlpha, "Telegram", "Full");
-    await drawn(() => {
-      bridge.publishContext("Telegram", {
-        platform: "telegram",
-        authenticated: true,
-        sensitive: false,
-        pane: "conversation",
-        accountLabel: "@owner",
-        conversation: { id: "chat-1", title: "Alex", kind: "direct", muted: false, unreadCount: 1 },
-        recentMessages: [{ id: "m1", sender: "Alex", at: 1000, text: "See you at 5", isOwn: false }],
-      });
-    });
+    const conversation = { id: "chat-9", title: "Morgan", kind: "direct" as const, muted: false, unreadCount: 1 };
+    const recentMessages = [{ id: "m9", sender: "Morgan", at: 2000, text: "Ping me later", isOwn: false }];
+    await drawn(() => bridge.publishContext("Telegram", { platform: "telegram", authenticated: true, sensitive: false, pane: "conversation", accountLabel: "@me", conversation, recentMessages }));
     await until(sensitiveAlpha, sensitiveArea, Conversation, (s) => s.context.showing.tag === "App" && s.context.showing.view === "Telegram" && !s.context.sensitive && s.context.selected);
     await drawn(() => sensitiveAlpha.runtime.runPromise(Effect.flatMap(Prefs.Machine, (m) => m.send({ type: "setShare", share: "TelegramContext", on: false, at: 0 }, "Owner"))));
     await until(sensitiveAlpha, sensitiveAlpha.runtime, Prefs.Machine, (s) => !Prefs.allows(s, "TelegramContext"));

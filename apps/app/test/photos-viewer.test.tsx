@@ -16,10 +16,10 @@ const has = (element: Element | null | undefined, list: string) => list.split(" 
 
 it("On the launcher the photo viewer's header floats below the status bar and the photo fills v119's 3:4 frame, while the editor keeps its own column, with v119's names for its controls (spec/app/photos/viewer.md, \"Story: Look at a photo or video\"; spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
   const world = { ...scene(), phone: true };
-  world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
+  world.settings.roles = world.settings.roles.map((r) => ({ ...r, held: r.role === "home" ? true : r.held }));
   const { alpha } = await open(world, only("home", "view:Photos", "notice"));
-  await press("Photos");
   const runtime = photosArea.runtime(alpha);
+  await press("Photos");
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded");
   await drawn(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
   await press("Allow access");

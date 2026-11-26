@@ -2,12 +2,13 @@
 import type { Source } from "../../gen/app__calendar.ts";
 import { rowShown } from "../../gen/app__calendar__presentation.ts";
 import type { Cancellation, OwnAnswer } from "../../gen/app__calendar__writing.ts";
+import { createShelf } from "../runtime/store.ts";
 import { civilDay, utcStart } from "./time.ts";
-import { externalStore } from "../runtime/store.ts";
 
 /** One of an event's people: the organizer, or a guest with the reply the calendar gave. */
 export interface Person {
   readonly name: string;
+  readonly email?: string;
   readonly organizer: boolean;
   readonly status: string;
 }
@@ -54,49 +55,6 @@ export interface Row {
 /** What a source answered, before it has a number. */
 export type Read = Omit<Row, "id" | "source" | "revision" | "calendar"> & { readonly changedAt?: number };
 
-const numbers = new Map<string, number>();
-const calendars = new Map<string, number>();
-const seen = new Map<string, { readonly content: string; readonly revision: number }>();
-const windows = new Map<Source, ReadonlyArray<Row>>();
-const last = new Map<number, Row>();
-const cut = new Set<Source>();
-const version = externalStore(0);
-let present = false;
-
-/** The number an event keeps for the life of the page, so the open event stays the same one across reads. @throws {never} */
-function numbered(source: Source, key: string): number {
-  const name = `${source}:${key}`;
-  const known = numbers.get(name);
-  if (known !== undefined) return known;
-  const made = numbers.size + 1;
-  numbers.set(name, made);
-  return made;
-}
-
-/** The number a phone calendar is hidden by: its own where Android numbers it, otherwise one it keeps for the page. @throws {never} */
-function calendarNumber(source: Source, calendarId: string): number {
-  if (source === "Google") return 0;
-  const own = Number(calendarId);
-  if (Number.isInteger(own) && own > 0) return own;
-  const known = calendars.get(calendarId);
-  if (known !== undefined) return known;
-  const made = 1_000_000 + calendars.size;
-  calendars.set(calendarId, made);
-  return made;
-}
-
-/** The revision of `row`: its change time in seconds where the calendar keeps one, otherwise a count of the changes this page saw. @throws {never} */
-function revised(source: Source, row: Read): number {
-  if (row.changedAt !== undefined && Number.isFinite(row.changedAt)) return Math.floor(row.changedAt / 1000);
-  const name = `${source}:${row.key}`;
-  const content = JSON.stringify([row.title, row.place, row.notes, row.begin, row.end, row.allDay]);
-  const before = seen.get(name);
-  const revision = before === undefined ? 0 : before.content === content ? before.revision : before.revision + 1;
-  seen.set(name, { content, revision });
-  return revision;
-}
-
-/** Whether `row` falls on civil `day`: an all-day event by its dates, a timed one by its instants. @throws {never} */
 const weekdays: Readonly<Record<string, string>> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" };
 const units: Readonly<Record<string, readonly [string, string]>> = { DAILY: ["daily", "days"], WEEKLY: ["weekly", "weeks"], MONTHLY: ["monthly", "months"], YEARLY: ["yearly", "years"] };
 
@@ -116,6 +74,7 @@ export function repeatText(recurrence: ReadonlyArray<string>, recurring: boolean
   return interval === 1 ? `Repeats ${unit[0]}` : `Repeats every ${interval} ${unit[1]}`;
 }
 
+/** Whether `row` falls on civil `day`: an all-day event by its dates, a timed one by its instants. @throws {never} */
 export function onDay(row: Pick<Row, "begin" | "end">, day: number): boolean {
   const first = civilDay(row.begin);
   const last = civilDay(Math.max(row.begin, row.end - 1));
@@ -127,72 +86,185 @@ export function androidWindowOf({ begin, end, allDay }: Pick<Row, "begin" | "end
   return allDay ? { begin: utcStart(civilDay(begin)), end: utcStart(civilDay(end)) } : { begin, end };
 }
 
-function told(): void {
-  version.set(version.snapshot() + 1);
+/** Scoped per-runtime cache of calendar events read from each source, backed by a reactive shelf. */
+export interface ShownStore {
+  /** @throws {never} */
+  readonly snapshot: () => number;
+  /** @throws {never} */
+  readonly subscribe: (listener: () => void) => () => void;
+  /** Keep what `source` answered for the window around `day`, numbered; the rows that fall on `day`. @throws {never} */
+  readonly keep: (source: Source, day: number, read: ReadonlyArray<Read>, partial?: boolean) => ReadonlyArray<Row>;
+  /** Refresh a single event in place without replacing the cached window or altering `partial`. @throws {never} */
+  readonly mergeOne: (source: Source, read: Read) => Row;
+  /** Convert a read row to a numbered `Row` without mutating the cached window. @throws {never} */
+  readonly toRow: (source: Source, read: Read) => Row;
+  /** The rows of `source` that fall on `day`, or none. @throws {never} */
+  readonly of: (source: Source, day: number) => ReadonlyArray<Row>;
+  /** Every row the last read of `source` found, in time order. @throws {never} */
+  readonly all: (source: Source) => ReadonlyArray<Row>;
+  /** The rows of both sources the owner has not hidden, in time order. @throws {never} */
+  readonly visible: (hidden: ReadonlyArray<number>, phone: boolean, google: boolean) => ReadonlyArray<Row>;
+  /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
+  readonly partial: (source: Source) => boolean;
+  /** Forget what `source` read, including seen titles, numbers, and revisions: an account changed or a permission went. @throws {never} */
+  readonly drop: (source: Source) => void;
+  /** Whether this phone has calendars of its own: a browser has none, and is never asked for access. @throws {never} */
+  readonly present: () => boolean;
+  /** @throws {never} */
+  readonly phone: (has: boolean) => void;
+  /** The revisions counted for events whose calendar keeps no version, to keep on the phone across restarts. @throws {never} */
+  readonly revisions: () => ReadonlyArray<readonly [string, string, number]>;
+  /** Take back the revisions kept before a restart, so a draft or a change in doubt meets the event at the revision it began from. @throws {never} */
+  readonly restore: (kept: ReadonlyArray<readonly [string, string, number]>) => void;
+  /** The number an event of `source` keyed `key` has, or is given now. @throws {never} */
+  readonly number: (source: Source, key: string) => number;
+  /** The event numbered `id` as it was last read, even where the window read since no longer holds it. @throws {never} */
+  readonly lastSeen: (id: number) => Row | undefined;
+  /** The event numbered `id`, wherever it was last read. @throws {never} */
+  readonly find: (id: number) => Row | undefined;
+  /** Clear every cached row, revision, and id mapping when the runtime scope closes. @throws {never} */
+  readonly reset: () => void;
 }
 
-/** The rows each source last gave, as an external store a screen reads without an effect. */
-export const shown = {
-  snapshot: version.snapshot,
-  subscribe: version.subscribe,
-  /** Keep what `source` answered for the window around `day`, numbered; the rows that fall on `day`. @throws {never} */
-  keep(source: Source, day: number, read: ReadonlyArray<Read>, partial = false): ReadonlyArray<Row> {
-    if (partial) cut.add(source);
-    else cut.delete(source);
-    const rows = read.map(({ changedAt, ...row }) => ({
-      ...row, source, id: numbered(source, row.key), calendar: calendarNumber(source, row.calendarId), revision: revised(source, { ...row, changedAt }),
-    }));
-    windows.set(source, [...rows].sort((a, b) => a.begin - b.begin));
-    for (const row of rows) last.set(row.id, row);
-    told();
-    return rows.filter((row) => onDay(row, day));
-  },
-  /** The rows of `source` that fall on `day`, or none. @throws {never} */
-  of(source: Source, day: number): ReadonlyArray<Row> {
-    return (windows.get(source) ?? []).filter((row) => onDay(row, day));
-  },
-  /** Every row the last read of `source` found, in time order. @throws {never} */
-  all(source: Source): ReadonlyArray<Row> {
-    return windows.get(source) ?? [];
-  },
-  /** The rows of both sources the owner has not hidden, in time order. @throws {never} */
-  visible(hidden: ReadonlyArray<number>, phone: boolean, google: boolean): ReadonlyArray<Row> {
-    const both = [...(phone ? shown.all("Phone") : []), ...(google ? shown.all("Google") : [])];
-    return both.filter((row) => rowShown(row.calendar, [...hidden])).sort((a, b) => a.begin - b.begin);
-  },
-  /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
-  partial: (source: Source): boolean => cut.has(source),
-  /** Forget what `source` read: an account changed or a permission went. @throws {never} */
-  drop(source: Source): void {
-    windows.delete(source);
-    cut.delete(source);
-    told();
-  },
-  /** Whether this phone has calendars of its own: a browser has none, and is never asked for access. @throws {never} */
-  present: (): boolean => present,
+/** Create a scoped Calendar row store backed by a reactive shelf, with no module-level mutable state. @throws {never} */
+export function createShownStore(): ShownStore {
+  const numbers = new Map<string, number>();
+  const calendars = new Map<string, number>();
+  const seen = new Map<string, { readonly content: string; readonly revision: number }>();
+  const windows = new Map<Source, ReadonlyArray<Row>>();
+  const last = new Map<number, Row>();
+  const cut = new Set<Source>();
+  const version = createShelf(0);
+  let nextNumber = 0;
+  let present = false;
+
   /** @throws {never} */
-  phone(has: boolean): void {
-    present = has;
-    told();
-  },
-  /** The revisions counted for events whose calendar keeps no version, to keep on the phone across restarts. @throws {never} */
-  revisions(): ReadonlyArray<readonly [string, string, number]> {
-    return [...seen].map(([name, { content, revision }]) => [name, content, revision] as const);
-  },
-  /** Take back the revisions kept before a restart, so a draft or a change in doubt meets the event at the revision it began from. @throws {never} */
-  restore(kept: ReadonlyArray<readonly [string, string, number]>): void {
-    for (const [name, content, revision] of kept) if (!seen.has(name)) seen.set(name, { content, revision });
-  },
-  /** The number an event of `source` keyed `key` has, or is given now. @throws {never} */
-  number: (source: Source, key: string): number => numbered(source, key),
-  /** The event numbered `id` as it was last read, even where the window read since no longer holds it. @throws {never} */
-  lastSeen: (id: number): Row | undefined => last.get(id),
-  /** The event numbered `id`, wherever it was last read. @throws {never} */
-  find(id: number): Row | undefined {
-    for (const rows of windows.values()) {
-      const row = rows.find((candidate) => candidate.id === id);
-      if (row !== undefined) return row;
-    }
-    return undefined;
-  },
-};
+  function numbered(source: Source, key: string): number {
+    const name = `${source}:${key}`;
+    const known = numbers.get(name);
+    if (known !== undefined) return known;
+    const made = ++nextNumber;
+    numbers.set(name, made);
+    return made;
+  }
+
+  /** @throws {never} */
+  function calendarNumber(source: Source, calendarId: string): number {
+    if (source === "Google") return 0;
+    const own = Number(calendarId);
+    if (Number.isInteger(own) && own > 0) return own;
+    const known = calendars.get(calendarId);
+    if (known !== undefined) return known;
+    const made = 1_000_000 + calendars.size;
+    calendars.set(calendarId, made);
+    return made;
+  }
+
+  /** @throws {never} */
+  function revised(source: Source, row: Read): number {
+    if (row.changedAt !== undefined && Number.isFinite(row.changedAt)) return Math.floor(row.changedAt / 1000);
+    const name = `${source}:${row.key}`;
+    const content = JSON.stringify([row.title, row.place, row.notes, row.begin, row.end, row.allDay]);
+    const before = seen.get(name);
+    const revision = before === undefined ? 0 : before.content === content ? before.revision : before.revision + 1;
+    seen.set(name, { content, revision });
+    return revision;
+  }
+
+  /** @throws {never} */
+  function toRow(source: Source, read: Read): Row {
+    const { changedAt, ...rest } = read;
+    return {
+      ...rest,
+      source,
+      id: numbered(source, read.key),
+      calendar: calendarNumber(source, read.calendarId),
+      revision: revised(source, { ...rest, changedAt }),
+    };
+  }
+
+  /** @throws {never} */
+  function told(): void {
+    version.update((n) => n + 1);
+  }
+
+  const store: ShownStore = {
+    snapshot: version.snapshot,
+    subscribe: version.subscribe,
+    keep(source, day, read, partial = false) {
+      if (partial) cut.add(source);
+      else cut.delete(source);
+      const rows = read.map((one) => toRow(source, one));
+      windows.set(source, [...rows].sort((a, b) => a.begin - b.begin));
+      for (const row of rows) last.set(row.id, row);
+      told();
+      return rows.filter((row) => onDay(row, day));
+    },
+    mergeOne(source, read) {
+      const row = toRow(source, read);
+      const existing = windows.get(source) ?? [];
+      const idx = existing.findIndex((candidate) => candidate.id === row.id || candidate.key === row.key);
+      const next = idx >= 0
+        ? existing.map((candidate, at) => (at === idx ? row : candidate))
+        : [...existing, row];
+      windows.set(source, [...next].sort((a, b) => a.begin - b.begin));
+      last.set(row.id, row);
+      told();
+      return row;
+    },
+    toRow,
+    of(source, day) {
+      return (windows.get(source) ?? []).filter((row) => onDay(row, day));
+    },
+    all(source) {
+      return windows.get(source) ?? [];
+    },
+    visible(hidden, phone, google) {
+      const both = [...(phone ? store.all("Phone") : []), ...(google ? store.all("Google") : [])];
+      return both.filter((row) => rowShown(row.calendar, [...hidden])).sort((a, b) => a.begin - b.begin);
+    },
+    partial: (source) => cut.has(source),
+    drop(source) {
+      windows.delete(source);
+      cut.delete(source);
+      const prefix = `${source}:`;
+      for (const [id, row] of [...last]) if (row.source === source) last.delete(id);
+      for (const key of [...numbers.keys()]) if (key.startsWith(prefix)) numbers.delete(key);
+      for (const key of [...seen.keys()]) if (key.startsWith(prefix)) seen.delete(key);
+      if (source === "Phone") calendars.clear();
+      told();
+    },
+    present: () => present,
+    phone(has) {
+      present = has;
+      told();
+    },
+    revisions() {
+      return [...seen].map(([name, { content, revision }]) => [name, content, revision] as const);
+    },
+    restore(kept) {
+      for (const [name, content, revision] of kept) if (!seen.has(name)) seen.set(name, { content, revision });
+    },
+    number: (source, key) => numbered(source, key),
+    lastSeen: (id) => last.get(id),
+    find(id) {
+      for (const rows of windows.values()) {
+        const row = rows.find((candidate) => candidate.id === id);
+        if (row !== undefined) return row;
+      }
+      return undefined;
+    },
+    reset() {
+      numbers.clear();
+      calendars.clear();
+      seen.clear();
+      windows.clear();
+      last.clear();
+      cut.clear();
+      nextNumber = 0;
+      present = false;
+      version.reset();
+    },
+  };
+  return store;
+}

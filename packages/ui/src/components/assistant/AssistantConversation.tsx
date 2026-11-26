@@ -21,6 +21,8 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   composer: AssistantComposerProps;
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
   detent?: "bar" | "sheet" | "full";
+  /** Dismisses the open half-sheet when tapping the dimmed backdrop scrim; when omitted, no internal scrim is drawn. */
+  onDismiss?: () => void;
   /** A drag anywhere on the resting bar moves Ask Alpha as a drag of its handle does, the sheet following the finger as it rises; left out where it may not be dragged. */
   barDrag?: AssistantBarDrag;
   /**
@@ -31,6 +33,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   underlay?: "bar" | "pill";
 };
 
+const scrimClass = "fixed inset-0 z-assistant-sheet bg-foreground/15 transition-opacity duration-fast ease-standard motion-safe:animate-fade motion-reduce:transition-none dark:bg-background/50";
 const noop = () => undefined;
 
 /**
@@ -38,42 +41,46 @@ const noop = () => undefined;
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, contextAction, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", barDrag, underlay, className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, contextAction, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", onDismiss, barDrag, underlay, className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
-  const dragging = useAssistantBarDrag(barDrag ?? {});
+  const sheet = detent === "sheet";
   const full = detent === "full";
+  const dragging = useAssistantBarDrag(barDrag ?? {});
   const panel = resting ? undefined : voicePanel;
   return (
     <>
-    {underlay && (
-      <div inert aria-hidden data-alpha-underlay="" className="pointer-events-none fixed inset-x-0 bottom-0 z-dock mx-auto max-w-md">
-        <AssistantComposer {...composer} value="" placeholder="" fieldRef={undefined} fieldPull={undefined} onFocusField={undefined} voice={undefined} opener={undefined} variant="bar" onOpen={noop} onType={underlay === "pill" ? noop : undefined} />
-      </div>
-    )}
-    <section
-      aria-label="Ask Alpha"
-      data-host-chrome=""
-      data-alpha-detent={detent}
-      className={cn(
-        "flex flex-col text-foreground",
-        resting ? "z-dock in-[body:has([data-covers-dock])]:invisible" : "z-sheet overflow-hidden bg-card [interpolate-size:allow-keywords]",
-        full
-          ? "h-full rounded-none pt-[calc(env(safe-area-inset-top)+--spacing(1))] in-data-[alpha-native]:pt-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(4))]"
-          : resting ? null : cn("rounded-t-chat pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
-        className,
-      )}
-      {...(barDrag ? { ...dragging, onPointerDownCapture: resting ? dragging.onPointerDownCapture : undefined } : {})}
-      {...props}
-    >
-      <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel ? "overflow-y-auto" : "overflow-hidden")}>
-        <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
-        {contextAction}
-        {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
-        {panel}
-        <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
-      </div>
-      <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={composer.variant ?? (resting ? "bar" : "sheet")} />
-    </section>
+      {underlay ? (
+        <div inert aria-hidden data-alpha-underlay="" className="pointer-events-none fixed inset-x-0 bottom-0 z-dock mx-auto max-w-md">
+          <AssistantComposer {...composer} value="" placeholder="" fieldRef={undefined} fieldPull={undefined} onFocusField={undefined} voice={undefined} opener={undefined} variant="bar" onOpen={noop} onType={underlay === "pill" ? noop : undefined} />
+        </div>
+      ) : null}
+      {sheet && onDismiss ? (
+        <button type="button" aria-hidden tabIndex={-1} data-alpha-assistant-scrim="" onClick={onDismiss} className={cn(scrimClass, "cursor-default")} />
+      ) : null}
+      <section
+        aria-label="Ask Alpha"
+        data-host-chrome=""
+        data-alpha-detent={detent}
+        className={cn(
+          "relative flex flex-col text-foreground",
+          resting ? "z-dock in-[body:has([data-covers-dock])]:invisible" : "z-assistant-sheet overflow-hidden bg-popover text-popover-foreground [interpolate-size:allow-keywords]",
+          full
+            ? "h-full rounded-none pt-[calc(var(--alpha-safe-top)+--spacing(1))] in-data-[alpha-native]:pt-[calc(var(--alpha-safe-top)+--spacing(4))]"
+            : resting ? null : cn("rounded-t-chat border-t border-border/60 pt-2 shadow-sheet dark:border-border", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
+          className,
+        )}
+        {...(barDrag ? { ...dragging, onPointerDownCapture: resting ? dragging.onPointerDownCapture : undefined } : {})}
+        {...props}
+      >
+        <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel ? "overflow-y-auto" : "overflow-hidden")}>
+          <AssistantChatHeader {...header} expanded={header.expanded ?? full} grabber={full ? undefined : header.grabber} />
+          {contextAction}
+          {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
+          {panel}
+          <AssistantTranscript {...transcript} visible={transcript.visible ?? !resting} className={cn("flex-1", transcript.className)} />
+        </div>
+        <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={composer.variant ?? (resting ? "bar" : "sheet")} />
+      </section>
     </>
   );
 }

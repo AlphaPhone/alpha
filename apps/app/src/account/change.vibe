@@ -1,4 +1,4 @@
-// spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in"
+// spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
 import type { Account as CloudProfile, SnapshotSubscription, SubscriptionCommand } from "@elizaos/cloud"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
@@ -6,9 +6,9 @@ import * as Change from "../../gen/app__account__change.effect.vibe"
 import * as Codes from "../../gen/app__account__codes.effect.vibe"
 import { Cloud, openCloudInvoice } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { answer, contained, type Job, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { answer, contained, due, type Job, reacting, run, untimed } from "../runtime/reactor.vibe"
 import { type BillingVerification, billingSession, BillingSession, reviewedBuyer } from "./change-authority.vibe"
-import { bindCommand, CommandBinding, matchesCommand, planTier, type PlanAction, type PlanDirection, readInvoice, readQuote, type ReviewedQuote, sendPlanAction } from "./change-cloud.vibe"
+import { bindCommand, type CommandBinding, CommandBindingSchema, matchesCommand, planTier, type PlanAction, type PlanDirection, readInvoice, readQuote, type ReviewedQuote, sendPlanAction } from "./change-cloud.vibe"
 import { accountIsInFront, AccountWrites, type Buyer, buyerOf, sameBuyer } from "./profile.vibe"
 
 type Choice = "Upgrade" | "Downgrade" | "Cancel" | "Keep"
@@ -82,7 +82,7 @@ effect function pendingCommand() {
   const storage = try KeyValueStore.KeyValueStore
   const raw = storage.get(planCommandKey) catch () => undefined
   if (raw === undefined) return undefined
-  const saved = Schema.decodeUnknownOption(Schema.fromJsonString(CommandBinding))(raw)
+  const saved = Schema.decodeUnknownOption(Schema.fromJsonString(CommandBindingSchema))(raw)
   return Option.isSome(saved) ? saved.value : undefined
 }
 
@@ -369,5 +369,12 @@ function effects(refresh: () => void) {
 }
 
 export function managePlan(refresh: () => void) {
-  return Layer.provideMerge(reacting(Change, { keep: 1, open: [{ type: "restart" }], carry: effects(refresh) }), Layer.merge(changeWords, billingSession))
+  return Layer.provideMerge(reacting(Change, {
+    keep: 1,
+    open: [{ type: "restart" }],
+    timers: (state) => state.step === "Quoted"
+      ? [due<Change.Event, []>("quote-expiry", state.quoteEnds, { type: "notNow" })]
+      : [],
+    carry: effects(refresh),
+  }), Layer.merge(changeWords, billingSession))
 }

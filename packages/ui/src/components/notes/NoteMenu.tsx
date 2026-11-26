@@ -4,7 +4,7 @@ import { cn, focusRing } from "../../lib/cn.ts";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 
 /** A Notes menu's panel, as develop's: the raised surface, 208px at least, 6px padding, a 16px corner. */
-export const noteMenuPanel = "min-w-52 rounded-lg border-0 bg-card p-1.5 shadow-note-menu dark:shadow-note-menu";
+export const noteMenuPanel = "min-w-52 rounded-lg border border-border/60 bg-popover p-1.5 text-popover-foreground shadow-note-menu dark:border-border dark:shadow-note-menu";
 
 /** One row of a Notes menu: 48px, 12px in, a 10px corner, 15px words and 18px icons. */
 export const noteMenuItem = "min-h-12 gap-3 rounded-option px-3 text-base [&_svg:not([class*='size-'])]:size-4.5";
@@ -40,7 +40,7 @@ export function NoteMenu({ pinned = false, onShare, onPin, onDelete, size = "md"
         <MenuItem disabled={!onShare} onSelect={onShare} className={noteMenuItem}><Share2 aria-hidden className="size-4.5" />Share</MenuItem>
         <MenuItem disabled={!onPin} onSelect={onPin} className={noteMenuItem}><Pin aria-hidden className="size-4.5" />{pinned ? "Unpin" : "Pin"}</MenuItem>
         <div role="separator" className="my-1 border-t border-border" />
-        <MenuItem disabled={!onDelete} onSelect={onDelete} className={noteMenuItem}><Trash2 aria-hidden className="size-4.5" />Delete</MenuItem>
+        <MenuItem destructive disabled={!onDelete} onSelect={onDelete} className={noteMenuItem}><Trash2 aria-hidden className="size-4.5" />Delete</MenuItem>
       </MenuContent>
     </Menu>
   );

@@ -180,14 +180,15 @@ pure val specValues: Set[ItemSpec] = Set(
   { listId: 2, hasDue: true, dueDay: 11, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: HighPriority, flagged: true },
 )
 pure val criteriaValues = Set(defaultFilter, { showCompleted: true, flaggedOnly: false, priority: NoPriority }, { showCompleted: false, flaggedOnly: true, priority: HighPriority })
-pure val listsValues: Set[List[ListEntry]] = Set(
+pure val syncedListsValues: Set[List[ListEntry]] = Set(
   List(defaultList),
   List(defaultList, { id: 2, isDefault: false, revision: 1 }),
 )
 pure val nextListIdValues = Set(2, 3)
-pure val itemsValues: Set[List[ItemEntry]] = Set(
+pure val syncedItemsValues: Set[List[ItemEntry]] = Set(
   List(),
-  List({ id: 1, listId: 1, hasDue: true, dueDay: 10, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: MediumPriority, flagged: false, completed: false, snoozedUntil: 0, revision: 1 }),
+  List({ id: 1, listId: 1, hasDue: true, dueDay: 10, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: HighPriority, flagged: true, completed: false, snoozedUntil: 0, revision: 1 }),
+  List({ id: 1, listId: 2, hasDue: false, dueDay: 0, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: NoPriority, flagged: false, completed: true, snoozedUntil: 0, revision: 2 }),
 )
 pure val nextItemIdValues = Set(1, 2)
 ```
@@ -195,7 +196,8 @@ pure val nextItemIdValues = Set(1, 2)
 ### Switching smart views, custom lists, sort, filter, search and item selection keeps every reference valid
 
 ```quint
-pure def canSelectSmartView(s: Reminders, view: SmartView): bool = s.view != Smart({ view: view })
+pure def canSelectSmartView(s: Reminders, view: SmartView): bool =
+  s.view != Smart({ view: view })
 
 pure def selectSmartView(s: Reminders, view: SmartView): Reminders =
   { ...s, view: Smart({ view: view }), selectedId: 0 }
@@ -361,6 +363,16 @@ pure def moveItem(s: Reminders, itemId: int, targetListId: int): Moved =
   val updated: ItemEntry = { ...cur, listId: targetListId, revision: cur.revision + 1 }
   { state: { ...s, items: putItem(s.items, updated), write: A::dispatch(A::record(A::plan(attemptId))) },
     out: List(WriteItem({ attemptId: attemptId, itemId: itemId })) }
+
+pure def canClearCompleted(s: Reminders): bool =
+  not(writing(s)) and not(undoHeld(s)) and s.items.some(it => it.completed)
+
+pure def clearCompleted(s: Reminders): Moved =
+  val attemptId = s.write.id + 1
+  val remaining = s.items.select(it => not(it.completed))
+  val nextSelected = if (s.selectedId != 0 and hasItem(remaining, s.selectedId)) s.selectedId else 0
+  { state: { ...s, items: remaining, selectedId: nextSelected, write: A::dispatch(A::record(A::plan(attemptId))) },
+    out: List(WriteItem({ attemptId: attemptId, itemId: 0 })) }
 ```
 
 ### Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day
@@ -539,6 +551,34 @@ pure def agentChanged(s: Reminders): Moved =
     { state: { ...s, again: true }, out: List() }
   else
     refresh(s)
+
+pure def canApplySync(s: Reminders, syncedLists: List[ListEntry], nextListId: int, syncedItems: List[ItemEntry], nextItemId: int): bool =
+  not(writing(s)) and not(undoHeld(s))
+    and syncedLists.length() <= 32
+    and hasList(syncedLists, defaultListId) and listOf(syncedLists, defaultListId).isDefault
+    and nextListId > defaultListId
+    and syncedLists.every(l => l.id >= 1 and l.id < nextListId and syncedLists.select(m => m.id == l.id).length() == 1)
+    and syncedItems.length() <= 200
+    and nextItemId >= 1
+    and syncedItems.every(it => itemWellFormed(it, syncedLists, nextItemId) and syncedItems.select(o => o.id == it.id).length() == 1)
+
+pure def applySync(s: Reminders, syncedLists: List[ListEntry], nextListId: int, syncedItems: List[ItemEntry], nextItemId: int): Reminders =
+  val curView = s.view
+  val keepCustom = match curView {
+    | CustomList(c) => hasList(syncedLists, c.listId)
+    | _ => true
+  }
+  val nextView = if (keepCustom) curView else Overview
+  val nextSelected = if (s.selectedId != 0 and hasItem(syncedItems, s.selectedId)) s.selectedId else 0
+  {
+    ...s,
+    lists: syncedLists,
+    nextListId: nextListId,
+    items: syncedItems,
+    nextItemId: nextItemId,
+    view: nextView,
+    selectedId: nextSelected,
+  }
 ```
 
 ### A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made
@@ -603,28 +643,6 @@ pure def reopen(s: Reminders): Moved =
   val fetchOut = if (s.sync.status == R::Loading) List(SyncFetch({ ticket: s.sync.ticket })) else List()
   val wakeOut = if (undoHeld(s)) List(WakeUndo({ at: s.undo.until })) else List()
   { state: { ...s, front: false, view: Overview, searchOpen: false, selectedId: 0, write: settledWrite }, out: fetchOut.concat(wakeOut) }
-```
-
-### Applying a synced snapshot admits only valid lists and items while preserving active view and selection invariants
-
-```quint
-pure def canApplySync(s: Reminders, lists: List[ListEntry], nextListId: int, items: List[ItemEntry], nextItemId: int): bool =
-  not(writing(s)) and not(undoHeld(s))
-    and hasList(lists, defaultListId) and listOf(lists, defaultListId).isDefault
-    and nextListId > defaultListId
-    and lists.every(l => l.id >= 1 and l.id < nextListId and lists.select(m => m.id == l.id).length() == 1)
-    and nextItemId >= 1
-    and items.every(it => itemWellFormed(it, lists, nextItemId) and items.select(o => o.id == it.id).length() == 1)
-
-pure def applySync(s: Reminders, lists: List[ListEntry], nextListId: int, items: List[ItemEntry], nextItemId: int): Reminders =
-  val curView = s.view
-  val nextView = match curView {
-    | CustomList(c) => if (hasList(lists, c.listId)) s.view else Smart({ view: TodayView })
-    | _ => s.view
-  }
-  val nextSelected = if (s.selectedId != 0 and hasItem(items, s.selectedId)) s.selectedId else 0
-  { ...s, lists: lists, nextListId: nextListId, items: items, nextItemId: nextItemId,
-    view: nextView, selectedId: nextSelected }
 ```
 
 ### The default list always exists, every item belongs to a valid list, timing rules hold, and ids remain unique and below the next id

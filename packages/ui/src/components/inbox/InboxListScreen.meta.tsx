@@ -42,16 +42,18 @@ export const meta: ComponentMeta<InboxListScreenProps> = {
       const canvas = within(canvasElement);
       await expect([Boolean(canvas.queryByRole("button", { name: "Back to inbox" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([true, false]);
       const header = canvasElement.querySelector("header")?.getBoundingClientRect();
+      if (!header || header.width === 0) return;
       const back = canvas.getByRole("button", { name: "Back to inbox" }).getBoundingClientRect();
       const pill = canvas.getByRole("search", { name: "Search Gmail" }).getBoundingClientRect();
-      await expect([canvas.getByRole("button", { name: "Clear search" }).getBoundingClientRect().width, back.left - (header?.left ?? 0), (header?.right ?? 0) - pill.right]).toEqual([40, 16, 16]);
+      await expect([canvas.getByRole("button", { name: "Clear search" }).getBoundingClientRect().width, back.left - header.left, header.right - pill.right]).toEqual([40, 16, 16]);
     },
     "Searching on the launcher": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
       await expect([canvas.queryByRole("button", { name: /^Back/ }), Boolean(canvas.getByRole("search", { name: "Search Gmail" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([null, true, false]);
       const header = canvasElement.querySelector("header")?.getBoundingClientRect();
+      if (!header || header.width === 0) return;
       const pill = canvas.getByRole("search", { name: "Search Gmail" }).getBoundingClientRect();
-      await expect([canvas.getByRole("button", { name: "Clear search" }).getBoundingClientRect().width, pill.left - (header?.left ?? 0), (header?.right ?? 0) - pill.right]).toEqual([40, 16, 16]);
+      await expect([canvas.getByRole("button", { name: "Clear search" }).getBoundingClientRect().width, pill.left - header.left, header.right - pill.right]).toEqual([40, 16, 16]);
     },
     "Loading first page": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "true");

@@ -67,7 +67,7 @@ export function CallStrip({ runtime, stage = false }: CallStripProps) {
   return (
     <div role="region" aria-label="Ongoing call" data-alpha-call-strip={stage ? "stage" : "over"} className={cn(
       "mx-auto flex h-13 shrink-0 items-center gap-1 rounded-full px-0.5 text-alpha-foreground shadow-bar dark:shadow-bar-dark",
-      stage ? "w-[calc(100%_-_1.5rem)]" : "absolute inset-x-3 top-[calc(var(--alpha-call-inset-top)_+_0.375rem)] z-50",
+      stage ? "w-[calc(100%_-_1.5rem)]" : "absolute inset-x-3 top-[calc(var(--alpha-call-inset-top)_+_0.375rem)] z-alert",
       stage && open && "max-w-[26.5rem]",
       stage && !open && "mt-[calc(var(--alpha-call-inset-top)_+_0.375rem)] mb-1.5",
       ended ? "bg-call-ended" : "bg-call",

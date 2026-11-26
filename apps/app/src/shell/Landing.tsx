@@ -7,7 +7,7 @@ const said: Readonly<Record<Message, string>> = {
   MessageReopened: "This page was opened again. Go back to Alpha to continue or start again.",
   MessageInvalid: "This return can't be used. Go back to Alpha and connect again.",
   MessageCancelled: "You cancelled the authorization.",
-  MessageContinue: "Alpha checks your account before it saves the connection.",
+  MessageContinue: "Continue in Alpha to finish connecting your account.",
 };
 
 export interface LandingPageProps {

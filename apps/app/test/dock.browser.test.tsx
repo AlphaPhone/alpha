@@ -14,6 +14,11 @@ afterEach(closeAllDocks);
 const shellReaches = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"], ok: (state: ShellState) => boolean) =>
   runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, ok))));
 
+async function openSheetByMark(runtime: Awaited<ReturnType<typeof mountDock>>["runtime"]) {
+  await page.getByRole("button", { name: "Open conversation" }).click();
+  await shellReaches(runtime, (s) => s.assistant === "Sheet");
+}
+
 describe("Ask Alpha dock", () => {
   // spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
   it("Drag the Browser composer (spec/app/assistant/dock.md, \"An empty Browser composer can start a drag without taking focus\")", async () => {
@@ -70,8 +75,7 @@ describe("Ask Alpha dock", () => {
     expect(document.activeElement).toBe(beforeTextarea);
     expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
 
-    await page.getByRole("button", { name: "Open conversation" }).click();
-    await shellReaches(runtime, (s) => s.assistant === "Sheet");
+    await openSheetByMark(runtime);
 
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "agentOpenView", view: "Calendar" })));
@@ -88,8 +92,7 @@ describe("Ask Alpha dock", () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Browser" });
 
-    await page.getByRole("button", { name: "Open conversation" }).click();
-    await shellReaches(runtime, (s) => s.assistant === "Sheet");
+    await openSheetByMark(runtime);
     expect(document.activeElement).not.toBe(document.querySelector("textarea[data-alpha-composer]"));
 
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
@@ -98,8 +101,8 @@ describe("Ask Alpha dock", () => {
 
     const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
     expect(grabber).not.toBeNull();
-    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch", isPrimary: true }));
-    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch", isPrimary: true }));
+    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, button: 0, clientY: 760, pointerId: 2, pointerType: "touch" }));
+    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, button: 0, clientY: 760, pointerId: 2, pointerType: "touch" }));
     await shellReaches(runtime, (s) => s.assistant === "Sheet");
     expect(document.activeElement).not.toBe(document.querySelector("textarea[data-alpha-composer]"));
   });
@@ -228,14 +231,19 @@ describe("Ask Alpha dock", () => {
     expect(blackOnTheBar).toEqual([]);
   });
 
-  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet that grew as a reply arrived is put away from the height it was drawn at, never snapping back first
-  it("Put a sheet that grew away from the height it was drawn at (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+  const openHomeSheet = async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Home" });
     const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     await page.getByRole("button", { name: "Open conversation" }).click();
     await shellReaches(runtime, (s) => s.assistant === "Sheet");
     await Effect.runPromise(Effect.sleep("600 millis"));
+    return { runtime, section };
+  };
+
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet that grew as a reply arrived is put away from the height it was drawn at, never snapping back first
+  it("Put a sheet that grew away from the height it was drawn at (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { section } = await openHomeSheet();
     const fitted = section()?.getBoundingClientRect().height ?? 0;
     section()?.querySelector("[role='log'] > div")?.append(Object.assign(document.createElement("div"), { style: "height: 400px; flex-shrink: 0" }));
     await expect.poll(() => section()?.getBoundingClientRect().height ?? 0).toBeGreaterThan(fitted + 100);
@@ -255,18 +263,19 @@ describe("Ask Alpha dock", () => {
     expect(closing.every((height, at) => at === 0 || height <= (closing[at - 1] ?? height) + 1)).toBe(true);
   });
 
+  const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
+  const seen = (element: Element) => {
+    let opacity = 1;
+    for (let at: Element | null = element; at; at = at.parentElement) opacity *= Number(getComputedStyle(at).opacity);
+    return opacity;
+  };
+
   // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": only one field shows words at a time while a sheet is put away, by a tap or by a drag: the fading sheet's field is empty and the bar's own words show at once under it
   it("Put the sheet away with one field's words at a time (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Home" });
     const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     const reaches = (detent: "Bar" | "Sheet") => runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
-    const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
-    const seen = (element: Element) => {
-      let opacity = 1;
-      for (let at: Element | null = element; at; at = at.parentElement) opacity *= Number(getComputedStyle(at).opacity);
-      return opacity;
-    };
     /** The words each drawn field shows, its text or else its placeholder, where it can be seen at all. */
     const worded = () => [...document.querySelectorAll("textarea")]
       .filter((field) => field.getBoundingClientRect().height > 0 && seen(field) > 0.05 && (field.value || field.placeholder))
@@ -335,18 +344,7 @@ describe("Ask Alpha dock", () => {
 
   // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v119's (45f6bed30 chat-overlay-motion-adapter.ts:261-272, 1037-1039), an open sheet pulled down fades by how far it is into the zone above a floor of 62 and 28 points, where no bar is drawn at the press, and a flick down lets its header slide down onto the bar as it fades
   it("Flick an open sheet down onto the bar as v119 drew it (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
-    await page.viewport(390, 844);
-    const { runtime } = await mountDock({ view: "Home" });
-    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
-    const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
-    const seen = (element: Element) => {
-      let opacity = 1;
-      for (let at: Element | null = element; at; at = at.parentElement) opacity *= Number(getComputedStyle(at).opacity);
-      return opacity;
-    };
-    await page.getByRole("button", { name: "Open conversation" }).click();
-    await shellReaches(runtime, (s) => s.assistant === "Sheet");
-    await pause(600);
+    const { runtime, section } = await openHomeSheet();
     const handle = section()?.querySelector("[aria-label='Resize chat']");
     const box = handle?.getBoundingClientRect();
     const y = Math.round((box?.top ?? 0) + (box?.height ?? 0) / 2);

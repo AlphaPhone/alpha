@@ -664,10 +664,10 @@ pure def ownerChanged(r: Recorder, owner: int, by: Actor): Moved =
 
 ```quint
 pure def canTakeFound(r: Recorder, take: int, segments: int, intact: bool, handed: bool, by: Actor): bool =
-  by == Phone and isOwner(r.owner) and not(unfinished(r)) and take > 0 and take <= r.issued and segments > 0
+  by == Phone and isOwner(r.owner) and not(unfinished(r)) and take > 0 and segments > 0
 
 pure def takeFound(r: Recorder, take: int, segments: int, intact: bool, handed: bool, by: Actor): Recorder =
-  val held = { ...r, take: take, kept: segments, capture: 0, unsaved: 0, level: 0, ask: NoAsk, note: 0, folder: 0,
+  val held = { ...r, take: take, issued: if (take > r.issued) take else r.issued, kept: segments, capture: 0, unsaved: 0, level: 0, ask: NoAsk, note: 0, folder: 0,
     missing: false, recovered: false, damaged: false, found: 0, keeping: A::plan(r.keeping.id) }
   if (handed) { ...held, phase: Keeping, keeping: A::conclude(A::dispatch(A::record(A::plan(r.keeping.id + 1))), false, false) }
   else if (intact) { ...held, phase: Paused, recovered: true, found: segments }

@@ -549,7 +549,15 @@ The page can read pending receipts. It cannot complete them.
 pure val nativeNotesCleanup = "/api/alpha-runtime/notes-recording-cleanup"
 pure val nativeNotesCleanupLimit = 2048
 pure val nativeRecordingRoutes: List[Route] = List({ method: Post, path: nativeNotesCleanup, stream: false })
-pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes).concat(nativeRecordingRoutes)
+pure val nativeRoutes: List[Route] = List(
+  { method: Get, path: "/api/alpha-speech/scope", stream: false },
+  { method: Post, path: "/api/asr/local-inference/live", stream: false },
+  { method: Get, path: nativeDigestScope, stream: false },
+  { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/hosted/results", stream: false },
+  { method: Post, path: nativeDigestAck, stream: false },
+  { method: Post, path: nativeNotesCleanup, stream: false },
+)
 pure def nativeRoutesAdmitted(listed: List[Route]): bool =
   listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
     and nativeRoutes.every(route => listed.includes(route))
@@ -607,7 +615,9 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
   { method: Delete, path: "/api/alpha/reminders/lists/{id}", key: "mode", kind: PatternQuery, value: "reassign|cascade", example: "reassign" },
 )
-pure val nativeDigestQueries = pageQueries.select(q => q.method == Get and q.path == "/api/workflow/hosted/results")
+pure val nativeDigestQueries: List[RequestQuery] = List(
+  { method: Get, path: "/api/workflow/hosted/results", key: "clientId", kind: PatternQuery, value: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}", example: "build-probe" },
+)
 ```
 
 ### The agent keeps its memory across restarts, without embeddings

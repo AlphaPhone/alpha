@@ -1,13 +1,13 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
     <integer name="config_default_keyboard_theme">4</integer>
-    <string name="keyboard_theme_material_light">Alpha light</string>
-    <string name="keyboard_theme_material_dark">Alpha dark</string>
-    <string name="english_ime_name">Alpha Keyboard</string>
-    <string name="english_ime_settings">Alpha Keyboard settings</string>
-    <string name="spell_checker_service_name">Alpha Spell Checker</string>
-    <string name="android_spell_checker_settings">Alpha Spell Checker settings</string>
-    <string name="dictionary_service_name">Alpha Dictionary</string>
+    <string name="keyboard_theme_material_light" translatable="false">Alpha light</string>
+    <string name="keyboard_theme_material_dark" translatable="false">Alpha dark</string>
+    <string name="english_ime_name" translatable="false">Alpha Keyboard</string>
+    <string name="english_ime_settings" translatable="false">Alpha Keyboard settings</string>
+    <string name="spell_checker_service_name" translatable="false">Alpha Spell Checker</string>
+    <string name="android_spell_checker_settings" translatable="false">Alpha Spell Checker settings</string>
+    <string name="dictionary_service_name" translatable="false">Alpha Dictionary</string>
     <color name="key_text_color_lxx_dark">#FFFFFF</color>
     <color name="key_functional_text_color_lxx_dark">#FFFFFF</color>
     <color name="key_text_inactive_color_lxx_dark">#B8B8B8</color>
@@ -72,8 +72,8 @@
     <color name="sliding_key_input_preview_color_lxx_light">#0000FF</color>
     <color name="key_background_lxx_light">#FAFAFA</color>
     <color name="key_background_pressed_lxx_light">#DCE2FF</color>
-    <color name="key_action_background_lxx_light">#0000FF</color>
-    <color name="key_action_background_pressed_lxx_light">#0000CC</color>
+    <color name="key_action_background_lxx_light">#DCE2FF</color>
+    <color name="key_action_background_pressed_lxx_light">#C4CEFF</color>
     <color name="suggested_word_background_selected_lxx_light">#DCE2FF</color>
     <color name="gesture_floating_preview_color_lxx_light">#FAFAFA</color>
     <color name="emoji_tab_page_indicator_background_lxx_light">#FAFAFA</color>

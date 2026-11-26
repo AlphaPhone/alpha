@@ -171,9 +171,10 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and the make ticket of a send waiting for its conversation. */
   outgoing: string
   lastSent: string
+  lastSentWire: string
   lastPost: PostedMessage | undefined
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
-  readonly lastSentId: string
+  lastSentId: string
   sendWhenMade: number
   staged: StagedFiles | undefined
   lastTranscriptOffer: number
@@ -255,6 +256,7 @@ export const talk = Layer.effect(Talk, effect {
   let turnPage: { readonly ticket: number } | undefined
   let readLines: readonly ReadLine[] = []
   let previewOrigin: { readonly preview: NonNullable<Seen["preview"]>; readonly conversation: number; readonly id: string } | undefined
+  let restoredSentId = ""
   let seen: Seen = {
     pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(),
@@ -276,8 +278,10 @@ export const talk = Layer.effect(Talk, effect {
     queueSend: (ticket) => { board.sendWhenMade = ticket },
     outgoing: "",
     lastSent: "",
+    lastSentWire: "",
     lastPost: undefined,
-    get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? "" },
+    get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? restoredSentId },
+    set lastSentId(id: string) { restoredSentId = id },
     sendWhenMade: 0,
     staged: undefined,
     lastTranscriptOffer: 0,

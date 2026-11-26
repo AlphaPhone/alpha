@@ -40,7 +40,7 @@ function earlierTiles(record: Earlier): Tile[] {
     if (key.startsWith("alpha:")) {
       const view = earlierViews[key.slice("alpha:".length)]
       if (view !== undefined) add({ tag: "Own", view })
-    } else if (record.version === 1 || record.defaultPolicy !== undefined) add({ tag: "Installed", app: key })
+    } else if (key !== "" && (record.version === 1 || record.defaultPolicy !== undefined)) add({ tag: "Installed", app: key })
   }
   if (record.version === 1) for (const view of homeOrder) add({ tag: "Own", view })
   return tiles

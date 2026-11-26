@@ -1,4 +1,4 @@
-// spec/app/startup/index.md, "Until the connection has resolved, Home shows only the Alpha mark" (the cover that waits on this)
+// spec/app/startup/index.md, "Until the connection has resolved, Home shows only the Alpha mark"
 import type { Place } from "../areas.ts";
 import { externalStore } from "../runtime/store.ts";
 

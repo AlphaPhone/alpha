@@ -17,13 +17,13 @@ underAct();
 afterEach(closeAll);
 
 const mounts: Mount[] = [
-  { at: "assistant", load: () => import("../src/assistant/index.tsx") },
-  { at: "view:Settings", load: () => import("../src/settings/index.tsx") },
   { at: "settings/activity", load: () => import("../src/assistant/settingsActivity.tsx") },
+  { at: "view:Settings", load: () => import("../src/settings/index.tsx") },
+  { at: "assistant", load: () => import("../src/assistant/index.tsx") },
 ];
 
 /** Each bubble of the conversation, by the words it shows. */
-const bubbles = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.textContent ?? "");
+const bubbles = () => Array.from(document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article"), (line) => line.textContent ?? "");
 
 /** Restore the saved conversation titled `title` from Agent activity in Settings, as the owner does. */
 async function restore(alpha: Alpha, title: string) {

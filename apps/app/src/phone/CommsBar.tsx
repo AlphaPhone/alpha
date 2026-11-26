@@ -1,9 +1,9 @@
 // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "Story: Never lose End"
 import { Button, Input, Mark, cn } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
+import { Effect, Exit, type ManagedRuntime } from "effect";
 import { ArrowUp, Mic } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
-import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
+import { Machine as ShellMachine, canGoBack } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -37,12 +37,18 @@ export interface CommsBarProps {
 
 /** The sheet's detent is owned by the shell, and also controls which composer can take focus. */
 export function useCommsDock(runtime: ManagedRuntime.ManagedRuntime<ShellMachine, unknown>) {
-  const { state, can, send } = useShell(runtime);
+  const { state } = useShell(runtime);
   return {
     open: state?.assistant === "Sheet" || state?.assistant === "Full",
     close: () => {
-      if (state?.assistant === "Full") void send({ type: "goBack" });
-      if (state?.assistant !== "Bar" && can({ type: "goBack" })) void send({ type: "goBack" });
+      void runtime.runPromiseExit(Effect.gen(function* () {
+        const shell = yield* ShellMachine;
+        for (let step = 0; step < 2; step += 1) {
+          const current = yield* shell.get();
+          if (current.assistant === "Bar" || !canGoBack(current)) break;
+          yield* Effect.exit(shell.send({ type: "goBack" }));
+        }
+      }));
     },
   };
 }
@@ -70,9 +76,12 @@ export function CommsBar({ runtime, closed, filter, person, actions }: CommsBarP
     if (!opening) return;
     const about = comms.state?.key;
     const text = query.trim();
-    if (text !== "" && about !== undefined) await comms.send({ type: "requestTyped", about, request: text }, "Owner");
-    await shell.send(raise);
-    if (text !== "" && about !== undefined) await runtime.runPromise(Effect.flatMap(CommsPrompts, (prompts) => prompts.submit({ about, text })));
+    const request = about !== undefined ? ({ type: "requestTyped", about, request: text } as const) : undefined;
+    if (text !== "" && request !== undefined && comms.can(request, "Owner")) await comms.send(request, "Owner");
+    const raised = await shell.send(raise);
+    if (Exit.isSuccess(raised) && text !== "" && about !== undefined) {
+      await runtime.runPromise(Effect.flatMap(CommsPrompts, (prompts) => prompts.submit({ about, text })));
+    }
   };
   const view = shell.state.trail.at(-1);
   const talk = () => {
@@ -83,8 +92,7 @@ export function CommsBar({ runtime, closed, filter, person, actions }: CommsBarP
   const phone = view === "Phone";
   const placeholder = phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
   return (
-    <div data-alpha-comms-dock="" data-host-chrome="" className={cn("sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-dock bg-secondary py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark",
-      // v119 (45f6bed30) prototype/phone.css:419: the person's dock has only its 1.5px accent outline, no drop shadow.
+    <div data-alpha-comms-dock="" data-host-chrome="" className={cn("sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(var(--alpha-safe-bottom,env(safe-area-inset-bottom))_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-dock bg-secondary py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark",
       person && !closed && "shadow-none ring-[1.5px] ring-primary ring-inset dark:shadow-none")}>
       <Button ref={holdButton} size="icon" aria-label="Open Alpha" className="size-11 shrink-0 touch-none overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening}
         onPointerDown={(event) => {

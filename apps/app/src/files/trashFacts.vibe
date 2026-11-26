@@ -1,4 +1,6 @@
 // spec/app/files/trash.md, "The owner opens a listed Trash item's details and can restore or ask to erase that same item"
+import { createShelf, type Shelf } from "../runtime/shelf.vibe"
+
 export interface TrashItemFacts {
   readonly location: string
   readonly directory: boolean
@@ -9,13 +11,15 @@ export interface TrashItemFacts {
 /** Native metadata, keyed by the same permanent mark as the Trash's rules. */
 export service TrashFacts {
   rows(): ReadonlyMap<number, TrashItemFacts>!!
+  view(): Shelf<ReadonlyMap<number, TrashItemFacts>>!!
   hold(items: ReadonlyMap<number, TrashItemFacts>): void!!
 }
 
 export const trashFacts = Layer.sync(TrashFacts, () => {
-  let held: ReadonlyMap<number, TrashItemFacts> = new Map()
+  const shelf = createShelf<ReadonlyMap<number, TrashItemFacts>>(new Map(), { reset: () => new Map() })
   return {
-    rows: () => sync(() => held),
-    hold: (items: ReadonlyMap<number, TrashItemFacts>) => sync(() => { held = items }),
+    rows: () => sync(() => shelf.get()),
+    view: () => sync(() => shelf),
+    hold: (items: ReadonlyMap<number, TrashItemFacts>) => sync(() => { shelf.set(new Map(items)) }),
   }
 })

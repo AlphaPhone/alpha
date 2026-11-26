@@ -107,11 +107,11 @@ final class AlphaRoleUpgradeAndroid implements AlphaRoleUpgrade.Port {
         try {
             output = file.startWrite();
             output.write(value.getBytes(StandardCharsets.UTF_8));
-            output.getFD().sync();
         } catch (IOException error) {
             if (output != null) file.failWrite(output);
             return false;
         }
+        // AtomicFile.finishWrite() syncs the file descriptor before renaming.
         file.finishWrite(output);
         // Owner requests reach save() outside the default pass's catch, on the system
         // server's role worker: an unreadable marker refuses the write instead of throwing.

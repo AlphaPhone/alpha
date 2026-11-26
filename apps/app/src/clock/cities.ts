@@ -124,7 +124,7 @@ const RAW_CITIES: ReadonlyArray<readonly [string, string, string]> = [
   ["Yangon", "Myanmar", "Asia/Yangon"],
   ["Bangkok", "Thailand", "Asia/Bangkok"],
   ["Ho Chi Minh City", "Vietnam", "Asia/Ho_Chi_Minh"],
-  ["Hanoi", "Vietnam", "Asia/Bangkok"],
+  ["Hanoi", "Vietnam", "Asia/Ho_Chi_Minh"],
   ["Jakarta", "Indonesia", "Asia/Jakarta"],
   ["Singapore", "Singapore", "Asia/Singapore"],
   ["Kuala Lumpur", "Malaysia", "Asia/Kuala_Lumpur"],
@@ -195,25 +195,79 @@ export function localTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
-function zonedDateParts(nowMs: number, timeZone: string): { year: number; month: number; day: number; hour: number; minute: number } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(nowMs));
-  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
-  return { year: read("year"), month: read("month"), day: read("day"), hour: read("hour") % 24, minute: read("minute") };
+interface ZonedParts {
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+  readonly hour: number;
+  readonly minute: number;
 }
 
-function zoneOffsetMinutes(nowMs: number, timeZone: string): number {
-  const zoned = zonedDateParts(nowMs, timeZone);
+const partsFormatters = new Map<string, Intl.DateTimeFormat>();
+const cityTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+const zoneAbbrFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function getPartsFormatter(timeZone: string): Intl.DateTimeFormat {
+  let fmt = partsFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    partsFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+function getCityTimeFormatter(timeZone: string, hour24: boolean): Intl.DateTimeFormat {
+  const key = `${timeZone}|${hour24 ? "24" : "12"}`;
+  let fmt = cityTimeFormatters.get(key);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(undefined, {
+      timeZone,
+      hour: hour24 ? "2-digit" : "numeric",
+      minute: "2-digit",
+      hour12: !hour24,
+    });
+    cityTimeFormatters.set(key, fmt);
+  }
+  return fmt;
+}
+
+function getZoneAbbrFormatter(timeZone: string): Intl.DateTimeFormat {
+  let fmt = zoneAbbrFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: "short" });
+    zoneAbbrFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+function zonedDateParts(date: Date, timeZone: string): ZonedParts {
+  const parts = getPartsFormatter(timeZone).formatToParts(date);
+  let year = 0;
+  let month = 0;
+  let day = 0;
+  let hour = 0;
+  let minute = 0;
+  for (const part of parts) {
+    if (part.type === "year") year = Number(part.value);
+    else if (part.type === "month") month = Number(part.value);
+    else if (part.type === "day") day = Number(part.value);
+    else if (part.type === "hour") hour = Number(part.value) % 24;
+    else if (part.type === "minute") minute = Number(part.value);
+  }
+  return { year, month, day, hour, minute };
+}
+
+function offsetMinutesFromParts(zoned: ZonedParts, roundedNowMs: number): number {
   const asUtc = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute);
-  const roundedNow = Math.floor(nowMs / 60_000) * 60_000;
-  return Math.round((asUtc - roundedNow) / 60_000);
+  return Math.round((asUtc - roundedNowMs) / 60_000);
 }
 
 function formatRelativeOffset(diffMinutes: number): string {
@@ -226,23 +280,44 @@ function formatRelativeOffset(diffMinutes: number): string {
   return `${sign}${hours} hr ${mins} min`;
 }
 
+/** Precomputed host-zone reference snapshot for formatting multiple world cities in one pass. */
+export interface HostClockReference {
+  readonly date: Date;
+  readonly roundedNowMs: number;
+  readonly localDay: number;
+  readonly localOffsetMinutes: number;
+}
+
+/** Compute the host timezone reference once for a given instant so formatting many cities avoids redundant lookups. */
+export function hostClockReference(nowMs: number, hostZone = localTimeZone()): HostClockReference {
+  const date = new Date(nowMs);
+  const roundedNowMs = Math.floor(nowMs / 60_000) * 60_000;
+  const local = zonedDateParts(date, hostZone);
+  return {
+    date,
+    roundedNowMs,
+    localDay: Date.UTC(local.year, local.month - 1, local.day),
+    localOffsetMinutes: offsetMinutesFromParts(local, roundedNowMs),
+  };
+}
+
 /** Format a world city's live wall time, relative offset from local time, and day delta. */
-export function formatCityClock(timeZone: string, nowMs: number, hour24: boolean, hostZone = localTimeZone()): CityClockReading {
-  const timeParts = new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    hour: hour24 ? "2-digit" : "numeric",
-    minute: "2-digit",
-    hour12: !hour24,
-  }).formatToParts(new Date(nowMs));
+export function formatCityClock(
+  timeZone: string,
+  nowMs: number,
+  hour24: boolean,
+  hostZone = localTimeZone(),
+  hostRef?: HostClockReference,
+): CityClockReading {
+  const ref = hostRef ?? hostClockReference(nowMs, hostZone);
+  const timeParts = getCityTimeFormatter(timeZone, hour24).formatToParts(ref.date);
   const period = timeParts.find((part) => part.type === "dayPeriod")?.value ?? "";
   const time = timeParts.filter((part) => part.type !== "dayPeriod").map((part) => part.value).join("").trim();
-  const zoneParts = new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: "short" }).formatToParts(new Date(nowMs));
+  const zoneParts = getZoneAbbrFormatter(timeZone).formatToParts(ref.date);
   const zoneAbbr = zoneParts.find((part) => part.type === "timeZoneName")?.value ?? timeZone;
-  const target = zonedDateParts(nowMs, timeZone);
-  const local = zonedDateParts(nowMs, hostZone);
+  const target = zonedDateParts(ref.date, timeZone);
   const targetDay = Date.UTC(target.year, target.month - 1, target.day);
-  const localDay = Date.UTC(local.year, local.month - 1, local.day);
-  const dayDelta = targetDay > localDay ? "Tomorrow" : targetDay < localDay ? "Yesterday" : "Today";
-  const diffMinutes = zoneOffsetMinutes(nowMs, timeZone) - zoneOffsetMinutes(nowMs, hostZone);
+  const dayDelta = targetDay > ref.localDay ? "Tomorrow" : targetDay < ref.localDay ? "Yesterday" : "Today";
+  const diffMinutes = offsetMinutesFromParts(target, ref.roundedNowMs) - ref.localOffsetMinutes;
   return { time, period, offsetLabel: formatRelativeOffset(diffMinutes), dayDelta, zoneAbbr };
 }

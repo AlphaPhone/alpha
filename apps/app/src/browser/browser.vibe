@@ -8,13 +8,15 @@ import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app_
 import * as Share from "../../gen/app__browser__share.effect.vibe"
 import type { Event as ShareEvent } from "../../gen/app__browser__share.effect.vibe"
 import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing, type Shell as ShellState } from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import type { BrowserPageGuard } from "@elizaos/os-bridges"
 import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
 import { say } from "../notices/toasts.vibe"
 import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
+import { Device } from "../platform/device.vibe"
 import type { Install } from "../runtime/attempts.vibe"
-import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, due, reacting, run, started, together, untimed, whole } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
 /** Whether Browser is on the shell's active view. */
@@ -137,18 +139,18 @@ export type HistoryChange =
  * `TabHost`'s session holds by the tab's id.
  */
 export service Pages {
+  readonly subscribe: (listener: () => void) => () => void
+  readonly version: () => number
+  notify(): void!!
   of(tab: number): PageRuntime!!
   /** Where the next load of `tab` that opens an address goes. */
   aim(tab: number, address: string): void!!
   aimed(tab: number): Option.Option<string>!!
   /** What the owner is finding in `tab`'s page. */
   seek(tab: number, text: string): void!!
-  sought(tab: number): { readonly text: string; readonly index: number }!!
-  stood(tab: number, index: number): void!!
-  readonly find: {
-    readonly subscribe: (listener: () => void) => () => void
-    readonly snapshot: (tab: number) => { readonly text: string; readonly index: number }
-  }
+  sought(tab: number): string!!
+  findTicket(tab: number, ticket: number): void!!
+  activeFindTicket(tab: number): number!!
   /** Whether the native tab currently requests the desktop version of pages. */
   desktop(tab: number): boolean!!
   setDesktop(tab: number, enabled: boolean): void!!
@@ -364,41 +366,64 @@ export effect function leaving(): ShareEvent!!(TabHost | Tabs.Machine | Share.Ma
 
 function carryPage(tab: number) {
   return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine | Time, []> => match (fx) {
-    when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
+    when { tag: "Go", let load, let way }: run(`go ${tab}`, effect {
+      const outcome = try went(tab, load, way)
+      if (outcome.type === "failed") try tellPage(tab, outcome)
+    });
     when { tag: "Halt", let load }: run(`halt ${tab}`, effect {
       const host = try TabHost
       if (host.web === undefined) try ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" })))
       else try sync(() => host.web?.stop(idOf(tab), load))
     });
     when { tag: "Visit", let load }: run(`visit ${tab}`, visited(tab, load));
-    when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
-      const { text } = try (try Pages).sought(tab)
+    when { tag: "Find", let ticket }: run(`find ${tab}`, ignore(effect {
+      const pages = try Pages
+      try pages.findTicket(tab, ticket)
+      const text = try pages.sought(tab)
       try hosted("find", (plugin, session) => plugin.find({ session, id: idOf(tab), query: text }))
     }));
     when { tag: "FindNext", let forward }: run(`find next ${tab}`, ignore(hosted("findNext", (plugin, session) => plugin.findNext({ session, id: idOf(tab), forward }))));
-    when { tag: "ClearFind" }: run(`find ${tab}`, ignore(hosted("clearFind", (plugin, session) => plugin.clearFind({ session, id: idOf(tab) }))));
+    when { tag: "ClearFind" }: run(`find ${tab}`, ignore(effect {
+      try (try Pages).findTicket(tab, 0)
+      try hosted("clearFind", (plugin, session) => plugin.clearFind({ session, id: idOf(tab) }))
+    }));
   }
 }
-
-const emptyFind = { text: "", index: 0 } as const
 
 /** Each tab's page machine, made over the Browser's own runtime once it is whole, so its loads go through the tab host. */
 const pages = Layer.effect(Pages, effect {
   const area = try Whole
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
-  const finds = new Map<number, { readonly text: string; readonly index: number }>()
-  const findListeners = new Set<() => void>()
-  const notifyFind = () => { for (const listener of [...findListeners]) listener() }
+  const finds = new Map<number, { text: string; ticket: number }>()
   const desktops = new Set<number>()
+  const listeners = new Set<() => void>()
   let history: readonly HistoryRow[] = []
   let stamp = 0
   let editing: HistoryEdit | undefined
-  const changed = try Queue.unbounded<HistoryChange>()
+  let rev = 0
+  const historyQueue = try Queue.unbounded<HistoryChange>()
+  function notifyListeners() {
+    rev += 1
+    for (const listener of [...listeners]) listener()
+  }
   const note = (url: string, title?: string, at?: number): HistoryRow => ({
     url, stamp: ++stamp, ...(title === undefined || title === "" || title === url ? {} : { title }), ...(at === undefined ? {} : { at }),
   })
+  try addFinalizer(() => effect {
+    for (const runtime of made.values()) try ignore(tryPromise(() => runtime.dispose()))
+    made.clear()
+    aims.clear()
+    finds.clear()
+    desktops.clear()
+  })
   return {
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    version: () => rev,
+    notify: () => sync(notifyListeners),
     effect of(tab: number): PageRuntime!! {
       const known = made.get(tab)
       if (known !== undefined) return known
@@ -412,39 +437,31 @@ const pages = Layer.effect(Pages, effect {
     },
     aim: (tab: number, address: string) => sync(() => { aims.set(tab, address) }),
     aimed: (tab: number) => sync(() => Option.fromNullishOr(aims.get(tab))),
-    seek: (tab: number, text: string) => sync(() => {
-      finds.set(tab, { text, index: 0 })
-      notifyFind()
+    seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, ticket: finds.get(tab)?.ticket ?? 0 }); notifyListeners() }),
+    sought: (tab: number) => sync(() => finds.get(tab)?.text ?? ""),
+    findTicket: (tab: number, ticket: number) => sync(() => {
+      const current = finds.get(tab)
+      finds.set(tab, { text: current?.text ?? "", ticket })
     }),
-    sought: (tab: number) => sync(() => finds.get(tab) ?? emptyFind),
-    stood: (tab: number, index: number) => sync(() => {
-      const current = finds.get(tab) ?? emptyFind
-      if (current.index === index) return
-      finds.set(tab, { text: current.text, index })
-      notifyFind()
-    }),
-    find: {
-      snapshot: (tab: number) => finds.get(tab) ?? emptyFind,
-      subscribe: (listener: () => void) => {
-        findListeners.add(listener)
-        return () => { findListeners.delete(listener) }
-      },
-    },
+    activeFindTicket: (tab: number) => sync(() => finds.get(tab)?.ticket ?? 0),
     desktop: (tab: number) => sync(() => desktops.has(tab)),
     setDesktop: (tab: number, enabled: boolean) => sync(() => {
       if (enabled) desktops.add(tab)
       else desktops.delete(tab)
+      notifyListeners()
     }),
     history: () => sync(() => history),
     keepVisits: (urls: readonly string[], times: Readonly<Record<string, number>> | undefined, titles: ReadonlyMap<string, string>) => sync(() => {
       const live = new Map(history.map((row) => [row.url, row]))
       history = urls.map((url) => live.get(url) ?? note(url, titles.get(url), times?.[url]))
+      notifyListeners()
     }),
     visit: (url: string, at: number, title: string | undefined) => sync(() => {
       history = [note(url, title, at), ...history.filter((visit) => visit.url !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
-      Queue.offerUnsafe(changed, { kind: "visited", count: history.length })
+      Queue.offerUnsafe(historyQueue, { kind: "visited", count: history.length })
+      notifyListeners()
     }),
-    historyChanges: Stream.fromQueue(changed),
+    historyChanges: Stream.fromQueue(historyQueue),
     historyEdit: () => sync(() => editing),
     stageHistory: (edit: HistoryEdit) => sync(() => {
       if (editing !== undefined) return false
@@ -456,12 +473,16 @@ const pages = Layer.effect(Pages, effect {
       editing = undefined
       const count = history.length
       const kept = history.filter((one) => !edit.stamps.has(one.stamp))
-      if (ok) history = kept
-      Queue.offerUnsafe(changed, { kind: "edited", ticket: edit.ticket, ok, count, remaining: count - kept.length })
+      if (ok) {
+        history = kept
+        notifyListeners()
+      }
+      Queue.offerUnsafe(historyQueue, { kind: "edited", ticket: edit.ticket, ok, count, remaining: count - kept.length })
     }),
     wipeHistory: () => sync(() => {
       history = []
-      Queue.offerUnsafe(changed, { kind: "wiped" })
+      Queue.offerUnsafe(historyQueue, { kind: "wiped" })
+      notifyListeners()
     }),
     effect share(tab: number, event: ShareEvent): boolean!! {
       const context = try area.context
@@ -474,8 +495,9 @@ const pages = Layer.effect(Pages, effect {
       const runtime = made.get(tab)
       made.delete(tab)
       aims.delete(tab)
-      if (finds.delete(tab)) notifyFind()
+      finds.delete(tab)
       desktops.delete(tab)
+      notifyListeners()
       if (runtime !== undefined) try promise(() => runtime.dispose())
     },
   }
@@ -509,9 +531,27 @@ const told = started(effect {
       }
       return
     }
+    if (said.kind === "opened") {
+      const opened = host.session.applyOpened(said.raw)
+      if (opened === undefined) return
+      const s = try (try Tabs.Machine).get()
+      const rawOpener = typeof said.raw === "object" && said.raw !== null && "opener" in said.raw && typeof said.raw.opener === "string" ? tabOf(said.raw.opener) : s.selected
+      const opener = s.native.includes(rawOpener) ? rawOpener : s.selected
+      if (tabOf(opened.id) === s.issued + 1 && Tabs.canPopup(s, opener)) {
+        try tellTabs({ type: "popup", opener })
+      } else if (!Tabs.steady(s) || s.open.length >= Tabs.maxTabs) {
+        try ignore(hosted("close", (plugin, session) => plugin.close({ session, id: opened.id })))
+        host.session.forget([opened.id])
+      }
+      try (try Pages).notify()
+      return
+    }
     if (said.kind === "closed") {
       const id = host.session.applyClosed(said.raw)
-      if (id !== undefined) try tellTabs({ type: "nativeLost", tab: tabOf(id) })
+      if (id !== undefined) {
+        try tellTabs({ type: "nativeLost", tab: tabOf(id) })
+        try (try Pages).notify()
+      }
       return
     }
     if (said.kind === "found") {
@@ -522,19 +562,28 @@ const told = started(effect {
       if (outcome === undefined || outcome.cleared || !outcome.done || !Number.isInteger(outcome.count) || !Number.isInteger(outcome.index)) return
       const navigation = host.session.info(id)?.navigation
       if (navigation === undefined || typeof raw !== "object" || raw === null || !("navigation" in raw) || raw.navigation !== navigation) return
+      const pages = try Pages
       const p = try pageOf(s.selected)
+      if (!p.finding) return
+      const activeTicket = try pages.activeFindTicket(s.selected)
       const { count } = outcome
       const position = count > 0 ? Math.max(1, outcome.index) : 0
-      if (p.find.status === "Loading") try tellPage(s.selected, { type: "found", ticket: p.find.ticket, count, position })
-      else if (p.find.status === "Loaded") try tellPage(s.selected, { type: "matchSelected", ticket: p.find.ticket, count, position })
+      if (p.find.status === "Loading" && p.find.ticket === activeTicket) try tellPage(s.selected, { type: "found", ticket: p.find.ticket, count, position })
+      else if (p.find.status === "Loaded" && p.find.ticket === activeTicket) try tellPage(s.selected, { type: "matchSelected", ticket: p.find.ticket, count, position })
       return
     }
     if (said.kind !== "state") return
     const change = host.session.applyState(said.raw)
     if (change === undefined) return
     const tab = tabOf(change.id)
+    const tabsState = try (try Tabs.Machine).get()
+    if (tab <= 0 || !tabsState.open.includes(tab)) return
+    try (try Pages).notify()
     const p = try pageOf(tab)
     const { info } = change
+    if (change.revisionChanged && !change.documentChanged && Address.canReaddressed(p, p.load, true, true)) {
+      try tellPage(tab, { type: "readdressed", load: p.load, sameOrigin: true, sameDocument: true })
+    }
     if (p.phase === "Shown" && info.loading === true && change.documentChanged && (try tellPage(tab, { type: "followed" }))) try tellShare(tab, { type: "pageChanged" })
     const now = try pageOf(tab)
     if (now.phase !== "Loading") return
@@ -557,19 +606,33 @@ const told = started(effect {
   })
 }, "the tab host")
 
+function presentable(s: Browser, where: ShellState, above: Layers.Layers, deviceShowing: boolean): number {
+  return deviceShowing && showing(where, "Browser") && where.assistant !== "Full" && !Layers.pageInert(above) && Tabs.pageShown(s) && s.erasing === "Kept"
+    ? s.selected
+    : 0
+}
+
 // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"; spec/app/browser/index.md, "A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one"
 const shown = started(effect {
   const shell = try Shell
+  const layers = try Layers.Machine
+  const device = try Device
   const machine = try Tabs.Machine
   const host = try TabHost
-  try Stream.runForEach(Stream.zipLatest(Stream.map(shell.changes, (s) => showing(s, "Browser")), machine.changes), effect ([open, s]) => {
-    if (open && Tabs.canAskRestore(s)) try tellTabs({ type: "askRestore" })
+  const visibility = Stream.concat(Stream.succeed(try device.showing()), device.visible)
+  const states = Stream.zipLatestAll(shell.changes, layers.changes, visibility, machine.changes)
+  let wasOpen = false
+  try Stream.runForEach(states, effect ([where, above, deviceShowing, s]) => {
+    const open = deviceShowing && showing(where, "Browser")
+    const entered = open && !wasOpen
+    wasOpen = open
+    if (open && Tabs.canAskRestore(s) && (s.restore.status === "Idle" || entered)) try tellTabs({ type: "askRestore" })
     const aimed = try (try Pages).aimed(s.selected)
     if (open && Tabs.steady(s) && !s.native.includes(s.selected) && Option.isSome(aimed)) {
       const p = try pageOf(s.selected)
       if (p.phase === "Blank") try tellPage(s.selected, { type: "submit", i: inputOf(aimed.value) })
     }
-    try present(open && Tabs.pageShown(s) ? s.selected : 0, host)
+    try present(presentable(s, where, above, deviceShowing), host)
   })
 }, "showing the page")
 
@@ -653,10 +716,12 @@ export effect function toggleDesktopSite(tab: number): boolean!!(TabHost | Pages
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */
-export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
+export const placed: void!!(Tabs.Machine | Shell | Layers.Machine | Device | TabHost) = effect {
   const s = try (try Tabs.Machine).get()
-  const open = showing(try (try Shell).get(), "Browser")
-  try present(open && Tabs.pageShown(s) ? s.selected : 0, try TabHost)
+  const where = try (try Shell).get()
+  const above = try (try Layers.Machine).get()
+  const deviceShowing = try (try Device).showing()
+  try present(presentable(s, where, above, deviceShowing), try TabHost)
 }
 
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
@@ -667,7 +732,8 @@ export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
 export effect function openMessageLink(href: string, from: "Messages" | "Inbox" | "Ask Alpha" = "Messages", current: Effect.Effect<boolean> = succeed(true)): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
   const address = messageHref(href)
   const shell = try Shell
-  if (address === undefined || Option.isNone((try TabHost).plugin) || (from !== "Ask Alpha" && !showing(try shell.get(), from)) || !(try current)) return false
+  const host = try TabHost
+  if (address === undefined || (Option.isNone(host.plugin) && host.web === undefined) || (from !== "Ask Alpha" && !showing(try shell.get(), from)) || !(try current)) return false
   const input = inputOf(address)
   if (Address.verdict(input) !== "Open") return false
   if (!(try contained(shell.send({ type: "openView", view: "Browser" }), "opening a Message link"))) return false

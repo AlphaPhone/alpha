@@ -49,10 +49,10 @@ export const noteSubjects = Stream.unwrap(effect {
 
 /** Only identifiers cross to the agent. The agent reads its own saved words after receiving an owner turn. */
 export effect function notesSelection(): (RendererNote | undefined)!!NotesSelection {
-  const shell = try Shell
-  if (!showing(try shell.get(), "Notes")) return undefined
+  const shell = try (try Shell).get()
+  if (!showing(shell, "Notes")) return undefined
   const identity = ownerAt() catch () => ""
-  if (identity === "" || !(try (try Device).showing()) || !showing(try shell.get(), "Notes") || pageInert(try (try Layers).get())) return undefined
+  if (identity === "" || !(try (try Device).showing()) || pageInert(try (try Layers).get())) return undefined
   if ((try (try Previous).get()).showing || (try (try Trash).get()).showing || unfinished(try (try Recorder).get())) return undefined
   const list = try (try Notes).get()
   const editor = try (try Editor).get()

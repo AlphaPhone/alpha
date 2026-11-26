@@ -6,17 +6,18 @@ import { registered } from "./device.vibe"
 import { WebFrames, type FrameEvent } from "./browserWeb.vibe"
 
 module held {
-  import type { BrowserPageGuard, BrowserTabHostPlugin, BrowserTabPresentation } from "@elizaos/os-bridges"
+  import type { BrowserPageGuard, BrowserTabHostListener, BrowserTabHostPlugin, BrowserTabPresentation } from "@elizaos/os-bridges"
+  import { BrowserTabSession } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   /** A place of Alpha's on the page, rounded by `cornerRadius`. */
   type HostRect = { readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly cornerRadius: number }
-  import { BrowserTabSession, tabHostPlugin } from "@elizaos/os-bridges"
 
   /**
    * Alpha's `AlphaBrowser`: eliza's tab host, the read of the page it presents for one chat turn (`AlphaBrowserPlugin.pageContext`),
    * and a failed page opened in another browser at the HTTPS address the host named (`AlphaBrowserPlugin.openFailedPage`).
    */
-  export interface AlphaTabHost extends BrowserTabHostPlugin {
+  export type AlphaTabHost = BrowserTabHostPlugin & {
     /**
      * Draws a tab's page above Alpha. `hostRects` are the places of Alpha's controls drawn over the page, in the page's
      * own pixels: the page is left out of them and a touch there is Alpha's (`AlphaBrowserPlugin.present`).
@@ -25,6 +26,7 @@ module held {
     pageContext(options: BrowserPageGuard): Promise<unknown>
     openFailedPage(options: BrowserPageGuard): Promise<void>
     setDesktopSite(options: { readonly session: string; readonly id: string; readonly enabled: boolean }): Promise<unknown>
+    addListener(event: "showDownloads", listener: (raw: unknown) => void): Promise<BrowserTabHostListener>
   }
 
   let made: AlphaTabHost | undefined
@@ -36,7 +38,7 @@ module held {
    */
   export function client(name: string): AlphaTabHost {
     if (made !== undefined) return made
-    const plugin = tabHostPlugin(name) as AlphaTabHost
+    const plugin = capacitorPlugin<AlphaTabHost>(name)
     made = new Proxy(plugin, {
       get: (target, key) => key === "present"
         ? (options: Parameters<BrowserTabHostPlugin["present"]>[0]) => target.present(options).then(() => { front = { session: options.session, id: options.id } })
@@ -119,31 +121,41 @@ const listenerTimeout = 3000
 export const phoneTabHost = Layer.effect(TabHost, effect {
   if (!registered(name)) return { plugin: Option.none(), session: session(), told: Stream.empty, observing: () => succeed(false) }
   const plugin = client(name)
+  const events = try PubSub.unbounded<Told>()
   const ready = try Deferred.make<boolean>()
   let listening = false
-  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult" | "showDownloads", kind: Exclude<Told["kind"], FrameEvent["kind"]>) => Stream.callback<Told>((queue) => effect {
+  const emit = (kind: Exclude<Told["kind"], FrameEvent["kind"]>) => (raw: unknown) => {
+    PubSub.publishUnsafe(events, { kind, raw })
+  }
+  const attach = (subscribe: () => Promise<BrowserTabHostListener>, tracksState: boolean) => effect {
     const acquire = tryPromise(async (signal: AbortSignal): Promise<BrowserTabHostListener> => {
-      const handle = await plugin.addListener(event as "stateChanged", (raw: unknown) => { Queue.offerUnsafe(queue, { kind, raw }) })
-      if (signal.aborted) await handle.remove()
+      const handle = await subscribe()
+      if (signal.aborted) await Promise.resolve(handle.remove()).catch(() => undefined)
       return handle
     })
     const handle = acquireRelease(
       Effect.interruptible(Effect.timeout(acquire, listenerTimeout)),
       (one) => effect {
-        if (kind === "state") listening = false
+        if (tracksState) listening = false
         try ignore(Effect.interruptible(Effect.timeout(tryPromise(async () => { await one.remove() }), listenerTimeout)))
       },
     ) catch () => undefined
-    if (kind === "state") {
+    if (tracksState) {
       listening = handle !== undefined
       try Deferred.succeed(ready, listening)
     }
-    if (handle === undefined) try Queue.end(queue)
-  })
+  }
+  try Effect.all([
+    attach(() => plugin.addListener("stateChanged", emit("state")), true),
+    attach(() => plugin.addListener("tabOpened", emit("opened")), false),
+    attach(() => plugin.addListener("tabClosed", emit("closed")), false),
+    attach(() => plugin.addListener("findResult", emit("found")), false),
+    attach(() => plugin.addListener("showDownloads", emit("showDownloads")), false),
+  ], { concurrency: "unbounded" })
   return {
     plugin: Option.some(plugin),
     session: session(),
-    told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed"), heard("findResult", "found"), heard("showDownloads", "showDownloads")], { concurrency: "unbounded" }),
+    told: Stream.fromPubSub(events),
     observing: () => listening ? succeed(true) : Effect.map(Effect.orElseSucceed(Effect.timeout(Deferred.await(ready), listenerTimeout), () => false), (installed) => installed && listening),
   }
 })

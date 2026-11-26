@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, useRef } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
 import { type AssistantPull, useAssistantPull } from "./assistant-pull.ts";
@@ -10,6 +10,10 @@ type Press = { now: number };
 export type AssistantGrabberProps = Omit<ComponentProps<"button">, keyof AssistantPull | "children" | "disabled" | "onClick" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & AssistantPull & {
   /** The resting dock opens by its mark. The sheet uses a resize handle. */
   variant?: "mark" | "handle";
+  /** Called with the pointer's viewport `y` while dragging, for live sheet resize. */
+  onDragMove?: (y: number) => void;
+  /** Called when a drag starts (`true`) and ends or cancels (`false`). */
+  onDragStateChange?: (dragging: boolean) => void;
   /** The click a button receives, which may be the late click of a gesture just ended. */
   onTap?: (press: Press & { keyboard: boolean }) => void;
 };
@@ -21,9 +25,35 @@ export type AssistantGrabberProps = Omit<ComponentProps<"button">, keyof Assista
  * (45f6bed30 chat-overlay-motion-adapter.ts:1040, :1096-1097).
  * @model spec/app/assistant/dock.md
  */
-export function AssistantGrabber({ variant = "handle", onPress, onDrag, onRelease, onLift, onCancel, onTap, className, ...props }: AssistantGrabberProps) {
+export function AssistantGrabber({ variant = "handle", onPress, onDrag, onDragMove, onDragStateChange, onRelease, onLift, onCancel, onTap, className, ...props }: AssistantGrabberProps) {
   const mark = variant === "mark";
-  const pull = useAssistantPull<HTMLButtonElement>(mark ? undefined : { onPress, onDrag, onRelease, onLift, onCancel });
+  const draggingRef = useRef(false);
+  const pull = useAssistantPull<HTMLButtonElement>(mark ? undefined : {
+    onPress,
+    onDrag: onDrag || onDragMove || onDragStateChange ? ({ y }) => {
+      if (!draggingRef.current) {
+        draggingRef.current = true;
+        onDragStateChange?.(true);
+      }
+      onDrag?.({ y });
+      onDragMove?.(y);
+    } : undefined,
+    onRelease: onRelease || onDragStateChange ? (release) => {
+      if (draggingRef.current) {
+        draggingRef.current = false;
+        onDragStateChange?.(false);
+      }
+      onRelease?.(release);
+    } : undefined,
+    onLift,
+    onCancel: onCancel || onDragStateChange ? (press) => {
+      if (draggingRef.current) {
+        draggingRef.current = false;
+        onDragStateChange?.(false);
+      }
+      onCancel?.(press);
+    } : undefined,
+  });
   return (
     <button
       type="button"
@@ -35,7 +65,7 @@ export function AssistantGrabber({ variant = "handle", onPress, onDrag, onReleas
       onClick={(event) => onTap?.({ now: event.timeStamp, keyboard: event.detail === 0 })}
       {...props}
     >
-      {mark ? <Mark aria-hidden className="size-[118%] shrink-0" /> : <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/45" />}
+      {mark ? <Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /> : <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/45" />}
     </button>
   );
 }

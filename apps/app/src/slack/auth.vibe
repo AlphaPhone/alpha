@@ -19,7 +19,7 @@ import { type Job, answer, contained, reacting, run } from "../runtime/reactor.v
 import { SlackLedger, slackSessionKey } from "./ledger.vibe"
 
 const OAUTH_CLIENT_ID = "alpha-slack-user"
-const OAUTH_REDIRECT_URI = "alpha://slack/oauth/callback"
+const OAUTH_REDIRECT_URI = "alphaphone://slack/oauth/callback"
 
 effect function openOAuthBrowser(nonce: number): void!!(Slack | SlackLedger) {
   const slack = try Slack

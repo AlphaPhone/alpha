@@ -182,7 +182,7 @@ pure def listed(s: Notes, ticket: int, ok: bool, version: int, rows: List[Row], 
   val narrowed = if (hasFolder(keptFolders, s.filter)) s.filter else 0
   val gone = if (good) s.folders.select(f => not(hasFolder(folders, f.id))).listMap(f => f.id) else List()
   val read = R::answer(s.read, good)
-  val shown = { ...s, read: read, rows: if (good) tidy else List(), folders: keptFolders, shelf: shelf,
+  val shown = { ...s, read: read, rows: if (good) tidy else List(), folders: keptFolders, shelf: if (good) shelf else s.shelf,
     version: if (good) version else s.version, retired: s.retired.concat(gone),
     filter: narrowed, review: V::revise(s.review), again: false,
     selection: if (s.selection == Reviewing and (not(good) or version != s.version or s.filter != narrowed)) Picking else s.selection,

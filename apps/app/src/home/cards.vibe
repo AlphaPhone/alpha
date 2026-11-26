@@ -4,24 +4,38 @@ import * as Cards from "../../gen/app__home__cards.effect.vibe"
 import type { CardVisit, Effect as Out, Event, Flows, Item, Kind, Mail, Origin, Row } from "../../gen/app__home__cards.effect.vibe"
 import * as Home from "../../gen/app__home.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
-import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import type { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
+import type { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device, native, registered } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
 import { civilDay, dayStart, localDate } from "../calendar/time.ts"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
 import { Time } from "../runtime/time.vibe"
 import { homeInput } from "./home.vibe"
 
+/** Read the runtime's current wall-clock timestamp synchronously inside a view. */
+export const latestTime = effect {
+  return try (try Time).latest()
+}
+
 module held {
   import { calendarClient } from "@elizaos/os-bridges"
+  import type { AndroidCalendarPlugin } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "../platform/capacitor.ts"
 
+  let lastPlugin: AndroidCalendarPlugin | undefined
   let made: ReturnType<typeof calendarClient> | undefined
-  /** eliza's client of the `ElizaCalendar` plugin, made once. @throws {never} */
+  /** eliza's client of the `ElizaCalendar` plugin, refreshed if the host plugin changes. @throws {never} */
   export function client(): ReturnType<typeof calendarClient> {
-    return (made ??= calendarClient())
+    const current = capacitorPlugin<AndroidCalendarPlugin>("ElizaCalendar")
+    if (made === undefined || lastPlugin !== current) {
+      lastPlugin = current
+      made = calendarClient({ plugin: current })
+    }
+    return made
   }
 }
 import { client } from held
@@ -29,33 +43,6 @@ import { client } from held
 /** The phone's calendar, where this phone's host registered it. */
 function phoneCalendar() {
   return native() && registered("ElizaCalendar") ? client() : undefined
-}
-
-/** What each item of a card is called, which the spec never holds: by its origin and its number in the read. */
-const titles = new Map<string, string>()
-const listeners = new Set<() => void>()
-let version = 0
-
-function subscribeNamed(this: void, listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
-
-/** The titles of the items read, as an external store the card reads without an effect. */
-export const named = {
-  snapshot: (): number => version,
-  subscribe: subscribeNamed,
-  title: (origin: Origin, id: number): string => titles.get(`${origin}:${id}`) ?? "",
-}
-
-function bump() {
-  version += 1
-  for (const listener of [...listeners]) listener()
-}
-
-function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>) {
-  rows.forEach((row, at) => titles.set(`${origin}:${at + 1}`, row.title))
-  bump()
 }
 
 /** A reminder saved on the phone, as the area that keeps it tells the agenda: when it is due, whether it is overdue or done, and its title. */
@@ -84,12 +71,42 @@ export interface Told {
   readonly brief: ToldBrief | undefined
 }
 
-let told: Told = { reminders: [], hidden: [], mail: Cards.quiet, mailMore: false, mailStatus: "", messages: [], phone: [], waiting: { messages: 0, messagesAt: 0, phone: 0, phoneAt: 0, phoneSaid: "" }, flows: { rows: [], freshness: "UpToDate" }, brief: undefined }
+const emptyTold = (): Told => ({
+  reminders: [], hidden: [], mail: Cards.quiet, mailMore: false, mailStatus: "", messages: [], phone: [],
+  waiting: { messages: 0, messagesAt: 0, phone: 0, phoneAt: 0, phoneSaid: "" },
+  flows: { rows: [], freshness: "UpToDate" }, brief: undefined,
+})
+
+const titleShelf = createShelf<{ readonly version: number; readonly map: ReadonlyMap<string, string> }>(
+  { version: 0, map: new Map() },
+  { reset: () => ({ version: 0, map: new Map() }) },
+)
+
+const toldShelf = createShelf<Told>(emptyTold(), { reset: emptyTold })
+
+/** The titles of the items read, as an external store the card reads without an effect. */
+export const named = {
+  snapshot: (): number => titleShelf.snapshot().version,
+  subscribe: titleShelf.subscribe,
+  title: (origin: Origin, id: number): string => titleShelf.snapshot().map.get(`${origin}:${id}`) ?? "",
+}
+
+function bump() {
+  titleShelf.update((current) => ({ ...current, version: current.version + 1 }))
+}
+
+function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>) {
+  const prefix = `${origin}:`
+  titleShelf.update((current) => {
+    const next = new Map<string, string>()
+    for (const [key, value] of current.map) if (!key.startsWith(prefix)) next.set(key, value)
+    rows.forEach((row, at) => next.set(`${prefix}${at + 1}`, row.title))
+    return { version: current.version + 1, map: next }
+  })
+}
 
 function tell(next: Partial<Told>): void {
-  told = { ...told, ...next }
-  version += 1
-  for (const listener of [...listeners]) listener()
+  toldShelf.update((current) => ({ ...current, ...next }))
 }
 
 /** What Home's cards are given, for a phone that is or is not an Alpha image. */
@@ -109,8 +126,8 @@ export function others(
 // spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"; spec/app/home/cards.md, "Story: The other cards"
 /** What other areas tell Home's cards, each as its area holds it now, as an external store the cards read without an effect. */
 export const fromAreas = {
-  snapshot: (): Told => told,
-  subscribe: named.subscribe,
+  snapshot: toldShelf.snapshot,
+  subscribe: toldShelf.subscribe,
   /** The reminders saved on the phone now, every one of them. */
   reminders(rows: ReadonlyArray<ToldReminder>): void {
     titled("Reminder", rows)
@@ -121,9 +138,13 @@ export const fromAreas = {
   /** Inbox's summary of the unread mail it loaded: subject and sender, never a body; and which account it read when. */
   mail(mail: Mail, more = false, status = ""): void { tell({ mail, mailMore: more, mailStatus: status }) },
   /** The rows waiting in Messages: who, over the message; how many conversations are unread and when the newest came. */
-  messages(rows: ReadonlyArray<Row>, count = rows.length, at = 0): void { tell({ messages: [...rows], waiting: { ...told.waiting, messages: count, messagesAt: at } }) },
+  messages(rows: ReadonlyArray<Row>, count = rows.length, at = 0): void {
+    toldShelf.update((current) => ({ ...current, messages: [...rows], waiting: { ...current.waiting, messages: count, messagesAt: at } }))
+  },
   /** The rows waiting in Phone: who, over the missed call or voicemail; how many wait, when the newest came, and what waits in words. */
-  phone(rows: ReadonlyArray<Row>, count = rows.length, at = 0, said = ""): void { tell({ phone: [...rows], waiting: { ...told.waiting, phone: count, phoneAt: at, phoneSaid: said } }) },
+  phone(rows: ReadonlyArray<Row>, count = rows.length, at = 0, said = ""): void {
+    toldShelf.update((current) => ({ ...current, phone: [...rows], waiting: { ...current.waiting, phone: count, phoneAt: at, phoneSaid: said } }))
+  },
   /** Workflows' enabled rows, name over status, and how current they are. */
   flows(flows: Flows): void { tell({ flows }) },
   /** The brief kept for Home, or none. */
@@ -154,10 +175,11 @@ effect function readPhone(ticket: number, day: number): Event!!Cards.Machine {
     begin: event.allDay ? ownersMidnight(event.begin) : event.begin, end: event.allDay ? ownersMidnight(event.end) : event.end,
     allDay: event.allDay, overdue: false, done: false,
   }))
-  if (Cards.canCalendarRead(try (try Cards.Machine).get(), ticket, "Ready", items)) {
-    titled("PhoneCalendar", listed.events.map((event) => ({ title: event.title ?? "" })))
+  const event: Event = { type: "calendarRead", ticket, source: "Ready", items }
+  if (Cards.enabled(try (try Cards.Machine).get(), event)) {
+    titled("PhoneCalendar", listed.events.map((item) => ({ title: item.title ?? "" })))
   }
-  return { type: "calendarRead", ticket, source: "Ready", items }
+  return event
 }
 
 /** The part of the agent's calendar feed the agenda reads: what it could reach, and each event's title and times. */
@@ -177,11 +199,14 @@ effect function readAgent(ticket: number, day: number): Event!!(Agent | Cards.Ma
     return Number.isFinite(from) && Number.isFinite(to) ? [{ title: event.title, begin: from, end: to, allDay: event.isAllDay }] : []
   })
   const source: Cards.Source = feed.state === "complete" ? "Ready" : "Unavailable"
-  const mapped: Item[] = events.map((event, at) => ({ id: at + 1, origin: "AgentCalendar", calendar: 0, begin: event.begin, end: event.end, allDay: event.allDay, overdue: false, done: false }))
-  if (source === "Ready" && Cards.canAgentRead(try (try Cards.Machine).get(), ticket, source, mapped)) {
+  const event: Event = {
+    type: "agentRead", ticket, source,
+    events: events.map((entry, at) => ({ id: at + 1, origin: "AgentCalendar", calendar: 0, begin: entry.begin, end: entry.end, allDay: entry.allDay, overdue: false, done: false })),
+  }
+  if (source === "Ready" && Cards.enabled(try (try Cards.Machine).get(), event)) {
     titled("AgentCalendar", events)
   }
-  return { type: "agentRead", ticket, source, events: mapped }
+  return event
 }
 
 /** The Inbox area prepares the previous reader and search for the next exact Inbox visit. */
@@ -245,6 +270,8 @@ function carry(fx: Out, state: () => Cards.Cards!!Cards.Machine): Job<Event, Age
 
 const current = () => Cards.Machine.use((machine) => machine.get())
 
+const shelfCleanup = Layer.effectDiscard(Effect.addFinalizer(() => sync(() => { titleShelf.reset(); toldShelf.reset() })))
+
 // spec/app/home/cards.md, "When the owner's day begins, Home counts the new day and asks both calendars for it, in place of any read still asked for an earlier day"
 /** A restart, told the owner's civil day by Alpha's time in the phone's own time zone. */
 effect function restarted(): Event!!Time {
@@ -291,6 +318,7 @@ export const cards = together(
       ...(Cards.loading(c.agent) ? [due(`agent ${c.agent.read.ticket}`, c.agent.since + Cards.patience, { type: "ranOut", now: untimed } as const)] : []),
     ],
   }),
+  shelfCleanup,
   following(Shell.Machine, (shell) => shell.trail.length === 0, Cards.Machine, (bare) => (bare ? { type: "look", now: untimed } as const : undefined)),
   hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Cards.Machine, () => ({ type: "look", now: untimed } as const)),
   advancing,

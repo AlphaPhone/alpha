@@ -13,6 +13,7 @@ import { editor } from "./editor.vibe";
 import { linking } from "./link.vibe";
 import { owners } from "./owner.vibe";
 import { reopening } from "./reopen.vibe";
+import { stores } from "./stores.vibe";
 
 /** Back inside Calendar: the form, then the overlay, then the open event, while one is open. */
 const back = Effect.gen(function* () {
@@ -35,5 +36,5 @@ const back = Effect.gen(function* () {
   return false;
 });
 
-/** Calendar, at its view (areas.ts): its view, its form, the Google link, who it reads for and the agent's changes live from its first opening until Alpha closes. */
-export default area(Layer.mergeAll(together(calendar, editor, linking, deletions, owners, reopening), changes), Calendar, { back });
+/** Calendar, at its view (areas.ts): its scoped stores, view, form, Google link, owner coordination, reminder reopen review and agent changes live from its first opening until Alpha closes. */
+export default area(Layer.mergeAll(together(stores, calendar, editor, linking, deletions, owners, reopening), changes), Calendar, { back });

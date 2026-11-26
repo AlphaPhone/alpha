@@ -49,6 +49,7 @@ type Drag = {
   readonly id: string;
   readonly pointer: number;
   readonly cell: HTMLElement;
+  grid?: HTMLElement;
   readonly x: number;
   readonly y: number;
   readonly scale: number;
@@ -81,6 +82,11 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, dra
     const drag = draggingRef.current;
     if (!drag) return;
     draggingRef.current = undefined;
+    try {
+      if (drag.grid?.hasPointerCapture?.(drag.pointer)) drag.grid.releasePointerCapture(drag.pointer);
+    } catch {
+      drag.grid = undefined;
+    }
     drag.cell.style.removeProperty("transform");
     drag.cell.removeAttribute("data-home-dragging");
   };
@@ -100,7 +106,14 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, dra
     const dy = (event.clientY - drag.y) * drag.scale;
     if (!drag.moved) {
       if (Math.hypot(dx, dy) <= launcherPressSlop) return;
-      if (event.nativeEvent.isTrusted) event.currentTarget.setPointerCapture(event.pointerId);
+      if (event.nativeEvent.isTrusted) {
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          drag.grid = event.currentTarget;
+        } catch {
+          drag.grid = undefined;
+        }
+      }
       drag.moved = true;
       drag.cell.setAttribute("data-home-dragging", "");
     }
@@ -131,7 +144,7 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, dra
       aria-label="Apps on Home"
       className={cn(tileColumns, "px-[calc(var(--alpha-home-spacing,var(--spacing))*4)]", className)}
       onBlur={(event) => {
-        if (event.relatedTarget) movedRef.current = null;
+        if (!event.currentTarget.contains(event.relatedTarget)) movedRef.current = null;
       }}
       onPointerMove={moveDrag}
       onPointerUp={endDrag}

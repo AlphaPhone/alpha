@@ -3,17 +3,16 @@ import { registered } from "./device.vibe"
 import { saveBrowserCopy } from "./inboxAttachments.vibe"
 
 module checked {
-  import { registerPlugin } from "@capacitor/core"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export interface Android {
     pick(input: { readonly importing: boolean; readonly title: string }): Promise<unknown>
     write(input: { readonly handle: string; readonly text: string }): Promise<unknown>
   }
 
-  let made: Android | undefined
   /** @throws {never} */
   export function client(): Android {
-    return (made ??= registerPlugin<Android>("AlphaNoteDocuments"))
+    return capacitorPlugin<Android>("AlphaNoteDocuments")
   }
 }
 import { type Android, client } from checked

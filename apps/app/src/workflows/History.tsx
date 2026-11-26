@@ -1,6 +1,6 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"
 import type { WorkflowRun } from "@elizaos/plugin-workflow-client";
-import { Effect } from "effect";
+import { useSyncExternalStore } from "react";
 import { Alert, Button, Spinner, cn, focusRing } from "@repo/ui";
 import { Check, ChevronRight, CircleAlert, Clock, Minus, Play, Sparkles, Square, Volume2, VolumeX, X } from "lucide-react";
 import { type Event, newerVersion } from "../../gen/app__workflows__sheet.ts";
@@ -98,12 +98,18 @@ interface HistoryProps extends Pick<Shown<Resident | HistoryWordsPort | Machine 
   readonly owner: number;
 }
 
+function useHistorySnapshot(runtime: HistoryProps["runtime"], owner: number, row: number) {
+  const wordsPort = runtime.runSync(HistoryWordsPort);
+  const snapshot = useSyncExternalStore(wordsPort.subscribe, wordsPort.snapshot, wordsPort.snapshot);
+  return snapshot.owner === owner && snapshot.row === row ? snapshot : { owner: 0, row: 0, all: [] };
+}
+
 /** The header switch of the workflow shown, reviewed against the runs the agent last listed. */
 export function WorkflowPower({ runtime, row, owner }: HistoryProps) {
   const sheet = useMachine(runtime);
+  const history = useHistorySnapshot(runtime, owner, row.number);
   const state = sheet.state;
   if (state === undefined || state.owner !== owner || state.runId > 0) return null;
-  const history = runtime.runSync(Effect.flatMap(HistoryWordsPort, (words) => words.view(owner, row.number)));
   return <LifecyclePower runtime={runtime} row={row.number} owner={owner} title={row.title}
     unfinished={state.history.status !== "Loaded" || history.all.some((run) => run.status === "Running")}
     interrupted={history.all[0]?.status === "Interrupted"} />;
@@ -112,9 +118,9 @@ export function WorkflowPower({ runtime, row, owner }: HistoryProps) {
 /** The run history and the sheet of an exact run, as the agent last read them. */
 export function History({ runtime, row, owner }: HistoryProps) {
   const sheet = useMachine(runtime);
+  const history = useHistorySnapshot(runtime, owner, row.number);
   const state = sheet.state;
   if (state === undefined || state.owner !== owner) return <Spinner aria-label="Reading runs" />;
-  const history = runtime.runSync(Effect.flatMap(HistoryWordsPort, (words) => words.view(owner, row.number)));
   const opened = history.opened?.number === state.runId ? history.opened : undefined;
   const send = (event: Event) => { if (sheet.can(event)) void sheet.send(event); };
   if (state.runId > 0) {

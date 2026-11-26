@@ -350,7 +350,8 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         const to = proposal.to ?? [];
         scene.changes.push(`send ${to.join(",")} ${proposal.subject}`);
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name), ...parts.map(({ file }) => file.name));
-        scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to } });
+        const sent = letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText);
+        scene.mail.push({ ...sent, card: { ...sent.card, to } });
         const confirmed = operation(requestId, "send", "succeeded");
         receipts.set(requestId, confirmed);
         if (!scene.loseSendReply) return Response.json(confirmed);

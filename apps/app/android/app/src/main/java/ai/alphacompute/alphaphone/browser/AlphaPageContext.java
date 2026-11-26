@@ -43,13 +43,13 @@ public final class AlphaPageContext {
   }
  }
 
- /** The address without its query, for a page whose text is withheld. */
+ /** The origin (scheme and authority without path or query), for a page whose text is withheld. */
  public static String origin(String value) {
   try {
    String safe = address(value);
    if (safe == null) return null;
    URI uri = new URI(safe);
-   return new URI(uri.getScheme(), uri.getRawAuthority(), uri.getRawPath(), null, null).toString();
+   return new URI(uri.getScheme(), uri.getRawAuthority(), null, null, null).toString();
   } catch (Exception error) {
    return null;
   }

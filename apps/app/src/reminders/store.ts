@@ -2,8 +2,8 @@
 import type { ReminderItemRecord, ReminderListRecord, ReminderPriority, ReminderRecurrence, RemindersSnapshot } from "@repo/launcher-records";
 import type { Priority, SmartView, SortKey } from "../../gen/app__reminders.ts";
 import type { Repeat } from "../../gen/app__reminders__recurrence.ts";
-import { externalStore } from "../runtime/store.ts";
-import { civilDayFromString, civilDayNumber, dueInstantMs, nextFutureOccurrence } from "./recurrence.ts";
+import { type Shelf, createShelf } from "../runtime/store.ts";
+import { civilDayFromString, civilDayNumber, dueInstantMs, dueSortInstantMs, nextFutureOccurrence } from "./recurrence.ts";
 
 function withReminderCompletion(item: ReminderItemRecord, completedAtMs: number, skippedDates = 0): ReminderItemRecord {
   const dueAtMs = dueInstantMs(item.dueDate, item.dueMinute);
@@ -165,8 +165,8 @@ export function sortReminders(items: readonly ReminderItemRecord[], sortKey: Sor
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
     switch (sortKey) {
       case "SortDue": {
-        const aDue = dueInstantMs(a.dueDate, a.dueMinute) ?? Number.MAX_SAFE_INTEGER;
-        const bDue = dueInstantMs(b.dueDate, b.dueMinute) ?? Number.MAX_SAFE_INTEGER;
+        const aDue = dueSortInstantMs(a.dueDate, a.dueMinute) ?? Number.MAX_SAFE_INTEGER;
+        const bDue = dueSortInstantMs(b.dueDate, b.dueMinute) ?? Number.MAX_SAFE_INTEGER;
         if (aDue !== bDue) return aDue - bDue;
         return priorityRank[b.priority] - priorityRank[a.priority] || a.createdAtMs - b.createdAtMs;
       }
@@ -233,7 +233,8 @@ export interface RemindersStoreView {
   readonly itemSpecIds: ReadonlyMap<string, number>;
 }
 
-function emptyStoreView(): RemindersStoreView {
+/** Create an empty store view for a fresh Reminders runtime scope. @throws {never} */
+export function emptyStoreView(): RemindersStoreView {
   return {
     snapshot: { version: 0, updatedAtMs: 0, lists: [createDefaultList(0)], items: [] },
     hiddenIds: new Set(),
@@ -243,35 +244,36 @@ function emptyStoreView(): RemindersStoreView {
   };
 }
 
-const { snapshot: current, subscribe, set: publish } = externalStore<RemindersStoreView>(emptyStoreView());
-
-function assignSpecIds(
+/** Assign stable positive spec IDs for every list and item in a snapshot. @throws {never} */
+export function assignSpecIds(
   lists: readonly ReminderListRecord[],
   items: readonly ReminderItemRecord[],
   prevLists: ReadonlyMap<string, number>,
   prevItems: ReadonlyMap<string, number>,
-): { readonly listSpecIds: Map<string, number>; readonly itemSpecIds: Map<string, number> } {
+  minNextListId = 2,
+  minNextItemId = 1,
+): { readonly listSpecIds: Map<string, number>; readonly itemSpecIds: Map<string, number>; readonly nextListId: number; readonly nextItemId: number } {
   const listSpecIds = new Map<string, number>([[DEFAULT_LIST_ID, 1]]);
-  let nextList = 2;
+  let nextList = Math.max(2, minNextListId);
   for (const existing of prevLists.values()) if (existing >= nextList) nextList = existing + 1;
   for (const list of lists) {
     if (list.isDefault || list.id === DEFAULT_LIST_ID) {
       listSpecIds.set(list.id, 1);
     } else {
       const prior = prevLists.get(list.id);
-      if (prior !== undefined) listSpecIds.set(list.id, prior);
+      if (prior !== undefined && prior > 1) listSpecIds.set(list.id, prior);
       else listSpecIds.set(list.id, nextList++);
     }
   }
   const itemSpecIds = new Map<string, number>();
-  let nextItem = 1;
+  let nextItem = Math.max(1, minNextItemId);
   for (const existing of prevItems.values()) if (existing >= nextItem) nextItem = existing + 1;
   for (const item of items) {
     const prior = prevItems.get(item.id);
-    if (prior !== undefined) itemSpecIds.set(item.id, prior);
+    if (prior !== undefined && prior >= 1) itemSpecIds.set(item.id, prior);
     else itemSpecIds.set(item.id, nextItem++);
   }
-  return { listSpecIds, itemSpecIds };
+  return { listSpecIds, itemSpecIds, nextListId: nextList, nextItemId: nextItem };
 }
 
 /** Count active (non-completed, non-hidden) items belonging to `listId`. @throws {never} */
@@ -290,8 +292,16 @@ export function groupScheduledItems(
 ): readonly { readonly key: ScheduledBucket; readonly label: string; readonly items: ReminderItemRecord[] }[] {
   const order: readonly ScheduledBucket[] = ["Overdue", "Today", "Tomorrow", "Upcoming"];
   const map = new Map<ScheduledBucket, ReminderItemRecord[]>(order.map((bucket) => [bucket, []]));
-  for (const item of items) map.get(scheduledBucketOf(item, nowMs))!.push(item);
-  return order.map((key) => ({ key, label: key, items: map.get(key)! })).filter((group) => group.items.length > 0);
+  for (const item of items) {
+    const bucket = map.get(scheduledBucketOf(item, nowMs));
+    if (bucket !== undefined) bucket.push(item);
+  }
+  const groups: { readonly key: ScheduledBucket; readonly label: string; readonly items: ReminderItemRecord[] }[] = [];
+  for (const key of order) {
+    const entries = map.get(key) ?? [];
+    if (entries.length > 0) groups.push({ key, label: key, items: entries });
+  }
+  return groups;
 }
 
 /** Ensure the default Reminders list is always present in any snapshot. @throws {never} */
@@ -305,72 +315,163 @@ export function normalizeSnapshot(snapshot: RemindersSnapshot): RemindersSnapsho
   return { ...snapshot, lists, items };
 }
 
-/** Synchronous external store for Reminders data, read by screens with `useSyncExternalStore`. */
-export const remindersStore = {
+/** Scoped reactive API for Reminders data, backed by `runtime/shelf.vibe`. */
+export interface RemindersStoreApi {
   /** @throws {never} */
-  snapshot: current,
+  readonly snapshot: () => RemindersStoreView;
   /** @throws {never} */
-  subscribe,
+  readonly subscribe: (listener: () => void) => () => void;
   /** @throws {never} */
-  reset(): void {
-    publish(emptyStoreView());
-  },
+  readonly reset: () => void;
   /** @throws {never} */
-  replace(snapshot: RemindersSnapshot, syncError: string | null = null): RemindersStoreView {
-    const normalized = normalizeSnapshot(snapshot);
-    const { listSpecIds, itemSpecIds, hiddenIds } = current();
-    const ids = assignSpecIds(normalized.lists, normalized.items, listSpecIds, itemSpecIds);
-    publish({ snapshot: normalized, hiddenIds, syncError, ...ids });
-    return current();
-  },
+  readonly replace: (snapshot: RemindersSnapshot, syncError?: string | null, minNextListId?: number, minNextItemId?: number) => RemindersStoreView;
   /** @throws {never} */
-  setHidden(hiddenIds: ReadonlySet<string>): void {
-    publish({ ...current(), hiddenIds: new Set(hiddenIds) });
-  },
+  readonly replaceWithIds: (snapshot: RemindersSnapshot, listSpecIds: ReadonlyMap<string, number>, itemSpecIds: ReadonlyMap<string, number>, syncError?: string | null) => RemindersStoreView;
   /** @throws {never} */
-  setSyncError(syncError: string | null): void {
-    publish({ ...current(), syncError });
-  },
+  readonly setHidden: (hiddenIds: ReadonlySet<string>) => void;
   /** @throws {never} */
-  findItem(id: string): ReminderItemRecord | undefined {
-    return current().snapshot.items.find((item) => item.id === id);
-  },
+  readonly setSyncError: (syncError: string | null) => void;
   /** @throws {never} */
-  findItemBySpecId(specId: number): ReminderItemRecord | undefined {
-    for (const [id, num] of current().itemSpecIds) {
-      if (num === specId) return current().snapshot.items.find((item) => item.id === id);
-    }
-    return undefined;
-  },
+  readonly findItem: (id: string) => ReminderItemRecord | undefined;
   /** @throws {never} */
-  findList(id: string): ReminderListRecord | undefined {
-    return current().snapshot.lists.find((list) => list.id === id);
-  },
+  readonly findItemBySpecId: (specId: number) => ReminderItemRecord | undefined;
   /** @throws {never} */
-  findListBySpecId(specId: number): ReminderListRecord | undefined {
-    for (const [id, num] of current().listSpecIds) {
-      if (num === specId) return current().snapshot.lists.find((list) => list.id === id);
-    }
-    return undefined;
-  },
-  /** Take back the numbers reminders and lists had when Alpha last ran, so a held change keeps meaning the same one. @throws {never} */
-  keepNumbers(items: readonly (readonly [string, number])[], lists: readonly (readonly [string, number])[]): void {
-    publish({ ...current(), itemSpecIds: new Map(items), listSpecIds: new Map([[DEFAULT_LIST_ID, 1], ...lists]) });
-  },
-  /** Keep under the reminder `id` the number the Reminders machine gave it. @throws {never} */
-  numberItem(id: string, specId: number): void {
-    publish({ ...current(), itemSpecIds: new Map([...current().itemSpecIds, [id, specId]]) });
-  },
-  /** Keep under the list `id` the number the Reminders machine gave it. @throws {never} */
-  numberList(id: string, specId: number): void {
-    publish({ ...current(), listSpecIds: new Map([...current().listSpecIds, [id, specId]]) });
-  },
+  readonly findList: (id: string) => ReminderListRecord | undefined;
   /** @throws {never} */
-  specIdForItem(id: string): number {
-    return current().itemSpecIds.get(id) ?? 0;
-  },
+  readonly findListBySpecId: (specId: number) => ReminderListRecord | undefined;
   /** @throws {never} */
-  specIdForList(id: string): number {
-    return current().listSpecIds.get(id) ?? 1;
+  readonly keepNumbers: (items: readonly (readonly [string, number])[], lists: readonly (readonly [string, number])[]) => void;
+  /** @throws {never} */
+  readonly numberItem: (id: string, specId: number) => void;
+  /** @throws {never} */
+  readonly numberList: (id: string, specId: number) => void;
+  /** @throws {never} */
+  readonly specIdForItem: (id: string) => number;
+  /** @throws {never} */
+  readonly specIdForList: (id: string) => number;
+}
+
+/** Wrap a scoped `Shelf<RemindersStoreView>` with typed Reminders lookup and update helpers. @throws {never} */
+export function createRemindersStore(shelf: Shelf<RemindersStoreView>): RemindersStoreApi {
+  return {
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
+    reset(): void {
+      shelf.reset();
+    },
+    replace(snapshot: RemindersSnapshot, syncError: string | null = null, minNextListId = 2, minNextItemId = 1): RemindersStoreView {
+      const normalized = normalizeSnapshot(snapshot);
+      const { listSpecIds, itemSpecIds, hiddenIds } = shelf.snapshot();
+      const ids = assignSpecIds(normalized.lists, normalized.items, listSpecIds, itemSpecIds, minNextListId, minNextItemId);
+      const next: RemindersStoreView = {
+        snapshot: normalized,
+        hiddenIds,
+        syncError,
+        listSpecIds: ids.listSpecIds,
+        itemSpecIds: ids.itemSpecIds,
+      };
+      shelf.set(next);
+      return next;
+    },
+    replaceWithIds(
+      snapshot: RemindersSnapshot,
+      listSpecIds: ReadonlyMap<string, number>,
+      itemSpecIds: ReadonlyMap<string, number>,
+      syncError: string | null = null,
+    ): RemindersStoreView {
+      const normalized = normalizeSnapshot(snapshot);
+      const { hiddenIds } = shelf.snapshot();
+      const next: RemindersStoreView = {
+        snapshot: normalized,
+        hiddenIds,
+        syncError,
+        listSpecIds: new Map(listSpecIds),
+        itemSpecIds: new Map(itemSpecIds),
+      };
+      shelf.set(next);
+      return next;
+    },
+    setHidden(hiddenIds: ReadonlySet<string>): void {
+      shelf.set({ ...shelf.snapshot(), hiddenIds: new Set(hiddenIds) });
+    },
+    setSyncError(syncError: string | null): void {
+      shelf.set({ ...shelf.snapshot(), syncError });
+    },
+    findItem(id: string): ReminderItemRecord | undefined {
+      return shelf.snapshot().snapshot.items.find((item) => item.id === id);
+    },
+    findItemBySpecId(specId: number): ReminderItemRecord | undefined {
+      const view = shelf.snapshot();
+      for (const [id, num] of view.itemSpecIds) {
+        if (num === specId) return view.snapshot.items.find((item) => item.id === id);
+      }
+      return undefined;
+    },
+    findList(id: string): ReminderListRecord | undefined {
+      return shelf.snapshot().snapshot.lists.find((list) => list.id === id);
+    },
+    findListBySpecId(specId: number): ReminderListRecord | undefined {
+      const view = shelf.snapshot();
+      for (const [id, num] of view.listSpecIds) {
+        if (num === specId) return view.snapshot.lists.find((list) => list.id === id);
+      }
+      return undefined;
+    },
+    keepNumbers(items: readonly (readonly [string, number])[], lists: readonly (readonly [string, number])[]): void {
+      shelf.set({ ...shelf.snapshot(), itemSpecIds: new Map(items), listSpecIds: new Map([[DEFAULT_LIST_ID, 1], ...lists]) });
+    },
+    numberItem(id: string, specId: number): void {
+      const view = shelf.snapshot();
+      shelf.set({ ...view, itemSpecIds: new Map([...view.itemSpecIds, [id, specId]]) });
+    },
+    numberList(id: string, specId: number): void {
+      const view = shelf.snapshot();
+      shelf.set({ ...view, listSpecIds: new Map([...view.listSpecIds, [id, specId]]) });
+    },
+    specIdForItem(id: string): number {
+      return shelf.snapshot().itemSpecIds.get(id) ?? 0;
+    },
+    specIdForList(id: string): number {
+      return shelf.snapshot().listSpecIds.get(id) ?? 1;
+    },
+  };
+}
+
+const remindersListeners = new Set<() => void>();
+let activeRemindersShelf: Shelf<RemindersStoreView> = createShelf<RemindersStoreView>(emptyStoreView(), { reset: emptyStoreView });
+let unsubActiveReminders = activeRemindersShelf.subscribe(() => {
+  for (const listener of remindersListeners) listener();
+});
+
+/** Bind the active scoped `RemindersShelf` so cross-area callers of `remindersStore` share one runtime-scoped store. @throws {never} */
+export function attachRemindersShelf(shelf: Shelf<RemindersStoreView>): () => void {
+  const previous = activeRemindersShelf;
+  unsubActiveReminders();
+  activeRemindersShelf = shelf;
+  unsubActiveReminders = shelf.subscribe(() => {
+    for (const listener of remindersListeners) listener();
+  });
+  for (const listener of remindersListeners) listener();
+  return () => {
+    if (activeRemindersShelf !== shelf) return;
+    unsubActiveReminders();
+    activeRemindersShelf = previous;
+    unsubActiveReminders = previous.subscribe(() => {
+      for (const listener of remindersListeners) listener();
+    });
+    for (const listener of remindersListeners) listener();
+  };
+}
+
+/** Reactive Reminders store backed by the active runtime-scoped `RemindersShelf` (with clean reset on disposal). */
+export const remindersStore: RemindersStoreApi = createRemindersStore({
+  snapshot: () => activeRemindersShelf.snapshot(),
+  get: () => activeRemindersShelf.get(),
+  set: (next) => { activeRemindersShelf.set(next); },
+  update: (fn) => activeRemindersShelf.update(fn),
+  reset: () => activeRemindersShelf.reset(),
+  subscribe: (listener) => {
+    remindersListeners.add(listener);
+    return () => { remindersListeners.delete(listener); };
   },
-};
+});

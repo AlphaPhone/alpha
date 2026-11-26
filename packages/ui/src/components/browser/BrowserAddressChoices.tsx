@@ -1,5 +1,6 @@
 import { Clock, Star } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { PrivateMark } from "./PrivateMark.tsx";
 import { PrivateNotice } from "./PrivateNotice.tsx";
 
@@ -27,14 +28,14 @@ export interface BrowserAddressChoicesProps {
  */
 export function BrowserAddressChoices({ choices, onOpen, refusal, privateTab, privateNotice }: BrowserAddressChoicesProps) {
   return (
-    <section aria-label="Address suggestions" className="absolute inset-x-0 top-13 bottom-0 in-data-[alpha-launcher]:top-25 z-20 overflow-y-auto bg-background pt-1.5 pb-35">
+    <section aria-label="Address suggestions" className={cn(dockClearance, "absolute inset-x-0 top-13 bottom-0 z-20 overflow-y-auto bg-background pt-1.5 in-data-[alpha-launcher]:top-25")}>
       {privateTab && <PrivateNotice icon={<PrivateMark aria-hidden className="size-4.5 shrink-0 self-center" />} className="mx-5.5 mt-2.5 mb-3 flex items-baseline gap-2.5">{privateNotice}</PrivateNotice>}
       {refusal && <p role="alert" className="mx-5.5 py-2 text-base">{refusal}</p>}
       <ul>
         {choices.map(({ url, kind, title, detail }) => {
           const Icon = icons[kind];
           return (
-            <li key={url}>
+            <li key={`${kind}:${url}`}>
               <button type="button" className={cn(focusRing, "flex min-h-15 w-full items-center gap-4 px-5.5 text-left active:bg-accent")} onClick={() => onOpen(url)}>
                 <Icon aria-hidden className="size-4.5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">

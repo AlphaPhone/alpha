@@ -10,8 +10,11 @@ import { registered } from "./device.vibe"
 import { microphoneAccess } from "./voice.vibe"
 
 module held {
-  import { registerPlugin } from "@capacitor/core"
-  import { type NotificationsNativePlugin, type SystemClient, createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient } from "@elizaos/os-bridges"
+  import {
+    type ElizaFilesPlugin, type ElizaPasswordsPlugin, type LocationPlugin, type NotificationsNativePlugin, type PermittedPhotosPlugin, type SystemClient, type WiFiPlugin,
+    createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient,
+  } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export type PasswordProviderAction = "settings" | "install" | "open"
   export type AppPermission = "camera" | "notifications"
@@ -34,7 +37,6 @@ module held {
   let noticeHost: ApprovalNoticeHost | undefined
   let notices: ReturnType<typeof noticesClient> | undefined
   let passwords: ReturnType<typeof createPasswordsClient> | undefined
-  let host: SettingsHost | undefined
   /**
    * eliza's client of `ElizaSystem`, which its bridge makes as it loads: loaded at first use, once the phone's host is
    * up, since Capacitor binds a plugin to the platform it finds when the plugin is first registered.
@@ -44,23 +46,23 @@ module held {
   }
   /** eliza's clients of the other plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function locationOf(): ReturnType<typeof locationClient> {
-    return (location ??= locationClient())
+    return (location ??= locationClient(capacitorPlugin<LocationPlugin>("ElizaLocation")))
   }
   /** @throws {never} */
   export function wifiOf(): ReturnType<typeof wifiClient> {
-    return (wifi ??= wifiClient())
+    return (wifi ??= wifiClient(capacitorPlugin<WiFiPlugin>("ElizaWiFi")))
   }
   /** @throws {never} */
   export function filesOf(): ReturnType<typeof filesClient> {
-    return (files ??= filesClient())
+    return (files ??= filesClient(capacitorPlugin<ElizaFilesPlugin>("ElizaFiles")))
   }
   /** @throws {never} */
   export function photosOf(): ReturnType<typeof permittedPhotosClient> {
-    return (photos ??= permittedPhotosClient())
+    return (photos ??= permittedPhotosClient(capacitorPlugin<PermittedPhotosPlugin>("ElizaPhotos"), "ElizaPhotos"))
   }
   /** @throws {never} */
   export function noticeHostOf(): ApprovalNoticeHost {
-    return (noticeHost ??= registerPlugin<ApprovalNoticeHost>("ElizaNotifications"))
+    return (noticeHost ??= capacitorPlugin<ApprovalNoticeHost>("ElizaNotifications"))
   }
   /** @throws {never} */
   export function noticesOf(): ReturnType<typeof noticesClient> {
@@ -68,11 +70,11 @@ module held {
   }
   /** @throws {never} */
   export function passwordsOf(): ReturnType<typeof createPasswordsClient> {
-    return (passwords ??= createPasswordsClient())
+    return (passwords ??= createPasswordsClient(capacitorPlugin<ElizaPasswordsPlugin>("ElizaPasswords")))
   }
   /** @throws {never} */
   export function hostOf(): SettingsHost {
-    return (host ??= registerPlugin<SettingsHost>("AlphaDevice"))
+    return capacitorPlugin<SettingsHost>("AlphaDevice")
   }
 }
 import { type AppPermission, type PasswordProviderAction, filesOf, hostOf, locationOf, noticeHostOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
@@ -308,10 +310,16 @@ effect function phoneAccess(access: Access) {
     case "PhotosAccess": return Option.map(try settled(() => photosOf().libraryAccess()), (status) => ({ grant: photoGrant(status.scope), on: true }))
     case "FilesAccess": return Option.flatMap(try settled(() => filesOf().storageState()), (status) => permission(filesGrantOf(status.access)))
     case "NotificationsAccess": return Option.map(try settled(() => noticesOf().delivery()), (status) => ({ grant: status.permissionGranted ? "Granted" as const : "Denied" as const, on: status.appEnabled }))
-    default: {
+    case "CameraAccess":
+    case "MicrophoneAccess":
+    case "CalendarAccess": {
       const permissions = Option.getOrUndefined(try hostFacts())?.permissions
       const seen = access === "CameraAccess" ? permissions?.Camera : access === "MicrophoneAccess" ? permissions?.Microphone : permissions?.Calendar
       return permission(seen === undefined ? undefined : seen ? "Granted" : "Denied")
+    }
+    default: {
+      const exhaustive: never = access
+      return exhaustive
     }
   }
 }
@@ -415,18 +423,24 @@ effect function opening(target: Target, channel: string): Opened!! {
       return result.destination === "autofill-picker" ? "Exactly" : "Nearby"
     }
     if (target === "AlertChannel") {
+      if (channel === "" || !registered("ElizaNotifications")) return "NotAtAll"
       try tryPromise(() => noticesOf().openChannelSettings(channel))
       return "Exactly"
     }
     if (target === "NotificationAccess") {
+      if (!registered("ElizaNotifications")) return "NotAtAll"
       try tryPromise(() => noticesOf().openNotificationAccess())
       return "Exactly"
     }
     if (target === "PhotoPermissions") {
+      if (!registered("ElizaPhotos")) return "NotAtAll"
       try tryPromise(() => photosOf().openLibrarySettings())
       return "Exactly"
     }
-    if (target === "InternetPanel") return (try tryPromise(() => wifiOf().openInternetPanel())) === "Opened" ? "Exactly" : "NotAtAll"
+    if (target === "InternetPanel") {
+      if (!registered("ElizaWiFi")) return "NotAtAll"
+      return (try tryPromise(() => wifiOf().openInternetPanel())) === "Opened" ? "Exactly" : "NotAtAll"
+    }
     const system = try tryPromise(() => systemOf())
     if (target === "AndroidHome") return openedOf(try tryPromise(() => system.openSettings()))
     const page = target === "WorkflowAlerts" ? "notifications" : pages[target]

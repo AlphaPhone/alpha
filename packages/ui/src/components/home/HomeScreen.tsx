@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode, type Ref } from "react";
+import { isValidElement, type ReactNode, type Ref, useCallback } from "react";
 import { cn } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
 import { AddToHomeSheet } from "./AddToHomeSheet.tsx";
@@ -68,6 +68,7 @@ export type HomeScreenProps = {
 
 /** Fit the 412-point Home proportions on narrow phones, keeping app faces at least 48px. */
 const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spacing))]";
+const noop = () => undefined;
 
 /**
  * Home: the day's cards and the owner's tiles; while editing, the edit bar and Add to Home. A pull down on its
@@ -76,18 +77,18 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  */
 export function HomeScreen({
   cards = [], appCards, tiles, editing = false, covered = false, held = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onPressTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
-  onShowHidden, onDone, notice, adding = false, addInFrame, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
+  onShowHidden, onDone, notice, adding = false, addInFrame, hidden = [], onAddToHome, onCloseAdding = noop, className,
 }: HomeScreenProps) {
   const first = String(cards.find(isValidElement)?.key ?? "");
-  const startAtFirstCard = (row: HTMLElement | null) => {
+  const startAtFirstCard = useCallback((row: HTMLElement | null) => {
     if (!row || row.dataset.homeFirstCard === first) return;
     row.dataset.homeFirstCard = first;
     row.scrollTo({ left: 0 });
-  };
+  }, [first]);
   return (
     <div inert={covered || undefined} className={cn("@container flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
       <div ref={scrollRef} className={cn(dockClearance, homeSpacing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
-        <div className={cn("shrink-0", launcher ? "min-h-[max(calc(var(--alpha-home-spacing)*16),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))]" : "min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+var(--alpha-home-spacing)*3)]")}>
+        <div className={cn("shrink-0", launcher ? "min-h-[max(calc(var(--alpha-home-spacing)*16),calc(var(--alpha-safe-top)+--spacing(3)))]" : "min-h-[calc(var(--alpha-safe-top)+var(--alpha-home-spacing)*3)]")}>
           {held ? null : <h1 className="sr-only">Home</h1>}
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
@@ -96,7 +97,7 @@ export function HomeScreen({
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
           <div className="contents" onPointerDownCapture={onPressTile ? (event) => {
-            const id = (event.target as Element).closest<HTMLElement>("[data-home-tile]")?.dataset.homeTile;
+            const id = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-home-tile]")?.dataset.homeTile : undefined;
             if (id) onPressTile(id);
           } : undefined}>
           <HomeTileGrid
@@ -113,7 +114,7 @@ export function HomeScreen({
           />
           </div>
         ) : (
-          <div aria-busy className="min-h-24" />
+          <div role="status" aria-label="Loading apps" aria-busy className="min-h-24" />
         )}
         <div aria-hidden className="min-h-4 flex-1" />
       </div>

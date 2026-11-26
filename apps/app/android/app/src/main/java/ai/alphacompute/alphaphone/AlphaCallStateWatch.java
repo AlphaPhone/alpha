@@ -18,28 +18,46 @@ final class AlphaCallStateWatch {
  boolean watching() { return listener != null; }
 
  /** Registers once possible; true while registered. */
+ @SuppressWarnings("deprecation")
  synchronized boolean ensure() {
   if (listener != null) return true;
-  if (android.os.Build.VERSION.SDK_INT < 31) return false;
   if (context.checkSelfPermission("android.permission.READ_PHONE_STATE") != android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
   android.telephony.TelephonyManager phone = context.getSystemService(android.telephony.TelephonyManager.class);
   if (phone == null) return false;
-  Listener next = new Listener(changed);
+  if (android.os.Build.VERSION.SDK_INT >= 31) {
+   Listener next = new Listener(changed);
+   try {
+    phone.registerTelephonyCallback(context.getMainExecutor(), next);
+   } catch (SecurityException | IllegalStateException unavailable) {
+    return false;
+   }
+   listener = next;
+   return true;
+  }
+  android.telephony.PhoneStateListener legacy = new android.telephony.PhoneStateListener(context.getMainExecutor()) {
+   @Override public void onCallStateChanged(int state, String phoneNumber) { changed.run(); }
+   @Override public void onServiceStateChanged(android.telephony.ServiceState state) { changed.run(); }
+  };
   try {
-   phone.registerTelephonyCallback(context.getMainExecutor(), next);
+   phone.listen(legacy, android.telephony.PhoneStateListener.LISTEN_CALL_STATE | android.telephony.PhoneStateListener.LISTEN_SERVICE_STATE);
   } catch (SecurityException | IllegalStateException unavailable) {
    return false;
   }
-  listener = next;
+  listener = legacy;
   return true;
  }
 
+ @SuppressWarnings("deprecation")
  synchronized void stop() {
   Object registered = listener;
   listener = null;
-  if (!(registered instanceof Listener) || android.os.Build.VERSION.SDK_INT < 31) return;
   android.telephony.TelephonyManager phone = context.getSystemService(android.telephony.TelephonyManager.class);
-  try { if (phone != null) phone.unregisterTelephonyCallback((Listener) registered); } catch (RuntimeException ignored) {}
+  if (phone == null) return;
+  if (registered instanceof Listener && android.os.Build.VERSION.SDK_INT >= 31) {
+   try { phone.unregisterTelephonyCallback((Listener) registered); } catch (RuntimeException ignored) {}
+  } else if (registered instanceof android.telephony.PhoneStateListener) {
+   try { phone.listen((android.telephony.PhoneStateListener) registered, android.telephony.PhoneStateListener.LISTEN_NONE); } catch (RuntimeException ignored) {}
+  }
  }
 
  @android.annotation.TargetApi(31)

@@ -41,7 +41,7 @@ export function InboxListState({ kind, onAction }: InboxListStateProps) {
       <p className="text-base">{title}</p>
       {rest.body ? <p className="max-w-60 text-sm">{rest.body}</p> : null}
       {onAction && rest.action ? (
-        <button type="button" onClick={onAction} className={cn(focusRing, "mt-1 h-9 rounded-full bg-secondary px-4 text-sm font-semibold text-secondary-foreground")}>{rest.action}</button>
+        <button type="button" onClick={onAction} className={cn(focusRing, "mt-1 min-h-11 rounded-full bg-secondary px-4 text-sm font-semibold text-secondary-foreground")}>{rest.action}</button>
       ) : null}
     </div>
   );

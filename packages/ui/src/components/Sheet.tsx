@@ -2,6 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn.ts";
+import { useLayerSurface } from "../lib/layers.tsx";
 import { aboveDock, sheetHandle, sheetPanel, surfaceDescription, surfaceTitle } from "../lib/styles.ts";
 import { Button } from "./Button.tsx";
 import { DialogOverlay } from "./Dialog.tsx";
@@ -16,6 +17,8 @@ export type SheetContentProps = Omit<ComponentProps<typeof DialogPrimitive.Conte
   description?: ReactNode;
   /** The sheet's buttons, in a row at its foot, each as wide as the others. */
   actions?: ReactNode;
+  /** An enclosing container for the sheet's portal. */
+  container?: HTMLElement;
   /** A local sheet's mounted frame and backdrop. */
   frame?: { readonly container: HTMLElement; readonly backdrop: ReactNode };
   /** The dimmed backdrop where the sheet has its own surface treatment. */
@@ -36,10 +39,11 @@ export const SheetTrigger = DialogPrimitive.Trigger;
 export const SheetClose = DialogPrimitive.Close;
 
 /** The panel at the foot of a dimmed page, under a grab handle: its title, a body that scrolls, and its actions. Escape and a press outside dismiss it. */
-export function SheetContent({ title, description, actions, overlayClassName, closeLabel, frame, className, children, ...props }: SheetContentProps) {
+export function SheetContent({ title, description, actions, container, overlayClassName, closeLabel, frame, className, children, ref, onPointerDownOutside, onInteractOutside, ...props }: SheetContentProps) {
   const placed = /(?:^|\s)(?:inset-0|inset-y-|bottom-)/.test(className ?? "");
+  const surface = useLayerSurface("SheetLayer", { container: frame?.container ?? container, ref, onPointerDownOutside, onInteractOutside });
   return (
-    <DialogPrimitive.Portal container={frame?.container}>
+    <DialogPrimitive.Portal container={surface.container}>
       {frame ? frame.backdrop : <DialogOverlay className={cn("z-sheet", !placed && aboveDock, overlayClassName)} />}
       <DialogPrimitive.Content
         {...(description ? {} : { "aria-describedby": undefined })}
@@ -47,9 +51,10 @@ export function SheetContent({ title, description, actions, overlayClassName, cl
           sheetPanel,
           !placed && aboveDock,
           sheetHandle,
-          "gap-3 bg-popover px-5 pt-8.5 pb-[max(--spacing(9.5),env(safe-area-inset-bottom))] text-popover-foreground shadow-lift dark:shadow-lift-dark",
+          "gap-3 border-t border-border/60 bg-popover px-5 pt-8.5 pb-[max(--spacing(9.5),var(--alpha-safe-bottom))] text-popover-foreground shadow-lift dark:border-border dark:shadow-lift-dark",
           className,
         )}
+        {...surface.contentProps}
         {...props}
       >
         <div className="flex items-start gap-2">
@@ -57,7 +62,7 @@ export function SheetContent({ title, description, actions, overlayClassName, cl
           {closeLabel ? (
             <DialogPrimitive.Close asChild>
               <Button variant="ghost" size="icon" aria-label={closeLabel} className="-mt-0.5 -mr-2 rounded-tile [&_svg:not([class*='size-'])]:size-5">
-                <X />
+                <X aria-hidden />
               </Button>
             </DialogPrimitive.Close>
           ) : null}

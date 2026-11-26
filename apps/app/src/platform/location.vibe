@@ -1,14 +1,16 @@
 // spec/app/maps/connection.md, "Story: Use my location"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
 import type { LocationResult, LocationPermissionStatus } from "@elizaos/os-bridges"
+import { registered } from "./device.vibe"
 import { phoneSystem } from "./launcher.vibe"
 
 module held {
-  import { type LocationClient, locationClient } from "@elizaos/os-bridges"
+  import { type LocationClient, type LocationPlugin, locationClient } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   let made: LocationClient | undefined
   /** eliza's client of the phone's `ElizaLocation` plugin, made once: Capacitor registers a plugin a single time. @throws {never} */
   export function client(): LocationClient {
-    return (made ??= locationClient())
+    return (made ??= locationClient(capacitorPlugin<LocationPlugin>("ElizaLocation")))
   }
 }
 import { client } from held
@@ -59,36 +61,57 @@ export function sightingOf(result: Pick<LocationResult, "coords">): Sighting {
   return { lat: Math.round(latitude * 1e6), lng: Math.round(longitude * 1e6), accuracy: Math.round(accuracy), precise: accuracy <= 100, taken: timestamp }
 }
 
+const locationPluginName = "ElizaLocation"
+
 /** On the phone: eliza's client of its `ElizaLocation` plugin. */
 export const phoneLocation = Layer.sync(Location, () => {
-  const native = client()
+  const present = registered(locationPluginName)
+  const native = present ? client() : undefined
   const watches = new Set<string>()
+  const clearWatch = (watchId: string) => native === undefined
+    ? succeed(true)
+    : effect {
+      const cleared = try (tryPromise(() => native.clearWatch({ watchId })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+      if (cleared) watches.delete(watchId)
+      return cleared
+    }
   return {
-    permission: () => tryPromise(() => native.checkPermissions()) |> Effect.map(%, grantOf) |> Effect.orElseSucceed(%, (): Grant => "denied"),
-    request: () => tryPromise(() => native.requestPermissions()) |> Effect.map(%, grantOf) |> Effect.orElseSucceed(%, (): Grant => "denied"),
-    watch: () => Stream.callback<Heard, Unavailable>((queue) => effect {
-      const fixes = try acquireRelease(promise(() => native.onLocation((result) => { Queue.offerUnsafe(queue, { kind: "fix", ...sightingOf(result) }) })), (handle) => promise(() => handle.remove()))
-      const errors = try acquireRelease(promise(() => native.onError(() => { Queue.failCauseUnsafe(queue, Cause.fail(new Unavailable({ cause: "the watch failed" }))) })), (handle) => promise(() => handle.remove()))
-      const started = try tryPromise({ try: () => native.watchPosition({ accuracy: "high", minInterval: 1000 }), catch: (cause) => new Unavailable({ cause }) })
-      watches.add(started.watchId)
+    permission: () => native === undefined ? succeed<Grant>("denied") : tryPromise(() => native.checkPermissions()) |> Effect.map(%, grantOf) |> Effect.orElseSucceed(%, (): Grant => "denied"),
+    request: () => native === undefined ? succeed<Grant>("denied") : tryPromise(() => native.requestPermissions()) |> Effect.map(%, grantOf) |> Effect.orElseSucceed(%, (): Grant => "denied"),
+    watch: () => native === undefined ? Stream.fail(new Unavailable({ cause: "location plugin is absent" })) : Stream.callback<Heard, Unavailable>((queue) => effect {
+      const fixes = try acquireRelease(
+        tryPromise({ try: () => native.onLocation((result) => { Queue.offerUnsafe(queue, { kind: "fix", ...sightingOf(result) }) }), catch: (cause) => new Unavailable({ cause }) }),
+        (handle) => ignore(tryPromise(() => handle.remove())),
+      )
+      const errors = try acquireRelease(
+        tryPromise({ try: () => native.onError(() => { Queue.failCauseUnsafe(queue, Cause.fail(new Unavailable({ cause: "the watch failed" }))) }), catch: (cause) => new Unavailable({ cause }) }),
+        (handle) => ignore(tryPromise(() => handle.remove())),
+      )
+      const watchId = try acquireRelease(
+        effect {
+          const started = try tryPromise({ try: () => native.watchPosition({ accuracy: "high", minInterval: 1000 }), catch: (cause) => new Unavailable({ cause }) })
+          watches.add(started.watchId)
+          return started.watchId
+        },
+        (id) => watches.has(id) ? Effect.asVoid(clearWatch(id)) : Effect.void,
+      )
       Queue.offerUnsafe(queue, { kind: "started" })
-      return [fixes, errors]
+      return [fixes, errors, watchId]
     }),
     clear: () => effect {
       let confirmed = true
       for (const watchId of [...watches]) {
-        watches.delete(watchId)
-        confirmed = (try (tryPromise(() => native.clearWatch({ watchId })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
+        confirmed = (try clearWatch(watchId)) && confirmed
       }
       return confirmed
     },
-    rough: () => tryPromise(() => native.getCurrentPosition({ accuracy: "low", timeout: 10_000, maxAge: 30_000 }))
+    rough: () => native === undefined ? succeed(Option.none<Sighting>()) : tryPromise(() => native.getCurrentPosition({ accuracy: "low", timeout: 10_000, maxAge: 30_000 }))
       |> Effect.map(%, (read) => (read.kind === "fix"
         ? Option.some<Sighting>({ lat: Math.round(read.coords.latitude * 1e6), lng: Math.round(read.coords.longitude * 1e6), accuracy: Math.round(read.coords.accuracy), precise: false, taken: read.coords.timestamp })
         : Option.none<Sighting>()))
       |> Effect.orElseSucceed(%, () => Option.none<Sighting>()),
     openSettings: () => tryPromise(() => phoneSystem().then((sys) => sys.openSettingsPage({ page: "location" }))) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false),
-    fix: () => tryPromise(() => native.getCurrentPosition({ accuracy: "medium", maxAge: 300000 }))
+    fix: () => native === undefined ? succeed(Option.none<Sighting>()) : tryPromise(() => native.getCurrentPosition({ accuracy: "medium", maxAge: 300000 }))
       |> Effect.map(%, (reading) => (reading.kind === "fix" ? Option.some(sightingOf(reading)) : Option.none<Sighting>()))
       |> Effect.orElseSucceed(%, () => Option.none<Sighting>()),
   }

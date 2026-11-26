@@ -4,7 +4,8 @@ import { fixturesAllowed, reachable, variantOf } from "../../gen/app__platform.e
 import { allowsTestMocks } from "./build.ts"
 
 module web {
-  import { Capacitor, registerPlugin } from "@capacitor/core"
+  import { Capacitor } from "@capacitor/core"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   /** Alpha's own Android plugin: Android's touch feedback and its accessibility timeout. */
   interface AlphaDevice {
@@ -19,10 +20,9 @@ module web {
     takeBillingReturn(): Promise<unknown>
     shareText(options: { readonly title: string; readonly text: string }): Promise<{ readonly status: string }>
   }
-  let alphaDevice: AlphaDevice | undefined
   /** @throws {never} */
   export function alpha(): AlphaDevice {
-    return (alphaDevice ??= registerPlugin<AlphaDevice>("AlphaDevice"))
+    return capacitorPlugin<AlphaDevice>("AlphaDevice")
   }
 
   /** Whether the phone's host registered `plugin` in this build. @throws {never} */

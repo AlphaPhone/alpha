@@ -5,7 +5,7 @@ import type { Event, Timer } from "../../gen/app__clock__timers.effect.vibe"
 import { contained, due, reacting, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { persistClockMeta } from "./alarms.vibe"
-import { clockRecords } from "./records.ts"
+import { activeClockRecords } from "./shelf.vibe"
 
 function timerDeadlines(state: Timers.Timers) {
   return state.items
@@ -16,29 +16,36 @@ function timerDeadlines(state: Timers.Timers) {
 /** Create a countdown timer, optionally starting it immediately, and persist its label. */
 export effect function createTimer(durationMs: number, label: string, autoStart = true): number!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
   const machine = try Timers.Machine
+  const records = try activeClockRecords()
   const now = try (try Time).now()
   const nextId = (try machine.get()).issued + 1
-  const hadPrior = clockRecords.snapshot().timers.has(nextId)
-  const prior = clockRecords.timer(nextId)
-  clockRecords.setTimer(nextId, { label: label.trim(), remoteId: `timer-${nextId}`, updatedAtMs: now })
+  const hadPrior = records.snapshot().timers.has(nextId)
+  const prior = records.timer(nextId)
+  records.setTimer(nextId, { label: label.trim(), remoteId: `timer-${nextId}`, updatedAtMs: now })
   const sent = try contained(machine.send({ type: "create", durationMs, autoStart, at: untimed }), "creating a timer")
   if (!sent) {
-    if (hadPrior) clockRecords.setTimer(nextId, prior)
+    if (hadPrior) records.setTimer(nextId, prior)
+    else records.deleteTimer(nextId)
     return 0
   }
+  records.markDirty()
   try persistClockMeta()
   return nextId
 }
 
 effect function sendTimerUpdate(id: number, event: Event, label: string): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  const records = try activeClockRecords()
   const now = try (try Time).now()
-  const prior = clockRecords.timer(id)
-  clockRecords.setTimer(id, { updatedAtMs: now })
+  const hadPrior = records.snapshot().timers.has(id)
+  const prior = records.timer(id)
+  records.setTimer(id, { updatedAtMs: now })
   const sent = try contained((try Timers.Machine).send(event), label)
   if (!sent) {
-    clockRecords.setTimer(id, prior)
+    if (hadPrior) records.setTimer(id, prior)
+    else records.deleteTimer(id)
     return false
   }
+  records.markDirty()
   try persistClockMeta()
   return true
 }
@@ -75,20 +82,27 @@ export effect function dismissTimer(id: number): boolean!!(Timers.Machine | Time
 
 /** Delete a timer and record its deletion tombstone for agent sync. */
 export effect function removeTimer(id: number): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
-  const prior = clockRecords.timer(id)
-  clockRecords.markTimerDeleted(id)
+  const records = try activeClockRecords()
+  const hadPrior = records.snapshot().timers.has(id)
+  const prior = records.timer(id)
+  records.markTimerDeleted(id)
   const sent = try contained((try Timers.Machine).send({ type: "remove", id }), "removing a timer")
   if (!sent) {
-    clockRecords.setTimer(id, prior)
+    records.unmarkTimerDeleted(id)
+    if (hadPrior) records.setTimer(id, prior)
     return false
   }
+  records.markDirty()
   try persistClockMeta()
   return true
 }
 
-/** Compute live remaining milliseconds for a timer at `nowMs`. */
+/** Compute live remaining milliseconds for a timer at `nowMs`, clamping backward clock steps. */
 export function liveRemainingMs(item: Timer, nowMs: number): number {
-  if (item.status === "Running") return Math.max(0, item.endAt - nowMs)
+  if (item.status === "Running") {
+    if (nowMs < item.startedAt) return Math.max(0, item.endAt - item.startedAt)
+    return Math.max(0, item.endAt - nowMs)
+  }
   if (item.status === "Ringing") return 0
   return item.remainingMs
 }

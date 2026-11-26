@@ -25,14 +25,14 @@ const rise = (() => {
 export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "onChange"> & {
   /** Where the composer sits: in the Ask Alpha bar, raised on its own, or at the foot of the conversation sheet. */
   variant?: "bar" | "sheet";
-  /** The bar or pill is already in place, as after a drag: it changes between the two without an entrance (v119 45f6bed30 chat-overlay-motion-adapter.ts:637-646). */
-  still?: boolean;
   /** The text being written. */
   value: string;
   /** Called with the text as it is typed. */
   onValueChange: (value: string) => void;
   /** The draft's slot is not open yet, or could not be: the field takes no typing. */
   closed?: boolean;
+  /** The bar or pill is already in place, as after a drag: it changes between the two without an entrance (v119 45f6bed30 chat-overlay-motion-adapter.ts:637-646). */
+  still?: boolean;
   /** Something to tell or ask about the saved draft, above the field. */
   notice?: AssistantDraftNoticeProps;
   /** Why nothing can be sent now: Alpha cannot be reached, or the screen is sensitive and is never sent. Said to a screen reader only; no text is written by the composer. */
@@ -139,7 +139,7 @@ export function AssistantComposer({
     return () => { motion.cancel(); };
   }, [enter]);
   return (
-    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
+    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(var(--alpha-safe-bottom)_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
       {!compact && attachments.length ? (
@@ -154,9 +154,9 @@ export function AssistantComposer({
       <div ref={dockRef} data-alpha-input-bar={bar && !compact ? "" : undefined} data-alpha-pill={compact ? "" : undefined} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
-          <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
+          <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-full scale-[1.18]" /></Button>
         ) : null) : null}
-        {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard /></Button> : (
+        {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard aria-hidden /></Button> : (
           <AssistantChatActions placement={bar ? "bar" : "sheet"} disabled={closed} onAttach={onAttach} onSearch={onSearch} />
         )}
         <Textarea
@@ -177,7 +177,7 @@ export function AssistantComposer({
             event.preventDefault();
             if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
           }}
-          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 rounded-full bg-transparent py-2.75 text-body leading-field", cn("border-0 pr-0.5 focus-visible:outline-none", bar ? "pl-2" : "pl-0.5"), fieldPull || (bar && draggable) ? "touch-none" : bar ? "touch-pan-y" : "touch-auto", compact && "hidden")}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 rounded-panel border-0 bg-transparent px-3 py-2.75 text-body leading-field", fieldPull || (bar && draggable) ? "touch-none" : bar ? "touch-pan-y" : "touch-auto", compact && "hidden")}
         />
         {onStop || stopping ? (
           <Button key={`${look}-stop`} variant={compact ? "ghost" : undefined} size="icon" aria-label="Stop reply" loading={stopping} className={compact ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>
@@ -189,13 +189,13 @@ export function AssistantComposer({
             disabled={closed || !onSend}
             onPointerDown={keepComposerFocus}
             onClick={onSend}
-          ><ArrowUp /></Button>
+          ><ArrowUp aria-hidden /></Button>
         ) : onTalk ? (
-          <Button key={`${look}-talk`} variant="ghost" size="icon" aria-label="Talk" className={bar || targeting ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
+          <Button key={`${look}-talk`} variant="ghost" size="icon" aria-label="Talk" className={bar || targeting ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic aria-hidden /></Button>
         ) : !compact && onDictate ? (
-          <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
+          <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic aria-hidden /></Button>
         ) : compact || showUnavailableTalk ? (
-          <Button key={`${look}-talk`} variant="ghost" size="icon" aria-label="Talk" className={cn("disabled:opacity-100", !bar && !targeting && "bg-foreground text-background")} disabled><Mic /></Button>
+          <Button key={`${look}-talk`} variant="ghost" size="icon" aria-label="Talk" className={!bar && !targeting ? "bg-foreground text-background" : undefined} disabled><Mic aria-hidden /></Button>
         ) : null}
       </div>
     </div>

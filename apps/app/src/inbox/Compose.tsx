@@ -1,12 +1,12 @@
 // spec/app/inbox/drafts.md, "Story: Write a message"; spec/app/inbox/drafts.md, "Story: Set a draft aside or discard it"; spec/app/inbox/sending.md, "Story: Send a draft I reviewed"
 import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
-import { useMemo } from "react";
+import { Effect, Exit, type ManagedRuntime } from "effect";
+import { useMemo, useSyncExternalStore } from "react";
 import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { type Composer, flushed, ready } from "../../gen/app__inbox__drafts.ts";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
-import { type Letter, blank, canAttach } from "../../gen/app__inbox__letter.ts";
+import { blank, canAttach, mayHaveGone } from "../../gen/app__inbox__letter.ts";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import type { Refusal } from "../../gen/app__inbox__adding.ts";
 import { useMachine as useAdding } from "../../gen/app__inbox__adding.react.ts";
@@ -53,13 +53,18 @@ function correspondents(read: ReturnType<Mail.Shape["shown"]>): { name: string; 
 }
 
 /** How the last operation on `letter` stands, while it is worth telling. */
-function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outcome"] | undefined {
-  if (ops.draft !== letter.id || ops.kind !== "Send" || ops.of !== ops.session) return letter.doubt.attempt !== 0 ? "unknown" : undefined;
-  const outcome = ops.attempt.outcome;
-  if (outcome === "Recorded" || outcome === "Sent") return "sending";
-  if (outcome === "Confirmed") return "sent";
-  if (outcome === "Refused") return ops.withdrawn ? "stopped" : "refused";
-  if (outcome === "Unknown") return "unknown";
+function outcomeOf(ops: Operations, state: Composer): InboxSendOutcomeProps["outcome"] | undefined {
+  const { letter } = state;
+  if (ops.draft === letter.id && ops.kind === "Send" && ops.of === ops.session) {
+    const outcome = ops.attempt.outcome;
+    if (outcome === "Recorded" || outcome === "Sent") return "sending";
+    if (outcome === "Confirmed") return "sent";
+    if (outcome === "Refused") return ops.withdrawn ? "stopped" : "refused";
+    if (outcome === "Unknown") return "unknown";
+  }
+  if (letter.doubt.attempt !== 0) return "unknown";
+  if (state.check.status === "Loaded" && state.checked.length > 0 && letter.sent > 0) return "foundSent";
+  if (state.check.status === "Loaded" && state.checked.length > 0 && letter.sent === 0) return "notSent";
   return undefined;
 }
 
@@ -71,6 +76,12 @@ const notices: Partial<Record<Composer["notice"], InboxNoticeKind>> = {
 
 const keepingOf = (s: Composer) => (s.unkept ? (s.full ? "full" : "notKept") : s.write.status === "Loading" || s.pending ? "writing" : "kept");
 
+function useLettersStore(runtime: ComposeProps["runtime"]) {
+  const store = useMemo(() => runtime.runSync(Effect.flatMap(Letters, (all) => Effect.succeed(all))), [runtime]);
+  useSyncExternalStore((listener) => store.subscribe(listener), () => store.version(), () => store.version());
+  return store;
+}
+
 /**
  * The draft open: its recipients, subject, text and files, kept on the phone as it is typed, and the review of its send.
  * Each control is offered exactly when its machine takes its event.
@@ -80,6 +91,7 @@ export function Compose({ runtime, list }: ComposeProps) {
   const { state, can, send } = useTimed(runtime, useDrafts);
   const ops = useTimed(runtime, useChanges);
   const adding = useAdding(runtime);
+  const lettersStore = useLettersStore(runtime);
   const shell = useShell(runtime).state;
   const account = state?.letter.account;
   const recent = useMemo(() => list.selected.account === account
@@ -88,9 +100,8 @@ export function Compose({ runtime, list }: ComposeProps) {
   if (!state || !ops.state || !adding.state || !state.open) return null;
   const letter = state.letter;
   const draft = letter.id;
-  const letters = runtime.runSync(Letters);
   const mail = runtime.runSync(Mail);
-  const words = letters.words(draft);
+  const words = lettersStore.words(draft);
   const typing = words.pending ?? emptyAddressFields;
   const access = accessOf(list, letter.account);
   const from = mail.email(letter.account);
@@ -103,8 +114,11 @@ export function Compose({ runtime, list }: ComposeProps) {
   const write = { type: "write", now: untimed } as const;
   const change = (next: Partial<Words>) => {
     if (!can(write, "Owner")) return;
-    letters.set(draft, { ...letters.words(draft), ...next });
-    void send(write, "Owner");
+    const before = lettersStore.words(draft);
+    lettersStore.set(draft, { ...before, ...next });
+    void send(write, "Owner").then((outcome) => {
+      if (Exit.isFailure(outcome)) lettersStore.set(draft, before);
+    });
   };
   const line = (name: "to" | "cc" | "bcc") => ({
     recipients: words[name].map((address) => ({ address, valid: acceptable(address) })),
@@ -123,14 +137,20 @@ export function Compose({ runtime, list }: ComposeProps) {
         return;
       }
       if (!can(added, "Owner")) return;
-      letters.set(draft, { ...letters.words(draft), [name]: [...words[name], address], pending });
-      void send(added, "Owner");
+      const before = lettersStore.words(draft);
+      lettersStore.set(draft, { ...before, [name]: [...words[name], address], pending });
+      void send(added, "Owner").then((outcome) => {
+        if (Exit.isFailure(outcome)) lettersStore.set(draft, before);
+      });
     },
     onRemove: (address: string) => {
       const removed = { type: "removeRecipient", now: untimed, valid: acceptable(address) } as const;
       if (!can(removed, "Owner")) return;
-      letters.set(draft, { ...words, [name]: words[name].filter((one) => one !== address) });
-      void send(removed, "Owner");
+      const before = lettersStore.words(draft);
+      lettersStore.set(draft, { ...before, [name]: words[name].filter((one) => one !== address) });
+      void send(removed, "Owner").then((outcome) => {
+        if (Exit.isFailure(outcome)) lettersStore.set(draft, before);
+      });
     },
   });
   const query = typing.to.trim().toLowerCase();
@@ -155,6 +175,7 @@ export function Compose({ runtime, list }: ComposeProps) {
     ...list.connected.filter(({ account }) => can(changeFrom(account), "Owner")).map(({ account, grant }) => ({ id: String(account), email: mail.email(account), grant })),
   ];
   const sending = { type: "prepare", kind: "Send", access, letter, kept: kept && addressed, again: false } as const;
+  const sendingAgain = { ...sending, again: true } as const;
   // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on opens Google authorization"
   const turnOn = { type: "turnOnSending", access, account: letter.account } as const;
   const onTurnOn = shell && ops.can(turnOn, "Owner") ? () => {
@@ -166,41 +187,56 @@ export function Compose({ runtime, list }: ComposeProps) {
   const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept: kept && addressed, again: false } as const;
   const lookUp = { type: "lookUp", access } as const;
   const checkCopy = kept && addressed && can(lookUp, "Owner") ? () => void send(lookUp, "Owner") : undefined;
+  const checkSent = { type: "checkSent", draft, access } as const;
   const clash = letter.draft.sync === "Conflicted";
-  const copy = clash ? letters.copy(letter.gmail) : undefined;
+  const copy = clash ? lettersStore.copy(letter.gmail) : undefined;
   const latest = choiceOf(copy);
   const gmail = clash ? "clash" : letter.draft.sync === "Saving" ? "saving" : letter.gmail === 0 || letter.unsure ? "none" : letter.draft.sync === "Edited" ? "unsaved" : "saved";
   const deleting = { type: "prepare", kind: "DeleteDraft", access, letter, kept, again: false } as const;
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
+  const reviewAgain = { type: "reviewAgain", letter, kept: kept && addressed } as const;
+  const cancelReview = { type: "cancel" } as const;
+  const dismissOutcome = { type: "dismissOutcome" } as const;
+  const discardDraft = { type: "discard" } as const;
+  const keepDraft = { type: "keepDraft" } as const;
   const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
   const reviewing = ops.state.review.showing && ops.state.draft === draft && reviewed;
-  const outcome = outcomeOf(ops.state, letter);
+  const confirming = ops.state.draft === draft && (ops.state.attempt.outcome === "Recorded" || ops.state.attempt.outcome === "Sent");
+  const outcomeKind = outcomeOf(ops.state, state);
   const checkingSent = state.checking === draft && state.check.status === "Loading";
-  const checkSent = { type: "checkSent", draft, access } as const;
-  const sendAgain = { ...sending, again: true } as const;
-  const sendOutcome: InboxSendOutcomeProps | undefined = outcome === undefined ? undefined : {
-    outcome, checking: checkingSent,
+  const outcomeProps: InboxSendOutcomeProps | undefined = outcomeKind === undefined ? undefined : {
+    outcome: outcomeKind,
+    checking: checkingSent,
     onCheckSent: checkingSent || can(checkSent, "Owner") ? () => { if (!checkingSent) void send(checkSent, "Owner"); } : undefined,
-    onSendAgain: outcome === "unknown" && !checkingSent && ops.can(sendAgain, "Owner") ? () => void ops.send(sendAgain, "Owner") : undefined,
+    onSendAgain: (mayHaveGone(letter) || outcomeKind === "unknown") && !checkingSent && ops.can(sendingAgain, "Owner") ? () => void ops.send(sendingAgain, "Owner") : undefined,
+    onDismiss: ops.can(dismissOutcome, "Owner") ? () => void ops.send(dismissOutcome, "Owner") : undefined,
   };
-  const notice = state.lookup.status === "Loading" ? "checkingGmailCopy"
-    : letter.unsure ? "gmailCopyUnknown"
-    : state.lookup.status === "Failed" ? "unreachable"
-    : notices[state.notice] ?? (letter.textOnly ? "forwardTextOnly" : undefined);
   const aside = { type: "setAside" } as const;
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
   const attach = { type: "attach", draft } as const;
   const refused = adding.state.draft === draft && adding.state.refused !== "Accepted" ? refusals[adding.state.refused] : undefined;
+  const notice: InboxNoticeKind | undefined = state.lookup.status === "Loading" ? "checkingGmailCopy"
+    : letter.unsure ? "gmailCopyUnknown"
+    : state.lookup.status === "Failed" ? "unreachable"
+    : notices[state.notice] ?? (letter.textOnly ? "forwardTextOnly" : undefined);
   // spec/app/inbox/drafts.md, "A file joins the draft open only within its account's limits, and one is removed with its size"
   const detach = (id: string) => {
     const file = words.files[Number(id)];
     const event = { type: "detach", now: untimed, mib: mibOf(file?.size ?? 0) } as const;
     if (!file || !can(event, "Owner")) return undefined;
     return () => {
-      letters.set(draft, { ...words, files: words.files.filter((_, at) => at !== Number(id)) });
-      void send(event, "Owner");
+      const before = lettersStore.words(draft);
+      lettersStore.set(draft, { ...before, files: before.files.filter((_, at) => at !== Number(id)) });
+      void send(event, "Owner").then((outcome) => {
+        if (Exit.isFailure(outcome)) lettersStore.set(draft, before);
+      });
     };
   };
+  const sendAction = ops.can(sending, "Owner")
+    ? () => void ops.send(sending, "Owner")
+    : mayHaveGone(letter) && ops.can(sendingAgain, "Owner")
+      ? () => void ops.send(sendingAgain, "Owner")
+      : undefined;
   return (
     <>
       <InboxComposer
@@ -232,7 +268,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         notice={refused ?? notice}
         onNoticeAction={refused === undefined ? checkCopy : undefined}
         onTurnOnSending={onTurnOn}
-        outcome={sendOutcome}
+        outcome={outcomeProps}
         storage={ready(state) ? undefined : state.load.status === "Failed" ? "unavailable" : "checking"}
         onReloadStorage={can({ type: "reload" }, "World") ? () => void send({ type: "reload" }, "World") : undefined}
         keeping={keepingOf(state)}
@@ -242,7 +278,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         onUseSaved={latest && can(latest, "Owner") ? () => void runtime.runPromise(chooseLatestSavedDraft()) : undefined}
         sent={letter.sent === 0 ? "none" : letter.sent === letter.revision ? "already" : "earlier"}
         onKeepAgain={can({ type: "keepAgain" }, "World") ? () => void send({ type: "keepAgain" }, "World") : undefined}
-        onSend={ops.can(sending, "Owner") ? () => void ops.send(sending, "Owner") : undefined}
+        onSend={sendAction}
         onSaveToGmail={ops.can(saving, "Owner") ? () => void ops.send(saving, "Owner") : undefined}
         onCheckCopy={checkCopy}
         onDeleteGmailCopy={ops.can(deleting, "Owner") ? () => void ops.send(deleting, "Owner") : undefined}
@@ -261,14 +297,16 @@ export function Compose({ runtime, list }: ComposeProps) {
         attachments={words.files.map((file) => file.name)}
         repeat={ops.state.repeat}
         changed={ops.state.changed}
+        confirming={confirming}
         onConfirm={ops.can(confirm, "Owner") ? () => void ops.send(confirm, "Owner") : undefined}
-        onCancel={() => void ops.send({ type: "cancel" }, "Owner")}
+        onReviewAgain={ops.can(reviewAgain, "Owner") ? () => void ops.send(reviewAgain, "Owner") : undefined}
+        onCancel={() => { if (ops.can(cancelReview, "Owner")) void ops.send(cancelReview, "Owner"); }}
       />
       <InboxDiscardDialog
         open={state.discarding}
         gmailCopy={letter.gmail !== 0}
-        onDiscard={() => void send({ type: "discard" }, "Owner")}
-        onKeep={() => void send({ type: "keepDraft" }, "Owner")}
+        onDiscard={() => { if (can(discardDraft, "Owner")) void send(discardDraft, "Owner"); }}
+        onKeep={() => { if (can(keepDraft, "Owner")) void send(keepDraft, "Owner"); }}
       />
     </>
   );
@@ -313,6 +351,7 @@ const targets = { ToDraft: "draft", NewReply: "newReply", NewEmail: "newEmail" }
 export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
   const { state, can, send } = useOffer(runtime);
   const drafts = useDrafts(runtime);
+  const lettersStore = useLettersStore(runtime);
   if (!state || !drafts.state || state.text === 0) return null;
   const composer = drafts.state;
   const letter = state.target !== "ToDraft" ? undefined : composer.open && composer.letter.id === state.draft ? composer.letter : held(composer.shelf, state.draft);
@@ -320,7 +359,7 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
   const offers = runtime.runSync(Offers);
   const text = offers.text(state.text);
   const account = runtime.runSync(Mail).email(letter?.account ?? state.account);
-  const before = letter === undefined ? "" : runtime.runSync(Letters).words(letter.id).text;
+  const before = letter === undefined ? "" : lettersStore.words(letter.id).text;
   const review = { type: "review", revision } as const;
   // spec/app/inbox/suggestion.md, "Only the owner puts it in, once, as it was last shown, into the draft as it still is, adding or replacing as the owner chooses; text that does not fit is refused whole and the offer stays"
   const using = (appends: boolean) => {
@@ -341,7 +380,7 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
       tooLong={state.blocked}
       onAdd={state.target === "ToDraft" ? using(true) : using(false)}
       onReplace={state.target === "ToDraft" ? using(false) : undefined}
-      onDismiss={() => void send({ type: "dismiss" }, "Owner")}
+      onDismiss={() => { if (can({ type: "dismiss" }, "Owner")) void send({ type: "dismiss" }, "Owner"); }}
     />
   );
 }

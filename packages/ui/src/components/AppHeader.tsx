@@ -31,14 +31,14 @@ export type AppHeaderProps = Omit<ComponentProps<"header">, "title"> & {
 export function AppHeader({ title, leading, titleControl, detail = false, className, children, ...props }: AppHeaderProps) {
   return (
     <header data-host-chrome="" className={cn(
-      "flex min-h-13 items-center gap-0.5 px-2 [&_button[aria-label]]:size-13 [&_button[aria-label]]:min-w-13",
+      "flex min-h-13 items-center gap-0.5 px-2 [&>button[aria-label]]:size-13 [&>button[aria-label]]:min-w-13",
       !titleControl && "in-data-[alpha-title-row]:flex-wrap in-data-[alpha-title-row]:content-start in-data-[alpha-title-row]:gap-y-1 in-data-[alpha-title-row]:[&>h1+*]:ms-auto",
       !titleControl && !detail && "in-data-[alpha-title-row]:in-data-[alpha-launcher]:@container",
       className,
     )} {...props}>
       {leading}
       <h1 className={titleControl ? "sr-only" : cn(
-        "min-w-0 flex-1 text-xl font-semibold break-words focus-visible:outline-none in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:font-light in-data-[alpha-launcher]:[font-variation-settings:'opsz'_144]",
+        "min-w-0 flex-1 text-xl font-semibold break-words in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:font-light in-data-[alpha-launcher]:[font-variation-settings:'opsz'_144]",
         "in-data-[alpha-title-row]:order-1 in-data-[alpha-title-row]:basis-full in-data-[alpha-title-row]:wrap-anywhere in-data-[alpha-title-row]:not-in-data-[alpha-launcher]:px-2 in-data-[alpha-title-row]:not-in-data-[alpha-launcher]:pb-1.5",
         detail
           ? "in-data-[alpha-launcher]:truncate in-data-[alpha-launcher]:text-home-display in-data-[alpha-launcher]:tracking-tight in-data-[alpha-title-row]:overflow-visible in-data-[alpha-title-row]:whitespace-normal"

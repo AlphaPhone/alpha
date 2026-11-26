@@ -112,13 +112,43 @@ export const scratch = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(
 const children = new Set<ChildProcess>();
 process.once("exit", () => { for (const child of children) child.kill("SIGKILL"); });
 
-function ended(child: ChildProcess) {
-  return new Promise<void>((done) => {
-    children.delete(child);
-    if (child.exitCode !== null || child.signalCode !== null) return done();
-    child.once("close", () => done());
-    child.kill("SIGTERM");
+const MAX_LOG_CHARS = 65_536;
+const MAX_ASKED_SYSTEMS = 100;
+const MAX_ASKED_PER_SYSTEM = 200;
+const STARTUP_DEADLINE_MS = 120_000;
+
+function appendRing(existing: string, chunk: string): string {
+  const combined = existing + chunk;
+  return combined.length > MAX_LOG_CHARS ? combined.slice(combined.length - MAX_LOG_CHARS) : combined;
+}
+
+function waitForClose(child: ChildProcess): Effect.Effect<void> {
+  return Effect.callback<void>((resume) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resume(Effect.void);
+      return;
+    }
+    const onClose = () => resume(Effect.void);
+    child.once("close", onClose);
+    return Effect.sync(() => { child.off("close", onClose); });
   });
+}
+
+function ended(child: ChildProcess): Promise<void> {
+  children.delete(child);
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  child.kill("SIGTERM");
+  return Effect.runPromise(
+    Effect.race(
+      waitForClose(child),
+      Effect.sleep(5_000).pipe(
+        Effect.andThen(Effect.sync(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        })),
+        Effect.andThen(Effect.race(waitForClose(child), Effect.sleep(2_000))),
+      ),
+    ),
+  );
 }
 
 async function freePort() {
@@ -147,10 +177,12 @@ function exchange(url: string, init: { method?: string; headers?: Record<string,
 }
 
 /** Wait until `url` answers 200: a service that has only just bound its port may take a connection and never answer it. */
-async function answering(url: string, gone: () => string | undefined) {
+async function answering(url: string, gone: () => string | undefined, timeoutMs = STARTUP_DEADLINE_MS) {
+  const deadline = Date.now() + timeoutMs;
   while (!(await exchange(url, { within: 2_000 }).then((answer) => answer.status === 200, () => false))) {
     const why = gone();
     if (why !== undefined) throw new Error(why);
+    if (Date.now() > deadline) throw new Error(`${url} did not answer 200 within ${timeoutMs}ms`);
     await Effect.runPromise(Effect.sleep(100));
   }
 }
@@ -173,6 +205,10 @@ interface Tool { readonly type: string; readonly function: { readonly name: stri
  */
 const uniformTools = (tools: readonly Tool[]): Tool[] =>
   tools.every((tool) => tool.function.strict === true) ? [...tools] : tools.map(({ function: { strict: _strict, ...declared }, ...tool }) => ({ ...tool, function: declared }));
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+}
 
 /** One model call as `ALPHA_MODEL_TIMING_LOG` keeps it: when it started, how long until its headers, its first output and its end, what it asked and called with which arguments, and the start of the text it wrote. */
 interface CallTiming {
@@ -263,6 +299,10 @@ function forwarded(real: RealModel, input: Record<string, unknown>, outgoing: Se
   const startedAt = Date.now();
   const tools = input.tools as readonly Tool[] | undefined;
   const url = new URL(`${real.baseUrl}/chat/completions`);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
+    outgoing.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: { type: "invalid_request_error", message: "Refusing non-loopback HTTP upstream for bearer key" } }));
+    return;
+  }
   const upstream = (url.protocol === "https:" ? https : http).request(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${real.key}` } }, (answer) => {
     const wait = answer.headers["retry-after"];
     outgoing.writeHead(answer.statusCode ?? 502, { "content-type": answer.headers["content-type"] ?? "application/json", "cache-control": "no-store", ...(wait === undefined ? {} : { "retry-after": wait }) }).flushHeaders();
@@ -307,11 +347,20 @@ function catalogued(route: string, authorization: string | undefined): [number, 
 async function startProvider(key: string, real: RealModel | undefined) {
   const replies = new Map<string, { readonly prompt?: string; readonly reply: Reply }[]>();
   const asked = new Map<string, Message[][]>();
-  const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
+  const listed = <A>(lists: Map<string, A[]>, system: string): A[] => {
+    const existing = lists.get(system);
+    if (existing !== undefined) return existing;
+    const created: A[] = [];
+    lists.set(system, created);
+    return created;
+  };
   const scripted = (system: string) => [...replies.keys()].filter((character) => system.startsWith(character)).sort((a, b) => b.length - a.length)[0] ?? system;
   const heard = (character: string) => [...asked].filter(([system]) => system.startsWith(character)).flatMap(([, calls]) => calls);
   const frame = (data: unknown) => `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
-  const usage = (messages: readonly Message[], text: string) => ({ prompt_tokens: JSON.stringify(messages).length, completion_tokens: text.length, total_tokens: JSON.stringify(messages).length + text.length });
+  const usage = (messages: readonly Message[], text: string) => {
+    const promptTokens = JSON.stringify(messages).length;
+    return { prompt_tokens: promptTokens, completion_tokens: text.length, total_tokens: promptTokens + text.length };
+  };
   const json = (outgoing: ServerResponse, status: number, data: unknown) => void outgoing.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(data));
   async function read(incoming: IncomingMessage) {
     let text = "";
@@ -322,19 +371,23 @@ async function startProvider(key: string, real: RealModel | undefined) {
     const messages = (input.messages ?? []) as Message[];
     const character = messages.find((message) => message.role === "system")?.content;
     const system = typeof character === "string" ? character : "";
-    listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
+    if (!asked.has(system) && asked.size >= MAX_ASKED_SYSTEMS) {
+      const oldest = asked.keys().next().value;
+      if (oldest !== undefined) asked.delete(oldest);
+    }
+    const recorded = listed(asked, system);
+    recorded.push(messages);
+    if (recorded.length > MAX_ASKED_PER_SYSTEM) recorded.splice(0, recorded.length - MAX_ASKED_PER_SYSTEM);
     const content = messages.findLast((message) => message.role === "user")?.content;
-    // A message with pictures is a list of parts: its words are its text parts, so a script can still be bound to them.
     const last = Array.isArray(content)
       ? content.flatMap((part: unknown) => typeof part === "object" && part !== null && "type" in part && part.type === "text"
         && "text" in part && typeof part.text === "string" ? [part.text] : []).join("\n")
       : content;
-    // Only reading: a call made before this owner's first script must not leave an empty list that later shadows it.
     const pending = replies.get(scripted(system)) ?? [];
     const prompt = typeof last === "string" ? ownerWords(last) : undefined;
     const choice = pending.findIndex((entry) => entry.prompt === undefined || entry.prompt === prompt);
-    const queued = choice < 0 ? undefined : pending.splice(choice, 1)[0]?.reply;
+    const queued = choice < 0 ? undefined : (pending[choice]?.reply.kind === "stall" && input.stream !== true ? undefined : pending.splice(choice, 1)[0]?.reply);
     const reply = queued ?? { kind: "text", parts: [typeof last === "string" ? repeated(last) : `You said: ${JSON.stringify(last)}`] };
     const parts = reply.kind === "text" ? reply.parts : reply.kind === "stall" ? [reply.first] : [];
     const text = parts.join("");
@@ -363,7 +416,10 @@ async function startProvider(key: string, real: RealModel | undefined) {
       const prompt = typeof body.prompt === "string" ? body.prompt : undefined;
       return json(outgoing, 200, { scripted: listed(replies, String(body.system)).push({ prompt, reply: body.reply as Reply }) });
     }
-    if (url.pathname === "/operator/asked") return json(outgoing, 200, heard(url.searchParams.get("system") ?? ""));
+    if (url.pathname === "/operator/asked") {
+      if (real !== undefined) return json(outgoing, 403, { error: "disabled_in_real_model_mode" });
+      return json(outgoing, 200, heard(url.searchParams.get("system") ?? ""));
+    }
     if (url.pathname.startsWith("/stripe/")) return json(outgoing, ...catalogued(url.pathname.slice("/stripe".length), incoming.headers.authorization));
     if (incoming.method !== "POST" || url.pathname !== "/v1/chat/completions") return json(outgoing, 404, { error: { type: "invalid_request_error", message: "no such route" } });
     if (incoming.headers.authorization !== `Bearer ${key}`) return json(outgoing, 401, { error: { type: "authentication_error", message: "bad key" } });
@@ -400,7 +456,7 @@ function cloudCommand(secrets: string, args: readonly string[], keys: Readonly<R
   const child = spawn(node, ["--no-warnings", `--env-file=${secrets}`, "dist/src/main.js", ...args], { cwd: prepared().cloud, env: { PATH: process.env.PATH, TZ: "UTC", ...keys }, stdio: ["ignore", "pipe", "pipe"] });
   children.add(child);
   let output = "";
-  for (const stream of [child.stdout, child.stderr]) stream.setEncoding("utf8").on("data", (text: string) => { output += text; });
+  for (const stream of [child.stdout, child.stderr]) stream.setEncoding("utf8").on("data", (text: string) => { output = appendRing(output, text); });
   const exited = new Promise<number | null>((done) => child.once("close", (code) => { children.delete(child); done(code); }));
   return { child, exited, output: () => output };
 }
@@ -425,8 +481,13 @@ export async function awaitChildService(
 
 async function served(secrets: string, args: readonly string[], origin: string, keys: Readonly<Record<string, string>> = {}) {
   const running = cloudCommand(secrets, ["serve", ...args], keys);
-  await awaitChildService(running.child, `${origin}/api/public/service`, "the cloud", running.output);
-  return running.child;
+  try {
+    await awaitChildService(running.child, `${origin}/api/public/service`, "the cloud", running.output);
+    return running.child;
+  } catch (cause) {
+    await ended(running.child);
+    throw cause;
+  }
 }
 
 const challenged = () => {
@@ -486,8 +547,8 @@ export async function startCloud(state: string, emails: readonly string[], credi
   const local = `http://127.0.0.1:${port}`;
   const at = [...deployment, "--port", String(port), "--host", "127.0.0.1"];
   const owners = new Map<string, DeviceKey>();
-  const keys: Readonly<Record<string, string>> = speech === undefined ? {} : { [speechSettings.apiKeyEnv]: speech.key };
   let running: ChildProcess | undefined;
+  const keys: Readonly<Record<string, string>> = speech === undefined ? {} : { [speechSettings.apiKeyEnv]: speech.key };
   try {
     const first = await served(secrets, [...at, "--seed", file("seed.json", JSON.stringify(seed))], local, keys);
     try {
@@ -546,10 +607,15 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
   });
   children.add(child);
   let errors = "";
-  child.stderr.setEncoding("utf8").on("data", (text: string) => { errors += text; });
+  child.stderr.setEncoding("utf8").on("data", (text: string) => { errors = appendRing(errors, text); });
   child.stdin.end(`${JSON.stringify({ version: 1, token, epoch: Date.now(), credential: { version: 1, value: key.token }, storageKey: base64url(randomBytes(32)) })}\n`);
   const origin = `http://127.0.0.1:${port}`;
-  await awaitChildService(child, `${origin}/api/health`, "the agent", () => errors);
+  try {
+    await awaitChildService(child, `${origin}/api/health`, "the agent", () => errors);
+  } catch (cause) {
+    await ended(child);
+    throw cause;
+  }
   return { origin, token, stop: () => ended(child) };
 }
 
@@ -567,10 +633,19 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
 export async function startEliza(keep?: string, real?: RealModel, speech?: RealSpeech) {
   const { character } = await builtPack();
   const state = keep === undefined ? scratch() : owned(path.join(keep, "harness"));
-  const cloud = await startCloud(state, [owner.email], owner.credits, real, speech);
-  const key = cloud.owners.get(owner.email)!;
-  const socket = process.env.ALPHA_LOCAL_SPEECH_SOCKET;
-  const browserNotesSpeech = socket === undefined || !path.isAbsolute(socket) ? undefined : socket;
-  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, browserNotesSpeech, Intl.DateTimeFormat().resolvedOptions().timeZone);
-  return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); if (keep === undefined) fs.rmSync(state, { recursive: true, force: true }); } };
+  let cloud: Cloud | undefined;
+  try {
+    cloud = await startCloud(state, [owner.email], owner.credits, real, speech);
+    const key = cloud.owners.get(owner.email);
+    if (key === undefined) throw new Error(`missing device key for ${owner.email}`);
+    const socket = process.env.ALPHA_LOCAL_SPEECH_SOCKET;
+    const browserNotesSpeech = socket === undefined || !path.isAbsolute(socket) ? undefined : socket;
+    const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, browserNotesSpeech, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const activeCloud = cloud;
+    return { cloud: activeCloud, agent, key, stop: async () => { await agent.stop(); await activeCloud.stop(); if (keep === undefined) fs.rmSync(state, { recursive: true, force: true }); } };
+  } catch (cause) {
+    await cloud?.stop();
+    if (keep === undefined) fs.rmSync(state, { recursive: true, force: true });
+    throw cause;
+  }
 }

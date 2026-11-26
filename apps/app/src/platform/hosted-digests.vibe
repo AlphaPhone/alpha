@@ -5,7 +5,8 @@ import { registered } from "./device.vibe"
 const pluginName = "AlphaHostedDigestDelivery"
 
 module held {
-  import { registerPlugin, type PluginListenerHandle } from "@capacitor/core"
+  import type { PluginListenerHandle } from "@capacitor/core"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   interface NativeDigestPlugin {
     read(): Promise<unknown>
@@ -17,10 +18,9 @@ module held {
     addListener(name: "changed", listener: () => void): Promise<PluginListenerHandle>
   }
 
-  let client: NativeDigestPlugin | undefined
   /** @throws {never} */
   export function bridge(name: string): NativeDigestPlugin {
-    return (client ??= registerPlugin<NativeDigestPlugin>(name))
+    return capacitorPlugin<NativeDigestPlugin>(name)
   }
 }
 import { bridge } from held
@@ -124,9 +124,12 @@ export effect function settleNativeDigestNotice(token: string, questionLease?: s
   try ignore(tryPromise(() => bridge(pluginName).settleNotice(seen)))
 }
 
-export const nativeDigestChanges = () => Stream.callback<void>((queue) => effect {
-  const listener = tryPromise(() => bridge(pluginName).addListener("changed", () => {
-    Queue.offerUnsafe(queue, undefined)
-  })) catch () => undefined
-  if (listener !== undefined) try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+export const nativeDigestChanges = () => Stream.suspend(() => {
+  if (!registered(pluginName)) return Stream.empty
+  return Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(tryPromise(() => bridge(pluginName).addListener("changed", () => {
+      Queue.offerUnsafe(queue, undefined)
+    })), () => undefined),
+    (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
+  )))
 })

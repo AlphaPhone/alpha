@@ -1,8 +1,8 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
-import type { ClockAlarmRecord, ClockTimerRecord, WorldCityRecord } from "@repo/launcher-records";
+import type { ClockAlarmRecord, ClockTimerRecord } from "@repo/launcher-records";
 import { showsApp } from "@elizaos/agent-host";
 import {
-  type AlphaAppsStore, DEFAULT_SNOOZE_MINUTES, isValidTimeZone, normalizeSound, parseSound,
+  type AlphaAppsStore, AlphaStoreCapacityError, DEFAULT_SNOOZE_MINUTES, isValidTimeZone, normalizeSound, parseClockSyncPayload, parseSound,
 } from "./store.ts";
 import {
   type AgentAction, type AgentProvider, type AgentRoute, asRecord, readBoolean, readNumber, readRawString, readString,
@@ -103,13 +103,15 @@ function formatHourMinute(hour: number, minute: number): string {
 }
 
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
-  if (minutes > 0) return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
-  return `${seconds}s`;
+  const remaining = Math.max(0, Math.ceil(ms / 1000));
+  const parts: string[] = [];
+  const hours = Math.trunc(remaining / 3600);
+  const minutes = Math.trunc((remaining % 3600) / 60);
+  const seconds = remaining % 60;
+  if (hours > 0) parts.push(`${hours}h`, `${minutes}m`);
+  else if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join(" ");
 }
 
 const dayBits: Readonly<Record<string, number>> = {
@@ -212,18 +214,26 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
     if (parsed === undefined) return { success: false, text: "Please specify an alarm time (for example, 7:30 AM)." };
     const days = parseDaysMask(params.daysMask ?? params.days);
     if ("unknown" in days) return unknownDays(days.unknown);
-    const created = store.createAlarm({
-      hour: parsed.hour,
-      minute: parsed.minute,
-      daysMask: days.mask,
-      label: readString(params, "label") ?? "",
-      sound: normalizeSound(params.sound),
-      vibrate: readBoolean(params, "vibrate") ?? true,
-      enabled: readBoolean(params, "enabled") ?? true,
-      snoozeMinutes: readNumber(params, "snoozeMinutes") ?? DEFAULT_SNOOZE_MINUTES,
-      timeZone,
-    });
-    return { success: true, text: `Alarm set for ${formatHourMinute(created.hour, created.minute)}${created.label ? ` (${created.label})` : ""}.`, data: { op: "set", alarm: created } };
+    try {
+      const created = store.createAlarm({
+        hour: parsed.hour,
+        minute: parsed.minute,
+        daysMask: days.mask,
+        label: readString(params, "label") ?? "",
+        sound: normalizeSound(params.sound),
+        vibrate: readBoolean(params, "vibrate") ?? true,
+        enabled: readBoolean(params, "enabled") ?? true,
+        snoozeMinutes: readNumber(params, "snoozeMinutes") ?? DEFAULT_SNOOZE_MINUTES,
+        timeZone,
+      });
+      return { success: true, text: `Alarm set for ${formatHourMinute(created.hour, created.minute)}${created.label ? ` (${created.label})` : ""}.`, data: { op: "set", alarm: created } };
+    } catch (error) {
+      if (error instanceof AlphaStoreCapacityError) return { success: false, text: error.message };
+      throw error;
+    }
+  }
+  if (op !== "snooze" && op !== "dismiss" && op !== "delete" && op !== "toggle" && op !== "update") {
+    return { success: false, text: `Unknown alarm action "${op}".` };
   }
   const target = findAlarmTarget(snapshot.alarms, params, op);
   if (target === undefined) return { success: false, text: "No single alarm matches: name it by its id from the Clock context." };
@@ -278,6 +288,9 @@ function handleClockTimer(store: AlphaAppsStore, params: Record<string, unknown>
     if (created === undefined) return { success: false, text: "Clock already holds as many timers as it can: cancel one first." };
     return { success: true, text: `Started ${formatDuration(created.durationMs)} timer${created.label ? ` for ${created.label}` : ""}.`, data: { op: "start", timer: created } };
   }
+  if (op !== "cancel" && op !== "delete" && op !== "add_time" && op !== "pause" && op !== "resume" && op !== "reset" && op !== "dismiss") {
+    return { success: false, text: `Unknown timer action "${op}".` };
+  }
   const target = findTimerTarget(snapshot.timers, params, op);
   if (target === undefined) return { success: false, text: "No single timer matches: name it by its id from the Clock context." };
   if (op === "cancel" || op === "delete") {
@@ -312,11 +325,19 @@ function handleClockWorld(store: AlphaAppsStore, params: Record<string, unknown>
     const removed = store.removeWorldCity(match.id);
     return { success: true, text: `Removed ${match.city} from World Clock.`, data: { op, city: removed } };
   }
+  if (op !== "add_city" && op !== "time_in") {
+    return { success: false, text: `Unknown world clock action "${op}".` };
+  }
   const resolved = resolveWorldCity(query);
   if (resolved === undefined) return { success: false, text: `Could not recognize city or time zone "${query}".` };
   if (op === "add_city") {
-    const added = store.addWorldCity(resolved);
-    return { success: true, text: `Added ${added.city} (${formatClockTime(nowMs, added.timeZone)}) to World Clock.`, data: { op, city: added } };
+    try {
+      const added = store.addWorldCity(resolved);
+      return { success: true, text: `Added ${added.city} (${formatClockTime(nowMs, added.timeZone)}) to World Clock.`, data: { op, city: added } };
+    } catch (error) {
+      if (error instanceof AlphaStoreCapacityError) return { success: false, text: error.message };
+      throw error;
+    }
   }
   return { success: true, text: `It is ${formatClockTime(nowMs, resolved.timeZone)} in ${resolved.city}.`, data: { op: "time_in", city: resolved, formatted: formatClockTime(nowMs, resolved.timeZone), readOnlyOperation: true } };
 }
@@ -438,7 +459,12 @@ export function clockProvider(store: AlphaAppsStore, timeZone: string): AgentPro
           alarmCount: snapshot.alarms.length,
           activeTimerCount: activeTimers.length,
         },
-        data: { snapshot },
+        data: {
+          version: snapshot.version,
+          ringingAlarmIds: ringingAlarms.map((a) => a.id),
+          ringingTimerIds: ringingTimers.map((t) => t.id),
+          nextAlarmId: nextAlarm?.id ?? null,
+        },
       });
     },
   };
@@ -448,6 +474,15 @@ function alarmOrNotFound(store: AlphaAppsStore, alarm: ClockAlarmRecord | undefi
   return alarm === undefined
     ? { status: 404, body: { error: "alarm_not_found" } }
     : { status: 200, body: { alarm, snapshot: store.getClock() } };
+}
+
+function createdOrConflict<K extends string, T>(store: AlphaAppsStore, key: K, create: () => T) {
+  try {
+    return { status: 201, body: { [key]: create(), snapshot: store.getClock() } };
+  } catch (error) {
+    if (error instanceof AlphaStoreCapacityError) return { status: 409, body: { error: error.code, message: error.message } };
+    throw error;
+  }
 }
 
 /** HTTP routes under `/api/alpha/clock` for bidirectional sync between Alpha Clock UI and the resident agent. */
@@ -462,15 +497,9 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
       method: "PUT",
       path: "/api/alpha/clock",
       handler: (input) => {
-        const body = asRecord(input.body);
-        const snapshot = store.syncClock({
-          version: readNumber(body, "version"),
-          alarms: Array.isArray(body.alarms) ? (body.alarms as ClockAlarmRecord[]) : undefined,
-          timers: Array.isArray(body.timers) ? (body.timers as ClockTimerRecord[]) : undefined,
-          world: Array.isArray(body.world) ? (body.world as WorldCityRecord[]) : undefined,
-          deletedAlarmIds: Array.isArray(body.deletedAlarmIds) ? (body.deletedAlarmIds as string[]) : undefined,
-          deletedTimerIds: Array.isArray(body.deletedTimerIds) ? (body.deletedTimerIds as string[]) : undefined,
-        });
+        const parsed = parseClockSyncPayload(input.body);
+        if (parsed === undefined) return { status: 400, body: { error: "invalid_clock_snapshot" } };
+        const snapshot = store.syncClock(parsed);
         return { status: 200, body: snapshot };
       },
     },
@@ -482,7 +511,7 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
         const hour = readNumber(body, "hour");
         const minute = readNumber(body, "minute");
         if (hour === undefined || minute === undefined) return { status: 400, body: { error: "invalid_alarm_time" } };
-        const alarm = store.createAlarm({
+        return createdOrConflict(store, "alarm", () => store.createAlarm({
           id: readString(body, "id"),
           hour,
           minute,
@@ -493,8 +522,7 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
           enabled: readBoolean(body, "enabled") ?? true,
           snoozeMinutes: readNumber(body, "snoozeMinutes") ?? DEFAULT_SNOOZE_MINUTES,
           timeZone,
-        });
-        return { status: 201, body: { alarm, snapshot: store.getClock() } };
+        }));
       },
     },
     {
@@ -590,8 +618,7 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
           ? { city: city ?? zone.split("/").pop()?.replace(/_/g, " ") ?? zone, region: readRawString(body, "region") ?? "", timeZone: zone }
           : resolveWorldCity(city ?? readString(body, "query") ?? "");
         if (resolved === undefined) return { status: 400, body: { error: "invalid_world_city" } };
-        const added = store.addWorldCity({ id: readString(body, "id"), ...resolved });
-        return { status: 201, body: { city: added, snapshot: store.getClock() } };
+        return createdOrConflict(store, "city", () => store.addWorldCity({ id: readString(body, "id"), ...resolved }));
       },
     },
     {

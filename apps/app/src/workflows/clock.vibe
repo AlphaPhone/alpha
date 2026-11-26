@@ -6,6 +6,8 @@ import type { Effect as Out, Event, Handoff, Receipt } from "../../gen/app__work
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { type Job, answer, applying, hearing, reacting, together } from "../runtime/reactor.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
+import { localTimeZone } from "./api.vibe"
 
 module native {
   import type { SystemClient } from "@elizaos/os-bridges"
@@ -14,13 +16,8 @@ module native {
   export function systemOf(): Promise<SystemClient> {
     return import("@elizaos/os-bridges").then((module) => module.System)
   }
-
-  /** @throws {never} */
-  export function timeZone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  }
 }
-import { systemOf, timeZone } from native
+import { systemOf } from native
 
 export const clockAvailable = () => registered("ElizaSystem")
 
@@ -29,16 +26,20 @@ export service AlarmLabel {
   set(text: string): void!!
   zone(): string!!
   reviewed(zone: string): void!!
+  snapshot(this: void): string
+  subscribe(this: void, listener: () => void): () => void
 }
 
 const label = Layer.sync(AlarmLabel, () => {
-  let value = ""
+  const shelf = createShelf("")
   let selectedZone = ""
   return {
-    read: () => succeed(value),
-    set: (text: string) => sync(() => { value = text }),
+    read: () => sync(() => shelf.get()),
+    set: (text: string) => sync(() => { shelf.set(text) }),
     zone: () => succeed(selectedZone),
     reviewed: (zone: string) => sync(() => { selectedZone = zone }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
   }
 })
 
@@ -118,7 +119,7 @@ export effect function setAlarmLabel(text: string): void!!(Model.Machine | Alarm
 export effect function reviewAlarm(): void!!(Model.Machine | AlarmLabel) {
   const machine = try Model.Machine
   if (!Model.canPrepare(try machine.get())) return
-  try (try AlarmLabel).reviewed(timeZone())
+  try (try AlarmLabel).reviewed(localTimeZone())
   try ignore(machine.send({ type: "prepare" }))
 }
 
@@ -135,12 +136,21 @@ const hidden = hearing(Stream.unwrap(effect { return Stream.filter((try Device).
   Model.Machine, () => ({ type: "suspend" } as const))
 const gone = applying(Shell.Machine, (state) => Shell.showing(state, "Workflows"), effect (shown: boolean) => {
   if (shown) return
-  try (try AlarmLabel).set("")
-  try ignore((try Model.Machine).send({ type: "leave" }))
+  const machine = try Model.Machine
+  const before = try machine.get()
+  try ignore(machine.send({ type: "leave" }))
+  if (before.handoff.outcome !== "Sent") try (try AlarmLabel).set("")
 })
+const settledLabel = applying(
+  Model.Machine,
+  (state) => !state.open && state.label === 0 && state.handoff.outcome !== "Sent",
+  effect (clear: boolean) => {
+    if (clear) try (try AlarmLabel).set("")
+  },
+)
 
 const openedAsk = applying(Shell.Machine, (state) => Shell.showing(state, "Workflows") && state.assistant !== "Bar", effect (opened: boolean) => {
   if (opened) try ignore((try Model.Machine).send({ type: "closeClock" }))
 })
 
-export const clock = together(reacting(Model, { carry }), label, hidden, gone, openedAsk)
+export const clock = together(reacting(Model, { carry }), label, hidden, gone, settledLabel, openedAsk)

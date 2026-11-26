@@ -319,12 +319,16 @@ export function connect() {
   events.addEventListener("files", () => { refresh().catch((e: Error) => toast(e.message)); });
   events.addEventListener("job", (e) => {
     if (!S.snap) return;
-    const { session, jobs, check, app } = JSON.parse((e as MessageEvent).data);
+    let parsed: { session?: Snapshot["session"]; jobs?: Snapshot["jobs"]; check?: Snapshot["check"]; app?: Snapshot["app"] };
+    try { parsed = JSON.parse((e as MessageEvent).data); } catch { return; }
+    const { session, jobs, check, app } = parsed;
+    if (!session) return;
     const ended = S.snap.session.job !== "Idle" && session.job === "Idle";
     Object.assign(S.snap, { session, jobs, check, app });
     if (ended) refresh().catch((error: Error) => toast(error.message));
     else redraw();
   });
+  return () => events.close();
 }
 
 // --- what the checks say about each story and rule ----------------------------------------------------------------
@@ -418,7 +422,12 @@ function remember() {
 }
 export function change(fn: () => boolean | void, message?: string) {
   remember();
-  if (fn() === false) { S.history.pop(); return toast("The outline does not allow that"); }
+  if (fn() === false) {
+    const prev = S.history.pop();
+    if (prev) S.specs = prev;
+    redraw();
+    return toast("The outline does not allow that");
+  }
   redraw();
   if (message) toast(message, { label: "Undo", run: undo });
 }

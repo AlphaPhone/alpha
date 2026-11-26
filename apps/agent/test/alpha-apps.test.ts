@@ -4,16 +4,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { defineRoutes } from "@elizaos/agent";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { pageQueries } from "../gen/agent.ts";
-import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin, notesTranscriptionRoutes } from "../src/plugins/index.ts";
+import { AlphaAppsStore, alphaAppsModule, alphaAppsPluginName, createAlphaAppsPlugin, notesTranscriptionRoutes } from "../src/plugins/index.ts";
 import { advanceDueDate, civilToEpochMs } from "../src/plugins/store.ts";
-import type { AgentRoute, AgentRuntimeLike } from "../src/plugins/types.ts";
+import type { AgentAction, AgentRoute, AgentRuntimeLike } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
-  ({ content: { text }, metadata }) as unknown as Parameters<NonNullable<ReturnType<typeof createAlphaAppsPlugin>["plugin"]["actions"]>[number]["handler"]>[1];
+  ({ content: { text }, metadata }) as unknown as Parameters<AgentAction["handler"]>[1];
 
-const emptyState = {} as unknown as NonNullable<Parameters<NonNullable<ReturnType<typeof createAlphaAppsPlugin>["plugin"]["actions"]>[number]["handler"]>[2]>;
+const emptyState = {} as unknown as NonNullable<Parameters<AgentAction["handler"]>[2]>;
+
+function actionOf(plugin: ReturnType<typeof createAlphaAppsPlugin>["plugin"], name: string): AgentAction {
+  const found = plugin.actions?.find((action) => action.name === name);
+  if (found === undefined) throw new Error(`Missing action ${name}`);
+  return found;
+}
 
 function makeFakeRuntime(initialTasks: readonly {
   readonly taskId: string;
@@ -237,9 +244,9 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
     expect(plugin.views).toBeUndefined();
 
-    const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
-    const timerAction = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
-    const worldAction = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
+    const alarmAction = actionOf(plugin, "CLOCK_ALARM");
+    const timerAction = actionOf(plugin, "CLOCK_TIMER");
+    const worldAction = actionOf(plugin, "CLOCK_WORLD");
     const provider = plugin.providers!.find((p) => p.name === "CLOCK_CONTEXT")!;
 
     const setRes = await alarmAction.handler(runtime, emptyMessage("Set an alarm for 7:30 am weekdays labeled Standup"), emptyState, {
@@ -447,6 +454,41 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     }
   });
 
+  it("converges DST offsets, validates HTTP payloads, rejects unknown ops and overflow, and loads alphaAppsModule", async () => {
+    const springAlarm = civilToEpochMs("2026-03-08", 7 * 60, "America/Los_Angeles");
+    expect(springAlarm).toBe(Date.UTC(2026, 2, 8, 14, 0, 0));
+    const fallAlarm = civilToEpochMs("2026-11-01", 7 * 60, "America/Los_Angeles");
+    expect(fallAlarm).toBe(Date.UTC(2026, 10, 1, 15, 0, 0));
+
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15, 0, 0) });
+    const { runtime } = makeFakeRuntime();
+
+    const hosted = await Effect.runPromise(alphaAppsModule({ timeZone: "UTC", runtime, launch: {} } as Parameters<typeof alphaAppsModule>[0]));
+    expect(hosted.name).toBe(alphaAppsPluginName);
+    expect(hosted.plugin.name).toBe(alphaAppsPluginName);
+
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    const routes = plugin.routes!;
+    const alarmAction = actionOf(plugin, "CLOCK_ALARM");
+    const timerAction = actionOf(plugin, "CLOCK_TIMER");
+    const worldAction = actionOf(plugin, "CLOCK_WORLD");
+    const remAction = actionOf(plugin, "REMINDERS_MANAGE");
+
+    expect((await alarmAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);
+    expect((await timerAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);
+    expect((await worldAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);
+    expect((await remAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { op: "bogus" } }))?.success).toBe(false);
+
+    const badClock = await callRoute(routes, "PUT", "/api/alpha/clock", { body: { alarms: [{ id: "bad", hour: "nope" }] } });
+    expect(badClock.status).toBe(400);
+    const badRestore = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params: { id: "r1" }, body: { item: { id: "other", title: "X" } } });
+    expect(badRestore.status).toBe(400);
+
+    for (let i = 0; i < 16; i += 1) store.createTimer({ durationMs: 60_000, label: `T${i}` });
+    const overflow = await callRoute(routes, "POST", "/api/alpha/clock/timers", { body: { durationMs: 60_000, label: "Overflow" } });
+    expect(overflow.status).toBe(409);
+  });
+
   it("registers the Clock context for activity labels, marks read-only ops, and gives accurate parameter guidance", async () => {
     const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 14, 0, 0) });
     const registeredContexts: unknown[] = [];
@@ -455,10 +497,10 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     await plugin.init?.({}, { ...runtime, contexts: { tryRegister: (ctx: unknown) => { registeredContexts.push(ctx); } } } as never);
     expect(registeredContexts).toContainEqual(expect.objectContaining({ id: "clock", label: "Clock" }));
 
-    const alarm = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
-    const timer = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
-    const world = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
-    const reminders = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
+    const alarm = actionOf(plugin, "CLOCK_ALARM");
+    const timer = actionOf(plugin, "CLOCK_TIMER");
+    const world = actionOf(plugin, "CLOCK_WORLD");
+    const reminders = actionOf(plugin, "REMINDERS_MANAGE");
 
     expect((await alarm.handler(runtime, emptyMessage("list alarms"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
     expect((await timer.handler(runtime, emptyMessage("list timers"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });

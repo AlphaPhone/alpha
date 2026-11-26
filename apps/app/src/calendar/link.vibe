@@ -8,8 +8,10 @@ import { Agent } from "../platform/agent.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { ask } from "../platform/remote.vibe"
 import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
 
 const base = "/api/lifeops/calendar"
+const cacheTtlMs = 15_000
 
 /** One of the owner's Google calendars, as eliza's linked sync names a destination. */
 schema Destination { readonly connectorAccountId: string; readonly providerCalendarId: string }
@@ -30,6 +32,49 @@ schema Destinations {
 /** The linked events and the state of each (eliza's `LinkedCalendarMapping`). */
 schema Mappings { readonly links: ReadonlyArray<{ readonly destination: Destination | null; readonly state: string }> }
 
+interface GoogleInfo {
+  readonly grant: Grant
+  readonly email: string
+}
+
+/** Scoped per-runtime cache deduplicating `googleStatus()` and `/sync-control/destinations` reads. */
+export service LinkCache {
+  google(): GoogleInfo!unknown!(Cloud | Time)
+  destinations(): Destinations!unknown!(Agent | Time)
+  invalidate(): void
+}
+
+const linkCache = Layer.effect(LinkCache, effect {
+  const googleLock = try Semaphore.make(1)
+  const destLock = try Semaphore.make(1)
+  let googleEntry: { readonly value: GoogleInfo; readonly at: number } | undefined
+  let destEntry: { readonly value: Destinations; readonly at: number } | undefined
+  try Effect.addFinalizer(() => sync(() => { googleEntry = undefined; destEntry = undefined }))
+  return {
+    google: () => googleLock.withPermits(1)(effect {
+      const now = try (try Time).now()
+      if (googleEntry !== undefined && now - googleEntry.at < cacheTtlMs) return googleEntry.value
+      const { client } = try Cloud
+      const status: GoogleStatus = try tryPromise({ try: () => client.googleStatus(), catch: (cause) => cause })
+      const has = (capability: GoogleStatus["grantedCapabilities"][number]) => status.connected && status.grantedCapabilities.includes(capability)
+      const value: GoogleInfo = { grant: Link.grantOf(has("google.calendar.read"), has("google.calendar.write")), email: (status.identity?.email ?? "").toLowerCase() }
+      googleEntry = { value, at: now }
+      return value
+    }),
+    destinations: () => destLock.withPermits(1)(effect {
+      const now = try (try Time).now()
+      if (destEntry !== undefined && now - destEntry.at < cacheTtlMs) return destEntry.value
+      const value = try ask(Agent, HttpClientRequest.get(`${base}/sync-control/destinations`), Destinations)
+      destEntry = { value, at: now }
+      return value
+    }),
+    invalidate() {
+      googleEntry = undefined
+      destEntry = undefined
+    },
+  }
+})
+
 const same = (a: Destination, b: Destination) => a.connectorAccountId === b.connectorAccountId && a.providerCalendarId === b.providerCalendarId
 
 /** A dispatch the agent has pending, as the number the rules compare: 0 is none. */
@@ -42,16 +87,13 @@ function dispatchNumber(pending: Control["pendingDispatch"]): number {
 }
 
 /** What the cloud says Google allows for the owner's calendar, and the address of the Google account that allows it. */
-effect function googleNow(): { readonly grant: Grant; readonly email: string }!unknown!Cloud {
-  const { client } = try Cloud
-  const status: GoogleStatus = try tryPromise({ try: () => client.googleStatus(), catch: (cause) => cause })
-  const has = (capability: GoogleStatus["grantedCapabilities"][number]) => status.connected && status.grantedCapabilities.includes(capability)
-  return { grant: Link.grantOf(has("google.calendar.read"), has("google.calendar.write")), email: (status.identity?.email ?? "").toLowerCase() }
+effect function googleNow(): GoogleInfo!unknown!(Cloud | Time | LinkCache) {
+  return try (try LinkCache).google()
 }
 
 // spec/app/calendar/link.md, "The account area's read says what Google allows now; a grant that no longer writes stops a setup under way"
 /** The account read, as the link takes it. */
-effect function accountRead(): Event!!Cloud {
+effect function accountRead(): Event!!(Cloud | Time | LinkCache) {
   return effect {
     const now = try googleNow()
     return { type: "accountRead", ok: true, grant: now.grant } as Event
@@ -60,10 +102,10 @@ effect function accountRead(): Event!!Cloud {
 
 // spec/app/calendar/link.md, "Each control review is checked against the revision this setup wrote, and its destination against the owner's writable calendars"
 /** The agent's control and the calendars it may link to, checked against the Google account that may write them. */
-effect function review(ticket: number): Event!!(Agent | Cloud) {
+effect function review(ticket: number): Event!!(Agent | Cloud | Time | LinkCache) {
   return effect {
     const control = try ask(Agent, HttpClientRequest.get(`${base}/sync-control`), Control)
-    const listed = try ask(Agent, HttpClientRequest.get(`${base}/sync-control/destinations`), Destinations)
+    const listed = try (try LinkCache).destinations()
     const { email } = try googleNow()
     const approved = (candidate: Destinations["candidates"][number]) => email !== "" && (candidate.accountEmail ?? "").toLowerCase() === email
     const saved = control.destination
@@ -78,12 +120,12 @@ effect function review(ticket: number): Event!!(Agent | Cloud) {
 
 // spec/app/calendar/link.md, "A write is sent only while the owner and the reviewed revision still hold, and its answer starts another review"
 /** Select the one authorized primary calendar, or resume the saved one, at the revision reviewed, under a key of what is written. */
-effect function write(ticket: number, planned: Planned, revision: number): Event!!(Agent | Cloud) {
+effect function write(ticket: number, planned: Planned, revision: number): Event!!(Agent | Cloud | Time | LinkCache) {
   return effect {
     const idempotencyKey = `alpha.calendar.link:${planned}:${revision}`
     const body = planned === "SelectDestination"
       ? try effect {
-          const listed = try ask(Agent, HttpClientRequest.get(`${base}/sync-control/destinations`), Destinations)
+          const listed = try (try LinkCache).destinations()
           const { email } = try googleNow()
           const primary = listed.candidates.filter((candidate) => candidate.primary && email !== "" && (candidate.accountEmail ?? "").toLowerCase() === email)
           const chosen = primary.length === 1 ? primary[0] : undefined
@@ -119,7 +161,7 @@ effect function pause(ticket: number, revision: number): Event!!Agent {
   } catch () => ({ type: "pauseAnswered", ticket, answered: false, paused: false, revision: 0 })
 }
 
-function carry(fx: Out): Job<Event, Agent | Cloud | Shell.Machine, []> {
+function carry(fx: Out): Job<Event, Agent | Cloud | Shell.Machine | Time | LinkCache, []> {
   return match (fx) {
     when { tag: "Ask", let ticket, let asked }:
       asked === "AskControl" ? answer("review", review(ticket), { type: "reviewFailed", ticket }) : answer("links", links(ticket), { type: "linksListed", ticket, links: "Unread" });
@@ -131,7 +173,7 @@ function carry(fx: Out): Job<Event, Agent | Cloud | Shell.Machine, []> {
 
 // spec/app/calendar/link.md, "Setup waits while Calendar reads or writes, and makes at most three control reviews, two writes and one link read"
 /** Whether Calendar can be read now, and whether a read or a write of it is under way, each time either changes. */
-const calendar = following(View.Machine, (view) => `${view.phone.status !== "Failed" || view.google.status !== "Failed"}:${view.writing || view.phone.status === "Loading" || view.google.status === "Loading"}`,
+const calendar = following(View.Machine, (view) => `${view.google.status !== "Failed" && view.phone.status !== "Failed"}:${view.writing || view.phone.status === "Loading" || view.google.status === "Loading"}`,
   Link.Machine, (both): Event => ({ type: "calendarChanged", ready: both.startsWith("true"), busy: both.endsWith("true") }))
 
 // spec/app/calendar/link.md, "Story: See whether my agent's Calendar reaches Google"
@@ -139,15 +181,21 @@ const calendar = following(View.Machine, (view) => `${view.phone.status !== "Fai
 const account = started(effect {
   const view = try View.Machine
   const link = try Link.Machine
-  try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.google.ticket === b.google.ticket && a.owner === b.owner), (state) =>
-    state.owner === 0 ? Effect.void : contained(flatMap(accountRead(), (event) => link.send(event)), "reading what Google allows"))
+  const cache = try LinkCache
+  try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.google.ticket === b.google.ticket && a.owner === b.owner), effect (state) => {
+    if (state.owner === 0) return
+    cache.invalidate()
+    try contained(flatMap(accountRead(), (event) => link.send(event)), "reading what Google allows")
+  })
 }, "reading the Google account for the link")
 
 /** Read what Google allows now and start the link setup. */
-export effect function setUp(): void!!(Cloud | Link.Machine) {
+export effect function setUp(): void!!(Cloud | Link.Machine | Time | LinkCache) {
   const link = try Link.Machine
+  ;(try LinkCache).invalidate()
   try contained(link.send(try accountRead()), "reading what Google allows")
   try contained(link.send({ type: "start" }), "starting Google Calendar link setup")
 }
+
 /** The link: in memory, a run at a time, its answers refused once another owner signs in. */
-export const linking = together(reacting(Link, { carry }), calendar, account)
+export const linking = together(linkCache, reacting(Link, { carry }), calendar, account)

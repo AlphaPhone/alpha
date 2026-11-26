@@ -1,18 +1,19 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/alarms.md, "Story: Ring, snooze, dismiss, and recover alarms"
-import { Banner, Button, Card, EmptyState, StatusDot, Switch } from "@repo/ui";
+import { Banner, Button, Card, EmptyState, StatusDot, Switch, cn, focusRing } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { Clock, Plus, Trash2 } from "lucide-react";
-import { useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
 import { useMachine as useAlarms } from "../../gen/app__clock__alarms.react.ts";
 import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.effect.vibe";
 import type { Said } from "../notices/toasts.vibe";
+import { useTimed } from "../runtime/react.ts";
+import { untimed } from "../runtime/reactor.vibe";
 import { ackMissedAlarm, deleteAlarmWithUndo, dismissAlarm, nextUpcomingAlarm, snoozeAlarm, toggleAlarm } from "./alarms.vibe";
-import { clockRecords, soundLabel } from "./records.ts";
+import { alarmMetaOf, soundLabel } from "./records.ts";
 import type { ClockResident } from "./sync.vibe";
-import { clockNow } from "./ticker.vibe";
 import { describeDaysMask, formatAlarmCountdown, formatAlarmTime } from "./time.ts";
+import { useClockMeta, useClockNow } from "./useClockStore.ts";
 
 export interface AlarmsTabProps {
   /** Clock resident machines and toast service. */
@@ -21,32 +22,40 @@ export interface AlarmsTabProps {
 
 /** Alarms tab with next-alarm summary, missed-alarm notices, instant toggles, and editor triggers. */
 export function AlarmsTab({ runtime }: AlarmsTabProps) {
-  const alarmsState = useAlarms(runtime).state;
+  const alarms = useTimed(runtime, useAlarms);
+  const alarmsState = alarms.state;
   const view = useClockView(runtime);
-  const meta = useSyncExternalStore(clockRecords.subscribe, clockRecords.snapshot);
-  const now = useSyncExternalStore(clockNow.subscribe, clockNow.snapshot);
+  const meta = useClockMeta(runtime);
+  const now = useClockNow(runtime);
 
   const items = alarmsState?.items ?? [];
   const sorted = [...items].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute) || a.id - b.id);
   const upcoming = nextUpcomingAlarm(sorted);
+  const upcomingDisplay = upcoming !== undefined ? formatAlarmTime(upcoming.alarm.hour, upcoming.alarm.minute, meta.hour24) : undefined;
   const missedAlarms = sorted.filter((item) => item.missed);
 
-  const openNew = () => void view.send({ type: "openSheet", sheet: { tag: "NewAlarm" } });
-  const openEdit = (alarmId: number) => void view.send({ type: "openSheet", sheet: { tag: "EditAlarm", alarmId } });
+  const canOpenNew = view.can({ type: "openSheet", sheet: { tag: "NewAlarm" } });
+  const openNew = () => {
+    if (canOpenNew) void view.send({ type: "openSheet", sheet: { tag: "NewAlarm" } });
+  };
+  const openEdit = (alarmId: number) => {
+    const event = { type: "openSheet", sheet: { tag: "EditAlarm", alarmId } } as const;
+    if (view.can(event)) void view.send(event);
+  };
 
   return (
     <section aria-label="Alarms" className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
-          {upcoming !== undefined ? (
+          {upcoming !== undefined && upcomingDisplay !== undefined ? (
             <p className="text-sm font-medium text-muted-foreground">
-              {`${formatAlarmTime(upcoming.alarm.hour, upcoming.alarm.minute, meta.hour24).time}${formatAlarmTime(upcoming.alarm.hour, upcoming.alarm.minute, meta.hour24).period ? ` ${formatAlarmTime(upcoming.alarm.hour, upcoming.alarm.minute, meta.hour24).period}` : ""} · ${now > 0 ? formatAlarmCountdown(upcoming.at, now) : "Scheduled"}`}
+              {`${upcomingDisplay.time}${upcomingDisplay.period ? ` ${upcomingDisplay.period}` : ""} · ${now > 0 ? formatAlarmCountdown(upcoming.at, now) : "Scheduled"}`}
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">No upcoming alarms</p>
           )}
         </div>
-        <Button size="sm" aria-label="Add alarm" disabled={!view.can({ type: "openSheet", sheet: { tag: "NewAlarm" } })} onClick={openNew}>
+        <Button size="sm" className="min-h-11" aria-label="Add alarm" disabled={!canOpenNew} onClick={openNew}>
           <Plus aria-hidden className="size-4.5" />
           Add alarm
         </Button>
@@ -54,13 +63,20 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
 
       {missedAlarms.map((item) => {
         const display = formatAlarmTime(item.hour, item.minute, meta.hour24);
-        const label = clockRecords.alarm(item.id).label;
+        const label = alarmMetaOf(meta, item.id).label;
+        const canAck = alarms.can({ type: "ackMissed", id: item.id });
         return (
           <Banner
             key={`missed-${item.id}`}
             variant="warn"
             action={
-              <Button size="sm" variant="ghost" onClick={() => void runtime.runPromise(ackMissedAlarm(item.id))}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="min-h-11"
+                disabled={!canAck}
+                onClick={() => void runtime.runPromise(ackMissedAlarm(item.id))}
+              >
                 Dismiss
               </Button>
             }
@@ -72,24 +88,34 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
 
       {sorted.length === 0 ? (
         <EmptyState icon={<Clock aria-hidden />} title="No alarms set">
-          <Button onClick={openNew}>Add alarm</Button>
+          <Button disabled={!canOpenNew} onClick={openNew}>Add alarm</Button>
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">
           {sorted.map((item) => {
             const display = formatAlarmTime(item.hour, item.minute, meta.hour24);
-            const record = clockRecords.alarm(item.id);
+            const record = alarmMetaOf(meta, item.id);
             const timeLabel = `${display.time}${display.period ? ` ${display.period}` : ""}`;
             const repeatText = describeDaysMask(item.daysMask);
             const detailParts = [record.label, repeatText, soundLabel(record.sound)].filter((part) => part !== "");
+            const canEdit = view.can({ type: "openSheet", sheet: { tag: "EditAlarm", alarmId: item.id } });
+            const canDelete = alarms.can({ type: "requestDelete", id: item.id, now: untimed });
+            const canToggle = alarms.can({ type: "toggle", id: item.id, on: !item.enabled, fireAt: !item.enabled ? 1 : 0 });
+            const canSnooze = alarms.can({ type: "snooze", id: item.id, now: untimed });
+            const nextDismissFire = item.daysMask > 0 ? Math.max(now, item.fireAt, item.snoozeUntil, 1) + 31_536_000_000 : 0;
+            const canDismiss = alarms.can({ type: "dismiss", id: item.id, nextFireAt: nextDismissFire, now: untimed });
             return (
               <Card key={item.id} className="gap-3 rounded-tile border-0 bg-secondary">
                 <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
                     aria-label={`Edit alarm ${timeLabel}${record.label ? ` ${record.label}` : ""}`}
+                    disabled={!canEdit}
                     onClick={() => openEdit(item.id)}
-                    className="flex min-w-0 flex-1 flex-col items-start text-left"
+                    className={cn(
+                      focusRing,
+                      "flex min-h-11 min-w-0 flex-1 flex-col items-start justify-center rounded-md text-left focus-visible:-outline-offset-focus disabled:cursor-not-allowed disabled:opacity-50",
+                    )}
                   >
                     <div className="flex items-baseline gap-1.5">
                       <span className={`text-3xl font-light tabular-nums ${item.enabled ? "text-foreground" : "text-muted-foreground"}`}>
@@ -113,6 +139,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                       variant="ghost"
                       size="icon"
                       aria-label={`Delete alarm ${timeLabel}`}
+                      disabled={!canDelete}
                       onClick={() => void runtime.runPromise(deleteAlarmWithUndo(item.id))}
                     >
                       <Trash2 aria-hidden className="size-4.5" />
@@ -120,6 +147,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                     <Switch
                       aria-label={`Toggle alarm ${timeLabel}`}
                       checked={item.enabled}
+                      disabled={!canToggle}
                       onCheckedChange={(checked) => void runtime.runPromise(toggleAlarm(item.id, checked))}
                     />
                   </div>
@@ -128,11 +156,23 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                 {item.phase !== "Idle" && (
                   <div className="flex items-center gap-2 pt-1">
                     {item.phase === "Ringing" && (
-                      <Button variant="secondary" size="sm" className="bg-background" onClick={() => void runtime.runPromise(snoozeAlarm(item.id))}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="min-h-11 bg-background"
+                        disabled={!canSnooze}
+                        onClick={() => void runtime.runPromise(snoozeAlarm(item.id))}
+                      >
                         {`Snooze ${item.snoozeMinutes}m`}
                       </Button>
                     )}
-                    <Button variant="destructive" size="sm" onClick={() => void runtime.runPromise(dismissAlarm(item.id))}>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="min-h-11"
+                      disabled={!canDismiss}
+                      onClick={() => void runtime.runPromise(dismissAlarm(item.id))}
+                    >
                       Dismiss
                     </Button>
                   </div>

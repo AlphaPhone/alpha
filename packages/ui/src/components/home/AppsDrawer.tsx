@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import { Search, X } from "lucide-react";
 import { Button } from "../Button.tsx";
 import { AppTile } from "../AppTile.tsx";
@@ -128,12 +128,17 @@ function DrawerTile({ app, detail, opening, hold, menu, onOpen, onOpenMenu }: {
 
 /** The native launcher catalog in a drawer over Home. @model spec/app/home/drawer.md */
 export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, modal = true, inactive = false, onSearch, onClose, onOpen, onOpenMenu, onRetry }: AppsDrawerProps) {
-  const entries = matches(apps, query);
+  const entries = useMemo(() => matches(apps, query), [apps, query]);
   const reading = catalog === "reading";
   const failed = catalog === "unavailable";
+  const drawerRef = useCallback((node: HTMLElement | null) => {
+    if (!inactive && node && !node.contains(node.ownerDocument.activeElement)) {
+      node.querySelector<HTMLElement>("h1")?.focus();
+    }
+  }, [inactive]);
   return (
-    <section data-alpha-apps-drawer="" role="dialog" aria-modal={modal || undefined} aria-label="Apps" inert={inactive || undefined}
-      className="absolute inset-0 z-10 flex min-h-0 flex-col bg-background pt-[calc(max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3))] text-foreground motion-safe:animate-[fade_700ms_cubic-bezier(0.19,1,0.22,1)_both]"
+    <section ref={drawerRef} data-alpha-apps-drawer="" role="dialog" aria-modal={modal || undefined} aria-label="Apps" inert={inactive || undefined}
+      className="absolute inset-0 z-sheet flex min-h-0 flex-col bg-background pt-[calc(max(--spacing(11),var(--alpha-safe-top))+--spacing(3))] text-foreground motion-safe:animate-fadein"
       onKeyDown={(event) => {
         if (inactive || event.key !== "Escape" || event.defaultPrevented) return;
         const drawer = event.currentTarget;
@@ -145,8 +150,8 @@ export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, 
         else onClose();
       }}>
       <header className="flex h-11 shrink-0 items-center gap-2 pr-3 pl-5">
-        <h1 className="grow font-display text-3xl leading-serif font-light outline-none [font-variation-settings:'opsz'_144]">Apps</h1>
-        <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X className="size-5" /></Button>
+        <h1 tabIndex={-1} className="grow font-display text-3xl leading-serif font-light outline-none [font-variation-settings:'opsz'_144]">Apps</h1>
+        <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X aria-hidden className="size-5" /></Button>
       </header>
       <div className="relative mx-4 mt-3 mb-2 shrink-0">
         <Search aria-hidden className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-muted-foreground" />

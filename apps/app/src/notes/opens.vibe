@@ -7,6 +7,7 @@
 export service Opens {
   expect(turn: number): Deferred.Deferred<boolean>!!
   settle(turn: number, shown: boolean): void!!
+  drop(turn: number): void!!
 }
 
 export const opens = Layer.sync(Opens, () => {
@@ -21,6 +22,9 @@ export const opens = Layer.sync(Opens, () => {
       const found = waiting.get(turn)
       waiting.delete(turn)
       if (found !== undefined) Deferred.doneUnsafe(found, Effect.succeed(shown))
+    }),
+    drop: (turn: number) => sync(() => {
+      waiting.delete(turn)
     }),
   }
 })

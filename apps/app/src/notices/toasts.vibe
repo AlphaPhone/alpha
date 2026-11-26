@@ -20,7 +20,14 @@ export service Said {
   readonly turn: Semaphore.Semaphore
 }
 
-const said = Layer.sync(Said, () => ({ toasts: new Map<number, Words>(), kept: new Map<string, string>(), undos: new Map<string, void!!>(), turn: Semaphore.makeUnsafe(1) }))
+const said = Layer.effect(Said, effect {
+  const toasts = new Map<number, Words>()
+  const kept = new Map<string, string>()
+  const undos = new Map<string, void!!>()
+  const turn = Semaphore.makeUnsafe(1)
+  try Effect.addFinalizer(() => sync(() => { toasts.clear(); kept.clear(); undos.clear() }))
+  return { toasts, kept, undos, turn }
+})
 
 /** The name of a change, or of a kept notice, in the maps above: its area and its number there. */
 export function nameOf(area: string, about: number): string {
@@ -32,8 +39,10 @@ effect function raised(words: Words, undo: boolean, area: string, about: number)
   const sentences = try Said
   try sentences.turn.withPermits(1)(effect {
     const before = try toasts.get()
-    sentences.toasts.set(before.issued + 1, words)
-    try contained(toasts.send({ type: "raise", chars: Math.max(1, words.message.length), undo, area, about }), "a toast")
+    const issued = before.issued + 1
+    sentences.toasts.set(issued, words)
+    const ok = try contained(toasts.send({ type: "raise", chars: Math.max(1, words.message.length), undo, area, about }), "a toast")
+    if (!ok) sentences.toasts.delete(issued)
   })
 }
 
@@ -105,6 +114,25 @@ const ticking = started(effect {
   })))
 }, "the toasts' time")
 
+/** Prune retired toast words and kept-notice entries so side maps remain bounded. */
+const pruning = started(effect {
+  const toasts = try Toasts.Machine
+  const sentences = try Said
+  try Stream.runForEach(toasts.changes, (state) => sync(() => {
+    const activeToasts = new Set<number>()
+    if (state.showing) activeToasts.add(state.current.number)
+    if (state.next.number > 0) activeToasts.add(state.next.number)
+    for (const queued of state.undos) activeToasts.add(queued.number)
+    for (const key of sentences.toasts.keys()) {
+      if (key <= state.issued && !activeToasts.has(key)) sentences.toasts.delete(key)
+    }
+    const activeKept = new Set(state.kept.map(({ area: from, about }) => nameOf(from, about)))
+    for (const key of sentences.kept.keys()) {
+      if (!activeKept.has(key)) sentences.kept.delete(key)
+    }
+  }))
+}, "pruning retired toast sentences")
+
 // spec/app/notices/toasts.md, "Alpha asks Android how long toasts should stay, and only the newest answer counts"
 const asking = started(effect {
   const toasts = try Toasts.Machine
@@ -120,6 +148,7 @@ export const toasts = together(
   reacting(Toasts, { open: [{ type: "started" }], carry }),
   said,
   ticking,
+  pruning,
   asking,
   covered,
 )

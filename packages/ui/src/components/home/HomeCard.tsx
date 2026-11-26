@@ -33,10 +33,10 @@ export function HomeCard({ title, origin, icon, status, variant = "row", classNa
         "focus-visible:outline-none",
         launcherRing,
         "in-data-[alpha-keyboard]:focus-visible:-outline-offset-focus",
-        "min-h-49 shrink-0 snap-start justify-between rounded-home-card border-0 p-5.5 text-left",
+        "min-h-49 shrink-0 snap-start justify-between rounded-home-card border-0 p-5.5 text-left transition-colors duration-fast ease-standard motion-reduce:transition-none",
         agenda
-          ? "w-[min(100%,calc(280px_*_clamp(1,var(--alpha-text-scale,1),1.3)))] bg-alpha text-alpha-foreground"
-          : "w-max max-w-[calc(100%-3rem)] min-w-43 bg-secondary text-foreground",
+          ? "w-[min(100%,calc(280px_*_clamp(1,var(--alpha-text-scale,1),1.3)))] bg-alpha text-alpha-foreground active:bg-alpha/90"
+          : "w-max max-w-[calc(100%-3rem)] min-w-43 bg-secondary text-foreground active:bg-accent",
         className,
       )}
     >

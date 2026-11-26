@@ -1,5 +1,5 @@
 import { Check, Heart, Play } from "lucide-react";
-import { cn } from "../../lib/cn.ts";
+import { cn, focusRing } from "../../lib/cn.ts";
 
 export type PhotoTileProps = {
   /** The thumbnail's address; an item without one shows its empty square. */
@@ -33,9 +33,9 @@ export function PhotoTile({ image, label, duration, favorite = false, selected, 
       aria-pressed={selecting ? selected : undefined}
       disabled={!onPress}
       onClick={onPress}
-      className={cn("relative block aspect-square touch-pan-y overflow-hidden bg-secondary", dim && "opacity-60")}
+      className={cn(focusRing, "relative block aspect-square touch-pan-y overflow-hidden bg-secondary focus-visible:-outline-offset-focus", dim && "opacity-60")}
     >
-      {image ? <img src={image} alt="" draggable={false} className={cn("absolute inset-0 size-full object-cover transition-transform duration-150", selected && "scale-86")} /> : null}
+      {image ? <img src={image} alt="" draggable={false} className={cn("absolute inset-0 size-full object-cover transition-transform duration-fast ease-standard motion-reduce:transition-none", selected && "scale-86")} /> : null}
       {duration !== undefined && !selecting ? (
         <span className={cn(scrim, "absolute flex items-center gap-0.75 rounded-full px-1 py-0.5 text-badge font-semibold", album ? "right-1.75 bottom-1.5" : "right-1.5 bottom-1.25")}>
           <Play aria-hidden className="size-2.75 fill-current stroke-none" />

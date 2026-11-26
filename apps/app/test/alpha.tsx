@@ -44,11 +44,26 @@ const closing: (() => Promise<void>)[] = [];
 /** What each open Alpha was opened with: the world a journey moves, and the screens its `until` loads. */
 const opened = new WeakMap<Alpha, { world?: Scene; mounts: readonly Mount[] }>();
 
+/** Reset document-level styles, alpha data attributes, fake browser overlays, and visibility state between tests. */
+export function resetDocument() {
+  if (typeof document === "undefined") return;
+  document.documentElement.style.fontSize = "";
+  document.documentElement.style.removeProperty("--alpha-own-text-scale");
+  document.documentElement.style.removeProperty("--alpha-native-inset-top");
+  document.documentElement.style.removeProperty("--alpha-native-inset-bottom");
+  document.documentElement.style.removeProperty("--alpha-viewport-height");
+  for (const attr of [...document.documentElement.attributes]) {
+    if (attr.name.startsWith("data-alpha-")) document.documentElement.removeAttribute(attr.name);
+  }
+  for (const surface of [...document.querySelectorAll("[data-fake-browser-page]")]) surface.remove();
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+}
+
 /** Close every Alpha the test opened, and forget what it stored: for `afterEach`. */
 export async function closeAll() {
   for (const close of closing.splice(0)) await close();
   localStorage.clear();
-  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+  resetDocument();
 }
 
 /**
@@ -57,16 +72,27 @@ export async function closeAll() {
  * process dying.
  */
 export async function open(world: Scene, mounts: readonly Mount[] = every) {
-  const running = await openOver(fakeWorld(world), mounts);
-  opened.set(running.alpha, { world, mounts });
-  return running;
+  return openOver(fakeWorld(world), mounts, world);
 }
 
 /** Alpha over `platform`, which a journey with real services builds itself (test/eliza/world.vibe). */
-export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every, requireNativeSignIn = false) {
+export async function openOver(
+  platform: Layer.Layer<Platform>,
+  mounts: readonly Mount[] = every,
+  options?: Scene | boolean | { readonly world?: Scene; readonly requireNativeSignIn?: boolean },
+) {
+  const world: Scene | undefined = typeof options === "object" && options !== null
+    ? ("world" in options || "requireNativeSignIn" in options ? options.world : options as Scene)
+    : undefined;
+  const requireNativeSignIn = typeof options === "boolean"
+    ? options
+    : typeof options === "object" && options !== null && "requireNativeSignIn" in options
+      ? options.requireNativeSignIn === true
+      : false;
   const alpha = boot(platform, mounts, requireNativeSignIn);
-  opened.set(alpha, { mounts });
-  const root = createRoot(document.body.appendChild(document.createElement("div")));
+  opened.set(alpha, { world, mounts });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
   await drawn(async () => {
     root.render(<App alpha={alpha} />);
     await alpha.runtime.runPromise(Effect.void);
@@ -76,6 +102,7 @@ export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly
     if (!open) return;
     open = false;
     await drawn(() => root.unmount());
+    host.remove();
     await alpha.dispose();
   };
   closing.push(close);
@@ -96,6 +123,12 @@ export const later = (alpha: Alpha, ms: number) => drawn(() => {
   if (world) world.now += ms;
   return alpha.runtime.runPromise(TestClock.adjust(ms));
 });
+
+/** Let the startup cover lift, as it does at the latest 2.5 s after start when Home is mounted over TestClock. */
+export async function coverLifted(alpha: Alpha) {
+  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
+  for (let waited = 0; waited < 2500 && cover(); waited += 500) await later(alpha, 500);
+}
 
 /** Let `ms` pass in the world while no Alpha is open: the next one opens that much later. */
 export function asleep(world: Scene, ms: number) {

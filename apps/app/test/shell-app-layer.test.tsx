@@ -18,22 +18,20 @@ const homeLayer = () => document.querySelector("[data-alpha-home-layer]");
 const appLayer = () => homeLayer()?.nextElementSibling ?? null;
 const homeHidden = () => homeLayer()?.classList.contains("invisible") === true;
 
-/** Press a tab, as a finger does: Radix's tabs choose on the press, before the click. */
 const tab = (name: string) => drawn(() => {
-  const found = [...document.querySelectorAll("[role=tab]")].find((one) => one.textContent === name);
-  if (!found) throw new Error(`no tab ${name}`);
-  found.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  const match = Array.from(document.querySelectorAll("[role=tab]")).find((el) => el.textContent === name);
+  if (!match) throw new Error(`missing tab ${name}`);
+  match.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
 });
 
 /** Lay the window out `width` by `height`, as the phone measures its own, until the test ends. */
 async function windowSize(width: number, height: number) {
-  const size = { width: Object.getOwnPropertyDescriptor(window, "innerWidth"), height: Object.getOwnPropertyDescriptor(window, "innerHeight") };
+  const entries = [["innerWidth", width], ["innerHeight", height]] as const;
+  const previous = entries.map(([prop]) => [prop, Object.getOwnPropertyDescriptor(window, prop)] as const);
   onTestFinished(() => {
-    if (size.width) Object.defineProperty(window, "innerWidth", size.width);
-    if (size.height) Object.defineProperty(window, "innerHeight", size.height);
+    for (const [prop, desc] of previous) if (desc) Object.defineProperty(window, prop, desc);
   });
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
-  Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+  for (const [prop, value] of entries) Object.defineProperty(window, prop, { configurable: true, value });
   await drawn(() => window.dispatchEvent(new Event("resize")));
 }
 

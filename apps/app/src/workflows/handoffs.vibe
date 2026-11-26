@@ -3,9 +3,10 @@ import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Machine as Editor } from "../../gen/app__reminders__editor.effect.vibe"
 import { Machine as Shell, canOpenView } from "../../gen/app__shell.effect.vibe"
 import { beginNewReminder } from "../reminders/editor.vibe"
+import type { EditorDraftShelf, RemindersShelf } from "../reminders/shelf.vibe"
 
 /** Open the phone's reminder editor. An editor already open keeps its draft. */
-export effect function newPhoneReminder(): void!!(Shell | Editor | KeyValueStore.KeyValueStore) {
+export effect function newPhoneReminder(): void!!(Shell | Editor | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
   const shell = try Shell
   const seen = try shell.get()
   if (!canOpenView(seen, "Reminders")) return

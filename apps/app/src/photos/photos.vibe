@@ -1,9 +1,10 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/index.md, "Story: Select photos"
-import { MediaId as MediaIdSchema, type AlbumChange, type LibraryAccess, type MediaId, type MediaItem, type MediaPage, type PhotosClient, type Reviewed } from "@elizaos/os-bridges"
+import { MediaId as MediaIdSchema, type AlbumChange, type LibraryAccess, type MediaId, type MediaItem, type MediaPage, type OwnedAlbum, type PhotosClient, type Reviewed } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
+import * as Changes from "../../gen/app__photos__changes.effect.vibe"
 import type { Change } from "../../gen/app__photos__changes.effect.vibe"
 import { allows, type Grant } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
@@ -92,7 +93,7 @@ export effect function viewportThumbnails(ids: readonly number[], shown: Thumbna
     if (row === undefined) continue
     const image = row.kind === "browser" ? row.item.thumbnail : row.item.image
     if (image) result.set(key, image)
-    else if (row.kind === "phone" && !shown.trash) native.set(row.item.id, key)
+    else if (row.kind === "phone") native.set(row.item.id, key)
   }
   const { phone } = try PhotosPort
   if (native.size > 0 && Option.isSome(phone)) {
@@ -191,48 +192,95 @@ function sameCameraContent(before: MediaItem, after: MediaItem): boolean {
       : after.contentRevision === before.contentRevision)
 }
 
+function errorCode(cause: unknown): string | undefined {
+  const inner = typeof cause === "object" && cause !== null && "cause" in cause ? cause.cause : cause
+  return typeof inner === "object" && inner !== null && "code" in inner && typeof inner.code === "string" ? inner.code : undefined
+}
+
+const albumRefusalCodes = new Set(["LIBRARY_STALE", "ALBUM_STALE", "ALBUM_EXISTS", "ALBUM_LIMIT", "LIBRARY_DECLINED", "INVALID_ARGUMENT", "ALBUM_NOT_FOUND"])
+
+/** Extract optional lock-screen scope from a handoff record when provided by Camera. */
+function handoffScope(capture: PhotoHandoff | undefined): { readonly secure: boolean; readonly only: readonly string[] } {
+  if (capture === undefined) return { secure: false, only: [] }
+  const secure = "secure" in capture && capture.secure === true
+  const rawOnly = "only" in capture && Array.isArray(capture.only) ? capture.only.filter((item): item is string => typeof item === "string") : []
+  return { secure, only: secure ? rawOnly : [] }
+}
+
+/** Populate the catalog's album map from the phone's library without mutating Library state. */
+effect function loadNativeAlbums(client: PhotosClient, withCovers: boolean): (number[] | undefined)!!Catalog {
+  const [shelves, totals] = try.all [
+    effect { return tryPromise(() => client.albums()) catch () => undefined },
+    effect { return tryPromise(() => client.summary()) catch () => undefined },
+  ]
+  if (shelves === undefined) return undefined
+  const cache = try Catalog
+  const representatives = withCovers ? [...new Set(shelves.flatMap((album) => album.memberIds.slice(0, 1)))] : []
+  const covers = representatives.length > 0 ? (tryPromise(() => pictures(client, representatives)) catch () => undefined) : undefined
+  const tiles: ListedAlbum[] = []
+  for (const album of standardAlbums) {
+    const count = totals?.[album.target]
+    if (count === 0 && album.target !== "favorites") continue
+    const sample = withCovers ? (tryPromise(() => client.list({ album: album.target, limit: 1, thumbnails: true })) catch () => undefined) : undefined
+    if (count === undefined && withCovers && (sample?.items.length ?? 0) === 0 && album.target !== "favorites") continue
+    tiles.push({ ...album, count: count ?? sample?.items.length ?? 0, cover: sample?.items[0]?.image })
+  }
+  const custom = shelves.map((owned): ListedAlbum => ({
+    title: owned.name, target: `custom:${owned.id}`, owned, count: owned.count,
+    cover: owned.memberIds[0] === undefined ? undefined : covers?.get(owned.memberIds[0]),
+  }))
+  return try cache.shelves([...tiles, ...custom], totals?.trash ?? (try cache.displayed()).trashCount)
+}
+
+/** Populate the catalog's album map from the browser library. */
+effect function loadBrowserAlbums(live: readonly BrowserCapture[], allCount: number): (number[] | undefined)!!(PhotosPort | Catalog) {
+  const { browser } = try PhotosPort
+  if (Option.isNone(browser)) return undefined
+  const local = browser.value
+  const owned = tryPromise(() => local.albums()) catch () => undefined
+  if (owned === undefined) return undefined
+  const defaults: ListedAlbum[] = standardAlbums.flatMap((album) => {
+    const rows = live.filter((row) => browserBelongs(row, album.target, new Set()))
+    return rows.length > 0 || album.target === "favorites" ? [{ ...album, count: rows.length, cover: rows[0]?.thumbnail }] : []
+  })
+  const personal = owned.map((album): ListedAlbum => {
+    const members = new Set(album.memberIds)
+    const rows = live.filter((item) => members.has(item.id))
+    return { title: album.name, target: `custom:${album.id}`, owned: album, count: rows.length, cover: rows[0]?.thumbnail }
+  })
+  return try (try Catalog).shelves([...defaults, ...personal], Math.max(0, allCount - live.length))
+}
+
+effect function listedAlbums(ticket: number, albums: number[] | undefined): Library.Event!!(Catalog | Library.Machine) {
+  const fail = failedList(ticket)
+  if (albums === undefined || !Library.canListed(try (try Library.Machine).get(), ticket, "Phone")) return fail
+  return { ...fail, ok: true, rows: albums, revision: try (try Catalog).revision() }
+}
+
 /** Read the requested page and keep its payload only when the matching ticket can still answer. */
 effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | Library.Machine) {
   const { phone, browser, reviewed: deviceLibrary, peekHandoff } = try PhotosPort
   const cache = try Catalog
   const machine = try Library.Machine
-  const revision = try cache.revision()
   const cursor = request.page ? try cache.cursor(false) : null
   const fail = failedList(request.ticket)
   if (Option.isSome(browser)) return try fetchedBrowser(request)
   if (request.tab === "Albums" && request.album === 0) {
     if (Option.isNone(phone)) return fail
-    const client = phone.value
-    const [shelves, totals] = try.all [
-      effect { return tryPromise(() => client.albums()) catch () => undefined },
-      effect { return tryPromise(() => client.summary()) catch () => undefined },
-    ]
-    if (shelves === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-    const representatives = [...new Set(shelves.flatMap((album) => album.memberIds.slice(0, 1)))]
-    const covers = tryPromise(() => pictures(client, representatives)) catch () => undefined
-    const tiles: ListedAlbum[] = []
-    for (const album of standardAlbums) {
-      const count = totals?.[album.target]
-      if (count === 0 && album.target !== "favorites") continue
-      const sample = tryPromise(() => client.list({ album: album.target, limit: 1, thumbnails: true })) catch () => undefined
-      if (count === undefined && (sample?.items.length ?? 0) === 0 && album.target !== "favorites") continue
-      tiles.push({ ...album, count: count ?? sample?.items.length ?? 0, cover: sample?.items[0]?.image })
-    }
-    if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-    const custom = shelves.map((owned): ListedAlbum => ({
-      title: owned.name, target: `custom:${owned.id}`, owned, count: owned.count,
-      cover: owned.memberIds[0] === undefined ? undefined : covers?.get(owned.memberIds[0]),
-    }))
-    const albums = try cache.shelves([...tiles, ...custom], totals?.trash ?? 0)
-    return { ...fail, ok: true, rows: albums, revision }
+    return try listedAlbums(request.ticket, try loadNativeAlbums(phone.value, true))
   }
-  const { albums } = try cache.displayed()
-  const album = request.album === 0 ? undefined : albums.get(request.album)
+  let album = request.album === 0 ? undefined : (try cache.displayed()).albums.get(request.album)
+  if (request.album !== 0 && album === undefined && Option.isSome(phone)) {
+    try loadNativeAlbums(phone.value, false)
+    album = (try cache.displayed()).albums.get(request.album)
+  }
+  if (request.album !== 0 && album === undefined) return fail
   const listed = Option.isSome(phone) ? (tryPromise(() => phonePage(phone.value, request, cursor, album)) catch () => undefined) : undefined
   if (Option.isSome(phone) && listed === undefined) {
     const scope = Option.isSome(deviceLibrary) ? (tryPromise(() => deviceLibrary.value.scope()) catch () => undefined) : undefined
     return scope?.locked ? { type: "lockedOut", ticket: request.ticket } : fail
   }
+  const revision = try cache.revision()
   const state = try machine.get()
   if (!Library.canListed(state, request.ticket, "Phone")) return fail
   const ownedPage = request.own && album === undefined && listed !== undefined && listed.access === undefined
@@ -271,7 +319,7 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
   }
   return {
     type: "listed", ticket: request.ticket, ok: true, rows: handles, owned, starred, cameraItem,
-    revision, more: listed?.next != null,
+    revision: try cache.revision(), more: listed?.next != null,
   }
 }
 
@@ -294,24 +342,15 @@ effect function fetchedBrowser(request: Fetch): Library.Event!!(PhotosPort | Cat
   const cache = try Catalog
   const machine = try Library.Machine
   if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-  const revision = try cache.revision()
   if (request.tab === "Albums" && request.album === 0) {
-    const owned = tryPromise(() => local.albums()) catch () => undefined
-    if (owned === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-    const defaults: ListedAlbum[] = standardAlbums.flatMap((album) => {
-      const rows = live.filter((row) => browserBelongs(row, album.target, new Set()))
-      return rows.length > 0 || album.target === "favorites" ? [{ ...album, count: rows.length, cover: rows[0]?.thumbnail }] : []
-    })
-    const personal = owned.map((album): ListedAlbum => {
-      const members = new Set(album.memberIds)
-      const rows = live.filter((item) => members.has(item.id))
-      return { title: album.name, target: `custom:${album.id}`, owned: album, count: rows.length, cover: rows[0]?.thumbnail }
-    })
-    const albums = try cache.shelves([...defaults, ...personal], all.length - live.length)
-    return { ...fail, ok: true, rows: albums, revision }
+    return try listedAlbums(request.ticket, try loadBrowserAlbums(live, all.length))
   }
-  const { albums } = try cache.displayed()
-  const album = albums.get(request.album)
+  let album = request.album === 0 ? undefined : (try cache.displayed()).albums.get(request.album)
+  if (request.album !== 0 && album === undefined) {
+    try loadBrowserAlbums(live, all.length)
+    album = (try cache.displayed()).albums.get(request.album)
+  }
+  if (request.album !== 0 && album === undefined) return fail
   const members = new Set(album?.owned?.memberIds ?? [])
   const query = request.query.toLocaleLowerCase()
   const rows = live.filter((item) => browserBelongs(item, album?.target, members) && (request.filter === "Favorites" ? item.favorite === true
@@ -327,7 +366,7 @@ effect function fetchedBrowser(request: Fetch): Library.Event!!(PhotosPort | Cat
   const shown = slice.slice(0, pageLimit)
   const ids = shown.map(({ number }) => number)
   try cache.publish(shown.map(({ row }) => row), ids)
-  return { ...fail, ok: true, rows: ids, owned: ids, starred: shown.filter(({ row }) => row.item.favorite === true).map(({ number }) => number), revision, more: slice.length > shown.length }
+  return { ...fail, ok: true, rows: ids, owned: ids, starred: shown.filter(({ row }) => row.item.favorite === true).map(({ number }) => number), revision: try cache.revision(), more: slice.length > shown.length }
 }
 
 /** Resolve the exact browser rows approved by the owner. */
@@ -426,17 +465,28 @@ effect function changed(attempt: number, change: Change, items: readonly number[
 
 // spec/app/photos/index.md, "The owner can add the Camera capture in the Viewer to an album"
 effect function cameraAlbums(photo: number, ticket: number): void!!(PhotosPort | Catalog | Library.Machine | Viewer.Machine) {
-  const { phone } = try PhotosPort
-  if (Option.isNone(phone)) return
-  const shelves = tryPromise(() => phone.value.albums()) catch () => undefined
+  const { phone, browser } = try PhotosPort
   const machine = try Library.Machine
-  const viewer = try (try Viewer.Machine).get()
-  if (shelves === undefined || viewer.open !== photo || !Viewer.shown(viewer)
-    || !Library.canCameraAlbumsLoaded(try machine.get(), photo, ticket, "Phone")) return
-  const cache = try Catalog
-  const choices = try cache.shelves(shelves.map((album): ListedAlbum => ({
-    title: album.name, target: `custom:${album.id}`, owned: album, count: album.count,
-  })), (try cache.displayed()).trashCount)
+  if (photo > 0) {
+    const viewer = try (try Viewer.Machine).get()
+    if (viewer.open !== photo || !Viewer.shown(viewer)) return
+  }
+  let choices: number[] | undefined
+  if (Option.isSome(phone)) {
+    choices = try loadNativeAlbums(phone.value, false)
+  } else if (Option.isSome(browser)) {
+    const all = tryPromise(() => browser.value.rows()) catch () => undefined
+    if (all !== undefined) {
+      const live = all.filter((item) => item.trashedAt === undefined).sort((a, b) => b.created - a.created)
+      choices = try loadBrowserAlbums(live, all.length)
+    }
+  }
+  if (choices === undefined) return
+  if (photo > 0) {
+    const viewer = try (try Viewer.Machine).get()
+    if (viewer.open !== photo || !Viewer.shown(viewer)) return
+  }
+  if (!Library.canCameraAlbumsLoaded(try machine.get(), photo, ticket, "Phone")) return
   try ignore(machine.send({ type: "cameraAlbumsLoaded", photo, ticket, choices }, "Phone"))
 }
 
@@ -465,8 +515,10 @@ type WriteAlbum = Extract<Library.Effect, { readonly tag: "WriteAlbum" }>
 
 effect function albumWritten(request: WriteAlbum): Library.Event!!(PhotosPort | Catalog) {
   const { phone, browser } = try PhotosPort
-  const { albums } = try (try Catalog).displayed()
-  const owned = albums.get(request.album)?.owned
+  const cache = try Catalog
+  const { albums } = try cache.displayed()
+  const existing = albums.get(request.album)
+  const owned = existing?.owned
   const refusal: Library.Event = { type: "albumWritten", attempt: request.attempt, known: true, confirmed: false }
   if (Option.isSome(browser)) {
     const local = browser.value
@@ -474,7 +526,12 @@ effect function albumWritten(request: WriteAlbum): Library.Event!!(PhotosPort | 
     if (items.length !== request.items.length) return refusal
     const album = owned !== undefined && "kind" in owned ? owned : undefined
     const written = tryPromise(() => local.writeAlbum({ change: request.change, album, name: request.name, items })) catch () => undefined
-    if (written) try (try Catalog).changed()
+    if (written) {
+      if (existing !== undefined && album !== undefined && request.change === "Rename") {
+        try cache.updateAlbum(request.album, { ...existing, title: request.name, owned: { ...album, name: request.name } })
+      }
+      try cache.changed()
+    }
     return { ...refusal, known: written !== undefined, confirmed: written === true }
   }
   const album = owned !== undefined && !("kind" in owned) ? owned : undefined
@@ -486,24 +543,60 @@ effect function albumWritten(request: WriteAlbum): Library.Event!!(PhotosPort | 
   else if (album !== undefined && request.change === "Delete") update = { operation: "delete", id: album.id, revision: album.revision }
   if (update === undefined && album === undefined) return refusal
   const planned = update
-  const reply = planned === undefined ? album : (tryPromise(() => phone.value.changeAlbum(planned)) catch () => undefined)
-  if (reply === undefined) return { ...refusal, known: false }
-  let current = reply
+  let current: Pick<OwnedAlbum, "id" | "revision"> | undefined = album
+  let mutated = false
+  if (planned !== undefined) {
+    const attempted = try exit(tryPromise(() => phone.value.changeAlbum(planned)))
+    if (Exit.isFailure(attempted)) {
+      const code = errorCode(Cause.squash(attempted.cause))
+      return { ...refusal, known: code !== undefined && albumRefusalCodes.has(code) }
+    }
+    current = attempted.value
+    mutated = true
+  }
+  if (current === undefined) return refusal
+  let latest: Pick<OwnedAlbum, "id" | "revision"> = current
   for (const { item } of request.change === "Create" || request.change === "Add" || request.change === "Remove" ? rows : []) {
     const operation = request.change === "Remove" ? "remove" : "add"
-    const { id, revision } = current
-    const next = tryPromise(() => phone.value.changeAlbum({ operation, id, revision, mediaId: item.id, mediaRevision: item.revision })) catch () => undefined
-    if (next === undefined) return { ...refusal, known: false }
-    current = next
+    const { id, revision } = latest
+    const attempted = try exit(tryPromise(() => phone.value.changeAlbum({ operation, id, revision, mediaId: item.id, mediaRevision: item.revision })))
+    if (Exit.isFailure(attempted)) {
+      if (mutated) try cache.changed()
+      const code = errorCode(Cause.squash(attempted.cause))
+      return { ...refusal, known: !mutated && code !== undefined && albumRefusalCodes.has(code) }
+    }
+    latest = attempted.value
+    mutated = true
   }
-  try (try Catalog).changed()
+  if (existing !== undefined && album !== undefined && (request.change === "Rename" || request.change === "Add" || request.change === "Remove")) {
+    const name = request.change === "Rename" ? request.name : album.name
+    const memberIds = request.change === "Add"
+      ? [...album.memberIds, ...rows.map(({ item }) => item.id).filter((id) => !album.memberIds.includes(id))]
+      : request.change === "Remove"
+        ? album.memberIds.filter((id) => !rows.some(({ item }) => item.id === id))
+        : album.memberIds
+    const updated: OwnedAlbum = { ...album, id: latest.id, revision: latest.revision, name, memberIds, count: memberIds.length }
+    try cache.updateAlbum(request.album, { ...existing, title: name, owned: updated, count: updated.count })
+  }
+  try cache.changed()
   return { ...refusal, confirmed: true }
 }
 
-effect function revoke() {
-  try (try Catalog).clear()
+effect function revoke(dropAlbums = true) {
+  const cache = try Catalog
+  if (dropAlbums) try cache.clear()
+  else try cache.clearRows()
   try ignore((try Viewer.Machine).send({ type: "revoked" }, "Phone"))
   try ignore((try Trash.Machine).send({ type: "leave" }, "Phone"))
+}
+
+effect function askPermission(): Access!!(PhotosPort | Library.Machine) {
+  const asked = try permission(true)
+  if (asked !== undefined) return asked
+  const fallback = try permission(false)
+  if (fallback !== undefined) return fallback
+  const state = try (try Library.Machine).get()
+  return { type: "accessIs", grant: state.access.grant, videos: state.videos }
 }
 
 type LibraryNeeds = PhotosPort | Catalog | Library.Machine | Viewer.Machine | Trash.Machine | Device | Shell | Effect.Services<ReturnType<typeof say>>
@@ -512,13 +605,13 @@ function carry(fx: Library.Effect): Job<Library.Event, LibraryNeeds, [Actor]> {
     when { tag: "Fetch" }: answer("library", fetched(fx), failedList(fx.ticket), "Phone");
     when { tag: "ReadCameraAlbums", let photo, let ticket }: run("camera albums", cameraAlbums(photo, ticket), "Phone");
     when { tag: "DropCamera", let photo }: run("drop camera", revokeCamera(photo), "Phone");
-    when { tag: "AskAccess" }: answer("access", Effect.map(permission(true), (event) => event ?? denied), denied, "Phone");
-    when { tag: "PickItems" }: answer("access", Effect.map(permission(true), (event) => event ?? denied), denied, "Phone");
+    when { tag: "AskAccess" }: answer("access", askPermission(), denied, "Phone");
+    when { tag: "PickItems" }: answer("access", askPermission(), denied, "Phone");
     when { tag: "OpenSettings" }: run("settings", effect {
       const { phone } = try PhotosPort
       if (Option.isSome(phone)) try ignore(tryPromise(() => phone.value.openLibrarySettings()))
     }, "Phone");
-    when { tag: "Revoke" }: run("privacy", revoke(), "Phone");
+    when { tag: "Revoke" }: run("privacy", revoke(true), "Phone");
     when { tag: "ChangeItems" }: answer(`change:${fx.attempt}`, changed(fx.attempt, fx.change, fx.items), { type: "changed", attempt: fx.attempt, done: [], stale: [], declined: false, known: false }, "Phone");
     when { tag: "WriteAlbum" }: answer(`album:${fx.attempt}`, albumWritten(fx), { type: "albumWritten", attempt: fx.attempt, confirmed: false, known: false }, "Phone");
   }
@@ -528,29 +621,38 @@ const lifecycle = started(effect {
   const shell = try Shell
   const device = try Device
   const photos = try Library.Machine
-  const { phone, hasHandoff, takeHandoff } = try PhotosPort
+  const cache = try Catalog
+  const { phone, reviewed: deviceLibrary, hasHandoff, peekHandoff, takeHandoff } = try PhotosPort
   const picker = try PhotoChooser
   const visibility = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
   try Stream.runForEach(Stream.changesWith(Stream.zipLatestWith(Stream.map(shell.changes, (state) => showing(state, "Photos")), visibility, (front, visible) => ({ front, visible })), (a, b) => a.front === b.front && a.visible === b.visible), effect ({ front, visible }) => {
     const state = try photos.get()
-    if (front && (try picker.pending())) return
+    if (front && !visible && (try picker.pending())) {
+      const scope = Option.isSome(deviceLibrary) ? (tryPromise(() => deviceLibrary.value.scope()) catch () => undefined) : undefined
+      if (scope?.locked !== true) return
+      try picker.finish()
+    }
     if (!front || !visible) {
       if (!front) try picker.finish()
       if (state.visible) {
         try takeHandoff()
         try ignore(photos.send({ type: "hideView" }, "Phone"))
       }
-      try revoke()
+      try revoke(false)
       if (Option.isSome(phone)) try ignore(tryPromise(() => phone.value.watchLibrary(false)))
       return
     }
+    try picker.finish()
     const access = try permission()
     if (access !== undefined) {
-      if (state.access.grant === "Granted" && access.grant === "Limited") try revoke()
+      if (state.access.grant === "Granted" && access.grant === "Limited") try revoke(true)
       try ignore(photos.send(access, "Phone"))
     }
-    if (!state.visible) try ignore(photos.send({ type: "showView", secure: false, only: [] }, "Phone"))
-    else if (access === undefined) try ignore(photos.send({ type: "libraryChanged" }, "Phone"))
+    if (!state.visible) {
+      const scope = handoffScope(try peekHandoff())
+      const only = scope.secure ? try cache.lookup(scope.only) : []
+      try ignore(photos.send({ type: "showView", secure: scope.secure, only }, "Phone"))
+    } else if (access === undefined) try ignore(photos.send({ type: "libraryChanged" }, "Phone"))
     if (try hasHandoff()) {
       const current = try photos.get()
       if (current.tab === "Albums") try ignore(photos.send({ type: "showTab", tab: "Library" }, "Owner"))
@@ -596,7 +698,7 @@ const libraryChanges = started(effect {
       && (after.job.change === "Favorite" || after.job.change === "Unfavorite")
     if (writingCameraFlag && access?.grant === "Granted" && after.access.grant === "Granted" && access.videos === after.videos) return
     try cache.changed()
-    if (access?.grant === "Limited" && (before.access.grant === "Granted" || before.access.grant === "Limited")) try revoke()
+    if (access?.grant === "Limited" && before.access.grant === "Granted") try revoke(true)
     try ignore(photos.send(access ?? { type: "libraryChanged" }, "Phone"))
   })
 }, "Photos library changes")
@@ -633,7 +735,7 @@ const cameraUpdates = started(effect {
   })
 }, "refreshing the open Camera capture")
 
-const batchLimit = 20
+const batchLimit = Changes.maxRequest
 const batches = following(Library.Machine, (state) => ({ job: state.job, visible: state.visible }), Library.Machine,
   ({ job, visible }): Library.Event | undefined => visible && job.left.length > 0 && job.request.outcome !== "Sent"
     ? { type: "sendNext", items: job.change === "Share" ? job.left : job.left.slice(0, batchLimit) } : undefined, "Phone")
@@ -643,12 +745,21 @@ const notices = started(effect {
   const time = try Time
   const device = try Device
   const outcomes = Stream.changesWith(Stream.map(photos.changes, (s) => ({
-    attempt: s.job.request.id, undo: s.visible && s.job.undoable,
+    attempt: s.job.request.id, undo: s.visible && s.job.undoable, visible: s.visible,
     outcome: s.job.request.outcome, done: s.job.done.length,
-  })), (a, b) => a.attempt === b.attempt && a.outcome === b.outcome && a.undo === b.undo)
+  })), (a, b) => a.attempt === b.attempt && a.outcome === b.outcome && a.undo === b.undo && a.visible === b.visible)
   let previous = 0
+  let reportedUnknown = 0
   try Stream.runDrain(Stream.switchMap(outcomes, (state) => Stream.fromEffect(effect {
-    if (previous > 0) { try withdraw("Photos", previous); previous = 0 }
+    if (previous > 0) {
+      try withdraw("Photos", previous)
+      if (!state.visible && (try photos.get()).job.request.id === previous) try ignore(photos.send({ type: "undoLapsed" }, "Phone"))
+      previous = 0
+    }
+    if (state.outcome === "Unknown" && state.attempt !== reportedUnknown) {
+      reportedUnknown = state.attempt
+      try say("Some photo changes could not be confirmed.", true)
+    }
     if (state.undo) {
       const { attempt, done } = state
       previous = attempt
@@ -659,7 +770,7 @@ const notices = started(effect {
       if ((try photos.get()).job.request.id === attempt) try ignore(photos.send({ type: "undoLapsed" }, "Phone"))
       try withdraw("Photos", attempt)
       previous = 0
-    } else if (state.outcome === "Unknown") try say("Some photo changes could not be confirmed.", true)
+    }
   })))
 }, "Photos change notices")
 

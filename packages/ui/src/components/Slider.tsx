@@ -40,7 +40,7 @@ export function Slider({ variant = "default", value, defaultValue, onValueChange
         <SliderPrimitive.Range className={cn("absolute h-full", playback ? "bg-foreground" : "bg-alpha")} />
       </SliderPrimitive.Track>
       <SliderPrimitive.Thumb id={id} aria-label={label} aria-labelledby={labelledBy} aria-valuetext={valueText}
-        className={cn(focusRing, "block rounded-full", playback ? "size-4 bg-foreground" : "size-6 border-2 border-alpha bg-background shadow-sm")} />
+        className={cn(focusRing, "block rounded-full", playback ? "size-4 bg-foreground" : "size-6 border-2 border-primary bg-background shadow-sm")} />
     </SliderPrimitive.Root>
   );
 }

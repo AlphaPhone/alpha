@@ -30,6 +30,8 @@ effect function postgresOrigin(value: string): Postgres!ResourcesRefused {
   const url = URL.parse(value)
   const port = url?.port ? Number(url.port) : 5432
   if (url === null || !["postgres:", "postgresql:"].includes(url.protocol) || !url.hostname || !url.username || !url.password || url.pathname.length < 2 || !(port > 0 && port <= 65535)) throw refused()
+  const sslmode = url.searchParams.get("sslmode")?.toLowerCase()
+  if (sslmode === "disable" || sslmode === "allow") throw new ResourcesRefused({ problem: "DATABASE_URL must not disable TLS" })
   const [database, user, password] = try Effect.try({ try: () => [url.pathname.slice(1), url.username, url.password].map(decodeURIComponent), catch: refused })
   return { host: url.hostname.toLowerCase(), port, database: database ?? "", user: user ?? "", password: password ?? "", scheme: url.protocol.slice(0, -1) }
 }
@@ -87,16 +89,19 @@ export effect function reconcileResources(at: Reconciling): CloudResources!Resou
     throw new ResourcesRefused({ problem: "CLOUDFLARE_ACCOUNT_ID must identify the selected Alpha Cloud account" })
   const token = at.token?.trim() ?? ""
   if (token === "") throw new ResourcesRefused({ problem: "CLOUDFLARE_API_TOKEN is required to check Alpha Cloud's resources" })
-  if (at.ids.workerName === at.sibling.workerName || at.apiHost === at.webHost) throw new ResourcesRefused({ problem: "Alpha Cloud's Worker names and hosts must be distinct" })
-  for (const host of [at.apiHost, at.webHost]) if (host !== at.ids.zone && !host.endsWith("." + at.ids.zone)) throw new ResourcesRefused({ problem: `${host} is not in zone ${at.ids.zone}` })
+  const zoneLower = at.ids.zone.toLowerCase()
+  const apiHost = at.apiHost.toLowerCase()
+  const webHost = at.webHost.toLowerCase()
+  if (at.ids.workerName === at.sibling.workerName || apiHost === webHost) throw new ResourcesRefused({ problem: "Alpha Cloud's Worker names and hosts must be distinct" })
+  for (const host of [apiHost, webHost]) if (host !== zoneLower && !host.endsWith("." + zoneLower)) throw new ResourcesRefused({ problem: `${host} is not in zone ${at.ids.zone}` })
   const hyperdriveId = try configured(at.ids.hyperdriveId, "Hyperdrive")
   if (!at.creating && (recordedAccount === undefined || hyperdriveId === undefined)) throw new ResourcesRefused({ problem: "record the account and Hyperdrive IDs (provision --write) before deploying" })
   const origin = at.databaseUrl === undefined && !at.creating ? undefined : try postgresOrigin(at.databaseUrl ?? "")
   const base = at.base ?? "https://api.cloudflare.com/client/v4"
   const accountPath = `/accounts/${account}`
-  const zones = try list(base, token, `/zones?${new URLSearchParams({ name: at.ids.zone, "account.id": account, match: "all" })}`, "zone lookup")
+  const zones = try list(base, token, `/zones?${new URLSearchParams({ name: zoneLower, "account.id": account, match: "all" })}`, "zone lookup")
   const zone = zones[0]
-  if (zones.length !== 1 || zone?.name !== at.ids.zone || record(zone.account).id !== account || typeof zone.id !== "string")
+  if (zones.length !== 1 || String(zone?.name ?? "").toLowerCase() !== zoneLower || record(zone?.account).id !== account || typeof zone?.id !== "string")
     throw new ResourcesRefused({ problem: `zone ${at.ids.zone} is not owned by the selected Cloudflare account alone` })
   const hyperPath = `${accountPath}/hyperdrive/configs`
   const hyperName = `${at.ids.workerName}-db`
@@ -110,10 +115,10 @@ export effect function reconcileResources(at: Reconciling): CloudResources!Resou
       throw new ResourcesRefused({ problem: "Hyperdrive's origin is not DATABASE_URL" })
     return found
   }
-  for (const [host, service] of [[at.apiHost, at.ids.workerName], [at.webHost, `${at.ids.workerName}-edge`]] as const) {
+  for (const [host, service] of [[apiHost, at.ids.workerName], [webHost, `${at.ids.workerName}-edge`]] as const) {
     const domains = try list(base, token, `${accountPath}/workers/domains?${new URLSearchParams({ hostname: host, zone_id: zone.id })}`, "Worker domain lookup")
     const domain = domains[0]
-    if (domain !== undefined && (domains.length !== 1 || domain.hostname !== host || domain.service !== service || domain.environment !== "production"))
+    if (domain !== undefined && (domains.length !== 1 || String(domain.hostname ?? "").toLowerCase() !== host || domain.service !== service || domain.environment !== "production"))
       throw new ResourcesRefused({ problem: `${host} is another Worker's custom domain` })
     if (domain === undefined) {
       const records = try list(base, token, `/zones/${zone.id}/dns_records?${new URLSearchParams({ "name.exact": host })}`, "DNS lookup")

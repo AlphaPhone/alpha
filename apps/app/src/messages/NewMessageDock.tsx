@@ -40,9 +40,9 @@ export function NewMessageDock({ runtime, scope, contactsAllowed, draft, textare
   const phone = usePhone(runtime);
   const voice = useVoice(runtime);
   const [selected, setSelected] = useState<TelephonySubscription>();
-  const pictures = useRef<HTMLInputElement>(null);
-  const camera = useRef<HTMLInputElement>(null);
-  const chooserRevision = useRef<number | undefined>(undefined);
+  const picturesRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const chooserRevisionRef = useRef<number | undefined>(undefined);
   const state = composer.state;
   const title = useNewRecipientTitle(runtime, scope, contactsAllowed);
   if (!state || !phone.state) return <CommsBar runtime={runtime} />;
@@ -68,7 +68,7 @@ export function NewMessageDock({ runtime, scope, contactsAllowed, draft, textare
   const retry = { type: "transcribeAgain", now: untimed } as const;
   const chooseFile = (input: HTMLInputElement | null) => {
     if (!textIsSaved()) return;
-    chooserRevision.current = revision;
+    chooserRevisionRef.current = revision;
     input?.click();
   };
   return <>
@@ -109,19 +109,19 @@ export function NewMessageDock({ runtime, scope, contactsAllowed, draft, textare
     ) : (
       <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-center gap-1">
         <MessageAttachmentsMenu media={canPicture ? {
-          camera: () => chooseFile(camera.current),
-          files: () => chooseFile(pictures.current),
+          camera: () => chooseFile(cameraRef.current),
+          files: () => chooseFile(picturesRef.current),
         } : undefined} />
         <Textarea ref={textarea} rows={1} aria-label={label} placeholder={label} value={body} maxLength={MMS_MAX_BODY} readOnly={!editable}
           onChange={(event) => onBody(event.currentTarget.value)} style={minHeight === undefined ? undefined : { minHeight }}
           className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 text-body leading-field shadow-none focus-visible:outline-none" />
-        {([["Attach a picture", pictures, false], ["Take a picture", camera, true]] as const).map(([name, input, capture]) => <Input
+        {([["Attach a picture", picturesRef, false], ["Take a picture", cameraRef, true]] as const).map(([name, input, capture]) => <Input
           key={name} ref={input} type="file" hidden className="hidden" aria-label={name} multiple={!capture} capture={capture ? "environment" : undefined}
           accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!canPicture} onChange={(event) => {
             const files = [...(event.currentTarget.files ?? [])];
             event.currentTarget.value = "";
-            const picked = chooserRevision.current;
-            chooserRevision.current = undefined;
+            const picked = chooserRevisionRef.current;
+            chooserRevisionRef.current = undefined;
             if (picked !== undefined && files.length > 0) void runtime.runPromise(attachNewPictures(visit, picked, files));
           }} />)}
         {hasContent && <Button size="icon" className="disabled:opacity-100" aria-label={checking ? "Check send status" : "Send"} data-alpha-bar-send disabled={!canSend}

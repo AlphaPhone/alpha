@@ -151,7 +151,8 @@ effect function removed(id: number): Event!!(Telephony | Voicemails | Time | Pho
   const row = Option.getOrUndefined(try opened())
   const store = try Voicemails
   const { confirmation } = try store.get()
-  const state = try (try Voicemail.Machine).get()
+  const machine = try Voicemail.Machine
+  const state = try machine.get()
   try store.set({ confirmation: undefined })
   if (confirmation === undefined || row?.id !== confirmation.id || row.deletionWitness !== confirmation.witness
     || !state.front || !state.open || state.audio.ticket !== confirmation.opening || state.removal.id !== id
@@ -163,8 +164,9 @@ effect function removed(id: number): Event!!(Telephony | Voicemails | Time | Pho
   const report = answer.success
   if (report.status !== "queued") return { type: "removed", id, done: false, known: true, kept: false }
   try store.set({ deletion: report.deletion })
-  try ignore((try Voicemail.Machine).send({ type: "removalStaged", id }))
-  return try settlement(id, report.deletion)
+  try ignore(machine.send({ type: "removalStaged", id }))
+  const settledEarly = Effect.as(Stream.runHead(Stream.filter(machine.changes, (s) => s.removal.id !== id || s.removal.outcome !== "Sent")), { type: "removed", id, done: false, known: true, kept: true } satisfies Event)
+  return try race(settlement(id, report.deletion), settledEarly)
 }
 
 // spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open"
@@ -207,8 +209,16 @@ function carry(fx: Out): Job<Event, Telephony | Voicemails | PhoneMachine | Voic
     when { tag: "FetchAudio", let ticket }: answer("audio", fetched(ticket), { type: "audioFetched", ticket, ok: false, recognizer: false });
     when { tag: "TranscribeOnPhone", let ticket }: answer("transcript", transcribed(ticket), { type: "transcribed", ticket, ok: false });
     when { tag: "MarkHeard" }: run("heard", effect {
+      const store = try Voicemails
       const open = try opened()
-      if (Option.isSome(open)) try ignore(telephony("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(open.value.id)))
+      if (Option.isSome(open)) {
+        const id = open.value.id
+        const marked = telephony("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(id)) catch () => undefined
+        if (marked !== undefined) {
+          const held = try store.get()
+          try store.set({ rows: held.rows.map((row) => (row.id === id ? { ...row, heard: true } : row)) })
+        }
+      }
     });
     when { tag: "ReachCaller", let app }: run("reach", reached(app));
     when { tag: "Remove", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost", id });
@@ -331,7 +341,14 @@ const played = applying(Voicemail.Machine, (state) => ({ front: state.front, ope
 /** The open voicemail's audio reaching its end. */
 const ends: Stream.Stream<Event, never, Player> = Stream.unwrap(effect {
   const element = try (try Player).element()
-  return Stream.callback<Event>((queue) => sync(() => element.addEventListener("ended", () => { Queue.offerUnsafe(queue, { type: "ended" }) })))
+  return Stream.callback<Event>((queue) => Effect.asVoid(acquireRelease(
+    sync(() => {
+      const handler = () => { Queue.offerUnsafe(queue, { type: "ended" }) }
+      element.addEventListener("ended", handler)
+      return handler
+    }),
+    (handler) => sync(() => { element.removeEventListener("ended", handler) }),
+  )))
 })
 
 /** Voicemail: resident, so that Home's unheard count and a call starting reach it; its list is read while its tab shows. */

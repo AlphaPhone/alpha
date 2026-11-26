@@ -1,13 +1,13 @@
 // spec/app/settings/facts.md, "Story: Manage my saved passwords"
 import { SettingsProtonPass, type SettingsFactReading } from "@repo/ui";
-import { useEffect, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { useMachine as useFacts } from "../../gen/app__settings__facts.react.ts";
 import { say } from "../notices/toasts.vibe";
 import type { PasswordProvider, PasswordProviderAction } from "../platform/systemSettings.vibe";
 import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { handPasswordProvider, passwordPageVisible, readPasswordProvider } from "./passwords.vibe";
+import { handPasswordProvider, passwordPageVisible, passwordProviderShelf } from "./passwords.vibe";
 import type { SettingsRuntime } from "./Settings.tsx";
 
 const word = (value: string, status: "ok" | "warn" | "error" | "off" = "off"): SettingsFactReading => ({ word: "reported", value, status });
@@ -35,20 +35,10 @@ const selection = ({ selection: selected, installation }: PasswordProvider): Set
 /** Android's checked status and handoffs for the other password provider. */
 export function ProtonPass({ runtime, alpha }: { runtime: SettingsRuntime; alpha: Alpha }) {
   const { state, can, send } = useTimed(runtime, useFacts);
-  const [provider, setProvider] = useState<PasswordProvider>();
+  const shelf = useMemo(() => runtime.runSync(passwordProviderShelf), [runtime]);
+  const provider = useSyncExternalStore(shelf.subscribe, shelf.snapshot, shelf.snapshot);
   const [opening, setOpening] = useState<PasswordProviderAction>();
   const front = state?.vault.front;
-  const ticket = state?.read.read.ticket;
-  useEffect(() => {
-    if (!front) return;
-    const request = new AbortController();
-    void runtime.runPromise(readPasswordProvider(), { signal: request.signal }).then((answer) => {
-      if (!request.signal.aborted) setProvider(answer);
-    }, () => {
-      if (!request.signal.aborted) setProvider(undefined);
-    });
-    return () => request.abort();
-  }, [runtime, front, ticket]);
 
   const refresh = { type: "refresh", at: untimed } as const;
   const open = async (action: PasswordProviderAction) => {

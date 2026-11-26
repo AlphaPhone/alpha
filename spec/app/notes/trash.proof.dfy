@@ -1,6 +1,6 @@
 // remaining, with the heap-free filter the library's lemmas speak of
 lemma RemainingIs(s: Trash)
-  ensures remaining(s) == (if s.act.Discard? then (s.entries + [Entry(s.subject, s.asOf, s.revision, s.loose)])
+  ensures remaining(s) == (if s.act.Discard? then (if has(s.entries, s.subject) then s.entries else s.entries + [Entry(s.subject, s.asOf, s.revision, s.loose)])
     else if (s.act.Recover? || s.act.Erase?) then ProofLib.Filter((e: Entry) => (e.id != s.subject), s.entries)
     else if s.act.EmptyAll? then []
     else if s.act.Sweep? then ProofLib.Filter((e: Entry) => !(due(e, s.asOf)), s.entries)

@@ -21,10 +21,16 @@ export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
 
 /** An open link note: the page's title, its site to visit, and the passages kept from it. */
 export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisit, onBack, className, ...props }: LinkNoteViewProps) {
-  return noteViewFrame({ title, menu, onBack, className, ...props, children: (
-      <div className="min-h-0 grow touch-pan-y overflow-y-auto px-6 pt-1 pb-37.5">
+  return noteViewFrame({
+    title,
+    menu,
+    onBack,
+    className,
+    ...props,
+    children: (
+      <>
         <h1 className="m-0 font-display text-headline font-light">{title}</h1>
-        <button type="button" aria-label={`Open ${domain}`} disabled={!onVisit} onClick={onVisit} className={cn(focusRing, "mt-3.5 inline-flex h-12 items-center gap-2 rounded-full bg-secondary px-4 text-sm text-primary")}>
+        <button type="button" aria-label={`Open ${domain}`} disabled={!onVisit} onClick={onVisit} className={cn(focusRing, "mt-3.5 inline-flex h-12 items-center gap-2 rounded-full bg-secondary px-4 text-sm text-primary disabled:opacity-50")}>
           <Link aria-hidden className="size-4" />
           {domain}
         </button>
@@ -37,6 +43,7 @@ export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisi
             </div>
           ))}
         </div>
-      </div>
-  ) });
+      </>
+    ),
+  });
 }

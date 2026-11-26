@@ -1,7 +1,7 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
-import { Effect, Exit } from "effect";
+import { Exit } from "effect";
 import { useState, useSyncExternalStore } from "react";
-import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow-client";
+import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName, missedRunNowOffers } from "@elizaos/plugin-workflow-client";
 import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner, Switch } from "@repo/ui";
 import { CalendarDays, ChevronRight, Plus, RefreshCw, Sparkles, Sun } from "lucide-react";
 import { useMachine as useDigestDelivery } from "../../gen/app__digests.react.ts";
@@ -10,7 +10,6 @@ import type { Machine } from "../../gen/app__digests__schedules.effect.vibe";
 import type { Change, Event } from "../../gen/app__digests__schedules.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { type DigestNoticeIdentity, sameDigestNoticeResult } from "../platform/hosted-digests.vibe";
-import { Time } from "../runtime/time.vibe";
 import { setBrowserDigestChecks } from "./browser-digests.vibe";
 import { askAboutNativeDigest, digestQuestionExcerpt, enableDigestNotifications, NativeDigestPanel, setNativeDigestChecks } from "./native-digests.vibe";
 import { DigestWords, newDigest, pickDigestSource } from "./digests.vibe";
@@ -34,12 +33,14 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
   const delivery = useDigestDelivery(runtime);
   const native = runtime.runSync(NativeDigestPanel);
   const panel = useSyncExternalStore(native.subscribe, native.snapshot, native.snapshot);
+  const digestWords = runtime.runSync(DigestWords);
+  const digestSnapshot = useSyncExternalStore(digestWords.subscribe, digestWords.snapshot, digestWords.snapshot);
   const [notificationRequest, setNotificationRequest] = useState<NotificationRequest>();
   const nativeState = panel.owner === owner ? panel.delivery : undefined;
   const request = notificationRequest?.owner === owner && notificationRequest.lease === nativeState?.lease ? notificationRequest : undefined;
   const state = model.state;
   if (!state || state.owner !== owner) return <Spinner aria-label="Reading scheduled digests" />;
-  const home = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.view(owner)));
+  const home = digestSnapshot.view.owner === owner ? digestSnapshot.view : { owner: 0, loops: [], sources: [], results: [], partial: false, capable: false };
   const results = native.available ? nativeState?.rows ?? [] : home.results;
   if (result > 0) {
     const selected = results.find((entry) => entry.cursor === result && (notice === undefined || sameDigestNoticeResult(entry, notice)));
@@ -75,17 +76,23 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
       setNotificationRequest((current) => current !== attempt ? current : requested ? undefined : { ...attempt, status: "refused" });
     });
   };
-  const zone = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.zone(owner)));
-  const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
+  const zone = digestSnapshot.zoneOwner === owner ? digestSnapshot.zone : "";
+  const now = digestSnapshot.observedAt;
   const sources = home.sources.filter(({ record }) => digestSourceState(record, now) === "current");
   const selection = home.loops.find((item) => item.number === state.row)?.record;
   const chosen = home.sources.find((item) => item.number === state.draft.source)?.record;
+  const selectedSource = selection === undefined ? undefined : home.sources.find((item) => item.record.id === selection.spec.sourceId)?.record;
+  const selectedSourceFresh = selectedSource !== undefined && digestSourceState(selectedSource, now) === "current";
+  const missedOffers = missedRunNowOffers(results, home.loops.map((item) => item.record), home.sources.map((item) => item.record), now);
+  const hasMissedOffer = selection !== undefined && results.some((entry) => entry.workflowId === selection.id && missedOffers.has(entry.runId));
+  const newerThanMissed = !hasMissedOffer;
   const time = `${String(state.draft.when.hour).padStart(2, "0")}:${String(state.draft.when.minute).padStart(2, "0")}`;
   const tell = (event: Event) => { if (model.can(event)) void model.send(event); };
   const review = (wanted: Change): Event => ({ type: "reviewChange", wanted });
+  const canSetTime = model.can({ type: "setTime", hour: state.draft.when.hour, minute: state.draft.when.minute });
   const titles: Record<Change, string> = { Create: "Schedule digest", Pause: "Pause", Resume: "Resume", Remove: "Remove" };
   return <section className="flex flex-col gap-4">
-    {model.can(refresh) && <Button className="self-end" variant="ghost" size="icon" aria-label="Refresh digests" onClick={() => void model.send(refresh)}><RefreshCw aria-hidden /></Button>}
+    {model.can(refresh) && <Button className="self-end" variant="ghost" size="icon" aria-label="Refresh digests" onClick={() => tell(refresh)}><RefreshCw aria-hidden /></Button>}
     {state.schedules.status === "Loading" && <Spinner aria-label="Reading scheduled digests" />}
     {unavailable && <Alert variant="warn" role="status">Scheduled digests couldn’t be read.</Alert>}
     {home.partial && <Alert variant="warn" role="status">Some digest information couldn’t be read.</Alert>}
@@ -124,42 +131,69 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
       {(["Pause", "Resume", "Remove"] as const).map((action) => model.can(review(action))
         ? <Button key={action} variant="secondary" onClick={() => tell(review(action))}>{titles[action]}</Button>
         : null)}
+      {model.can({ type: "reviewRunNow", fresh: selectedSourceFresh, newer: newerThanMissed }) && (
+        <Button onClick={() => tell({ type: "reviewRunNow", fresh: selectedSourceFresh, newer: newerThanMissed })}>Run missed digest</Button>
+      )}
     </div>}
     {!home.partial && sources.length > 0 && model.can({ type: "openEditor", zone: 0 }) && (
       <Button onClick={() => void runtime.runPromiseExit(newDigest())}><Plus aria-hidden />Schedule digest</Button>
     )}
     {state.editing && <div className="flex flex-col gap-3 rounded-tile bg-secondary p-4">
       <div className="flex flex-wrap gap-2">
-        {(["Morning", "Evening"] as const).filter((one) => one === "Morning" || state.evening).map((template) => (
-          <Button key={template} variant={state.draft.template === template ? "primary" : "outline"} aria-pressed={state.draft.template === template}
-            onClick={() => tell({ type: "pickTemplate", template })}>{template}</Button>
-        ))}
+        {(["Morning", "Evening"] as const).filter((one) => one === "Morning" || state.evening).map((template) => {
+          const pick = { type: "pickTemplate", template } as const;
+          return (
+            <Button key={template} variant={state.draft.template === template ? "primary" : "outline"} aria-pressed={state.draft.template === template}
+              disabled={state.draft.template !== template && !model.can(pick)}
+              onClick={() => tell(pick)}>{template}</Button>
+          );
+        })}
       </div>
       <label className="grid gap-1 text-sm">Time in {zone}
-        <Input type="time" value={time} onChange={(event) => {
+        <Input type="time" value={time} disabled={!canSetTime} onChange={(event) => {
           const [hour, minute] = event.currentTarget.value.split(":").map(Number);
           if (hour !== undefined && minute !== undefined) tell({ type: "setTime", hour, minute });
         }} />
       </label>
       <fieldset className="divide-y divide-border">
         <legend className="text-sm">Source</legend>
-        {sources.map(({ number, record }) => (
-          <ListRow key={number} title={record.label} selected={number === state.draft.source}
-            onClick={() => void runtime.runPromiseExit(pickDigestSource(number))} />
-        ))}
+        {sources.map(({ number, record }) => {
+          const pick = { type: "pickSource", source: number, fresh: true } as const;
+          return (
+            <ListRow key={number} title={record.label} selected={number === state.draft.source}
+              {...(model.can(pick) ? { onClick: () => void runtime.runPromiseExit(pickDigestSource(number)) } : {})} />
+          );
+        })}
       </fieldset>
       <div className="flex gap-2">
         {model.can(review("Create")) && <Button onClick={() => tell(review("Create"))}>Review</Button>}
-        <Button variant="outline" onClick={() => tell({ type: "closeEditor" })}>Cancel</Button>
+        <Button variant="outline" disabled={!model.can({ type: "closeEditor" })} onClick={() => tell({ type: "closeEditor" })}>Cancel</Button>
       </div>
     </div>}
     {state.change.live && <Spinner aria-label="Saving the schedule" />}
-    {state.change.attempt.outcome === "Refused" && <Alert role="status" variant="warn">The agent didn’t save the schedule.</Alert>}
-    {model.can({ type: "checkChange" }) && <Alert role="status" variant="warn">The agent didn’t confirm the change.
+    {state.change.attempt.outcome === "Refused" && !state.change.offered && <Alert role="status" variant="warn">The agent didn’t save the schedule.</Alert>}
+    {model.can({ type: "checkChange" }) && <Alert role="status" variant="warn">
+      The agent didn’t confirm the change.
       <Button size="sm" variant="secondary" onClick={() => tell({ type: "checkChange" })}>Check change</Button>
     </Alert>}
-    {model.can({ type: "retry" }) && <Button variant="secondary" onClick={() => tell({ type: "retry" })}>Try again</Button>}
-    {model.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow a different change</Button>}
+    {(model.can({ type: "retry" }) || model.can({ type: "discard" }) || model.can({ type: "letGo" })) && (
+      <div className="flex flex-wrap gap-2">
+        {model.can({ type: "retry" }) && <Button variant="secondary" onClick={() => tell({ type: "retry" })}>Try again</Button>}
+        {model.can({ type: "discard" }) && <Button variant="ghost" onClick={() => tell({ type: "discard" })}>Discard</Button>}
+        {model.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow a different change</Button>}
+      </div>
+    )}
+    {state.runNow.live && <Spinner aria-label="Running missed digest" />}
+    {model.can({ type: "checkRunNow" }) && <Alert role="status" variant="warn">
+      The agent didn’t confirm whether it ran the missed digest.
+      <Button size="sm" variant="secondary" onClick={() => tell({ type: "checkRunNow" })}>Check run</Button>
+    </Alert>}
+    {(model.can({ type: "resendRunNow" }) || model.can({ type: "letGoRunNow" })) && (
+      <div className="flex flex-wrap gap-2">
+        {model.can({ type: "resendRunNow" }) && <Button variant="secondary" onClick={() => tell({ type: "resendRunNow" })}>Send again</Button>}
+        {model.can({ type: "letGoRunNow" }) && <Button variant="secondary" onClick={() => tell({ type: "letGoRunNow" })}>Allow another run</Button>}
+      </div>
+    )}
     <ConfirmDialog open={state.review.showing}
       title={state.proposed === "Create" ? "Schedule a digest?" : `${titles[state.proposed]} “${selection?.name ?? "Digest"}”?`}
       confirmLabel={titles[state.proposed]} destructive={state.proposed === "Remove"}
@@ -167,6 +201,13 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
       {state.proposed === "Create"
         ? `At ${time} in ${zone}, the agent reads “${chosen?.label ?? "your selected source"}” for the ${state.draft.template.toLowerCase()} digest. Android can delay it, and a run more than 30 minutes late is marked missed.`
         : undefined}
+    </ConfirmDialog>
+    <ConfirmDialog open={state.runReview.showing}
+      title={`Run missed “${selection?.name ?? "Digest"}” now?`}
+      confirmLabel="Run now"
+      onConfirm={() => tell({ type: "confirmRunNow", fresh: selectedSourceFresh, newer: newerThanMissed })}
+      onCancel={() => tell({ type: "cancelRunNow" })}>
+      The agent will run the newest missed morning digest once using its current source.
     </ConfirmDialog>
     {results.length > 0 && <ul aria-label="Digest results" className="divide-y divide-border">
       {results.map((entry) => <li key={entry.runId}>

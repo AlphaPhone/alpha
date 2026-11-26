@@ -1,8 +1,8 @@
 // spec/app/startup/access.md, "Story: Look at access again"; spec/app/settings/index.md, "Story: Reach what another area owns"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Access from "../../gen/app__startup__access.effect.vibe"
 import type { Actor } from "../../gen/app__startup__actor.ts"
-import * as Steps from "../../gen/app__startup__steps.effect.vibe"
+import type * as Steps from "../../gen/app__startup__steps.effect.vibe"
 import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import type { Access as Permission } from "../../gen/app__settings__facts.ts"
 import type { Target } from "../../gen/app__settings__android.ts"
@@ -184,7 +184,7 @@ export const openReview = effect {
   try (try AccessStart).ready()
   if (!here()) return
   const cloud = (try Cloud).client
-  const signedIn = try Effect.option(tryPromise((signal) => cloud.account({ signal })))
+  const signedIn = try Effect.option(timeout(tryPromise((signal) => cloud.account({ signal })), "10 seconds"))
   if (!here()) return
   const access = try Access.Machine
   if (Option.isNone(signedIn)) {

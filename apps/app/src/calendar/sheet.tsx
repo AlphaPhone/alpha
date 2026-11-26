@@ -1,5 +1,5 @@
 // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
-import { useContext } from "react";
+import { use } from "react";
 import type { Area } from "../runtime/area.tsx";
 import { AskedRequest } from "./asked.ts";
 import { Proposal } from "./Calendar.tsx";
@@ -10,7 +10,7 @@ export default {
   open(alpha) {
     const runtime = calendar.runtime(alpha);
     return function AskedCalendarChange() {
-      const request = useContext(AskedRequest);
+      const request = use(AskedRequest);
       return request === undefined ? null : <Proposal runtime={runtime} className="m-0" request={request} />;
     };
   },

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "../lib/cn.ts";
+import { useLayerRef, usePortalContainer } from "../lib/layers.tsx";
 import { aboveDock, overlay, sheetHandle, sheetPanel, surfaceTitle } from "../lib/styles.ts";
 import { Button } from "./Button.tsx";
 
@@ -23,15 +24,19 @@ export type ConfirmDialogProps = {
   onConfirm: () => void;
   /** Called by the cancel button and Escape; a press outside does not back out. */
   onCancel: () => void;
+  /** An enclosing container for the dialog's portal. */
+  container?: HTMLElement;
 };
 
 /** A question asked before something that matters is done, as an alert dialog in a bottom sheet: one button goes ahead, the other, focused first, backs out. */
-export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", destructive = false, loading = false, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", destructive = false, loading = false, onConfirm, onCancel, container }: ConfirmDialogProps) {
+  const defaultContainer = usePortalContainer();
+  const layerRef = useLayerRef("DialogLayer");
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next && !loading) onCancel(); }}>
-      <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className={cn(overlay, "z-dialog", aboveDock)} />
-        <AlertDialogPrimitive.Content className={cn(sheetPanel, aboveDock, sheetHandle, "z-dialog overflow-y-auto bg-card px-6 pt-7.5 pb-[max(--spacing(11),env(safe-area-inset-bottom))] text-card-foreground before:bg-muted-foreground/45")} {...(children ? {} : { "aria-describedby": undefined })}>
+      <AlertDialogPrimitive.Portal container={container ?? defaultContainer}>
+        <AlertDialogPrimitive.Overlay className={cn(overlay, "z-alert", aboveDock)} />
+        <AlertDialogPrimitive.Content ref={layerRef} className={cn(sheetPanel, aboveDock, sheetHandle, "z-alert overflow-y-auto border-t border-border/60 bg-popover px-6 pt-7.5 pb-[max(--spacing(11),var(--alpha-safe-bottom))] text-popover-foreground before:bg-muted-foreground/45 dark:border-border")} {...(children ? {} : { "aria-describedby": undefined })}>
           <AlertDialogPrimitive.Title className={surfaceTitle}>{title}</AlertDialogPrimitive.Title>
           {children ? <AlertDialogPrimitive.Description className="mt-1.5 text-sm text-muted-foreground wrap-anywhere">{children}</AlertDialogPrimitive.Description> : null}
           <div className="mt-6 flex gap-2.5 *:h-13 *:flex-1">

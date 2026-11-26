@@ -59,18 +59,21 @@ export function elizaCamera(world: CameraScene): Faked {
     width: 1280, height: 720, captureSize: { width: 3000, height: 4000 }, deviceId: options.direction ?? "back", minZoom: 1,
     maxZoom: options.direction === "front" ? 1 : 5, zoom: 1, hasFlash: options.direction !== "front", flash: "off",
   });
-  return plugin<CameraPlugin>(() => ({
+  let recording = false;
+  return plugin<CameraPlugin>((_emit, onUnplug) => {
+    onUnplug?.(() => { nativeLayer(false); });
+    return {
     checkCameraPermission: permission,
     requestCameraPermission: permission,
     checkPermissions: permissions,
     requestPermissions: permissions,
-    getDevices() {
-      return Promise.resolve({ devices: (["back", "front"] as const).map((direction) => ({
+    getDevices: () => Promise.resolve({
+      devices: (["back", "front"] as const).map((direction) => ({
         deviceId: direction, direction, label: direction, hasZoom: direction === "back", hasFlash: direction === "back",
         maxZoom: direction === "back" ? 5 : 1, supportedResolutions: [{ width: 1280, height: 720 }],
         supportedFrameRates: [30], supportedCaptureAspectRatios: ["4:3", "16:9"],
-      })) });
-    },
+      })),
+    }),
     async startPreview(options) {
       if (world.permission !== "granted") throw rejection("Camera off", "CAMERA_PERMISSION_DENIED");
       await world.startGate;
@@ -78,10 +81,20 @@ export function elizaCamera(world: CameraScene): Faked {
       nativeLayer(true);
       return preview(options);
     },
-    stopPreview() { world.preview = undefined; nativeLayer(false); return Promise.resolve(); },
-    switchCamera(options) { world.preview = options; return Promise.resolve(preview(options)); },
-    setCaptureMode({ mode }) { world.modes.push(mode); return Promise.resolve(); },
-    capturePhoto(options = {}) {
+    stopPreview: () => {
+      world.preview = undefined;
+      nativeLayer(false);
+      return Promise.resolve();
+    },
+    switchCamera: (options) => {
+      world.preview = options;
+      return Promise.resolve(preview(options));
+    },
+    setCaptureMode: ({ mode }) => {
+      world.modes.push(mode);
+      return Promise.resolve();
+    },
+    capturePhoto: (options = {}) => {
       if (world.preview === undefined) return Promise.reject(rejection("No live view", "PREVIEW_STOPPED"));
       if (options.thumbnailOnly && (!options.saveToGallery || options.quality !== undefined || options.width !== undefined || options.height !== undefined)) {
         return Promise.reject(rejection("Incompatible thumbnail options", "INVALID_OPTIONS"));
@@ -98,19 +111,31 @@ export function elizaCamera(world: CameraScene): Faked {
     },
     async startRecording() {
       if (world.preview === undefined) throw rejection("No live view", "PREVIEW_STOPPED");
+      recording = true;
       await world.recordingGate;
     },
-    stopRecording() {
+    stopRecording: () => {
+      recording = false;
       const path = `content://media/external/video/media/${world.savedVideos.length + 1}`;
       world.savedVideos.push(path);
       return Promise.resolve({ path, duration: 1, width: 1280, height: 720, fileSize: 10_000, mimeType: "video/mp4" });
     },
-    getRecordingState() { return Promise.resolve({ isRecording: false, duration: 0, fileSize: 0 }); },
-    getSettings() { return Promise.resolve({ settings }); },
-    setSettings({ settings: update }) { Object.assign(settings, update); return Promise.resolve(); },
-    setZoom({ zoom }) { settings.zoom = zoom; return Promise.resolve(); },
-    setFocusPoint(point) { world.focus.push(point); return Promise.resolve(); },
-    async setExposurePoint() {},
-    async removeAllListeners() {},
-  }));
+    getRecordingState: () => Promise.resolve({ isRecording: recording, duration: recording ? 1 : 0, fileSize: recording ? 10_000 : 0 }),
+    getSettings: () => Promise.resolve({ settings }),
+    setSettings: ({ settings: update }) => {
+      Object.assign(settings, update);
+      return Promise.resolve();
+    },
+    setZoom: ({ zoom }) => {
+      settings.zoom = zoom;
+      return Promise.resolve();
+    },
+    setFocusPoint: (point) => {
+      world.focus.push(point);
+      return Promise.resolve();
+    },
+    setExposurePoint: () => Promise.resolve(),
+    removeAllListeners: () => Promise.resolve(),
+  };
+  });
 }

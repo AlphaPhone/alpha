@@ -59,6 +59,7 @@ export function reactHook(name: string, source: string, text: string): string | 
     `    subscribe: (notify) => {`,
     `      listeners.add(notify);`,
     `      if (!active) {`,
+    `        if (seen.cause !== undefined) seen = { state: seen.state };`,
     `        const token = {};`,
     `        active = token;`,
     `        const show = (next: Snapshot<E>) => {`,

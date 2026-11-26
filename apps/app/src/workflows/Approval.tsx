@@ -1,7 +1,7 @@
 // spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"
 import type { WorkflowApproval } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Alert, cn, focusRing } from "@repo/ui";
 import { useMachine } from "../../gen/app__workflows__approvals.react.ts";
 import type { Machine } from "../../gen/app__workflows__approvals.effect.vibe";
@@ -16,12 +16,24 @@ interface ApprovalProps extends Pick<Shown<Resident | Machine | ApprovalWords>, 
   readonly approvals?: readonly WorkflowApproval[];
 }
 
+const noticeMessages = {
+  Gone: "This approval is no longer waiting.",
+  OtherAgent: "This approval belongs to another agent.",
+  Lapsed: "This approval expired before it could be opened.",
+  Unreadable: "The approval couldn’t be checked.",
+} as const;
+
 /** An exact, versioned approval the agent says is still waiting on this run. */
 export function Approval({ runtime, run, owner, approvals }: ApprovalProps) {
   const machine = useTimed(runtime, useMachine);
+  const words = runtime.runSync(ApprovalWords);
+  const pending = useSyncExternalStore(words.subscribe, words.snapshot, words.snapshot);
   const state = machine.state;
-  if (!state || state.owner !== owner || state.runId !== run || state.approval === "NoApproval") return null;
-  const pending = runtime.runSync(Effect.flatMap(ApprovalWords, (words) => words.get()));
+  if (!state || state.owner !== owner) return null;
+  if (state.tapRun === run && (state.opened === "Gone" || state.opened === "OtherAgent" || state.opened === "Lapsed" || state.opened === "Unreadable") && state.approval === "NoApproval") {
+    return <Alert variant="warn" role="status">{noticeMessages[state.opened]}</Alert>;
+  }
+  if (state.runId !== run || state.approval === "NoApproval") return null;
   if (!pending || pending.number !== state.digest || pending.owner !== owner || pending.runId !== run) return null;
   const { approval } = pending;
   if (state.approval === "Waiting" && !approvals?.some((current) => current.status === "pending" && sameAsking(approval, current))) return null;
@@ -75,13 +87,19 @@ export function WorkflowDeviceApproval({ runtime, run, owner }: ApprovalProps) {
   const allow = { type: "decideDevice", number: shown.number, runNumber: run, approved: true, now: untimed } as const;
   const deny = { ...allow, approved: false };
   const pill = cn(focusRing, "min-h-11 rounded-full px-4.5");
+  const seen = new Map<string, number>();
+  const detailLines = shown.detail.map((line) => {
+    const count = (seen.get(line) ?? 0) + 1;
+    seen.set(line, count);
+    return { key: `${shown.number}:${line}:${count}`, line };
+  });
   return (
     <section aria-label="Review device action" className="mt-5.5 flex flex-col gap-3 rounded-panel bg-secondary px-5 py-4.5 text-base leading-transcript">
       <strong className="font-semibold">{operations[shown.offer.operation.type]}</strong>
       <details className="text-sm leading-chat wrap-anywhere">
         <summary className={cn(focusRing, "min-h-11 cursor-pointer py-3 font-semibold")}>Details</summary>
-        {shown.detail.map((line, index) => (
-          <p key={`${index}/${line.length}`} className="whitespace-pre-wrap">{line}</p>
+        {detailLines.map(({ key, line }) => (
+          <p key={key} className="whitespace-pre-wrap">{line}</p>
         ))}
       </details>
       {(machine.can(allow) || machine.can(deny)) && (

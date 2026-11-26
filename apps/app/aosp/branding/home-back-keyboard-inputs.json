@@ -2,7 +2,7 @@
   {
     "path": "packages/apps/Launcher3/res/values/config.xml",
     "baseSha256": "6cff89602717eaa3b9bf915679ea370ac0d7fd840190143e396585a806a897b1",
-    "sha256": "0d436c9de1036fd10329a4b16111a472e1be812114a8e738c37dd8be7a4e3056"
+    "sha256": "428768b87280ab55508c83df5bbd1d6c189771f11e3dd4dd697e9892277e2158"
   },
   {
     "path": "packages/apps/Launcher3/quickstep/src/com/android/quickstep/RecentsAnimationDeviceState.java",

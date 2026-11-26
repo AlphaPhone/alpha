@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { page } from "vitest/browser";
-import { closeAll, only, open } from "./alpha.tsx";
+import { closeAll, coverLifted, only, open } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
@@ -10,33 +10,37 @@ afterEach(closeAll);
 it("Keep a message and its list on a wide phone canvas", async () => {
   await page.viewport(1280, 800);
   const world = { ...scene(), phone: true };
-  await open(world, only("home", "view:Inbox", "assistant"));
+  const { alpha } = await open(world, only("home", "view:Inbox", "assistant"));
+  await coverLifted(alpha);
   await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
-  const subview = async (name: string) => {
+  const subviewElement = async (name: string) => {
     const selector = `[data-alpha-subview="${name}"]`;
     await expect.poll(() => document.querySelector(selector)).toBeInstanceOf(HTMLElement);
-    const element = document.querySelector(selector);
+    const element = document.querySelector<HTMLElement>(selector);
     if (!element) throw new Error(`Inbox did not draw ${name}`);
-    return page.elementLocator(element);
+    return element;
   };
-  const list = await subview("inbox-list");
-  const row = list.getByRole("button", { name: /Standup notes/ });
+  const listEl = await subviewElement("inbox-list");
+  const row = page.elementLocator(listEl).getByRole("button", { name: /Standup notes/ });
   await row.click();
-  const reader = await subview("inbox-detail");
+  const readerEl = await subviewElement("inbox-detail");
+  const reader = page.elementLocator(readerEl);
   await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
-  await expect.element(row).toHaveAttribute("aria-current", "true");
+  const listAfter = page.elementLocator(listEl);
+  const rowAfter = listAfter.getByRole("button", { name: /Standup notes/ });
+  await expect.element(rowAfter).toHaveAttribute("aria-current", "true");
   await expect.poll(() => {
-    const columns = [list.element(), reader.element()].map((pane) => pane.getBoundingClientRect());
+    const columns = [listEl, readerEl].map((pane) => pane.getBoundingClientRect());
     const [left, right] = columns;
     return Boolean(left && right && left.width >= 300 && left.right <= right.left && right.width > 400);
   }).toBe(true);
 
   await page.viewport(412, 915);
-  await expect.element(list).toHaveAttribute("inert", "");
+  await expect.poll(() => listEl.hasAttribute("inert")).toBe(true);
   await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
-  await expect.poll(() => reader.element().contains(document.activeElement)).toBe(true);
+  await expect.poll(() => readerEl.contains(document.activeElement)).toBe(true);
   await reader.getByRole("button", { name: "Back to the list", exact: true }).click();
-  await expect.element(row).toHaveFocus();
+  await expect.element(rowAfter).toHaveFocus();
   expect(world.inbox.changes).toEqual([]);
 });
 
@@ -69,7 +73,8 @@ it("Review an attachment and save the copy in Files", async () => {
   ];
   message.attachmentData = { "1": bytes, "2": pdf };
 
-  await open(world, only("home", "view:Inbox", "view:Files", "assistant"));
+  const { alpha } = await open(world, only("home", "view:Inbox", "view:Files", "assistant"));
+  await coverLifted(alpha);
   // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited": the tile's name is its app's, with what waits there said after it
   await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
   await page.getByRole("button", { name: /Revised term sheet/ }).click();

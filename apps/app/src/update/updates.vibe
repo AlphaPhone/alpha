@@ -7,7 +7,7 @@ import * as Updates from "../../gen/app__update.effect.vibe"
 import type { Activity, Effect as Out, Event, Feed, Release } from "../../gen/app__update.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { LauncherUpdates } from "../platform/launcherUpdates.vibe"
-import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Engagement, Engagements, engagements } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
@@ -136,7 +136,7 @@ effect function observed(): void!!(LauncherUpdates | Names | Updates.Machine) {
   const mine = Option.getOrUndefined(try Effect.option((try LauncherUpdates).installed()))
   if (mine === undefined || !hex64.test(mine.signer)) return
   const signer = try (try Names).number(mine.signer)
-  try ignore((try Updates.Machine).send({ type: "observePhone", installed: whole(mine.version), signer, permission: mine.permission }))
+  try contained((try Updates.Machine).send({ type: "observePhone", installed: whole(mine.version), signer, permission: mine.permission }), "observing phone for updates")
 }
 
 /** What the phone reports, read at launch and each time Alpha comes back to the front. */
@@ -149,8 +149,8 @@ const phone = started(effect {
 const shown = started(effect {
   const updates = try Updates.Machine
   const device = try Device
-  try ignore(updates.send({ type: "show", visible: try device.showing() }))
-  try Stream.runForEach(device.visible, (visible) => ignore(updates.send({ type: "show", visible })))
+  try contained(updates.send({ type: "show", visible: try device.showing() }), "showing updates")
+  try Stream.runForEach(device.visible, (visible) => contained(updates.send({ type: "show", visible }), "showing updates"))
 }, "following whether Alpha is on screen for updates")
 
 /** What the owner's activity is read from: the shell, what covers or holds the phone, a call, Alpha in front, a field with focus and the other areas' reports. */
@@ -169,7 +169,7 @@ function activityOf({ shell, layers, call, front, typing, reported }: Facts): Ac
   return Updates.withSignIn({
     home: shell.trail.length === 0,
     open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
-    typing: typing || shell.assistant === "Typing", voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
+    typing: reported.card !== "Resting" && (typing || shell.assistant === "Typing"), voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
     busy: reported.connecting, recording: reported.recording, front, call, audio: !call,
   }, reported.card)
 }
@@ -185,15 +185,15 @@ const activity = started(effect {
   )
   const activities = Stream.map(facts, ([shell, layers, call, front, typing, reported]) => activityOf({ shell, layers, call, front, typing, reported }))
   try Stream.runForEach(Stream.changesWith(activities, (a, b) => JSON.stringify(a) === JSON.stringify(b)),
-    (fact) => ignore(updates.send({ type: "observeActivity", activity: fact })))
+    (fact) => contained(updates.send({ type: "observeActivity", activity: fact }), "observing activity for updates"))
 }, "following the owner's activity for updates")
 
 /** The earliest future time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
 function nextWake(state: Updates.Updates, now: number): Option.Option<number> {
   if (!state.visible || !Updates.free(state)) return Option.none()
   const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.retry : Updates.interval)
-  const upcoming = [check, ...(state.deferrals > 0 ? [state.retryAt] : [])].filter((at) => at > now)
-  return upcoming.length === 0 ? Option.none() : Option.some(Math.min(...upcoming))
+  const candidates = [check, ...(state.deferrals > 0 ? [state.retryAt] : [])].filter((at) => at > now)
+  return candidates.length > 0 ? Option.some(Math.min(...candidates)) : Option.none()
 }
 
 // spec/app/update/index.md, "Alpha checks on its own only while on screen, when a check is due, and never during another check or an install"; spec/app/update/index.md, "An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded"
@@ -205,11 +205,14 @@ const schedule = started(effect {
     const now = try time.now()
     const due: Event | undefined = Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
       : Updates.canPoll(state, now) ? { type: "poll", now: untimed } : undefined
-    const taken = due !== undefined && (effect { try updates.send(due); return true } catch () => false)
+    const taken = due !== undefined && (try contained(updates.send(due), "the update schedule"))
     if (taken) continue
     const next = nextWake(state, now)
-    const changed = Stream.runHead(Stream.drop(updates.changes, 1))
-    if (Option.isSome(next)) try race(Effect.asVoid(changed), time.until(next.value))
+    const changed = Effect.flatMap(
+      Stream.runHead(Stream.filter(updates.changes, (current) => current !== state)),
+      (found) => (Option.isSome(found) ? Effect.void : Effect.never),
+    )
+    if (Option.isSome(next)) try race(changed, time.until(next.value))
     else try changed
   }
 }, "the update schedule")

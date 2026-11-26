@@ -32,6 +32,7 @@ export function AssistantFileRow({ file, selected, onSelect }: AssistantFileRowP
   return (
     <ListRow
       asChild
+      disabled={!onSelect}
       title={file.name}
       detail={file.detail}
       leading={file.thumbnail ? <img src={file.thumbnail} alt="" className="size-10 rounded-md object-cover" /> : <Icon />}

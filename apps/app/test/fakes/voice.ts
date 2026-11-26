@@ -192,7 +192,7 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         voice.played.push({ text: texts.get(playbackId) ?? "", at: Date.now() });
         const hold = voice.playbackHold;
         if (voice.holdPagePlayback && playbackId === pagePlaybackId) return Promise.resolve({});
-        if (hold === undefined) emit("playbackEnded", { playbackId });
+        if (hold === undefined) void Promise.resolve().then(() => emit("playbackEnded", { playbackId }));
         else void hold().then(() => emit("playbackEnded", { playbackId }));
         return Promise.resolve({});
       },
@@ -261,6 +261,7 @@ type RelayExtras = {
 export function elizaCloudSpeech(voice: VoiceScene): Faked {
   return plugin<ElizaCloudSpeechPlugin & RelayExtras, { cloudSpeechEvent: CloudStreamEvent }>((emit) => {
     voice.emitCloud = (event) => emit("cloudSpeechEvent", event);
+    const cancelled = new Set<string>();
     return {
       prewarmCloudSpeech: ({ environment }) => {
         voice.relayWarmups.push(environment);
@@ -280,11 +281,18 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
         if (voice.activeMicSession === sessionId) voice.activeMicSession = undefined;
         return Promise.resolve({});
       },
-      setCloudSpeechOutputMuted: () => Promise.resolve({}),
+      setCloudSpeechOutputMuted: ({ muted }) => {
+        voice.speakerMuted = muted;
+        return Promise.resolve({});
+      },
       setCloudSpeechMuted: () => Promise.resolve({}),
       speakCloudSpeech: ({ sessionId, utteranceId, text }) => {
         voice.spoken.push({ text, append: false, replace: false, channel: "cloud" });
         void Promise.resolve().then(() => {
+          if (utteranceId !== undefined && cancelled.has(utteranceId)) {
+            cancelled.delete(utteranceId);
+            return;
+          }
           emit("cloudSpeechEvent", { sessionId, type: "audio-start", utteranceId });
           emit("cloudSpeechEvent", { sessionId, type: "audio-end", utteranceId });
         });
@@ -292,6 +300,7 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
       },
       cancelCloudSpeech: ({ sessionId, utteranceId }) => {
         voice.hushCalls += 1;
+        if (utteranceId !== undefined) cancelled.add(utteranceId);
         emit("cloudSpeechEvent", { sessionId, type: "audio-end", utteranceId, interrupted: "cancelled" });
         return Promise.resolve({});
       },

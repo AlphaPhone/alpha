@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { Button } from "../Button.tsx";
 
@@ -23,19 +24,25 @@ export type BrowserFindBarProps = {
  * 26px corners, 44px controls with 18px icons.
  */
 export function BrowserFindBar({ value, onValueChange, status, onPrevious, onNext, onClose }: BrowserFindBarProps) {
+  const attachInput = useCallback((input: HTMLInputElement | null) => {
+    if (input && input.dataset.focused === undefined) {
+      input.dataset.focused = "";
+      input.focus({ preventScroll: true });
+    }
+  }, []);
   return (
-    <div role="search" aria-label="Find in page" className="absolute top-12.5 right-2.5 left-2.5 z-20 in-data-[alpha-launcher]:top-24.5 flex min-h-13 items-center gap-1 rounded-group bg-card py-1 pr-1 pl-3.5 shadow-dock-compact ring-1 ring-border dark:shadow-dock-compact-dark">
+    <div role="search" aria-label="Find in page" className="absolute top-12.5 right-2.5 left-2.5 z-20 flex min-h-13 items-center gap-1 rounded-group bg-popover py-1 pr-1 pl-3.5 text-popover-foreground shadow-dock-compact ring-1 ring-border has-[>input:focus-visible]:outline-solid has-[>input:focus-visible]:outline-focus has-[>input:focus-visible]:outline-offset-focus has-[>input:focus-visible]:outline-ring in-data-[alpha-launcher]:top-24.5 dark:shadow-dock-compact-dark">
       <input
-        ref={(input) => { if (input && input.dataset.focused === undefined) { input.dataset.focused = ""; input.focus({ preventScroll: true }); } }}
+        ref={attachInput}
         type="search" aria-label="Find in page" placeholder="Find in page" value={value}
         onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); (event.shiftKey ? onPrevious : onNext)?.(); } else if (event.key === "Escape") onClose(); }}
         className="min-h-11 min-w-0 flex-1 border-0 bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
       />
       <span role="status" aria-live="polite" className="text-meta leading-plain whitespace-nowrap text-muted-foreground">{status}</span>
-      <Button variant="ghost" size="icon" className="disabled:opacity-100" aria-label="Previous match" disabled={onPrevious === undefined} onClick={onPrevious}><ChevronUp className="size-4.5" /></Button>
-      <Button variant="ghost" size="icon" className="disabled:opacity-100" aria-label="Next match" disabled={onNext === undefined} onClick={onNext}><ChevronDown className="size-4.5" /></Button>
-      <Button variant="ghost" size="icon" aria-label="Close find in page" onClick={onClose}><X className="size-4.5" /></Button>
+      <Button variant="ghost" size="icon" aria-label="Previous match" disabled={onPrevious === undefined} onClick={onPrevious}><ChevronUp aria-hidden className="size-4.5" /></Button>
+      <Button variant="ghost" size="icon" aria-label="Next match" disabled={onNext === undefined} onClick={onNext}><ChevronDown aria-hidden className="size-4.5" /></Button>
+      <Button variant="ghost" size="icon" aria-label="Close find in page" onClick={onClose}><X aria-hidden className="size-4.5" /></Button>
     </div>
   );
 }

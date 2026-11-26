@@ -3,43 +3,52 @@ import * as ClockView from "../../gen/app__clock.effect.vibe"
 import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Stopwatch from "../../gen/app__clock__stopwatch.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
 import { started, together } from "../runtime/reactor.vibe"
-import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
+import { activeClockTicks } from "./shelf.vibe"
 
-interface TickStore {
-  readonly snapshot: () => number
-  readonly subscribe: (listener: () => void) => () => void
-  readonly set: (now: number) => void
+effect function optionalShellChanges(): Stream.Stream<Shell.Shell | undefined>!! {
+  const ctx = try Effect.context<never>()
+  const found = Context.getOption(ctx, Shell.Machine)
+  return Option.isSome(found) ? found.value.changes : Stream.concat(Stream.succeed(undefined), Stream.never)
 }
 
-function makeTickStore(): TickStore {
-  const held = externalStore(0)
-  return {
-    snapshot: held.snapshot,
-    subscribe: held.subscribe,
-    set(now: number): void {
-      if (now !== held.snapshot()) held.set(now)
-    },
-  }
+function clockOrHomeVisible(shellState: Shell.Shell | undefined): boolean {
+  if (shellState === undefined) return true
+  return Shell.showing(shellState, "Clock") || shellState.trail.length === 0
 }
 
-/** Live one-second clock timestamp fed by Effect Time for Alarms, Timers, and World Clock displays. */
-export const clockNow: TickStore = makeTickStore()
+function clockVisible(shellState: Shell.Shell | undefined): boolean {
+  if (shellState === undefined) return true
+  return Shell.showing(shellState, "Clock")
+}
 
-/** High-resolution timestamp fed by Effect Time while Stopwatch is Running. */
-export const stopwatchNow: TickStore = makeTickStore()
+effect function visibilityStream(): Stream.Stream<boolean>!!Device {
+  const device = try Device
+  const initial = try device.showing()
+  return Stream.concat(Stream.succeed(initial), device.visible)
+}
 
 const runningTimerTick = started(effect {
   const time = try Time
   const timers = try Timers.Machine
-  clockNow.set(try time.now())
-  const active = Stream.changes(Stream.map(timers.changes, (state) => state.items.some((item) => item.status === "Running")))
+  const ticks = try activeClockTicks()
+  const shellStream = try optionalShellChanges()
+  const visibleStream = try visibilityStream()
+  ticks.clockNow.set(try time.now())
+  const active = Stream.changes(
+    Stream.map(
+      Stream.zipLatest(Stream.zipLatest(visibleStream, shellStream), timers.changes),
+      ([[visible, shellState], state]) => visible && clockOrHomeVisible(shellState) && state.items.some((item) => item.status === "Running"),
+    ),
+  )
   try Stream.runDrain(Stream.switchMap(active, (running) => {
-    if (!running) return Stream.fromEffect(effect { clockNow.set(try time.now()) })
+    if (!running) return Stream.fromEffect(effect { ticks.clockNow.set(try time.now()) })
     return Stream.fromEffectDrain(effect {
       for (;;) {
-        clockNow.set(try time.now())
+        ticks.clockNow.set(try time.now())
         try sleep(1000)
       }
     })
@@ -49,42 +58,67 @@ const runningTimerTick = started(effect {
 const alarmChangeTick = started(effect {
   const time = try Time
   const alarms = try Alarms.Machine
+  const ticks = try activeClockTicks()
   try Stream.runForEach(alarms.changes, effect () => {
-    clockNow.set(try time.now())
+    ticks.clockNow.set(try time.now())
   })
 }, "Clock alarm timestamp refresh")
 
-/** Resident lightweight clock tick layer (ticks every second only while a timer is running). */
+/** Resident lightweight clock tick layer (ticks every second only while visible on Clock or Home with a running timer). */
 export const residentClockTick = together(runningTimerTick, alarmChangeTick)
 
 const screenSecondTick = started(effect {
   const time = try Time
   const view = try ClockView.Machine
-  const onWorld = Stream.changes(Stream.map(view.changes, (state) => state.tab === "World"))
-  try Stream.runDrain(Stream.switchMap(onWorld, (worldTab) => Stream.fromEffectDrain(effect {
-    const cadence = worldTab ? 1000 : 60_000
-    for (;;) {
-      clockNow.set(try time.now())
-      try sleep(cadence)
-    }
-  })))
+  const ticks = try activeClockTicks()
+  const shellStream = try optionalShellChanges()
+  const visibleStream = try visibilityStream()
+  const mode = Stream.changes(
+    Stream.map(
+      Stream.zipLatest(Stream.zipLatest(visibleStream, shellStream), view.changes),
+      ([[visible, shellState], state]) => {
+        if (!visible || !clockVisible(shellState)) return "off" as const
+        return state.tab === "World" ? ("world" as const) : ("idle" as const)
+      },
+    ),
+  )
+  try Stream.runDrain(Stream.switchMap(mode, (current) => {
+    if (current === "off") return Stream.empty
+    const cadence = current === "world" ? 1000 : 60_000
+    return Stream.fromEffectDrain(effect {
+      for (;;) {
+        ticks.clockNow.set(try time.now())
+        try sleep(cadence)
+      }
+    })
+  }))
 }, "Clock screen ticks")
 
 const stopwatchRunningTick = started(effect {
   const time = try Time
+  const view = try ClockView.Machine
   const sw = try Stopwatch.Machine
-  stopwatchNow.set(try time.now())
-  const running = Stream.changes(Stream.map(sw.changes, (state) => state.status === "Running"))
+  const ticks = try activeClockTicks()
+  const shellStream = try optionalShellChanges()
+  const visibleStream = try visibilityStream()
+  ticks.stopwatchNow.set(try time.now())
+  const running = Stream.changes(
+    Stream.map(
+      Stream.zipLatest(Stream.zipLatest(visibleStream, shellStream), Stream.zipLatest(view.changes, sw.changes)),
+      ([[visible, shellState], [viewState, swState]]) =>
+        visible && clockVisible(shellState) && viewState.tab === "Stopwatch" && swState.status === "Running",
+    ),
+  )
   try Stream.runDrain(Stream.switchMap(running, (isRunning) => {
-    if (!isRunning) return Stream.fromEffect(effect { stopwatchNow.set(try time.now()) })
+    if (!isRunning) return Stream.empty
     return Stream.fromEffectDrain(effect {
       for (;;) {
-        stopwatchNow.set(try time.now())
+        ticks.stopwatchNow.set(try time.now())
         try sleep(50)
       }
     })
   }))
 }, "Stopwatch high-resolution ticks")
 
-/** Area-scoped Clock screen ticker for live World Clock seconds and 50ms Stopwatch display. */
+/** Area-scoped Clock screen ticker gated on visibility and active Clock screen/tab. */
 export const clockScreenTick = together(screenSecondTick, stopwatchRunningTick)

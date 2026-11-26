@@ -1,17 +1,21 @@
 // spec/app/calendar/agent.md, "Story: Let the agent read my calendar"; spec/app/calendar/agent.md, "Story: Approve what the agent changes"; spec/app/calendar/agent.md, "Story: Know what the agent's change did"; spec/app/calendar/agent.md, "Story: Read where a Calendar request stands"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Changes from "../../gen/app__calendar__agent.effect.vibe"
-import type { Actor, Effect as Out, Event } from "../../gen/app__calendar__agent.effect.vibe"
+import type { Actor, Effect as Out, Event, Result } from "../../gen/app__calendar__agent.effect.vibe"
+import type * as Notices from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
-import { type Attempts } from "../runtime/attempts.vibe"
+import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
-import { type AgentCalendar, inAskAlpha, readsRequestsAgain, refreshes } from "../../gen/app__calendar__agent.ts"
+import { type AgentCalendar, readsRequestsAgain, refreshes } from "../../gen/app__calendar__agent.ts"
 import { Time } from "../runtime/time.vibe"
 import { asked } from "./asked.ts"
-import { type Request, complete, requestOf, requests } from "./requests.ts"
-import { type Row, shown } from "./shown.ts"
+import { readFeed } from "./calendar.vibe"
+import { type Request, complete, decodeRequest } from "./requests.ts"
+import type { Row } from "./shown.ts"
+import { Requests, Shown } from "./stores.vibe"
 import { civilDay, dayStart, feedParams, zone } from "./time.ts"
 
 const base = "/api/lifeops/calendar"
@@ -19,21 +23,33 @@ const base = "/api/lifeops/calendar"
 /** What a read of the agent's calendar says, as far as Calendar asks: whether Google answered. */
 schema Answered { readonly state: "complete" | "partial" | "unavailable" }
 
-/** What a read back finds of the events around a change: each one's id, title, start and the owner's own reply. */
+/** What a read back finds of the events around a change: each one's id, title, location, start, end and the owner's own reply. */
 schema Listed {
   readonly events: ReadonlyArray<{
     readonly id: string
     readonly title: string
+    readonly location: string
     readonly startAt: string
+    readonly endAt: string
     readonly attendees: ReadonlyArray<{ readonly self: boolean; readonly responseStatus: string | null }>
   }>
 }
 
-/** The agent's approvals list, as far as Calendar reads it: its rows, untrusted, which `requestOf` reads. */
+/** The agent's approvals list, as far as Calendar reads it: its rows, untrusted, which `Requests.fromWire` reads. */
 const Approvals = Schema.Struct({ approvals: Schema.Array(Schema.Unknown) })
 
 /** How the agent ended a decision, as its approvals route answers. */
 schema Resolved { readonly kind: string }
+
+const reportedWords: Partial<Record<Result, { readonly message: string; readonly failure: boolean }>> = {
+  Done: { message: "Done, and seen in your calendar.", failure: false },
+  NotFound: { message: "Sent, but Calendar could not find the change.", failure: true },
+  Refused: { message: "Your agent didn't make the change. Nothing changed.", failure: true },
+  InDoubt: { message: "Alpha can't tell whether this change was made. It won't be sent again.", failure: true },
+  Declined: { message: "Declined. Nothing changed.", failure: false },
+  DeletedByReceipt: { message: "Deleted.", failure: false },
+  Unverified: { message: "Sent, but Calendar couldn't check it yet.", failure: true },
+}
 
 /** The window the agent's reads cover: today and the six days after. */
 function week(now: number) {
@@ -53,8 +69,8 @@ const resolveOf = (request: Request, decision: "approve" | "reject") =>
 
 // spec/app/calendar/agent.md, "What is sent is exactly the change approved, for the revision the agent selected"; spec/app/calendar/agent.md, "A change Google confirms is read back; a refused or unknown one ends there and is reported"
 /** Approve the request the card showed, at the revision the owner reviewed: the agent then makes exactly that change, once. */
-effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts) {
-  const request = requests.find(change.filing)
+effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts | Requests) {
+  const request = (try Requests).find(change.filing)
   if (request === undefined) return { type: "sent", attempt: change.attempt, confirmed: false, known: true }
   const sent = try attemptedWith(Agent, () => resolveOf(request, "approve"), change.attempt)
   if (!sent.confirmed) return { type: "sent", attempt: change.attempt, confirmed: false, known: sent.known }
@@ -63,37 +79,58 @@ effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts) {
 }
 
 // spec/app/calendar/agent.md, "The owner declines, or the agent withdraws, and nothing is sent"
-effect function reject(filing: number): void!!Agent {
-  const request = requests.find(filing)
+effect function reject(filing: number): void!!(Agent | Requests) {
+  const request = (try Requests).find(filing)
   if (request !== undefined) try ignore(ask(Agent, resolveOf(request, "reject"), Schema.Unknown))
 }
 
 // spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"; spec/app/calendar/agent.md, "A read back that fails leaves a confirmed deletion deleted by its receipt, and any other change sent but unverified"
 /** The read back's answer, over the window around the change's own day: whether the event is there as the change left it. */
-effect function readBack(ticket: number, filing: number): Event!!(Agent | Time) {
-  const request = requests.find(filing)
-  const at = request?.fields === undefined ? shown.find(shown.number("Google", request?.eventId ?? ""))?.begin : Date.parse(request.fields.startAt)
+effect function readBack(ticket: number, filing: number): Event!!(Agent | Time | Requests | Shown) {
+  const request = (try Requests).find(filing)
+  if (request === undefined) return { type: "readBackFailed", ticket }
+  const shown = try Shown
+  const at = request.fields === undefined
+    ? (request.targetStartAt !== "" ? Date.parse(request.targetStartAt) : request.eventId !== "" ? shown.find(shown.number("Google", request.eventId))?.begin : undefined)
+    : Date.parse(request.fields.startAt)
   const urlParams = feedParams(civilDay(at === undefined || !Number.isFinite(at) ? try (try Time).now() : at))
   const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams }), Listed) catch () => undefined
-  if (listed === undefined || request === undefined) return { type: "readBackFailed", ticket }
+  if (listed === undefined) return { type: "readBackFailed", ticket }
   const reply = { Going: "accepted", Maybe: "tentative", NotGoing: "declined", NoReply: "" }[request.reply]
   const present = request.change === "Create"
     ? listed.events.some((event) => event.title === request.fields?.title && Date.parse(event.startAt) === Date.parse(request.fields.startAt))
     : listed.events.some((event) => event.id === request.eventId
-        && (request.change !== "Update" || request.fields === undefined || event.title === request.fields.title)
+        && (request.change !== "Update" || request.fields === undefined
+          || (event.title === request.fields.title
+            && event.location === request.fields.location
+            && Date.parse(event.startAt) === Date.parse(request.fields.startAt)
+            && Date.parse(event.endAt) === Date.parse(request.fields.endAt)))
         && (request.change !== "Respond" || event.attendees.some((person) => person.self && person.responseStatus === reply)))
   return { type: "readBack", ticket, present }
 }
 
+const shownKey = "alpha.calendar.request"
+
+// spec/app/calendar/agent.md, "The agent is told once, when its change ends"
+/** Record and announce the final outcome of an agent calendar change, and clear the persisted proposal slot. */
+effect function report(result: Result): void!!(Changes.Machine | Requests | KeyValueStore.KeyValueStore | Notices.Machine | Said) {
+  const state = try (try Changes.Machine).get()
+  const store = try Requests
+  if (state.filing > 0) store.recordResult(state.filing, result)
+  try ignore((try KeyValueStore.KeyValueStore).remove(shownKey))
+  const words = reportedWords[result]
+  if (words !== undefined) try say(words.message, words.failure)
+}
+
 const world: Actor = "World"
 
-function carry(fx: Out): Job<Event, Agent | Time, [by: Actor]> {
+function carry(fx: Out): Job<Event, Agent | Time | Requests | Shown | Changes.Machine | KeyValueStore.KeyValueStore | Notices.Machine | Said, [by: Actor]> {
   return match (fx) {
     when { tag: "Ask", let ticket }: answer("ask", read(ticket), { type: "feedAnswered", ticket, ok: false }, world);
     when { tag: "Send" }: answer(`send ${fx.attempt}`, send(fx), { type: "sent", attempt: fx.attempt, confirmed: false, known: false }, world);
     when { tag: "Reject", let filing }: run(`reject ${filing}`, reject(filing), world);
     when { tag: "ReadBack", let ticket, let filing }: answer("read back", readBack(ticket, filing), { type: "readBackFailed", ticket }, world);
-    when { tag: "Report" }: run("report", succeed(undefined), world);
+    when { tag: "Report", let result }: run("report", report(result), world);
   }
 }
 
@@ -103,39 +140,60 @@ function revisionOf(request: Request, rows: ReadonlyArray<Row>): number {
   return 2 * request.changes + (moved ? 1 : 0)
 }
 
-const shownKey = "alpha.calendar.request"
-const decodeKept = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
+// spec/app/calendar/agent.md, "A card is complete only with known fields, a valid time and, for a change, a verified target"
+/** Verify a non-create target against cached rows or, if outside the current window, one read of its own calendar at its start. */
+effect function rowsFor(request: Request, cached: ReadonlyArray<Row>): ReadonlyArray<Row>!!(Agent | Shown) {
+  if (request.change === "Create" || request.eventId === "") return cached
+  if (cached.some((row) => row.key === request.eventId)) return cached
+  const targetAt = request.targetStartAt !== ""
+    ? Date.parse(request.targetStartAt)
+    : request.fields !== undefined ? Date.parse(request.fields.startAt) : NaN
+  if (!Number.isFinite(targetAt)) return cached
+  const fetched = readFeed(civilDay(targetAt)) catch () => Option.none()
+  if (Option.isNone(fetched)) return cached
+  const shown = try Shown
+  return fetched.value.map((one) => shown.toRow("Google", one))
+}
 
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "When the event changes in Google, the card waiting for the owner no longer counts"; spec/app/calendar/agent.md, "A card voided by a change in Google is shown again at the event's new revision, marked updated"
 /** Read the agent's approvals list and tell the card what it holds: the oldest pending Calendar request, a new revision of the one shown, or that it is gone. */
-effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore) {
+effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore | Requests | Shown | Time) {
   const machine = try Changes.Machine
+  const reqStore = try Requests
+  const shown = try Shown
+  const nowMs = try (try Time).now()
   const listed = ask(Agent, HttpClientRequest.get("/api/approvals", { urlParams: { state: "pending", limit: "50" } }), Approvals) catch () => undefined
   if (listed === undefined) return
   const s = try machine.get()
-  const pending = listed.approvals.map((row) => requestOf(row, s.filing)).filter((request): request is Request => request !== undefined)
-  const rows = shown.all("Google")
-  for (const request of pending) requests.keep(request)
+  const pending = listed.approvals.map((row) => reqStore.fromWire(row, s.filing)).filter((request): request is Request => request !== undefined)
+  const cached = shown.all("Google")
+  for (const request of pending) {
+    reqStore.keep(request)
+    const exp = Date.parse(request.expiresAt)
+    if (Number.isFinite(exp) && nowMs >= exp) reqStore.markExpired(request.filing)
+  }
   if (s.stage === "Awaiting") {
-    const mine = requests.find(s.filing)
+    const mine = reqStore.find(s.filing)
     const now = pending.find((request) => request.id === mine?.id)
     if (now === undefined) {
       try contained(machine.send({ type: "withdraw" }, "Agent"), "withdrawing a request the agent dropped")
       return
     }
+    const rows = try rowsFor(now, cached)
     const revision = revisionOf(now, rows)
     if (revision > s.revision) try contained(machine.send({ type: "eventChanged", revision }, world), "a change to the request or its event")
     try contained(machine.send({ type: "showUpdated", complete: complete(now, rows) }, world), "showing the card again")
     return
   }
   if (s.stage !== "Idle") return
-  // A request just declined may still read pending while its decline is on its way to the agent.
-  const declined = s.result === "Declined" ? requests.find(s.filing)?.id : undefined
+  // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": a request just declined may still read pending while its decline is on its way to the agent.
+  const declined = s.result === "Declined" ? reqStore.find(s.filing)?.id : undefined
   const oldest = pending.findLast((request) => request.id !== declined)
   if (oldest === undefined) return
   try ignore((try KeyValueStore.KeyValueStore).set(shownKey, JSON.stringify(oldest)))
+  const rows = try rowsFor(oldest, cached)
   const id = oldest.change === "Create" ? 0 : shown.number("Google", oldest.eventId)
-  const row = shown.find(id)
+  const row = rows.find((candidate) => candidate.key === oldest.eventId) ?? shown.find(id)
   try contained(machine.send({
     type: "propose", change: oldest.change, reply: oldest.reply, complete: complete(oldest, rows), filing: oldest.filing, id,
     series: oldest.occurrences === "series" || oldest.occurrences === "this_and_following", managed: row?.managed ?? false, revision: revisionOf(oldest, rows),
@@ -144,28 +202,48 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
 
 // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
 /** Tell Ask Alpha what the card has to show there, a change under way or how one a reply filed ended, and the request it holds. */
-function tellAskAlpha(s: AgentCalendar): void {
-  const id = requests.find(s.filing)?.id
-  asked.show(inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)), id ?? "")
+effect function tellAskAlpha(s: AgentCalendar): void!!Requests {
+  const id = (try Requests).find(s.filing)?.id
+  asked.show(Changes.inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)), id ?? "")
 }
 
 /** Read the agent's approvals list once a reply filed a Calendar request, so its card shows in Ask Alpha. */
 export const relistRequests = effect {
   try listRequests()
-  tellAskAlpha(try (try Changes.Machine).get())
+  try tellAskAlpha(try (try Changes.Machine).get())
 }
 
 const toldAskAlpha = started(effect {
-  try Stream.runForEach((try Changes.Machine).changes, (s) => sync(() => tellAskAlpha(s)))
+  try Stream.runForEach((try Changes.Machine).changes, (s) => tellAskAlpha(s))
 }, "telling Ask Alpha what the card shows")
 
-/** The request the card showed before a restart, so a read back after it can still find the change. */
+/** The request the card showed before a restart, decoded via Schema so a read back after it can still find the change. */
 const restored = started(effect {
   const kept = (try KeyValueStore.KeyValueStore).get(shownKey) catch () => undefined
   if (kept === undefined) return
-  const request = (decodeKept(kept) catch () => undefined) as Request | undefined
-  if (request !== undefined && typeof request.filing === "number") requests.keep(request)
+  const request = decodeRequest(kept)
+  if (request !== undefined) (try Requests).keep(request)
 }, "taking back the request the card showed")
+
+// spec/app/calendar/agent.md, "The status follows the request's state and whether its owner was verified"
+/** Watch the active proposal's `expiresAt` deadline and mark it expired in the requests store once time reaches it. */
+const expiring = started(effect {
+  const machine = try Changes.Machine
+  const reqStore = try Requests
+  const time = try Time
+  const active = Stream.changesWith(
+    Stream.map(machine.changes, (s) => (s.stage === "Awaiting" ? { filing: s.filing, revision: s.revision } : undefined)),
+    (a, b) => a?.filing === b?.filing && a?.revision === b?.revision,
+  )
+  try Stream.runDrain(Stream.switchMap(active, (item) => item === undefined ? Stream.empty : Stream.fromEffect(effect {
+    const request = reqStore.find(item.filing)
+    const exp = request === undefined ? NaN : Date.parse(request.expiresAt)
+    if (!Number.isFinite(exp)) return
+    const now = try time.now()
+    if (exp > now) try time.until(exp)
+    reqStore.markExpired(item.filing)
+  })))
+}, "watching Calendar proposal expiry")
 
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"
 /** Each read of the day reads the agent's approvals list too. */
@@ -187,4 +265,4 @@ const applied = following(Changes.Machine, (a) => (a.stage === "Idle" && refresh
   (write): View.Event | undefined => (write === 0 ? undefined : { type: "changeCommitted" }))
 
 /** The agent's changes to the owner's Google Calendar: kept across restarts, which end what was in flight. */
-export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, relisted, restored, toldAskAlpha)
+export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, relisted, restored, expiring, toldAskAlpha)

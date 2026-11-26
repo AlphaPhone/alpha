@@ -14,8 +14,11 @@ lemma TakeWorks(job: Job, s: Trash)
 
 lemma moveToTrash_ensures(s: Trash, items: seq<int>, approval: int, by_: Actor)
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysItemsWaitOnlyBehindAJob(moveToTrash(s, items, approval, by_).state))
+  ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysAnUnseenTrashReadsNothing(moveToTrash(s, items, approval, by_).state))
+  ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysDetailsAreListed(moveToTrash(s, items, approval, by_).state))
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysAJobHoldsTheTrashAlone(moveToTrash(s, items, approval, by_).state))
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysAnUnreadableListShowsNothing(moveToTrash(s, items, approval, by_).state))
+  ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysMarksAreOfListedEntries(moveToTrash(s, items, approval, by_).state))
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysAJobKeepsItsEntries(moveToTrash(s, items, approval, by_).state))
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysWhatIsShownIsListed(moveToTrash(s, items, approval, by_).state))
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> alwaysTheConfirmationIsNotAhead(moveToTrash(s, items, approval, by_).state))
@@ -27,7 +30,6 @@ lemma moveToTrash_ensures(s: Trash, items: seq<int>, approval: int, by_: Actor)
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> stepEntriesLeaveOnlyByTheirOwnJob(s, "moveToTrash", moveToTrash(s, items, approval, by_).state))
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "moveToTrash", moveToTrash(s, items, approval, by_).state, moveToTrash(s, items, approval, by_).out))
   ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> stepARestartLeavesNothingToAnswer(s, "moveToTrash", moveToTrash(s, items, approval, by_).state))
-  ensures (inv(s) ==> canMoveToTrash(s, items, approval, by_) ==> stepNumbersNeverGoBack(s, moveToTrash(s, items, approval, by_).state))
 {
   if inv(s) && canMoveToTrash(s, items, approval, by_) && !busy(s) {
     TakeWorks(Job(Kind.Binning, items, [], approval), s);
@@ -38,8 +40,11 @@ lemma moveToTrash_ensures(s: Trash, items: seq<int>, approval: int, by_: Actor)
 
 lemma restore_ensures(s: Trash, entry: Entry, now: int, by_: Actor)
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysItemsWaitOnlyBehindAJob(restore(s, entry, now, by_).state))
+  ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysAnUnseenTrashReadsNothing(restore(s, entry, now, by_).state))
+  ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysDetailsAreListed(restore(s, entry, now, by_).state))
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysAJobHoldsTheTrashAlone(restore(s, entry, now, by_).state))
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysAnUnreadableListShowsNothing(restore(s, entry, now, by_).state))
+  ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysMarksAreOfListedEntries(restore(s, entry, now, by_).state))
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysAJobKeepsItsEntries(restore(s, entry, now, by_).state))
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysWhatIsShownIsListed(restore(s, entry, now, by_).state))
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> alwaysTheConfirmationIsNotAhead(restore(s, entry, now, by_).state))
@@ -51,7 +56,6 @@ lemma restore_ensures(s: Trash, entry: Entry, now: int, by_: Actor)
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> stepEntriesLeaveOnlyByTheirOwnJob(s, "restore", restore(s, entry, now, by_).state))
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "restore", restore(s, entry, now, by_).state, restore(s, entry, now, by_).out))
   ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> stepARestartLeavesNothingToAnswer(s, "restore", restore(s, entry, now, by_).state))
-  ensures (inv(s) ==> canRestore(s, entry, now, by_) ==> stepNumbersNeverGoBack(s, restore(s, entry, now, by_).state))
 {
   if inv(s) && canRestore(s, entry, now, by_) {
     TakeWorks(Job(Kind.Restoring, [entry.item], [entry], 0), s);
@@ -62,8 +66,11 @@ lemma restore_ensures(s: Trash, entry: Entry, now: int, by_: Actor)
 
 lemma undoDelete_ensures(s: Trash, now: int, by_: Actor)
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysItemsWaitOnlyBehindAJob(undoDelete(s, now, by_).state))
+  ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysAnUnseenTrashReadsNothing(undoDelete(s, now, by_).state))
+  ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysDetailsAreListed(undoDelete(s, now, by_).state))
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysAJobHoldsTheTrashAlone(undoDelete(s, now, by_).state))
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysAnUnreadableListShowsNothing(undoDelete(s, now, by_).state))
+  ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysMarksAreOfListedEntries(undoDelete(s, now, by_).state))
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysAJobKeepsItsEntries(undoDelete(s, now, by_).state))
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysWhatIsShownIsListed(undoDelete(s, now, by_).state))
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> alwaysTheConfirmationIsNotAhead(undoDelete(s, now, by_).state))
@@ -75,7 +82,6 @@ lemma undoDelete_ensures(s: Trash, now: int, by_: Actor)
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> stepEntriesLeaveOnlyByTheirOwnJob(s, "undoDelete", undoDelete(s, now, by_).state))
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "undoDelete", undoDelete(s, now, by_).state, undoDelete(s, now, by_).out))
   ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> stepARestartLeavesNothingToAnswer(s, "undoDelete", undoDelete(s, now, by_).state))
-  ensures (inv(s) ==> canUndoDelete(s, now, by_) ==> stepNumbersNeverGoBack(s, undoDelete(s, now, by_).state))
 {
   if inv(s) && canUndoDelete(s, now, by_) {
     TakeWorks(Job(Kind.Restoring, [], s.binned, 0), s.(undo := kit__undo_undo(s.undo), binned := []));
@@ -86,8 +92,11 @@ lemma undoDelete_ensures(s: Trash, now: int, by_: Actor)
 
 lemma erase_ensures(s: Trash, by_: Actor)
   ensures (inv(s) ==> canErase(s, by_) ==> alwaysItemsWaitOnlyBehindAJob(erase(s, by_).state))
+  ensures (inv(s) ==> canErase(s, by_) ==> alwaysAnUnseenTrashReadsNothing(erase(s, by_).state))
+  ensures (inv(s) ==> canErase(s, by_) ==> alwaysDetailsAreListed(erase(s, by_).state))
   ensures (inv(s) ==> canErase(s, by_) ==> alwaysAJobHoldsTheTrashAlone(erase(s, by_).state))
   ensures (inv(s) ==> canErase(s, by_) ==> alwaysAnUnreadableListShowsNothing(erase(s, by_).state))
+  ensures (inv(s) ==> canErase(s, by_) ==> alwaysMarksAreOfListedEntries(erase(s, by_).state))
   ensures (inv(s) ==> canErase(s, by_) ==> alwaysAJobKeepsItsEntries(erase(s, by_).state))
   ensures (inv(s) ==> canErase(s, by_) ==> alwaysWhatIsShownIsListed(erase(s, by_).state))
   ensures (inv(s) ==> canErase(s, by_) ==> alwaysTheConfirmationIsNotAhead(erase(s, by_).state))
@@ -99,7 +108,6 @@ lemma erase_ensures(s: Trash, by_: Actor)
   ensures (inv(s) ==> canErase(s, by_) ==> stepEntriesLeaveOnlyByTheirOwnJob(s, "erase", erase(s, by_).state))
   ensures (inv(s) ==> canErase(s, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "erase", erase(s, by_).state, erase(s, by_).out))
   ensures (inv(s) ==> canErase(s, by_) ==> stepARestartLeavesNothingToAnswer(s, "erase", erase(s, by_).state))
-  ensures (inv(s) ==> canErase(s, by_) ==> stepNumbersNeverGoBack(s, erase(s, by_).state))
 {
   if inv(s) && canErase(s, by_) {
     TakeWorks(Job(Kind.Erasing, (var s_map := s.doomed; seq(|s_map|, i_map requires 0 <= i_map < |s_map| => var e := s_map[i_map]; e.item)), s.doomed, 0), s.(erasing := kit__review_confirm(s.erasing)));
@@ -108,27 +116,29 @@ lemma erase_ensures(s: Trash, by_: Actor)
   }
 }
 
-lemma finished_ensures(s: Trash, number: int, results: seq<Entry>, known: bool, now: int, by_: Actor)
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> alwaysItemsWaitOnlyBehindAJob(finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> alwaysAJobHoldsTheTrashAlone(finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> alwaysAnUnreadableListShowsNothing(finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> alwaysAJobKeepsItsEntries(finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> alwaysWhatIsShownIsListed(finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> alwaysTheConfirmationIsNotAhead(finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepOnlyConfirmedItemsAreDone(s, "finished", finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepOneJobAtATime(s, "finished", finished(s, number, results, known, now, by_).state, finished(s, number, results, known, now, by_).out))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepNoJobFromAStaleList(s, "finished", finished(s, number, results, known, now, by_).state, finished(s, number, results, known, now, by_).out))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepUndoBringsBackWhatWasDeleted(s, "finished", finished(s, number, results, known, now, by_).state, finished(s, number, results, known, now, by_).out))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepOnlyListedEntriesAreRestored(s, finished(s, number, results, known, now, by_).state, finished(s, number, results, known, now, by_).out))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepEntriesLeaveOnlyByTheirOwnJob(s, "finished", finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "finished", finished(s, number, results, known, now, by_).state, finished(s, number, results, known, now, by_).out))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepARestartLeavesNothingToAnswer(s, "finished", finished(s, number, results, known, now, by_).state))
-  ensures (inv(s) ==> canFinished(s, number, by_) ==> stepNumbersNeverGoBack(s, finished(s, number, results, known, now, by_).state))
+lemma finished_ensures(s: Trash, number: int, results: seq<Entry>, known: bool, now: int, window: int, by_: Actor)
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysItemsWaitOnlyBehindAJob(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysAnUnseenTrashReadsNothing(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysDetailsAreListed(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysAJobHoldsTheTrashAlone(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysAnUnreadableListShowsNothing(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysMarksAreOfListedEntries(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysAJobKeepsItsEntries(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysWhatIsShownIsListed(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> alwaysTheConfirmationIsNotAhead(finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepOnlyConfirmedItemsAreDone(s, "finished", finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepOneJobAtATime(s, "finished", finished(s, number, results, known, now, window, by_).state, finished(s, number, results, known, now, window, by_).out))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepNoJobFromAStaleList(s, "finished", finished(s, number, results, known, now, window, by_).state, finished(s, number, results, known, now, window, by_).out))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepUndoBringsBackWhatWasDeleted(s, "finished", finished(s, number, results, known, now, window, by_).state, finished(s, number, results, known, now, window, by_).out))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepOnlyListedEntriesAreRestored(s, finished(s, number, results, known, now, window, by_).state, finished(s, number, results, known, now, window, by_).out))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepEntriesLeaveOnlyByTheirOwnJob(s, "finished", finished(s, number, results, known, now, window, by_).state))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "finished", finished(s, number, results, known, now, window, by_).state, finished(s, number, results, known, now, window, by_).out))
+  ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepARestartLeavesNothingToAnswer(s, "finished", finished(s, number, results, known, now, window, by_).state))
 {
-  if inv(s) && canFinished(s, number, by_) {
-    var m := finished(s, number, results, known, now, by_);
+  if inv(s) && canFinished(s, number, window, by_) {
+    var m := finished(s, number, results, known, now, window, by_);
     if |s.waiting| > 0 {
-      TakeWorks(Job(Kind.Binning, s.waiting, [], 0), concluded(results, known, now, s));
+      TakeWorks(Job(Kind.Binning, s.waiting, [], 0), concluded(results, known, now, window, s));
     } else {
       forall e | e in m.out ensures !(e.Bin? || (e.Restore? || e.Erase?)) {
       }

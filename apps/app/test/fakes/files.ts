@@ -13,10 +13,11 @@ export interface Stored {
   modified: number;
 }
 
-/** A file in a volume's Trash: what it was, and the id the phone gave it. */
+/** A file in a volume's Trash: what it was, any nested descendants if a folder, and the id the phone gave it. */
 interface Binned {
   readonly id: string;
   readonly was: Stored;
+  readonly descendants?: Stored[];
   readonly deletedAt: number;
 }
 
@@ -169,8 +170,8 @@ export function elizaFiles(scene: FilesScene): Faked {
       },
       storageReviewedIdentities({ volume, paths }) {
         called("reviewed");
-        const found = paths.map((path) => find(on(volume), path));
-        return Promise.resolve(found.every((one) => one !== undefined) ? { status: "ready", reviewed: found.map((one) => identity(one)) } : { status: "missing" });
+        const found = paths.map((path) => find(on(volume), path)).filter((one): one is Stored => one !== undefined);
+        return Promise.resolve(found.length === paths.length ? { status: "ready", reviewed: found.map((one) => identity(one)) } : { status: "missing" });
       },
       storageTransfer({ volume, paths, dest, copy, reviewed }) {
         called(copy ? "copy" : "move");
@@ -200,9 +201,11 @@ export function elizaFiles(scene: FilesScene): Faked {
           const found = find(on(volume), path);
           if (!found) return { path, status: "missing" };
           if (!same(path)) return { path, status: "changed" };
-          const id = String(scene.trash.length + 1);
-          for (const one of inside(on(volume), path)) scene.stored.splice(scene.stored.indexOf(one), 1);
-          scene.trash.push({ id, was: found, deletedAt: scene.now });
+          const id = String(Math.max(0, ...scene.trash.map((one) => Number(one.id) || 0)) + 1);
+          const all = inside(on(volume), path);
+          const descendants = all.filter((one) => one !== found);
+          for (const one of all) scene.stored.splice(scene.stored.indexOf(one), 1);
+          scene.trash.push({ id, was: found, descendants, deletedAt: scene.now });
           return { path, status: "trashed", to: id };
         }) });
       },
@@ -221,7 +224,7 @@ export function elizaFiles(scene: FilesScene): Faked {
           const found = scene.trash.find((one) => one.id === id && one.was.volume === on(volume));
           if (!found) return { path: id, status: "missing" };
           scene.trash.splice(scene.trash.indexOf(found), 1);
-          scene.stored.push(found.was);
+          scene.stored.push(found.was, ...(found.descendants ?? []));
           return { path: id, status: "restored", to: found.was.path };
         }) });
       },
@@ -295,7 +298,12 @@ export function selectedDocuments(scene: FilesScene): Faked {
       attachmentSelected({ selectionId }) {
         const found = held(selectionId);
         if (!found) return Promise.reject(new Error("Access ended"));
-        return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64: btoa(scene.texts[found.path] ?? `The words of ${leaf(found.path)}`) });
+        const raw = scene.texts[found.path] ?? `The words of ${leaf(found.path)}`;
+        const hasWideChar = Array.from(raw).some((ch) => (ch.codePointAt(0) ?? 0) > 0xff);
+        const dataBase64 = hasWideChar
+          ? btoa(Array.from(new TextEncoder().encode(raw), (byte) => String.fromCharCode(byte)).join(""))
+          : btoa(raw);
+        return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64 });
       },
       reviewStorageAttachment: (input) => answered(() => {
         const file = storedAttachment(input);

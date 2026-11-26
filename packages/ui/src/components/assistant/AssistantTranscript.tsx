@@ -83,9 +83,11 @@ const MessageRows = memo(function MessageRows({ messages, hold }: { messages: re
  */
 export function AssistantTranscript({ messages, messagesAfterLater, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
   const scrollRef = useRef<TranscriptScroll>({ follows: true, seen: { height: 0, view: 0 }, top: 0 });
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const page = position?.page;
   const around = position?.around;
   const placed = useCallback((content: HTMLDivElement | null) => {
+    contentRef.current = content;
     const viewport = content?.parentElement;
     if (!content || !viewport || !visible || status !== "loaded") return;
     const reading = scrollRef.current;
@@ -109,21 +111,21 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- each change to what the conversation shows is followed as it is drawn, as v119 did (45f6bed30 model.js:5561-5576), so a size the observer never sees still keeps the end
   }, [around, page, status, visible, messages, messagesAfterLater, briefing, liveMessages, interim, turn]);
-  const pageFrom = (button: HTMLElement, id: string | undefined, load: () => void) => {
-    const content = button.parentElement;
+  const pageFrom = (id: string | undefined, load: () => void) => {
+    const content = contentRef.current;
     const viewport = content?.parentElement;
     const row = content && id !== undefined ? messageRow(content, id) : undefined;
     if (viewport && row && id !== undefined) scrollRef.current.paging = { id, offset: topIn(viewport, row) };
     load();
   };
   const body = () => {
-    if (status === "loading") return <div aria-busy className="flex flex-col gap-4"><Skeleton className="h-10 w-2/3 self-end" /><Skeleton className="h-16 w-4/5" /><Skeleton className="h-10 w-1/2 self-end" /></div>;
+    if (status === "loading") return <div role="status" aria-label="Loading messages" aria-busy className="flex flex-col gap-4"><Skeleton className="h-10 w-2/3 self-end" /><Skeleton className="h-16 w-4/5" /><Skeleton className="h-10 w-1/2 self-end" /></div>;
     if (status === "failed") return <EmptyState title="Messages did not load">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>;
     return (
       <>
-        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}>Earlier</Button> : null}
+        {onEarlier ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(position?.earlier ?? messages[0]?.id, onEarlier)}>Earlier</Button> : null}
         <MessageRows messages={messages} hold={holdMessage} />
-        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}>Later</Button> : null}
+        {onLater ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(position?.later ?? messages.at(-1)?.id, onLater)}>Later</Button> : null}
         {messagesAfterLater?.length ? <MessageRows messages={messagesAfterLater} hold={holdMessage} /> : null}
         {briefing}
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
@@ -141,7 +143,10 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       onScroll={(event) => {
         const viewport = event.currentTarget;
         const reading = scrollRef.current;
-        if (visible && status === "loaded") [reading.follows, reading.top] = [atSeenEnd(reading, viewport.scrollTop), viewport.scrollTop];
+        if (visible && status === "loaded") {
+          reading.follows = atSeenEnd(reading, viewport.scrollTop);
+          reading.top = viewport.scrollTop;
+        }
         onScroll?.(event);
       }}
       {...props}

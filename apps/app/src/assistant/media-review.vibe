@@ -65,7 +65,7 @@ interface ApprovalScope extends ReviewDetails {
 }
 
 module native {
-  import { registerPlugin } from "@capacitor/core"
+  import { Capacitor, registerPlugin } from "@capacitor/core"
   import type { DeviceJournal, JournalEntry } from "@elizaos/agent"
 
   interface EnrollmentPlugin {
@@ -83,9 +83,10 @@ module native {
   /** @throws {never} */
   export function enrollment() { return (enrolled ??= registerPlugin<EnrollmentPlugin>("AlphaMediaEnrollment")) }
 
-  /** @throws {never} */
+  /** Reuse an already-registered `ElizaActionJournal` plugin instance when available to avoid duplicate Capacitor registrations. @throws {never} */
   export function journal(): DeviceJournal {
-    const held = (journalPlugin ??= registerPlugin<JournalPlugin>("ElizaActionJournal"))
+    const existing = (Capacitor as { Plugins?: Record<string, unknown> }).Plugins?.ElizaActionJournal as JournalPlugin | undefined
+    const held = existing ?? (journalPlugin ??= registerPlugin<JournalPlugin>("ElizaActionJournal"))
     return {
       get: async (proposalId) => {
         const answer = await held.get({ proposalId })
@@ -697,17 +698,20 @@ const notStarted = "Alpha couldn’t start that action."
 const sameTarget = (one: MessageDraftTarget | undefined, other: MessageDraftTarget | undefined): boolean =>
   one !== undefined && other !== undefined && one.thread === other.thread && one.ticket === other.ticket
 
-interface FilesReviewContext {
-  readonly device: Device.Shape
-  readonly shell: Shell.Shape
-  readonly layers: Layers.Machine.Shape
+interface AskedOpenContext {
   readonly preferences: Prefs.Machine.Shape
-  readonly executors: MediaExecutors.Shape
   readonly lock: Semaphore.Semaphore
   readonly scopes: Map<string, ApprovalScope>
   readonly isLatest: (opened: Session) => boolean
   readonly enrollmentIsCurrent: (opened: Session) => Effect.Effect<boolean>
   readonly proposals: (opened: Session) => Effect.Effect<readonly Proposal[] | undefined>
+}
+
+interface FilesReviewContext extends AskedOpenContext {
+  readonly device: Device.Shape
+  readonly shell: Shell.Shape
+  readonly layers: Layers.Machine.Shape
+  readonly executors: MediaExecutors.Shape
 }
 
 function filesActions(context: FilesReviewContext) {
@@ -851,15 +855,6 @@ function filesActions(context: FilesReviewContext) {
     return try continueInFiles(opened, candidate, request, route)
   }
   return { methods: { filesContext, filesOrigin, spokenFiles, spokenFilesFrom }, actOnFiles, continueInFiles }
-}
-
-interface AskedOpenContext {
-  readonly preferences: Prefs.Machine.Shape
-  readonly lock: Semaphore.Semaphore
-  readonly scopes: Map<string, ApprovalScope>
-  readonly isLatest: (opened: Session) => boolean
-  readonly enrollmentIsCurrent: (opened: Session) => Effect.Effect<boolean>
-  readonly proposals: (opened: Session) => Effect.Effect<readonly Proposal[] | undefined>
 }
 
 // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
@@ -1089,7 +1084,10 @@ const mediaReviewContext = effect {
       pinnedFiles.clear()
       const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
       const { image } = try device.capabilities()
-      const fresh = (latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch () => undefined))
+      const fresh = (latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch effect (cause) => {
+        try Effect.logWarning("Device action enrollment failed", cause instanceof Error ? cause.message : typeof cause)
+        return undefined
+      }))
       if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
       return latest
     })
@@ -1239,24 +1237,16 @@ const mediaReviewContext = effect {
   }
 }
 
-export const mediaReview = Layer.effect(MediaReview, effect {
-  const {
-    runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
-    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow,
-  } = try mediaReviewContext
-  const { methods: files, actOnFiles, continueInFiles } = filesActions({
-    device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
-  })
-  const pending = pendingProposals({
-    proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences,
-  })
+// spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+function makeSpokenReview(deps: {
+  readonly proposals: (opened: Session) => (readonly Proposal[] | undefined)!!
+  readonly enrollmentIsCurrent: (opened: Session) => boolean!!
+  readonly isLatest: (opened: Session) => boolean
+  readonly telephony: Telephony.Shape
+  readonly sameSms: (selection: SmsSelection) => boolean!!
+}): Pick<MediaReview.Shape, "hasSpokenReview" | "spokenSms"> {
+  const { proposals, enrollmentIsCurrent, isLatest, telephony, sameSms } = deps
   return {
-    session,
-    effect turnHeaders(opened, filesOnly) {
-      return turnHeaders(opened, filesOnly, opensAtOnce(try preferences.get()))
-    },
-    openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
     effect hasSpokenReview(opened, message, reply) {
       const source = reply.spoken
       const actions = repliedDeviceActions(reply.actionResults)
@@ -1295,6 +1285,29 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         revision: source.revision, enrollmentId: opened.identity.enrollmentId, ...review,
         detail: `SIM ${source.selection.subscription.slot + 1}\n${review.detail}`, sms: source.selection, spokenSms: source }
     },
+  }
+}
+
+export const mediaReview = Layer.effect(MediaReview, effect {
+  const {
+    runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow,
+  } = try mediaReviewContext
+  const { methods: files, actOnFiles, continueInFiles } = filesActions({
+    device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
+  })
+  const pending = pendingProposals({
+    proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences,
+  })
+  const spokenReview = makeSpokenReview({ proposals, enrollmentIsCurrent, isLatest, telephony, sameSms })
+  return {
+    session,
+    effect turnHeaders(opened, filesOnly) {
+      return turnHeaders(opened, filesOnly, opensAtOnce(try preferences.get()))
+    },
+    openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
+    ...spokenReview,
     effect workflowDevice() {
       const opened = try session()
       if (opened === undefined || opened.workflowProtocol === 0 || !(try enrollmentIsCurrent(opened))) return undefined
@@ -1444,7 +1457,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           const media = board.snapshot().media
           if (media.includes(before)) board.change({ media: media.flatMap((item) => item !== before ? [item] : after === undefined ? [] : [after]) })
         }
-        if ((card.phone !== undefined || deciding !== undefined) && !board.snapshot().media.includes(deciding ?? card)) return
+        if (!board.snapshot().media.includes(deciding ?? card)) return
         if (deciding === undefined) replace(card)
         const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
         if (!live || held === undefined) {

@@ -69,8 +69,8 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
       <span aria-hidden className="absolute inset-0 flex items-center justify-end bg-secondary px-6 text-muted-foreground"><Archive className="size-5.5" /></span>
       <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined} aria-current={current || undefined}
         disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
-        onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
-        className={cn(focusRing, "relative flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus", current && "bg-secondary")}
+        onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }} onLostPointerCapture={() => { swipeFromRef.current = undefined; }}
+        className={cn(focusRing, "relative flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus disabled:opacity-50", current && "bg-secondary")}
       >
         {unread ? <span className="sr-only">Unread</span> : null}
         {selecting ? (
@@ -80,17 +80,17 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
         ) : null}
         <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">{initial ?? Array.from(sender.trim())[0]?.toUpperCase()}</span>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex h-4.25 items-center gap-1.5">
-            <span className={cn("min-w-0 truncate text-base", unread ? "font-bold" : "font-medium")}>{sender}</span>
+          <span className="flex min-h-4.25 items-center gap-1.5 leading-tight">
+            <span className={cn("min-w-0 truncate text-base leading-tight", unread ? "font-bold" : "font-medium")}>{sender}</span>
             <span className="flex-1" />
             {attachment ? <Paperclip aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /> : null}
-            <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground">{time}</span>
+            <span className="shrink-0 text-xs leading-tight whitespace-nowrap text-muted-foreground">{time}</span>
           </span>
-          <span className="mt-0.5 flex h-4.25 items-center gap-2">
-            <span data-inbox-subject="" className="min-w-0 flex-1 truncate text-subject">{subject}</span>
+          <span className="mt-0.5 flex min-h-4.25 items-center gap-2 leading-tight">
+            <span data-inbox-subject="" className={cn("min-w-0 flex-1 truncate text-subject leading-tight", unread && "font-semibold")}>{subject}</span>
             <span aria-hidden className={cn("size-2 shrink-0 rounded-full", unread && "bg-primary")} />
           </span>
-          <span className="mt-0.5 block h-4 truncate text-snippet text-muted-foreground">{snippet}</span>
+          <span className="mt-0.5 block min-h-4 truncate text-snippet leading-tight text-muted-foreground">{snippet}</span>
         </span>
         {attachment ? <span className="sr-only">Has attachments</span> : null}
       </button>

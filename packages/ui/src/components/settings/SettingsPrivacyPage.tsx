@@ -50,7 +50,7 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
 export function SettingsPrivacyPage({ onPhone = true, read, askFirst, saving, recovering, onAskFirstChange, shares = {}, onShareChange, onRecover, onBack, onOpen, onSetUpAccess, onListener, place, onPlace, children }: SettingsPrivacyPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const permissionSwitch = (share: SettingsShare) => (
-    <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} recovering={recovering} onChange={onShareChange && ((on) => onShareChange(share, on))} />
+    <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} onChange={onShareChange && ((on) => onShareChange(share, on))} />
   );
   return (
     <SettingsPage title="Privacy" onBack={onBack} backLabel="Back to Settings">

@@ -1,6 +1,6 @@
 // spec/app/files/trash.md, "Story: See what is in the Trash"; spec/app/files/trash.md, "Story: Bring something back"; spec/app/files/trash.md, "Story: Erase for good"; spec/app/files/trash.md, "The owner restores everything listed that is still kept, together, from a list read since the last job"; spec/app/files/trash.md, "The owner marks listed entries, one by one or every one, and a mark lasts while its entry is listed and no job has started"; spec/app/files/trash.md, "The phone keeps an item thirty days from when it went in; its days left count down from thirty and never go below zero"
-import { Alert, AppHeader, Button, cn, EmptyState, FilesCard, filesCardCancel, filesCardConfirm, FilesRow, FilesSelectionBar, Toast } from "@repo/ui";
-import { useState, type MouseEvent } from "react";
+import { Alert, AppHeader, Button, cn, dockClearance, EmptyState, FilesCard, filesCardCancel, filesCardConfirm, FilesRow, FilesSelectionBar, Toast } from "@repo/ui";
+import { useState, useSyncExternalStore, type MouseEvent } from "react";
 import { Effect, type ManagedRuntime } from "effect";
 import { AudioLines, Check, ChevronLeft, FileText, Folder, Image, Trash2, Undo2, Video, X } from "lucide-react";
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
@@ -27,6 +27,8 @@ export interface TrashProps {
  */
 export function Trash({ runtime, onBack }: TrashProps) {
   const { state, can, send } = useTimed(runtime, useMachine);
+  const factsShelf = runtime.runSync(Effect.flatMap(TrashFacts, (trash) => trash.view()));
+  const facts = useSyncExternalStore(factsShelf.subscribe, factsShelf.snapshot, factsShelf.snapshot);
   const [choosing, setChoosing] = useState(false);
   const [asked, setAsked] = useState<"empty" | "chosen">("chosen");
   if (!state) return null;
@@ -36,7 +38,6 @@ export function Trash({ runtime, onBack }: TrashProps) {
   const ended = state.attempt.outcome;
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const detail = state.entries.find((entry) => entry.mark === state.details);
-  const facts = runtime.runSync(Effect.flatMap(TrashFacts, (trash) => trash.rows()));
   const details = detail === undefined ? undefined : facts.get(detail.mark);
   const restore = detail === undefined ? undefined : { type: "restore", entry: detail, now: untimed } as const;
   const erase = detail === undefined ? undefined : { type: "askToErase", entry: detail } as const;
@@ -61,7 +62,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
           {owner({ type: "markAll" }) && <Button variant="ghost" size="icon" aria-label="Select items" onClick={() => setChoosing(true)}><Check /></Button>}
         </AppHeader>
       )}
-      <div className="min-h-0 flex-1 touch-pan-y space-y-3 overflow-y-auto px-2 pb-28">
+      <div className={cn("min-h-0 flex-1 touch-pan-y space-y-3 overflow-y-auto px-2", selecting ? "pb-[calc(--spacing(24)+max(var(--alpha-dock-overlap,5.75rem),var(--alpha-safe-bottom,0px)))]" : dockClearance)}>
       {(ended === "Refused" || ended === "Unknown") && <Alert variant="warn">{ended === "Unknown" ? "Alpha cannot tell how far the phone got" : "The phone did not do all of it"}</Alert>}
       {shown === "NoAccess" && <Alert variant="warn">Alpha may not read your files</Alert>}
       {shown === "Reading" && <p role="status" className="mx-2 my-2 text-sm text-muted-foreground">Loading…</p>}
@@ -101,7 +102,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
           { label: "Delete forever", icon: <Trash2 />, onPress: owner({ type: "askToEraseMarked" }) ? () => { setAsked("chosen"); tell({ type: "askToEraseMarked" }); } : undefined },
         ]} />
       )}
-      <FilesCard open={detail !== undefined} onOpenChange={(open) => { if (!open) closeDetails(); }} title={detail?.name ?? ""} message={details?.location}>
+      <FilesCard open={detail !== undefined && !state.erasing.showing} onOpenChange={(open) => { if (!open) closeDetails(); }} title={detail?.name ?? ""} message={details?.location}>
         <div className="mt-2 flex flex-wrap gap-2.5">
           {restore !== undefined && owner(restore) && <button type="button" className={filesCardConfirm} onClick={() => tell(restore)}>Restore</button>}
           {erase !== undefined && owner(erase) && <button type="button" className={cn(filesCardConfirm, "bg-secondary text-foreground")} onClick={() => { setAsked("chosen"); tell(erase); }}>Delete now</button>}

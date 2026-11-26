@@ -14,11 +14,11 @@ export type Native<P> = { [Method in Exclude<keyof P, "addListener">]: P[Method]
 /** Send the page's listeners an event of a plugin, as `notifyListeners` does. */
 export type Emit<Events> = <Name extends keyof Events & string>(event: Name, data: Events[Name]) => void;
 
-/** One plugin of the fake phone: its methods, given the way to emit its events. */
-export type Faked = (emit: (event: string, data: unknown) => void) => object;
+/** One plugin of the fake phone: its methods, given the way to emit its events and optional unplug teardown hook. */
+export type Faked = (emit: (event: string, data: unknown) => void, onUnplug?: (cleanup: () => void) => void) => object;
 
 /** The fake of a plugin whose definition is `P` and whose events are `Events`: it does not compile once eliza changes either. */
-export const plugin = <P, Events = Record<never, never>>(make: (emit: Emit<Events>) => Native<P>): Faked => (emit) => make(emit);
+export const plugin = <P, Events = Record<never, never>>(make: (emit: Emit<Events>, onUnplug?: (cleanup: () => void) => void) => Native<P>): Faked => (emit, onUnplug) => make(emit, onUnplug);
 
 /** What a plugin rejects a call with: Android's `call.reject(message, code)`. */
 export function rejection(message: string, code = message) {
@@ -38,36 +38,63 @@ const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fro
  * `agentEvent`, until `unsubscribeEvents`.
  */
 export function elizaAgent(agent: Answering, recovery?: RecoveryScene, abortFails: () => boolean = () => false): Faked {
-  return plugin<ElizaAgentPlugin, AgentEvents>((emit) => {
+  return plugin<ElizaAgentPlugin, AgentEvents>((emit, onUnplug) => {
     const calls = new Map<string, AbortController>();
     let state: "running" | "stopped" | "failed" = recovery === undefined ? "running" : "failed";
-    const base = { available: true, epoch: 1, requestBodyLimit: 1_048_576 } as const;
-    const status = (): AgentStatus => state === "failed" ? { ...base, state, failure: "storage" } : { ...base, state };
-    const set = (next: "running" | "stopped"): Promise<AgentStatus> => {
+    let epoch = 1;
+    const requestBodyLimit = 1_048_576;
+    onUnplug?.(() => {
+      for (const call of calls.values()) call.abort();
+      calls.clear();
+    });
+    const status = (): AgentStatus => state === "failed"
+      ? { available: true, epoch, requestBodyLimit, state, failure: "storage" }
+      : { available: true, epoch, requestBodyLimit, state };
+    const set = (next: "running" | "stopped", bumpEpoch = false): Promise<AgentStatus> => {
       state = next;
+      if (bumpEpoch) epoch += 1;
       const now = status();
       emit("status", now);
       return Promise.resolve(now);
     };
     function asked({ method, path, body, headers }: AgentRequest, id: string) {
+      if (state !== "running") throw rejection("NotReady");
       if (typeof method !== "string" || typeof path !== "string" || !path.startsWith("/api/")) throw rejection("RouteRefused");
       if (id === "" || calls.has(id)) throw rejection("IdInUse");
+      const serialized = body === undefined ? undefined : JSON.stringify(body);
+      if (serialized !== undefined && new TextEncoder().encode(serialized).length > requestBodyLimit) throw rejection("BodyTooLarge");
       const gone = new AbortController();
       calls.set(id, gone);
-      return new Request(new URL(path, "http://agent.phone"), { method, signal: gone.signal, headers: { ...headers, ...(body === undefined ? {} : { "content-type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      return new Request(new URL(path, "http://agent.phone"), { method, signal: gone.signal, headers: { ...headers, ...(serialized === undefined ? {} : { "content-type": "application/json" }) }, ...(serialized === undefined ? {} : { body: serialized }) });
     }
     async function listen(id: string, request: Request) {
       let index = 0;
-      const response = await agent(request).catch(() => undefined);
-      const reader = response?.body?.pipeThrough(new TextDecoderStream()).getReader();
-      request.signal.addEventListener("abort", () => void reader?.cancel(), { once: true });
-      let held = "";
-      for (let read = await reader?.read().catch(() => undefined); read && !read.done; read = await reader?.read().catch(() => undefined)) {
-        const parts = (held + read.value).split("\n\n");
-        held = parts.pop() ?? "";
-        for (const part of parts) if (part.startsWith("data: ")) emit("agentEvent", { id, kind: "event", index: index++, event: JSON.parse(part.slice(6)) as Record<string, unknown> });
+      try {
+        if (request.signal.aborted) return;
+        const response = await agent(request).catch(() => undefined);
+        if (request.signal.aborted) return;
+        const reader = response?.body?.pipeThrough(new TextDecoderStream()).getReader();
+        request.signal.addEventListener("abort", () => void reader?.cancel(), { once: true });
+        if (request.signal.aborted) void reader?.cancel();
+        let held = "";
+        for (let read = await reader?.read().catch(() => undefined); read && !read.done; read = await reader?.read().catch(() => undefined)) {
+          if (request.signal.aborted) break;
+          const parts = (held + read.value).split("\n\n");
+          held = parts.pop() ?? "";
+          for (const part of parts) {
+            if (!part.startsWith("data: ")) continue;
+            try {
+              emit("agentEvent", { id, kind: "event", index: index++, event: JSON.parse(part.slice(6)) as Record<string, unknown> });
+            } catch {
+              continue;
+            }
+          }
+        }
+      } catch {
+        return;
+      } finally {
+        if (calls.delete(id)) emit("agentEvent", { id, kind: "end" });
       }
-      if (calls.delete(id)) emit("agentEvent", { id, kind: "end" });
     }
     async function pump(id: string, request: Request) {
       let index = 0;
@@ -94,9 +121,9 @@ export function elizaAgent(agent: Answering, recovery?: RecoveryScene, abortFail
     };
     return {
       getStatus: () => Promise.resolve(status()),
-      start: () => { if (recovery !== undefined) recovery.starts += 1; return set("running"); },
+      start: () => { if (recovery !== undefined) recovery.starts += 1; return set("running", true); },
       stop: () => set("stopped"),
-      restart: () => set("running"),
+      restart: () => set("running", true),
       async request(options: AgentRequest) {
         const id = options.id ?? crypto.randomUUID();
         try {
@@ -279,10 +306,20 @@ export function listenerCount(name: string, event: string): number {
 export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   const page = globalThis as { Capacitor?: Capacitor; androidBridge?: object };
   const capacitor = (page.Capacitor ??= {});
+  const previousHeaders = capacitor.PluginHeaders;
+  const previousPromise = capacitor.nativePromise;
+  const previousCallback = capacitor.nativeCallback;
   const hearing = new Map<string, Map<string, Hear>>();
+  const cleanups: (() => void)[] = [];
   currentHearing = hearing;
   const heard = (name: string, event: string) => hearing.get(`${name} ${event}`) ?? hearing.set(`${name} ${event}`, new Map()).get(`${name} ${event}`)!;
-  const made = Object.fromEntries(Object.entries(plugins).map(([name, make]) => [name, make((event, data) => { for (const hear of [...heard(name, event).values()]) hear(data); }) as NativeMethods]));
+  const made = Object.fromEntries(Object.entries(plugins).map(([name, make]) => [
+    name,
+    make(
+      (event, data) => { for (const hear of [...heard(name, event).values()]) hear(data); },
+      (cleanup) => { cleanups.push(cleanup); },
+    ) as NativeMethods,
+  ]));
   const web = typeof window === "undefined" ? undefined : window as Window & { alphaLegacySmsDrafts?: ReturnType<typeof legacySmsDrafts> };
   const legacy = made.ElizaTelephony === undefined ? undefined : legacySmsDrafts(made.AlphaConnection);
   if (web && legacy) web.alphaLegacySmsDrafts = legacy;
@@ -301,12 +338,16 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
     return id;
   };
   return () => {
+    for (const cleanup of cleanups.splice(0)) cleanup();
     hearing.clear();
     if (web && web.alphaLegacySmsDrafts === legacy) delete web.alphaLegacySmsDrafts;
     delete page.androidBridge;
-    delete capacitor.PluginHeaders;
-    delete capacitor.nativePromise;
-    capacitor.nativeCallback = () => "";
+    if (previousHeaders === undefined) delete capacitor.PluginHeaders;
+    else capacitor.PluginHeaders = previousHeaders;
+    if (previousPromise === undefined) delete capacitor.nativePromise;
+    else capacitor.nativePromise = previousPromise;
+    if (previousCallback === undefined) capacitor.nativeCallback = () => "";
+    else capacitor.nativeCallback = previousCallback;
   };
 }
 

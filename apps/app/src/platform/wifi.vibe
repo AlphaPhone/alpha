@@ -1,14 +1,16 @@
 // spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/network.md, "Story: See whether I am online"
 import type { JoinableWiFiSecurity, WiFiSecurity } from "@elizaos/os-bridges"
 import type { Joined, Scan, Security } from "../../gen/app__settings__network.ts"
+import { registered } from "./device.vibe"
 
 module held {
-  import { wifiClient } from "@elizaos/os-bridges"
+  import { wifiClient, type WiFiPlugin } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   let made: ReturnType<typeof wifiClient> | undefined
   /** eliza's client of the `ElizaWiFi` plugin, made once. @throws {never} */
   export function client(): ReturnType<typeof wifiClient> {
-    return (made ??= wifiClient())
+    return (made ??= wifiClient(capacitorPlugin<WiFiPlugin>("ElizaWiFi")))
   }
 
   export async function activeTransport() {
@@ -46,7 +48,10 @@ const securities: Readonly<Record<WiFiSecurity, Security>> = { open: "OpenNet", 
 const joinable: Readonly<Partial<Record<Security, JoinableWiFiSecurity>>> = { OpenNet: "open", EnhancedOpen: "owe", Wpa2: "wpa2", Wpa3: "wpa3" }
 const answers = { connected: "Connected", captivePortal: "Portal", declined: "Declined", unverified: "Unverified", notConnected: "NotConnected", wrongPassword: "WrongPassword", savedNetwork: "AlreadySaved" } as const
 
+const wifiPluginName = "ElizaWiFi"
+
 effect function scanned(): Scanned!! {
+  if (!registered(wifiPluginName)) return { scan: "ScanUnavailable", networks: [] }
   const wifi = client()
   const permission = try Effect.option(tryPromise(() => wifi.checkPermissions()))
   if (Option.isSome(permission) && permission.value.location !== "granted") return { scan: "NeedsLocation", networks: [] }
@@ -59,6 +64,7 @@ effect function scanned(): Scanned!! {
 }
 
 effect function joined(name: string, security: Security, passphrase: Redacted.Redacted<string>): Joined!! {
+  if (!registered(wifiPluginName)) return "JoinRefused"
   const kind = joinable[security]
   if (kind === undefined) return "JoinRefused"
   const password = Redacted.value(passphrase)
@@ -70,7 +76,9 @@ effect function joined(name: string, security: Security, passphrase: Redacted.Re
 export const phoneWiFi = Layer.succeed(WiFi, {
   scan: scanned,
   join: joined,
-  connectivity: () => Effect.map(Effect.option(tryPromise(() => client().getConnectivity())), Option.map((read) => ({ online: read.online, validated: read.validated, portal: read.captivePortal }))),
+  connectivity: () => registered(wifiPluginName)
+    ? Effect.map(Effect.option(tryPromise(() => client().getConnectivity())), Option.map((read) => ({ online: read.online, validated: read.validated, portal: read.captivePortal })))
+    : succeed(Option.none()),
   usingWifi: () => Effect.map(Effect.orElseSucceed(tryPromise(activeTransport), () => undefined), Option.fromUndefinedOr),
 })
 

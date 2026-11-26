@@ -75,6 +75,10 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
   return PasswordSurfaces.visible();
  }
 
+ void cancelReadingSpeech(String requestId) {
+  cancelBrowserSpeech(requestId);
+ }
+
  private boolean speechInFront() {
   return AlphaDevicePlugin.shareForeground(getActivity()) && !PasswordSurfaces.visible();
  }
@@ -103,8 +107,14 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  }
 
  void cancelBrowserSpeech(String requestId) {
-  cancelSpeech(requestId);
-  notifyListeners("playbackStopped", new JSObject().put("requestId", requestId));
+  if (requestId == null || requestId.isBlank()) return;
+  Runnable stop = () -> {
+   if (destroyed()) return;
+   cancelSpeech(requestId);
+   notifyListeners("playbackStopped", new JSObject().put("requestId", requestId));
+  };
+  if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) stop.run();
+  else mainHandler().post(stop);
  }
 
  @Override @PluginMethod public void transcribeLocalRecording(PluginCall call) {
@@ -279,24 +289,48 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
 
   private byte[] wav(BooleanSupplier cancelled) throws Exception {
    if (cancelled.getAsBoolean() || !current()) throw new IOException();
-   if (pcm == null) {
+   boolean needLoad;
+   synchronized (voicemailLock) {
+    if (retired || activeVoicemail != this) throw new IOException();
+    needLoad = pcm == null;
+   }
+   if (needLoad) {
     String data = VoicemailStore.pcm(getContext(), id, cancel).getString("data");
     if (data == null || data.length() > (VoicemailPcm.MAX_WAV_BYTES + 2) / 3 * 4) throw new IOException();
-    pcm = Base64.getDecoder().decode(data);
-    int bytes = pcm.length - offset;
-    if (bytes <= 0 || (bytes & 1) != 0 || pcm.length > VoicemailPcm.MAX_WAV_BYTES) throw new IOException();
+    byte[] decoded = Base64.getDecoder().decode(data);
+    int bytes = decoded.length - offset;
+    if (bytes <= 0 || (bytes & 1) != 0 || decoded.length > VoicemailPcm.MAX_WAV_BYTES) {
+     Arrays.fill(decoded, (byte) 0);
+     throw new IOException();
+    }
     // Balance the windows so that the last one is never shorter than the recognizer's minimum.
     int samples = bytes / 2;
     int windows = (samples + WINDOW_SAMPLES - 1) / WINDOW_SAMPLES;
-    windowBytes = 2 * ((samples + windows - 1) / windows);
+    int computedWindow = 2 * ((samples + windows - 1) / windows);
+    synchronized (voicemailLock) {
+     if (retired || activeVoicemail != this) {
+      Arrays.fill(decoded, (byte) 0);
+      throw new IOException();
+     }
+     if (pcm == null) {
+      pcm = decoded;
+      windowBytes = computedWindow;
+     } else {
+      Arrays.fill(decoded, (byte) 0);
+     }
+    }
    }
    if (cancelled.getAsBoolean() || !current()) throw new IOException();
-   int length = Math.min(windowBytes, pcm.length - offset);
-   byte[] header = VoicemailPcm.wavHeader(length);
-   byte[] window = Arrays.copyOf(header, header.length + length);
-   System.arraycopy(pcm, offset, window, header.length, length);
-   offset += length;
-   return window;
+   synchronized (voicemailLock) {
+    if (retired || activeVoicemail != this || pcm == null) throw new IOException();
+    int length = Math.min(windowBytes, pcm.length - offset);
+    if (length <= 0) throw new IOException();
+    byte[] header = VoicemailPcm.wavHeader(length);
+    byte[] window = Arrays.copyOf(header, header.length + length);
+    System.arraycopy(pcm, offset, window, header.length, length);
+    offset += length;
+    return window;
+   }
   }
 
   private void heard(String result) {
@@ -307,7 +341,11 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
      if (!text.isEmpty()) text.append(' ');
      text.append(spoken, 0, Math.min(spoken.length(), TRANSCRIPT_LIMIT - text.length()));
     }
-    if (offset == pcm.length) finish(true);
+    boolean done;
+    synchronized (voicemailLock) {
+     done = pcm != null && offset >= pcm.length;
+    }
+    if (done) finish(true);
     else next();
    } catch (RuntimeException unavailable) {
     finish(false);
@@ -315,10 +353,13 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
   }
 
   private void finish(boolean success) {
-   if (pcm != null) Arrays.fill(pcm, (byte) 0);
    VoicemailRead waiting;
    boolean publish;
    synchronized (voicemailLock) {
+    if (pcm != null) {
+     Arrays.fill(pcm, (byte) 0);
+     pcm = null;
+    }
     if (activeVoicemail != this) return;
     publish = success && !retired;
     waiting = nextVoicemail;

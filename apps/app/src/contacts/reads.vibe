@@ -29,9 +29,10 @@ function checked(operation: Reading, raw: unknown, unavailable: unknown): unknow
 }
 
 // spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
-effect function thread(): unknown!!(MessagesMachine | Inbox | Conversations) {
+effect function thread(): unknown!!(MessagesMachine | Inbox | Conversations | Shell | Device) {
   const state = try (try MessagesMachine).get()
-  const open = state.pane === "Conversation" && state.thread > 0
+  const shell = try (try Shell).get()
+  const open = state.front && state.pane === "Conversation" && state.thread > 0 && shell.trail.at(-1) === "Messages" && (try (try Device).showing())
   if (readOf(openedAs(open, state.page.status === "Loaded")) === "NoneSelected") return { kind: "messages-read", status: "none-selected" }
   const held = try (try Inbox).get()
   const conversation = try (try Conversations).get(state.thread)
@@ -156,7 +157,8 @@ effect function keypad(number: string | undefined): unknown!!(Dialer | PhoneMach
   }
   try contained((try Shell).send({ type: "openView", view: "Phone" }), "the agent's keypad")
   if (handed === undefined) {
-    try Stream.runHead(Stream.filter(phone.changes, (s) => s.front))
+    const front = try Effect.timeoutOption(Stream.runHead(Stream.filter(phone.changes, (s) => s.front)), "3 seconds")
+    if (Option.isNone(front) || Option.isNone(front.value)) return { kind: "phone-keypad", status: "unavailable" }
     try ignore(phone.send({ type: "pickTab", tab: "Keypad" }))
   }
   return { kind: "phone-keypad", status: "opened" }
@@ -196,11 +198,13 @@ effect function drafted(body: string, number: string | undefined): ("drafted" | 
     try (try Callers).message(number)
     const messages = try (try MessagesMachine).get()
     if (messages.pane !== "Conversation" || messages.thread !== thread) return "unavailable"
-    try Stream.runHead(Stream.filter(composer.changes, (s) => s.thread === thread))
+    const opened = try Effect.timeoutOption(Stream.runHead(Stream.filter(composer.changes, (s) => s.thread === thread)), "3 seconds")
+    if (Option.isNone(opened) || Option.isNone(opened.value)) return "unavailable"
   }
   const state = try composer.get()
   if (state.thread === 0) return "none-selected"
   if (state.slot.author !== "Nobody") return "occupied"
+  if ((try (try Drafts).text(state.thread)) !== "") return "occupied"
   if (!(try offerMessageDraft(state.thread, body))) return "unavailable"
   return (try composer.get()).slot.author === "AlphaWrote" ? "drafted" : "occupied"
 }

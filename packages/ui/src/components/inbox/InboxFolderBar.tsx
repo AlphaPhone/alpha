@@ -33,7 +33,7 @@ export function InboxFolderBar({ folder, unavailable = false, onChoose }: InboxF
   const triggerRef = useRef<HTMLButtonElement>(null);
   const refused = (name: InboxFolder) => !onChoose || (unavailable && (name === "spam" || name === "trashed"));
   return (
-    <div role="group" aria-label="Folder" tabIndex={0} className={cn(focusRing, "-mx-4 flex touch-pan-x gap-2 overflow-x-auto px-5 pb-1.5")}>
+    <div role="group" aria-label="Folder" tabIndex={0} className={cn(focusRing, "-mx-4 flex touch-pan-x gap-2 overflow-x-auto px-5 py-1.5")}>
       {primaryFolders.map((name) => {
         const Icon = icons[name];
         return (

@@ -7,7 +7,7 @@ import { useMachine as useConversation } from "../../gen/app__assistant.react.ts
 import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
-import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { Machine as ShellMachine, canRaise } from "../../gen/app__shell.effect.vibe";
 import type { Area } from "../runtime/area.tsx";
 import { type AssistantProps } from "./Assistant.tsx";
 import { freedom } from "./assistant.vibe";
@@ -22,7 +22,6 @@ function ConversationActions({ runtime }: AssistantProps) {
   const conversation = useConversation(runtime).state;
   const chats = useChats(runtime);
   const composer = useComposer(runtime).state;
-  const shell = useShell(runtime);
   const board = useMemo(() => runtime.runSync(Effect.map(Talk, (talk) => talk.board)), [runtime]);
   const store = useMemo(() => ({ subscribe: (listener: () => void) => board.subscribe(listener), snapshot: () => board.snapshot() }), [board]);
   const seen = useSyncExternalStore(store.subscribe, store.snapshot);
@@ -33,8 +32,10 @@ function ConversationActions({ runtime }: AssistantProps) {
   const start = { type: "start", ...free } as const;
   const busy = making(shown);
   const raise = () => {
-    const open = { type: "raise", detent: "Full" } as const;
-    if (shell.can(open)) void shell.send(open);
+    void runtime.runPromiseExit(Effect.gen(function* () {
+      const shell = yield* ShellMachine;
+      if (canRaise(yield* shell.get(), "Full")) yield* shell.send({ type: "raise", detent: "Full" });
+    }));
   };
   const listed = listing && shown.list.status !== "Idle";
   if (free.replying && !(listed && shown.list.status === "Failed")) return null;

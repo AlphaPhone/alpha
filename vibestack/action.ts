@@ -52,7 +52,7 @@ const TOOLS = {
   },
   dafny: {
     answered: (args: string[], r: Ran) => refused(r) || (args[0] === "audit" ? /Dafny auditor completed/.test(r.out)
-      : (r.status === 0 || r.status === 4) && !/timed out|out of memory|solver exception|inconclusive/i.test(r.out)
+      : (r.status === 0 || r.status === 4) && !/timed out|out of memory|solver exception|verification inconclusive|could not be proved.*inconclusive/i.test(r.out)
         && (r.out.match(DAFNY_SUMMARY)?.[1].split(", ").filter(Boolean).every((counted) => counted.endsWith(" out of resource")) ?? false)),
   },
 } satisfies Record<string, Tool>;

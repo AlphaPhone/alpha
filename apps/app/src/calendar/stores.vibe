@@ -1,0 +1,24 @@
+// spec/app/calendar/index.md, "Rows shown are for the day the calendar is anchored to, from a source it may read"; spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"
+import { type RequestsStore, createRequestsStore } from "./requests.ts"
+import { type ShownStore, createShownStore } from "./shown.ts"
+
+/** Scoped per-runtime store of Calendar events read from Phone and Google. */
+export service Shown: ShownStore {}
+
+/** Scoped per-runtime store of agent Calendar approval requests. */
+export service Requests: RequestsStore {}
+
+const shownLayer = Layer.effect(Shown, effect {
+  const store = createShownStore()
+  try Effect.addFinalizer(() => sync(() => { store.reset() }))
+  return store
+})
+
+const requestsLayer = Layer.effect(Requests, effect {
+  const store = createRequestsStore()
+  try Effect.addFinalizer(() => sync(() => { store.reset() }))
+  return store
+})
+
+/** Scoped Calendar side-stores, created freshly per runtime and reset on scope close. */
+export const stores = Layer.mergeAll(shownLayer, requestsLayer)

@@ -12,7 +12,9 @@ import { Device } from "../platform/device.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { untimed } from "../runtime/reactor.vibe"
+import { covering } from "./agent.vibe"
 import { NoteContent, numberOf } from "./content.vibe"
+import { NoteEditor } from "./editor.vibe"
 import { enter } from "./notes.vibe"
 import { notesSelection } from "./selection.vibe"
 
@@ -49,9 +51,7 @@ effect function allowed(fromHome: boolean): boolean!!(Device | Shell | Layers) {
 
 effect function settled(prepared: Notes.Change) {
   const listing = try Notes.Machine
-  const state = try listing.get()
-  const owner = state.owner
-  const next = state.writing.id + 1
+  const owner = (try listing.get()).owner
   const asked = listing.send({ type: "propose", c: prepared }, "Agent") catch () => undefined
   if (asked === undefined) return refused
   const review = listing.send({ type: "showProposal", covered: false }, "Owner") catch () => undefined
@@ -64,7 +64,8 @@ effect function settled(prepared: Notes.Change) {
     try ignore(listing.send({ type: "decline" }, "Owner"))
     return refused
   }
-  const ended = Stream.runHead(Stream.filter(listing.changes, (value) => value.owner !== owner || value.writing.id === next
+  const ticket = accepted.state.writing.id
+  const ended = Stream.runHead(Stream.filter(listing.changes, (value) => value.owner !== owner || value.writing.id === ticket
     && (value.writing.outcome === "Confirmed" || value.writing.outcome === "Refused" || value.writing.outcome === "Unknown")))
     |> timeout(%, "12 seconds") catch () => Option.none()
   if (Option.isNone(ended) || ended.value.owner !== owner) return unknown
@@ -75,17 +76,28 @@ effect function recovery(noteId: string, owner: number) {
   const trash = try Trash.Machine
   const opened = trash.send({ type: "show", covered: false }, "Owner") catch () => undefined
   if (opened === undefined) return refused
+  const closeIfStillShowing = effect {
+    const current = try trash.get()
+    if (current.showing && Trash.canLeave(current)) try ignore(trash.send({ type: "leave" }, "Owner"))
+  }
   const listened = Stream.runHead(Stream.filter(trash.changes, (state) => state.owner !== owner || state.read.status === "Loaded" || state.read.status === "Failed"))
     |> timeout(%, "12 seconds") catch () => Option.none()
-  if (Option.isNone(listened) || listened.value.owner !== owner || !(try allowed(false))) return refused
+  if (Option.isNone(listened) || listened.value.owner !== owner || listened.value.read.status !== "Loaded" || !(try allowed(false))) {
+    try closeIfStillShowing
+    return refused
+  }
   const id = numberOf("note", noteId)
   const written = trash.send({ type: "recover", id, now: untimed, storage: true }, "Owner") catch () => undefined
-  if (written === undefined) return refused
+  if (written === undefined) {
+    try closeIfStillShowing
+    return refused
+  }
   const ticket = written.state.attempt.id
   const answered = Stream.runHead(Stream.filter(trash.changes, (state) => state.owner !== owner || state.attempt.id === ticket
     && (state.attempt.outcome === "Confirmed" || state.attempt.outcome === "Refused" || state.attempt.outcome === "Unknown")))
     |> timeout(%, "12 seconds") catch () => Option.none()
   if (Option.isNone(answered) || answered.value.owner !== owner) return unknown
+  if (answered.value.attempt.outcome === "Refused") try closeIfStillShowing
   return answered.value.attempt.outcome === "Confirmed" ? done : answered.value.attempt.outcome === "Refused" ? refused : unknown
 }
 
@@ -98,6 +110,7 @@ export effect function executeNotes(operation: NotesOperation) {
   const listing = try Notes.Machine
   const content = try NoteContent
   const owner = numberOf("owner", identity)
+  if (try covering(operation.type !== "notes_move")) return refused
   const open = try (try Editor.Machine).get()
   if (open.showing && operation.type !== "notes_move") return refused
   if ((try listing.get()).owner !== owner || (try listing.get()).read.status !== "Loaded") {
@@ -128,7 +141,8 @@ export effect function executeNotes(operation: NotesOperation) {
   const writer = try Editor.Machine
   const still = try writer.get()
   if (!still.showing || still.note !== noteNumber || still.draft.sync !== "Kept" || still.draft.base !== snapshot.version) return refused
-  const pane = writer.send({ type: "close" }, "Owner") catch () => undefined
-  if (pane === undefined) return refused
+  const noteEditor = try NoteEditor
+  try noteEditor.close()
+  if ((try writer.get()).showing) return refused
   return try settled({ ...Notes.nothing, op: "Move", note: noteNumber, folder: destination === undefined ? 0 : numberOf("folder", destination.id), base: snapshot.version })
 }

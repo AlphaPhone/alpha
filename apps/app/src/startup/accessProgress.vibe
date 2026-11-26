@@ -1,4 +1,4 @@
-// spec/app/startup/access.md, "Story: Walk through each access in order"; "Progress is saved whole, and only the newest save's answer counts"
+// spec/app/startup/access.md, "Story: Walk through each access in order"; spec/app/startup/access.md, "Progress is saved whole, and only the newest save's answer counts"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Access from "../../gen/app__startup__access.effect.vibe"
 import * as Steps from "../../gen/app__startup__steps.effect.vibe"

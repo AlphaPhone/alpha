@@ -46,7 +46,13 @@ function prerender(): Plugin {
       const { Site: drawn } = (await built("Site")) as { Site: typeof Site };
       const { LegalPage, policyPages } = (await built("Legal")) as { LegalPage: typeof Legal; policyPages: typeof Pages };
       const { demo } = (await built("demo")) as { demo: typeof Demo };
-      const page = renderToString(createElement(drawn, { runtime: ManagedRuntime.make(demo) }));
+      const runtime = ManagedRuntime.make(demo);
+      let page: string;
+      try {
+        page = renderToString(createElement(drawn, { runtime }));
+      } finally {
+        await runtime.dispose();
+      }
       const index = join(out, "index.html");
       const shell = await readFile(index, "utf8");
       await writeFile(index, withPage(shell, page));

@@ -1,6 +1,6 @@
 // spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
 import { HomeAgendaCard, type HomeAgendaItem, type HomeAgendaNext, HomeBriefCard, HomeCallsCard, HomeMailCard, HomeWorkflowsCard } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
+import type { ManagedRuntime } from "effect";
 import { type ReactNode, useSyncExternalStore } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine as HomeMachine } from "../../gen/app__home.effect.vibe";
@@ -14,8 +14,7 @@ import { shortWhen } from "../phone/words.ts";
 import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
-import { fromAreas, named, openRoutedCard, others } from "./cards.vibe";
+import { fromAreas, latestTime, named, openRoutedCard, others } from "./cards.vibe";
 import { messagingStateOf, renderMessagingCard } from "./MessagingCards.tsx";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
@@ -74,7 +73,7 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Hom
   if (!state || !shell) return { cards: [], settled: false };
   const answered = state.calendar.source !== "Unanswered" && state.agent.source !== "Unanswered";
   const told = others(given, shell.image, messagingStateOf(messaging.cards.Telegram), messagingStateOf(messaging.cards.Slack));
-  const now = Math.max(runtime.runSync(Effect.flatMap(Time, (time) => time.latest())), state.calendar.since, state.agent.since, dayStart(state.today));
+  const now = Math.max(runtime.runSync(latestTime), state.calendar.since, state.agent.since, dayStart(state.today));
   const latest = now;
   const open = (kind: Cards.Kind) => {
     if (kind === "MailCard" || beside) {
@@ -118,12 +117,18 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Hom
     MessagesCard: () => (
       <HomeCallsCard key="messages" app="Messages" aria-label={`Open Messages, ${given.waiting.messages || told.messages.length} unread`}
         summary={String(given.waiting.messages || told.messages.length)} status={given.waiting.messagesAt > 0 ? shortWhen(given.waiting.messagesAt, latest) : ""}
-        lines={told.messages} {...open("MessagesCard")} onClick={beside ? undefined : () => void runtime.runPromise(openUnread())} />
+        lines={told.messages} disabled={open("MessagesCard").disabled} onClick={beside ? undefined : () => {
+          if (!can({ type: "openCard", kind: "MessagesCard", now })) return;
+          void send({ type: "openCard", kind: "MessagesCard", now: untimed }).then(() => runtime.runPromise(openUnread()));
+        }} />
     ),
     PhoneCard: () => (
       <HomeCallsCard key="phone" app="Phone" aria-label={given.waiting.phoneSaid ? `Open Phone, ${given.waiting.phoneSaid}` : "Open Phone"}
         summary={String(given.waiting.phone || told.phone.length)} status={given.waiting.phoneAt > 0 ? shortWhen(given.waiting.phoneAt, latest) : ""}
-        lines={told.phone} {...open("PhoneCard")} onClick={beside ? undefined : () => void runtime.runPromise(openCalls())} />
+        lines={told.phone} disabled={open("PhoneCard").disabled} onClick={beside ? undefined : () => {
+          if (!can({ type: "openCard", kind: "PhoneCard", now })) return;
+          void send({ type: "openCard", kind: "PhoneCard", now: untimed }).then(() => runtime.runPromise(openCalls()));
+        }} />
     ),
     MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} lines={told.mail.rows} status={given.mailStatus || (Cards.mailCard(told.mail) === "NotUpdated" ? "Not up to date" : "")} {...open("MailCard")} />,
     TelegramCard: () => renderMessagingCard("Telegram", "TelegramCard", messaging.cards.Telegram, open("TelegramCard")),

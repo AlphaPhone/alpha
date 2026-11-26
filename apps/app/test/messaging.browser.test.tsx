@@ -20,7 +20,7 @@ import { telegramAt } from "../src/platform/telegram.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { completeSlackOAuthCallback } from "../src/slack/auth.vibe";
 import { SlackLedger } from "../src/slack/ledger.vibe";
-import { closeAll, later, only, openOver, until } from "./alpha.tsx";
+import { closeAll, coverLifted, later, only, openOver, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 import "../src/main.css";
@@ -65,7 +65,9 @@ async function openMessagingAlpha() {
     telegram: Layer.provide(telegramAt(telegramOrigin), FetchHttpClient.layer),
     sessions: messagingSessions,
   });
-  return openOver(platform, messagingMounts);
+  const opened = await openOver(platform, messagingMounts);
+  await coverLifted(opened.alpha);
+  return opened;
 }
 
 async function waitForSlackOAuth(
@@ -186,9 +188,10 @@ describe("Messaging E2E", () => {
     await page.getByRole("button", { name: "Unlock account" }).click();
     await until(alpha, alpha.runtime, TelegramAuth.Machine, (s) => s.step === "Authenticated");
     await until(alpha, alpha.runtime, TelegramList.Machine, (s) => s.list.status === "Loaded" && s.pages > 0);
-    await expect.element(page.getByText("Maya Chen")).toBeVisible();
+    const mayaChat = page.getByLabelText("Telegram chats").getByText("Maya Chen");
+    await expect.element(mayaChat).toBeVisible();
 
-    await page.getByText("Maya Chen").click();
+    await mayaChat.click();
     await until(alpha, alpha.runtime, TelegramConversation.Machine, (s) => s.chat > 0 && s.read.status === "Loaded");
     await page.getByLabelText("Message").fill("Hello from Chromium E2E");
     await page.getByRole("button", { name: "Send" }).first().click();

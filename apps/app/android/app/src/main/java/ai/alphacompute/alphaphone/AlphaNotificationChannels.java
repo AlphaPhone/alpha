@@ -32,10 +32,12 @@ final class AlphaNotificationChannels {
    for (Row row : ROWS) {
     NotificationChannel existing = manager.getNotificationChannel(row.id());
     if (existing == null) continue;
-    String name = row.name() == 0 ? String.valueOf(existing.getName()) : context.getString(row.name());
+    CharSequence existingName = existing.getName();
+    String currentName = existingName == null ? "" : existingName.toString();
+    String name = row.name() == 0 ? currentName : context.getString(row.name());
     String description = row.description() == 0 ? existing.getDescription() : context.getString(row.description());
     String group = existing.getGroup() != null ? existing.getGroup() : row.group();
-    if (name.contentEquals(existing.getName()) && Objects.equals(description, existing.getDescription()) && Objects.equals(group, existing.getGroup())) continue;
+    if (Objects.equals(name, currentName) && Objects.equals(description, existing.getDescription()) && Objects.equals(group, existing.getGroup())) continue;
     if (group != null && group.equals(row.group())) manager.createNotificationChannelGroup(new NotificationChannelGroup(group, context.getString(groupName(group))));
     NotificationChannel next = new NotificationChannel(row.id(), name, existing.getImportance());
     next.setDescription(description);

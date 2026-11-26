@@ -30,13 +30,11 @@ migration is ineligible (setup open, app disabled or suspended), so the choice s
 when eligibility returns. Custom choices, managed users and
 secondary users retain their assignments. No credential or application data is copied.
 
-`python3 test/aosp-role-upgrade.test.py` (also run by `pnpm test`) compiles the policy
-cases, and the real staging projection, policy and Android adapter over a synthetic controller
-that carries the projection anchors, with Android boundary doubles. That synthetic controller
-test drives owner add, remove and clear requests through the injected hook. The test that
-compiles the pinned AOSP `RoleControllerServiceImpl` runs only when its hash-checked input is in
-`.cache/` (or `ALPHA_FRESH_PRESET_INPUTS`); CI does not fetch it and skips that test. A real
-signed image upgrade remains the device gate.
+Note: earlier provisioning test and staging scripts (`scripts/fetch-alpha-os-preset-inputs.py`,
+`scripts/stage-alpha-os-branding.py`, `test/aosp-role-upgrade.test.py`, `test/aosp-fresh-presets.test.py`)
+now live under `legacy/` until branding/provisioning staging is wired into `apps/app/scripts/aosp.ts`.
+`source-inputs.json` pins the active `apps/app/android/app/src/main/res/drawable/app_icon.xml` and
+`packages/design-system/brand/symbol.svg`. A real signed image upgrade remains the device gate.
 
 A rejected request, timeout, unavailable role, or failed readback leaves setup open for
 retry. The recovery button opens Home, Default apps, Input method, or ordinary Settings

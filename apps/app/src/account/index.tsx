@@ -3,8 +3,8 @@ import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Input, Sheet,
 import { ChevronDown, RotateCw, Ticket, X } from "lucide-react";
 import { normalizeSubscriptionCode, type SnapshotSubscription } from "@elizaos/cloud";
 import { Layer } from "effect";
-import { useCallback, useRef, useState, useSyncExternalStore } from "react";
-import * as Billing from "../../gen/app__account__billing.effect.vibe";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type * as Billing from "../../gen/app__account__billing.effect.vibe";
 import { useMachine as useCodes } from "../../gen/app__account__codes.react.ts";
 import { useMachine as useBilling } from "../../gen/app__account__billing.react.ts";
 import { useMachine as useSettings } from "../../gen/app__settings.react.ts";
@@ -17,7 +17,7 @@ import { checkout, choosePurchase, recheckPlan, tierOf } from "./billing.vibe";
 import { accountAccess, checkCodePlan, codes, readReferral, referralCode, submitCode } from "./codes.vibe";
 import { managePlan } from "./change.vibe";
 import { ManagePlan } from "./ManagePlan.tsx";
-import { AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, profileLive, profileShelf, settingsIsInFront } from "./profile.vibe";
+import { type AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, type ProfileShelf, profileLive, profileShelf, settingsIsInFront } from "./profile.vibe";
 
 const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
 const planDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -71,7 +71,7 @@ type PlanRuntime = Layer.Success<ReturnType<typeof managePlan>>;
 
 function Plans({ runtime, shelf, canSubscribe, subscription }: {
   runtime: Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>["runtime"];
-  shelf: ReturnType<typeof profileShelf>;
+  shelf: ProfileShelf;
   canSubscribe: boolean;
   subscription: SnapshotSubscription | undefined;
 }) {
@@ -151,26 +151,15 @@ function PurchaseStatus({ runtime }: { runtime: Shown<Resident | CheckoutRuntime
     </div>
   );
 }
-
-const profiles = new WeakMap<Alpha, ReturnType<typeof profileShelf>>();
-
-function profileFor(alpha: Alpha) {
-  const known = profiles.get(alpha);
-  if (known) return known;
-  const made = profileShelf();
-  profiles.set(alpha, made);
-  return made;
-}
-
 /** The verified account shown below the Account row in Settings. */
 export function AccountStatus({ alpha }: { alpha: Alpha }) {
-  const profile = profileFor(alpha);
-  const current = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
+  const shelf = useMemo(() => alpha.runtime.runSync(profileShelf), [alpha.runtime]);
+  const current = useSyncExternalStore(shelf.subscribe, shelf.snapshot, shelf.snapshot);
   if (current.tag === "Reading") return null;
   const label = current.tag === "Read" ? current.contact || "Signed in"
     : current.tag === "SignInRequired" ? "Signed out" : "Account unavailable";
   return <StatusDot status={current.tag === "Read" ? "ok" : "off"} label={label} showLabel
-    className={cn("flex gap-3 text-caption leading-normal text-[#6b6b6b] dark:text-[#8f8f8f] [&_circle]:r-[6px] [&_circle]:fill-current [&_circle]:stroke-none [&_svg]:size-2 [&_svg]:text-current", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
+    className={cn("flex gap-3 text-caption leading-normal text-muted-foreground [&_circle]:fill-current [&_circle]:stroke-none [&_svg]:size-2 [&_svg]:text-current", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
 }
 
 /** The browser's account recovery page is contained in Alpha's phone canvas. */
@@ -204,13 +193,13 @@ function BrowserAccount({ open, reading, inbox, retry, close }: { open: boolean;
           }}
           className="absolute inset-x-0 top-auto bottom-0 max-h-full max-w-120 translate-y-0 gap-0 overflow-auto rounded-t-sheet rounded-b-none bg-background px-5.5 pt-5 pb-7 text-foreground">
           <AuthMark className="mb-6" />
-          <DialogTitle className="mb-7 font-sans text-[1.375rem]/[1.2] font-semibold">Alpha</DialogTitle>
+          <DialogTitle className="mb-7 font-sans text-panel-title font-semibold">Alpha</DialogTitle>
           {reading
             ? <Spinner label="Reading account" className="mb-3 text-muted-foreground" />
-            : <p role="alert" className="mb-3 rounded-[12px] bg-[color-mix(in_srgb,#e03131_12%,var(--color-background))] p-3 text-sm leading-[1.45] text-[color-mix(in_srgb,#e03131_72%,var(--color-foreground))]">Unavailable</p>}
-          <Button variant="ghost" className="h-11.5 w-full gap-3 rounded-lg px-3 py-2.5 text-base leading-[1.25] font-medium text-primary hover:bg-transparent"
+            : <p role="alert" className="mb-3 rounded-sm bg-status-error/12 p-3 text-sm leading-status text-status-error">Unavailable</p>}
+          <Button variant="ghost" className="h-11.5 w-full gap-3 rounded-lg px-3 py-2.5 text-base leading-snug font-medium text-primary hover:bg-transparent"
             onClick={retry} disabled={reading}><RotateCw aria-hidden className="size-5.5" />Try again</Button>
-          <Button variant="ghost" className="mt-5 h-11 w-full rounded-full text-base leading-[1.25] font-medium text-muted-foreground hover:bg-transparent" onClick={close}>Back</Button>
+          <Button variant="ghost" className="mt-5 h-11 w-full rounded-full text-base leading-snug font-medium text-muted-foreground hover:bg-transparent" onClick={close}>Back</Button>
         </DialogContent>
       </Dialog>}
     </div>
@@ -284,7 +273,7 @@ function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeR
 /** The account sheet above Settings or Inbox, drawing the details the account read returned. */
 export default {
   open(alpha, place) {
-    const profile = profileFor(alpha);
+    const profile = alpha.runtime.runSync(profileShelf);
     function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>) {
       const { state, can, send } = useMachine(runtime);
       const { state: settings } = useSettings(runtime);
@@ -302,7 +291,7 @@ export default {
         <Sheet open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
           <SheetContent
             title="Account"
-            className="max-h-dvh max-w-105 gap-2.5 before:hidden bg-background px-6.5 pt-9 pb-[max(--spacing(7),env(safe-area-inset-bottom))] text-foreground [&_h2]:flex [&_h2]:min-h-12 [&_h2]:items-center [&_h2]:text-title"
+            className="max-h-dvh max-w-105 gap-2.5 before:hidden bg-background px-6.5 pt-9 pb-[max(--spacing(7),var(--alpha-safe-bottom))] text-foreground [&_h2]:flex [&_h2]:min-h-12 [&_h2]:items-center [&_h2]:text-title"
             actions={<Button variant="secondary" className="mt-2 rounded-lg" onClick={onClose}>Done</Button>}
           >
             <span aria-hidden className="absolute inset-x-0 top-3 mx-auto h-1 w-8 rounded-full bg-border" />

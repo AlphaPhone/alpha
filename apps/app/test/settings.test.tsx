@@ -25,8 +25,8 @@ afterEach(closeAll);
 // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image": these journeys open the development build with its developer tools.
 history.replaceState(null, "", "/?tools=1");
 
-const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 const originalFetch = globalThis.fetch;
+const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 const fetchWithNotices: typeof fetch = (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   return url.endsWith("licenses/third-party-notices.json") ? shipped() : originalFetch(input, init);
@@ -44,6 +44,7 @@ const tap = (title: string) => drawn(() => {
   if (!found) throw new Error(`no row ${title}`);
   const control = found instanceof HTMLLabelElement ? document.getElementById(found.htmlFor) : found;
   (control ?? found).click();
+  return Promise.resolve();
 });
 
 const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime.runPromise(Pages.Machine.use((pages) => pages.get())).then((state) => state.page);

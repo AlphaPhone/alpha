@@ -1,7 +1,9 @@
 // spec/app/maps/index.md, "Story: Keep guiding away from Maps"; spec/app/maps/navigation.md, "Story: Keep guiding with the screen off"
+import { registered } from "./device.vibe"
 
 module held {
-  import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
+  import type { PluginListenerHandle } from "@capacitor/core"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   /** Why Android ended a journey's service: Stop on its notification, the service lost, or arrival shown. */
   export interface Stopped { sessionId: string; reason: string }
@@ -16,10 +18,9 @@ module held {
     addListener(event: "navigationStopped", listener: (stopped: Stopped) => void): Promise<PluginListenerHandle>
   }
 
-  let made: Transport | undefined
   /** The plugin, registered once for the life of the page. @throws {never} */
   export function plugin(): Transport {
-    return (made ??= registerPlugin<Transport>("AlphaMapsTransport"))
+    return capacitorPlugin<Transport>("AlphaMapsTransport")
   }
 }
 import { type Stopped, plugin } from held
@@ -48,8 +49,20 @@ const journeyOf = (session: string): number | undefined => {
   return found === null ? undefined : Number(found[1])
 }
 
+const transportName = "AlphaMapsTransport"
+
+const unavailableNavigation = {
+  start: () => succeed(false),
+  update: () => succeed(false),
+  arrived: () => Effect.void,
+  stop: () => Effect.void,
+  opened: () => succeed(false),
+  ended: Stream.empty,
+}
+
 /** On the phone: Alpha's `AlphaMapsTransport` plugin. */
 export const phoneNavigation = Layer.sync(Navigation, () => {
+  if (!registered(transportName)) return unavailableNavigation
   const native = plugin()
   return {
     start: (journey: number, title: string, text: string) =>
@@ -59,26 +72,17 @@ export const phoneNavigation = Layer.sync(Navigation, () => {
     arrived: (title: string, text: string) => tryPromise(() => native.navigationArrived({ title, text })) |> Effect.ignore(%),
     stop: (journey: number) => tryPromise(() => native.stopNavigation({ sessionId: sessionOf(journey) })) |> Effect.ignore(%),
     opened: () => tryPromise(() => native.consumeNavigationOpen()) |> Effect.map(%, (r) => r.open === true) |> Effect.orElseSucceed(%, () => false),
-    ended: Stream.callback<Ended>((queue) => effect {
-      try acquireRelease(
-        promise(() => native.addListener("navigationStopped", (stopped: Stopped) => {
-          const journey = journeyOf(stopped.sessionId)
-          if (journey !== undefined && !["app", "renderer-closed", "replaced"].includes(stopped.reason)) {
-            Queue.offerUnsafe(queue, { journey, by: stopped.reason === "notification" ? "notification" : "lost" })
-          }
-        })),
-        (handle) => promise(() => handle.remove()),
-      )
-    }),
+    ended: Stream.callback<Ended>((queue) => Effect.asVoid(acquireRelease(
+      Effect.orElseSucceed(tryPromise(() => native.addListener("navigationStopped", (stopped: Stopped) => {
+        const journey = journeyOf(stopped.sessionId)
+        if (journey !== undefined && !["app", "renderer-closed", "replaced"].includes(stopped.reason)) {
+          Queue.offerUnsafe(queue, { journey, by: stopped.reason === "notification" ? "notification" : "lost" })
+        }
+      })), () => undefined),
+      (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
+    ))),
   }
 })
 
 /** A browser has no service to guide with the screen off. */
-export const browserNavigation = Layer.succeed(Navigation, {
-  start: () => succeed(false),
-  update: () => succeed(false),
-  arrived: () => Effect.void,
-  stop: () => Effect.void,
-  opened: () => succeed(false),
-  ended: Stream.empty,
-})
+export const browserNavigation = Layer.succeed(Navigation, unavailableNavigation)

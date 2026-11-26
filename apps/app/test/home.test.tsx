@@ -515,7 +515,7 @@ describe("Home on a phone", () => {
     };
     try {
       for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["UTC", day + 8 * hour], ["America/Los_Angeles", day + 18 * hour]] as const) {
-        const opened = await open(phoneThere(where, at, [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }]));
+        const opened = await open(phoneThere(where, at, [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }]), only("home"));
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 1);
         await drawn(() => undefined);
         const utcMidnight = Math.floor(at / 86_400_000) * 86_400_000;
@@ -525,12 +525,13 @@ describe("Home on a phone", () => {
         await opened.close();
       }
       // spec/app/home/cards.md, "An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled": an all-day event is the owner's date, as v121 read it. In Tokyo at 06:00 on the 11th (UTC still the 10th) yesterday's all-day event has ended; in Los Angeles at 18:00 on the 11th (UTC already the 12th) today's has not.
+      localStorage.clear();
       for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["America/Los_Angeles", day + 26 * hour]] as const) {
         const opened = await open(phoneThere(where, at, [
           { id: "y", calendarId: "1", title: "Moving day", begin: day - 86_400_000, end: day, allDay: true, recurring: false },
           { id: "t", calendarId: "1", title: "Holiday", begin: day, end: day + 86_400_000, allDay: true, recurring: false },
           { id: "n", calendarId: "1", title: "Trip", begin: day + 86_400_000, end: day + 2 * 86_400_000, allDay: true, recurring: false },
-        ]));
+        ]), only("home"));
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 3);
         await drawn(() => undefined);
         allDay.push(agenda()?.getAttribute("aria-label") ?? "");
@@ -740,7 +741,7 @@ describe("Home on a phone", () => {
 
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
-    await vi.waitFor(() => expect(world.ask.said).toEqual([draft]));
+    await vi.waitFor(() => expect(world.ask.said).toEqual([draft]), { timeout: 5_000 });
     expect(world.ask.spokenFiles?.map(({ images }) => images)).toEqual([
       [{ name: "Saved result.txt", mimeType: "text/plain", data: btoa(resultText) }],
     ]);

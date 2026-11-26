@@ -7,7 +7,7 @@ import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe
 import type { Ask, Effect as Out, Ending, Event, Request } from "../../gen/app__contacts__agent.effect.vibe"
 import { type Telephony, TelephonyRefused, namesOf, readAddressBook, telephony, textingDefault } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { classifyDialNumber } from "../phone/phone.vibe"
 import { draftFrom, removeContact } from "./contacts.vibe"
@@ -65,16 +65,6 @@ function askOf(operation: Asking): { readonly ask: Ask; readonly number: string;
       return { ask: "ChangeContact", number: "", search: operation.query, text: "", pictures: false }
     case "contact_delete":
       return { ask: "DeleteContact", number: "", search: operation.query, text: "", pictures: false }
-  }
-}
-
-/** Whether the phone answers `operation` as a request: a draft is Alpha's suggestion in the composer, and a text to several numbers is not one request. */
-export function isAsking(operation: DeviceOperation): operation is Asking {
-  switch (operation.type) {
-    case "phone_call": case "phone_dial": case "contact_create": case "contact_update": case "contact_delete": return true
-    case "sms_send": case "mms_send": return operation.recipients.length === 1
-    case "sms_compose": return !("draft" in operation && operation.draft === true)
-    default: return false
   }
 }
 
@@ -174,19 +164,20 @@ effect function searched(ticket: number): Event!!(Telephony | Requested | Agent.
   const documents = state.ask === "ChangeContact" || state.ask === "DeleteContact"
     ? try Effect.forEach(candidates, (one) => Effect.orElseSucceed(readAddressBook("read reviewed contact", (c) => c.get(one.id, "ExplicitRead")), () => undefined))
     : []
-  if (documents.some((document) => document === undefined)) return failed
   const reviewed = new Map(documents.flatMap((document) => document === undefined ? [] : [[document.id, document] as const]))
-  const found = candidates.map((one) => {
+  if ((state.ask === "ChangeContact" || state.ask === "DeleteContact") && candidates.length > 0 && reviewed.size === 0) return failed
+  const found = (state.ask === "ChangeContact" || state.ask === "DeleteContact" ? candidates.filter((one) => reviewed.has(one.id)) : candidates).map((one) => {
     const document = reviewed.get(one.id)
     return document === undefined ? one : { ...one, name: document.displayName, phones: document.phoneNumbers.map(({ number }) => number), emails: document.emailAddresses.map(({ address }) => address) }
   })
   const more = all.length > Agent.maxMatches || pages.some((page) => page.next !== null && page.next !== undefined)
   const added = operation.type === "contact_create" ? operation.contact.phoneNumbers : operation.type === "contact_update" ? [...(operation.set?.phoneNumbers ?? []), ...(operation.add?.phoneNumbers ?? [])] : []
   const saved = try namesOf("call", added)
-  if (!Agent.canFound(try (try Agent.Machine).get(), ticket, found.length, found[0]?.id ?? "", "Device")) return failed
-  try store.set({ matches: found, reviewed, saved })
-  const matches = Agent.reachesANumber(state.ask) ? choicesOf(found).length : found.length
+  const fresh = try (try Agent.Machine).get()
+  const matches = Agent.reachesANumber(fresh.ask) ? choicesOf(found).length : found.length
   const only = found.length === 1 ? found[0] : undefined
+  if (!Agent.canFound(fresh, ticket, matches, only?.id ?? "", "Device")) return failed
+  try store.set({ matches: found, reviewed, saved })
   return { type: "found", ticket, ok: true, matches, more, unchanged: only !== undefined && unchangedBy(operation, only), contact: only?.id ?? "" }
 }
 
@@ -204,7 +195,7 @@ function settled(record: SmsSendResult): { readonly done: boolean; readonly know
 
 /** The SIM a text goes out on: the one the agent named, the phone's default for texts, or its only SIM; with several and no default, none. */
 effect function simFor(operation: Asking | undefined): (number | undefined)!!Telephony {
-  if (operation?.type === "sms_send") return operation.subscriptionId
+  if (operation?.type === "sms_send" && operation.subscriptionId !== undefined) return operation.subscriptionId
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
   return textingDefault(status?.subscriptions ?? [])
 }
@@ -296,5 +287,29 @@ function carry(fx: Out): Job<Event, Telephony | Requested | Attempts | Time | Ag
   }
 }
 
+// spec/app/contacts/agent.md, "A change on the phone stops the review until the owner sees what is on the phone now"
+const watchedBook = started(effect {
+  const agent = try Agent.Machine
+  const contacts = try ContactsMachine
+  const store = try Requested
+  const signals = Stream.changesWith(
+    Stream.map(contacts.changes, (state) => `${state.write.id}:${state.write.outcome}:${state.card.ticket}:${state.list.ticket}`),
+    (a, b) => a === b,
+  )
+  try Stream.runForEach(signals, effect () => {
+    const current = try agent.get()
+    if (current.stage !== "Shown" || current.contact === "" || !Agent.canChanged(current, "Device")) return
+    const held = try store.get()
+    const base = held.reviewed.get(current.contact)
+    if (base === undefined) return
+    const latest = readAddressBook("recheck reviewed contact", (c) => c.get(base.id, "ExplicitRead")) catch () => undefined
+    if (latest !== undefined && latest.version === base.version) return
+    const now = try agent.get()
+    if (now.stage === "Shown" && now.contact === current.contact && Agent.canChanged(now, "Device")) {
+      try contained(agent.send({ type: "changed" }, "Device"), "marking the shown contact changed")
+    }
+  })
+}, "watching reviewed contacts for changes")
+
 /** What the agent asked of the phone, held until it ends: resident, since the approvals desk hands it requests whatever is showing. */
-export const requests = together(reacting(Agent, { carry }), requested)
+export const requests = together(reacting(Agent, { carry }), requested, watchedBook)

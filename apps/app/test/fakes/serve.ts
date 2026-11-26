@@ -8,22 +8,36 @@ import { developedRecording } from "./notes.ts";
 import { type Scene, scene, services } from "./scene.ts";
 
 async function relay(answer: Answering, incoming: IncomingMessage, outgoing: ServerResponse) {
-  const body = incoming.method === "GET" || incoming.method === "HEAD" ? undefined : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>);
-  const headers = Object.entries(incoming.headers).flatMap(([name, value]) => (Array.isArray(value) ? value : [value ?? ""]).map((one): [string, string] => [name, one]));
-  const response = await answer(new Request(new URL(incoming.url ?? "/", "http://fake"), { method: incoming.method, headers, body, duplex: "half" } as RequestInit));
-  outgoing.writeHead(response.status, Object.fromEntries(response.headers)).flushHeaders();
-  if (!response.body) return void outgoing.end();
-  const sent = Readable.fromWeb(response.body as NodeStream<Uint8Array>);
-  outgoing.on("close", () => sent.destroy());
-  sent.pipe(outgoing);
+  const abort = new AbortController();
+  incoming.on("close", () => { if (!incoming.complete) abort.abort(); });
+  outgoing.on("close", () => { if (!outgoing.writableEnded) abort.abort(); });
+  try {
+    const body = incoming.method === "GET" || incoming.method === "HEAD" ? undefined : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>);
+    const headers = Object.entries(incoming.headers).flatMap(([name, value]) => (Array.isArray(value) ? value : [value ?? ""]).map((one): [string, string] => [name, one]));
+    const response = await answer(new Request(new URL(incoming.url ?? "/", "http://fake"), { method: incoming.method, headers, body, signal: abort.signal, duplex: "half" } as RequestInit));
+    if (outgoing.destroyed || outgoing.writableEnded) return;
+    outgoing.writeHead(response.status, Object.fromEntries(response.headers)).flushHeaders();
+    if (!response.body) return void outgoing.end();
+    const sent = Readable.fromWeb(response.body as NodeStream<Uint8Array>);
+    outgoing.on("close", () => sent.destroy());
+    sent.pipe(outgoing);
+  } catch {
+    if (!outgoing.headersSent && !outgoing.destroyed) outgoing.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: "fake_relay_failed" }));
+  }
 }
 
 /**
  * What the dev server shows beyond the journeys' empty world, as develop's browser fixture does: the agent's calendar
- * holds develop's reference week, "Design review" at 3:00 PM today among it, and "Design sync" keeps its recording, as
- * the fake phone's dev page holds it (`developedRecording`), so it plays as v119's did.
+ * holds develop's reference week, "Design review" at 3:00 PM today among it, "Design sync" keeps its recording, as
+ * the fake phone's dev page holds it (`developedRecording`), so it plays as v119's did, and its clock reads wall time instead of epoch 0.
  */
 function developed(world: Scene): Scene {
+  Object.defineProperty(world, "now", {
+    get: () => Date.now(),
+    set: () => {},
+    enumerable: true,
+    configurable: true,
+  });
   seedReferenceWeek(world.calendar, Date.now());
   const sync = world.notes.notes.find((note) => note.id === developedRecording.noteId);
   if (sync?.format?.kind === "voice") sync.format = { ...sync.format, data: { ...sync.format.data, audioId: developedRecording.audioId } };
@@ -43,12 +57,12 @@ export function fakePhone(): Plugin {
 }
 
 /**
- * The fake agent and cloud at the dev server's /agent and /cloud, from the routes the journeys use, so that `pnpm dev`
+ * The fake agent, cloud, Slack, and Telegram at the dev server's /agent, /cloud, /slack, and /telegram, from the routes the journeys use, so that `pnpm dev`
  * and the explore stage run with no agent; `apply: "serve"` keeps it out of every build. With `real` the agent is the one at that address.
  * With `phone` the page reaches them through the fake phone's plugins, as on an Alpha image.
  */
 export function fakes(real?: string, phone = false): Plugin {
-  const { agent, cloud } = services(developed(scene()));
+  const { agent, cloud, slack, telegram } = services(developed(scene()));
   return {
     name: "alpha-fakes",
     apply: "serve",
@@ -56,6 +70,8 @@ export function fakes(real?: string, phone = false): Plugin {
     configureServer(server) {
       if (real === undefined) server.middlewares.use("/agent", (incoming, outgoing) => void relay(agent, incoming, outgoing));
       server.middlewares.use("/cloud", (incoming, outgoing) => void relay(cloud, incoming, outgoing));
+      server.middlewares.use("/slack", (incoming, outgoing) => void relay(slack, incoming, outgoing));
+      server.middlewares.use("/telegram", (incoming, outgoing) => void relay(telegram, incoming, outgoing));
     },
     config: () => (real === undefined ? {} : { server: { proxy: { "/agent": { target: real, rewrite: (path: string) => path.slice("/agent".length) } } } }),
   };

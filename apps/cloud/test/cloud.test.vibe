@@ -16,8 +16,8 @@ import { operate } from "../src/commands.vibe"
 import { sha256Hex } from "../src/digest.ts"
 import edgeWorker, { edgeRouteOf, type EdgeEnv } from "../src/edge.vibe"
 import { EdgeHeaders, EdgeRequest, EdgeResponse, forwardedHeaders } from "../src/edge-platform.ts"
-import { entitlementPublicKey } from "../src/keys.ts"
-import { elizaosCloud, generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
+import { base64Bytes, entitlementPublicKey, entitlementPublicKeyMatches, hexBytes, isExampleEntitlementPublicKey } from "../src/keys.ts"
+import { deploy, elizaosCloud, generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
 import { PROFILE_ASSET, readProfileAsset } from "../src/profile-asset.ts"
 import { elizaCloudRoutes, tableProblems } from "../src/routes.vibe"
 import { smoke } from "../src/smoke.vibe"
@@ -42,11 +42,6 @@ module node {
   /** A valid PKCS #8 DER private key on P-384 (not P-256), to verify entitlement key validation rejects wrong curves. @throws {never} */
   export function p384Key(): string {
     return generateKeyPairSync("ec", { namedCurve: "P-384" }).privateKey.export({ type: "pkcs8", format: "der" }).toString("base64")
-  }
-
-  /** Decoded byte length of a base64 string. @throws {never} */
-  export function base64Bytes(text: string): number {
-    return Buffer.from(text, "base64").length
   }
 
   /** An oversized 64-byte base64 key, invalid for AES-256-GCM sealing. @throws {never} */
@@ -123,7 +118,7 @@ module node {
     return { address: url.href, ...shown }
   }
 }
-import { base64Bytes, catalog, challengeOf, oversizedKey, p384Key, portalAnswer, random, returnPageAt, returnPageParts } from node
+import { catalog, challengeOf, oversizedKey, p384Key, portalAnswer, random, returnPageAt, returnPageParts } from node
 
 /** The cloud stopped, or said nothing of serving, before its deadline. */
 error NotServing { output: string }
@@ -330,6 +325,9 @@ describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/ind
     const listed = (group?.routes ?? []).map((route) => ({ path: route.path.replace(/\{\w+\}/g, "{}"), keys: ((route as { readonly query?: ReadonlyArray<{ readonly key: string }> }).query ?? []).map((rule) => rule.key).sort() }))
     try holds(() => assert.ok(sent.length >= 13, `found ${sent.length} paths of the managed Gmail client`))
     try holds(() => assert.deepStrictEqual(sent.filter((want) => !listed.some((have) => have.path === want.path && have.keys.join() === want.keys.join())), []))
+    const capConfig = (try tryPromise(() => import(new URL("../../app/capacitor.config.ts", import.meta.url).href) as Promise<{ default: { plugins?: { ElizaCloud?: { routes?: unknown } }; android?: { webContentsDebuggingEnabled?: boolean } } }>)).default
+    try holds(() => assert.deepStrictEqual(capConfig.plugins?.ElizaCloud?.routes, elizaCloudRoutes))
+    try holds(() => assert.strictEqual(capConfig.android?.webContentsDebuggingEnabled, false))
   } |> Effect.provide(%, NodeServices.layer))
 })
 
@@ -392,10 +390,14 @@ describe(`The web host returns the owner to the app (spec/cloud/rollout.md, "Sto
     try holds(() => assert.deepStrictEqual([down.status, down.headers.get("retry-after")], [503, "30"]))
     const refused = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://elsewhere.example/alphaphone/auth/callback"), env))
     try holds(() => assert.strictEqual(refused.status, 404))
+    const apiBlocked = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://cloud.alphaphone.dev/api/v1/user"), { ...env, API: api }))
+    try holds(() => assert.strictEqual(apiBlocked.status, 404))
+    const postBlocked = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://cloud.alphaphone.dev/alphaphone/auth/callback", { method: "POST" }), { ...env, API: api }))
+    try holds(() => assert.strictEqual(postBlocked.status, 405))
   })
 
   it.effect(`names the web host it was asked for and passes no forwarding or hop-by-hop header (spec/cloud/rollout.md, "The API Worker is told the web host it was asked for, and gets none of the caller's forwarding or hop-by-hop headers")`, () => effect {
-    const sent = try Effect.try(() => forwardedHeaders(new EdgeHeaders({ host: "cloud.alphaphone.dev", "x-forwarded-host": "evil.example", forwarded: "host=evil.example", connection: "keep-alive", accept: "text/html" }), "cloud.alphaphone.dev"))
+    const sent = try Effect.try(() => forwardedHeaders(new EdgeHeaders({ host: "cloud.alphaphone.dev", "x-forwarded-host": "evil.example", forwarded: "host=evil.example", connection: "keep-alive, x-custom-hop", "x-custom-hop": "drop-me", accept: "text/html" }), "cloud.alphaphone.dev"))
     try holds(() => assert.deepStrictEqual(Object.fromEntries(sent), { accept: "text/html", "x-forwarded-host": "cloud.alphaphone.dev", "x-forwarded-proto": "https" }))
   })
 })
@@ -432,13 +434,20 @@ describe(`Secrets stay private and fit their environment (spec/cloud/rollout.md,
     try holds(() => assert.deepStrictEqual(Object.keys(workerSecrets(first.values)).sort(), ["CARTESIA_API_KEY", "CEREBRAS_API_KEY", "CLOUD_DIGEST_KEY", "CLOUD_ENTITLEMENT_KEY", "CLOUD_SEALING_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY", "GOOGLE_MAPS_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]))
     try holds(() => assert.deepStrictEqual(secretProblems(first.values, "production"), ["STRIPE_SECRET_KEY must be a live key in production"]))
     try holds(() => assert.deepStrictEqual(secretProblems({ ...generated(provided), CARTESIA_API_KEY: "https://api.eliza.app" }, "staging"), ["CARTESIA_API_KEY names a deployed Eliza Cloud host"]))
+    try holds(() => assert.strictEqual(hexBytes(first.values.GOOGLE_CONNECT_TOKEN_KEY ?? ""), 32))
     try holds(() => assert.match(first.values.GOOGLE_CONNECT_TOKEN_KEY ?? "", /^[0-9a-fA-F]{64}$/))
     try holds(() => assert.strictEqual(base64Bytes(first.values.CLOUD_SEALING_KEY ?? ""), 32))
     try holds(() => assert.ok(secretProblems({ ...first.values, GOOGLE_CONNECT_TOKEN_KEY: "not-a-64-hex-token-key-even-if-32-bytes-base64url-abcdef" }, "staging").some((p) => p.includes("GOOGLE_CONNECT_TOKEN_KEY"))))
     try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_SEALING_KEY: oversizedKey() }, "staging").some((p) => p.includes("CLOUD_SEALING_KEY"))))
     const base64urlSealing = `${(first.values.CLOUD_SEALING_KEY ?? "").slice(0, 40)}-_${(first.values.CLOUD_SEALING_KEY ?? "").slice(40)}`
     try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_SEALING_KEY: base64urlSealing }, "staging").some((p) => p.includes("CLOUD_SEALING_KEY"))))
+    try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_ENTITLEMENT_KEY: "not-a-der-key" }, "staging").some((p) => p.includes("CLOUD_ENTITLEMENT_KEY"))))
     try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_ENTITLEMENT_KEY: p384Key() }, "staging").some((p) => p.includes("CLOUD_ENTITLEMENT_KEY"))))
+    const candidateProfile = try profileNamed("candidate")
+    try holds(() => assert.ok(candidateProfile.environments.staging.entitlement.publicKeys.some(isExampleEntitlementPublicKey)))
+    try holds(() => assert.strictEqual(entitlementPublicKeyMatches(first.values.CLOUD_ENTITLEMENT_KEY ?? "", candidateProfile.environments.staging.entitlement.publicKeys, candidateProfile.environments.staging.entitlement.keyId), false))
+    const exampleRejected = deploy({ environment: "staging", profile: "profile/candidate.example.json", secrets: file, component: "all" }) catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag
+    try holds(() => assert.ok(typeof exampleRejected === "string" && exampleRejected.includes("placeholder entitlement public key")))
     const badKeyFile = path.join(directory, "bad-entitlement.env")
     try files.writeFileString(badKeyFile, Object.entries({ ...first.values, CLOUD_ENTITLEMENT_KEY: "not-a-key" }).map(([name, value]) => `${name}=${value}`).join("\n"), { mode: 0o600 })
     const badVault = try effect {
@@ -459,7 +468,7 @@ describe(`Secrets stay private and fit their environment (spec/cloud/rollout.md,
     try holds(() => assert.ok(typeof unprovisionedApply === "string" && /account|provision/i.test(unprovisionedApply), String(unprovisionedApply)))
     const wrongModePrices = operate("prices", ["--environment", "production", "--profile", "profile/candidate.example.json", "--env-file", file]) catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag
     try holds(() => assert.ok(typeof wrongModePrices === "string" && wrongModePrices.includes("STRIPE_SECRET_KEY"), String(wrongModePrices)))
-  } |> scoped(%) |> Effect.provide(%, NodeServices.layer))
+  } |> scoped(%) |> Effect.provide(%, [NodeServices.layer, FetchHttpClient.layer]))
 })
 
 describe(`Provisioning creates only what is missing (spec/cloud/rollout.md, "Story: Create an environment's Cloudflare resources once")`, () => {

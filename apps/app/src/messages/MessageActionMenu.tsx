@@ -15,12 +15,11 @@ interface MessageActionMenuProps {
   ref?: Ref<HTMLDivElement>;
 }
 
-// v119 (45f6bed30) template.html:634-635 draws Copy and its Copied tick as its own strokes (model.js:74,86): the svg
-// holds two sc-if paths, so dc-lite.js:146 leaves them unswapped, while Delete's single trash path becomes lucide's trash-2.
+/** Copy and Copied glyphs drawn as strokes, while Delete uses Lucide's trash-2. */
 const CopyGlyph = createLucideIcon({ name: "MessageCopy", node: [["path", { key: "copy", d: "M9 9h11v11H9zM5 15H4V4h11v1" }]] });
 const CopiedGlyph = createLucideIcon({ name: "MessageCopied", node: [["path", { key: "check", d: "M5 12l5 5 9-10" }]] });
 
-const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm leading-[normal] font-semibold whitespace-nowrap transition-colors duration-fast pointer-fine:hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
+const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm leading-normal font-semibold whitespace-nowrap transition-colors duration-fast pointer-fine:hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 
 // spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
 export function MessageActionMenu({ actions, focusOnOpen, close, ref }: MessageActionMenuProps) {
@@ -46,7 +45,7 @@ export function MessageActionMenu({ actions, focusOnOpen, close, ref }: MessageA
   };
 
   return (
-    <div ref={ref} data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1 leading-[normal]${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={handleKey}>
+    <div ref={ref} data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1 leading-normal${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={handleKey}>
       {actions.copy && <button type="button" role="menuitem" autoFocus={focusOnOpen} className={`${actionItem} min-w-25`} disabled={copy === "pending"} onClick={() => {
         const attempt = ++copyAttemptRef.current;
         setCopy("pending");

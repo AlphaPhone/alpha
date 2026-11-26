@@ -17,9 +17,17 @@ const bubble = "max-w-4/5 self-end rounded-tile rounded-br-box bg-alpha px-4 py-
  */
 export function VoiceInterim({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<Machine | VoiceWords, unknown> }) {
   const { state } = useMachine(runtime);
-  const memory = useMemo(() => runtime.runSync(VoiceWords).memory, [runtime]);
-  const interim = useSyncExternalStore(memory.subscribeInterim, memory.interimSnapshot);
-  const said = useSyncExternalStore(memory.subscribeSaid, memory.saidSnapshot);
+  const store = useMemo(() => {
+    const { memory } = runtime.runSync(VoiceWords);
+    return {
+      subscribeInterim: (listener: () => void) => memory.subscribeInterim(listener),
+      interimSnapshot: () => memory.interimSnapshot(),
+      subscribeSaid: (listener: () => void) => memory.subscribeSaid(listener),
+      saidSnapshot: () => memory.saidSnapshot(),
+    };
+  }, [runtime]);
+  const interim = useSyncExternalStore(store.subscribeInterim, store.interimSnapshot);
+  const said = useSyncExternalStore(store.subscribeSaid, store.saidSnapshot);
   if (state !== undefined && said !== undefined && said.text !== "" && showsWhatWasSaid(state, said.session, said.turn)) {
     return (
       <>

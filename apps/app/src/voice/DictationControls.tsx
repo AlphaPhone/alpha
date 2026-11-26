@@ -1,8 +1,8 @@
 // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
 import { Button, cn, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Check, Mic, X } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { Check, Mic, Settings, X } from "lucide-react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import type { Machine as Voice } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
 import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe";
@@ -31,6 +31,9 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
   playback?: { readonly playing: boolean; toggle(ticket: number): void };
 }) {
   const { state, can, send } = useMachine(runtime);
+  const words = useMemo(() => runtime.runSync(VoiceWords), [runtime]);
+  const store = useMemo(() => ({ subscribe: (listener: () => void) => words.subscribe(listener), snapshot: () => words.snapshot() }), [words]);
+  const { dictatedText, dictatedDurationMs } = useSyncExternalStore(store.subscribe, store.snapshot);
   const clock = runtime.runSync(DictationClock);
   const elapsed = useSyncExternalStore(clock.subscribe, clock.snapshot, clock.snapshot);
   const [leaving, setLeaving] = useState<number>();
@@ -38,7 +41,6 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
   const { recorder } = state;
   if (recorder.field !== "ComposerField" || recorder.stage === "Closed") return null;
   const pending = leaving === recorder.ticket;
-  const { dictatedText, dictatedDurationMs } = runtime.runSync(VoiceWords).memory;
   const start = { type: "startRecording" } as const;
   const stop = { type: "stopRecording", now: untimed } as const;
   const retry = { type: "transcribeAgain", now: untimed } as const;
@@ -55,11 +57,13 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
     : retired ? (dictatedDurationMs === undefined ? undefined : Math.floor(dictatedDurationMs / 1000))
       : 0;
   const primary = {
-    Ready: {
-      label: recorder.preparation === "Preparing" ? "Preparing on-device speech"
-        : recorder.preparation === "Unavailable" ? "On-device speech unavailable" : "Start recording",
-      icon: Mic, event: start, enabled: can(start) && !can(settings),
-    },
+    Ready: can(settings)
+      ? { label: "Open Settings", icon: Settings, event: settings, enabled: true }
+      : {
+        label: recorder.preparation === "Preparing" ? "Preparing on-device speech"
+          : recorder.preparation === "Unavailable" ? "On-device speech unavailable" : "Start recording",
+        icon: Mic, event: start, enabled: can(start),
+      },
     Starting: { label: "Starting microphone", icon: Mic, event: start, enabled: false },
     Recording: { label: "Stop recording", icon: VoiceStopIcon, event: stop, enabled: can(stop) },
     Transcribing: { label: "Cancel transcription", icon: VoiceStopIcon, event: close, enabled: can(close) },

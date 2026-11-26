@@ -6,6 +6,7 @@ import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
+import { say } from "../notices/toasts.vibe"
 import { CommsPrompts } from "../phone/comms.vibe"
 import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
@@ -47,7 +48,10 @@ export const talkFromComms = started(effect {
   try Stream.runForEach(requests, effect ({ about, view }) => {
     const before = try shell.get()
     if (!Shell.showing(before, view) || !Shell.canRaise(before, "Sheet") || (try comms.get()).key !== about || !(try device.showing())) return
-    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) return
+    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) {
+      try say("Talk is unavailable right now", true)
+      return
+    }
     if (!(try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Talk from the communications bar"))) return
     const current = try shell.get()
     if (Shell.showing(current, view) && current.assistant === "Sheet" && (try comms.get()).key === about

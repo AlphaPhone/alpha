@@ -2,16 +2,19 @@
 """Prepare the pinned Alpha OS policy packet locally; never mutate an AOSP checkout."""
 from pathlib import Path
 import argparse
-import base64
 import difflib
 import hashlib
 import json
-import urllib.request
+import sys
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT.parent / 'system-entry'))
+from portable_tools import fetch_pinned_googlesource, reject_symlinks, require, safe_relative_path
+
 PIN = json.loads((ROOT / 'SOURCE-INPUTS.json').read_text())
-BASE = ROOT / '.cache/baseline'
-OUT = ROOT / '.cache/staged'
+CACHE = ROOT / '.cache'
+BASE = CACHE / 'baseline'
+OUT = CACHE / 'staged'
 changes = {}
 sha = lambda data: hashlib.sha256(data).hexdigest()
 parser = argparse.ArgumentParser(description=__doc__)
@@ -19,35 +22,33 @@ parser.add_argument('--fetch', action='store_true', help='Fetch only missing has
 args = parser.parse_args()
 if args.fetch:
     for row in PIN['files']:
-        relative = Path(row['path'])
-        assert not relative.is_absolute() and '..' not in relative.parts, 'Unsafe input path'
+        relative = safe_relative_path(row['path'], 'input path')
         target = BASE / relative
-        if target.exists():
-            assert sha(target.read_bytes()) == row['beforeSha256'], 'Existing baseline drift'
-            continue
         url = f"https://android.googlesource.com/platform/frameworks/base/+/{PIN['revision']}/{row['path']}?format=TEXT"
-        data = base64.b64decode(urllib.request.urlopen(url, timeout=20).read())
-        assert sha(data) == row['beforeSha256'], 'Downloaded source drift'
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open('xb') as stream: stream.write(data)
+        fetch_pinned_googlesource(url, target, row['beforeSha256'], CACHE)
+
 
 def original(path):
-    data = (BASE / path).read_bytes()
+    relative = safe_relative_path(path, 'baseline path')
+    target = BASE / relative
+    reject_symlinks(target, CACHE, 'baseline path')
+    data = target.read_bytes()
     row = next(row for row in PIN['files'] if row['path'] == path)
-    assert sha(data) == row['beforeSha256'], 'Pinned source drift: ' + path
+    require(sha(data) == row['beforeSha256'], 'Pinned source drift: ' + path)
     return data.decode()
 
+
 def replace(text, old, new):
-    assert text.count(old) == 1, 'Source anchor drift: ' + old
+    require(text.count(old) == 1, 'Source anchor drift: ' + old)
     return text.replace(old, new, 1)
+
 
 def edit(path, text):
     changes[path] = (original(path), text)
 
+
 fgs = 'packages/SystemUI/src/com/android/systemui/qs/FgsManagerController.kt'
 text = original(fgs)
-text = replace(text, 'if (!uiControlInitialized) {',
-    'if (!uiControlInitialized || packageName == AlphaCoreLauncherPolicy.PACKAGE) {')
 text = replace(text, '        fun updateUiControl() {', '''        private fun isCoreLauncher(): Boolean {
             if (packageName != AlphaCoreLauncherPolicy.PACKAGE) return false
             return try {
@@ -81,21 +82,64 @@ text = replace(text, '        val addedPackages =\n', '''        // A Home chang
 
         val addedPackages =
 ''')
-text = replace(text, '            initialized = true', '''            // Refresh cached classification when the owner changes the selected Home app.
+text = replace(text, '            initialized = true', '''            // Refresh cached core-launcher classification when Home or package state changes.
+            val refreshAlphaCoreLauncher = {
+                val alphaPackages = synchronized(lock) {
+                    runningTaskIdentifiers.keys.filter {
+                        it.packageName == AlphaCoreLauncherPolicy.PACKAGE
+                    }
+                }
+                if (alphaPackages.isNotEmpty()) {
+                    alphaPackages.forEach { it.updateUiControl() }
+                    synchronized(lock) {
+                        updateNumberOfVisibleRunningPackagesLocked()
+                        updateAppItemsLocked()
+                    }
+                }
+            }
             broadcastDispatcher.registerReceiver(
                 object : BroadcastReceiver() {
                     override fun onReceive(context: Context, intent: Intent) {
-                        synchronized(lock) {
-                            runningTaskIdentifiers.keys
-                                .filter { it.packageName == AlphaCoreLauncherPolicy.PACKAGE }
-                                .forEach { it.updateUiControl() }
-                            updateNumberOfVisibleRunningPackagesLocked()
-                            updateAppItemsLocked()
-                        }
+                        refreshAlphaCoreLauncher()
                     }
                 },
                 IntentFilter("android.intent.action.ACTION_PREFERRED_ACTIVITY_CHANGED"),
                 executor = backgroundExecutor,
+                user = UserHandle.ALL,
+                flags = Context.RECEIVER_NOT_EXPORTED,
+            )
+            broadcastDispatcher.registerReceiver(
+                object : BroadcastReceiver() {
+                    override fun onReceive(context: Context, intent: Intent) {
+                        if (intent.data?.schemeSpecificPart == AlphaCoreLauncherPolicy.PACKAGE) {
+                            refreshAlphaCoreLauncher()
+                        }
+                    }
+                },
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_PACKAGE_CHANGED)
+                    addAction(Intent.ACTION_PACKAGE_REPLACED)
+                    addDataScheme("package")
+                },
+                executor = backgroundExecutor,
+                user = UserHandle.ALL,
+                flags = Context.RECEIVER_NOT_EXPORTED,
+            )
+            broadcastDispatcher.registerReceiver(
+                object : BroadcastReceiver() {
+                    override fun onReceive(context: Context, intent: Intent) {
+                        val changed = intent.getStringArrayExtra(Intent.EXTRA_CHANGED_PACKAGE_LIST)
+                        if (changed != null && AlphaCoreLauncherPolicy.PACKAGE in changed) {
+                            refreshAlphaCoreLauncher()
+                        }
+                    }
+                },
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_PACKAGES_SUSPENDED)
+                    addAction(Intent.ACTION_PACKAGES_UNSUSPENDED)
+                },
+                executor = backgroundExecutor,
+                user = UserHandle.ALL,
                 flags = Context.RECEIVER_NOT_EXPORTED,
             )
 
@@ -104,30 +148,53 @@ edit(fgs, text)
 
 repo = 'packages/SystemUI/src/com/android/systemui/qs/pipeline/data/repository/UserTileSpecRepository.kt'
 text = original(repo)
-text = replace(text, '    private var isHeadlessSystemUser = false',
-    '    private var isHeadlessSystemUser = false\n    private var alphaDefaultsMigrationPending = false')
-text = replace(text, '        val loadedTiles = loadTilesFromSettings(userId)',
-    '''        val loadedTiles = loadTilesFromSettings(userId)
+text = replace(text, '''    private suspend fun loadTilesFromSettingsAndParse(userId: Int): List<TileSpec> {
+        val loadedTiles = loadTilesFromSettings(userId)
+        if (loadedTiles.isNotEmpty()) {
+            _tilesUpgradePath.send(TilesUpgradePath.ReadFromSettings(loadedTiles.toSet()))
+        } else {
+            _tilesUpgradePath.send(TilesUpgradePath.DefaultSet)
+        }
+        return parseTileSpecs(loadedTiles, userId)
+    }''', '''    private suspend fun loadTilesFromSettingsAndParse(userId: Int): List<TileSpec> {
+        val loadedTiles = loadTilesFromSettings(userId)
         val reviewedVersion = withContext(backgroundDispatcher) {
             secureSettings.getIntForUser(AlphaQsDefaultsPolicy.VERSION_SETTING, 0, userId)
         }
-        alphaDefaultsMigrationPending = defaultTiles.any { it.spec == AlphaQsDefaultsPolicy.ALPHA } &&
+        val shouldRecordVersion = defaultTiles.any { it.spec == AlphaQsDefaultsPolicy.ALPHA } &&
             reviewedVersion < AlphaQsDefaultsPolicy.VERSION
-        val selected = AlphaQsDefaultsPolicy.migrate(
+        val migrated = AlphaQsDefaultsPolicy.shouldMigrate(
             loadedTiles.map { it.spec }, defaultTiles.map { it.spec }, reviewedVersion,
-        ).map { TileSpec.create(it) }
-        val parsedTiles = parseTileSpecs(selected, userId)''')
-text = replace(text, 'TilesUpgradePath.ReadFromSettings(loadedTiles.toSet())',
-    'TilesUpgradePath.ReadFromSettings(parsedTiles.toSet())')
-text = replace(text, '        return parseTileSpecs(loadedTiles, userId)', '        return parsedTiles')
-text = replace(text, '            secureSettings.putStringForUser(SETTING, toStore, null, false, forUser, true)',
-    '''            val written = secureSettings.putStringForUser(SETTING, toStore, null, false, forUser, true)
-            // Commit the version only after the selected layout was stored. A later owner edit,
-            // even one recreating the old stock order, is never migrated a second time.
-            if (written && alphaDefaultsMigrationPending && secureSettings.putIntForUser(
-                    AlphaQsDefaultsPolicy.VERSION_SETTING, AlphaQsDefaultsPolicy.VERSION, forUser)) {
-                alphaDefaultsMigrationPending = false
-            }''')
+        )
+        val selected = if (migrated) defaultTiles else loadedTiles
+        val parsedTiles = parseTileSpecs(selected, userId)
+        if (shouldRecordVersion) {
+            val toStore = parsedTiles
+                .filter { it !is TileSpec.Invalid }
+                .joinToString(DELIMITER, transform = TileSpec::spec)
+            withContext(backgroundDispatcher) {
+                // Commit the version atomically on backgroundDispatcher after storing any migrated
+                // layout. Custom owner layouts also record VERSION so a future reboot never
+                // overwrites them if they later resemble stock tiles.
+                val written = if (migrated) {
+                    secureSettings.putStringForUser(SETTING, toStore, null, false, userId, true)
+                } else {
+                    true
+                }
+                if (written) {
+                    secureSettings.putIntForUser(
+                        AlphaQsDefaultsPolicy.VERSION_SETTING, AlphaQsDefaultsPolicy.VERSION, userId,
+                    )
+                }
+            }
+        }
+        if (loadedTiles.isNotEmpty()) {
+            _tilesUpgradePath.send(TilesUpgradePath.ReadFromSettings(parsedTiles.toSet()))
+        } else {
+            _tilesUpgradePath.send(TilesUpgradePath.DefaultSet)
+        }
+        return parsedTiles
+    }''')
 edit(repo, text)
 
 config = 'packages/SystemUI/res/values/config.xml'
@@ -151,30 +218,44 @@ text = replace(text, '    public void scheduleReadDefaultPermissionExceptions() 
     '    public void scheduleReadDefaultPermissionExceptions() {\n        registerAlphaStorageBootReceiver();')
 text = replace(text, '        pm.apply();\n    }',
     '        pm.apply();\n        grantAlphaSharedStorageDefault(pm, userId);\n    }')
-text = replace(text, '    private void grantSignatureAppsNotificationPermissions(', '''    /** Primary-user factory default only; explicit owner modes and managed devices are retained. */
+text = replace(text, '    private void grantSignatureAppsNotificationPermissions(', '''    /** One-time primary-user factory default; explicit owner modes and managed devices are retained. */
     private void grantAlphaSharedStorageDefault(PackageManagerWrapper pm, int userId) {
         if (userId != UserHandle.USER_SYSTEM) return;
         android.app.admin.DevicePolicyManager policy =
                 mContext.getSystemService(android.app.admin.DevicePolicyManager.class);
-        if (policy == null || policy.getDeviceOwnerComponentOnAnyUser() != null) return;
+        if (policy == null || policy.getDeviceOwnerComponentOnAnyUser() != null
+                || policy.isOrganizationOwnedDeviceWithManagedProfile()) return;
+        boolean alreadyApplied = android.provider.Settings.Secure.getIntForUser(
+                mContext.getContentResolver(), AlphaSharedStoragePolicy.GRANTED_SETTING, 0, userId) != 0;
+        if (alreadyApplied) return;
         PackageInfo pkg = pm.getSystemPackageInfo(AlphaSharedStoragePolicy.PACKAGE);
-        if (pkg == null) return;
+        if (pkg == null || pkg.applicationInfo == null) return;
         android.app.AppOpsManager ops = mContext.getSystemService(android.app.AppOpsManager.class);
         if (ops == null) return;
         int uid = UserHandle.getUid(userId, UserHandle.getAppId(pkg.applicationInfo.uid));
         boolean installed = pkg.applicationInfo.enabled
                 && (pkg.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_INSTALLED) != 0
                 && (pkg.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SUSPENDED) == 0;
+        boolean preinstalled = pkg.applicationInfo.isSystemApp()
+                || pkg.applicationInfo.isUpdatedSystemApp();
         try {
             int mode = ops.unsafeCheckOpRawNoThrow(
                     android.app.AppOpsManager.OPSTR_MANAGE_EXTERNAL_STORAGE, uid, pkg.packageName);
+            if (mode != android.app.AppOpsManager.MODE_DEFAULT) {
+                // Owner already chose allow/deny; record the one-time marker so a later reset never re-grants.
+                android.provider.Settings.Secure.putIntForUser(
+                        mContext.getContentResolver(), AlphaSharedStoragePolicy.GRANTED_SETTING, 1, userId);
+                return;
+            }
             if (AlphaSharedStoragePolicy.shouldGrant(userId, pkg.packageName, installed,
-                    pkg.applicationInfo.isSystemApp(),
+                    preinstalled,
                     com.android.internal.util.ArrayUtils.contains(pkg.requestedPermissions,
                             Manifest.permission.MANAGE_EXTERNAL_STORAGE),
-                    mode == android.app.AppOpsManager.MODE_DEFAULT)) {
+                    true, alreadyApplied)) {
                 ops.setUidMode(android.app.AppOpsManager.OPSTR_MANAGE_EXTERNAL_STORAGE,
                         uid, android.app.AppOpsManager.MODE_ALLOWED);
+                android.provider.Settings.Secure.putIntForUser(
+                        mContext.getContentResolver(), AlphaSharedStoragePolicy.GRANTED_SETTING, 1, userId);
             }
         } catch (IllegalArgumentException | SecurityException error) {
             Log.w(TAG, "Alpha shared storage default was not applied", error);
@@ -209,7 +290,9 @@ for name, target in {
 patch = []
 files = []
 for path, (before, after) in sorted(changes.items()):
-    target = OUT / path
+    relative = safe_relative_path(path, 'staged path')
+    target = OUT / relative
+    reject_symlinks(target, CACHE, 'staged path')
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(after)
     patch.extend(difflib.unified_diff((before or '').splitlines(True), after.splitlines(True),
@@ -219,6 +302,6 @@ for path, (before, after) in sorted(changes.items()):
 data = ''.join('\n' if line == ' \n' else line for line in patch).encode()
 (ROOT / 'alpha-core-launcher.patch').write_bytes(data)
 (ROOT / 'manifest.json').write_text(json.dumps({'schema': 1, 'project': PIN['project'],
-    'revision': PIN['revision'], 'targetAppId':'ai.alphacompute.alphaphone', 'patch': 'alpha-core-launcher.patch', 'patchSha256': sha(data),
+    'revision': PIN['revision'], 'targetAppId': 'ai.alphacompute.alphaphone', 'patch': 'alpha-core-launcher.patch', 'patchSha256': sha(data),
     'files': files}, indent=2) + '\n')
 print(json.dumps({'files': len(files), 'sha256': sha(data)}))

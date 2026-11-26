@@ -112,12 +112,13 @@ function row(list: string, text: string) {
   });
 }
 
-/** Open Ask Alpha on `world`, waiting for its composer slot to open and optionally for the agent. */
-async function openAssistant(world: ReturnType<typeof scene>, ready = true) {
+/** Open Ask Alpha on `world`, waiting for its composer slot to open and optionally for the agent and preferences. */
+async function openAssistant(world: ReturnType<typeof scene>, ready = true, waitPrefs = false) {
   const { alpha } = await open(world, mounts);
   const runtime = assistant.runtime(alpha);
   await until(alpha, runtime, Composer, (s) => s.slot === "Open");
   if (ready) await until(alpha, runtime, Conversation, (s) => s.ready);
+  if (waitPrefs) await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
   await drawn(() => vi.waitFor(() => expect(document.querySelector("textarea[aria-label='Message Alpha']")).not.toBeNull()));
   return { alpha, runtime };
 }
@@ -337,7 +338,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
       await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
-      // General, drawn again, focuses the row the owner left, which ends typing; the draft stays for the next Type.
+      // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day": General, drawn again, focuses the row the owner left, which ends typing; the draft stays for the next Type.
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
       await press("Type");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Typing");
@@ -969,6 +970,24 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(cardSend).toBeDefined();
     await drawn(() => { cardSend?.click(); });
     expect(sentBodies).toEqual(["Joining in 5"]);
+  });
+
+  // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one"
+  it("marks screen context sensitive on a sensitive screen and hides pagination on a fresh 2-message chat", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistant(world);
+    const bridge = alpha.runtime.runSync(MessagingBridge);
+    write("Hello");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect(lines()).toEqual(["Hello", "You said: Hello"]);
+    expect([button("Earlier"), button("Later")]).toEqual([undefined, undefined]);
+
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Slack" }))));
+    await drawn(() => bridge.publishContext("Slack", { platform: "slack", authenticated: false, sensitive: true, pane: "auth", accountLabel: "", recentMessages: [] }));
+    await until(alpha, runtime, Conversation, (s) => s.context.sensitive);
+    await hardware("home");
+    await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
   });
 });
 

@@ -79,6 +79,7 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs | D
     return
   }
   if (taker === "ByHold" || (try screens.take("startup/sign-in"))) return
+  if (try screens.take("ui-layer")) return
   const state = try shell.get()
   const view = state.trail.at(-1)
   if (try screens.take("assistant")) return
@@ -142,5 +143,44 @@ export function stepping<IA, A>(place: string, source: Context.Key<IA, { readonl
   return following(source, fact, Layers.Machine, (has) => ({ type: has ? "offerStep" : "withdrawStep", place } as const))
 }
 
+module page {
+  /** Publish whether the shell or its layers can take Back for the native Android bridge. @throws {never} */
+  export function markCanGoBack(value: string | undefined): void {
+    if (typeof document === "undefined") return
+    const root = document.documentElement
+    if (value === undefined) delete root.dataset.alphaCanGoBack
+    else if (root.dataset.alphaCanGoBack !== value) root.dataset.alphaCanGoBack = value
+  }
+}
+import { markCanGoBack } from page
+
+/** Open a layer in the shell's layer stack if not already listed. */
+export effect function openLayer(id: string, kind: Layers.Kind, covers: boolean): void!!Layers.Machine {
+  const layers = try Layers.Machine
+  const state = try layers.get()
+  if (Layers.listed(state, id)) return
+  try contained(layers.send({ type: "openLayer", id, kind, covers }), `opening ${id}`)
+}
+
+/** Close a layer in the shell's layer stack if currently listed. */
+export effect function closeLayer(id: string): void!!Layers.Machine {
+  const layers = try Layers.Machine
+  const state = try layers.get()
+  if (!Layers.listed(state, id)) return
+  try contained(layers.send({ type: "closeLayer", id }), `closing ${id}`)
+}
+
+/** Keep `data-alpha-can-go-back` synchronized with `Shell` and `Layers` without render-time DOM writes. */
+const backFlag = Layer.effectDiscard(effect {
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  try Effect.addFinalizer(() => sync(() => markCanGoBack(undefined)))
+  const flags = Stream.changes(Stream.map(
+    Stream.zipLatest(shell.changes, layers.changes),
+    ([state, over]) => String(Shell.enabled(state, { type: "goBack" }) || state.textAsk.tag === "TextAskVisit" || Layers.takesBack(over)),
+  ))
+  try fork.scoped Stream.runForEach(flags, (flag) => sync(() => markCanGoBack(flag)))
+})
+
 /** The shell, kept across restarts, with the layers over it, told what the phone admits and which buttons it hands over. */
-export const shell = Layer.provideMerge(told, Layer.mergeAll(kept, layered, backs))
+export const shell = Layer.provideMerge(Layer.mergeAll(told, backFlag), Layer.mergeAll(kept, layered, backs))

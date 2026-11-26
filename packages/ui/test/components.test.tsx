@@ -178,7 +178,8 @@ describe("UI component contracts", () => {
 
     const mark = render(<StartupMark />);
     const status = mark.querySelector('[role="status"]');
-    expect(status?.className).toContain("text-primary");
+    expect(status?.className).toContain("light");
+    expect(status?.className).toContain("text-foreground");
     expect(status?.className).not.toContain("text-alpha");
   });
 

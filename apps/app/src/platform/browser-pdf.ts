@@ -29,7 +29,7 @@ export async function drawPdf(blob: Blob, page: number, signal?: AbortSignal): P
     if (!Number.isInteger(page) || page < 1 || page > pdf.numPages) return { status: "failed", message: "This PDF does not have that page." };
     const source = await pdf.getPage(page);
     const natural = source.getViewport({ scale: 1 });
-    const scale = Math.min(1.5, pixelLimit / Math.max(natural.width, natural.height));
+    const scale = Math.min(1.5, pixelLimit / Math.max(1, natural.width, natural.height));
     const viewport = source.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = Math.ceil(viewport.width);

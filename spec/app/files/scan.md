@@ -622,7 +622,8 @@ pure def exported(s: Scan, ticket: int, confirmed: bool, known: bool, by: Actor)
   val pdf = A::conclude(s.pdf, confirmed, known)
   val receipt = if (pdf.outcome == A::Confirmed) List(ToRecent({ ticket: ticket })) else List()
   val reviewed = if (pdf.outcome != A::Refused and s.search.stage == SearchSaving) List(SearchSaved({ ticket: s.search.ticket })) else List()
-  { state: { ...s, pdf: pdf, pages: if (s.origin == Document or s.open) s.pages else List(),
+  val keep = s.origin == Document or s.open
+  { state: { ...s, pdf: pdf, origin: if (keep) s.origin else Document, pages: if (keep) s.pages else List(),
       search: if (pdf.outcome == A::Refused) retrySearch(s) else s.search,
       written: if (pdf.outcome == A::Refused) s.written else writing(s) }, out: receipt.concat(reviewed) }
 ```
@@ -635,7 +636,7 @@ PDF was being drawn without it. A final export answer can release the pages of a
 ```quint
 pure def stepExportingFreezesThePages(before: Scan, via: str, after: Scan): bool =
   exporting(before) implies
-    (after.pages == before.pages or (via == "exported" and not(exporting(after)) and before.origin != Document and not(before.open) and after.pages.length() == 0))
+    (after.pages == before.pages or ((via == "exported" or via == "close" or via == "hidden" or via == "restart") and not(exporting(after)) and before.origin != Document and after.pages.length() == 0))
 
 pure def alwaysNoTextIsReadDuringAnExport(s: Scan): bool = exporting(s) implies s.text.reading.status != R::Loading
 ```
@@ -717,7 +718,8 @@ exported again; once the phone was asked, its answer still counts.
 
 ```quint
 pure def closed(by: Actor, s: Scan): Scan =
-  { ...s, open: false, pages: if (s.origin == Document or exporting(s)) s.pages else List(),
+  val keep = s.origin == Document or s.pdf.outcome == A::Sent
+  { ...s, open: false, origin: if (keep) s.origin else Document, pages: if (keep) s.pages else List(),
     text: T::close(s.text), keeping: K::close(s.keeping), pdf: F::withdraw(s.pdf), search: closeSearch(s.search.ticket) }
 
 pure def canClose(s: Scan, by: Actor): bool = by == Owner and s.open
@@ -753,7 +755,7 @@ pure def lawAPagePickedBehindItsPickerIsAdded(frame: int, camera: bool): bool =
 pure def canRestart(s: Scan, by: Actor): bool = by == Phone
 
 pure def restart(s: Scan, by: Actor): Scan =
-  val cut = { ...closed(by, s), pdf: F::cut(s.pdf), keep: F::cut(s.keep), keeping: K::restart(s.keeping), text: T::restart(s.text) }
+  val cut = { ...closed(by, s), origin: Document, pages: if (s.origin == Document) s.pages else List(), pdf: F::cut(s.pdf), keep: F::cut(s.keep), keeping: K::restart(s.keeping), text: T::restart(s.text) }
   { ...cut, written: if (s.pdf.outcome == A::Sent) writing(s) else s.written, kept: if (s.keep.outcome == A::Sent) keptAfter(cut) else s.kept }
 
 pure def stepARestartLeavesNothingUnderWay(before: Scan, via: str, after: Scan): bool =

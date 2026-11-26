@@ -12,7 +12,7 @@ import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
 import { type VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
 import { Drafts, editNewMessage, newDraftHeld, writeMessageDraft } from "./composer.vibe"
-import { Conversations } from "./messages.vibe"
+import type { Conversations } from "./messages.vibe"
 
 /** The open thread or exact New visit owns the recorder. Across a pane change it must retire. */
 function messageField(where: Messages.Messages): string {
@@ -89,12 +89,8 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
       && place.thread === thread && place.page.ticket === ticket && Messages.readable(place) && draft.thread === thread
       && Composer.canTypeText(draft, false) && (try phone.get()).telecom === "NoCall" && (try device.showing())
   }
-  try dictateInto(
-    editableHere,
-    effect { return (try composer.get()).slot.author === "Nobody" ? "" : try drafts.text(thread) },
-    (body) => writeMessageDraft(thread, body),
-    "starting message dictation",
-  )
+  const before = effect { return (try composer.get()).slot.author === "Nobody" ? "" : try drafts.text(thread) }
+  try dictateInto(editableHere, before, (body) => writeMessageDraft(thread, body), "starting message dictation")
 }
 
 /** Start dictating to the New draft even before choosing To. A late transcript cannot move to another visit or draft revision. */

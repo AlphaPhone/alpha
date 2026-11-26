@@ -15,6 +15,7 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { executeMedia } from "../src/assistant/media-executors.ts";
 import { readAgentSms } from "../src/messages/agent-send.vibe";
+import { answerReading } from "../src/contacts/reads.vibe";
 import { Drafts } from "../src/messages/composer.vibe";
 import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
@@ -241,7 +242,10 @@ describe("Messages on an Alpha image", () => {
     await press("Call Maya Chen");
     await ready(alpha.runtime, Shell, "Phone on the same Ask Alpha sheet", (state) => state.trail.at(-1) === "Phone" && state.assistant === "Sheet");
     await ready(alpha.runtime, Phone, "Maya's number on the keypad", (state) => state.front && state.tab === "Keypad" && state.digits === "+14155550100".length);
-    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>("[data-alpha-phone-number]")?.value).toBe("+14155550100"));
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.querySelector<HTMLInputElement>("[data-alpha-phone-number]")?.value).toBe("+14155550100");
+    }, { timeout: 12_000 });
     expect([world.telephony.dialed, world.telephony.placed, world.telephony.sent]).toEqual([[], [], []]);
     await hardware("back");
     await ready(alpha.runtime, Shell, "Messages again on the same Ask Alpha sheet", (state) => state.trail.at(-1) === "Messages" && state.assistant === "Sheet");
@@ -898,6 +902,10 @@ describe("Messages on an Alpha image", () => {
           await vi.waitFor(() => expect(review.proposal.state).toBe("reconciliation_required"), { timeout: 12_000 });
           await drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "openView", view: "Settings" }))));
           await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Settings");
+          await vi.waitFor(async () => {
+            await drawn(() => undefined);
+            expect(button("About")).toBeDefined();
+          }, { timeout: 12_000 });
           await press("About");
           const activity = await vi.waitFor(async () => {
             await drawn(() => undefined);
@@ -1066,6 +1074,31 @@ describe("Messages on an Alpha image", () => {
     const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await ready(page, Page, "Browser link page", (state) => state.phase === "Shown" && !state.secure);
+  });
+
+  it("Removes a cleared draft from storage so reopening and agent drafts see an empty composer (spec/app/messages/composer.md, \"Typing changes the draft and makes it the owner's; emptying it leaves no draft\")", async () => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Messages list loaded", (state) => state.list.status === "Loaded" && state.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Composer ready", (state) => state.thread > 0 && state.slot.author === "Nobody");
+
+    await fill("Text Maya", "Temporary draft");
+    await ready(alpha.runtime, Composer, "Owner wrote draft", (state) => state.slot.author === "OwnerWrote");
+    await fill("Text Maya", "");
+    await ready(alpha.runtime, Composer, "Owner cleared draft", (state) => state.slot.author === "Nobody");
+
+    await hardware("back");
+    await ready(alpha.runtime, Messages, "Returned to threads", (state) => state.pane === "Threads");
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Reopened empty composer", (state) => state.thread > 0 && state.slot.author === "Nobody");
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe("");
+    expect(await alpha.runtime.runPromise(answerReading({ type: "sms_reply_selected", body: "Fresh reply" }))).toEqual({
+      kind: "sms-reply", status: "drafted",
+    });
+    await ready(alpha.runtime, Composer, "Agent drafted into cleared composer", (state) => state.slot.author === "AlphaWrote");
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe("Fresh reply");
   });
 
   it("Clears stale Messages search filter when opening Unread from Home (spec/app/messages/index.md, \"One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are\")", async () => {

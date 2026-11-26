@@ -10,6 +10,7 @@ import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
+import { untimed } from "../runtime/reactor.vibe";
 import { drawsAppBack } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
@@ -72,7 +73,7 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
   const pointersRef = useRef(new Map<number, Point>());
   const pinchRef = useRef<{ distance: number; zoom: number } | undefined>(undefined);
   const pinchedRef = useRef(false);
-  const [target, setTarget] = useState<Point | undefined>(undefined);
+  const [target, setTarget] = useState<(Point & { preview: number }) | undefined>(undefined);
   const input = (event: PointerEvent<HTMLButtonElement>) => ({ x: event.clientX, y: event.clientY });
   function spread() {
     const [a, b] = pointersRef.current.values();
@@ -113,20 +114,28 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={up}
+      onLostPointerCapture={up}
       onClick={(event) => {
-        if (pinchedRef.current || !ready(state)) return;
+        if (event.detail === 0) pinchedRef.current = false;
+        else if (pinchedRef.current) {
+          pinchedRef.current = false;
+          return;
+        }
+        if (!ready(state)) return;
         const box = event.currentTarget.getBoundingClientRect();
         if (!box.width || !box.height) return;
         const x = event.detail === 0 ? box.left + box.width / 2 : event.clientX;
         const y = event.detail === 0 ? box.top + box.height / 2 : event.clientY;
         const page = event.currentTarget.ownerDocument.documentElement;
+        const relX = Math.max(0, Math.min(1, (x - box.left) / box.width));
+        const relY = Math.max(0, Math.min(1, (y - box.top) / box.height));
         const point = {
-          x: Math.max(0, Math.min(1, (x - box.left) / box.width)),
-          y: Math.max(0, Math.min(1, (y - box.top) / box.height)),
-          viewportX: Math.max(0, Math.min(1, x / page.clientWidth)),
-          viewportY: Math.max(0, Math.min(1, y / page.clientHeight)),
+          x: relX,
+          y: relY,
+          viewportX: page.clientWidth > 0 ? Math.max(0, Math.min(1, x / page.clientWidth)) : relX,
+          viewportY: page.clientHeight > 0 ? Math.max(0, Math.min(1, y / page.clientHeight)) : relY,
         };
-        setTarget(point);
+        setTarget({ ...point, preview: state.preview });
         focusAt(point);
       }}
     >
@@ -146,12 +155,12 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
           </span>
         )}
       </span>
-      {state.focus > 0 && target !== undefined && (
+      {state.focus > 0 && target !== undefined && target.preview === state.preview && (
         <span
           key={state.focus}
           role="status"
           aria-label={state.confirmed === state.focus ? "Camera focus applied" : "Focus target"}
-          className="pointer-events-none absolute z-10 size-10.5 -translate-1/2 rounded-frame border-2 border-camera-focus shadow-focus-target"
+          className="pointer-events-none absolute z-10 size-10.5 -translate-1/2 rounded-frame border-2 border-camera-focus shadow-focus-target motion-safe:transition-opacity"
           style={{ left: `${target.x * 100}%`, top: `${target.y * 100}%` }}
         />
       )}
@@ -177,7 +186,7 @@ function Access({ state, present, native, can, fire, takeSilent }: {
   const video = state.mode === "Video";
   const noCamera = !allows(state.permission);
   const failed = state.phase === "Failed" || !present;
-  const noMic = !noCamera && !failed && video && !allows(state.mic) && state.film.stage !== "Running";
+  const noMic = !noCamera && !failed && video && !allows(state.mic) && !recording(state);
   if (!state.showing || !noCamera && !failed && !noMic) return null;
   const title = failed ? "Can’t start camera" : noCamera ? "Camera off" : "Mic off";
   const ask = { type: noCamera ? "askAccess" : "askMicrophone" } as const;
@@ -199,9 +208,10 @@ function Access({ state, present, native, can, fire, takeSilent }: {
   );
 }
 
-function ZoomStops({ state, lens, top, zoom }: { state: Visit; lens: LensFacts | undefined; top: string; zoom: (level: number) => void }) {
+function ZoomStops({ state, lens, top, zoom, can, hidden }: { state: Visit; lens: LensFacts | undefined; top: string; zoom: (level: number) => void; can: Can; hidden: boolean }) {
   const enabled = stops.filter(([level]) => level >= (lens?.minimum ?? 10) && level <= (lens?.maximum ?? 10));
-  if (!ready(state) || enabled.length < 2) return null;
+  if (hidden || !ready(state) || enabled.length < 2) return null;
+  const nearest = enabled.reduce((a, b) => Math.abs(a[0] - state.zoom) < Math.abs(b[0] - state.zoom) ? a : b);
   return (
     <div role="group" aria-label="Zoom" data-alpha-camera="zoom" className={cn("pointer-events-none absolute inset-x-0 z-10 flex h-11 items-center justify-center landscape:top-auto landscape:bottom-15", top, railed)}>
       {enabled.map(([level, label]) => (
@@ -209,7 +219,8 @@ function ZoomStops({ state, lens, top, zoom }: { state: Visit; lens: LensFacts |
           key={level}
           type="button"
           aria-label={`Zoom ${level / 10}x`}
-          aria-pressed={state.zoom === level}
+          aria-pressed={nearest[0] === level}
+          disabled={!can({ type: "zoomTo", level })}
           className={cn("pointer-events-auto grid size-11 place-items-center rounded-full font-bold", focusRing)}
           onClick={() => zoom(level)}
         >
@@ -230,9 +241,10 @@ function LastCapture({ id, media, thumbnails, open }: {
 }) {
   const thumbnail = useSyncExternalStore(thumbnails.subscribe, () => thumbnails.snapshot(id));
   const video = media.mime.startsWith("video/");
+  const preview = thumbnail || media.source;
   return (
     <button type="button" aria-label={video ? "Open last video" : "Open last photo"} onClick={open} className={cn("relative block size-13 shrink-0 overflow-hidden rounded-md ring-[1.5px] ring-foreground/70", focusRing)}>
-      {video && !thumbnail ? <Video aria-hidden className="m-auto size-5" /> : <img src={thumbnail ?? media.source} alt="" className="size-full object-cover" />}
+      {!preview || (video && !thumbnail) ? <Video aria-hidden className="m-auto size-5" /> : <img src={preview} alt="" className="size-full object-cover" />}
     </button>
   );
 }
@@ -276,7 +288,8 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
   const autoFlash = port.nativePreview && state.flashAuto;
   const flashLabel = autoFlash ? "Flash auto" : !video ? (lit ? "Flash on" : "Flash off") : lit ? "Light on" : "Light off";
   const Flash = lit || autoFlash ? Zap : ZapOff;
-  const videoShutter = state.film.stage === "Running" || can({ type: "startRecording", sound: true });
+  const videoShutter = (state.film.stage === "Running" && can({ type: "stopRecording", now: untimed })) || can({ type: "startRecording", sound: true });
+  const overlayShown = (state.showing && (!allows(state.permission) || state.phase === "Failed" || !port.present || (video && !allows(state.mic) && !inProgress))) || (active && state.agent.stage === "Asked");
 
   return (
     <section
@@ -303,7 +316,6 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
       />
       {sheet && <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-(--alpha-dock-clearance,0px) h-40 bg-linear-to-b from-transparent to-background/55" />}
 
-      {/* v119's header (legacy template.html at 45f6bed30, lines 1861-1868): 44px down, back off the launcher, the recording time, flip and flash; no timer, ratio, grid or scan. */}
       <header data-alpha-app-header="main" className="absolute inset-x-0 top-0 z-10 flex h-13 items-center px-2.5 portrait:top-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))]">
         {shell.state && drawsAppBack(shell.state, launcher, "FirstPage") && <button type="button" className={cn(headerButton, "rounded-lg")} aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft className="size-5.5" aria-hidden /></button>}
         <span className="flex-1" />
@@ -322,7 +334,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
       </header>
 
       {state.countdown > 0 && (
-        <span role="timer" aria-label={`Photo in ${state.countdown} ${state.countdown === 1 ? "second" : "seconds"}`} className="pointer-events-none absolute inset-x-0 top-75 z-10 flex justify-center text-camera-countdown font-light text-foreground tabular-nums [text-shadow:0_2px_12px_color-mix(in_oklab,var(--background)_60%,transparent)] landscape:right-33">
+        <span role="timer" aria-label={`Photo in ${state.countdown} ${state.countdown === 1 ? "second" : "seconds"}`} className="pointer-events-none absolute inset-x-0 top-75 z-10 flex justify-center text-camera-countdown font-light text-foreground tabular-nums drop-shadow-md landscape:right-33">
           {state.countdown}
         </span>
       )}
@@ -331,14 +343,14 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
           <span className="text-subject leading-normal">{notices[state.said]}</span>
         </button>
       )}
-      <ZoomStops state={state} lens={lens} top={band.zoom} zoom={currentZoom} />
+      <ZoomStops state={state} lens={lens} top={band.zoom} zoom={currentZoom} can={can} hidden={overlayShown} />
       <Access state={state} present={port.present} native={port.nativePreview} can={can} fire={fire} takeSilent={() => fire({ type: "startRecording", sound: false })} />
       {active && state.agent.stage === "Asked" && (
         <section aria-label="Camera request" className={cn("absolute inset-x-4 z-20 mx-auto flex max-w-md -translate-y-full flex-col gap-3 rounded-tile bg-secondary p-4 text-secondary-foreground landscape:top-auto landscape:right-37 landscape:bottom-28 landscape:translate-y-0", band.zoom)}>
           <strong>Take a photo for Alpha?</strong>
           {state.requestedLens !== "AsShown" && <span className="text-sm text-muted-foreground">{chosenLens(state) === "Front" ? "Front camera requested" : "Back camera requested"}</span>}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => fire({ type: "agentDecline" })}>Decline</Button>
+            <Button variant="ghost" size="sm" disabled={!can({ type: "agentDecline" })} onClick={() => fire({ type: "agentDecline" })}>Decline</Button>
             <Button size="sm" disabled={!can({ type: "agentApprove" })} onClick={() => void runtime.runPromiseExit(approveCapture())}>Take photo</Button>
           </div>
         </section>
@@ -352,7 +364,8 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
               type="button"
               aria-label={`${mode} mode`}
               aria-pressed={state.mode === mode}
-              className={cn("flex min-h-11 shrink-0 flex-col items-center justify-center gap-1.25 px-3.5 text-subject font-semibold transition-colors duration-base landscape:rounded-tile landscape:bg-background/62", state.mode === mode ? "text-foreground" : "text-foreground/55", focusRing)}
+              disabled={!can({ type: "setMode", mode })}
+              className={cn("flex min-h-11 shrink-0 flex-col items-center justify-center gap-1.25 px-3.5 text-subject font-semibold transition-colors duration-base disabled:opacity-60 landscape:rounded-tile landscape:bg-background/62", state.mode === mode ? "text-foreground" : "text-foreground/55", focusRing)}
               onClick={() => fire({ type: "setMode", mode })}
             >
               {mode}<span aria-hidden className={cn("size-1 rounded-full bg-foreground", state.mode !== mode && "invisible")} />

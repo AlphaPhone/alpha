@@ -5,7 +5,7 @@ import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contact
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { type Telephony, type TelephonyAbsent, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Dialer, dialing, grantOf } from "../phone/phone.vibe"
@@ -60,11 +60,20 @@ const rows = Layer.sync(Rows, () => {
 /** What a contact has, as Contacts counts it: notes are counted only where the phone lets them be read and edited here. */
 export function sheetOf(found: ContactDetail | Form): Sheet {
   if ("phones" in found) {
-    return { names: found.givenName.trim() + found.familyName.trim() === "" ? 0 : 1, phones: found.phones.filter((value) => value.trim() !== "").length, emails: found.emails.filter((value) => value.trim() !== "").length, notes: found.notes === "" ? 0 : 1, notable: true }
+    return {
+      names: found.givenName.trim() + found.familyName.trim() === "" ? 0 : 1,
+      phones: Math.min(found.phones.filter((value) => value.trim() !== "").length, Contacts.maxEach),
+      emails: Math.min(found.emails.filter((value) => value.trim() !== "").length, Contacts.maxEach),
+      notes: found.notes === "" ? 0 : 1,
+      notable: true,
+    }
   }
   return {
-    names: found.displayName === "" ? 0 : 1, phones: found.phoneNumbers.length, emails: found.emailAddresses.length,
-    notes: found.notes === undefined || found.notes === "" ? 0 : 1, notable: found.notes !== undefined,
+    names: found.displayName === "" ? 0 : 1,
+    phones: Math.min(found.phoneNumbers.length, Contacts.maxEach),
+    emails: Math.min(found.emailAddresses.length, Contacts.maxEach),
+    notes: found.notes === undefined || found.notes === "" ? 0 : 1,
+    notable: found.notes !== undefined,
   }
 }
 
@@ -106,6 +115,40 @@ function linesOfForm(form: Form, card: ContactDetail | undefined): Lines {
   }
 }
 
+/** Page forward through the phone's address book until at least one new accepted row arrives, with cursor-cycle protection. */
+export effect function pageAddressBook(options: {
+  readonly query: string
+  readonly limit: number
+  readonly existing: ReadonlyArray<AddressBookContact>
+  readonly start: ContactCursor | undefined
+  readonly maxPages?: number
+  readonly kind?: "ExplicitRead"
+  readonly accept: (row: AddressBookContact) => boolean
+}): { readonly rows: ReadonlyArray<AddressBookContact>; readonly next: ContactCursor | undefined }!(TelephonyAbsent | TelephonyRefused)!Telephony {
+  const found = new Map(options.existing.map((one) => [one.id, one] as const))
+  const seen = new Set<ContactCursor>()
+  let cursor = options.start
+  let more = true
+  let pages = 0
+  const minimum = found.size
+  while (more && found.size === minimum && (options.maxPages === undefined || pages < options.maxPages)) {
+    pages += 1
+    const position = cursor
+    const page = try readAddressBook("list contacts", (c) => c.list({
+      query: options.query,
+      limit: options.limit,
+      ...(options.kind === undefined ? {} : { kind: options.kind }),
+      ...(position === undefined ? {} : { cursor: position }),
+    }))
+    for (const row of page.contacts) if (!("incomplete" in row) && options.accept(row)) found.set(row.id, row)
+    const next = page.next ?? undefined
+    more = next !== undefined && !seen.has(next)
+    if (next !== undefined) seen.add(next)
+    cursor = next
+  }
+  return { rows: Array.from(found.values()), next: more ? cursor : undefined }
+}
+
 // spec/app/contacts/index.md, "Only the newest list read is taken, and with it what Android says about access"
 effect function listed(ticket: number, further: boolean): Event!!(Telephony | Rows | Contacts.Machine) {
   const store = try Rows
@@ -119,21 +162,15 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
   if (grant !== "Granted") return { type: "listed", ticket, ok: status !== undefined, grant, count: 0, further: false, editable: false }
   const read = effect {
     const book = try readAddressBook("open contacts", (c) => c.open())
-    const found = new Map((further ? held.rows : []).map((one) => [one.id, one] as const))
-    let cursor = further ? held.next : undefined
-    const seen = new Set<ContactCursor>()
-    let more = true
-    const minimum = found.size
-    while (more && found.size === minimum) {
-      const position = cursor
-      const page = try readAddressBook("list contacts", (c) => c.list({ query, limit: 50, kind: "ExplicitRead", ...(position === undefined ? {} : { cursor: position }) }))
-      for (const row of page.contacts) if (!("incomplete" in row) && (chip === "Everyone" || row.starred)) found.set(row.id, row)
-      const next = page.next ?? undefined
-      more = next !== undefined && !seen.has(next)
-      if (next !== undefined) seen.add(next)
-      cursor = next
-    }
-    return { found: Array.from(found.values()), next: more ? cursor : undefined, editable: book.writable }
+    const paged = try pageAddressBook({
+      query,
+      limit: 50,
+      kind: "ExplicitRead",
+      existing: further ? held.rows : [],
+      start: further ? held.next : undefined,
+      accept: (row) => chip === "Everyone" || row.starred,
+    })
+    return { found: paged.rows, next: paged.next, editable: book.writable }
   } catch () => undefined
   if (read === undefined) return { type: "listed", ticket, ok: false, grant, count: 0, further: false, editable: false }
   const { found, next, editable } = read

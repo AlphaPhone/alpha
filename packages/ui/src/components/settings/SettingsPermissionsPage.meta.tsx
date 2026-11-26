@@ -2,9 +2,8 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { fullHeight } from "./samples.ts";
 import type { SettingsPermissionsPageProps } from "./SettingsPermissionsPage.tsx";
-import type { AndroidStart } from "./vocabulary.ts";
 
-const onAndroid = fn<(start: AndroidStart) => void>();
+const onAndroid = fn<NonNullable<SettingsPermissionsPageProps["onAndroid"]>>();
 const onNotifications = fn();
 
 export const meta: ComponentMeta<SettingsPermissionsPageProps> = {

@@ -136,29 +136,31 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
         </div>
       ) : null}
       {quote ? <p className="line-clamp-2 border-l-2 border-border pl-3 text-sm break-words text-muted-foreground">{quote}</p> : null}
-      <div className="flex max-w-full items-start gap-2.5">
-        {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>}
-        <div className="relative max-w-full">
-          {actions && (
-            <button
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={Boolean(open)}
-              aria-controls={open ? rowId : undefined}
-              aria-label="Message actions"
-              className={cn(focusRing, "pointer-events-none absolute inset-0 min-h-11", owner && "rounded-tile rounded-br-box")}
-              onClick={toggle}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
-                event.preventDefault();
-                setOpen("keys");
-              }}
-            />
-          )}
-          <div {...press} data-alpha-message-text="" data-alpha-own-gesture="" className={cn(bubble, "relative select-text")}>{shown}</div>
+      {text ? (
+        <div className="flex max-w-full items-start gap-2.5">
+          {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /></span>}
+          <div className="relative max-w-full">
+            {actions && (
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={Boolean(open)}
+                aria-controls={open ? rowId : undefined}
+                aria-label="Message actions"
+                className={cn(focusRing, "pointer-events-none absolute inset-0 min-h-11", owner && "rounded-tile rounded-br-box")}
+                onClick={toggle}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
+                  event.preventDefault();
+                  setOpen("keys");
+                }}
+              />
+            )}
+            <div {...press} data-alpha-message-text="" data-alpha-own-gesture="" className={cn(bubble, "relative select-text")}>{shown}</div>
+          </div>
         </div>
-      </div>
-      {actions && open ? (
+      ) : null}
+      {text && actions && open ? (
         <div ref={dismissible} id={rowId} role="menu" aria-label="Message actions" aria-orientation="horizontal" className={cn("flex max-w-full overflow-x-auto rounded-md bg-secondary p-1", owner ? "self-end" : "self-start")} onKeyDown={(event) => roam(event, close)}>
           {[
             onQuote && { key: "reply", act: onQuote, icon: <CornerUpLeft aria-hidden />, text: "Reply" },

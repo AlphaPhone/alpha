@@ -1,8 +1,7 @@
 // spec/app/workflows/automations.md, "Story: Act on an automation"; spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule"
-import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, Switch, Textarea, WorkflowAction, WorkflowActions, WorkflowChoice, cn, focusRing } from "@repo/ui";
 import { Play, Repeat } from "lucide-react";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { type Event, type Change, maxText } from "../../gen/app__workflows__automations.ts";
 import { useMachine } from "../../gen/app__workflows__automations.react.ts";
 import type { Machine } from "../../gen/app__workflows__automations.effect.vibe";
@@ -35,12 +34,12 @@ const sources = { Prompt: "Agent automation", Reminder: "Agent reminder", Schedu
 const schedules = [["Daily", "Every day"], ["Weekdays", "Weekdays"], ["Weekends", "Weekends"], ["Custom", "Custom"]] as const satisfies readonly (readonly [Preset, string])[];
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-function EditFields({ initial, onReview }: { initial: { title: string; text: string }; onReview: (title: string, instructions: string) => void }) {
+function EditFields({ initial, canReview, onReview }: { initial: { title: string; text: string }; canReview: boolean; onReview: (title: string, instructions: string) => void }) {
   const [title, setTitle] = useState(initial.title);
   const [instructions, setInstructions] = useState(initial.text);
   return <form className="flex flex-col gap-3" onSubmit={(event) => {
     event.preventDefault();
-    onReview(title, instructions);
+    if (canReview) onReview(title, instructions);
   }}>
     <label className="grid gap-1 text-sm">Name
       <Input aria-label="Name" value={title} maxLength={80} required onChange={(event) => setTitle(event.currentTarget.value)} />
@@ -48,7 +47,7 @@ function EditFields({ initial, onReview }: { initial: { title: string; text: str
     <label className="grid gap-1 text-sm">Instructions
       <Textarea aria-label="Instructions" value={instructions} maxLength={maxText} required onChange={(event) => setInstructions(event.currentTarget.value)} />
     </label>
-    <Button type="submit" disabled={title.trim() === "" || instructions.trim() === ""}>Review</Button>
+    <Button type="submit" disabled={!canReview || title.trim() === "" || instructions.trim() === ""}>Review</Button>
   </form>;
 }
 
@@ -87,10 +86,14 @@ export function automationSource(row: WorkflowRow): string {
 /** The header switch opens a review for the current prompt and schedule. */
 export function AutomationPower({ runtime, row, owner }: AutomationProps & { readonly row: WorkflowRow }) {
   const model = useMachine(runtime);
+  const wordsService = runtime.runSync(AutomationWords);
+  const snapshot = useSyncExternalStore(wordsService.subscribe, wordsService.snapshot, wordsService.snapshot);
   const state = model.state;
   if (!state || state.owner !== owner || state.row !== row.number || row.kind !== "Prompt" || !state.present) return null;
   const toggle = { type: "reviewChange", wanted: state.on ? "Disable" : "Enable" } as const;
-  const current = runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.current(owner, row.number, state.list.ticket)));
+  const current = snapshot.observed?.owner === owner && snapshot.observed.row === row.number && snapshot.observed.ticket === state.list.ticket
+    ? snapshot.observed.prompt
+    : undefined;
   return <Switch checked={state.on} aria-label={`Turn ${row.title} on or off`} disabled={current === undefined || !model.can(toggle)}
     className="ml-3" onCheckedChange={() => void runtime.runPromiseExit(reviewPromptPower(owner, row.number))} />;
 }
@@ -98,15 +101,17 @@ export function AutomationPower({ runtime, row, owner }: AutomationProps & { rea
 /** Prompt and scheduled-task controls over the current owner and row. */
 export function Automation({ runtime, row, owner }: AutomationProps) {
   const model = useMachine(runtime);
+  const wordsService = runtime.runSync(AutomationWords);
+  const snapshot = useSyncExternalStore(wordsService.subscribe, wordsService.snapshot, wordsService.snapshot);
   const state = model.state;
   const number = row?.number ?? 0;
   if (!state || state.owner !== owner || state.row !== number) return null;
   const editor = () => void runtime.runPromiseExit(editAutomation(owner, number));
   const send = (event: Event) => { if (model.can(event)) void model.send(event); };
-  const draft = runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.view()));
+  const draft = snapshot.editor;
   const editing = state.editing && draft.owner === owner && draft.row === number;
-  const observed = row?.kind === "Prompt"
-    ? runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.current(owner, number, state.list.ticket)))
+  const observed = row?.kind === "Prompt" && snapshot.observed?.owner === owner && snapshot.observed.row === number && snapshot.observed.ticket === state.list.ticket
+    ? snapshot.observed.prompt
     : undefined;
   const canEdit = observed !== undefined && model.can(promptEditEvent(observed));
   const time = `${String(state.when.hour).padStart(2, "0")}:${String(state.when.minute).padStart(2, "0")}`;
@@ -114,8 +119,9 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
     ? savedSchedule(draft.source.prompt) : editedSchedule(state.when, time, draft.zone);
   const reviewEdit = state.proposed === "Edit" || state.proposed === "Create";
   const reviewedTitle = reviewEdit ? draft.title : row?.title ?? draft.title;
+  const canSetCurrentTime = model.can({ type: "setTime", hour: state.when.hour, minute: state.when.minute });
   const reviewedPower = state.review.showing && (state.proposed === "Enable" || state.proposed === "Disable")
-    ? runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.powerReview())) : undefined;
+    ? snapshot.power : undefined;
   return (
     <section aria-label={row === undefined ? "Automation" : "Automation controls"} className="flex flex-col gap-3">
       {row === undefined && !editing && model.can({ type: "openEditor", kind: "PromptTask", zone: 0 }) && (
@@ -142,22 +148,31 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
         {state.timingEditable ? <fieldset className="flex flex-col gap-2">
           <legend className="mb-2 text-sm">When</legend>
           <div className="flex flex-wrap gap-1">
-            {schedules.map(([preset, label]) => <Button key={preset} size="sm" aria-pressed={state.when.preset === preset}
-              variant={state.when.preset === preset ? "primary" : "secondary"} onClick={() => send({ type: "pickPreset", preset })}>{label}</Button>)}
+            {schedules.map(([preset, label]) => {
+              const pick = { type: "pickPreset", preset } as const;
+              return <Button key={preset} size="sm" aria-pressed={state.when.preset === preset}
+                disabled={state.when.preset !== preset && !model.can(pick)}
+                variant={state.when.preset === preset ? "primary" : "secondary"} onClick={() => send(pick)}>{label}</Button>;
+            })}
           </div>
           {state.when.preset === "Custom" && <div className="flex flex-wrap gap-1">
-            {weekdays.map((day, index) => <Button key={day} size="sm" aria-label={day} aria-pressed={state.when.days.includes(index)}
-              variant={state.when.days.includes(index) ? "primary" : "secondary"} onClick={() => send({ type: "toggleDay", day: index })}>{day.slice(0, 3)}</Button>)}
+            {weekdays.map((day, index) => {
+              const toggleDay = { type: "toggleDay", day: index } as const;
+              return <Button key={day} size="sm" aria-label={day} aria-pressed={state.when.days.includes(index)}
+                disabled={!model.can(toggleDay)}
+                variant={state.when.days.includes(index) ? "primary" : "secondary"} onClick={() => send(toggleDay)}>{day.slice(0, 3)}</Button>;
+            })}
           </div>}
           <label className="grid gap-1 text-sm">Time in {draft.zone}
-            <Input type="time" value={time} onChange={(event) => {
+            <Input type="time" value={time} disabled={!canSetCurrentTime} onChange={(event) => {
               const [hour, minute] = event.currentTarget.value.split(":").map(Number);
               if (hour !== undefined && minute !== undefined) send({ type: "setTime", hour, minute });
             }} />
           </label>
         </fieldset> : <p className="text-sm text-muted-foreground">{schedule}</p>}
-        <EditFields key={number} initial={draft} onReview={(title, instructions) => void runtime.runPromiseExit(reviewAutomation(title, instructions))} />
-        <Button variant="ghost" onClick={() => send({ type: "closeEditor" })}>Cancel</Button>
+        <EditFields key={number} initial={draft} canReview={model.can({ type: "setText", chars: 1 })}
+          onReview={(title, instructions) => void runtime.runPromiseExit(reviewAutomation(title, instructions))} />
+        <Button variant="ghost" disabled={!model.can({ type: "closeEditor" })} onClick={() => send({ type: "closeEditor" })}>Cancel</Button>
       </>}
       {state.fired === "Dispatched" && <p role="status">The agent ran it.</p>}
       {state.fired === "Deferred" && <p role="status">The agent scheduled another attempt.</p>}
@@ -169,7 +184,15 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
         <Button size="sm" variant="secondary" onClick={() => send({ type: "checkChange" })}>Check change</Button>
         <Button size="sm" variant="secondary" onClick={() => send({ type: "readAutomations" })}>Refresh</Button>
       </Alert>}
-      {model.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>}
+      {model.can({ type: "resendChange" }) && (
+        <Button variant="secondary" onClick={() => send({ type: "resendChange" })}>Send again</Button>
+      )}
+      {model.can({ type: "letGo" }) && (
+        <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>
+      )}
+      {model.can({ type: "dismissRecovery" }) && (
+        <Button variant="ghost" onClick={() => send({ type: "dismissRecovery" })}>Dismiss notice</Button>
+      )}
       {state.change.attempt.outcome === "Refused" && state.fired === "NotFired" && <Alert variant="warn">The agent didn’t apply the change.</Alert>}
       {row !== undefined && !reviewEdit && state.review.showing && (
         <div role="group" aria-label="Review workflow action" className="mt-6 border-t border-border pt-4">

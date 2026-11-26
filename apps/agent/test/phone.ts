@@ -3,9 +3,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { Effect } from "effect";
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent";
 import { type Cloud, type DeviceKey, packPrepared, said, scratch, startCloud } from "@repo/eliza-harness";
-import { Effect } from "effect";
 
 /** The owner every journey of the pack signs in. */
 const owner = "owner@alpha.test";

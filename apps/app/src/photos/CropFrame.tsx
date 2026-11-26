@@ -1,7 +1,7 @@
 // spec/app/photos/viewer.md, "Cropping a photo shows its full rotated frame, and only the area applied changes the edit"
 import { X } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Button, cn } from "@repo/ui";
+import { Button, cn, focusRing } from "@repo/ui";
 import { cropUnits, wholePhoto, type CropBounds } from "../../gen/app__photos__viewer.ts";
 
 export const editHeader = "flex h-13 shrink-0 items-center gap-2 pr-4 pl-3";
@@ -110,7 +110,11 @@ export function CropFrame({ source, bounds, onCancel, onApply }: Props) {
     const frame = imageRef.current?.getBoundingClientRect();
     if (!frame || frame.width < 1 || frame.height < 1) return;
     event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      return;
+    }
     gestureRef.current = { pointer: event.pointerId, origin: { x: event.clientX, y: event.clientY }, frame, bounds: rect, corner };
   }
   function move(event: PointerEvent<HTMLElement>) {
@@ -139,12 +143,14 @@ export function CropFrame({ source, bounds, onCancel, onApply }: Props) {
   }
   return <>
     <CropHeader onCancel={onCancel} onApply={() => onApply(rect)} />
-    <div className={cn("relative flex min-h-0 items-center justify-center [container-type:size]", editFrame)}>
-      <div ref={imageRef} className="relative touch-none overflow-hidden" style={{ width: `min(100cqw, calc(100cqh * ${imageRatio}))`, aspectRatio: imageRatio }}>
-        <img src={source.image} alt="" draggable={false} className="pointer-events-none absolute inset-0 size-full" />
-        <div aria-hidden className="pointer-events-none absolute inset-0 bg-background/65" style={{ clipPath: outside }} />
+    <div className={cn("relative flex min-h-0 items-center justify-center p-5 [container-type:size]", editFrame)}>
+      <div ref={imageRef} className="relative touch-none" style={{ width: `min(100cqw, calc(100cqh * ${imageRatio}))`, aspectRatio: imageRatio }}>
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <img src={source.image} alt="" draggable={false} className="absolute inset-0 size-full" />
+          <div aria-hidden className="absolute inset-0 bg-background/65" style={{ clipPath: outside }} />
+        </div>
         <div ref={frameFocus} tabIndex={0} role="group" aria-label="Crop area" aria-describedby="alpha-photos-crop-keys"
-          className="absolute cursor-move border-2 border-foreground focus-visible:outline-focus"
+          className={cn(focusRing, "absolute cursor-move border-2 border-foreground")}
           style={{ left, top, width: percent(rect.width), height: percent(rect.height) }}
           onPointerDown={(event) => begin(event)} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end} onKeyDown={nudge}>
           <span aria-hidden className="pointer-events-none absolute inset-x-0 top-1/3 h-1/3 border-y border-foreground/40" />
@@ -157,7 +163,7 @@ export function CropFrame({ source, bounds, onCancel, onApply }: Props) {
       </div>
     </div>
     <p className="sr-only" id="alpha-photos-crop-keys">Use the arrow keys to move the crop. Hold Shift to resize it.</p>
-    <div role="group" aria-label="Crop aspect" className="mt-6.5 flex shrink-0 flex-wrap justify-center gap-2 px-3 landscape:mt-2">
+    <div role="group" aria-label="Crop aspect" className="mt-6.5 flex shrink-0 flex-wrap justify-center gap-2 px-3 pb-4 landscape:mt-2">
       {aspects.map((aspect) => <Button key={aspect.key} size="sm" variant="secondary"
         className={cn("px-3.5", draft.aspect === aspect ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80" : editTool)}
         aria-label={`${aspect.key} crop`} aria-pressed={draft.aspect === aspect} onClick={() => choose(aspect)}>{aspect.key}</Button>)}

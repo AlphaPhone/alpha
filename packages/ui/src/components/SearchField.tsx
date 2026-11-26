@@ -34,13 +34,13 @@ export function SearchField({ value, onValueChange, clearLabel = "Clear", keepCl
           size="icon"
           aria-label={clearLabel}
           disabled={disabled}
-          className="absolute right-1 size-10 min-w-10 [&_svg:not([class*='size-'])]:size-4.5"
+          className="absolute right-0.5 size-11 min-w-11 [&_svg:not([class*='size-'])]:size-4.5"
           onClick={(event) => {
             onValueChange("");
             event.currentTarget.parentElement?.querySelector("input")?.focus();
           }}
         >
-          <X />
+          <X aria-hidden />
         </Button>
       ) : null}
     </div>

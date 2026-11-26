@@ -36,14 +36,15 @@ import type { Answering } from "./fakes/routes.ts";
 import { scene, services } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
-let mine: Awaited<ReturnType<typeof owned>>;
+type OwnedHarness = Awaited<ReturnType<typeof owned>>;
+let mine: OwnedHarness;
 
 underAct();
+afterEach(closeAll);
 beforeAll(async () => {
   // spec/app/ask/index.md, "Story: Talk to my agent": the owner signs in by the code the cloud mails, and the device is given its key.
   mine = await owned("ask");
 }, 600_000);
-afterEach(closeAll);
 
 /** Hold `check` against the drawn screen until it passes, for at most `timeout` ms. */
 const onScreen = (check: () => void | Promise<void>, timeout = 30_000) => vi.waitFor(async () => {
@@ -87,7 +88,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Confirmed");
   expect(askExampleLines()).toEqual(["Say hello.", "Hello from the cloud."]);
   const textOf = (value: unknown) => (typeof value === "string" ? value : "");
-  const last = (await mine.asked()).at(-1);
+  const last = (await mine.asked()).findLast((messages) => /^Say hello\.(\n|$)/.test(textOf(messages[1]?.content)));
   expect([last?.length, last?.[0]?.role, textOf(last?.[0]?.content).includes(mine.system), last?.[1]?.role, /^Say hello\.(\n|$)/.test(textOf(last?.[1]?.content))])
     .toEqual([2, "system", true, "user", true]);
   expect(await balance()).toBeLessThan(mine.granted);
@@ -176,7 +177,8 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   await send(next);
   await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Streaming");
   await waitForScreen(() => {
-    expect(document.querySelector('[data-alpha-message-id="reply"] [data-alpha-message-text]')?.textContent).toBe(partial);
+    // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
+    expect(document.querySelector('[data-alpha-message-id="reply"] [data-alpha-message-text]')).toBeNull();
     expect(button("Stop reply")?.disabled).toBe(false);
   });
   expect(button("Send")).toBeUndefined();
@@ -328,9 +330,9 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   }), only("home", "view:Photos", "assistant", "notice"));
   const library = photos.runtime(alpha);
   const chat = assistant.runtime(alpha);
-  const readViewer = () => library.runPromise(Viewer.use((machine) => machine.get()));
-  const readDraft = () => chat.runPromise(Composer.use((machine) => machine.get()));
-  const readShell = () => alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
+  const readViewer = () => library.runPromise(Effect.flatMap(Viewer, (machine) => machine.get()));
+  const readDraft = () => chat.runPromise(Effect.flatMap(Composer, (machine) => machine.get()));
+  const readShell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
   const waitForScreen = onScreen;
   await until(alpha, chat, Conversation, (state) => state.ready);
   await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
@@ -419,7 +421,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] }, prompt);
   await sendAndHear(alpha, chat, reply);
   expect(received).toEqual([expect.objectContaining({
-    text: expect.stringContaining(prompt),
+    text: expect.stringContaining(prompt) as unknown,
     images: [
       { data: replacement.image.slice(replacement.image.indexOf(",") + 1), mimeType: "image/jpeg", name: replacement.name },
       { data: ordinaryData, mimeType: "image/png", name: ordinary },
@@ -552,7 +554,7 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
 
   const native = Promise.withResolvers<void>();
   world.telephony.hold = native.promise;
-  const settled = (state: string) => expect.objectContaining({ id, digest, state });
+  const settled = (state: string): unknown => expect.objectContaining({ id, digest, state });
   try {
     await press("Send this text");
     await vi.waitFor(async () => {
@@ -568,9 +570,9 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
         providerIdempotencyKey: id,
         providerReceipt: expect.objectContaining({
           outcome: "applied", operationId: id,
-          result: expect.objectContaining({ kind: "sms-send", operationId: id, subscriptionId: 1, status: "sent" }),
-        }),
-      }),
+          result: expect.objectContaining({ kind: "sms-send", operationId: id, subscriptionId: 1, status: "sent" }) as unknown,
+        }) as unknown,
+      }) as unknown,
     }));
   }, { timeout: 30_000 });
   await onScreen(() => expect(enrollment.journal.get(id)?.acknowledged).toBe(true));
@@ -615,7 +617,7 @@ it('Filter Files from Home and open the named file with the resident agent (spec
   const open = { type: "files_open", path } as const;
   await send("Open Documents/notes.txt", open);
   await waitForScreen(() => expect(receipts().map(({ operation }): unknown => JSON.parse(operation))).toEqual([filter, open]));
-  // Files draws its preview only while Ask Alpha is not raised over it: the file opened behind the sheet shows once it is put away.
+  // spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes": Files draws its preview only while Ask Alpha is not raised over it.
   await hardware("back");
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
   await waitForScreen(() => expect(document.querySelector('[role="dialog"][aria-label="Preview"] pre')?.textContent).toBe(contents));

@@ -20,7 +20,7 @@ export function AssistantQuoteBar({ kind, text, onRemove, className, ...props }:
     <div className={cn("flex min-h-11 items-center gap-2 rounded-md bg-secondary py-1.5 pl-4 text-caption text-secondary-foreground", onRemove ? "pr-1.5" : "pr-4", className)} {...props}>
       <span className="line-clamp-2 min-w-0 flex-1 break-words">{kind === "quote" ? text : "Editing to send again"}</span>
       {onRemove ? (
-        <button type="button" aria-label="Remove quote" onClick={onRemove} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard hover:bg-accent")}>
+        <button type="button" aria-label="Remove quote" onClick={onRemove} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent")}>
           <X aria-hidden className="size-4" />
         </button>
       ) : null}

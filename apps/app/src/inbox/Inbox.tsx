@@ -127,13 +127,15 @@ function changeOf(list: Mailbox, kind: Change, messages: number[], history: numb
 }
 
 /** The review of a change to messages, and the toast of how it stands: Undo while held, then how it ended. */
-function ChangeReview({ runtime, list, cards }: { runtime: Runtime; list: Mailbox; cards: (message: number) => MailCard | undefined }) {
+function ChangeReview({ runtime, list, cards, selecting = false }: { runtime: Runtime; list: Mailbox; cards: (message: number) => MailCard | undefined; selecting?: boolean }) {
   const { state, can, send } = useTimed(runtime, useChanges);
   const listed = useList(runtime);
   if (!state || !isChange(state.kind)) return null;
   const operation = operationNames[state.kind];
   const confirm = { type: "confirm", revision: list.revision, access: accessOf(list, state.account), now: untimed } as const;
   const undo = { type: "undo", now: untimed } as const;
+  const cancel = { type: "cancel" } as const;
+  const dismiss = { type: "dismissOutcome" } as const;
   const restoring = () => {
     if (state.attempt.outcome !== "Confirmed" || (state.kind !== "Archive" && state.kind !== "Trash")) return undefined;
     const event = changeOf(list, state.kind === "Archive" ? "Unarchive" : "Untrash", state.messages, revisionOf(cards(state.messages[0] ?? 0)));
@@ -152,17 +154,31 @@ function ChangeReview({ runtime, list, cards }: { runtime: Runtime; list: Mailbo
         onConfirm={can(confirm, "Owner") ? () => void send(confirm, "Owner").then(() => {
           if (!checksSelection(state.kind) && listed.can({ type: "held" })) void listed.send({ type: "held" });
         }) : undefined}
-        onCancel={() => void send({ type: "cancel" }, "Owner")}
+        onCancel={() => {
+          if (can(cancel, "Owner")) void send(cancel, "Owner");
+          if (!selecting) {
+            for (const message of state.messages) {
+              if (listed.can({ type: "unchoose", message })) void listed.send({ type: "unchoose", message });
+            }
+          }
+        }}
       />
-      <ToastRegion>{toastOf(state, operation, can(undo, "Owner") ? () => void send(undo, "Owner") : restoring(), () => void send({ type: "dismissOutcome" }, "Owner"))}</ToastRegion>
+      <ToastRegion>{toastOf(state, operation, can(undo, "Owner") ? () => void send(undo, "Owner") : restoring(), can(dismiss, "Owner") ? () => void send(dismiss, "Owner") : undefined)}</ToastRegion>
     </>
   );
 }
 
-function toastOf(state: Operations, operation: (typeof operationNames)[Change], onUndo: (() => void) | undefined, onDismiss: () => void): ReactNode {
+function toastOf(state: Operations, operation: (typeof operationNames)[Change], onUndo: (() => void) | undefined, onDismiss: (() => void) | undefined): ReactNode {
   const count = state.messages.length;
   if (onUndo) return <InboxChangeToast operation={operation} count={count} phase={state.attempt.outcome === "Confirmed" ? "done" : "holding"} onUndo={onUndo} />;
-  if (!state.noticed) return <div onClick={onDismiss}><InboxChangeToast operation={operation} count={count} phase="unknown" /></div>;
+  if (!state.noticed) {
+    return (
+      <div className="pointer-events-auto flex items-center gap-2">
+        <InboxChangeToast operation={operation} count={count} phase="unknown" />
+        {onDismiss ? <Button size="sm" variant="secondary" onClick={onDismiss}>Dismiss</Button> : null}
+      </div>
+    );
+  }
   if (state.attempt.outcome === "Refused") return <InboxChangeToast operation={operation} count={count} phase={state.kind === "Unarchive" || state.kind === "Untrash" ? "outOfDate" : "refused"} />;
   return null;
 }
@@ -181,7 +197,7 @@ function Body({ text, contents, images, onReview }: { text: string; contents: Re
   const list = (
     <ul aria-label="Links" className={formatted ? "flex flex-col items-start gap-1" : "mt-5 flex flex-col items-start gap-1"}>
       {additional.map((link) => (
-        <li key={link.url} className="min-w-0 max-w-full text-sm [overflow-wrap:anywhere]">
+        <li key={link.url} className="min-w-0 max-w-full text-sm wrap-anywhere">
           {link.secure ? (
             <Button variant="ghost" size="sm" aria-label={link.mismatch ? link.label : link.url}
               className="h-auto min-h-11 min-w-0 justify-start rounded-sm px-0 text-left font-normal whitespace-normal text-primary hover:bg-transparent active:bg-transparent"
@@ -196,7 +212,7 @@ function Body({ text, contents, images, onReview }: { text: string; contents: Re
   return <>
     {document
       ? <iframe ref={frameRef} title="Formatted email" sandbox="allow-same-origin" referrerPolicy="no-referrer" className="block h-96 w-full border-0" srcDoc={document} />
-      : <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{text || "(Empty message)"}</p>}
+      : <p className="whitespace-pre-wrap wrap-anywhere">{text || "(Empty message)"}</p>}
     {additional.length > 0
       ? formatted ? <details className="mt-4"><summary className="min-h-11 cursor-pointer content-center text-sm text-muted-foreground">Other links ({additional.length})</summary>{list}</details> : list
       : null}
@@ -308,7 +324,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         threadRows={threadRows}
         onOlder={threadPage ? selectPosition(conversation?.earlier.get(threadPage.offset), true) : can(earlier) ? () => void send(earlier) : undefined}
         onNewer={threadPage ? selectPosition(threadPage.nextOffset, true) : can(newer) ? () => void send(newer) : undefined}
-        onClose={() => void send({ type: "close" })}
+        onClose={() => { if (can({ type: "close" })) void send({ type: "close" }); }}
         reading={state.body.status === "Loading"}
         fault={fault}
         onFaultAction={faultAction}
@@ -334,12 +350,14 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         onReplyAll={loaded && new Set([...(card?.to ?? []), ...(card?.cc ?? [])].map((one) => one.toLowerCase())).size > 1 ? onBegin({ kind: "ReplyAll", account: state.account, message: answered }) : undefined}
         onForward={loaded ? onBegin({ kind: "Forward", account: state.account, message: answered }) : undefined}
       >
-        {state.fromPhone ? <p className="whitespace-pre-wrap break-words">{mail.savedBody(list, state.message) ?? "Message not saved on this device."}</p> : null}
+        {state.fromPhone ? <p className="whitespace-pre-wrap wrap-anywhere">{mail.savedBody(list, state.message) ?? "Message not saved on this device."}</p> : null}
         {loaded && contents ? (
           <Body text={read.bodyText} contents={contents} images={imagesLoad(state)} onReview={reviewLink} />
         ) : null}
       </InboxMessageScreen>
-      <InboxLinkReview open={link !== undefined} destination={link?.url ?? ""} claimed={state.warning ? link?.label : undefined} onOpen={() => void send({ type: "openLink" })} onClose={() => void send({ type: "closeLink" })} />
+      <InboxLinkReview open={link !== undefined} destination={link?.url ?? ""} claimed={state.warning ? link?.label : undefined}
+        onOpen={() => { if (can({ type: "openLink" })) void send({ type: "openLink" }); }}
+        onClose={() => { if (can({ type: "closeLink" })) void send({ type: "closeLink" }); }} />
       <InboxAttachmentReview
         open={file !== undefined && state.attachment > 0}
         name={file?.name ?? ""}
@@ -352,7 +370,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
         onSave={file && destination !== "unavailable" && canSaveAttachment(file) && can(saveReviewed) ? () => void send(saveReviewed) : undefined}
         saveOutcome={state.handling === "Opening" ? outcomeOf(state.keep) : undefined}
-        onClose={() => void send({ type: "closeAttachment" })}
+        onClose={() => { if (can({ type: "closeAttachment" })) void send({ type: "closeAttachment" }); }}
       />
     </>
   );
@@ -430,14 +448,10 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const cards = (number: number) => mail.card(number);
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
   const retryList = refresh ?? retryAccess;
-  const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
-  const askMailSignIn = (otherwise: () => void) => () => {
-    void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(otherwise)));
-  };
   const route = shell.state?.route;
-  const signIn = route === undefined ? undefined : askMailSignIn(() => {
-    alpha.runtime.runFork(openInboxAccount(route));
-  });
+  const signIn = route === undefined ? undefined : () => {
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.signIn(() => alpha.runtime.runFork(openInboxAccount(route)))));
+  };
   const connectGmail = route === undefined ? undefined : () => {
     const popup = gmailAuthorizationWindow();
     void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.consent({ kind: "Connect", route }, popup)));
@@ -639,7 +653,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       {mustChoose ? <InboxAccountList accounts={accounts} onChoose={chooseAccount} /> : null}
       <FileOffer runtime={runtime} />
       <Suggested runtime={runtime} />
-      {review}
+      <ChangeReview runtime={runtime} list={state} cards={cards} selecting={selecting} />
     </>
   );
 }

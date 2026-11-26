@@ -15,7 +15,7 @@ public final class AlphaPageContextTest {
   assertEquals("https://example.com/", AlphaPageContext.address("HTTPS://example.com/"));
   for (String refused : new String[] {"http://example.com/", "https://user:pass@example.com/", "javascript:alert(1)", "file:///etc/passwd", "about:blank", "", null, "https://example.com/" + "a".repeat(2100)})
    assertNull(String.valueOf(refused), AlphaPageContext.address(refused));
-  assertEquals("https://accounts.example/signin", AlphaPageContext.origin("https://accounts.example/signin?token=abc#x"));
+  assertEquals("https://accounts.example", AlphaPageContext.origin("https://accounts.example/signin/reset-token?token=abc#x"));
   assertEquals("Two lines here", AlphaPageContext.title("  Two\nlines\u0007 here "));
   assertEquals("", AlphaPageContext.title(null));
   assertEquals(300, AlphaPageContext.title("t".repeat(400)).length());

@@ -12,10 +12,19 @@ import { type Telegram, telegramAt, unavailableTelegram } from "./telegram.vibe"
 import { type Vault, browserVault, relayedVault } from "./vault.vibe"
 
 module web {
-  /** @throws {never} */
-  export const storage = (): Storage => localStorage
+  /** Probe `localStorage` without throwing in restricted or sandboxed browser contexts. @throws {never} */
+  export function probeStorage(): Storage | undefined {
+    try {
+      const candidate = globalThis.localStorage
+      if (candidate === undefined) return undefined
+      void candidate.length
+      return candidate
+    } catch {
+      return undefined
+    }
+  }
 }
-import { storage } from web
+import { probeStorage } from web
 
 /** Optional overrides for Slack, Telegram, and isolated messaging session layers. */
 export interface MessagingLayers {
@@ -30,7 +39,10 @@ export type Platform = KeyValueStore.KeyValueStore | Time | Install | Agent | Cl
 /** Alpha's time and its installation's name, which every platform has: over the store, and over the phone that says when the page woke. */
 export const grounded = Layer.merge(install, Layer.unwrap(effect { return timeOver((try Device).visible) }))
 
-const store = KeyValueStore.layerStorage(storage)
+const store = Layer.unwrap(sync(() => {
+  const available = probeStorage()
+  return available === undefined ? KeyValueStore.layerMemory : KeyValueStore.layerStorage(() => available)
+}))
 
 function messagingLayers(overrides?: MessagingLayers) {
   return Layer.mergeAll(

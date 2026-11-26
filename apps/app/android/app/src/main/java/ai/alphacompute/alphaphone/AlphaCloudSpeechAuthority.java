@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
@@ -19,9 +20,10 @@ final class AlphaCloudSpeechAuthority {
  private final Map<String, String> origins;
  private final Function<String, CredentialReader> custody;
  private final BooleanSupplier secretSurface;
+ private final Object watchLock = new Object();
  private final Map<String, CredentialReader> readers = new HashMap<>();
  private final List<CredentialReader.Subscription> subscriptions = new ArrayList<>();
- private long epoch;
+ private final AtomicLong epoch = new AtomicLong();
  private boolean watching, closed;
 
  /** {@code origins} names each registered cloud's API origin; {@code custody} gives the sign-in reader of an origin. */
@@ -39,13 +41,42 @@ final class AlphaCloudSpeechAuthority {
  }
 
  /** The current authority epoch, watching every registered cloud's key from the first call on. */
- synchronized long epoch() {
-  if (closed) throw new IllegalStateException("Cloud speech authority closed");
-  if (!watching) {
-   watching = true;
-   for (String environment : origins.keySet()) subscriptions.add(reader(environment).listen(this::noticed));
+ long epoch() {
+  boolean needWatch;
+  synchronized (this) {
+   if (closed) throw new IllegalStateException("Cloud speech authority closed");
+   needWatch = !watching;
   }
-  return epoch;
+  if (needWatch) {
+   synchronized (watchLock) {
+    synchronized (this) {
+     if (closed) throw new IllegalStateException("Cloud speech authority closed");
+     needWatch = !watching;
+    }
+    if (needWatch) {
+     List<CredentialReader.Subscription> created = new ArrayList<>(origins.size());
+     try {
+      for (String environment : origins.keySet()) created.add(reader(environment).listen(this::noticed));
+     } catch (RuntimeException error) {
+      for (CredentialReader.Subscription subscription : created) subscription.close();
+      throw error;
+     }
+     boolean closeNow;
+     synchronized (this) {
+      closeNow = closed;
+      if (!closeNow) {
+       subscriptions.addAll(created);
+       watching = true;
+      }
+     }
+     if (closeNow) {
+      for (CredentialReader.Subscription subscription : created) subscription.close();
+      throw new IllegalStateException("Cloud speech authority closed");
+     }
+    }
+   }
+  }
+  return epoch.get();
  }
 
  /**
@@ -70,17 +101,27 @@ final class AlphaCloudSpeechAuthority {
   if (current != null && current.credentialId().equals(credentialId)) reader.report401(current.version(), reason);
  }
 
- synchronized void close() {
-  closed = true;
-  for (CredentialReader.Subscription subscription : subscriptions) subscription.close();
-  subscriptions.clear();
+ void close() {
+  List<CredentialReader.Subscription> toClose;
+  synchronized (this) {
+   closed = true;
+   toClose = new ArrayList<>(subscriptions);
+   subscriptions.clear();
+  }
+  for (CredentialReader.Subscription subscription : toClose) subscription.close();
  }
 
- private synchronized CredentialReader reader(String environment) {
-  return readers.computeIfAbsent(environment, name -> custody.apply(origins.get(name)));
+ private CredentialReader reader(String environment) {
+  synchronized (readers) {
+   CredentialReader existing = readers.get(environment);
+   if (existing != null) return existing;
+   CredentialReader created = custody.apply(origins.get(environment));
+   readers.put(environment, created);
+   return created;
+  }
  }
 
- private synchronized void noticed(Notice notice) {
-  if (notice instanceof Notice.Announce || notice instanceof Notice.SignedOutNotice || notice instanceof Notice.ExpiredNotice) epoch++;
+ private void noticed(Notice notice) {
+  if (notice instanceof Notice.Announce || notice instanceof Notice.SignedOutNotice || notice instanceof Notice.ExpiredNotice) epoch.incrementAndGet();
  }
 }

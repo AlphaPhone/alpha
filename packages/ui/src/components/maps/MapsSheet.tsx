@@ -18,8 +18,8 @@ export function MapsSheet({ height, grows = false, className, style, ...props }:
     <section
       style={{ ...style, ...(grows ? { minHeight: `min(${size}, ${highest})` } : { height }), maxHeight: highest }}
       className={cn(
-        "absolute inset-x-0 bottom-0 z-20 flex flex-col rounded-t-sheet bg-background text-foreground shadow-sheet outline outline-border transition-[height] duration-slow ease-standard motion-safe:animate-rise dark:shadow-sheet-dark",
-        grows && "overflow-y-auto overscroll-contain pb-29",
+        "absolute inset-x-0 bottom-0 z-20 flex flex-col rounded-t-sheet border-t border-border/60 bg-popover text-popover-foreground shadow-sheet transition-[height] duration-slow ease-standard motion-safe:animate-rise motion-reduce:transition-none dark:border-border dark:shadow-sheet-dark",
+        grows && "overflow-y-auto overscroll-contain pb-[calc(--spacing(29)+var(--alpha-safe-bottom))]",
         className,
       )}
       {...props}

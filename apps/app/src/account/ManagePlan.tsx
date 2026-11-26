@@ -1,15 +1,15 @@
-// spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in"
+// spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
 import type { PlanOffer, SnapshotSubscription } from "@elizaos/cloud";
 import { Button, Input, Spinner } from "@repo/ui";
-import { Layer, Effect } from "effect";
-import { useEffect, useState } from "react";
+import { Effect, type Layer } from "effect";
+import { useState } from "react";
 import { useMachine } from "../../gen/app__account__change.react.ts";
 import * as Change from "../../gen/app__account__change.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import type { AccountWrites } from "./profile.vibe";
 import type { checkout } from "./billing.vibe";
 import type { codes } from "./codes.vibe";
-import { beginBillingVerification, ChangeReviewPort, checkPlanChange, chooseChange, confirmReviewedChange, leaveBillingVerification, managePlan, payInvoice, sendBillingFactor, settleBillingVerification } from "./change.vibe";
+import { beginBillingVerification, ChangeReviewPort, checkPlanChange, chooseChange, confirmReviewedChange, leaveBillingVerification, type managePlan, payInvoice, sendBillingFactor, settleBillingVerification } from "./change.vibe";
 import type { BillingVerification } from "./change-authority.vibe";
 
 type Services = Resident | AccountWrites | Layer.Success<ReturnType<typeof managePlan>> | Layer.Success<ReturnType<typeof checkout>> | Layer.Success<ReturnType<typeof codes>>;
@@ -37,12 +37,6 @@ export function ManagePlan({ runtime, subscription, offers, refresh }: Props) {
   const [verification, setVerification] = useState<BillingVerification>();
   const [verificationError, setVerificationError] = useState("");
   const [sentSms, setSentSms] = useState(false);
-  const quoteEnds = state?.step === "Quoted" ? state.quoteEnds : undefined;
-  useEffect(() => {
-    if (quoteEnds === undefined) return;
-    const wake = window.setTimeout(() => void send({ type: "notNow" }), Math.max(0, quoteEnds - Date.now()));
-    return () => window.clearTimeout(wake);
-  }, [quoteEnds, send]);
   if (state === undefined) return null;
   const view = runtime.runSync(Effect.flatMap(ChangeReviewPort, (shelf) => shelf.get()));
   const ownReview = view.selection?.subscription.id === subscription.id;

@@ -38,7 +38,7 @@ const notices: Record<StartupAccessNotice, string> = {
   NotSaved: "Not saved",
 };
 
-const startupPanel = "inset-0 grid max-h-none max-w-none translate-y-0 overflow-y-auto overscroll-contain rounded-none bg-background pr-[max(--spacing(6),env(safe-area-inset-right))] pl-[max(--spacing(6),env(safe-area-inset-left))] pt-[max(--spacing(8),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] pb-[max(--spacing(8),var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))] text-foreground shadow-none motion-safe:animate-none [@media(max-height:500px)]:p-5";
+const startupPanel = "inset-0 grid max-h-none max-w-none translate-y-0 overflow-y-auto overscroll-contain rounded-none border-0 bg-background pr-[max(--spacing(6),env(safe-area-inset-right))] pl-[max(--spacing(6),env(safe-area-inset-left))] pt-[max(--spacing(8),var(--alpha-safe-top))] pb-[max(--spacing(8),var(--alpha-safe-bottom))] text-foreground shadow-none motion-safe:animate-none [@media(max-height:500px)]:p-5";
 export const startupHeading = "mb-5 text-center font-display text-[clamp(40px,7vw,56px)] leading-[1.05] font-light tracking-[-.025em] text-balance outline-none [@media(max-height:500px)]:mb-3 [@media(max-height:500px)]:text-[36px]";
 export const startupMainAction = "h-13 w-full rounded-md bg-primary text-base leading-tight font-medium text-primary-foreground hover:bg-primary hover:brightness-[.94] active:bg-primary disabled:opacity-45";
 

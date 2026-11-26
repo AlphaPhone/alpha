@@ -1,15 +1,17 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/index.md, "Story: Open a workflow"; spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it"
-import { Effect } from "effect";
-import { Button, EmptyState, ListRow, Screen, Spinner, WorkflowChoice, WorkflowRow as WorkflowRowView, cn, focusRing } from "@repo/ui";
+import { Button, EmptyState, ListRow, Screen, Spinner, Switch, WorkflowChoice, WorkflowRow as WorkflowRowView, cn, focusRing } from "@repo/ui";
 import { Bell, Calendar, ChevronDown, ChevronRight, Clock as ClockIcon, Info, Phone, Plus, Repeat, Sparkles, Sun, Workflow } from "lucide-react";
-import { type MouseEvent, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__workflows__list.react.ts";
 import { type Event, badge, passes } from "../../gen/app__workflows__list.ts";
+import { canFile } from "../../gen/app__workflows__request.ts";
 import type { Machine } from "../../gen/app__workflows__list.effect.vibe";
 import type { Machine as RunSheet } from "../../gen/app__workflows__sheet.effect.vibe";
 import type { Machine as WorkflowMachine } from "../../gen/app__workflows.effect.vibe";
+import { useMachine as useWorkflow } from "../../gen/app__workflows.react.ts";
 import type { Machine as RunsMachine } from "../../gen/app__workflows__runs.effect.vibe";
 import type { Machine as ApprovalsMachine } from "../../gen/app__workflows__approvals.effect.vibe";
+import { useMachine as useApprovals } from "../../gen/app__workflows__approvals.react.ts";
 import type { Machine as BuilderMachine } from "../../gen/app__workflows__builder.effect.vibe";
 import type { Machine as GenerateMachine } from "../../gen/app__workflows__generate.effect.vibe";
 import { Authoring } from "./Authoring.tsx";
@@ -27,13 +29,13 @@ import { newPhoneReminder } from "./handoffs.vibe";
 import type { Machine as DigestMachine } from "../../gen/app__digests__schedules.effect.vibe";
 import { Digests } from "./Digests.tsx";
 import type { DigestWords } from "./digests.vibe";
-import type { ApprovalWords } from "./approvals.vibe";
+import { ApprovalWords } from "./approvals.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { Filters, kinds, statuses } from "./Filters.tsx";
 import { History, WorkflowPower } from "./History.tsx";
 import type { HistoryWordsPort } from "./history.vibe";
-import type { DefinitionWords } from "./lifecycle.vibe";
+import { DefinitionWords, toggleListRow } from "./lifecycle.vibe";
 import { Rows, type WorkflowRow, refresh, shownUnder } from "./list.vibe";
 
 const remoteConnection = "Connect your remote agent in Settings.";
@@ -76,12 +78,12 @@ function listLabel(kind: keyof typeof kinds, status: keyof typeof statuses) {
   return status === "AnyStatus" ? type : `${type} · ${statuses[status]}`;
 }
 
-function statusWord(row: WorkflowRow): string {
+function statusWord(row: WorkflowRow, waiting = false): string {
   if (row.kind === "Reminder" || row.kind === "Schedule") {
     const status = row.record.state.status;
     return row.record.trigger.kind === "manual" && !ended.includes(status) ? "Paused" : taskWords[status] ?? "Unknown";
   }
-  return labels[badge(row.on, row.removed, false)];
+  return labels[badge(row.on, row.removed, waiting)];
 }
 
 /** When a detail page says it runs: a reminder's whole due date, otherwise the row's own line. */
@@ -91,18 +93,51 @@ function detailWhen(row: WorkflowRow): string {
   return Number.isFinite(due) ? fullDate.format(due) : row.line;
 }
 
-function WorkflowListRow({ row, open }: { row: WorkflowRow; open: () => void }) {
+function WorkflowListRow({ row, waiting, canToggle, open, onToggle }: {
+  row: WorkflowRow;
+  waiting: boolean;
+  canToggle: boolean;
+  open: () => void;
+  onToggle: () => void;
+}) {
   const Icon = icons[row.kind];
-  return <WorkflowRowView title={row.title} summary={row.line} status={statusWord(row)} icon={<Icon />} onClick={open} />;
+  const canManage = !row.removed && (row.kind === "Routine" || row.kind === "Prompt");
+  return (
+    <WorkflowRowView
+      title={row.title}
+      summary={row.line}
+      status={statusWord(row, waiting)}
+      icon={<Icon />}
+      onClick={open}
+      trailing={canManage ? (
+        <Switch
+          aria-label={`Turn ${row.title} ${row.on ? "off" : "on"}`}
+          checked={row.on}
+          disabled={!canToggle}
+          onClick={(event) => event.stopPropagation()}
+          onCheckedChange={onToggle}
+        />
+      ) : undefined}
+    />
+  );
 }
 
 /** The owner's workflows, prompts, reminders and schedules, with the last filter choices kept while looking at a row. */
 export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | RunSheet | HistoryWordsPort | WorkflowMachine | DefinitionWords | RunsMachine | ApprovalsMachine | ApprovalWords | BuilderMachine | GenerateMachine | DraftWords | AutomationsMachine | AutomationWords | ClockMachine | AlarmLabel | DigestMachine | DigestWords>) {
   const { state, can, send } = useMachine(runtime);
+  const rowsService = runtime.runSync(Rows);
+  const rowsSnapshot = useSyncExternalStore(rowsService.subscribe, rowsService.snapshot, rowsService.snapshot);
+  const approvalWords = runtime.runSync(ApprovalWords);
+  const pendingApproval = useSyncExternalStore(approvalWords.subscribe, approvalWords.snapshot, approvalWords.snapshot);
+  const definitionWords = runtime.runSync(DefinitionWords);
+  const definitionSnapshot = useSyncExternalStore(definitionWords.subscribe, definitionWords.snapshot, definitionWords.snapshot);
   const [clockSurface, setClockSurface] = useState<HTMLDivElement | null>(null);
   const clockOpenerRef = useRef<HTMLButtonElement>(null);
   const filterOpenerRef = useRef<HTMLButtonElement>(null);
-  const editingAutomation = useAutomations(runtime).state?.editing;
+  const automations = useAutomations(runtime);
+  const workflowModel = useWorkflow(runtime);
+  const approvals = useApprovals(runtime);
+  const editingAutomation = automations.state?.editing;
   const editingWorkflow = useBuilder(runtime).state?.open;
   const clock = useClock(runtime);
   const hasClock = clockAvailable();
@@ -114,9 +149,15 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   };
   const [more, setMore] = useState(false);
   const read = () => void runtime.runPromiseExit(refresh());
-  const snapshot = state === undefined ? undefined : shownUnder(runtime.runSync(Effect.flatMap(Rows, (rows) => rows.view(state.owner))), state.status);
+  const owner = state?.owner;
   const kind = state?.kind;
   const status = state?.status;
+  const snapshot = useMemo(
+    () => owner !== undefined && status !== undefined && rowsSnapshot.owner === owner
+      ? shownUnder(rowsSnapshot, status)
+      : undefined,
+    [rowsSnapshot, owner, status],
+  );
   const rows = useMemo(
     () => kind !== undefined && status !== undefined && snapshot !== undefined
       ? snapshot.rows.filter((row) => passes(row.kind, row.on, row.removed, kind, status))
@@ -124,6 +165,23 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
       : [],
     [snapshot, kind, status],
   );
+  const isWaiting = (row: WorkflowRow) =>
+    state !== undefined &&
+    approvals.state?.approval === "Waiting" &&
+    approvals.state.owner === state.owner &&
+    pendingApproval?.owner === state.owner &&
+    pendingApproval.number === approvals.state.digest &&
+    pendingApproval.run.workflowId === row.id;
+  const canToggleRow = (row: WorkflowRow) =>
+    state !== undefined &&
+    state.list.status === "Loaded" &&
+    !row.removed &&
+    !definitionSnapshot.toggling.has(row.number) &&
+    (row.kind === "Routine"
+      ? workflowModel.state !== undefined && canFile(workflowModel.state.change)
+      : row.kind === "Prompt"
+        ? automations.state !== undefined && canFile(automations.state.change)
+        : false);
   const dispatch = (event: Event) => { if (can(event)) void send(event); };
   const place = state?.place;
   const selected = place?.tag === "ListingDetail" ? snapshot?.rows.find((row) => row.number === place.row) : undefined;
@@ -174,7 +232,14 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
           </p>
         )}
         {rows.length > 0 && <ul aria-label="Workflows" className="mx-2">
-          {rows.map((row) => <WorkflowListRow key={row.number} row={row} open={() => dispatch({ type: "openRow", row: row.number })} />)}
+          {rows.map((row) => <WorkflowListRow
+            key={row.number}
+            row={row}
+            waiting={isWaiting(row)}
+            canToggle={canToggleRow(row)}
+            open={() => dispatch({ type: "openRow", row: row.number })}
+            onToggle={() => void runtime.runPromiseExit(toggleListRow(state.owner, row))}
+          />)}
         </ul>}
         <Filters listing={state} can={can} send={dispatch} refresh={read} restoreFocus={() => filterOpenerRef.current?.focus()} />
       </>}
@@ -215,7 +280,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
         : selected.kind === "Routine"
           ? <History runtime={runtime} row={selected} owner={state.owner} />
           : <div className="-mx-4 -mt-1 px-6 pt-2">
-            <p className="px-1 text-sm leading-chat text-muted-foreground">{automationSource(selected)} · {statusWord(selected)}</p>
+            <p className="px-1 text-sm leading-chat text-muted-foreground">{automationSource(selected)} · {statusWord(selected, isWaiting(selected))}</p>
             {selected.line !== "" && <p className="my-3.75 leading-chat">{detailWhen(selected)}</p>}
             {selected.summary !== "" && <p className="my-3.75 leading-chat whitespace-pre-wrap break-words">{selected.summary}</p>}
             <Automation runtime={runtime} row={selected} owner={state.owner} />

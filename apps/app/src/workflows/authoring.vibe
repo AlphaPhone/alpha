@@ -14,7 +14,8 @@ import type { Operation, Step } from "../../gen/app__workflows__steps.effect.vib
 import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
-import { WorkflowsApi } from "./api.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
+import { WorkflowsApi, localTimeZone } from "./api.vibe"
 import { Rows, refresh } from "./list.vibe"
 
 interface Draft {
@@ -26,6 +27,7 @@ interface Draft {
   readonly prompt: string
   readonly generated?: PhoneWorkflowSpec
   readonly zone: string
+  readonly held: number
   readonly device?: WorkflowPhone
   readonly choices?: SourceChoices
 }
@@ -46,28 +48,24 @@ const CalendarChoices = Schema.Struct({
     .check(Schema.isMaxLength(256)),
 })
 
-const blank: Draft = { owner: 0, name: "", description: "", steps: [], prompt: "", zone: "" }
+const blank: Draft = { owner: 0, name: "", description: "", steps: [], prompt: "", zone: "", held: 0 }
 
 export service DraftWords {
   view(): Draft!!
   set(draft: Draft): void!!
+  snapshot(this: void): Draft
+  subscribe(this: void, listener: () => void): () => void
 }
 
 const words = Layer.sync(DraftWords, () => {
-  let current = blank
+  const shelf = createShelf<Draft>(blank)
   return {
-    view: () => succeed(current),
-    set: (draft: Draft) => sync(() => { current = draft }),
+    view: () => sync(() => shelf.get()),
+    set: (draft: Draft) => sync(() => { shelf.set(draft) }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
   }
 })
-
-module zone {
-  /** @throws {never} */
-  export function localZone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  }
-}
-import { localZone } from zone
 
 const operations: Readonly<Record<PhoneStep["operation"], Operation>> = {
   supplied_text: "SuppliedText", selected_notes: "SelectedNotes", selected_reminders: "SelectedReminders", calendar_range: "CalendarRange",
@@ -138,7 +136,9 @@ const saveKey = (scope: string) => `${draftKey(scope)}/submit`
 
 const DraftRecord = Schema.fromJsonString(Schema.Struct({
   version: Schema.Literal(1), name: Schema.String, description: Schema.String,
-  steps: Schema.Array(Schema.Unknown), trigger: Schema.Unknown, device: Schema.optionalKey(Schema.Unknown),
+  steps: Schema.Array(Schema.Unknown), trigger: Schema.Unknown,
+  device: Schema.optionalKey(Schema.Unknown),
+  held: Schema.optionalKey(Schema.Int),
 }))
 
 function timing(trigger: PhoneWorkflowTrigger): When {
@@ -155,11 +155,14 @@ effect function readDraft(scope: string) {
   if (raw === undefined) return undefined
   const record = (Schema.decodeUnknownEffect(DraftRecord)(raw) catch () => undefined)
   if (record === undefined) return undefined
+  const { held, ...specRecord } = record
   const parsed = (validatePhoneWorkflowSpec({
-    ...record, name: record.name.trim() || "Draft",
+    ...specRecord, name: record.name.trim() || "Draft",
     steps: record.steps.length === 0 ? [{ kind: "Read", operation: "supplied_text", id: "draft", text: "Draft" }] : record.steps,
   }) catch () => undefined)
-  return parsed === undefined ? undefined : { ...parsed, name: record.name, steps: record.steps.length === 0 ? [] : parsed.steps }
+  return parsed === undefined ? undefined : {
+    ...parsed, name: record.name, steps: record.steps.length === 0 ? [] : parsed.steps, held: held ?? 0,
+  }
 }
 
 const Saved = Schema.fromJsonString(Schema.Struct({
@@ -190,7 +193,8 @@ effect function offer(ticket: number): Build.Event!!Needs {
   const restored = prior === undefined || live.name !== 0 || live.steps.length > 0 ? undefined : prior
   try box.set({ ...draft, owner: live.owner, catalog, device, choices: undefined,
     name: restored?.name ?? draft.name, description: restored?.description ?? draft.description, steps: restored?.steps ?? draft.steps,
-    zone: restored?.trigger.kind === "time" ? restored.trigger.timeZone : draft.zone || localZone() })
+    held: restored?.held ?? draft.held,
+    zone: restored?.trigger.kind === "time" ? restored.trigger.timeZone : draft.zone || localTimeZone() })
 
   return {
     ...failed, ok: true, speaks: onDevice(catalog, "read_aloud", device) && onDevice(catalog, "app_notification", device),
@@ -211,11 +215,17 @@ effect function keep(write: number, owner: number): Build.Event!!Needs {
   const scope = ownerAt() catch () => ""
   if (state.owner !== owner || words.owner !== owner || !(try (try Rows).sameOwner(scope, owner))) return failed
   const store = try KeyValueStore.KeyValueStore
+  const existing = try readDraft(scope)
+  if (existing !== undefined && existing.held > words.held) {
+    return { type: "draftKept", write, result: "WriteCollided", held: existing.held }
+  }
+  const nextHeld = Math.max(words.held, existing?.held ?? 0) + 1
   const kept = effect {
-    try store.set(draftKey(scope), JSON.stringify({ ...specification(state, words), name: words.name }))
+    try store.set(draftKey(scope), JSON.stringify({ ...specification(state, words), name: words.name, held: nextHeld }))
     return true
   } catch () => false
-  return kept ? { ...failed, result: "WriteLanded" } : failed
+  if (kept) try box.set({ ...(try box.view()), held: nextHeld })
+  return kept ? { type: "draftKept", write, result: "WriteLanded", held: nextHeld } : failed
 }
 
 effect function save(id: number, revision: number): Build.Event!!Needs {
@@ -323,10 +333,45 @@ function carry(fx: Build.Effect): Job<Build.Event, Needs, []> {
     when { tag: "AskCalendarAccess" }: answer("workflow calendar permissions", effect {
       return { type: "calendarAccess", grant: try (try PhoneCalendar).workflowAccess() } satisfies Build.Event
     }, { type: "calendarAccess", grant: "Denied" });
-    when { tag: "OpenSettings" }: run("workflow calendar settings", effect { try (try SystemSettings).open("AppPermissions", "") });
+    when { tag: "OpenSettings" }: run("workflow calendar settings", effect { try ignore((try SystemSettings).open("AppPermissions", "")) });
     when { tag: "SaveWorkflow", let id, let revision }: answer("save workflow", save(id, revision), { type: "saveUnanswered" });
     when { tag: "ReadSaveRecord", let ticket, let id }: answer("workflow save receipt", checked(ticket, id), { type: "saveChecked", ticket, ok: false, found: false, updated: false });
   }
+}
+
+export effect function takeSavedDraft(): void!!(Agent | Rows | DraftWords | Build.Machine | KeyValueStore.KeyValueStore) {
+  const machine = try Build.Machine
+  const state = try machine.get()
+  const scope = ownerAt() catch () => ""
+  if (!(try (try Rows).sameOwner(scope, state.owner))) return
+  const saved = try readDraft(scope)
+  const steps = saved === undefined ? [] : shapes(saved.steps)
+  if (!Build.canTakeSaved(state, steps)) return
+  const box = try DraftWords
+  const current = try box.view()
+  try box.set({
+    ...current,
+    name: saved?.name ?? "",
+    description: saved?.description ?? "",
+    steps: saved?.steps ?? [],
+    held: saved?.held ?? current.held,
+    zone: saved?.trigger.kind === "time" ? saved.trigger.timeZone : current.zone,
+  })
+  try ignore(machine.send({ type: "takeSaved", steps }))
+}
+
+export effect function keepMyDraft(): void!!(Agent | Rows | DraftWords | Build.Machine | KeyValueStore.KeyValueStore) {
+  const machine = try Build.Machine
+  const state = try machine.get()
+  if (!Build.canKeepMine(state)) return
+  const scope = ownerAt() catch () => ""
+  const saved = scope === "" ? undefined : try readDraft(scope)
+  if (saved !== undefined) {
+    const box = try DraftWords
+    const current = try box.view()
+    try box.set({ ...current, held: Math.max(current.held, saved.held) })
+  }
+  try ignore(machine.send({ type: "keepMine" }))
 }
 
 export effect function renameDraft(name: string): void!!(DraftWords | Build.Machine) {

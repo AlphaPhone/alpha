@@ -14,7 +14,7 @@ import { type Job, answer, due, following, hearing, reacting, run, together, unt
 import { Time } from "../runtime/time.vibe"
 import { type AccessStart, type AccessSurface, openReview } from "../startup/settingsAccess.vibe"
 import { developerTools } from "./build.ts"
-import { type VaultTurn, vaultPresence, vaultTimers, vaultTurn, vaultWork } from "./passwords.vibe"
+import { type VaultTurn, passwordProvider, vaultPresence, vaultTimers, vaultTurn, vaultWork } from "./passwords.vibe"
 
 const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
 
@@ -109,7 +109,7 @@ effect function opened(start: number, target: Android.Target, channel: string): 
 }
 
 function startAndroid(fx: Android.Effect): Job<Android.Event, SystemSettings, []> {
-  return answer("android", opened(fx.start, fx.target, fx.channel), { type: "giveUpOnAndroid", now: untimed })
+  return answer("android", opened(fx.start, fx.target, fx.channel), { type: "androidAnswered", start: fx.start, opened: "NotAtAll" })
 }
 
 // spec/app/settings/android.md, "A start not answered within ten seconds is given up, Alpha says Android did not answer, and the owner may try again"
@@ -127,4 +127,4 @@ const autofillShown = following(
 )
 
 /** What the Settings screen reads beside where the owner is: the phone's facts and the hand-overs to Android's own pages. */
-export const facts = together(factsMachine, factsShown, factsResumed, autofillShown, androidMachine, vaultTurn, vaultPresence)
+export const facts = together(factsMachine, factsShown, factsResumed, autofillShown, androidMachine, vaultTurn, vaultPresence, passwordProvider)

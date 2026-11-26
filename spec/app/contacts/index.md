@@ -218,7 +218,7 @@ pure def canListed(s: Contacts, ticket: int, count: int): bool =
 pure def listed(s: Contacts, ticket: int, ok: bool, grant: P::Grant, count: int, further: bool, editable: bool): Contacts =
   val access = P::observe(s.access, grant)
   val good = ok and P::allows(access)
-  val kept = if (P::allows(access)) s else { ...s, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false }
+  val kept = if (P::allows(access)) s else { ...s, searching: false, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false }
   { ...kept,
     access: access, list: R::answer(s.list, good), editable: if (good) editable else s.editable and P::allows(access),
     rows: if (good) count else 0, more: good and further and count > 0,
@@ -284,7 +284,7 @@ pure def openSettings(s: Contacts): Moved = { state: s, out: List(Settings) }
 pure def accessReported(s: Contacts, grant: P::Grant): Moved =
   val access = P::observe(s.access, grant)
   if (not(P::allows(access)))
-    { state: { ...s, access: access, rows: 0, more: false, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false },
+    { state: { ...s, access: access, searching: false, rows: 0, more: false, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false },
       out: List() }
   else if (s.front and not(P::allows(s.access))) refresh({ ...s, access: access })
   else { state: { ...s, access: access }, out: List() }

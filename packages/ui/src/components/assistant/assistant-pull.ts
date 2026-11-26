@@ -190,6 +190,7 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, onLi
       const current = track.current;
       if (current?.pointer !== event.pointerId) return;
       track.current = undefined;
+      watching.current?.();
       if (current.moved) return onRelease?.(settle(current, event));
       if (current.mark) onLift?.({ now: event.timeStamp, y: event.clientY });
     },

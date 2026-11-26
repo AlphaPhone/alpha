@@ -54,9 +54,9 @@ effect function readActions(reading: number, word: { proposal: string; value: "d
 function carry(fx: Activity.Effect): Job<Activity.Event, Agent | Activity.Machine | Device | Shell.Machine | Layers | Pages.Machine | Records.Machine | MediaReview, []> {
   return match (fx) {
     when { tag: "Recover", let how }: recover(how);
-    when { tag: "ReadJournal", let reading }: answer("actions", readActions(reading, undefined), unconfirmed);
-    when { tag: "Reject", let proposal, let reading }: answer("actions", readActions(reading, { proposal, value: "decline" }), unconfirmed);
-    when { tag: "Reconcile", let proposal, let happened, let reading }: answer("actions", readActions(reading, { proposal, value: happened ? "happened" : "did-not-happen" }), unconfirmed);
+    when { tag: "ReadJournal", let reading }: answer("actions", readActions(reading, undefined), { type: "actionsRead", reading, ok: false, rows: [], result: "NoWord" });
+    when { tag: "Reject", let proposal, let reading }: answer("actions", readActions(reading, { proposal, value: "decline" }), { type: "actionsRead", reading, ok: false, rows: [], result: "WordUnconfirmed" });
+    when { tag: "Reconcile", let proposal, let happened, let reading }: answer("actions", readActions(reading, { proposal, value: happened ? "happened" : "did-not-happen" }), { type: "actionsRead", reading, ok: false, rows: [], result: "WordUnconfirmed" });
   }
 }
 

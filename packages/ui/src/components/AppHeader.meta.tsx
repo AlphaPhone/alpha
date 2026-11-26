@@ -11,7 +11,7 @@ export const meta: ComponentMeta<AppHeaderProps> = {
     Actions: { children: <Button variant="ghost" size="icon" aria-label="New note"><Plus /></Button> },
   },
   play: {
-    // The launcher's serif title is drawn at Denton's largest optical size, as v119's `.serif`; off the launcher it is not.
+    /** The launcher's serif title is drawn at Denton's largest optical size, as v119's `.serif`; off the launcher it is not. */
     Leading: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const title = within(canvasElement).getByRole("heading", { name: "Notes" });
       await expect(title).toHaveClass("in-data-[alpha-launcher]:[font-variation-settings:'opsz'_144]");

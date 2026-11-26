@@ -7,10 +7,14 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent, type Reached } from "../src/platform/agent.vibe";
-import { CameraPort, browserCamera } from "../src/platform/camera.vibe";
+import { plugin as capacitorPlugin } from "../src/platform/capacitor.ts";
+import { CameraPort, browserCamera, ownedCaptureId } from "../src/platform/camera.vibe";
 import { Cloud, cloudAsked, cloudJsonBody } from "../src/platform/cloud.vibe";
 import { testMocks } from "../src/platform/device.vibe";
+import { boundWaitSeconds, createPkcePair, mapHttpFailure, parseRetryAfter } from "../src/platform/messaging.vibe";
 import { pageSpeechBase } from "../src/platform/pageSpeech.ts";
+import { Garbled, Refused, isDeclinedStatus, outcomeOf } from "../src/platform/remote.vibe";
+import { assertSlackUserToken } from "../src/platform/slack.vibe";
 import { Telegram, telegramAt } from "../src/platform/telegram.vibe";
 import { VoiceBridge } from "../src/platform/voice.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
@@ -288,6 +292,27 @@ it("Ship only what this build allows: test mocks are admitted only when ELIZA_DE
   vi.stubEnv("ELIZA_DEV_ALLOW_TEST_MOCKS", "1");
   expect(testMocks()).toBe(true);
   vi.unstubAllEnvs();
+});
+
+// spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"
+it("Platform boundary invariants: singleton Capacitor proxies, honest Garbled/408/429 outcomes, bounded waits, Slack user tokens, PKCE fallback, and external_primary capture ids", async () => {
+  expect(capacitorPlugin("AlphaTestSingleton")).toBe(capacitorPlugin("AlphaTestSingleton"));
+  expect(outcomeOf(new Garbled({ cause: "bad json" }))).toEqual({ confirmed: false, known: false });
+  expect([isDeclinedStatus(400), isDeclinedStatus(408), isDeclinedStatus(429)]).toEqual([true, false, false]);
+  expect([parseRetryAfter(undefined), parseRetryAfter("30"), parseRetryAfter("86401"), boundWaitSeconds(86400), boundWaitSeconds(999999)]).toEqual([undefined, 30, undefined, 86400, undefined]);
+  const ungivenRateLimit = mapHttpFailure("slack", new Refused({ status: 429 }));
+  expect(ungivenRateLimit._tag === "RateLimited" ? ungivenRateLimit.retryAfter : "other").toBeUndefined();
+  expect(await Effect.runPromise(assertSlackUserToken("xoxp-user"))).toBe("xoxp-user");
+  expect(await Effect.runPromise(assertSlackUserToken("xoxe.xoxp-rotated"))).toBe("xoxe.xoxp-rotated");
+  for (const rejected of ["xoxb-bot", "xoxe.xoxb-rotated-bot", "xapp-app"]) {
+    expect(failed(await Effect.runPromiseExit(assertSlackUserToken(rejected)))?._tag).toBe("BotTokenRejected");
+  }
+  const pkce = await Effect.runPromise(createPkcePair());
+  expect([pkce.method, pkce.verifier.length > 0, pkce.challenge.length > 0]).toEqual(["S256", true, true]);
+  expect([
+    ownedCaptureId("content://media/external/images/media/42", false),
+    ownedCaptureId("content://media/external_primary/video/media/99", true),
+  ]).toEqual(["42", "v:99"]);
 });
 
 it("Removes agent stream listeners even when abort fails (spec/app/platform/index.md, \"A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent\")", async () => {

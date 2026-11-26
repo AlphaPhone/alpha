@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { ChevronLeft, Clock, Minus, Plus, Search, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { CalendarHeaderAction } from "./CalendarHeader.tsx";
 
 type InputProps = Omit<ComponentProps<"input">, "children" | "dangerouslySetInnerHTML">;
@@ -24,12 +25,12 @@ export function CalendarFormPage({ onBack, onSave, actions, saving = false, clas
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />
         {actions ?? (
-          <button type="button" aria-label="Save event" aria-disabled={!onSave} aria-busy={saving || undefined} onClick={onSave}
-            className={cn(focusRing, "h-13 min-w-13 rounded-action px-4.5 text-base leading-plain font-semibold transition-colors duration-base",
+          <button type="button" aria-label="Save event" aria-disabled={!onSave || saving} aria-busy={saving || undefined} onClick={saving ? undefined : onSave}
+            className={cn(focusRing, "h-13 min-w-13 rounded-action px-4.5 text-base leading-plain font-semibold transition-colors duration-base motion-reduce:transition-none",
               onSave ? "bg-alpha text-alpha-foreground" : "bg-secondary text-muted-foreground")}>Save</button>
         )}
       </div>
-      <div role="region" aria-label="Event details" tabIndex={0} className={cn(focusRing, "min-h-0 grow touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pt-1 pb-32.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}>
+      <div role="region" aria-label="Event details" tabIndex={0} className={cn(focusRing, dockClearance, "min-h-0 grow touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}>
         {children}
       </div>
     </div>
@@ -40,7 +41,7 @@ export function CalendarFormPage({ onBack, onSave, actions, saving = false, clas
 export function CalendarFormTitle({ className, ...props }: InputProps) {
   return (
     <div className="px-6">
-      <input aria-label="Title" placeholder="Title" className={cn("w-full border-0 bg-transparent py-1.5 font-display text-display-sm font-light text-foreground outline-none placeholder:text-muted-foreground", className)} {...props} />
+      <input aria-label="Title" placeholder="Title" className={cn(focusRing, "w-full rounded-sm border-0 bg-transparent py-1.5 font-display text-display-sm font-light text-foreground placeholder:text-muted-foreground", className)} {...props} />
     </div>
   );
 }
@@ -125,7 +126,7 @@ export function CalendarTimeRow({ icon, caption, label, value, onChange, earlier
       <span aria-hidden className={cn("flex shrink-0 text-muted-foreground [&_svg]:size-5.5", icon === null && "w-6")}>{icon === undefined ? <Clock /> : icon}</span>
       <span className="min-w-0 flex-[1_1_0] text-sm leading-plain">{caption}
         <input aria-label={label} type="time" step={60} value={value} onChange={(event) => onChange(event.target.value)}
-          className="block min-h-11 w-full min-w-0 border-0 bg-transparent pl-px text-date text-foreground scheme-normal" />
+          className={cn(focusRing, "block min-h-11 w-full min-w-0 rounded-sm border-0 bg-transparent pl-px text-date text-foreground scheme-normal")} />
       </span>
       <button type="button" aria-label={earlierLabel} disabled={!onEarlier} onClick={onEarlier} className={step}><Minus aria-hidden className="size-4.5" /></button>
       <button type="button" aria-label={laterLabel} disabled={!onLater} onClick={onLater} className={step}><Plus aria-hidden className="size-4.5" /></button>
@@ -179,7 +180,7 @@ export function CalendarSwitch({ checked, onCheckedChange, className, ...props }
   return (
     <button type="button" role="switch" aria-checked={checked} onClick={() => onCheckedChange(!checked)}
       className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-lg disabled:opacity-50", className)} {...props}>
-      <span aria-hidden className={cn("relative block h-8 w-13 rounded-lg transition-colors duration-base", checked ? "bg-alpha" : "bg-accent")}>
+      <span aria-hidden className={cn("relative block h-8 w-13 rounded-lg transition-colors duration-base motion-reduce:transition-none", checked ? "bg-alpha" : "bg-accent")}>
         <span className={cn("absolute top-0.75 left-0.75 size-6.5 rounded-full bg-alpha-foreground shadow-sm transition-transform duration-base ease-standard motion-reduce:transition-none", checked && "translate-x-5")} />
       </span>
     </button>
@@ -187,6 +188,7 @@ export function CalendarSwitch({ checked, onCheckedChange, className, ...props }
 }
 
 const bare = "min-w-0 grow border-0 bg-transparent px-0.5 py-px text-body text-foreground outline-0 placeholder:text-muted-foreground disabled:opacity-50";
+const fieldFocus = "has-[>:focus-visible]:outline-solid has-[>:focus-visible]:outline-focus has-[>:focus-visible]:outline-offset-focus has-[>:focus-visible]:outline-ring";
 
 export type CalendarFieldRowProps = InputProps & {
   "aria-label": string;
@@ -197,7 +199,7 @@ export type CalendarFieldRowProps = InputProps & {
 /** A one-line field of the form on the quiet fill, such as Location: its icon, then the field. */
 export function CalendarFieldRow({ icon, className, ...props }: CalendarFieldRowProps) {
   return (
-    <div className={cn("flex h-14 items-center gap-3.5 rounded-lg bg-secondary px-4", className)}>
+    <div className={cn(fieldFocus, "flex h-14 items-center gap-3.5 rounded-lg bg-secondary px-4", className)}>
       <span aria-hidden className="flex shrink-0 text-muted-foreground [&_svg]:size-5.5">{icon}</span>
       <input className={cn(bare, "h-11.5")} {...props} />
     </div>
@@ -212,7 +214,7 @@ export type CalendarNotesFieldProps = Omit<ComponentProps<"textarea">, "children
 /** The event's notes: its icon, then a field of three lines that grows. */
 export function CalendarNotesField({ icon, className, ...props }: CalendarNotesFieldProps) {
   return (
-    <div className={cn("flex min-h-14 items-start gap-3.5 rounded-lg bg-secondary px-4 py-3", className)}>
+    <div className={cn(fieldFocus, "flex min-h-14 items-start gap-3.5 rounded-lg bg-secondary px-4 py-3", className)}>
       <span aria-hidden className="flex shrink-0 text-muted-foreground [&_svg]:size-5.5">{icon}</span>
       <textarea rows={3} className={cn(bare, "resize-y py-0.5 leading-plain")} {...props} />
     </div>
@@ -230,7 +232,7 @@ export type CalendarPickerFieldProps = InputProps & {
 /** A field to find someone or something by name, with a button that closes it: on the page's own color, inside a group. */
 export function CalendarPickerField({ onDone, doneLabel, className, ...props }: CalendarPickerFieldProps) {
   return (
-    <div className={cn("mt-1.5 flex h-12 items-center gap-2 rounded-lg bg-background pr-1 pl-3.5", className)}>
+    <div className={cn(fieldFocus, "mt-1.5 flex h-12 items-center gap-2 rounded-lg bg-background pr-1 pl-3.5", className)}>
       <Search aria-hidden className="size-4.5 shrink-0 text-muted-foreground" />
       <input className={cn(bare, "h-11.5")} {...props} />
       <button type="button" aria-label={doneLabel} onClick={onDone} className={cn(focusRing, "inline-flex size-13 shrink-0 items-center justify-center rounded-tile active:bg-accent")}><X aria-hidden className="size-4.5" /></button>
@@ -246,7 +248,7 @@ export type CalendarSearchBarProps = InputProps & {
 /** Search over the days, under the header: a quiet pill with its field and Close. */
 export function CalendarSearchBar({ onClose, className, ...props }: CalendarSearchBarProps) {
   return (
-    <div role="search" className={cn("mx-4 mb-2 flex shrink-0 items-center gap-1 rounded-tile bg-secondary pr-1 pl-3.5", className)}>
+    <div role="search" className={cn(fieldFocus, "mx-4 mb-2 flex shrink-0 items-center gap-1 rounded-tile bg-secondary pr-1 pl-3.5", className)}>
       <Search aria-hidden className="size-4.5 shrink-0 text-muted-foreground" />
       <input type="search" aria-label="Search events" enterKeyHint="search" autoComplete="off" className={cn(bare, "h-11 p-0 [&::-webkit-search-cancel-button]:appearance-none")} {...props} />
       <button type="button" aria-label="Close search" onClick={onClose} className={cn(focusRing, "inline-flex size-11 shrink-0 items-center justify-center rounded-tile active:bg-accent [&_svg]:size-5.5")}><X aria-hidden /></button>

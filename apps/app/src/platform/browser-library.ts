@@ -12,13 +12,26 @@ export function selectedFile(signal: AbortSignal): Promise<File | undefined> {
     const input = document.createElement("input");
     input.type = "file";
     input.hidden = true;
+    let done = false;
+    let fallbackSignal: AbortSignal | undefined;
     const finish = (picked?: File) => {
+      if (done) return;
+      done = true;
       signal.removeEventListener("abort", cancel);
+      window.removeEventListener("focus", onFocus);
+      fallbackSignal?.removeEventListener("abort", cancel);
       input.remove();
       resolve(picked);
     };
     const cancel = () => finish();
+    const onFocus = () => {
+      if (done || typeof AbortSignal.timeout !== "function") return;
+      fallbackSignal?.removeEventListener("abort", cancel);
+      fallbackSignal = AbortSignal.timeout(300);
+      fallbackSignal.addEventListener("abort", cancel, { once: true });
+    };
     signal.addEventListener("abort", cancel, { once: true });
+    window.addEventListener("focus", onFocus, { once: true });
     input.addEventListener("cancel", cancel, { once: true });
     input.addEventListener("change", () => finish(input.files?.[0]), { once: true });
     document.body.append(input);

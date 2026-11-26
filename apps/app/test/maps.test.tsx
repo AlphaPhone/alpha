@@ -2,12 +2,13 @@
 import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { Machine as Screen } from "../gen/app__maps.effect.vibe";
+import { Machine as Screen, type Maps as ScreenState } from "../gen/app__maps.effect.vibe";
 import { Machine as Credits } from "../gen/app__maps__credits.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Atlas } from "../src/maps/atlas.vibe";
+import { measured, meters, pointIn, toLine } from "../src/maps/geometry.ts";
 import { handToMaps } from "../src/maps/handoff.ts";
 import maps from "../src/maps/index.tsx";
-import { atlas } from "../src/maps/atlas.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { cloudRoute, gallery, harbour, move } from "./fakes/maps.ts";
@@ -26,9 +27,9 @@ const enter = (name: string) => drawn(() => {
 });
 
 /** Open Maps from the shell, as Home's tile or the agent does. */
-const showMaps = (alpha: Alpha) => act(async () => {
-  await alpha.runtime.runPromise(Effect.ignore(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Maps" }))));
-});
+const showMaps = (alpha: Alpha) => drawn(() =>
+  alpha.runtime.runPromise(Effect.ignore(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Maps" })))),
+);
 
 async function onMaps(world: ReturnType<typeof scene>) {
   const running = await open(world, withMaps);
@@ -44,13 +45,20 @@ async function typeMapSearch(text: string) {
 /** The places the results list shows, by name. */
 const results = () => [...document.querySelectorAll("section[aria-label=Maps] button")].map((found) => found.getAttribute("aria-label")).filter((name) => name?.startsWith("Harbour"));
 
-/** Open Maps on `world` and wait until its provider is installed when `ready` is true. */
-async function openMaps(world: ReturnType<typeof scene>, ready = true) {
+/** Open Maps on `world` and wait until its provider is installed (or `ready` holds). */
+async function openMaps(world: ReturnType<typeof scene>, ready: boolean | ((s: ScreenState) => boolean) = true) {
   const running = await open(world, withMaps);
   await showMaps(running.alpha);
   const runtime = maps.runtime(running.alpha);
-  if (ready) await until(running.alpha, runtime, Screen, (s) => s.link.provider !== 0);
+  if (typeof ready === "function") await until(running.alpha, runtime, Screen, ready);
+  else if (ready) await until(running.alpha, runtime, Screen, (s) => s.link.provider !== 0);
   return { ...running, runtime };
+}
+
+async function openGoogleMaps(world: ReturnType<typeof scene>, savedCount?: number) {
+  if (!world.maps.coverage.available) throw new Error("expected available coverage");
+  world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" };
+  return openMaps(world, (s) => s.link.google && (savedCount === undefined || s.saved.length === savedCount));
 }
 
 /** Focus Search Maps, submit `query`, and wait for search results or a dropped pin. */
@@ -60,15 +68,21 @@ async function searchFor(alpha: Alpha, runtime: ReturnType<typeof maps.runtime>,
   await until(alpha, runtime, Screen, (s) => (pin ? s.place !== 0 : s.search.status === "Loaded"));
 }
 
+async function pickDirectionsOrigin(alpha: Alpha, runtime: ReturnType<typeof maps.runtime>, query: string, option: string) {
+  await press("Directions");
+  await fill("Starting point", query);
+  await enter("Starting point");
+  await until(alpha, runtime, Screen, (s) => s.origins.status === "Loaded" && s.originsFound === 1);
+  await press(option);
+}
+
 describe("Maps on a phone", () => {
   it("Search for a place, get directions and navigate (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\"; spec/app/maps/index.md, \"Story: Navigate\")", async () => {
     const world = { ...scene(), phone: true };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3), cloudRoute("scenic", start, harbour.coordinate, 500, 4)];
-    const { alpha, runtime } = await onMaps(world);
-
     // spec/app/maps/index.md, "Opening Maps, the network returning or Retry reads the coverage when no provider works, and leaves a working one alone"
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0 && s.link.offer.walk && !s.link.offer.transit);
+    const { alpha, runtime } = await openMaps(world, (s) => s.link.provider !== 0 && s.link.offer.walk && !s.link.offer.transit);
 
     // spec/app/maps/connection.md, "Retry draws a broken map again on a new surface": this page has no WebGL, so MapLibre cannot draw
     await until(alpha, runtime, Screen, (s) => s.link.surface === "Broken");
@@ -90,7 +104,7 @@ describe("Maps on a phone", () => {
     // spec/app/maps/index.md, "Story: Look at a place": the field keeps the query, as v119 live did, not the place's name
     expect(document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value).toBe("harbour");
 
-    // spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
+    // spec/app/maps/index.md, "A fix goes to whoever holds the location"
     await press("Directions");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.origin === "MyLocation" && s.link.locator === "Nobody");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
@@ -138,8 +152,7 @@ describe("Maps on a phone", () => {
     const world = { ...scene(), phone: true };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3)];
-    const { alpha, runtime } = await onMaps(world);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const { alpha, runtime } = await openMaps(world);
     await typeMapSearch("cafe");
     await enter("Search Maps");
     await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 1);
@@ -158,7 +171,7 @@ describe("Maps on a phone", () => {
     await press("Recenter");
     await until(alpha, runtime, Screen, (s) => s.following);
 
-    // spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end": locking the phone is leaving
+    // spec/app/maps/index.md, "Story: Keep guiding away from Maps": locking the phone is leaving
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away && s.trip.guidance === "Going");
 
@@ -196,18 +209,21 @@ describe("Maps on a phone", () => {
     expect(world.maps.guidance.arrivals).toEqual(["Arrived at Harbour Cafe."]);
   });
 
-  it("A handed search runs at once, and Recenter tells why before Android asks, then locates (spec/app/maps/index.md, \"Story: Use my location\")", async () => {
+  async function openPromptMapsWithHarbour() {
     const world = { ...scene(), phone: true };
     world.maps.allowed = "prompt";
     const why = "Maps uses your location to show where you are";
     const now = (runtime: Awaited<ReturnType<typeof onMaps>>["runtime"]) => runtime.runPromise(Effect.flatMap(Screen, (machine) => machine.get()));
-
     const { alpha, runtime } = await onMaps(world);
     await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
-
     // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a places card's Map button, with the disclosure unread, searches at once, as v119 did
     await drawn(() => { handToMaps("harbour"); });
     await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+    return { world, alpha, runtime, why, now };
+  }
+
+  it("A handed search runs at once, and Recenter tells why before Android asks, then locates (spec/app/maps/index.md, \"Story: Use my location\")", async () => {
+    const { world, alpha, runtime, why, now } = await openPromptMapsWithHarbour();
     expect(results()).toEqual(["Harbour Cafe", "Harbour Gallery"]);
     expect([(await now(runtime)).link.disclosed, document.body.textContent?.includes(why)]).toEqual([false, false]);
 
@@ -269,18 +285,10 @@ describe("Maps on a phone", () => {
   });
 
   it("The location disclosure closes on Back, on leaving Maps and once Android allows location, and Recenter shows it again (spec/app/maps/index.md, \"Story: Use my location\")", async () => {
-    const world = { ...scene(), phone: true };
-    world.maps.allowed = "prompt";
-    const why = "Maps uses your location to show where you are";
-    const now = (runtime: Awaited<ReturnType<typeof onMaps>>["runtime"]) => runtime.runPromise(Effect.flatMap(Screen, (machine) => machine.get()));
-    const told = (runtime: Awaited<ReturnType<typeof onMaps>>["runtime"], grant: "Unasked" | "Granted") =>
+    const { alpha, runtime, why, now } = await openPromptMapsWithHarbour();
+    const told = (grant: "Unasked" | "Granted") =>
       act(async () => { await runtime.runPromise(Effect.ignore(Effect.flatMap(Screen, (machine) => machine.send({ type: "observeLocation", grant })))); });
     const card = () => Boolean(document.body.textContent?.includes(why));
-
-    const { alpha, runtime } = await onMaps(world);
-    await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
-    await act(async () => { handToMaps("harbour"); });
-    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
 
     // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Back closes it with the search
     await press("Recenter");
@@ -290,7 +298,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => !s.searching);
     expect([(await now(runtime)).explaining, card()]).toEqual([false, false]);
 
-    // Leaving Maps closes it, so the next visit opens on the bare map with Recenter
+    // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Leaving Maps closes it, so the next visit opens on the bare map with Recenter
     await press("Recenter");
     await until(alpha, runtime, Screen, (s) => s.explaining);
     await hardware("back");
@@ -299,12 +307,12 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
     expect([(await now(runtime)).explaining, card(), Boolean(button("Recenter"))]).toEqual([false, false, true]);
 
-    // An answer that leaves location unasked keeps it; one that allows location closes it
+    // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": An answer that leaves location unasked keeps it; one that allows location closes it
     await press("Recenter");
     await until(alpha, runtime, Screen, (s) => s.explaining);
-    await told(runtime, "Unasked");
+    await told("Unasked");
     expect([(await now(runtime)).explaining, card()]).toEqual([true, true]);
-    await told(runtime, "Granted");
+    await told("Granted");
     await until(alpha, runtime, Screen, (s) => !s.explaining);
     expect([(await now(runtime)).link.disclosed, card()]).toEqual([false, false]);
   });
@@ -333,9 +341,8 @@ describe("Maps in a browser", () => {
       { id: "a1", label: "Office", coordinate: { latitude: 43.7401, longitude: 7.4262 }, savedAt: 1 },
       { id: "a2", label: "Lunch", coordinate: { latitude: 43.7, longitude: 7.4 }, providerId: "eliza-cloud-google", providerPlaceId: "g1", savedAt: 2 },
     ] }));
-    const first = await onMaps(world);
+    const first = await openMaps(world);
     const { runtime } = first;
-    await until(first.alpha, runtime, Screen, (s) => s.link.provider !== 0);
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart": the previous Alpha's list is read
     await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Office");
@@ -360,10 +367,8 @@ describe("Maps in a browser", () => {
     await first.close();
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart"
-    world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" } as typeof world.maps.coverage;
-    const second = await onMaps(world);
-    const { runtime: again } = second;
-    await until(second.alpha, again, Screen, (s) => s.saved.length === 2 && s.link.google);
+    const second = await openGoogleMaps(world, 2);
+    const again = second.runtime;
     expect([Boolean(button("Quay")), Boolean(button("Office"))]).toEqual([true, true]);
 
     // spec/app/maps/index.md, "Saved places open from the map or the search"; spec/app/maps/index.md, "Story: Look at a place": a saved place opens with its name on the card and the field empty under "Search", as v119 live
@@ -399,7 +404,7 @@ describe("Maps in a browser", () => {
     await until(second.alpha, again, Credits, (s) => !s.infoOpen);
     await until(second.alpha, again, Screen, (s) => s.place !== 0);
 
-    // spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\"": Google's map offers no coordinate prompt
+    // spec/app/maps/index.md, "Story: Get directions": Google's map offers no coordinate prompt
     await press("Directions");
     await until(second.alpha, again, Screen, (s) => s.directions);
     await fill("Starting point", "Off");
@@ -418,11 +423,7 @@ describe("Maps in a browser", () => {
     const pin = (await now()).place;
 
     // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": a start found by search, swapped onto the card, offers no Rename, as v119 offered none on an unsaved place it found
-    await press("Directions");
-    await fill("Starting point", "cafe");
-    await enter("Starting point");
-    await until(alpha, runtime, Screen, (s) => s.origins.status === "Loaded" && s.originsFound === 1);
-    await press("From Harbour Cafe");
+    await pickDirectionsOrigin(alpha, runtime, "cafe", "From Harbour Cafe");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.startPlace !== 0);
     await press("Swap starting point and destination");
     await until(alpha, runtime, Screen, (s) => s.place !== pin && s.startPlace === pin && s.trip.route !== 0);
@@ -459,9 +460,8 @@ describe("Maps in a browser", () => {
   it("A saved list Alpha cannot read is never written over (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
     const world = scene();
     localStorage.setItem("alpha/maps/saved@1", "{not json");
-    const { alpha, runtime } = await onMaps(world);
     // spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0 && !s.keepable);
+    const { alpha, runtime } = await openMaps(world, (s) => s.link.provider !== 0 && !s.keepable);
     expect(document.body.textContent).toContain("Saved places could not be read. Existing data has not been replaced.");
     await typeMapSearch("48.85, 2.35");
     await enter("Search Maps");
@@ -475,8 +475,7 @@ describe("Maps in a browser", () => {
   it("Search as I type, start from a place by its name and swap the ends (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\")", async () => {
     const world = scene();
     world.maps.routes = [cloudRoute("there", harbour.coordinate, gallery.coordinate, 300, 2)];
-    const { alpha, runtime } = await onMaps(world);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const { alpha, runtime } = await openMaps(world);
 
     // spec/app/maps/index.md, "Typing searches once the owner pauses for 350 milliseconds, and Enter searches at once"
     await typeMapSearch("gallery");
@@ -490,17 +489,13 @@ describe("Maps in a browser", () => {
     await later(alpha, 400);
     expect([world.maps.asked.length, (await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).recent]).toEqual([asked, ["gallery"]]);
 
-    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"; spec/app/maps/index.md, "A copied number is told: \"Number copied\" or \"Couldn't copy\""
+    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"
     await press("Harbour Gallery");
     await until(alpha, runtime, Screen, (s) => s.place !== 0);
     expect(button("Copy phone number")).toBeUndefined();
 
     // spec/app/maps/index.md, "A starting point can be a place found by its name, around the phone or the last start"
-    await press("Directions");
-    await fill("Starting point", "cafe");
-    await enter("Starting point");
-    await until(alpha, runtime, Screen, (s) => s.origins.status === "Loaded" && s.originsFound === 1);
-    await press("From Harbour Cafe");
+    await pickDirectionsOrigin(alpha, runtime, "cafe", "From Harbour Cafe");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.startPlace !== 0 && s.trip.origin === "SomePlace");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: harbour.coordinate, to: gallery.coordinate });
 
@@ -520,8 +515,7 @@ describe("Maps in a browser", () => {
 
   it("Back off when Maps asks me to wait (spec/app/maps/connection.md, \"Story: Serve Maps through my cloud account\")", async () => {
     const world = { ...scene(), now: Date.now() };
-    const { alpha, runtime } = await onMaps(world);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const { alpha, runtime } = await openMaps(world);
 
     // spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"; spec/app/maps/index.md, "Cloud's wait holds the screen's requests until it ends, and its end lets them go again"
     await later(alpha, Math.max(0, Date.now() - world.now));
@@ -550,6 +544,73 @@ describe("Maps in a browser", () => {
     await until(alpha, runtime, Screen, (s) => s.search.status === "Failed" && s.link.held === 60);
     await later(alpha, 60_000);
     await until(alpha, runtime, Screen, (s) => s.link.held === 0);
+  });
+
+  it("Handles antimeridian, empty-line, and coordinate edge cases in geometry (spec/app/maps/navigation.md, \"A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75\")", () => {
+    expect(pointIn("+43.73, +7.42")).toEqual({ lat: 43_730_000, lng: 7_420_000 });
+    expect(pointIn(".5, -.5")).toEqual({ lat: 500_000, lng: -500_000 });
+    expect(pointIn("-0, -0")).toEqual({ lat: 0, lng: 0 });
+    expect(Object.is(pointIn("-0, -0")?.lat, -0)).toBe(false);
+
+    const west = { lat: 0, lng: 179_999_000 };
+    const east = { lat: 0, lng: -179_999_000 };
+    expect(meters(west, east)).toBeLessThan(300);
+    expect(toLine({ lat: 0, lng: 180_000_000 }, [west, east])).toBeLessThan(50);
+
+    const empty = measured(west, { line: [], turns: [] }, 0);
+    expect(Number.isFinite(empty.toRoute)).toBe(true);
+    expect(empty.toEnd).toBeGreaterThan(25);
+    expect(empty.beyond).toBe(0);
+
+    const a = { lat: 43_730_000, lng: 7_420_000 };
+    const turn = { lat: 43_731_000, lng: 7_420_000 };
+    const b = { lat: 43_731_000, lng: 7_421_000 };
+    const beforeTurn = measured({ lat: 43_730_500, lng: 7_420_000 }, { line: [a, turn, b], turns: [a, turn, b] }, 0);
+    const pastTurn = measured({ lat: 43_731_000, lng: 7_420_800 }, { line: [a, turn, b], turns: [a, turn, b] }, 0);
+    expect(beforeTurn.beyond).toBe(0);
+    expect(pastTurn.beyond).toBeGreaterThan(50);
+  });
+
+  it("Isolates Atlas per runtime, clears details on leave, skips coordinate search debounce, and refuses Google without tiles (spec/app/maps/index.md, \"A place's details are read from its provider once it is on the card, and shown only while it still is\"; spec/app/maps/connection.md, \"Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge\")", async () => {
+    const world = scene();
+    const first = await openMaps(world);
+    const { runtime } = first;
+
+    await typeMapSearch("43.73, 7.42");
+    await later(first.alpha, 450);
+    expect(world.maps.asked).toEqual([]);
+    expect((await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).recent).toEqual([]);
+
+    await fill("Search Maps", "harbour");
+    await enter("Search Maps");
+    await until(first.alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+    await fill("Search Maps", "");
+    await until(first.alpha, runtime, Screen, (s) => s.query === "" && s.results === 0);
+
+    await fill("Search Maps", "cafe");
+    await enter("Search Maps");
+    await until(first.alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 1);
+    await press("Harbour Cafe");
+    await until(first.alpha, runtime, Screen, (s) => s.place !== 0 && s.details.status === "Loaded");
+    await press("Save");
+    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1);
+    expect(localStorage.getItem("alpha/maps/saved@1")).not.toContain("+377 93 15 00 00");
+
+    const place = (await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).place;
+    const store = await runtime.runPromise(Atlas);
+    expect(store.spot(place)?.phone).toBe("+377 93 15 00 00");
+    await seen(false);
+    await until(first.alpha, runtime, Screen, (s) => s.trip.away);
+    await later(first.alpha, 10);
+    expect(store.spot(place)?.phone).toBeUndefined();
+    await first.close();
+    localStorage.clear();
+
+    const second = await openGoogleMaps(world);
+    const secondStore = await second.runtime.runPromise(Atlas);
+    expect(secondStore).not.toBe(store);
+    expect(secondStore.spot(place)).toBeUndefined();
+    expect(document.body.textContent).toContain("The Google map is missing.");
   });
 
   it("Takes a quiet fix on open that fails silently and clears one-shot GPS watches (spec/app/maps/index.md, \"Opening Maps with location already allowed and nothing chosen takes one fix quietly, once a visit\"; spec/app/maps/index.md, \"A fix goes to whoever holds the location\")", async () => {
@@ -656,7 +717,7 @@ describe("Maps in a browser", () => {
 
     await seen(false);
     await until(first.alpha, first.runtime, Screen, (s) => s.trip.away);
-    expect(atlas.spot(cafe)?.phone).toBeUndefined();
+    expect((await first.runtime.runPromise(Atlas)).spot(cafe)?.phone).toBeUndefined();
     await first.close();
     await seen(true);
 

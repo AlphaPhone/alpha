@@ -13,6 +13,7 @@ import { Launcher } from "../platform/launcher.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
 import { WiFi } from "../platform/wifi.vibe"
+import { type Shelf, createShelf } from "../runtime/shelf.vibe"
 import { Time } from "../runtime/time.vibe"
 import { Engagements } from "../update/activity.vibe"
 
@@ -30,6 +31,8 @@ export interface FirstRun {
 
 export service StartupSignIn {
   readonly changes: Stream.Stream<FirstRun>
+  shelf(): Shelf<FirstRun>!!
+  clock(): Shelf<number>!!
   active(): boolean!!
   confirmedAccount(): boolean!!
   check(): void!!
@@ -43,6 +46,73 @@ export service StartupSignIn {
 }
 
 const empty: FirstRun = { stage: "Disabled", accountConfirmed: false, email: false, google: false, phone: false }
+
+module browser {
+  /** @throws {never} */
+  export function hostWindow(): EventTarget | undefined {
+    return typeof window === "undefined" ? undefined : window
+  }
+  /** @throws {never} */
+  export function hostDocument(): Document | undefined {
+    return typeof document === "undefined" ? undefined : document
+  }
+}
+import { hostDocument, hostWindow } from browser
+
+/** Read the runtime-scoped startup sign-in status shelf. */
+export const signInShelf = effect {
+  return try (try StartupSignIn).shelf()
+}
+
+/** Read the runtime-scoped startup sign-in countdown clock shelf in whole seconds. */
+export const signInClock = effect {
+  return try (try StartupSignIn).clock()
+}
+
+/** Read the runtime's current wall-clock timestamp in whole seconds synchronously inside a view. */
+export const latestSignInSeconds = effect {
+  return Math.floor((try (try Time).latest()) / 1000)
+}
+
+/** Record owner interaction on the sign-in screen. */
+export const touchSignIn = effect {
+  try (try StartupSignIn).touch()
+}
+
+/** Recheck startup sign-in readiness and network state. */
+export const checkSignIn = effect {
+  try (try StartupSignIn).check()
+}
+
+/** Open Android Wi-Fi settings from the sign-in screen. */
+export const openSignInNetwork = effect {
+  return try (try StartupSignIn).openNetwork()
+}
+
+/** Start email or phone code sign-in. */
+export const sendSignInCode = (method: "email" | "phone", address: string) => effect {
+  return try (try StartupSignIn).send(method, address)
+}
+
+/** Start Google sign-in from the first-run chooser. */
+export const chooseGoogleSignIn = effect {
+  return try (try StartupSignIn).chooseGoogle()
+}
+
+/** Verify a sign-in or second-factor code. */
+export const verifySignInCode = (code: string) => effect {
+  return try (try StartupSignIn).verify(code)
+}
+
+/** Request another verification code for the active sign-in attempt. */
+export const resendSignInCode = effect {
+  return try (try StartupSignIn).resend()
+}
+
+/** Cancel the active code or second-factor step and return to the chooser. */
+export const cancelSignInStep = effect {
+  return try (try StartupSignIn).back()
+}
 
 module numbers {
   /** @throws {never} */
@@ -75,12 +145,16 @@ function verdictOf(heard: SignInReceipt | undefined): SignIn.Verdict {
   return "Refused"
 }
 
-export function startupSignIn(enabled: boolean) {
-  if (!enabled) {
-    return Layer.merge(
-      SignIn.machine(),
-      Layer.succeed(StartupSignIn, {
+function disabledSignIn() {
+  return Layer.merge(
+    SignIn.machine(),
+    Layer.effect(StartupSignIn, effect {
+      const shelf = createShelf<FirstRun>(empty, { reset: () => empty })
+      const clock = createShelf<number>(0, { reset: () => 0 })
+      return {
         changes: Stream.succeed(empty),
+        shelf: () => succeed(shelf),
+        clock: () => succeed(clock),
         active: () => succeed(false),
         confirmedAccount: () => succeed(false),
         check: () => Effect.void,
@@ -91,9 +165,208 @@ export function startupSignIn(enabled: boolean) {
         verify: () => succeed(false),
         resend: () => succeed(false),
         back: () => succeed(false),
-      }),
-    )
+      }
+    }),
+  )
+}
+
+function wakeEvents(): Stream.Stream<void> {
+  const win = hostWindow()
+  const doc = hostDocument()
+  const windowEvents = win === undefined
+    ? Stream.empty
+    : Stream.mergeAll([
+      Stream.fromEventListener(win, "online"),
+      Stream.fromEventListener(win, "offline"),
+      Stream.fromEventListener(win, "focus"),
+      Stream.fromEventListener(win, "pageshow"),
+    ], { concurrency: "unbounded" })
+  const visibleEvents = doc === undefined
+    ? Stream.empty
+    : Stream.filter(Stream.fromEventListener(doc, "visibilitychange"), () => doc.visibilityState === "visible")
+  return Stream.as(Stream.merge(windowEvents, visibleEvents), undefined)
+}
+
+effect function networkWarningOf(): (ConnectionWarning | undefined)!!WiFi {
+  const wifi = try WiFi
+  const network = try wifi.connectivity()
+  if (Option.isNone(network)) return undefined
+  if (!network.value.online) return "Offline" as const
+  const wifiActive = try wifi.usingWifi()
+  if (Option.isSome(wifiActive) && !wifiActive.value) {
+    return network.value.validated ? "WithoutWifi" as const : "UnvalidatedWithoutWifi" as const
   }
+  if (!network.value.validated) return "Unvalidated" as const
+  return undefined
+}
+
+effect function startSignInWatchers(
+  page: Page.Machine.Shape,
+  device: Device.Shape,
+  signIn: SignIn.Machine.Shape,
+  seconds: number!!,
+  check: () => void!!,
+  clockShelf: Shelf<number>,
+) {
+  const readyChanges = Stream.as(
+    Stream.filter(
+      Stream.changes(Stream.map(Stream.concat(Stream.fromEffect(page.get()), page.changes), (p) => Page.editorsMounted(p) && !Page.dialogShown(p))),
+      (ready) => ready,
+    ),
+    undefined,
+  )
+  const triggers = Stream.mergeAll([readyChanges, Stream.as(Stream.filter(device.visible, (shown) => shown), undefined), wakeEvents()], { concurrency: "unbounded" })
+  try fork.scoped Stream.runForEach(triggers, () => check())
+
+  const deadlines = Stream.changes(Stream.map(
+    Stream.concat(Stream.fromEffect(signIn.get()), signIn.changes),
+    (state) => (state.step === "Code" || state.step === "Second" ? Math.max(state.expiresAt, state.resendAt) : 0),
+  ))
+  const ticks = Stream.switchMap(deadlines, (deadline) => deadline <= 0
+    ? Stream.empty
+    : Stream.concat(Stream.fromEffect(seconds), Stream.fromEffectSchedule(seconds, Schedule.spaced("1 second"))))
+  try fork.scoped Stream.runForEach(ticks, (now) => sync(() => clockShelf.set(now)))
+}
+
+interface SignInFlow {
+  readonly signIn: SignIn.Machine.Shape
+  readonly current: () => FirstRun!!
+  readonly active: () => boolean!!
+  readonly foreground: boolean!!
+  readonly canAct: boolean!!
+  readonly seconds: number!!
+  readonly exclusive: (work: boolean!!) => boolean!!
+  readonly ownerTouch: () => void!!
+  readonly move: (event: SignIn.Event) => Option.Option<{ readonly state: SignIn.SignIn }>!!
+  readonly setUnavailable: () => void!!
+  readonly admitted: (accountConfirmed: boolean) => void!!
+  readonly getAttempt: () => SignInAttempt | undefined
+  readonly setAttempt: (next: SignInAttempt | undefined) => void
+  readonly setSignedInBy: (next: CredentialId) => void
+}
+
+function signInActions(flow: SignInFlow) {
+  effect function applyReceipt(
+    receipt: SignInReceipt | undefined,
+    checkingAttempt: SignInAttempt | undefined,
+    ticket: number,
+    browser: boolean,
+  ): boolean!! {
+    const answer = receipt?.verdict
+    const heard = checkingAttempt !== undefined && receipt?.attempt !== checkingAttempt ? undefined : receipt
+    let verdict = verdictOf(heard)
+    let account = 0
+    let factor: SignIn.Factor = "Totp"
+    if (heard !== undefined && answer?.kind === "SignedInAs") {
+      flow.setSignedInBy(answer.credentialId)
+      const read = try status()
+      if (!known(read) || read.account.kind !== "signedIn" || read.account.credentialId !== answer.credentialId) {
+        try flow.setUnavailable()
+        return false
+      }
+      verdict = "Passed"
+      account = 1
+    }
+    if (heard !== undefined && answer?.kind === "FactorAsked") {
+      flow.setAttempt(heard.attempt)
+      if (!answer.factors.includes("totp")) {
+        factor = "Sms"
+        const sent = try Effect.option(
+          tryPromise(() => signInAccounts().sendFactorCode({ attempt: heard.attempt })),
+        )
+        if (Option.isNone(sent) || sent.value !== heard.attempt) {
+          try ignore(tryPromise(() => signInAccounts().cancel({ attempt: heard.attempt })))
+          flow.setAttempt(undefined)
+          verdict = "Refused"
+        }
+      }
+    }
+    const stamp = try flow.seconds
+    const stepped = try flow.move(
+      browser
+        ? { type: "returned", tab: ticket, verdict, account, factor, free: true, now: stamp }
+        : { type: "verified", ticket, verdict, account, factor, free: true, now: stamp },
+    )
+    if (Option.isSome(stepped) && stepped.value.state.ended === "HandedOver") try flow.admitted(true)
+    return Option.isSome(stepped)
+  }
+
+  const send = (method: "email" | "phone", address: string) => flow.exclusive(effect {
+    if (!(try flow.canAct) || !(try flow.current())[method]) return false
+    const asked = try flow.move({
+      type: "sendCode",
+      method: method === "email" ? "Email" : "Phone",
+      address,
+      now: try flow.seconds,
+      online: true,
+    })
+    if (Option.isNone(asked)) return false
+    const state = asked.value.state
+    try flow.ownerTouch()
+    const request = method === "email"
+      ? { method: "email" as const, email: state.address }
+      : { method: "sms" as const, phone: state.address }
+    const receipt = tryPromise(() => signInAccounts().start({ ...request, environment: CLOUD_ENVIRONMENT })) catch () => undefined
+    const accepted = receipt?.verdict.kind === "CodeOnItsWay"
+    if (accepted) flow.setAttempt(receipt.attempt)
+    return Option.isSome(try flow.move({ type: "sent", ticket: state.ticket, accepted, now: try flow.seconds }))
+  })
+
+  const chooseGoogle = () => flow.exclusive(effect {
+    if (!(try flow.canAct) || !(try flow.current()).google) return false
+    const asked = try flow.move({ type: "chooseGoogle", now: try flow.seconds, online: true })
+    if (Option.isNone(asked)) return false
+    try flow.ownerTouch()
+    const receipt = tryPromise(() => signInAccounts().start({ method: "google", environment: CLOUD_ENVIRONMENT }))
+      catch () => undefined
+    return try applyReceipt(receipt, undefined, asked.value.state.tab.number, true)
+  })
+
+  const verify = (typed: string) => flow.exclusive(effect {
+    const attempt = flow.getAttempt()
+    const code = signInCode(typed)
+    if (attempt === undefined || Option.isNone(code) || !(try flow.canAct)) return false
+    const asked = try flow.move({ type: "checkCode", code: code.value, now: try flow.seconds, online: true })
+    if (Option.isNone(asked)) return false
+    const state = asked.value.state
+    const factor = state.step === "Second" ? state.factor === "Totp" ? "totp" as const : "sms" as const : undefined
+    const receipt = tryPromise(() => signInAccounts().verify({ attempt, code: code.value, factor })) catch () =>
+      undefined
+    return try applyReceipt(receipt, attempt, state.ticket, false)
+  })
+
+  const resend = () => flow.exclusive(effect {
+    const attempt = flow.getAttempt()
+    if (attempt === undefined || !(try flow.canAct)) return false
+    const asked = try flow.move({ type: "resend", now: try flow.seconds, online: true })
+    if (Option.isNone(asked)) return false
+    const receipt = tryPromise(() => signInAccounts().resend({ attempt })) catch () => undefined
+    const accepted = receipt?.verdict.kind === "CodeOnItsWay"
+    if (accepted) flow.setAttempt(receipt.attempt)
+    return Option.isSome(try flow.move({ type: "sent", ticket: asked.value.state.ticket, accepted, now: try flow.seconds }))
+  })
+
+  const back = () => effect {
+    const model = try flow.signIn.get()
+    const attempt = flow.getAttempt()
+    if (
+      !(try flow.active()) || (model.step !== "Code" && model.step !== "Second") || model.work !== "Resting"
+      || attempt === undefined || !(try flow.foreground)
+    ) return false
+    return try flow.exclusive(effect {
+      if ((try flow.signIn.get()).ticket !== model.ticket || flow.getAttempt() !== attempt) return false
+      const cancelled = tryPromise(() => signInAccounts().cancel({ attempt })) catch () => false
+      if (!cancelled) return false
+      flow.setAttempt(undefined)
+      return Option.isSome(try flow.move({ type: "cancel" }))
+    })
+  }
+
+  return { send, chooseGoogle, verify, resend, back }
+}
+
+export function startupSignIn(enabled: boolean) {
+  if (!enabled) return disabledSignIn()
   const firstRun = Layer.effect(
     StartupSignIn,
     effect {
@@ -105,7 +378,11 @@ export function startupSignIn(enabled: boolean) {
       const settings = try SystemSettings
       const time = try Time
       const engaged = try Engagements
-      const reports = try SubscriptionRef.make<FirstRun>({ ...empty, stage: "Checking" })
+      const initial: FirstRun = { ...empty, stage: "Checking" }
+      const reports = try SubscriptionRef.make<FirstRun>(initial)
+      const reportsShelf = createShelf<FirstRun>(initial, { reset: () => initial })
+      const clockShelf = createShelf<number>(0, { reset: () => 0 })
+      try Effect.addFinalizer(() => sync(() => { reportsShelf.reset(); clockShelf.reset() }))
       const checking = try Ref.make(false)
       const commands = try Semaphore.make(1)
       const exclusive = (work: boolean!!) =>
@@ -118,7 +395,10 @@ export function startupSignIn(enabled: boolean) {
       const current = () => SubscriptionRef.get(reports)
       const active = () => Effect.map(current(), (state) => state.stage !== "Disabled" && state.stage !== "Admitted")
       const confirmedAccount = () => Effect.map(current(), (state) => state.accountConfirmed)
-      const set = (reported: FirstRun) => SubscriptionRef.set(reports, reported)
+      const set = (reported: FirstRun) => effect {
+        try SubscriptionRef.set(reports, reported)
+        try sync(() => reportsShelf.set(reported))
+      }
       const seconds = effect {
         return Math.floor((try time.now()) / 1000)
       }
@@ -129,17 +409,7 @@ export function startupSignIn(enabled: boolean) {
         try set({ ...empty, stage: "Admitted", accountConfirmed })
         try engaged.report("startup/sign-in", { card: "NoCard", connecting: false })
       }
-      const networkWarning = effect {
-        const network = try wifi.connectivity()
-        if (Option.isNone(network)) return undefined
-        if (!network.value.online) return "Offline" as const
-        const wifiActive = try wifi.usingWifi()
-        if (Option.isSome(wifiActive) && !wifiActive.value) {
-          return network.value.validated ? "WithoutWifi" as const : "UnvalidatedWithoutWifi" as const
-        }
-        if (!network.value.validated) return "Unvalidated" as const
-        return undefined
-      }
+      const networkWarning = Effect.provideService(networkWarningOf(), WiFi, wifi)
       const move = (event: SignIn.Event) => Effect.option(signIn.send(event))
 
       effect function reported(reply: SignInStatus | undefined): void!! {
@@ -154,7 +424,6 @@ export function startupSignIn(enabled: boolean) {
           return
         }
         if (signedInBy !== undefined) {
-          // The phone has not confirmed custody of the sign-in it just reported. Recheck it before mounting.
           try set({ ...empty, stage: "Unavailable", connection })
           return
         }
@@ -224,135 +493,35 @@ export function startupSignIn(enabled: boolean) {
         return Option.isNone(network) || network.value.online
       }
 
-      effect function applyReceipt(
-        receipt: SignInReceipt | undefined,
-        checkingAttempt: SignInAttempt | undefined,
-        ticket: number,
-        browser: boolean,
-      ): boolean!! {
-        const answer = receipt?.verdict
-        const heard = checkingAttempt !== undefined && receipt?.attempt !== checkingAttempt ? undefined : receipt
-        let verdict = verdictOf(heard)
-        let account = 0
-        let factor: SignIn.Factor = "Totp"
-        if (heard !== undefined && answer?.kind === "SignedInAs") {
-          signedInBy = answer.credentialId
-          const read = try status()
-          if (!known(read) || read.account.kind !== "signedIn" || read.account.credentialId !== signedInBy) {
-            try set({ ...empty, stage: "Unavailable", connection: try networkWarning })
-            return false
-          }
-          verdict = "Passed"
-          account = 1
-        }
-        if (heard !== undefined && answer?.kind === "FactorAsked") {
-          nativeAttempt = heard.attempt
-          if (!answer.factors.includes("totp")) {
-            factor = "Sms"
-            const sent = try Effect.option(
-              tryPromise(() => signInAccounts().sendFactorCode({ attempt: heard.attempt })),
-            )
-            if (Option.isNone(sent) || sent.value !== heard.attempt) {
-              try ignore(tryPromise(() => signInAccounts().cancel({ attempt: heard.attempt })))
-              nativeAttempt = undefined
-              verdict = "Refused"
-            }
-          }
-        }
-        const stamp = try seconds
-        const stepped = try move(
-          browser
-            ? { type: "returned", tab: ticket, verdict, account, factor, free: true, now: stamp }
-            : { type: "verified", ticket, verdict, account, factor, free: true, now: stamp },
-        )
-        if (Option.isSome(stepped) && stepped.value.state.ended === "HandedOver") try admitted(true)
-        return Option.isSome(stepped)
-      }
-
-      const send = (method: "email" | "phone", address: string) => exclusive(effect {
-        if (!(try canAct) || !(try current())[method]) return false
-        const asked = try move({
-          type: "sendCode",
-          method: method === "email" ? "Email" : "Phone",
-          address,
-          now: try seconds,
-          online: true,
-        })
-        if (Option.isNone(asked)) return false
-        const state = asked.value.state
-        try ownerTouch()
-        const request = method === "email"
-          ? { method: "email" as const, email: state.address }
-          : { method: "sms" as const, phone: state.address }
-        const receipt = tryPromise(() => signInAccounts().start({ ...request, environment: CLOUD_ENVIRONMENT })) catch () => undefined
-        const accepted = receipt?.verdict.kind === "CodeOnItsWay"
-        if (accepted) nativeAttempt = receipt.attempt
-        return Option.isSome(try move({ type: "sent", ticket: state.ticket, accepted, now: try seconds }))
+      const actions = signInActions({
+        signIn,
+        current,
+        active,
+        foreground,
+        canAct,
+        seconds,
+        exclusive,
+        ownerTouch,
+        move,
+        setUnavailable: () => effect { try set({ ...empty, stage: "Unavailable", connection: try networkWarning }) },
+        admitted,
+        getAttempt: () => nativeAttempt,
+        setAttempt: (next) => { nativeAttempt = next },
+        setSignedInBy: (next) => { signedInBy = next },
       })
 
-      const chooseGoogle = () => exclusive(effect {
-        if (!(try canAct) || !(try current()).google) return false
-        const asked = try move({ type: "chooseGoogle", now: try seconds, online: true })
-        if (Option.isNone(asked)) return false
-        try ownerTouch()
-        // Browser/picker opens before returning its attempt. Wait for that exact native result without offering a cancellation.
-        const receipt = tryPromise(() => signInAccounts().start({ method: "google", environment: CLOUD_ENVIRONMENT }))
-          catch () => undefined
-        return try applyReceipt(receipt, undefined, asked.value.state.tab.number, true)
-      })
-
-      const verify = (typed: string) => exclusive(effect {
-        const attempt = nativeAttempt
-        const code = signInCode(typed)
-        if (attempt === undefined || Option.isNone(code) || !(try canAct)) return false
-        const asked = try move({ type: "checkCode", code: code.value, now: try seconds, online: true })
-        if (Option.isNone(asked)) return false
-        const state = asked.value.state
-        const factor = state.step === "Second" ? state.factor === "Totp" ? "totp" as const : "sms" as const : undefined
-        const receipt = tryPromise(() => signInAccounts().verify({ attempt, code: code.value, factor })) catch () =>
-          undefined
-        return try applyReceipt(receipt, attempt, state.ticket, false)
-      })
-
-      const resend = () => exclusive(effect {
-        const attempt = nativeAttempt
-        if (attempt === undefined || !(try canAct)) return false
-        const asked = try move({ type: "resend", now: try seconds, online: true })
-        if (Option.isNone(asked)) return false
-        const receipt = tryPromise(() => signInAccounts().resend({ attempt })) catch () => undefined
-        const accepted = receipt?.verdict.kind === "CodeOnItsWay"
-        if (accepted) nativeAttempt = receipt.attempt
-        return Option.isSome(try move({ type: "sent", ticket: asked.value.state.ticket, accepted, now: try seconds }))
-      })
-
-      const back = () => effect {
-        const model = try signIn.get()
-        const attempt = nativeAttempt
-        if (
-          !(try active()) || (model.step !== "Code" && model.step !== "Second") || model.work !== "Resting"
-          || attempt === undefined || !(try foreground)
-        ) return false
-        return try exclusive(effect {
-          if ((try signIn.get()).ticket !== model.ticket || nativeAttempt !== attempt) return false
-          const cancelled = tryPromise(() => signInAccounts().cancel({ attempt })) catch () => false
-          if (!cancelled) return false
-          nativeAttempt = undefined
-          return Option.isSome(try move({ type: "cancel" }))
-        })
-      }
+      try startSignInWatchers(page, device, signIn, seconds, check, clockShelf)
 
       return {
         changes: SubscriptionRef.changes(reports),
+        shelf: () => succeed(reportsShelf),
+        clock: () => succeed(clockShelf),
         active,
         confirmedAccount,
         check,
         touch: ownerTouch,
         openNetwork,
-        send,
-        chooseGoogle,
-        verify,
-        resend,
-        back,
+        ...actions,
       }
     },
   )

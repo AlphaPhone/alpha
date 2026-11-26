@@ -522,7 +522,7 @@ pure def startEdit(s: Viewer, by: Actor): Done =
   emit(List(Render({ revision: revised.revision, edit: fresh, cropSource: false })),
     { ...s, editing: true, cropping: false, playing: false, info: false, zoom: 1, pan: centered, chrome: true, edit: fresh, preview: revised, replace: false, unavailable: false, refusal: NoRefusal })
 
-pure def canCancelEdit(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(s.cropping)
+pure def canCancelEdit(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(s.cropping) and not(busy(s.save))
 
 pure def cancelEdit(s: Viewer, by: Actor): Viewer = { ...s, editing: false, cropping: false, playing: false, preview: V::dismiss(s.preview) }
 ```

@@ -5,15 +5,15 @@ import { Machine as Reminders } from "../gen/app__reminders.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
 import { civilDay, dayStart, utcStart } from "../src/calendar/time.ts";
-import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
-import { DEFAULT_LIST_ID } from "../src/reminders/store.ts";
+import { createReminderItem } from "../src/reminders/reminders.vibe";
+import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
 import { closeAll, only, open, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
 afterEach(async () => {
   await closeAll();
-  resetReminderStores();
+  remindersStore.reset();
   document.documentElement.style.removeProperty("font-size");
 });
 

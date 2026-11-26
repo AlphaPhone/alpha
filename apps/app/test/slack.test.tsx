@@ -243,7 +243,7 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
 
     const botCheck = await app.runtime.runPromiseExit(assertSlackUserToken("xoxb-disallowed-bot-token"));
     expect(botCheck._tag).toBe("Failure");
-    const botScopeRes = await fetch(`${provider.origin}/oauth/v2/authorize?client_id=alpha&scope=chat:write&redirect_uri=alpha://cb&state=s1`);
+    const botScopeRes = await fetch(`${provider.origin}/oauth/v2/authorize?client_id=alpha&scope=chat:write&redirect_uri=alphaphone://cb&state=s1`);
     expect(botScopeRes.status).toBe(400);
 
     await underAct(async () => {

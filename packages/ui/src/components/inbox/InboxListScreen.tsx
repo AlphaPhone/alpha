@@ -1,5 +1,5 @@
 import { Archive, Check, ChevronLeft, Ellipsis, Mail, MailOpen, Plus, RotateCw, Search, Star, Trash2 } from "lucide-react";
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -10,7 +10,7 @@ import { InboxListState, type InboxListStateKind } from "./InboxListState.tsx";
 import { InboxNotice, type InboxNoticeKind } from "./InboxNotice.tsx";
 import { InboxSearchBar, type InboxSearchBarProps } from "./InboxSearchBar.tsx";
 
-const actionChip = cn(focusRing, "min-h-9 shrink-0 rounded-action bg-secondary px-3 text-caption whitespace-nowrap text-secondary-foreground disabled:opacity-50");
+const actionChip = cn(focusRing, "min-h-11 shrink-0 rounded-action bg-secondary px-3 text-caption whitespace-nowrap text-secondary-foreground disabled:opacity-50");
 
 /** What an empty folder says, as develop's list words it: Starred, All mail and Spam read as a search. */
 const emptyIn = {
@@ -106,6 +106,12 @@ export function InboxListScreen({
   onArchive, onTrash, onRestore, labelChanges = false, onStar, onMarkRead, onMarkUnread, onDeleteDrafts, onChooseAll, onRefresh, onCompose, accounts = [], onChooseAccount, aside = [], rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
   const focusSearchAfterCloseRef = useRef(false);
+  const attachSearchButton = useCallback((button: HTMLButtonElement | null) => {
+    if (button && focusSearchAfterCloseRef.current) {
+      focusSearchAfterCloseRef.current = false;
+      button.focus();
+    }
+  }, []);
   const closeSearch = () => {
     focusSearchAfterCloseRef.current = true;
     onCloseSearch?.();
@@ -115,32 +121,27 @@ export function InboxListScreen({
   const hasAccount = account !== undefined;
   const actions = (
     <>
-      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw className="size-5" /></Button> : null}
-      <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
-        if (button && focusSearchAfterCloseRef.current) {
-          focusSearchAfterCloseRef.current = false;
-          button.focus();
-        }
-      }}><Search className="size-5" /></Button>
-      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus className="size-5" /></Button>
+      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw aria-hidden className="size-5" /></Button> : null}
+      <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={attachSearchButton}><Search aria-hidden className="size-5" /></Button>
+      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus aria-hidden className="size-5" /></Button>
       {hasAccount || onStartSelection || onFinishSelection ? (
         <Menu>
-          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
+          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis aria-hidden /></Button></MenuTrigger>
           <MenuContent className="min-w-52">
-            <MenuItem disabled={!onStartSelection && !onFinishSelection} onSelect={onFinishSelection ?? onStartSelection}><Check className="size-5.5" />{onFinishSelection ? "Finish selection" : folder === "drafts" ? "Select drafts" : "Select emails"}</MenuItem>
+            <MenuItem disabled={!onStartSelection && !onFinishSelection} onSelect={onFinishSelection ?? onStartSelection}><Check aria-hidden className="size-5.5" />{onFinishSelection ? "Finish selection" : folder === "drafts" ? "Select drafts" : "Select emails"}</MenuItem>
             {onFinishSelection ? (
               <>
-                <MenuItem disabled={!onChooseAll && !onClearSelection} onSelect={onChooseAll ?? onClearSelection}><Check className="size-5.5" />{onChooseAll || !onClearSelection ? "Select all shown" : "Deselect all"}</MenuItem>
+                <MenuItem disabled={!onChooseAll && !onClearSelection} onSelect={onChooseAll ?? onClearSelection}><Check aria-hidden className="size-5.5" />{onChooseAll || !onClearSelection ? "Select all shown" : "Deselect all"}</MenuItem>
                 {folder === "drafts" ? (
-                  <MenuItem disabled={!onDeleteDrafts} onSelect={onDeleteDrafts}><Trash2 className="size-5.5" />Delete drafts</MenuItem>
+                  <MenuItem disabled={!onDeleteDrafts} onSelect={onDeleteDrafts}><Trash2 aria-hidden className="size-5.5" />Delete drafts</MenuItem>
                 ) : folder === "archived" || folder === "trashed"
-                  ? <MenuItem disabled={!onRestore} onSelect={onRestore}><Archive className="size-5.5" />{folder === "trashed" ? "Restore from Trash" : "Restore to Inbox"}</MenuItem>
-                  : <MenuItem disabled={!onArchive} onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem>}
-                {folder === "trashed" || folder === "drafts" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem>}
+                  ? <MenuItem disabled={!onRestore} onSelect={onRestore}><Archive aria-hidden className="size-5.5" />{folder === "trashed" ? "Restore from Trash" : "Restore to Inbox"}</MenuItem>
+                  : <MenuItem disabled={!onArchive} onSelect={onArchive}><Archive aria-hidden className="size-5.5" />Archive</MenuItem>}
+                {folder === "trashed" || folder === "drafts" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 aria-hidden className="size-5.5" />Move to Trash</MenuItem>}
                 {labelChanges && folder !== "drafts" ? <>
-                  <MenuItem disabled={!onStar} onSelect={onStar}><Star className="size-5.5" />{folder === "starred" ? "Remove stars" : "Star"}</MenuItem>
-                  <MenuItem disabled={!onMarkRead} onSelect={onMarkRead}><MailOpen className="size-5.5" />Mark as read</MenuItem>
-                  <MenuItem disabled={!onMarkUnread} onSelect={onMarkUnread}><Mail className="size-5.5" />Mark as unread</MenuItem>
+                  <MenuItem disabled={!onStar} onSelect={onStar}><Star aria-hidden className="size-5.5" />{folder === "starred" ? "Remove stars" : "Star"}</MenuItem>
+                  <MenuItem disabled={!onMarkRead} onSelect={onMarkRead}><MailOpen aria-hidden className="size-5.5" />Mark as read</MenuItem>
+                  <MenuItem disabled={!onMarkUnread} onSelect={onMarkUnread}><Mail aria-hidden className="size-5.5" />Mark as unread</MenuItem>
                 </> : null}
               </>
             ) : null}
@@ -152,7 +153,7 @@ export function InboxListScreen({
   return (
     <Screen
       title={chosen > 0 || onFinishSelection ? `${chosen} selected` : inboxFolders[folder]}
-      leading={(searching && !launcher) || (!searching && onBack) ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5.5" /></Button> : undefined}
+      leading={(searching && !launcher) || (!searching && onBack) ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft aria-hidden className="size-5.5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
       className={cn("@container [&_main>div]:gap-0 [&_main>div]:pt-1 in-data-[alpha-wide]:[&>header]:max-w-none", searching ? searchHeader : launcherHeader)}

@@ -8,7 +8,7 @@ export interface Link {
 
 const written = /\bhttps?:\/\/[^\s<>"'()]+[^\s<>"'().,;:!?]/giu;
 const explicitUrl = /^(?:https?:)?\/\//iu;
-const bareDomain = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/:?#]|$)/iu;
+const bareDomain = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:[/:?#]|$)/iu;
 
 function claimedHost(label: string): string | undefined {
   const trimmed = label.trim();
@@ -28,10 +28,11 @@ function claimedHost(label: string): string | undefined {
 /** The destination and the host the sender's label appears to claim. @throws {never} */
 export function linkOf(url: string, label: string): Link {
   const parsed = URL.parse(url);
-  const claimed = claimedHost(label);
+  const trimmed = label.trim();
+  const claimed = claimedHost(trimmed);
   return {
     url: parsed?.href ?? url,
-    label: label.trim() || parsed?.hostname || url,
+    label: trimmed || parsed?.hostname || url,
     secure: parsed?.protocol === "https:" && parsed.username === "" && parsed.password === "",
     mismatch: claimed !== undefined && parsed?.hostname !== claimed,
   };

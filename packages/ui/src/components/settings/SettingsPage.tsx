@@ -45,11 +45,11 @@ export function SettingsPage({ title, top = false, leading, onBack, backLabel = 
       data-settings-page={title}
       title={title}
       detail={!top}
-      leading={leading ?? (onBack ? <Button ref={focusOnEntry} variant="ghost" size="icon" aria-label={backLabel} className="rounded-tile in-data-[alpha-launcher]:size-11! in-data-[alpha-launcher]:min-w-11! in-data-[alpha-launcher]:rounded-full" onClick={onBack}><ChevronLeft /></Button> : undefined)}
+      leading={leading ?? (onBack ? <Button ref={focusOnEntry} variant="ghost" size="icon" aria-label={backLabel} className="rounded-tile in-data-[alpha-launcher]:size-11! in-data-[alpha-launcher]:min-w-11! in-data-[alpha-launcher]:rounded-full" onClick={onBack}><ChevronLeft aria-hidden /></Button> : undefined)}
       actions={actions}
       className={cn(
-        "[&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+env(safe-area-inset-bottom))] not-in-data-[alpha-title-row]:not-in-data-[alpha-launcher]:[&>header>h1]:truncate",
-        "in-data-[alpha-launcher]:pt-[max(--spacing(11),env(safe-area-inset-top))] in-data-[alpha-launcher]:[&>header]:min-h-14",
+        "[&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+var(--alpha-safe-bottom))] not-in-data-[alpha-title-row]:not-in-data-[alpha-launcher]:[&>header>h1]:truncate",
+        "in-data-[alpha-launcher]:pt-[max(--spacing(11),var(--alpha-safe-top))] in-data-[alpha-launcher]:[&>header]:min-h-14",
         top ? "in-data-[alpha-launcher]:[&>header]:pl-5 in-data-[alpha-launcher]:[&>header>h1]:pl-0" : "in-data-[alpha-launcher]:[&>header]:gap-1 in-data-[alpha-launcher]:[&>header]:pr-4",
       )}
     >

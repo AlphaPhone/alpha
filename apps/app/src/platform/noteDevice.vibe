@@ -13,9 +13,10 @@ import { browserNotesRecognitionAvailable, requestBrowserNoteTranscription } fro
 import { Base64 } from "effect/encoding"
 
 module native {
-  import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
+  import type { PluginListenerHandle } from "@capacitor/core"
   import type { NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
   import type { Command } from "../../gen/app__notes__recording.effect.vibe"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export type Earlier = "records" | "trash" | "folders"
 
@@ -39,10 +40,9 @@ module native {
     addListener(event: "recordingChanged" | "openRequested", received: (value: unknown) => void): Promise<PluginListenerHandle>
   }
 
-  let made: NotesPlugin | undefined
   /** Alpha's registered device recorder. @throws {never} */
   export function client(): NotesPlugin {
-    return (made ??= registerPlugin<NotesPlugin>("AlphaNotes"))
+    return capacitorPlugin<NotesPlugin>("AlphaNotes")
   }
 
   /** The credential-free binding the device journal uses for this agent owner. */
@@ -135,21 +135,20 @@ export const noteDevice = Layer.effect(NoteDevice, effect {
     Effect.orElseSucceed(raw, () => ({ grant: "prompt" })),
     ({ grant }): Grant => grant === "granted" ? "Granted" : grant === "denied" ? "Denied" : "Unasked",
   )
-  const nativeChanged = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => acquireRelease(
-    promise(() => api.addListener("recordingChanged", (raw) => {
-      const report = Schema.decodeUnknownOption(TapeReply)(raw)
-      if (Option.isSome(report)) Queue.offerUnsafe(queue, report.value)
-    })),
-    (listener) => promise(() => listener.remove()),
-  ))
-  const changed = browser === undefined ? nativeChanged : Stream.callback<Tape>((queue) => acquireRelease(
+  const listen = <A>(event: "recordingChanged" | "openRequested", onEvent: (raw: unknown, emit: (value: A) => void) => void): Stream.Stream<A> =>
+    api === undefined ? Stream.empty : Stream.callback<A>((queue) => Effect.asVoid(acquireRelease(
+      Effect.orElseSucceed(tryPromise(() => api.addListener(event, (raw) => onEvent(raw, (value) => { Queue.offerUnsafe(queue, value) }))), () => undefined),
+      (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
+    )))
+  const nativeChanged = listen<Tape>("recordingChanged", (raw, emit) => {
+    const report = Schema.decodeUnknownOption(TapeReply)(raw)
+    if (Option.isSome(report)) emit(report.value)
+  })
+  const changed = browser === undefined ? nativeChanged : Stream.callback<Tape>((queue) => Effect.asVoid(acquireRelease(
     sync(() => browser.observe((report) => { Queue.offerUnsafe(queue, report) })),
     (remove) => sync(remove),
-  ))
-  const openAsked = api === undefined ? Stream.empty : Stream.callback<void>((queue) => acquireRelease(
-    promise(() => api.addListener("openRequested", () => { Queue.offerUnsafe(queue, undefined) })),
-    (listener) => promise(() => listener.remove()),
-  ))
+  )))
+  const openAsked = listen<void>("openRequested", (_raw, emit) => emit(undefined))
   return {
     available, onWeb: browser !== undefined, canPurge, canPlay: api !== undefined || browser !== undefined, canTranscribe, changed, openAsked,
     permission: () => granted(browser === undefined ? read(Permission, (native) => native.permission()) : web(() => browser.permission())),

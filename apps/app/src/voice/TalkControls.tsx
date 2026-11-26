@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { Machine } from "../../gen/app__voice.effect.vibe";
+import type { Machine } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
 import { micHeld, type Phase } from "../../gen/app__voice.ts";
 import { untimed } from "../runtime/reactor.vibe";

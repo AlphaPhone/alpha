@@ -9,9 +9,21 @@ import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { entryOf, registrationAt } from "./alpha.vibe"
 import { hostedClouds, hostedProfileProblems, type HostedCloudUnknown } from "./hosted.vibe"
 import { reconcileResources } from "./cloudflare.vibe"
-import { base64urlBytes, entitlementKey, entitlementPublicKey, hexKey, isEntitlementKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
+import { base64urlBytes, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexKey, isEntitlementKey, isExampleEntitlementPublicKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
 import { PROFILE_ASSET } from "./profile-asset.ts"
 import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResources } from "./wrangler.vibe"
+
+schema CloudResourcesSchema {
+  workerName: string
+  accountId: string
+  zone: string
+  hyperdriveId: string
+}
+
+schema ResourcesFileSchema {
+  production: CloudResourcesSchema
+  staging: CloudResourcesSchema
+}
 
 /** A step of the operator's command could not be carried out; the message says which and why, and holds no secret. */
 export error OperatorFailed { problem: string }
@@ -70,7 +82,9 @@ export effect function readSecrets(file: string): Record<string, string>!Operato
   const canonical = try canonicalPath(resolved)
   const checkout = try canonicalPath(path.resolve(try packageDirectory(), "../.."))
   const exists = (fs.exists(canonical) catch () => false)
-  const mode = exists ? ((fs.stat(canonical) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) })).mode : 0o600
+  const info = exists ? (fs.stat(canonical) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }) : undefined
+  if (info !== undefined && info.type !== "File") throw new OperatorFailed({ problem: `${resolved} must be a regular file` })
+  const mode = info?.mode ?? 0o600
   const insideCheckout = canonical === checkout || canonical.startsWith(checkout + path.sep)
   if (!secretsFileAccepted(insideCheckout, (mode & 0o077) !== 0))
     throw new OperatorFailed({ problem: `${resolved} must lie outside the checkout and be readable by its owner alone (chmod 600)` })
@@ -78,12 +92,22 @@ export effect function readSecrets(file: string): Record<string, string>!Operato
   return parseSecrets((fs.readFileString(canonical) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
 }
 
-effect function writeSecrets(file: string, values: Readonly<Record<string, string>>): void!OperatorFailed!FileSystem.FileSystem {
+effect function writeSecrets(file: string, values: Readonly<Record<string, string>>): void!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
   if (Object.values(values).some((value) => /[\r\n]/.test(value))) throw new OperatorFailed({ problem: "a secret cannot span lines" })
   const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  const resolved = try canonicalPath(file)
   const text = Object.entries(values).map(([name, value]) => `${name}=${value}`).join("\n") + "\n"
-  fs.writeFileString(file, text, { mode: 0o600 }) catch effect () => { throw new OperatorFailed({ problem: `cannot write ${file}` }) }
-  fs.chmod(file, 0o600) catch effect () => { throw new OperatorFailed({ problem: `cannot make ${file} private` }) }
+  const staged = path.join(path.dirname(resolved), `.${path.basename(resolved)}.${hexKey().slice(0, 16)}.tmp`)
+  fs.writeFileString(staged, text, { mode: 0o600 }) catch effect () => { throw new OperatorFailed({ problem: `cannot write ${resolved}` }) }
+  fs.chmod(staged, 0o600) catch effect () => {
+    fs.remove(staged, { force: true }) catch () => undefined
+    throw new OperatorFailed({ problem: `cannot make ${resolved} private` })
+  }
+  fs.rename(staged, resolved) catch effect () => {
+    fs.remove(staged, { force: true }) catch () => undefined
+    throw new OperatorFailed({ problem: `cannot replace ${resolved}` })
+  }
 }
 
 /** Every internal secret that is absent, generated; those present are kept as they are. */
@@ -192,7 +216,11 @@ export function registrationOn(profile: CloudProfile, environment: CloudEnvironm
 /** `apps/cloud/resources.json`, or the file `override` names. */
 export effect function resourcesOf(override?: string): Readonly<Record<CloudEnvironment, CloudResources>>!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
   const path = try Path.Path
-  return (try readJson(override ?? path.join(try packageDirectory(), "resources.json"))) as Record<CloudEnvironment, CloudResources>
+  const target = override ?? path.join(try packageDirectory(), "resources.json")
+  const raw = try readJson(target)
+  return Schema.decodeUnknownEffect(ResourcesFileSchema)(raw) catch effect () => {
+    throw new OperatorFailed({ problem: `${target} is not a valid resources.json` })
+  }
 }
 
 const siblingOf = (environment: CloudEnvironment): CloudEnvironment => environment === "production" ? "staging" : "production"
@@ -212,12 +240,15 @@ export effect function reconciled(environment: CloudEnvironment, resources: Read
 /** Records one environment's verified resources, unless the file changed since it was read. */
 export effect function recordResources(file: string, environment: CloudEnvironment, expected: CloudResources, verified: CloudResources) {
   const fs = try FileSystem.FileSystem
-  const current = (try readJson(file)) as Record<CloudEnvironment, CloudResources>
+  const current = try resourcesOf(file)
   if (JSON.stringify(current[environment]) === JSON.stringify(verified)) return
   if (JSON.stringify(current[environment]) !== JSON.stringify(expected)) throw new OperatorFailed({ problem: `resources.json changed for ${environment}; run provision again` })
-  const staged = `${file}.${environment}.next`
+  const staged = `${file}.${environment}.${hexKey().slice(0, 12)}.next`
   fs.writeFileString(staged, JSON.stringify({ ...current, [environment]: verified }, null, 2) + "\n") catch effect () => { throw new OperatorFailed({ problem: `cannot write ${staged}` }) }
-  fs.rename(staged, file) catch effect () => { throw new OperatorFailed({ problem: `cannot replace ${file}` }) }
+  fs.rename(staged, file) catch effect () => {
+    fs.remove(staged, { force: true }) catch () => undefined
+    throw new OperatorFailed({ problem: `cannot replace ${file}` })
+  }
 }
 
 /** Both Workers of one environment, rendered into `out`: their Wrangler files, and the API Worker's assets, eliza's pages and the profile. */
@@ -256,8 +287,15 @@ export effect function deploy(at: { readonly environment: CloudEnvironment; read
     provide machine() {
       const rollout = try Machine
       try rollout.send({ type: "freeze" })
-      const { values } = try settledSecrets(at.secrets, at.environment)
+      const { values, entitlementPublicKey: derivedKey } = try settledSecrets(at.secrets, at.environment)
       const { profile } = try profiled(at.profile)
+      const entitlement = profile.environments[at.environment].entitlement
+      if (isExampleEntitlementPublicKey(derivedKey) || entitlement.publicKeys.some(isExampleEntitlementPublicKey)) {
+        throw new OperatorFailed({ problem: "the profile still holds the example placeholder entitlement public key" })
+      }
+      if (!entitlementPublicKeyMatches(values.CLOUD_ENTITLEMENT_KEY ?? "", entitlement.publicKeys, entitlement.keyId)) {
+        throw new OperatorFailed({ problem: `CLOUD_ENTITLEMENT_KEY does not match entitlement.publicKeys[${entitlement.keyId}] in ${at.profile}` })
+      }
       const resources = try resourcesOf(at.resources)
       const verified = reconciled(at.environment, resources, values.DATABASE_URL, false) catch effect (refused) => {
         try rollout.send({ type: "checkResources", recorded: false })

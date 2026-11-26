@@ -50,6 +50,32 @@ async function openPhone(alpha: Alpha) {
   await until(alpha, alpha.runtime, Phone, (state) => state.front);
 }
 
+async function bootPhone(world = image()) {
+  const { alpha } = await openPhoneWorld(world);
+  await until(alpha, alpha.runtime, Shell, (s) => s.image);
+  return { world, alpha };
+}
+
+async function enterPhone(world = image()) {
+  const started = await bootPhone(world);
+  await openPhone(started.alpha);
+  return started;
+}
+
+async function enterKeypad(world = image()) {
+  const started = await enterPhone(world);
+  await tab("Keypad");
+  return started;
+}
+
+async function enterVoicemail(world = image(), requireUnheard = false) {
+  const started = await enterPhone(world);
+  await until(started.alpha, started.alpha.runtime, Phone, (s) => s.front && s.voicemail);
+  await tab("Voicemail");
+  await until(started.alpha, started.alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1 && (!requireUnheard || s.unheard === 1));
+  return started;
+}
+
 async function openReadyRecents(alpha: Alpha, matches: (state: PhoneState) => boolean = () => true) {
   await openPhone(alpha);
   await until(alpha, alpha.runtime, Phone, (state) => state.carrier === "CarrierReady" && state.recents.status === "Loaded" && matches(state));
@@ -126,10 +152,7 @@ describe("Phone on an Alpha image", () => {
   });
 
   it("Type a number, and call it only when the phone can dial it (spec/app/phone/index.md, \"Story: Type a number\"; spec/app/phone/index.md, \"Story: Call a number\")", async () => {
-    const world = image();
-    const alpha = await mountedImage(world);
-    await openPhone(alpha);
-    await tab("Keypad");
+    const { world, alpha } = await enterKeypad();
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad");
 
     // spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it": without the role the dial screen opens with the number.
@@ -361,8 +384,7 @@ describe("Phone on an Alpha image", () => {
   it("Hands off to the system dialer when cell service or call state is unknown (spec/app/phone/index.md, \"Story: Call a number\")", async () => {
     const world = image();
     world.telephony.mobileService = undefined;
-    const alpha = await mountedImage(world);
-    await openPhone(alpha);
+    const { alpha } = await enterPhone(world);
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierUnknown" && s.telecom === "NoCall" && s.recents.status === "Loaded");
     await press("Call Maya Chen");
     await until(alpha, alpha.runtime, Phone, (s) => s.dial.status === "Loaded");
@@ -388,9 +410,7 @@ describe("Phone on an Alpha image", () => {
     const world = image();
     world.telephony.mobileService = false;
     world.telephony.emergencyNumbers.add("09");
-    const alpha = await mountedImage(world);
-    await openPhone(alpha);
-    await tab("Keypad");
+    const { alpha } = await enterKeypad(world);
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad" && s.carrier === "CarrierUnavailable");
     await press("0");
     await press("9");
@@ -401,8 +421,7 @@ describe("Phone on an Alpha image", () => {
   });
 
   it("See missed calls on Home, then unheard voicemail (spec/app/phone/index.md, \"Story: See missed calls on Home\"; spec/app/phone/voicemail.md, \"Story: See my voicemail\")", async () => {
-    const world = image();
-    const alpha = await mountedImage(world);
+    const { world, alpha } = await bootPhone();
 
     // spec/app/phone/index.md, "Home shows the missed-calls card while there are missed calls not yet seen"; spec/app/phone/index.md, "One tap on the card opens Recents with the missed calls, and otherwise the Voicemail tab while a voicemail is unheard"
     await until(alpha, alpha.runtime, Phone, (s) => s.missed === 1 && s.voicemail);
@@ -444,11 +463,8 @@ describe("Phone on an Alpha image", () => {
   it("See my voicemail, listen to one, and delete it (spec/app/phone/voicemail.md, \"Story: See my voicemail\"; spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
     const world = image();
     world.voice.onDevice = false;
-    const alpha = await mountedImage(world);
-    await openVoicemail(alpha);
-
     // spec/app/phone/voicemail.md, "Voicemail reads the list each time its tab comes to the front"
-    await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1 && s.unheard === 1);
+    const { alpha } = await enterVoicemail(world, true);
 
     // spec/app/phone/voicemail.md, "Opening a voicemail asks for its audio under a new ticket"
     await pressVoicemailRow();
@@ -600,9 +616,7 @@ describe("Phone on an Alpha image", () => {
       requests.push({ id, requestId });
       return requests.length === 1 ? first.promise : reopened.promise;
     };
-    const alpha = await mountedImage(world);
-    await openVoicemail(alpha);
-    await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
+    const { alpha } = await enterVoicemail(world);
 
     await pressVoicemailRow();
     await vi.waitFor(() => expect(requests).toHaveLength(1));
@@ -668,9 +682,7 @@ describe("Phone on an Alpha image", () => {
   it(`Keeps a voicemail only when Android confirms Undo (spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open")`, async () => {
     const world = image();
     world.telephony.holdVoicemailDeletion = true;
-    const alpha = await mountedImage(world);
-    await openVoicemail(alpha, (state) => state.front);
-    await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
+    const { alpha } = await enterVoicemail(world);
     await pressVoicemailRow();
     await until(alpha, alpha.runtime, Voicemail, (s) => s.open);
     await press("Delete");
@@ -757,13 +769,20 @@ describe("The call strip on an Alpha image", () => {
     expect(button("End call")).toBeUndefined();
   });
 
-  it("Refuses direct emergency phone_dial without dialing (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
-    const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
-    await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "NoCall" && s.carrier === "CarrierReady");
-    const emergencyDial = await alpha.runtime.runPromise(phoneAction({ type: "phone_dial", target: { kind: "number", number: "911" } }, () => Promise.resolve(true)));
-    expect([emergencyDial, world.telephony.dialed]).toEqual([expect.objectContaining({ kind: "refused" }), []]);
+  it("Refuses emergency numbers in phone_dial and remembers seen missed calls across Home returns (spec/app/phone/index.md, \"Alpha never places an emergency call\"; spec/app/phone/index.md, \"Home shows the missed-calls card while there are missed calls not yet seen\")", async () => {
+    const { world, alpha } = await bootPhone();
+    await until(alpha, alpha.runtime, Phone, (s) => s.missed === 1);
+
+    await act(async () => {
+      expect(await alpha.runtime.runPromise(phoneAction({ type: "phone_dial", target: { kind: "number", number: "911" } }, () => Promise.resolve(true)))).toMatchObject({ kind: "refused" });
+    });
+    expect([world.telephony.dialed, world.telephony.placed]).toEqual([[], []]);
+
+    await pressPhoneCard();
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.recents.status === "Loaded" && s.missed === 0);
+    await hardware("home");
+    await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.missed === 0);
+    expect(world.telephony.calls.some((one) => one.type === "missed")).toBe(true);
   });
 
   const openRecents = async (world = image()) => {

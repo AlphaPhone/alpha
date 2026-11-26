@@ -40,9 +40,10 @@ export function ClipEditor({ duration, edit, position, playing, onPreview, onTri
     if (!frame || frame.width === 0 || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
     trim(handle, Math.round((event.clientX - frame.left) / frame.width * duration));
   }
+  const canTrim = onTrim !== undefined && duration > 1;
   const tool = "h-16 min-w-24 flex-col gap-2 rounded-md text-label font-normal [@media(max-height:480px)]:h-11 [@media(max-height:480px)]:flex-row";
   return (
-    <div className="max-h-[55%] shrink-0 overflow-y-auto bg-foreground/[0.066667] px-6 pt-2 pb-[max(--spacing(5),var(--alpha-native-inset-bottom,0px))] [@media(max-height:480px)]:pt-1">
+    <div className="max-h-[55%] shrink-0 overflow-y-auto bg-foreground/[0.066667] px-6 pt-2 pb-[max(--spacing(5),var(--alpha-safe-bottom,0px))] [@media(max-height:480px)]:pt-1">
       <div className="mb-2 flex justify-center">
         <Button variant="ghost" size="icon" className="size-11" aria-label={playing ? "Pause preview" : "Preview trim"} disabled={onPreview === undefined} onClick={onPreview}>
           {playing ? <Pause /> : <Play />}
@@ -56,18 +57,25 @@ export function ClipEditor({ duration, edit, position, playing, onPreview, onTri
         {handles.map((handle) => {
           const start = handle === "start";
           const value = edit[handle];
-          return <div key={handle} role="slider" tabIndex={onTrim === undefined ? -1 : 0} aria-label={start ? "Start seconds" : "End seconds"}
-            aria-valuenow={value / 10} aria-valuemin={start ? 0 : (edit.start + 1) / 10} aria-valuemax={start ? (edit.end - 1) / 10 : duration / 10}
-            aria-valuetext={`${(value / 10).toFixed(1)} seconds`} aria-disabled={onTrim === undefined || undefined}
+          const min = start ? 0 : Math.min(duration, edit.start + 1);
+          const max = start ? Math.max(0, edit.end - 1) : duration;
+          return <div key={handle} role="slider" tabIndex={!canTrim ? -1 : 0} aria-label={start ? "Start seconds" : "End seconds"}
+            aria-valuenow={value / 10} aria-valuemin={min / 10} aria-valuemax={Math.max(min, max) / 10}
+            aria-valuetext={`${(value / 10).toFixed(1)} seconds`} aria-disabled={!canTrim || undefined}
             className={cn(focusRing, "absolute top-0 z-10 flex h-14 w-11 -translate-x-1/2 touch-none cursor-ew-resize items-center justify-center rounded-md")}
             style={{ left: percent(value) }}
             onPointerDown={(event) => {
-              if (onTrim === undefined || event.button !== 0) return;
+              if (!canTrim || event.button !== 0) return;
               event.currentTarget.focus({ preventScroll: true });
-              event.currentTarget.setPointerCapture(event.pointerId);
+              try {
+                event.currentTarget.setPointerCapture?.(event.pointerId);
+              } catch {
+                return;
+              }
             }}
             onPointerMove={(event) => drag(handle, event)} onPointerUp={(event) => drag(handle, event)}
             onKeyDown={(event) => {
+              if (!canTrim) return;
               const step = event.shiftKey ? 10 : 1;
               const next = event.key === "Home" ? 0 : event.key === "End" ? duration
                 : event.key === "ArrowRight" || event.key === "ArrowUp" ? value + step

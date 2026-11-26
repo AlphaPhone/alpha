@@ -2,13 +2,14 @@
 import { Alert, Button, Input, Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger, DialogClose, cn, focusRing } from "@repo/ui";
 import { Effect, type Layer } from "effect";
 import { ArrowDown, ArrowUp, Camera, Crop, ImagePlus, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { useMachine as useCorrection } from "../../gen/app__files__correction.react.ts";
 import { useMachine } from "../../gen/app__files__scan.react.ts";
 import { pageLimit } from "../../gen/app__files__scanDraft.ts";
 import type { Page } from "../../gen/app__files__scanDraft.ts";
 import type { Event } from "../../gen/app__files__scan.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
+import { scanNoteLimit } from "./entries.vibe";
 import { ScanCorrection } from "./ScanCorrection.tsx";
 import { ScanSearchable } from "./ScanSearchable.tsx";
 import { ScanAssets, addScanImage, editScanLine, noteContent, reviewCalendarEvent, type scan } from "./scan.vibe";
@@ -27,7 +28,7 @@ function PickPage({ capture, children, replacing, selected, label, iconOnly = fa
 }) {
   return (
     <label title={iconOnly ? label : undefined} className={cn(
-      "relative inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 bg-secondary hover:bg-accent text-secondary-foreground focus-within:outline-ring",
+      "relative inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 bg-secondary hover:bg-accent text-secondary-foreground has-[:focus-visible]:outline-solid has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-ring has-[:focus-visible]:outline-offset-focus",
       iconOnly ? cn("size-11", pageAction) : "min-w-0 flex-1 basis-36 rounded-panel px-4 py-3 text-md leading-row font-medium",
       focusRing,
     )}>
@@ -48,9 +49,35 @@ function PickPage({ capture, children, replacing, selected, label, iconOnly = fa
   );
 }
 
+function ScanLineInput({ index, text, disabled, onCommit }: {
+  index: number;
+  text: string;
+  disabled: boolean;
+  onCommit: (value: string) => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState<{ readonly base: string; readonly value: string }>({ base: text, value: text });
+  const shown = draft.base === text ? draft.value : text;
+  return (
+    <label className="mb-1 block">
+      <span className="sr-only">Line {index + 1}</span>
+      <Input
+        value={shown}
+        disabled={disabled}
+        className={scanText}
+        maxLength={2_000}
+        onChange={(event) => setDraft({ base: text, value: event.currentTarget.value })}
+        onBlur={(event) => {
+          const value = event.currentTarget.value;
+          void onCommit(value).finally(() => setDraft({ base: text, value: text }));
+        }}
+      />
+    </label>
+  );
+}
+
 function NoteReview({ runtime, pages, save }: { runtime: Shown<Runtime>["runtime"]; pages: ReadonlyArray<Page>; save: () => void }) {
   const content = runtime.runSync(noteContent(pages));
-  const allowed = content !== undefined && content.trim() !== "" && content.length <= 20_241;
+  const allowed = content !== undefined && content.trim() !== "" && content.length <= scanNoteLimit;
   return (
     <DialogContent aria-describedby={undefined} closeLabel="Close note review" className="max-h-[86dvh] overflow-y-auto">
       <DialogTitle>Make note from scanned text</DialogTitle>
@@ -65,6 +92,8 @@ function NoteReview({ runtime, pages, save }: { runtime: Shown<Runtime>["runtime
 export function Scan({ runtime }: Shown<Runtime>) {
   const { state, can, send } = useMachine(runtime);
   const correction = useCorrection(runtime);
+  const assetsShelf = runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.version()));
+  useSyncExternalStore(assetsShelf.subscribe, assetsShelf.snapshot, assetsShelf.snapshot);
   if (!state?.open) return null;
   const allowed = (event: Event) => can(event, "Owner");
   const fire = (event: Event) => { if (allowed(event)) void send(event, "Owner"); };
@@ -121,18 +150,21 @@ export function Scan({ runtime }: Shown<Runtime>) {
                 const event = state.text.eventOf.image === image && state.text.eventOf.edits === edits ? state.text.event : undefined;
                 const suggestion = event !== undefined && state.text.found ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.event(event.ticket))) : undefined;
                 const replace = can({ type: "add", frame: state.images + 1, replacing: image, camera: true }, "Phone");
+                const canEdit = allowed({ type: "editText", image, links: 0 }) && !busy;
                 const number = at + 1;
                 const earlier = { type: "swapPages", slot: at - 1, earlier: state.pages[at - 1]?.image ?? 0, later: image } as const;
                 const later = { type: "swapPages", slot: at, earlier: image, later: state.pages[at + 1]?.image ?? 0 } as const;
                 const reviewed = !blank && words !== undefined && (
                   <details open={selectedImage || undefined}>
-                    <summary className="font-semibold">{selectedImage ? "Scanned text" : "Review page text"}</summary>
+                    <summary className={cn("cursor-pointer rounded-sm font-semibold", focusRing)}>{selectedImage ? "Scanned text" : "Review page text"}</summary>
                     {words.lines.length === 0 ? <p className="whitespace-pre-wrap">{words.text}</p> : words.lines.map((line, index) => (
-                      <label key={`${line.x}:${line.y}:${line.width}:${line.height}`} className="mb-1 block">
-                        <span className="sr-only">Line {index + 1}</span>
-                        <Input defaultValue={line.text} className={scanText} maxLength={2_000}
-                          onBlur={(event) => void runtime.runPromiseExit(editScanLine(image, index, event.currentTarget.value))} />
-                      </label>
+                      <ScanLineInput
+                        key={`${image}:${line.x}:${line.y}:${line.width}:${line.height}:${line.text.slice(0, 16)}`}
+                        index={index}
+                        text={line.text}
+                        disabled={!canEdit}
+                        onCommit={(value) => runtime.runPromiseExit(editScanLine(image, index, value))}
+                      />
                     ))}
                   </details>
                 );
@@ -145,7 +177,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
                         <Button variant="secondary" size="icon" className={pageAction} aria-label={`Move page ${number} earlier`} disabled={!allowed(earlier)} onClick={() => fire(earlier)}><ArrowUp /></Button>
                         <Button variant="secondary" size="icon" className={pageAction} aria-label={`Move page ${number} later`} disabled={!allowed(later)} onClick={() => fire(later)}><ArrowDown /></Button>
                       </>}
-                      {replace && correction.can(begin, "Owner") && <Button variant="secondary" size="icon" className={pageAction} aria-label={`Correct page ${number}`} onClick={() => void correction.send(begin, "Owner")}><Crop /></Button>}
+                      {!busy && replace && correction.can(begin, "Owner") && <Button variant="secondary" size="icon" className={pageAction} aria-label={`Correct page ${number}`} onClick={() => void correction.send(begin, "Owner")}><Crop /></Button>}
                       {replace && <PickPage iconOnly capture={false} replacing={image} selected={selected} label={`Replace page ${number}`}><ImagePlus aria-hidden /></PickPage>}
                       {replace && <PickPage iconOnly capture replacing={image} selected={selected} label={`Retake page ${number}`}><Camera aria-hidden /></PickPage>}
                       {!selectedImage && allowed({ type: "remove", image }) && <Button variant="secondary" size="icon" className={pageAction} aria-label={`Remove page ${number}`} onClick={() => fire({ type: "remove", image })}><Trash2 /></Button>}
@@ -175,7 +207,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
               })}
             </ol>
           )}
-          {state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : "The PDF could not be prepared."}</Alert>}
+          {state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : state.problem === "TooMuchText" ? "This scan has too much text for a searchable PDF." : "The PDF could not be prepared."}</Alert>}
           {state.pdf.outcome === "Refused" && <Alert variant="destructive">The PDF was not saved.</Alert>}
           {unconfirmed && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
           {state.text.note.outcome === "Unknown" && <Alert variant="destructive">Saving the note could not be confirmed.</Alert>}

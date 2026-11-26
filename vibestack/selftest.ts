@@ -5196,6 +5196,8 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
   const specFile = spec?.file ?? "spec/app/index.md";
   const storyHeading = spec?.stories.find((story) => !story.title.includes('"'))?.title ?? "Story: Say hello";
   const ruleHeading = spec ? heading(spec.rules.find((rule) => !heading(rule).includes('"'))!) : "The number of greetings is never negative";
+  const { default: config } = await import(path.join(project, "eslint.config.js"));
+  const commentsRule = config.find((block: { rules?: Record<string, unknown> }) => block.rules?.["code/comments"]).rules["code/comments"][1] as { jsdoc?: boolean; left: Record<string, number> };
   assert.deepEqual(await found("apps/app/src/probe.vibe", [
     `// ${specFile}, "${storyHeading}"; ${specFile}, "${ruleHeading}": covers both`,
     `/* ${specFile}, "${storyHeading}" */`,
@@ -5248,8 +5250,7 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
   const hiding = [["useEffect(() => {}, []); // eslint-disable-line"], ["/* eslint-disable */", "// a note"], ["/* eslint-disable code/comments, code/effects -- it must */", "setTimeout(() => {}, 1);"], ["/* eslint code/comments: off, no-console: off */", `console.log("seen");`], ["// eslint-disable-next-line no-console -- it must", `console.log("seen");`]];
   assert.deepEqual(await Promise.all(hiding.map((lines) => found("apps/app/src/probe.vibe", lines))), hiding.map(() => ["1 inline config"]));
   assert.deepEqual(await found("packages/ui/src/components/probe.vibe", ["/** What a component takes, which the stories generator reads. */", "export function Probe() {", "  /** inside it */", "  return 1;", "}", "// a note"]), ["3 code/comments", "6 code/comments"]);
-  const { default: config } = await import(path.join(project, "eslint.config.js"));
-  const [file, left] = Object.entries(config.find((block: { rules?: Record<string, unknown> }) => block.rules?.["code/comments"]).rules["code/comments"][1].left as Record<string, number>).find(([file]) => file.endsWith(".vibe"))!;
+  const [file, left] = Object.entries(commentsRule.left).find(([file]) => file.endsWith(".vibe")) ?? Object.entries(commentsRule.left)[0]!;
   const notes = (n: number) => Array.from({ length: n }, () => "// a note");
   assert.deepEqual([
     (await found(file, notes(left))).length,

@@ -9,16 +9,18 @@ export type AlphaCloudBindings = Omit<CloudBindings, "CLOUD_PROFILE" | "ASSETS">
 }
 
 const upstream = cloudWorker<CloudBindings>()
-const profiled = new WeakMap<object, CloudBindings>()
+const verifiedProfiles = new WeakMap<AssetFetcher, Map<string, string>>()
 
 async function bindingsOf(env: AlphaCloudBindings): Promise<CloudBindings | undefined> {
-  const known = profiled.get(env)
-  if (known !== undefined) return known
+  const byDigest = verifiedProfiles.get(env.ASSETS)
+  const cached = byDigest?.get(env.CLOUD_PROFILE_SHA256)
+  if (cached !== undefined) return { ...env, CLOUD_PROFILE: cached }
   const profile = await readProfileAsset(env.ASSETS, env.CLOUD_PROFILE_SHA256)
   if (profile === undefined) return undefined
-  const bound: CloudBindings = { ...env, CLOUD_PROFILE: profile }
-  profiled.set(env, bound)
-  return bound
+  const entries = byDigest ?? new Map<string, string>()
+  entries.set(env.CLOUD_PROFILE_SHA256, profile)
+  if (byDigest === undefined) verifiedProfiles.set(env.ASSETS, entries)
+  return { ...env, CLOUD_PROFILE: profile }
 }
 
 /** Alpha Cloud's API Worker: eliza's whole Cloud Worker, with its profile from the ASSETS copy that CLOUD_PROFILE_SHA256 names, its return pages from ASSETS and its web-origin requests through the web host's X-Forwarded-Host. */

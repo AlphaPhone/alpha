@@ -24,7 +24,7 @@ export function AssistantDigestCard({ title, rows, onOpen, settled = false }: As
     <AssistantCardRows title={title} onOpen={onOpen} settled={settled}>
       {rows.map((row) => (
         <span key={row.id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
-          <Avatar name={row.who} className="size-8.5 bg-accent text-xs font-bold" />
+          <Avatar name={row.who} aria-hidden className="size-8.5 bg-accent text-xs font-bold" />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className={cn("truncate text-sm font-semibold", settled && "text-muted-foreground")}>{row.who}</span>
             <span className="truncate text-caption text-muted-foreground">{row.text}</span>

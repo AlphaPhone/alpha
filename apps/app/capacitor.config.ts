@@ -1,8 +1,11 @@
 // spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
+import { readFileSync } from "node:fs";
 import type { CapacitorConfig } from "@capacitor/cli";
-import table from "../../packages/deployment/deployments.json" with { type: "json" };
 
 interface Hosted { readonly kind: "hosted"; readonly cloud: string; readonly appLinkHost: string }
+interface DeploymentTable { readonly production: Omit<Hosted, "kind">; readonly staging: Omit<Hosted, "kind"> }
+
+const table = JSON.parse(readFileSync(new URL("../../packages/deployment/deployments.json", import.meta.url), "utf8")) as DeploymentTable;
 
 const deployments: Record<"production" | "staging", Hosted> = { production: { ...table.production, kind: "hosted" }, staging: { ...table.staging, kind: "hosted" } };
 
@@ -35,6 +38,7 @@ const cloudRoutes = [
   { method: "GET", path: "/api/v1/billing/invoices" },
   { method: "GET", path: "/api/v1/billing/invoices/{invoiceId}" },
   { method: "GET", path: "/api/v1/maps/capabilities" },
+  { method: "POST", path: "/api/v1/maps/geocode" },
   { method: "POST", path: "/api/v1/maps/places/search" },
   { method: "POST", path: "/api/v1/maps/places/details" },
   { method: "POST", path: "/api/v1/maps/routes" },
@@ -86,7 +90,7 @@ const config: CapacitorConfig = {
     },
   },
   server: { androidScheme: "https" },
-  android: { path: androidPaths.project, allowMixedContent: false },
+  android: { path: androidPaths.project, allowMixedContent: false, webContentsDebuggingEnabled: false },
 };
 
 export default config;

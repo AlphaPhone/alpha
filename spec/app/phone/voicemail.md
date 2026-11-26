@@ -217,7 +217,7 @@ heard.
 
 ```quint
 pure def canPlay(s: Voicemail, live: bool): bool =
-  s.open and s.audio.status == R::Loaded and s.playback != Playing and not(s.confirming) and not(live)
+  s.open and s.audio.status == R::Loaded and s.playback != Playing and not(s.confirming) and not(removing(s)) and not(live)
 
 pure def play(s: Voicemail, live: bool): Moved =
   val played = { ...s, playback: Playing, heard: true }

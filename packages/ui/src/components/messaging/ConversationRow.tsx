@@ -74,7 +74,7 @@ export function ConversationRow({
       onClick={onSelect}
       className={cn(
         focusRing,
-        "flex min-h-16 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-foreground transition-colors duration-fast ease-standard hover:bg-accent/60 focus-visible:-outline-offset-focus active:bg-accent disabled:pointer-events-none disabled:opacity-50",
+        "flex min-h-16 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent/60 focus-visible:-outline-offset-focus active:bg-accent disabled:pointer-events-none disabled:opacity-50",
         selected && "bg-accent",
         className,
       )}
@@ -86,7 +86,7 @@ export function ConversationRow({
         </span>
       ) : (
         <span className="relative flex shrink-0">
-          <Avatar name={title} src={avatarSrc} />
+          <Avatar name={title} src={avatarSrc} aria-hidden />
           {online ? (
             <span className="absolute -right-0.5 -bottom-0.5 rounded-full bg-background p-0.5">
               <StatusDot status="ok" label="Online" />

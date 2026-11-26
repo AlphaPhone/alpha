@@ -6,9 +6,11 @@
 export function single(): Promise<boolean> {
   if (!("locks" in navigator)) return Promise.resolve(true);
   return new Promise((told) => {
-    void navigator.locks.request("alpha.page", { ifAvailable: true }, (lock) => {
+    navigator.locks.request("alpha.page", { ifAvailable: true }, (lock) => {
       told(lock !== null);
       return lock === null ? undefined : new Promise<never>(() => {});
+    }).catch(() => {
+      told(true);
     });
   });
 }

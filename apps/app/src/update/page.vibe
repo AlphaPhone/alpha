@@ -7,6 +7,7 @@ import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Ids, LauncherUpdates } from "../platform/launcherUpdates.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type BoundedCache, createBoundedCache } from "../runtime/shelf.vibe"
 import { Time } from "../runtime/time.vibe"
 import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
@@ -15,14 +16,18 @@ import { Names } from "./names.vibe"
 import { holder } from "./updates.vibe"
 
 /** How often Android's activation is read again while one is pending or the page holds. */
-const following = 1000
+const pollInterval = 1000
 
-/** The ids of each activation this page has read, by the number that stands for it. */
-service Known {
-  readonly ids: Map<number, Ids>
+/** Runtime-scoped cache of activation ids read by this page, bounded and cleared on disposal. */
+service KnownActivations {
+  readonly cache: BoundedCache<number, Ids>
 }
 
-const known = Layer.sync(Known, () => ({ ids: new Map<number, Ids>() }))
+const knownActivations = Layer.effect(KnownActivations, effect {
+  const cache = createBoundedCache<number, Ids>(32)
+  try Effect.addFinalizer(() => sync(() => { cache.clear() }))
+  return { cache }
+})
 
 const settlements: Readonly<Record<string, Settlement>> = { installed: "WasInstalled", canceled: "WasCancelled", cancelled: "WasCancelled" }
 
@@ -30,22 +35,23 @@ const settlements: Readonly<Record<string, Settlement>> = { installed: "WasInsta
 effect function flushed(activation: number): Event!!(Updates.Machine | Engagements) {
   const saved = try (try Engagements).endEdit()
   const { activity } = try (try Updates.Machine).get()
+  const settled = saved ? { ...activity, typing: false } : activity
   const engaged: Engaged = {
-    voice: activity.voice, connecting: activity.busy, call: activity.call, recording: activity.recording,
-    idle: Updates.ownerIdle(activity) && Updates.phoneQuiet(activity),
+    voice: settled.voice, connecting: settled.busy, call: settled.call, recording: settled.recording,
+    idle: Updates.ownerIdle(settled) && Updates.phoneQuiet(settled),
   }
   return { type: "flushed", activation, saved, engaged }
 }
 
 // spec/app/update/page.md, "A page answers each activation at most once"
-effect function answered(activation: number, ready: boolean): void!!(LauncherUpdates | Known) {
-  const ids = (try Known).ids.get(activation)
+effect function answered(activation: number, ready: boolean): void!!(LauncherUpdates | KnownActivations) {
+  const ids = (try KnownActivations).cache.get(activation)
   if (ids !== undefined) try ignore((try LauncherUpdates).answer(ids, ready))
 }
 
 // spec/app/update/page.md, "Continue update is sent once per tap, never while the last one is still going"
-effect function continued(activation: number): Event!!(LauncherUpdates | Known) {
-  const ids = (try Known).ids.get(activation)
+effect function continued(activation: number): Event!!(LauncherUpdates | KnownActivations) {
+  const ids = (try KnownActivations).cache.get(activation)
   if (ids !== undefined) try ignore((try LauncherUpdates).continueInstall(ids))
   return { type: "continued" }
 }
@@ -63,7 +69,7 @@ effect function told(): void!!(Page.Machine | Toasts.Machine | Said) {
   if (text !== "") try say(text, true)
 }
 
-function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engagements | Agent | Page.Machine | Toasts.Machine | Said | Known, []> {
+function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engagements | Agent | Page.Machine | Toasts.Machine | Said | KnownActivations, []> {
   return match (fx) {
     when { tag: "Answer", let activation, let ready }: run(`answer ${activation}`, answered(activation, ready));
     when { tag: "Flush", let activation }: answer("flush", flushed(activation), { type: "flushed", activation, saved: false, engaged: Page.calm });
@@ -76,55 +82,59 @@ function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engageme
 const machine = reacting(Page, { carry })
 
 // spec/app/update/page.md, "A pending update is read for this page, never an older one than the page has taken up"; spec/app/update/page.md, "A page that cannot read the update state holds rather than mount"; spec/app/update/page.md, "The update settles for this page when nothing is pending, or with the outcome of its own activation"
-effect function read(): void!!(LauncherUpdates | Names | Page.Machine | Known) {
+effect function read(): void!!(LauncherUpdates | Names | Page.Machine | KnownActivations) {
   const page = try Page.Machine
   const names = try Names
-  const ids = (try Known).ids
+  const { cache } = try KnownActivations
   const reply = try Effect.option((try LauncherUpdates).activation())
   if (Option.isNone(reply)) {
-    try ignore(page.send({ type: "unreadable" }))
+    try contained(page.send({ type: "unreadable" }), "unreadable update activation")
     return
   }
   const now = reply.value
   const number = Option.isSome(now.ids) ? try names.number(`activation:${now.ids.value.activationId}`) : (try page.get()).activation
-  if (Option.isSome(now.ids)) ids.set(number, now.ids.value)
+  if (Option.isSome(now.ids)) cache.set(number, now.ids.value)
   if (now.pending) {
     if (number === 0) {
-      try ignore(page.send({ type: "unreadable" }))
+      try contained(page.send({ type: "unreadable" }), "unreadable update activation")
       return
     }
-    try ignore(page.send({ type: "read", activation: number, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }))
+    try contained(page.send({ type: "read", activation: number, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }), "reading update activation")
     return
   }
   const ending: Settlement = Option.isSome(now.outcome) ? settlements[now.outcome.value] ?? "WasFailed" : "Gone"
-  try ignore(page.send({ type: "endUpdate", activation: number, ending, resume: now.resume }))
+  try contained(page.send({ type: "endUpdate", activation: number, ending, resume: now.resume }), "ending update activation")
+  if (number > 0) cache.delete(number)
 }
 
 /** Android's activation, read at launch, each time Android says it is ready or settled, and every second while one is pending or the page holds. */
-const followed = started(effect {
+const followed = started(Effect.scoped(effect {
   const page = try Page.Machine
   const time = try Time
+  const signals = try Queue.bounded<void>(16)
   const told = Stream.merge((try LauncherUpdates).told, Stream.filter((try Device).visible, (shown) => shown))
+  try fork.scoped Stream.runForEach(told, () => Queue.offer(signals, undefined))
   for (;;) {
     try read()
     const state = try page.get()
-    const next = Effect.asVoid(Stream.runHead(told))
-    if (state.activation !== 0 || state.mount !== "Mounted") try race(next, time.until((try time.now()) + following))
+    const next = Effect.asVoid(Queue.take(signals))
+    if (state.activation !== 0 || state.mount !== "Mounted") try race(next, time.until((try time.now()) + pollInterval))
     else try next
   }
-}, "following Android's activation of an update")
+}), "following Android's activation of an update")
 
 // spec/app/update/page.md, "A mounted page's navigation is frozen exactly while an update is pending"; spec/app/shell/layers.md, "Something holds the phone until it lets go, and each holder holds it once"
 /** The phone held while the page's navigation is frozen or it holds for an update, so Back and Home take nothing; let go after. */
 const holding = started(effect {
   const layers = try Layers.Machine
+  let wasHeld = false
   try Stream.runForEach(Stream.changes(Stream.map((try Page.Machine).changes, Page.holdsThePhone)), effect (held) => {
-    const over = try layers.get()
-    const event: Layers.Event | undefined = held ? (Layers.canHold(over, holder) ? { type: "hold", id: holder } : undefined)
-      : Layers.canRelease(over, holder) ? { type: "release", id: holder } : undefined
-    if (event !== undefined) try ignore(contained(layers.send(event), "holding the phone for an update"))
+    if (held === wasHeld) return
+    wasHeld = held
+    const event: Layers.Event = held ? { type: "hold", id: holder } : { type: "release", id: holder }
+    try contained(layers.send(event), "holding the phone for an update")
   })
 }, "holding the phone while an update is pending")
 
 /** The page's side of an update, from launch: it holds or freezes, saves drafts and answers Android. */
-export const paging = together(known, machine, followed, holding)
+export const paging = Layer.provideMerge(together(machine, followed, holding), knownActivations)

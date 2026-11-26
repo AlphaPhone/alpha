@@ -47,7 +47,7 @@ effect function share(fx: Extract<Actions.Effect, { readonly tag: "Hands" }>): v
   const editor = try (try Editor).get()
   const current = try (try NoteContent).collection()
   const shell = try (try Shell).get()
-  if (!showing(shell, "Notes") || !editor.showing || editor.deleting || editor.draft.sync !== "Kept" || editor.note !== fx.note || editor.link.tie !== "NoLink") return
+  if (!showing(shell, "Notes") || !editor.showing || editor.deleting || editor.draft.sync !== "Kept" || editor.note !== fx.note) return
   const identity = ownerAt() catch () => ""
   if (identity === "" || identity !== current.owner || editor.owner !== numberOf("owner", identity)) return
   const snapshot = (try NoteStore).read() catch () => undefined

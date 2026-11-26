@@ -46,7 +46,7 @@ export function AssistantChatHeader({ title, context, subtitle, grabber, onHome,
           onClick={onHome}
           className={cn(focusRing, "flex min-h-11 min-w-11.5 items-center gap-3 rounded-sm text-left")}
         >
-          <span aria-hidden className="flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>
+          <span aria-hidden className="flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /></span>
           {subtitle ? <span className="min-w-0 truncate text-caption text-muted-foreground">{subtitle}</span> : null}
         </button>
         {told ? <AssistantContextChip {...told} className="ml-2.5" /> : null}
@@ -55,10 +55,10 @@ export function AssistantChatHeader({ title, context, subtitle, grabber, onHome,
       <div className="col-start-3 flex min-w-0 items-center justify-end gap-0.5">
         {onResize ? (
           <Button variant="ghost" size="icon" aria-label={expanded ? "Shrink chat" : "Expand chat"} className="hover:bg-transparent" onClick={onResize}>
-            {expanded ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}
+            {expanded ? <Minimize2 aria-hidden className="size-4.5" /> : <Maximize2 aria-hidden className="size-4.5" />}
           </Button>
         ) : null}
-        {onClose ? <Button variant="ghost" size="icon" aria-label={returnOnClose ? "Close Ask Alpha" : "Minimize chat"} className="hover:bg-transparent" onClick={onClose}>{returnOnClose ? <X className="size-5" /> : <ChevronDown className="size-5" />}</Button> : null}
+        {onClose ? <Button variant="ghost" size="icon" aria-label={returnOnClose ? "Close Ask Alpha" : "Minimize chat"} className="hover:bg-transparent" onClick={onClose}>{returnOnClose ? <X aria-hidden className="size-5" /> : <ChevronDown aria-hidden className="size-5" />}</Button> : null}
       </div>
     </header>
   );

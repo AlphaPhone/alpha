@@ -72,11 +72,11 @@ pure val expectedRevisionValues = Set(1, 2, 3, 4)
 pure val attemptIdValues = Set(1, 2, 3, 4, 5)
 ```
 
-### Scheduling arms a reminder for a future due time and replaces any earlier schedule for that reminder
+### Scheduling arms a reminder for its due time (including already-due overdue reminders) and replaces any earlier schedule for that reminder
 
 ```quint
 pure def canSchedule(s: Alerts, id: int, dueAt: int, revision: int, now: int): bool =
-  id > 0 and dueAt > now and revision >= 1
+  id > 0 and dueAt > 0 and revision >= 1
     and (not(hasEntry(s.entries, id)) or (entryOf(s.entries, id).attempt.outcome != A::Sent and revision > entryOf(s.entries, id).revision))
 
 pure def schedule(s: Alerts, id: int, dueAt: int, revision: int, now: int): AlertMoved =

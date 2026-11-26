@@ -29,7 +29,7 @@ export type ReactionBarProps = Omit<ComponentProps<"div">, "children"> & {
 export function ReactionBar({ reactions, onToggle, onAdd, disabled = false, className, ...props }: ReactionBarProps) {
   if (reactions.length === 0 && !onAdd) return null;
   return (
-    <div role="group" aria-label="Reactions" className={cn("flex flex-wrap items-center gap-1.5", className)} {...props}>
+    <div role="group" aria-label="Reactions" className={cn("flex flex-wrap items-center gap-2", className)} {...props}>
       {reactions.map((reaction) => (
         <button
           key={reaction.emoji}
@@ -40,7 +40,7 @@ export function ReactionBar({ reactions, onToggle, onAdd, disabled = false, clas
           onClick={() => onToggle?.(reaction.emoji)}
           className={cn(
             focusRing,
-            "relative inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors duration-fast ease-standard before:absolute before:-inset-1 disabled:pointer-events-none disabled:opacity-50",
+            "relative inline-flex h-9 min-w-11 items-center justify-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors duration-fast ease-standard motion-reduce:transition-none before:absolute before:-inset-y-1 before:inset-x-0 disabled:pointer-events-none disabled:opacity-50",
             reaction.reacted
               ? "border-primary bg-primary text-primary-foreground"
               : "border-border bg-secondary text-secondary-foreground hover:bg-accent",
@@ -58,7 +58,7 @@ export function ReactionBar({ reactions, onToggle, onAdd, disabled = false, clas
           onClick={onAdd}
           className={cn(
             focusRing,
-            "relative inline-flex size-8 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-colors duration-fast ease-standard hover:bg-accent hover:text-foreground before:absolute before:-inset-1 disabled:pointer-events-none disabled:opacity-50",
+            "relative inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent hover:text-foreground before:absolute before:-inset-1 disabled:pointer-events-none disabled:opacity-50",
           )}
         >
           <SmilePlus aria-hidden className="size-4" />

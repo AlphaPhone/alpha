@@ -91,7 +91,7 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
         attachments: line.attachments?.map(chip),
         quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
         children: cards.length === 0 && choices.length === 0 && line.failure === undefined ? undefined : <>
-          {cards.map((card, index) => <MapsCardView key={index} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
+          {cards.map((card) => <MapsCardView key={JSON.stringify(card)} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
           {live && onChoose !== undefined ? choices.map((choice) => (
             <div key={choice.id} className="flex flex-wrap gap-2">
               {choice.options.map((option) => <Button key={option.value} variant="secondary" size="sm" onClick={() => onChoose(choice.id, option.value)}>{option.label}</Button>)}
