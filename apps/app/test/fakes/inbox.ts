@@ -223,12 +223,14 @@ export function inboxRoutes(scene: InboxScene): Route[] {
   const lost = () => Promise.reject(new TypeError("offline"));
   let revokedSeen = false;
   return [
-    async (request, url) => {
-      if (request.method !== "POST" || url.pathname !== `${google}/connect/initiate` || scene.consent === undefined) return;
+    (request, url) => {
+      const consent = scene.consent;
+      if (request.method !== "POST" || url.pathname !== `${google}/connect/initiate` || consent === undefined) return;
       if (request.headers.get("authorization") !== "Bearer signed-session") return refused(403, "session_required");
-      const body: { capabilities: string[] } = await request.json();
-      scene.consent.requests.push(body.capabilities);
-      return Response.json({ authUrl: scene.consent.authUrl });
+      return request.json().then(({ capabilities }: { capabilities: string[] }) => {
+        consent.requests.push(capabilities);
+        return Response.json({ authUrl: consent.authUrl });
+      });
     },
     (request, url) => {
       if (!url.pathname.startsWith(`${google}/`)) return;
