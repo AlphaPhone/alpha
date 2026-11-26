@@ -56,10 +56,7 @@ async function openTextReview(world: ReturnType<typeof image>, review: ReturnTyp
 async function proposeText(world: ReturnType<typeof image>, review: ReturnType<typeof textReview>, text: string, read: string) {
   const { alpha, runtime } = await openTextReview(world, review);
   await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
-  await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
-  await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
-  await press("Open conversation");
-  await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+  await openHomeConversation(alpha, runtime);
 
   world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
   world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];

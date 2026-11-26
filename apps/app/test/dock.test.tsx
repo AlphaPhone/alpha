@@ -37,6 +37,10 @@ async function showAttachments() {
 const resting = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"], detent: "Bar" | "Typing") =>
   runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
 
+/** Ask Alpha rests on the bar and Calendar is still the app shown. */
+const restsOverCalendar = async (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"]) =>
+  expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+
 /** The dock mounted over Calendar, typing from its compact bar with the field focused. */
 async function typingOverCalendar() {
   const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
@@ -323,7 +327,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       await resting(runtime, "Bar");
     });
     await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
-    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+    await restsOverCalendar(runtime);
   });
 
   // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a field left with no keyboard report rests it once, and the reported close after it takes no step Back out of the app
@@ -335,7 +339,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: true, voice: false })));
       await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: false, voice: false })));
     });
-    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+    await restsOverCalendar(runtime);
   });
 
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
