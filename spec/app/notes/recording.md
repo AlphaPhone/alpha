@@ -100,6 +100,7 @@ pure val roomValues = Set(
 )
 pure val captureValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val takeValues = Set(1, 2, 3)
+pure val captureReadyValues = Set(false, true)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val segmentValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val segmentsValues = Set(1, 2)
@@ -435,14 +436,18 @@ The question appears above the recorder controls. Keep closes it without
 interrupting the recording. Pause and Resume still control the recording
 under review. Stop closes the question and saves.
 
-### The owner reviews a recording that has heard audio, or is paused or failed, before discarding that take
+### The owner reviews the current take before discarding it
+
+The owner can review a live capture as soon as the device reports its
+recording identity, even while the timer is at zero. The shown time is
+rounded down and gives no authority to erase audio without confirmation.
 
 ```quint
-pure def canAskDiscard(r: Recorder, take: int, by: Actor): bool =
+pure def canAskDiscard(r: Recorder, take: int, captureReady: bool, by: Actor): bool =
   by == Owner and take == r.take and r.ask == NoAsk and
-    (r.phase == Paused or r.phase == Failed or (r.phase == Recording and (r.kept > 0 or r.unsaved > 0)))
+    (r.phase == Paused or r.phase == Failed or (r.phase == Recording and captureReady))
 
-pure def askDiscard(r: Recorder, take: int, by: Actor): Recorder = { ...r, ask: AskDiscard }
+pure def askDiscard(r: Recorder, take: int, captureReady: bool, by: Actor): Recorder = { ...r, ask: AskDiscard }
 
 pure def canCancelDiscard(r: Recorder, take: int, by: Actor): bool = by == Owner and take == r.take and r.ask == AskDiscard
 
@@ -519,6 +524,9 @@ pure def stepErasedOnlyWhenWrittenDown(before: Recorder, via: str, after: Record
 pure def sometimesAskingToDiscard(r: Recorder): bool = r.ask == AskDiscard and r.phase == Failed
 
 pure def sometimesAskingWhileRecording(r: Recorder): bool = r.ask == AskDiscard and r.phase == Recording and r.unsaved > 0
+
+pure def sometimesAskingBeforeTheFirstSecond(r: Recorder): bool =
+  r.ask == AskDiscard and r.phase == Recording and r.kept == 0 and r.unsaved == 0
 
 pure def sometimesDiscarding(r: Recorder): bool = r.phase == Discarding and not(r.pending)
 
