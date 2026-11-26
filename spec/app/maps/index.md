@@ -27,8 +27,9 @@ number was copied. It also keeps whether the name field is open, whether
 the location being found is the quiet fix on opening and whether that was
 taken this visit, whether the owner's own locate found nothing, whether a
 locate waits for Android's answer, whether a search waits for a provider,
-whether the last fix of guidance could not guide, and whether this build has
-Phone.
+whether the last fix of guidance could not guide, whether this build has
+Phone, and the pin dropped last with the name the owner gave it before it is
+saved.
 
 ```quint
 import read as R from "../../kit/read"
@@ -44,7 +45,7 @@ type Sheet = Peek | Half | Full
 type Question = NoQuestion | ReadPlace | StartTrip
 type HandOff = SharePlace | EtaShare | Website | MapsApp | Call | CopyNumber
 type Change = Added | Renamed | Removed
-type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept
+type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept | PinNamed
 type GuideNotice = Quiet | StoppedFromNotification | PausedAway | AccountChanged | RerouteKept
 type CopyNotice = Uncopied | NumberCopied | CopyFailed
 type Maps = {
@@ -59,7 +60,7 @@ type Maps = {
   startPlace: int, origins: R::Read, originsFound: int,
   following: bool, guideNotice: GuideNotice, copyNotice: CopyNotice,
   typingChars: int, copying: bool, renaming: bool, quiet: bool, quietDone: bool, missedFix: bool,
-  owedLocate: bool, waitingProvider: bool, imprecise: bool, dialer: bool, pinned: bool, explaining: bool,
+  owedLocate: bool, waitingProvider: bool, imprecise: bool, dialer: bool, pin: int, pinName: str, explaining: bool,
 }
 
 pure val initial: Maps = {
@@ -74,7 +75,7 @@ pure val initial: Maps = {
   startPlace: 0, origins: R::unread, originsFound: 0,
   following: false, guideNotice: Quiet, copyNotice: Uncopied,
   typingChars: 0, copying: false, renaming: false, quiet: false, quietDone: false, missedFix: false,
-  owedLocate: false, waitingProvider: false, imprecise: false, dialer: false, pinned: false, explaining: false,
+  owedLocate: false, waitingProvider: false, imprecise: false, dialer: false, pin: 0, pinName: "", explaining: false,
 }
 
 pure def onScreen(m: Maps): bool = not(m.trip.away)
@@ -224,7 +225,7 @@ pure def chosen(place: int, m: Maps): Maps =
   else { ...m, place: place, directions: false, sheet: Half, trip: N::forgetRoute(m.trip),
     question: NoQuestion, review: voided(m.review), details: cleared(m.details),
     startPlace: 0, origins: cleared(m.origins), originsFound: 0, copyNotice: Uncopied, guideNotice: Quiet,
-    copying: false, renaming: false, missedFix: false, waitingProvider: false, pinned: false }
+    copying: false, renaming: false, missedFix: false, waitingProvider: false }
 
 pure def cleared(r: R::Read): R::Read = { ...N::withdrawn(r), status: R::Idle }
 
@@ -452,7 +453,7 @@ pure def pinAt(m: Maps, lat: int, lng: int): Stepped =
 pure def canDropPin(m: Maps, place: int): bool =
   m.pinning and place > 0 and m.trip.guidance == N::Stopped and not(m.trip.away) and not(m.directions)
 
-pure def dropPin(m: Maps, place: int): Maps = { ...chosen(place, m), pinning: false, pinned: true }
+pure def dropPin(m: Maps, place: int): Maps = { ...chosen(place, m), pinning: false, pin: place, pinName: "" }
 
 pure def stepAPinIsAPlaceOfTheGlobe(before: Maps, after: Maps, out: List[Effect]): bool =
   out.every(e => match e { | MakePin(p) => coordinatesValid(p.lat, p.lng) | _ => true })
@@ -575,14 +576,28 @@ pure def forgetPlace(m: Maps): Stepped =
 
 ### A saved place is renamed in a name field the owner opens on its card
 
-A dropped pin offers the same field, as v119 did, while there is room and
-the map is not Google's, and its name saves it.
+The pin dropped last offers the same field while it is the place on the
+card, as v119 did, while there is room and the map is not Google's; any
+other place not saved, such as a place found by search, offers none. Its
+name only names the pin, and the owner reads "Name updated. Tap Save to
+keep this place."; Save then keeps it under that name, as v119's applyName
+did (ui/maps/maps-screen.ts:880-893).
 
 ```quint
+pure def isThePin(m: Maps): bool = m.place > 0 and m.place == m.pin
+
 pure def canStartRenaming(m: Maps): bool =
-  mode(m) == Place and (S::isSaved(m.saved, m.place) or (m.pinned and S::hasRoom(m.saved, m.place) and not(googleShown(m)))) and not(m.renaming) and m.keepable and onScreen(m)
+  mode(m) == Place and (S::isSaved(m.saved, m.place) or (isThePin(m) and S::hasRoom(m.saved, m.place) and not(googleShown(m)))) and not(m.renaming) and m.keepable and onScreen(m)
 
 pure def startRenaming(m: Maps): Maps = { ...m, renaming: true }
+
+pure def canNamePin(m: Maps, name: str): bool =
+  m.renaming and isThePin(m) and not(S::isSaved(m.saved, m.place)) and name != "" and onScreen(m)
+
+pure def namePin(m: Maps, name: str): Maps = { ...m, pinName: name, renaming: false, notice: PinNamed }
+
+pure def stepNamingThePinSavesNothing(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
+  via == "namePin" implies (after.saved == before.saved and out == List())
 
 pure def alwaysTheNameFieldIsOnAPlace(m: Maps): bool = m.renaming implies (mode(m) == Place)
 
@@ -649,7 +664,8 @@ pure def stepAnUnreadableListIsNeverWrittenOver(before: Maps, after: Maps, out: 
   not(before.keepable) implies out.every(e => match e { | KeepSaved(k) => false | _ => true })
 
 pure def stepAChangeIsToldOnlyOnceItReadsBack(before: Maps, via: str, after: Maps): bool =
-  (after.notice != before.notice and after.notice != NoNotice and after.notice != NotKept) implies via == "savedKept"
+  (after.notice != before.notice and after.notice != NoNotice and after.notice != NotKept)
+    implies (via == "savedKept" or (via == "namePin" and after.notice == PinNamed))
 
 pure def sometimesSavedUnreadable(m: Maps): bool = not(m.keepable)
 ```

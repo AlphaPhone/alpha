@@ -287,6 +287,49 @@ describe("Maps in a browser", () => {
     expect([document.querySelector("input[aria-label='Starting point']")?.getAttribute("placeholder"), Boolean(button("From Office"))]).toEqual(["My location", true]);
   });
 
+  it("A dropped pin is named before it is saved, and a place found never offers Rename (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
+    const world = scene();
+    world.maps.routes = [cloudRoute("there", harbour.coordinate, { latitude: 43.73, longitude: 7.42 }, 300, 2)];
+    const { alpha, runtime } = await onMaps(world);
+    const now = () => runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
+    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    await typeMapSearch("43.73, 7.42");
+    await enter("Search Maps");
+    await until(alpha, runtime, Screen, (s) => s.place !== 0 && !s.pinning);
+    const pin = (await now()).place;
+
+    // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": a start found by search, swapped onto the card, offers no Rename, as v119 offered none on an unsaved place it found
+    await press("Directions");
+    await fill("Starting point", "cafe");
+    await enter("Starting point");
+    await until(alpha, runtime, Screen, (s) => s.origins.status === "Loaded" && s.originsFound === 1);
+    await press("From Harbour Cafe");
+    await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.startPlace !== 0);
+    await press("Swap starting point and destination");
+    await until(alpha, runtime, Screen, (s) => s.place !== pin && s.startPlace === pin && s.trip.route !== 0);
+    await hardware("back");
+    await hardware("back");
+    await until(alpha, runtime, Screen, (s) => !s.directions && s.place !== 0 && s.place !== pin);
+    expect([document.querySelector("h2")?.textContent, button("Rename place")]).toEqual(["Harbour Cafe", undefined]);
+
+    // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": the pin's name only names it until Save keeps it under that name, as v119's applyName did
+    await hardware("back");
+    await until(alpha, runtime, Screen, (s) => s.place === 0);
+    await typeMapSearch("43.73, 7.42");
+    await enter("Search Maps");
+    await until(alpha, runtime, Screen, (s) => s.place === pin && !s.pinning);
+    await press("Rename place");
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Place name']")?.value).toBe("Dropped pin");
+    await fill("Place name", "Quay");
+    await press("Apply place name");
+    await until(alpha, runtime, Screen, (s) => s.notice === "PinNamed" && !s.renaming);
+    expect([document.querySelector("h2")?.textContent, (await now()).saved, document.body.textContent?.includes("Name updated. Tap Save to keep this place."), Boolean(button("Save"))])
+      .toEqual(["Quay", [], true, true]);
+    await press("Save");
+    await until(alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Quay" && s.notice === "PlaceSaved");
+    expect([document.querySelector("h2")?.textContent, document.body.textContent?.includes("Place saved on this device.")]).toEqual(["Quay", true]);
+  });
+
   it("A saved list Alpha cannot read is never written over (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
     const world = scene();
     localStorage.setItem("alpha/maps/saved@1", "{not json");
