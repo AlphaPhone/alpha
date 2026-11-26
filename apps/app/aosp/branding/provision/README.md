@@ -101,6 +101,7 @@ separate policy patches or build.
 Focused local checks reuse installed Java and exact cached inputs/assets:
 
 ```sh
+python3 apps/app/aosp/branding/hidden-navigation-handle/prepare.py
 ALPHA_FRESH_PRESET_INPUTS=/path/to/pinned-inputs \
 ALPHA_BRANDING_ASSETS=/path/to/generated-alpha-assets \
 python3 test/aosp-fresh-presets.test.py
