@@ -1,8 +1,8 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { type PointerEvent, type TouchEvent, useCallback, useRef, useSyncExternalStore } from "react";
+import { type PointerEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
-import { adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
+import { type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
@@ -22,6 +22,7 @@ import { home } from "./shell/shell.vibe";
 import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
 import { canLeaveSignInStep, SignIn, useFirstRun } from "./startup/SignIn.tsx";
 import { AccessWalkthrough } from "./startup/SettingsAccess.tsx";
+import { firstFrame } from "./startup/cover.vibe";
 import { reloadBeforeMount } from "./startup/recovery.vibe";
 
 export interface AppProps {
@@ -64,6 +65,8 @@ function touchScroll(target: Element, shell: HTMLElement) {
 /**
  * Alpha: Home, or the app on top of the trail under its title, with Back offered exactly when the rules allow it, and
  * over them Ask Alpha, whatever covers the screen, and the notices. Each screen is its area's, drawn at its place.
+ * One startup cover, the white page with the Alpha mark, stays over it until what shows under it is ready, kept at one
+ * place so its fade never starts over: v119 drew one cover for the whole start (45f6bed30 apps/app/src/main.tsx:357).
  * @model spec/app/shell/index.md
  */
 export function App({ alpha }: AppProps) {
@@ -91,14 +94,29 @@ export function App({ alpha }: AppProps) {
   const accessMayShow = accessHolding && !accessCovered;
   const accessStage = access !== undefined && accessPanel(access);
   const accessShowing = accessMayShow && (accessStage === "Walkthrough" || accessStage === "AllSet");
+  const [homeShown, setHomeShown] = useState(false);
+  const homeLayer = useCallback((node: HTMLDivElement | null) => {
+    const main = node?.closest("main");
+    if (!main || homeShown) return;
+    const stop = new AbortController();
+    void alpha.runtime.runPromise(firstFrame(main), { signal: stop.signal }).then(() => setHomeShown(true), () => undefined);
+    return () => stop.abort();
+  }, [alpha, homeShown]);
+  const [risen, setRisen] = useState<{ view: View | undefined; done: boolean }>({ view: undefined, done: false });
+  const pageReady = state !== undefined && cause === undefined && page !== undefined && editorsMounted(page) && !updating;
+  const signInWaits = signingIn && (!signedIn || signedIn.stage === "Checking" || !signInFlow);
+  const cover = !updating && cause === undefined
+    && (!pageReady || signInWaits || (accessMayShow && !accessShowing) || (!signingIn && !accessHolding && !homeShown))
+    ? <StartupMark key="startup" className="fixed inset-0 z-sheet" /> : null;
   if (!state) {
     if (updating) return <>{alpha.slot("overlay")}</>;
     return cause
       ? <StartupFailureScreen kind="FailedToStart" platform={phone ? "android" : "web"} version="Unavailable" onReload={reloadBeforeMount} />
-      : <StartupMark className="min-h-dvh" />;
+      : <>{null}{cover}</>; // the cover keeps its place beside main, so its fade never starts over
   }
   const shellFailed = cause !== undefined;
   const showing = state.trail.at(-1);
+  if (risen.view !== showing) setRisen({ view: showing, done: false });
   const owner = `${showing ?? "home"}:${state.assistant}:${launcher}:${state.textAskThrough}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
     if (shellFailed || signingIn || accessHolding || state.textAsk.tag === "TextAskVisit" || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
@@ -186,88 +204,108 @@ export function App({ alpha }: AppProps) {
     ? { left: preview.left, top: preview.top, width: preview.width, height: preview.height, transform: `scale(${preview.scale})`, transformOrigin: "top left" }
     : canvas?.covered ? { height: canvas.visible } : undefined;
   return (
-    <main
-      data-alpha-native={phone ? "" : undefined}
-      data-alpha-launcher={launcher ? "" : undefined}
-      data-alpha-desktop-preview={preview ? "" : undefined}
-      ref={frame}
-      onPointerDown={beginSwipe}
-      onPointerUp={swiped}
-      onPointerCancel={pointerCanceled}
-      onTouchStart={touchStarted}
-      onTouchEnd={touchEnded}
-      onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
-      style={frameStyle}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
-    >
-      <div
-        data-alpha-shell-page=""
-        data-alpha-comms-stage={comms ? "" : undefined}
-        ref={(node) => {
-          const document = node?.ownerDocument.documentElement;
-          if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
-        }}
-        className={cn(
-          "relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]",
-          showing !== undefined && "overflow-auto overscroll-contain",
-          strip && "overflow-hidden",
-          nativeHomeSide && "[--alpha-dock-overlap:0px]",
-          nativeHomeSide && !launcher && "[&_[data-alpha-apps-drawer]]:top-0",
-        )}
-        inert={signingIn ? updating : inert || fullScreen || voiceOverHome}
+    <>
+      <main
+        data-alpha-native={phone ? "" : undefined}
+        data-alpha-launcher={launcher ? "" : undefined}
+        data-alpha-desktop-preview={preview ? "" : undefined}
+        ref={frame}
+        onPointerDown={beginSwipe}
+        onPointerUp={swiped}
+        onPointerCancel={pointerCanceled}
+        onTouchStart={touchStarted}
+        onTouchEnd={touchEnded}
+        onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
+        style={frameStyle}
+        className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
       >
-        {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
-        {accessMayShow && !accessShowing ? <StartupMark /> : null}
-        {!signingIn && !accessHolding && comms && alpha.slot("phone/stage")}
-        {signingIn || accessHolding || page === undefined || !editorsMounted(page) ? null : showing === undefined
-          ? alpha.slot("home")
-          : (
-            <div key={showing} className="flex min-h-0 flex-1 flex-col motion-safe:animate-rise">
-              {!viewHasHeader(showing) && <AppHeader
-                title={views[showing].label}
-                leading={back && <AppBack alpha={alpha} />}
-                className="shrink-0"
-              />}
-              {alpha.slot(`view:${showing}`)}
-            </div>
+        <div
+          data-alpha-shell-page=""
+          data-alpha-comms-stage={comms ? "" : undefined}
+          ref={(node) => {
+            const document = node?.ownerDocument.documentElement;
+            if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
+          }}
+          className={cn(
+            "relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]",
+            showing !== undefined && "overflow-auto overscroll-contain",
+            strip && "overflow-hidden",
+            nativeHomeSide && "[--alpha-dock-overlap:0px]",
+            nativeHomeSide && !launcher && "[&_[data-alpha-apps-drawer]]:top-0",
           )}
-        {!phone && <BrowserFrames alpha={alpha} preview={preview} />}
-      </div>
-      {accessShowing ? <AccessWalkthrough runtime={alpha.runtime} /> : null}
-      <div
-        data-alpha-assistant-host=""
-        hidden={signingIn || accessHolding || !askAlphaDrawn(state)}
-        className={cn(
-          "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
-          "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
-          "in-[body:has([data-alpha-covers-assistant])]:invisible",
-          comms && "shrink-0",
-          sheetBeside && "[&>[data-alpha-chat-scrim]]:hidden",
-          !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
-          phone && canvas?.landscape && showing !== undefined && !comms && [
-            "[&&>[data-alpha-detent]]:start-auto [&>[data-alpha-detent]]:w-[min(400px,46%)]",
-            "[&&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:max-h-full",
-            "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
-          ],
-          inboxLandscapeBar && "[&&>[data-alpha-detent=bar]]:start-auto [&>[data-alpha-detent=bar]]:w-[min(400px,46%)]",
-          side && [
-            "relative flex w-[var(--alpha-home-ask-width,min(400px,46%))] shrink-0 flex-col justify-end",
-            "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",
-            "[&>[data-alpha-detent=full]]:inset-0",
-          ],
-          nativeHomeSide && [
-            "[&>[data-alpha-detent=bar]>[data-host-chrome]]:ml-0",
-            "[&>[data-alpha-detent]_[data-alpha-composer]]:min-h-[min(168px,28dvh)] [&>[data-alpha-detent]_[data-alpha-composer]]:rounded-none",
-            "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full! [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
-          ],
-        )}
-        inert={shellFailed || (layers !== undefined && assistantInert(layers))}
-      >
-        {!signingIn && !accessHolding && alpha.slot("assistant")}
-      </div>
-      {alpha.slot("overlay")}
-      {alpha.slot("notice")}
-      {shellFailed && !updating && <Alert variant="destructive" className="absolute inset-x-4 top-3 z-dialog">Alpha could not read where you were</Alert>}
-    </main>
+          inert={signingIn ? updating : inert || fullScreen || voiceOverHome}
+        >
+          {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
+          {!signingIn && !accessHolding && comms && alpha.slot("phone/stage")}
+          {signingIn || accessHolding || page === undefined || !editorsMounted(page) ? null : (
+            <>
+              <div
+                key="home"
+                ref={homeLayer}
+                data-alpha-home-layer=""
+                inert={showing !== undefined || undefined}
+                className={cn(
+                  showing === undefined ? "contents" : "absolute inset-0 isolate flex flex-col",
+                  showing !== undefined && (comms || (risen.view === showing && risen.done) ? "invisible" : "motion-reduce:invisible"),
+                )}
+              >
+                {alpha.slot("home")}
+              </div>
+              {showing !== undefined && (
+                <div
+                  key={showing}
+                  onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen({ view: showing, done: true }); }}
+                  className="relative flex min-h-0 flex-1 flex-col bg-background motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent"
+                >
+                  {!viewHasHeader(showing) && <AppHeader
+                    title={views[showing].label}
+                    leading={back && <AppBack alpha={alpha} />}
+                    className="shrink-0"
+                  />}
+                  {alpha.slot(`view:${showing}`)}
+                </div>
+              )}
+            </>
+          )}
+          {!phone && <BrowserFrames alpha={alpha} preview={preview} />}
+        </div>
+        {accessShowing ? <AccessWalkthrough runtime={alpha.runtime} /> : null}
+        <div
+          data-alpha-assistant-host=""
+          hidden={signingIn || accessHolding || !askAlphaDrawn(state)}
+          className={cn(
+            "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
+            "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
+            "in-[body:has([data-alpha-covers-assistant])]:invisible",
+            comms && "shrink-0",
+            sheetBeside && "[&>[data-alpha-chat-scrim]]:hidden",
+            !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
+            phone && canvas?.landscape && showing !== undefined && !comms && [
+              "[&&>[data-alpha-detent]]:start-auto [&>[data-alpha-detent]]:w-[min(400px,46%)]",
+              "[&&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:max-h-full",
+              "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
+            ],
+            inboxLandscapeBar && "[&&>[data-alpha-detent=bar]]:start-auto [&>[data-alpha-detent=bar]]:w-[min(400px,46%)]",
+            side && [
+              "relative flex w-[var(--alpha-home-ask-width,min(400px,46%))] shrink-0 flex-col justify-end",
+              "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",
+              "[&>[data-alpha-detent=full]]:inset-0",
+            ],
+            nativeHomeSide && [
+              "[&>[data-alpha-detent=bar]>[data-host-chrome]]:ml-0",
+              "[&>[data-alpha-detent]_[data-alpha-composer]]:min-h-[min(168px,28dvh)] [&>[data-alpha-detent]_[data-alpha-composer]]:rounded-none",
+              "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full! [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
+            ],
+          )}
+          inert={shellFailed || (layers !== undefined && assistantInert(layers))}
+        >
+          {!signingIn && !accessHolding && alpha.slot("assistant")}
+        </div>
+        {alpha.slot("overlay")}
+        {alpha.slot("notice")}
+        {shellFailed && !updating && <Alert variant="destructive" className="absolute inset-x-4 top-3 z-dialog">Alpha could not read where you were</Alert>}
+      </main>
+      {cover}
+    </>
   );
 }

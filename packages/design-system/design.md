@@ -70,7 +70,7 @@ do next.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
-  `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen,
+  `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen, `animate-fadein` a photo or preview fading in on `ease-standard`, `animate-startup` the Alpha mark at launch (a 0.3 s pause, then a 0.7 s fade),
   `animate-shimmer` work in progress, `animate-blink` the dots of a reply being written, `animate-wiggle` an app tile on Home while Home is being edited.
   Reduced motion stops them all.
 - **Width.** Layout follows the measured width, not the orientation: from `md` a centered reading
@@ -343,6 +343,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
+| `animate.fadein` | fade 700ms cubic-bezier(0.19, 1, 0.22, 1) both |
+| `animate.startup` | fade 700ms ease 300ms both |
 | `animate.shimmer` | shimmer 2s linear infinite |
 | `animate.page-loading` | page-loading 1.2s linear infinite |
 | `animate.wiggle` | wiggle 300ms ease-in-out infinite alternate |
