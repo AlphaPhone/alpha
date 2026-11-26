@@ -14,7 +14,7 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
 export { placeOf, viewOfPlace }
-import { MediaReview, ranDirect, sameFiles } from "../assistant/media-review.vibe"
+import { MediaReview, proposedReview, ranDirect, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -610,7 +610,6 @@ function voiceTurnOutput({ session, turn, queue, memory }: VoiceOutput) {
     },
     get usedDirect() { return usedDirect },
     get awaitingFiles() { return awaitingFiles },
-    get proposed() { return proposing },
     finishSpeech(finalText: string) {
       const full = speakableText(replyBlocks(finalText).words)
       sayFrom(full.length >= shown.length ? full : shown, true)
@@ -736,14 +735,14 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const readyToSend = review !== undefined && (files !== undefined ? sameFiles(files, try review.filesContext())
     : origin !== undefined && (try review.filesOrigin(true))?.route === origin.route)
   const direct = enrolled !== undefined && readyToSend && (try atSource) ? enrolled : undefined
-  const refused: VoiceCompletion = { type: "replyEnds", session, turn, asks: false, says: false }
+  const refused: VoiceCompletion = { type: "replyEnds", session, turn, asks: false, says: true }
   if (!(try lease.verified) || !(try currentRequest)) return refused
   const admittedScreen = direct === undefined ? sameScreen : try atSource
-  const sent = effect (files: typeof direct) => {
-    output.beginAttempt(files !== undefined)
-    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, try views.shown(), files === undefined ? undefined : "direct-files-only-v1")) } : {}
+  const sent = effect (directTurn: typeof direct) => {
+    output.beginAttempt(directTurn !== undefined)
+    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, try views.shown(), directTurn === undefined ? undefined : "direct-files-only-v1")) } : {}
     const headers = review === undefined ? undefined
-      : files !== undefined ? try review.turnHeaders(files, true)
+      : directTurn !== undefined ? try review.turnHeaders(directTurn, files !== undefined)
       : enrolled !== undefined && (try atSource) ? try review.turnHeaders(enrolled, false) : undefined
     return tryPromise(() => controller.send({
       text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
@@ -768,17 +767,18 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   if (result?.kind === "Replied") try lease.settle(result, spoken)
   memory.retireSaid(session, turn)
   let filesReport: string | undefined
+  let filesRan = false
   if (output.usedDirect && direct !== undefined && review !== undefined && output.awaitingFiles && streamed
     && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined) {
     const message = result.reply.userMessageId
     const report = (note: string) => { filesReport = note }
-    if (files !== undefined) try review.spokenFiles(direct, message, { files, current: atSource, report }, result.reply.actionResults)
+    if (files !== undefined) filesRan = try review.spokenFiles(direct, message, { files, current: atSource, report }, result.reply.actionResults)
     if (origin !== undefined && conversation !== undefined && screen !== undefined && (try atSource)) {
       const open = (source: Effect.Effect<boolean>) => openRouteForVoice(placeOf("Files"), origin.route, session, turn, effect {
         return (try source) && Shell.canAgentOpenFilesFrom(try shell.get(), origin.source, origin.panel, origin.route, true)
       }, memory, voice, shell, "Keep")
       const changes = Stream.merge(Stream.map(conversation.changes, () => undefined), Stream.map(voice.changes, () => undefined))
-      try review.spokenFilesFrom(direct, message, { origin, current: stillTalking, report },
+      filesRan = try review.spokenFilesFrom(direct, message, { origin, current: stillTalking, report },
         { view: conversation, revision: screen.context.revision, moved: succeed(true), open, changes }, result.reply.actionResults)
     }
   }
@@ -808,7 +808,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     }
   }
   const finalText = filesReport ?? (result?.kind === "Replied" ? result.reply.text : "")
-  if (!output.awaitingFiles && result?.kind === "Replied" && result.reply.failureKind === undefined) {
+  if (!filesRan && !smsShown && result?.kind === "Replied" && result.reply.failureKind === undefined) {
     const actions = result.reply.actionResults
     const page = admittedScreen && views !== undefined ? pageIn(actions, views.clientId) : undefined
     const prepared = admittedScreen && views !== undefined ? preparedIn(actions, views.clientId) : undefined
@@ -825,7 +825,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let asks = smsShown
-  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a turn that asked Files directly shows a page open's card alone.
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a turn that asked Files directly from Files shows a page open's card alone; from another screen it still omits Files review cards while keeping other cards.
   if (review !== undefined && enrolled !== undefined && chat !== undefined && chats !== undefined
     && chatPage !== undefined && chatPage.around === 0 && conversation !== undefined && screen !== undefined && streamed
     && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined
@@ -835,7 +835,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     const pageTicket = chatPage.page.ticket
     const reply = {
       clientMessageId: result.clientMessageId, conversationId: record.id, pageTicket, actionResults: result.reply.actionResults,
-      spoken: { session, turn, current: lease.verified, ...(output.usedDirect ? { pagesOnly: true } : {}) },
+      spoken: { session, turn, current: lease.verified, ...(output.usedDirect ? (files !== undefined ? { pagesOnly: true } : { noFiles: true }) : {}) },
       ...(observation?.sms === undefined ? {} : { sms: observation.sms }),
       ...(voicemail === undefined ? {} : { voicemail }),
     }
@@ -859,11 +859,12 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   memory.lastReply = finalText
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a direct Files result is said even beside a page's card, whose notice Talk still shows.
-  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a review the reply proposed from a Messages chat that Talk could not show ends the turn quietly, with nothing said after the proposal.
-  const quiet = smsText !== undefined && output.proposed && !asks
-  const says = !quiet && filesReport !== undefined
-  if (!quiet && (!asks || says)) output.finishSpeech(finalText)
-  return { type: "replyEnds", session, turn, asks: asks || quiet, says }
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a review the reply proposed from a Messages chat that Talk could not show ends the turn quietly without setting reviewPending.
+  const proposed = result?.kind === "Replied" && proposedReview(result.reply.actionResults)
+  const quiet = smsText !== undefined && proposed && !asks && filesReport === undefined
+  const says = !quiet && (!asks || filesReport !== undefined)
+  if (says) output.finishSpeech(finalText)
+  return { type: "replyEnds", session, turn, asks, says }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
@@ -876,7 +877,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const spoken = heard?.session === session && heard.turn === turn ? heard.text.trim() : ""
     // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": every spoken turn goes to the agent, and a review is decided only by the owner's touch on it.
     const finishLocally = () => {
-      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false, says: false })
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false, says: true })
       Queue.endUnsafe(queue)
     }
     const state = try voice.get()
@@ -888,7 +889,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const carried = try shared.writer.withPermitsIfAvailable(1)(effect {
       const abandoned = Effect.as(Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn))), undefined)
       const lease = try Effect.raceFirst(shared.begin(session, turn, current), abandoned)
-      if (lease === undefined) return { type: "replyEnds", session, turn, asks: false, says: false } as const
+      if (lease === undefined) return { type: "replyEnds", session, turn, asks: false, says: true } as const
       return try postVoiceTurn({ session, turn, queue, lease, spoken })
     })
     if (Option.isNone(carried)) { finishLocally(); return }
@@ -904,7 +905,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     memory.setHeard(undefined)
     memory.retireSaid(session, turn)
-    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false, says: false })
+    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false, says: true })
     Queue.endUnsafe(queue)
   })
 }
@@ -1014,7 +1015,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const closed = effect { try (try VoiceBridge).closeMic(session); return true } catch () => false
       return closed ? { type: "micClosed", session } : { type: "micCloseFailed", session }
     }, { type: "micCloseFailed", session });
-    when { tag: "Send", let session, let turn }: stream("send", sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false, says: false });
+    when { tag: "Send", let session, let turn }: stream("send", sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false, says: true });
     when { tag: "Play", let session, let turn }: answer(`play ${session}:${turn}:${fresh()}`, effect {
       const { memory } = try VoiceWords
       const bridge = try VoiceBridge
