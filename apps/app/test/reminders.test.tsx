@@ -358,7 +358,7 @@ describe("Reminders full journeys", () => {
       recurrence: "none", priority: "none", flagged: false, subtasks: [], completed: false, completedAtMs: null, snoozedUntilMs: null,
       notifiedAtMs: null, agentTaskId: "plumber-task", revision: 1, createdAtMs: baseNow, updatedAtMs: baseNow,
     };
-    const { recorder, alpha, runtime } = await launchReminders(baseNow, [plumber]);
+    const { recorder, alpha, runtime, close, platform } = await launchReminders(baseNow, [plumber]);
 
     await drawn(() => runtime.runPromise(toggleReminderComplete(plumber.id)));
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Held" && s.write.outcome === "Confirmed");
@@ -392,6 +392,29 @@ describe("Reminders full journeys", () => {
     await later(alpha, 5_100);
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
     expect(recorder.snapshot.items.filter((item) => item.id === first!.id || item.id === second!.id)).toEqual([]);
+
+    // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made": three fast changes run in turn, each with its own write
+    const gone = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Old list" }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    await drawn(() => runtime.runPromise(deleteReminderItem(gone!.id)));
+    const added = [runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Buy stamps" })), runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Call mom" }))];
+    await later(alpha, 5_100);
+    await drawn(() => Promise.all(added));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed" && s.undo.holding !== "Held");
+    expect(recorder.snapshot.items.map((item) => item.title).filter((title) => ["Old list", "Buy stamps", "Call mom"].includes(title)).toSorted()).toEqual(["Buy stamps", "Call mom"]);
+
+    // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made": a held delete resumed after a restart commits the reminder it held
+    const kept = remindersStore.snapshot().snapshot.items.find((item) => item.title === "Call mom")!;
+    await drawn(() => runtime.runPromise(deleteReminderItem(kept.id)));
+    await close();
+    resetReminderStores();
+    const again = await openOver(platform, withReminders);
+    const againRuntime = remindersArea.runtime(again.alpha);
+    await drawn(() => again.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Reminders" }))));
+    await later(again.alpha, 60_000);
+    await until(again.alpha, againRuntime, RemindersMachine.Machine, (s) => s.undo.holding !== "Held" && s.write.outcome !== "Sent");
+    expect(recorder.snapshot.items.some((item) => item.id === kept.id)).toBe(false);
+    expect(recorder.snapshot.items.some((item) => item.title === "Buy stamps")).toBe(true);
   });
 
   // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
