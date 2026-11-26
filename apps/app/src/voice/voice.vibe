@@ -806,8 +806,8 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     const held = page !== undefined ? { asked, page } : prepared !== undefined ? { asked, handoff: prepared } : undefined
     if (views !== undefined && held !== undefined) {
       const sameSource = effect { return (try atSource) && (try shell.get()).route === sourceRoute }
-      try views.spoken(held, sameSource, (place) =>
-        openRouteForVoice(placeOf(place === "Home" ? undefined : place), sourceRoute, session, turn, atSource, memory, voice, shell))
+      try views.spoken(held, sameSource, (place, keep) =>
+        openRouteForVoice(placeOf(place === "Home" ? undefined : place), sourceRoute, session, turn, atSource, memory, voice, shell, keep))
     } else if (!actions.some((action) => action.action === "VIEWS")) {
       const requested = requestedDestination(finalText)
       const place = requested === undefined ? undefined : placeForDestination(requested)
@@ -945,7 +945,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
 }
 
 // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "An exact spoken Files request may follow its own leased navigation once"; spec/app/shell/index.md, "Only a spoken move from its exact source route is marked as Talk's navigation"
-/** `keepPanel` opens the view under Ask Alpha at its height, as an exact spoken Files request does; otherwise the move shows its view, lowering Ask Alpha where it would hide it. */
+/** `keepPanel` opens the view under Ask Alpha at its height, as an exact spoken Files request or a saved note does; otherwise the move shows its view, lowering Ask Alpha where it would hide it. */
 effect function openRouteForVoice(place: number, sourceRoute: number, session: number, turn: number, current: Effect.Effect<boolean>,
   memory: VoiceMemory, voice: Voice.Machine.Shape, shell: Shell.Machine.Shape, keepPanel = false): boolean!! {
   const before = try shell.get()

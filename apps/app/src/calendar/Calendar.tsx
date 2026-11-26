@@ -37,7 +37,7 @@ import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agen
 import { type Request, requests } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
 import { releasedReach } from "./deletions.vibe";
-import { type Fields, confirmCalendarReschedule, kept, saveCalendarReminder, startForm, takeSaved, typed } from "./editor.vibe";
+import { type Fields, confirmCalendarReschedule, kept, saveCalendarReminder, saveEvent, startForm, takeSaved, typed } from "./editor.vibe";
 import { type Row, onDay, shown } from "./shown.ts";
 import { type CalendarRow, type DatedReminder, calendarRowKey, datedReminders } from "./reminders.ts";
 import { remindersStore } from "../reminders/store.ts";
@@ -562,9 +562,6 @@ function Access({ runtime }: CalendarProps) {
   const view = useView(runtime);
   useSyncExternalStore((listener) => shown.subscribe(listener), () => shown.snapshot(), () => shown.snapshot());
   if (!view.state || !shown.present()) return null;
-  if (view.can({ type: "askAccess" })) {
-    return <CalendarNotice actions={<CalendarNoticeAction onClick={() => void view.send({ type: "askAccess" })}>Allow</CalendarNoticeAction>}>Calendar needs access to your phone's calendar.</CalendarNotice>;
-  }
   if (view.can({ type: "openSettings" })) {
     return (
       <CalendarNotice tone="caution" actions={<CalendarNoticeAction aria-label="Open Calendar settings" onClick={() => void view.send({ type: "openSettings" })}><Settings aria-hidden />Settings</CalendarNoticeAction>}>
@@ -799,7 +796,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const onAgent = destination === "Agent";
   // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on this phone's calendar; its live adapter left them off the agent's (prototype/agent-calendar-adapter.ts:312, :328).
-  const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
+  const choosesOptions = !reminder && e.form === "NewEvent";
   const offersVideo = choosesOptions && (fields.video === true || offeredOn(onAgent, false, false, true));
   const offeredRepeats = repeats.filter(({ repeat }) => offeredOn(onAgent, repeat !== "NoRepeat", false, false));
   const offeredAlerts = alerts.filter(({ minutes }) => offeredOn(onAgent, false, minutes !== undefined, false));
@@ -809,7 +806,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const picked = (next: Fields) => withExtras({ ...next, calendar: destination });
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   const submit = () => {
-    if (!reminder) { void editor.send(save); return; }
+    if (!reminder) { void runtime.runPromise(saveEvent(destination === "Phone")); return; }
     saveButtonRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void runtime.runPromise(saveCalendarReminder());
   };
@@ -966,7 +963,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                   {reminder ? reminderRepeats.map(({ repeat, label }) => (
                     <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat}
                       onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
-                  )) : offeredRepeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
+                  )) : offeredRepeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={onAgent && repeat === "NoRepeat" ? "No repeat" : label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
                     disabled={!editor.can(plain)} onClick={() => (repeat === "NoRepeat" ? withExtras : picked)({ ...fields, repeat })} />)}
                 </div>
               </CalendarFormRow>

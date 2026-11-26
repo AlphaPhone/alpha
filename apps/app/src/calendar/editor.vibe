@@ -105,7 +105,24 @@ export effect function startForm(edit: Event, day: number, row?: Row) {
       : { title: row.title, place: row.place, notes: row.notes, begin: row.begin, end: row.end, allDay: row.allDay, people: "" }
     try ignore(keep(fields, state.owner))
   }
-  try contained(editor.send(edit), "opening the form")
+  if ((try contained(editor.send(edit), "opening the form")) && edit.type === "newEvent") try askForPhone()
+}
+
+// spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once"
+/** Ask Android for the phone's calendar while Calendar still may, and finish once Android has answered. */
+effect function askForPhone() {
+  if (!(try PhoneCalendar).present) return
+  const view = try View.Machine
+  if (!View.canAskAccess(try view.get())) return
+  if (!(try contained(view.send({ type: "askAccess" }), "asking for the phone's calendar"))) return
+  try Stream.runHead(Stream.filter(view.changes, (state) => state.access.grant !== "Unasked"))
+}
+
+/** Save the form; one going to the phone's calendar first asks Android for it while Calendar still may, as live v119 did. */
+export effect function saveEvent(toPhone: boolean) {
+  if (toPhone) try askForPhone()
+  const editor = try Editor.Machine
+  if (Editor.canSave(try editor.get())) try contained(editor.send({ type: "save" }), "saving the event")
 }
 
 /** Open Calendar's form for the exact reminder the owner is looking at. */

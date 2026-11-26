@@ -961,10 +961,12 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
     when { tag: "Arrived", let recorded }: run("arrived", arrived(recorded));
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
-    when { tag: "Navigate", let turn, let view }: answer("navigate", effect {
+    when { tag: "Navigate", let turn, let view, let keep }: answer("navigate", effect {
       const shell = try Shell
       const before = try shell.get()
-      const shown = (showing(before, view) && !canAgentShowView(before, view)) || (try contained(shell.send({ type: "agentShowView", view }), "opening the view the agent named"))
+      const shown = keep
+        ? showing(before, view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view the agent named"))
+        : (showing(before, view) && !canAgentShowView(before, view)) || (try contained(shell.send({ type: "agentShowView", view }), "opening the view the agent named"))
       return { type: "navigated", ticket: turn, opened: shown } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });
     when { tag: "NavigateHome", let turn }: answer("navigate", effect {
