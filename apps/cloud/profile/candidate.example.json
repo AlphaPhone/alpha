@@ -147,12 +147,12 @@
         "apiKeyEnv": "CARTESIA_API_KEY",
         "tts": {
           "defaultVoiceId": "alpha-voice",
-          "defaultModelId": "sonic-2",
+          "defaultModelId": "sonic-3.6",
           "voiceIds": [
             "alpha-voice"
           ],
           "modelIds": [
-            "sonic-2"
+            "sonic-3.6"
           ],
           "microsPerCharacter": 30
         },
@@ -317,12 +317,12 @@
         "apiKeyEnv": "CARTESIA_API_KEY",
         "tts": {
           "defaultVoiceId": "alpha-voice",
-          "defaultModelId": "sonic-2",
+          "defaultModelId": "sonic-3.6",
           "voiceIds": [
             "alpha-voice"
           ],
           "modelIds": [
-            "sonic-2"
+            "sonic-3.6"
           ],
           "microsPerCharacter": 30
         },
