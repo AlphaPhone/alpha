@@ -291,6 +291,7 @@ function General({ runtime, alpha, common }: PageProps) {
 
 // spec/app/settings/preferences.md, "Story: Choose how Alpha looks"; spec/app/settings/preferences.md, "Story: Make the text larger or smaller"
 function Display({ runtime, common }: PageProps) {
+  const onPhone = usePages(runtime).state?.phone ?? false;
   const { state, can, send } = useTimed(runtime, usePrefs);
   if (!state) return null;
   const size = ([75, 100, 115, 130, 150] as const).find((percent) => percent === state.size) ?? 0;
@@ -300,6 +301,7 @@ function Display({ runtime, common }: PageProps) {
   return (
     <SettingsDisplayPage
       {...common}
+      onPhone={onPhone}
       theme={themeNames[state.theme]}
       keeping={loading(state.keeping)}
       onChooseTheme={(theme) => choose({ type: "chooseTheme", theme: themesNamed[theme], at: untimed })}

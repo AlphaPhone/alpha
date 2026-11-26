@@ -3,7 +3,7 @@ module browser {
   import type { NotesAudioStore } from "@elizaos/plugin-notes-client"
 
   /** Play local audio only for the ID and note named by the current selection. */
-  export function browserNotePlayback(store: NotesAudioStore) {
+  export function browserNotePlayback(store: NotesAudioStore, connection: () => string | undefined) {
     let active: ((finished: boolean) => void) | undefined
     let generation = 0
 
@@ -16,14 +16,20 @@ module browser {
     return {
       halt,
       async describe(audioId: string) {
-        const row = await store.audioRecord(audioId)
+        const owner = connection()
+        if (owner === undefined) throw Error("Recording connection changed")
+        const row = await store.audioRecord(audioId, owner)
+        if (connection() !== owner) throw Error("Recording connection changed")
         return { audioId: row.audioId, noteId: row.noteId, durationMs: row.durationMs }
       },
       async play(audioId: string, noteId: string, offsetMs: number): Promise<boolean> {
         halt()
         const ticket = generation
-        const row = await store.audioRecord(audioId)
-        if (ticket !== generation || document.hidden || row.noteId !== noteId || row.expired || offsetMs < 0 || offsetMs >= row.durationMs) return false
+        const owner = connection()
+        if (owner === undefined) return false
+        const row = await store.audioRecord(audioId, owner)
+        if (ticket !== generation || connection() !== owner || document.hidden || row.noteId !== noteId || row.expired ||
+          !Number.isFinite(offsetMs) || offsetMs < 0 || offsetMs >= row.durationMs) return false
 
         return new Promise((resolve) => {
           const player = new Audio()

@@ -1,4 +1,4 @@
-import { Smartphone, SunMedium, Type } from "lucide-react";
+import { SlidersHorizontal, Smartphone, Type } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsAppearancePicker, type SettingsAppearancePickerProps } from "./SettingsAppearancePicker.tsx";
@@ -9,6 +9,8 @@ import { SettingsTextSizePicker, type SettingsTextSizePickerProps } from "./Sett
 import type { AndroidTold, SettingsAndroidProps } from "./vocabulary.ts";
 
 export type SettingsDisplayPageProps = SettingsAndroidProps & {
+  /** Android can handle Display settings on this host. */
+  onPhone?: boolean;
   /** The appearance shown. */
   theme: SettingsAppearancePickerProps["theme"];
   /** A choice is being kept on the phone. */
@@ -37,20 +39,22 @@ export type SettingsDisplayPageProps = SettingsAndroidProps & {
  * Display: the appearance, the size of the text and the way into Android's display settings.
  * @model spec/app/settings/preferences.md
  */
-export function SettingsDisplayPage({ theme, keeping, onChooseTheme, legible = false, onLegibleChange, size, sizing, onChooseSize, notice, told, onBack, starting, onAndroid }: SettingsDisplayPageProps) {
+export function SettingsDisplayPage({ onPhone = true, theme, keeping, onChooseTheme, legible = false, onLegibleChange, size, sizing, onChooseSize, notice, told, onBack, starting, onAndroid }: SettingsDisplayPageProps) {
   return (
     <SettingsPage title="Display" told={told} onBack={onBack} backLabel="Back to General">
       {notice ? <SettingsPreferencesNotice notice={notice} /> : null}
       <p aria-hidden className="px-2 pt-1 pb-4 font-display text-headline leading-tight font-light">Aa</p>
       <SettingsAppearancePicker theme={theme} keeping={keeping} onChoose={onChooseTheme} />
+      {onPhone ? <ListGroup>
+        <SettingsAndroidRow target="brightness" title="Brightness" aria-label="Manage brightness in Android" icon={<SlidersHorizontal />} starting={starting} onAndroid={onAndroid} />
+      </ListGroup> : null}
       <SettingsTextSizePicker size={size} busy={sizing} onChoose={onChooseSize} />
       <ListGroup>
         <SettingsSwitchRow title="Legible text" icon={<Type />} checked={legible} saving={keeping} onCheckedChange={onLegibleChange} />
       </ListGroup>
-      <ListGroup>
+      {onPhone ? <ListGroup>
         <SettingsAndroidRow target="display-settings" title="Display settings" icon={<Smartphone />} starting={starting} onAndroid={onAndroid} />
-        <SettingsAndroidRow target="brightness" title="Brightness" icon={<SunMedium />} starting={starting} onAndroid={onAndroid} />
-      </ListGroup>
+      </ListGroup> : null}
     </SettingsPage>
   );
 }

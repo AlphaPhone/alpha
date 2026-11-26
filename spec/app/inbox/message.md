@@ -279,7 +279,8 @@ pure def sometimesAMessageFailedToLoad(s: MessageView): bool = s.message != 0 an
 The shell shows only the plain text of a previously opened message for
 up to 30 days, while it can identify the owner and match the exact
 account, grant, message and history revision of the saved row. It keeps
-no image, link or attachment action with that text. The saved copy goes
+up to 16 bodies and two MiB of encoded storage. It keeps no image, link
+or attachment action with that text. The saved copy goes
 when access is known: read afresh if the account may be read, closed
 otherwise, and with the saved list.
 
