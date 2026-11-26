@@ -71,7 +71,10 @@ export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = fals
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
       if (event.button !== 0 || trackRef.current) return;
-      if (captureOnPress) capture(event.currentTarget, event.pointerId);
+      if (captureOnPress) {
+        event.stopPropagation();
+        capture(event.currentTarget, event.pointerId);
+      }
       const view = event.currentTarget.ownerDocument.defaultView ?? window;
       const sample = { y: event.clientY, at: event.timeStamp };
       const t: Track = { pointer: event.pointerId, start: event.clientY, prev: sample, last: sample, moved: false };

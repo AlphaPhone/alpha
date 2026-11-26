@@ -212,7 +212,7 @@ function useDockGesture({ dock, sectionRef, composerRef, open, compact, assistan
   };
   const follow = (y: number) => {
     const g = gestureRef.current;
-    if (!g || !dock.can({ type: "drag" }) && dock.state?.gesture !== "Dragging") return;
+    if (!g) return;
     if (!g.moved) {
       g.moved = true;
       void dock.send({ type: "drag" });

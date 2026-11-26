@@ -31,7 +31,7 @@ export const meta: ComponentMeta<SettingsAboutPageProps> = {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();
       const view = within(canvasElement);
-      await userEvent.click(view.getByRole("button", { name: "Agent activity" }));
+      await userEvent.click(view.getByRole("button", { name: /^Agent activity/ }));
       await userEvent.click(view.getByRole("button", { name: "Licenses" }));
       await expect(onOpen.mock.calls).toEqual([["activity"], ["licences"]]);
     },

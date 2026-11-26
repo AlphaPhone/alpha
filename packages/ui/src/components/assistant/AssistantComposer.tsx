@@ -117,8 +117,8 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} {...(compact && moves ? dragging : {})} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", moves && "relative isolate") : "min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
-        {!compact && moves ? <span aria-hidden data-alpha-bar-drag="" className="absolute inset-0 touch-none rounded-dock" style={{ zIndex: -1 }} {...dragging} /> : null}
+      <div hidden={Boolean(voice)} {...(moves ? dragging : {})} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", moves && "relative isolate") : "min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
+        {!compact && moves ? <span aria-hidden data-alpha-bar-drag="" className="absolute inset-0 touch-none rounded-dock" style={{ zIndex: -1 }} /> : null}
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
