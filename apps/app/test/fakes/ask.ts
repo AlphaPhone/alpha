@@ -37,8 +37,8 @@ export interface AskScene {
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
   nextReplyProvisional?: boolean;
-  /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
-  nextActions?: (metadata: unknown) => readonly unknown[];
+  /** The actions the next reply says it ran, made from the turn's metadata and the device capabilities the turn declared, as eliza's agent lists them on its done frame. */
+  nextActions?: (metadata: unknown, capabilities: readonly string[]) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
   holdDoneAfterReady?: Promise<void>;
   /** The agent sends no status frame, as the resident host does not. */
@@ -116,10 +116,10 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown, capabilities: readonly string[]): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
-  const actions = scene.nextActions?.(metadata) ?? [];
+  const actions = scene.nextActions?.(metadata, capabilities) ?? [];
   const holdDone = scene.holdDoneAfterReady;
   const holdReady = scene.holdReady;
   let cancelled = false;
@@ -279,7 +279,8 @@ export function askRoutes(scene: AskScene): Route[] {
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
         if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
-        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
+        const capabilities = request.headers.get("x-eliza-device-capabilities")?.split(",").filter((name) => name !== "") ?? [];
+        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata, capabilities);
       });
     },
     (request, url) => {

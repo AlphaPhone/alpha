@@ -165,7 +165,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
       ) : (
         <AppHeader title="Messages" className={messagesHeader} data-alpha-messages-header="" data-alpha-stage-header=""
           leading={onBack && <Button variant="ghost" size="icon" className="rounded-lg" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}>
-          {can(openSearch) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => void send(openSearch)}><Search className="size-5" /></Button>}
+          {can(openSearch) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => { runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ sought: "" }))); void send(openSearch); }}><Search className="size-5" /></Button>}
           {can(newMessage) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new disabled={draftOpening === "Opening" || handoffOpening} onClick={() => void openNew()}><Pencil className="size-5" /></Button>}
         </AppHeader>
       )}

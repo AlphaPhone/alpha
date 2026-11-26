@@ -40,6 +40,19 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
 
 export type TextReviewScene = ReturnType<typeof textReview>;
 
+/**
+ * eliza's grounding of the Browser open the owner's whole `message` asked for: bound to that message, to run at once, only on a
+ * turn that declared `browser.open-direct.v1`, and otherwise kept for the owner's review (eliza's spec/agent/deviceActions/index.md,
+ * "A proposal carries the owner's message only for a live turn that asked for it directly, so otherwise the phone shows its card").
+ */
+export function askedPage(review: TextReviewScene, message: string, capabilities: readonly string[]): readonly unknown[] {
+  const direct = capabilities.includes("browser.open-direct.v1");
+  review.proposal.payload.requestMessageId = direct ? message : undefined;
+  return [{ action: "PROPOSE_DEVICE_ACTION", data: direct
+    ? { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true }
+    : { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+}
+
 export const textReviewEnrollment: Faked = plugin<{
   enrollmentKey(input: { slot: string }): Promise<{ key: string }>;
   authority(): Promise<{ active: boolean }>;
