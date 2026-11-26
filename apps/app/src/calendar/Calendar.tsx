@@ -29,7 +29,7 @@ import { useMachine as useEditor } from "../../gen/app__calendar__editor.react.t
 import { useMachine as useHeld } from "../../gen/app__calendar__deletions.react.ts";
 import type { Event as DeletionEvent } from "../../gen/app__calendar__deletions.ts";
 import {
-  type ReplyWord, dayEmptiness, firstColumnDay, monthCells, replyWord, rowShown, showsOffsets, statusAction, timelineFirstHour, timelineLastHour,
+  type ReplyWord, calendarName, dayEmptiness, firstColumnDay, monthCells, replyWord, rowShown, showsOffsets, statusAction, timelineFirstHour, timelineLastHour,
 } from "../../gen/app__calendar__presentation.ts";
 import {
   type Occurrences as WritingOccurrences, type SaveBlock, goingOffered, managedDeleteOffered, managedScopeAllowed, maybeOffered, newEventTarget, offeredOn, saveBlock, wallTimeSavable,
@@ -589,7 +589,7 @@ function Calendars({ runtime }: CalendarProps) {
       <SheetContent title="Calendars">
         {[...new Map([...shown.all("Google"), ...(allows(s.access) ? shown.all("Phone") : [])].map((row) => [row.calendar, row])).values()].map((row) => (
           <Label key={row.calendar} className="flex items-center justify-between">
-            {row.source === "Google" ? "Your agent's calendar" : `Phone calendar ${row.calendarId}`}
+            {row.source === "Google" ? calendarName(shown.listedName(row.calendarId)) : `Phone calendar ${row.calendarId}`}
             <Switch checked={rowShown(row.calendar, [...s.hidden])} disabled={!view.can({ type: "toggleCalendar", calendar: row.calendar })}
               onCheckedChange={() => void view.send({ type: "toggleCalendar", calendar: row.calendar })} />
           </Label>
@@ -621,6 +621,7 @@ function EventPage({ runtime, row, today, inert }: CalendarProps & { row: Row; t
   const view = useView(runtime);
   const editor = useEditor(runtime);
   const held = useHeld(runtime);
+  const shown = useShown(runtime);
   const s = view.state;
   if (!s || !editor.state || !held.state) return null;
   const close = () => void view.send({ type: "closeEvent" });
@@ -658,7 +659,7 @@ function EventPage({ runtime, row, today, inert }: CalendarProps & { row: Row; t
   ].filter((text) => text !== null).map((text) => <div key={text} className="mt-3 text-sm leading-plain text-muted-foreground">{text}</div>);
   return (
     <CalendarEventPage inert={inert} title={row.title || "Untitled event"} onBack={close} when={interval(row)} day={dayName(civilDay(row.begin), today)}
-      source={row.source === "Phone" ? "Phone calendar" : "Your agent's calendar"} repeat={row.repeat} dot={stripe(row)} notes={row.notes}
+      source={row.source === "Phone" ? "Phone calendar" : calendarName(shown.listedName(row.calendarId))} repeat={row.repeat} dot={stripe(row)} notes={row.notes}
       actions={menu ? (
         <CalendarEventMenu items={[
           ...(editing ? [{ label: "Edit", name: "Edit event", onSelect: () => void runtime.runPromise(startForm(edit, civilDay(row.begin), row)) }] : []),
@@ -1045,7 +1046,7 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
   const choosesCalendar = reminder || e.form === "NewEvent";
   const editingPhone = e.form === "EditEvent" && editingRow?.source === "Phone";
   const destinations: { name: string; value: NonNullable<Fields["calendar"]> }[] = [{ name: "Reminders", value: "Reminders" }];
-  if (e.form === "NewEvent" && connected) destinations.push({ name: "Your agent's calendar", value: "Agent" });
+  if (e.form === "NewEvent" && connected) destinations.push({ name: calendarName(shown.listedName("")), value: "Agent" });
   if (e.form === "NewEvent" && shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const toggleAllDayEvent: Editor.Event = editor.can({ type: "setAllDay", allDay: !fields.allDay }) ? { type: "setAllDay", allDay: !fields.allDay } : plain;

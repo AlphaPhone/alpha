@@ -371,12 +371,25 @@ and its voice session's long gap). Speech that starts again within them
 continues the same turn: its words join the ones before, so a pause inside
 a sentence never sends half of it. Speech on the phone keeps its own timing.
 
+Mute pressed within that gap shuts the microphone at once, and the words
+already heard are still sent when the gap ends, as the Sunday demo build's
+voice session closed the capture on Mute and then still sent the utterance
+waiting on its long gap (v119, .eliza/client-features/packages/voice/src/
+voice-assistant-session.ts:596-611). Stop, or the relay's capture ending,
+within the gap sends nothing, as that session dropped an utterance not yet
+sent (voice-assistant-session.ts:574-575 and 786-797).
+
 ```quint
 pure def canTurnEnded(v: Voice, session: int): bool =
-  v.phase == Listening and v.mic == On and v.heard and session == v.session
+  v.phase == Listening and v.heard and session == v.session and (v.mic == On or (v.muted and v.network))
 
 pure def turnEnded(v: Voice, session: int): Change =
-  { state: { ...v, phase: Transcribing, mic: Closing }, out: List(CloseMicrophone({ session: v.session })) }
+  if (v.mic == On)
+    { state: { ...v, phase: Transcribing, mic: Closing }, out: List(CloseMicrophone({ session: v.session })) }
+  else if (v.mic == Closing) { state: { ...v, phase: Transcribing }, out: List() }
+  else
+    { state: { ...v, phase: Thinking, sent: v.turn, heard: false },
+      out: List(Send({ session: v.session, turn: v.turn, network: v.network })) }
 
 pure def canMicClosed(v: Voice, session: int): bool = v.mic == Closing and session == v.session and talking(v)
 
@@ -390,7 +403,9 @@ pure def micClosed(v: Voice, session: int): Change =
 
 pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   out.every(e => match e {
-    | Send(x) => via == "micClosed" and before.phase == Transcribing and after.mic == Off and out.length() == 1
+    | Send(x) => ((via == "micClosed" and before.phase == Transcribing)
+        or (via == "turnEnded" and before.phase == Listening and before.muted and before.network and before.mic == Off))
+        and after.mic == Off and out.length() == 1
         and x.session == before.session and x.turn == before.turn and after.sent == before.turn
     | _ => true
   })
@@ -402,11 +417,13 @@ When the owner finishes speaking, the words heard for that turn stay in the
 open conversation as the owner's own message, and three dots under it show
 Alpha at work, as the Sunday demo build did (v119,
 apps/app/src/prototype/template.html:4721-4726). They show while that turn
-is transcribed and thought about. What Alpha speaks takes the dots' place
-in the same moment it is queued to be spoken, as the Sunday demo build set
-the spoken text and the chat text together (v119,
-apps/app/src/prototype/agent-adapter.ts:2253-2254): an acknowledgment as
-the turn's label, as a typed turn shows one, then the reply's text. Words and reply go the
+is transcribed and thought about, and while an acknowledgment is said:
+the acknowledgment is only spoken, never written there, as the Sunday demo
+build only spoke it in Talk (v119, apps/app/src/prototype/voice-adapter.ts:778,
+and model.js:6443 drew the dots until reply text came). The reply's text
+takes the dots' place in the same moment it is queued to be spoken, as the
+Sunday demo build set the spoken text and the chat text together (v119,
+apps/app/src/prototype/agent-adapter.ts:2253-2254). Words and reply go the
 moment the recorded message and reply take their place, the turn ends
 unsent, or Talk leaves it. They are not a draft and not history: only the
 recorded rows are kept.
