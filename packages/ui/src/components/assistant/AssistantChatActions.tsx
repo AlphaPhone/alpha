@@ -29,14 +29,14 @@ interface ChatActionsMenuProps {
 
 function ChatActionsMenu({ placement, label, triggerId, disabled, children }: ChatActionsMenuProps) {
   const comms = placement === "comms";
-  const sideOffset = comms ? 19 : 14;
+  const sideOffset = comms ? 19 : 20;
   return (
     <Menu>
       <MenuTrigger asChild>
         <Button id={triggerId} variant="ghost" size="icon" aria-label={label} disabled={disabled} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
       </MenuTrigger>
       <MenuContent side="top" align="start" alignOffset={placement === "sheet" ? -16 : -57} sideOffset={sideOffset}
-        className={cn("rounded-tile border-0 bg-background p-2 shadow-chat-actions motion-safe:animate-rise dark:shadow-chat-actions-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:gap-3 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3 [&>[role=menuitem]]:py-2 [&>[role=menuitem]]:text-base [&>[role=menuitem]_svg]:size-5", comms ? "min-w-59" : "min-w-55")}>
+        className={cn("rounded-tile border-0 bg-background p-2 shadow-chat-actions dark:shadow-chat-actions-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3 [&>[role=menuitem]_svg]:size-5.5", comms ? "min-w-59" : "min-w-55")}>
         {children}
       </MenuContent>
     </Menu>

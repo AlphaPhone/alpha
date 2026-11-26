@@ -29,7 +29,7 @@ export async function closeAllDocks() {
 const dockAgent = "dock-agent";
 const dockOwner = "dock-owner";
 
-export async function mountDock({ view = "Browser", withToast = false, flush, speech }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void>; speech?: AssistantProps["speech"] } = {}) {
+export async function mountDock({ view = "Browser", withToast = false, flush, speech }: { view?: "Browser" | "Calendar" | "Home" | "Notes" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void>; speech?: AssistantProps["speech"] } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
   const client = Layer.succeed(
     HttpClient.HttpClient,

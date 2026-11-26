@@ -21,7 +21,8 @@ import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe"
 import { CommsBar, type CommsServices, useCommsDock } from "../phone/CommsBar.tsx";
 import { emailFieldLabel, emailLabel, emailRemoveLabel, phoneFieldLabel, phoneLabel, phoneRemoveLabel } from "./labels.ts";
 import type { Alpha } from "../runtime/area.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack, useFirstPageBack } from "../shell/AppBack.tsx";
+import { Layers, Over, Under } from "../shell/Layers.tsx";
 
 export interface ContactsProps {
   /** Provides Contacts' machine, resident, Phone's, for whether a call may be an emergency call, and what Contacts counts. */
@@ -39,6 +40,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const phone = usePhone(runtime).state;
   const returningRef = useRef<{ tab: Tab } | undefined>(undefined);
   const shell = useShell(runtime);
+  const firstPageBack = useFirstPageBack(alpha);
   const held = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const groups = useMemo(() => {
     const grouped = Object.groupBy(held.rows, ({ name }) => {
@@ -51,7 +53,9 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   }, [held.rows]);
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
-  if (!state || !phone) return null;
+  if (!state || !phone) return <section aria-label="Contacts" aria-busy className="flex min-h-0 flex-1 flex-col">
+    <AppHeader title="Contacts" className={telephonyHeader} leading={<AppBack alpha={alpha} firstPage />} />
+  </section>;
   const { searching } = state;
   const query = state.sought ? held.sought : "";
   const set = (change: Partial<Book>) => runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set(change)));
@@ -62,14 +66,14 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     void send(event);
   };
   const safe = clear(phone);
-  if (state.form !== "Shut") return <Editor runtime={runtime} />;
+  const editing = state.form !== "Shut";
   const open = (id: string) => {
     set({ card: undefined });
     void send({ type: "openContact", contact: id });
   };
-  const canBack = shell.can({ type: "goBack" });
-  const phoneTabs = !state.opened && shell.state?.trail.at(-2) === "Phone";
-  const back = canBack ? () => void alpha.back() : undefined;
+  const fromPhone = shell.state?.trail.at(-2) === "Phone";
+  const phoneTabs = !state.opened && fromPhone;
+  const back = firstPageBack ? () => void alpha.back() : undefined;
   const select = (tab: string) => {
     if (tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") return;
     if (returningRef.current) {
@@ -104,13 +108,11 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     // v119 (45f6bed30) prototype/phone-adapter.ts:276-277: the pill on Contacts shows no unheard voicemail dot.
     <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={false} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
   ) : searchHeader ?? (
-    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
+    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} firstPage />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
   const route = shell.state?.route;
-  const content = (
-    <section aria-label="Contacts" className="flex flex-1 flex-col">
-      {!state.opened && !phoneTabs && header}
+  const notices = <>
       {pending(state) && <p role="status" className="sr-only">Contact change pending</p>}
       {uncertain(state) && <Banner variant="warn" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Refresh</Button>}>Outcome unknown: refresh</Banner>}
       {accessNeeded(state) && (
@@ -120,8 +122,13 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
             : can({ type: "openSettings" }) && <Button className={allow} onClick={() => void send({ type: "openSettings" })}>Open Settings</Button>}
         </div>
       )}
-      {state.opened ? <Card runtime={runtime} safe={safe} route={route} /> : (
-        <>
+  </>;
+  const content = (
+    <section aria-label="Contacts" className="flex min-h-0 flex-1 flex-col">
+      <Layers>
+        <Under covered={state.opened || editing}>
+          {!phoneTabs && header}
+          {!state.opened && notices}
           {can({ type: "loadMore" }) && <div className="flex shrink-0 justify-center"><Button variant="secondary" size="icon" aria-label="More contacts" onClick={() => void send({ type: "loadMore" })}><ChevronDown className="size-5" /></Button></div>}
           {state.list.status === "Loading" && state.rows === 0 && <p role="status" className="sr-only">Reading contacts</p>}
           {listFailed(state) && <Banner variant="destructive" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Retry</Button>}>Contacts could not be read</Banner>}
@@ -138,19 +145,22 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
               ))}
             </ListGroup>
           )}
-        </>
-      )}
-      <CommsBar runtime={runtime}
+        </Under>
+        {state.opened && <Over inert={editing} aria-hidden={editing || undefined}><div className="flex flex-1 flex-col">{notices}<Card runtime={runtime} safe={safe} route={route} /></div></Over>}
+        {editing && <Over><Editor runtime={runtime} /></Over>}
+      </Layers>
+      {!editing && <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
         actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="comms" triggerId={contactChatActionsId(route, state.contact)}
           onAttach={() => attachFromContact(alpha, route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
-        filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />
+        filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />}
     </section>
   );
-  if (!phoneTabs) return content;
+  if (!fromPhone) return content;
+  if (editing) return <Layers><Over><Editor runtime={runtime} /></Over></Layers>;
   return (
     <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
-      {header}
+      {phoneTabs && header}
       <TabsContent value="Contacts" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</TabsContent>
     </Tabs>
   );
