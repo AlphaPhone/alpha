@@ -392,11 +392,11 @@ describe("Settings", () => {
     const { world } = await settingsOpen(sceneWithProton);
     await press("Apps");
     await press("Passwords");
-    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Not installed"));
+    await vi.waitFor(() => expect(button(/^Proton Pass/)?.textContent).toContain("Not installed"));
     expect(world.settings.opened).toEqual([]);
     expect(button("Get Proton Pass")).toBeUndefined();
-    await press("Proton Pass");
-    expect(button("Proton Pass")?.getAttribute("aria-expanded")).toBe("true");
+    await press(/^Proton Pass/);
+    expect(button(/^Proton Pass/)?.getAttribute("aria-expanded")).toBe("true");
     expect(button("Open Proton Pass")).toBeUndefined();
     await press("Get Proton Pass");
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install"]));
@@ -404,7 +404,7 @@ describe("Settings", () => {
     world.settings.passwordProvider = { installation: "installed", selection: "proton", support: "available" };
     await vi.waitFor(() => expect(button("Refresh password provider status")?.disabled).toBe(false));
     await press("Refresh password provider status");
-    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Verified"));
+    await vi.waitFor(() => expect(button(/^Proton Pass/)?.textContent).toContain("Verified"));
     expect(button("Get Proton Pass")).toBeUndefined();
     expect(document.body.textContent).toContain("Selected");
     await press("Open Proton Pass");
@@ -413,7 +413,7 @@ describe("Settings", () => {
     await press("Choose provider");
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install", "password-provider open", "password-provider settings"]));
     await hardware("back");
-    await vi.waitFor(() => expect(button("Proton Pass")).toBeUndefined());
+    await vi.waitFor(() => expect(button(/^Proton Pass/)).toBeUndefined());
   });
 
   it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
