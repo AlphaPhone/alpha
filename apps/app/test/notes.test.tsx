@@ -97,6 +97,17 @@ describe("Notes", () => {
     expect(fields.calendar).toBe(destination);
     expect(new Date(fields.begin).getHours()).toBe(9);
     expect(world.calendar.writes).toEqual([]);
+    if (destination === "Reminders") {
+      await rendered(() => expect(button("Save")?.disabled).toBe(false));
+      await press("Save");
+      await until(alpha, target, CalendarForm, (draft) => !draft.shown);
+      await rendered(() => expect(button(/Design sync/)).toBeDefined());
+      await press(/Design sync/);
+      await control("Open source note");
+      await press("Open source note");
+      await until(alpha, alpha.runtime, Shell, (where) => showing(where, "Notes"));
+      await until(alpha, notesArea, Voice, (voice) => voice.showing);
+    }
   });
 
   it("See my notes (spec/app/notes/index.md, \"Story: See my notes\")", async () => {

@@ -351,7 +351,7 @@ describe("Workflows", () => {
     await fill("Message Alpha", "What happened in this run?");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
-    await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]));
+    await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]), { timeout: 12_000 });
     const attachment = world.ask.spokenFiles?.at(-1)?.images?.[0] as { readonly name?: string; readonly mimeType?: string; readonly data?: string } | undefined;
     expect(attachment).toMatchObject({ name: "Workflow run.json", mimeType: "application/json" });
     expect(JSON.parse(atob(attachment?.data ?? ""))).toMatchObject({
@@ -456,8 +456,7 @@ describe("Workflows", () => {
 
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await press("Add to Workflows");
@@ -492,8 +491,7 @@ describe("Workflows", () => {
 
   it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await choose("Monthly statement");

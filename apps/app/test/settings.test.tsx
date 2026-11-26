@@ -305,7 +305,7 @@ describe("Settings", () => {
     await settingsOpen(world);
     await tap("Account");
     await vi.waitFor(() => {
-      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Plans");
+      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent?.trim() === "View plans");
       if (!plans) throw new Error("No Plans control");
       return drawn(() => plans.click());
     });

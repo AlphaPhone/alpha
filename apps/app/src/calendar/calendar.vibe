@@ -35,6 +35,7 @@ function phoneRow(event: AndroidCalendarEvent): Read {
   const end = event.allDay ? localDate(new Date(event.end).toISOString()) : event.end
   return {
     key: event.id, calendarId: event.calendarId, title: event.title ?? "", place: event.location ?? "", notes: event.body ?? "",
+    ...(event.creationId === undefined ? {} : { creationId: event.creationId }),
     begin, end, allDay: event.allDay, recurring: event.recurring, repeat: repeatText([], event.recurring), link: "", video: "",
     people: [], answer: "NotInvited", answerable: false, managed: false, series: "", editable: true, cancel: "OrganizerCancel", version: "",
   }

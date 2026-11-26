@@ -201,3 +201,8 @@ the requested Calendar visit for the same resident owner. An open or
 retained Calendar draft keeps its place. Opening this draft writes no
 event or reminder. Calendar supplies tomorrow at nine as a starting
 time, which the owner can change before saving.
+
+A saved Calendar item can open the note it came from. Alpha keeps the
+link under the current owner and the saved item's exact identity. The
+owner can still open a note that changed after the draft was made, and
+Alpha says when it was edited or deleted.
