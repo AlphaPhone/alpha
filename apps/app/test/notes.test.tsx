@@ -154,6 +154,22 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
   });
 
+  it("On the launcher the notes list draws no Back, a note keeps its own and Android's Back still leaves (spec/app/shell/index.md, \"On the launcher an app's first page draws no Back, and Android's Back still leaves it\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
+    await until(alpha, runtime, List, (s) => s.read.status === "Loaded");
+    await control("Open Groceries");
+    expect(button("Back")).toBeUndefined();
+    await press("Open Groceries");
+    await control("Back to notes");
+    await press("Back to notes");
+    await control("Open Groceries");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+  });
+
   it("Reviews a deleted note in a sheet and recovers it (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {
     const world = scene();
     world.now = Date.now();
