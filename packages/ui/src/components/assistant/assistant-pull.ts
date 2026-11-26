@@ -119,12 +119,27 @@ export type AssistantBarDrag = {
  */
 export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, from = "bar" }: AssistantBarDrag) {
   const track = useRef<Track | undefined>(undefined);
+  const watching = useRef<(() => void) | undefined>(undefined);
   const lost = (event: PointerEvent<HTMLElement>) => {
     if (event.type === "lostpointercapture" && event.target !== event.currentTarget) return;
     const current = track.current;
     if (current?.pointer !== event.pointerId) return;
     track.current = undefined;
+    watching.current?.();
     if (current.moved) onCancel?.({ now: event.timeStamp });
+  };
+  /** One move of the pressed pointer: once past the slop the bar takes the pointer, as v119's handle did on its press. */
+  const moveTo = (owner: HTMLElement, pointer: number, y: number, t: number) => {
+    const current = track.current;
+    if (current?.pointer !== pointer) return;
+    follow(current, y, t);
+    if (!current.moved && Math.abs(y - current.start.y) >= TAP_SLOP) {
+      current.moved = true;
+      watching.current?.();
+      capture(owner, pointer);
+      onStart?.({ now: t, y: current.start.y });
+    }
+    if (current.moved) onDrag?.({ y });
   };
   return {
     onPointerDownCapture: (event: PointerEvent<HTMLElement>) => {
@@ -137,19 +152,31 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, from
       if (event.target instanceof HTMLTextAreaElement && event.target.value !== "") return;
       const sample = { y: event.clientY, t: event.timeStamp };
       track.current = { pointer: event.pointerId, start: sample, samples: [sample], moved: false };
+      // A touch stays with what it pressed, but a mouse moves over whatever is under it: v119's handle took the pointer
+      // on its press (use-pull-gesture.ts:233-243). Taking it before the slop would make a tap the bar's click, not its
+      // button's, so until then the page's moves are watched and the bar takes the pointer once the press is a drag.
+      watching.current?.();
+      const owner = event.currentTarget;
+      const pointer = event.pointerId;
+      const outside = (seen: globalThis.PointerEvent) => seen.pointerId === pointer && !(seen.target instanceof Node && owner.contains(seen.target));
+      const move = (seen: globalThis.PointerEvent) => { if (outside(seen)) moveTo(owner, pointer, seen.clientY, seen.timeStamp); };
+      const end = (seen: globalThis.PointerEvent) => {
+        if (seen.pointerId !== pointer) return;
+        stop();
+        if (outside(seen) && track.current?.pointer === pointer && !track.current.moved) track.current = undefined;
+      };
+      const stop = () => {
+        window.removeEventListener("pointermove", move, true);
+        window.removeEventListener("pointerup", end, true);
+        window.removeEventListener("pointercancel", end, true);
+        if (watching.current === stop) watching.current = undefined;
+      };
+      window.addEventListener("pointermove", move, true);
+      window.addEventListener("pointerup", end, true);
+      window.addEventListener("pointercancel", end, true);
+      watching.current = stop;
     },
-    onPointerMove: (event: PointerEvent<HTMLElement>) => {
-      const current = track.current;
-      if (current?.pointer !== event.pointerId) return;
-      const y = event.clientY;
-      follow(current, y, event.timeStamp);
-      if (!current.moved && Math.abs(y - current.start.y) >= TAP_SLOP) {
-        current.moved = true;
-        capture(event.currentTarget, event.pointerId);
-        onStart?.({ now: event.timeStamp, y: current.start.y });
-      }
-      if (current.moved) onDrag?.({ y });
-    },
+    onPointerMove: (event: PointerEvent<HTMLElement>) => moveTo(event.currentTarget, event.pointerId, event.clientY, event.timeStamp),
     onPointerUp: (event: PointerEvent<HTMLElement>) => {
       const current = track.current;
       if (current?.pointer !== event.pointerId) return;

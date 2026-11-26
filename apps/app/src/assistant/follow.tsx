@@ -155,7 +155,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
         setLive(undefined);
         return;
       }
-      const next = { detent: landed.detent, kept: landed.detent === "Sheet" ? keptShare(landed.height, full) : 0 };
+      const next = { detent: landed.detent, kept: landed.detent === "Sheet" ? keptShare(landed.height, full) : landed.detent === "Full" ? kept : 0 };
       if (next.detent === held.start && next.kept === kept) {
         if (painted.height === 0) return done();
         heldRef.current = undefined;
@@ -172,7 +172,11 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const animate = useCallback((element: HTMLElement | null) => {
     sectionRef.current = element;
     if (!element || !animates()) return;
-    for (const motion of motionsRef.current.splice(0)) motion.cancel();
+    // A cancelled motion rejects its `finished`; the motion that replaces it is the one that settles the sheet.
+    for (const motion of motionsRef.current.splice(0)) {
+      motion.finished.catch(() => undefined);
+      motion.cancel();
+    }
     if (!growing && !leaving) {
       shownRef.current = element.getBoundingClientRect().height;
       return;

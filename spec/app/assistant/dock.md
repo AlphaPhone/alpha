@@ -207,7 +207,10 @@ pure def drag(d: Dock): Dock = { ...d, gesture: Dragging }
 ### A drag released asks the shell once for where it landed, and keeps a sheet's height
 
 The click Android sends after the finger lifts is ignored for a moment, so
-a drag that ends over Talk does not also start voice.
+a drag that ends over Talk does not also start voice. As v119 kept it
+(45f6bed30 chat-overlay-motion-adapter.ts:859, :961-965), a sheet raised to
+the full screen keeps the height it was left at, so shrinking it again
+returns there; only a sheet put away forgets it.
 
 ```quint
 pure def canRelease(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): bool =
@@ -215,7 +218,7 @@ pure def canRelease(d: Dock, direction: Direction, flick: bool, height: int, flo
 
 pure def release(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): Moved =
   val l = landing(d.start, direction, flick, height, floor, full)
-  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) keptShare(l.height, full) else 0 },
+  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) keptShare(l.height, full) else if (l.detent == S::Full) d.kept else 0 },
     out: asked(d.start, l.detent) }
 ```
 
