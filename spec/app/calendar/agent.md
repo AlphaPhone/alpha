@@ -100,7 +100,9 @@ No.
 
 The agent files each change as a request in its approvals list, which
 Calendar reads whenever it reads the day; the oldest pending Calendar
-request is proposed while no change is under way. The card shows the
+request is proposed while no change is under way, unless a reply in Ask
+Alpha has just filed one: then that request is proposed, so its card is
+the one under the reply that asked for it. The card shows the
 change as the request holds it: the title, the day and times with their
 time zone, the place, the calendar, the people and that no invitations are
 sent unless the request says so, all day, and this occurrence or every one.
@@ -260,16 +262,21 @@ the card in Ask Alpha, below that reply, whether the owner typed or
 talked: the same card as in Calendar, with the same Approve and Decline,
 so the owner approves where they asked and never has to open Calendar to
 find it. Which replies filed a request is read from the Calendar action's
-own result, never from the owner's words. While a change is under way its
-card stays at the foot of each conversation where a reply filed one. Once
-it ends, how it ended shows there until the owner asks something else.
+own result, never from the owner's words. The card holds one request at
+a time, so it shows under a reply only while it holds the request that
+reply filed: Approve or Decline there never decides an older request the
+owner did not ask for in that conversation, which stays in Calendar. While
+a change is under way its card stays at the foot of each conversation
+where a reply filed that request. Once it ends, how it ended shows there
+until the owner asks something else.
 
 ```quint
 type InAskAlpha = NothingToShow | ChangeUnderWay | ChangeEnded
 
 pure def inAskAlpha(s: AgentCalendar, filedByAReply: bool): InAskAlpha =
-  if (s.stage != Idle) ChangeUnderWay
-  else if (filedByAReply and s.result != NoResult and s.result != Withdrawn) ChangeEnded
+  if (not(filedByAReply)) NothingToShow
+  else if (s.stage != Idle) ChangeUnderWay
+  else if (s.result != NoResult and s.result != Withdrawn) ChangeEnded
   else NothingToShow
 
 pure def shownInAskAlpha(shown: InAskAlpha, filedHere: bool, latestReply: bool): bool =
@@ -280,6 +287,8 @@ pure def lawACardUnderWayShowsWhereItWasAsked(latestReply: bool): bool = shownIn
 pure def lawNothingShowsWhereNoReplyFiledOne(shown: InAskAlpha, latestReply: bool): bool = not(shownInAskAlpha(shown, false, latestReply))
 
 pure def lawAnEndedChangeLeavesWithTheNextQuestion(filedHere: bool): bool = not(shownInAskAlpha(ChangeEnded, filedHere, false))
+
+pure def lawARequestNoReplyFiledStaysInCalendar(s: AgentCalendar): bool = inAskAlpha(s, false) == NothingToShow
 ```
 
 ## Story: Know what the agent's change did

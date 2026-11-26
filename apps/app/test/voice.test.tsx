@@ -785,6 +785,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
     speakUtterance(world, "Put a 30 minute event called camera setup in that slot.");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1);
+    await later(alpha, 3000);
     await drawn(() => vi.waitFor(() => expect(button("Approve")).toBeDefined(), { timeout: 10_000 }));
     expect(document.querySelector("section[aria-label='Calendar change']")?.textContent).toContain("camera setup");
     expect(world.calendar.writes).toEqual([]);

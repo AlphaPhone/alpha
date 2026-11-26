@@ -2,5 +2,5 @@
 
 /** Calendar's own machines, reached from Ask Alpha before Calendar was ever opened: they read the requests a reply filed. */
 export service CalendarReviews {
-  relist(): void!!
+  relist(filed: ReadonlyArray<string>): void!!
 }

@@ -429,10 +429,10 @@ effect function syncAlphaApps(actionResults: ReadonlyArray<Ran>, reply: { readon
   const ranClock = actionResults.some((result) => result.action.startsWith("CLOCK_"))
   const ranReminders = actionResults.some((result) => result.action === "REMINDERS_MANAGE" || result.action === "OWNER_REMINDERS")
   const filed = calendarAsks.file(reply.conversation, reply.message, actionResults)
-  if (!ranClock && !ranReminders && !filed) return
+  if (!ranClock && !ranReminders && filed.length === 0) return
   const ctx = try Effect.context<never>()
   const reviews = Context.getOption(ctx, CalendarReviews)
-  if (filed && Option.isSome(reviews)) try reviews.value.relist()
+  if (filed.length > 0 && Option.isSome(reviews)) try reviews.value.relist(filed)
   if (ranClock) {
     const alarms = Context.getOption(ctx, Alarms.Machine)
     const timers = Context.getOption(ctx, Timers.Machine)

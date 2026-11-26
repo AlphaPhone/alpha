@@ -14,7 +14,9 @@ import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
 import { Machine as Reminders } from "../gen/app__reminders.effect.vibe";
 import { Machine as Alerts } from "../gen/app__reminders__alerts.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
+import type { Place } from "../src/areas.ts";
 import calendar from "../src/calendar/index.tsx";
+import { asked } from "../src/calendar/asked.ts";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
 import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
@@ -921,13 +923,13 @@ describe("on a phone", () => {
     expect((await runtime.runPromise(Held.use((d) => d.get()))).hiding).toBe(0);
   });
 
-  it("Approve in Ask Alpha what a reply asked for (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
-    const world = morning(true);
-    const { alpha } = await open(world, only("home", "assistant", "assistant/calendar"));
+  /** Ask Alpha over Calendar on `world`, its composer open: sending a typed message, and the Calendar card shown in it. */
+  async function askOverCalendar(world: ReturnType<typeof morning>, ...more: Place[]) {
+    const { alpha } = await open(world, only("home", "assistant", "assistant/calendar", ...more));
     const ask = assistant.runtime(alpha);
     await until(alpha, ask, Composer, (s) => s.slot === "Open");
     await until(alpha, ask, Conversation, (s) => s.ready);
-    const card = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
+    const card = () => document.querySelector("[role=log] section[aria-label='Calendar change']")?.textContent ?? "";
     const send = async (text: string) => {
       const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
       if (document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.hidden) await press("Type");
@@ -935,16 +937,30 @@ describe("on a phone", () => {
       await press("Send");
       await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
     };
-    const start = new Date(world.at(1, 9)).toISOString();
-    const end = new Date(world.at(1, 9.5)).toISOString();
-    world.ask.nextReplyChunks = ["I've proposed camera setup for 9:00 tomorrow. It's waiting for your approval."];
+    return { alpha, card, send };
+  }
+
+  /** The agent's request `id` to add `title` tomorrow at `hour` for half an hour, as its approvals list holds it. */
+  function addRequest(world: ReturnType<typeof morning>, id: string, title: string, hour: number) {
+    return agentRequest(id, {
+      action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+      fields: { title, description: "", location: "", startAt: new Date(world.at(1, hour)).toISOString(), endAt: new Date(world.at(1, hour + 0.5)).toISOString(), isAllDay: false, timeZone: "UTC" },
+    });
+  }
+
+  /** The next reply files `request` through the Calendar action, saying `text`. */
+  function nextReplyFiles(world: ReturnType<typeof morning>, request: ReturnType<typeof agentRequest>, text: string) {
+    world.ask.nextReplyChunks = [text];
     world.ask.nextActions = () => {
-      world.calendar.approvals.push(agentRequest("approval-1", {
-        action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
-        fields: { title: "camera setup", description: "", location: "", startAt: start, endAt: end, isAllDay: false, timeZone: "UTC" },
-      }));
-      return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: "approval-1" } }];
+      world.calendar.approvals.push(request);
+      return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: request.id } }];
     };
+  }
+
+  it("Approve in Ask Alpha what a reply asked for (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
+    const world = morning(true);
+    const { alpha, card, send } = await askOverCalendar(world);
+    nextReplyFiles(world, addRequest(world, "approval-1", "camera setup", 9), "I've proposed camera setup for 9:00 tomorrow. It's waiting for your approval.");
     await send("Put a 30 minute event called camera setup at 9 tomorrow.");
     await vi.waitFor(() => expect(button("Approve")).toBeDefined());
     expect(["camera setup", "Waiting for you"].map((text) => card().includes(text))).toEqual([true, true]);
@@ -958,6 +974,36 @@ describe("on a phone", () => {
     world.ask.nextReplyChunks = ["You're welcome."];
     await send("Thanks.");
     expect([card(), document.body.textContent?.includes("Done, and seen in your calendar.")]).toEqual(["", false]);
+  });
+
+  it("Approve in Ask Alpha decides the request its reply filed, never an older one waiting (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
+    const world = morning(true);
+    world.calendar.approvals.push(addRequest(world, "older-idle", "dentist", 14));
+    const { alpha, card, send } = await askOverCalendar(world);
+    nextReplyFiles(world, addRequest(world, "filed-idle", "camera setup", 9), "I've proposed camera setup for 9:00 tomorrow. It's waiting for your approval.");
+    await send("Put a 30 minute event called camera setup at 9 tomorrow.");
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(["camera setup", "dentist"].map((text) => card().includes(text))).toEqual([true, false]);
+
+    await press("Approve");
+    await until(alpha, calendar.runtime(alpha), Changes, (a) => a.result === "Done");
+    expect(world.calendar.writes).toEqual(["approve filed-idle", "create ev-camera-setup"]);
+    expect(world.calendar.approvals.find((one) => one.id === "older-idle")?.state).toBe("pending");
+  });
+
+  it("A reply's request shows no card in Ask Alpha while Calendar's card holds an older one (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    const world = morning(true);
+    world.calendar.approvals.push(addRequest(world, "older-held", "dentist", 14));
+    const { alpha, card, send } = await askOverCalendar(world, "view:Calendar");
+    const changes = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, changes, Changes, (a) => a.stage === "Awaiting");
+    nextReplyFiles(world, addRequest(world, "filed-held", "camera setup", 9), "I've proposed camera setup for 9:00 tomorrow. It's waiting for your approval.");
+    await send("Put a 30 minute event called camera setup at 9 tomorrow.");
+    await vi.waitFor(() => expect(asked.snapshot().filed.some((one) => one.request === "filed-held")).toBe(true));
+    await later(alpha, 500);
+    await drawn(() => {});
+    expect([card(), document.querySelector("[role=log] section[aria-label='Calendar change'] button"), world.calendar.writes]).toEqual(["", null, []]);
   });
 });
 

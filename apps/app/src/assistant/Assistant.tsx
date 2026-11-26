@@ -571,7 +571,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
   // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
-  const filedHere = calendar.filed.filter((one) => one.conversation === shown.chosen);
+  const filedHere = calendar.filed.filter((one) => one.conversation === shown.chosen && one.request === calendar.request);
   const calendarCard = calendarReview !== undefined && !talking.context.sensitive
     && shownInAskAlpha(calendar.shown, filedHere.length > 0, filedHere.some((one) => one.message === lines.at(-1)?.id))
     ? [{ id: "calendar review", author: "alpha" as const, text: "", children: calendarReview }] : [];

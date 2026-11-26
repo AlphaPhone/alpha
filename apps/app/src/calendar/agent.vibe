@@ -108,7 +108,7 @@ const decodeKept = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unkno
 
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "When the event changes in Google, the card waiting for the owner no longer counts"; spec/app/calendar/agent.md, "A card voided by a change in Google is shown again at the event's new revision, marked updated"
 /** Read the agent's approvals list and tell the card what it holds: the oldest pending Calendar request, a new revision of the one shown, or that it is gone. */
-effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore) {
+effect function listRequests(filed: ReadonlyArray<string> = []): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore) {
   const machine = try Changes.Machine
   const listed = ask(Agent, HttpClientRequest.get("/api/approvals", { urlParams: { state: "pending", limit: "50" } }), Approvals) catch () => undefined
   if (listed === undefined) return
@@ -129,7 +129,8 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
     return
   }
   if (s.stage !== "Idle") return
-  const oldest = pending.at(-1)
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+  const oldest = pending.find((request) => filed.includes(request.id)) ?? pending.at(-1)
   if (oldest === undefined) return
   try ignore((try KeyValueStore.KeyValueStore).set(shownKey, JSON.stringify(oldest)))
   const id = oldest.change === "Create" ? 0 : shown.number("Google", oldest.eventId)
@@ -141,15 +142,15 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
 }
 
 // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
-/** Tell Ask Alpha what the card has to show there: a change under way, or how one a reply filed ended. */
+/** Tell Ask Alpha what the card has to show there, for the request it holds: a change under way, or how one a reply filed ended. */
 function tellAskAlpha(s: AgentCalendar): void {
   const id = requests.find(s.filing)?.id
-  asked.show(inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)))
+  asked.show(inAskAlpha(s, asked.filedByAReply(id)), id)
 }
 
-/** Read the agent's approvals list once a reply filed a Calendar request, so its card shows in Ask Alpha. */
-export const relistRequests = effect {
-  try listRequests()
+/** Read the agent's approvals list once a reply filed the Calendar requests `filed`, so the card holds one of them, while no change is under way, and shows in Ask Alpha. */
+export effect function relistRequests(filed: ReadonlyArray<string>): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore) {
+  try listRequests(filed)
   tellAskAlpha(try (try Changes.Machine).get())
 }
 

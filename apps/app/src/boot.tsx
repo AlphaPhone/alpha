@@ -126,9 +126,9 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
   const calendarReviews = Layer.succeed(CalendarReviews, {
-    relist: () => Effect.tryPromise(async () => {
+    relist: (filed) => Effect.tryPromise(async () => {
       const [{ default: calendar }, { relistRequests }] = await Promise.all([import("./calendar/index.tsx"), import("./calendar/agent.vibe")]);
-      await calendar.runtime(alpha).runPromise(relistRequests);
+      await calendar.runtime(alpha).runPromise(relistRequests(filed));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
   // The resident's Settings pages read StartupSignIn, and StartupSignIn is built over the resident's own machines

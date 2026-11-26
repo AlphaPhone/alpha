@@ -9,10 +9,11 @@ export interface Filed {
   readonly request: string;
 }
 
-/** The requests replies filed, and what the agent's calendar has to show of them in Ask Alpha. */
+/** The requests replies filed, what the agent's calendar has to show of them in Ask Alpha, and the request its card holds. */
 export interface Asked {
   readonly filed: ReadonlyArray<Filed>;
   readonly shown: InAskAlpha;
+  readonly request: string | undefined;
 }
 
 /** One action a reply ran, as the agent reports it. */
@@ -29,22 +30,27 @@ export function filedRequests(ran: ReadonlyArray<Ran>): string[] {
   });
 }
 
-const store = externalStore<Asked>({ filed: [], shown: "NothingToShow" });
+const store = externalStore<Asked>({ filed: [], shown: "NothingToShow", request: undefined });
 
 /** What Ask Alpha shows of the agent's Calendar requests, as a store its screen reads, and Calendar tells. */
 export const asked = {
   snapshot: store.snapshot,
   subscribe: store.subscribe,
-  /** Keep the requests the Calendar action filed in the reply `message` of `conversation`; whether it filed one. @throws {never} */
-  file(conversation: number, message: string, ran: ReadonlyArray<Ran>): boolean {
+  /** Keep the requests the Calendar action filed in the reply `message` of `conversation`; the ids it filed. @throws {never} */
+  file(conversation: number, message: string, ran: ReadonlyArray<Ran>): string[] {
     const now = store.snapshot();
     const ids = filedRequests(ran);
     const added = ids.filter((request) => !now.filed.some((one) => one.request === request)).map((request) => ({ conversation, message, request }));
     if (added.length > 0) store.set({ ...now, filed: [...now.filed, ...added] });
-    return ids.length > 0;
+    return ids;
   },
-  /** Calendar says what it has to show. @throws {never} */
-  show(shown: InAskAlpha): void {
-    if (store.snapshot().shown !== shown) store.set({ ...store.snapshot(), shown });
+  /** Whether a reply filed `request`. @throws {never} */
+  filedByAReply(request: string | undefined): boolean {
+    return request !== undefined && store.snapshot().filed.some((one) => one.request === request);
+  },
+  /** Calendar says what it has to show, and which request its card holds. @throws {never} */
+  show(shown: InAskAlpha, request: string | undefined): void {
+    const now = store.snapshot();
+    if (now.shown !== shown || now.request !== request) store.set({ ...now, shown, request });
   },
 };
