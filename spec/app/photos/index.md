@@ -157,6 +157,9 @@ pure val weight_startSelect = 2
 pure val weight_toggle = 2
 pure val weight_chooseAlbum = 4
 pure val weight_addTo = 4
+pure val weight_trashSelected = 3
+pure val weight_sendNext = 3
+pure val weight_changed = 3
 ```
 
 ## Story: Choose an image in the browser

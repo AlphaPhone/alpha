@@ -60,6 +60,9 @@ pure val accountValues = Set(-1, 1, 2)
 pure val nowValues = Set(0, 30, 100, 1000)
 pure val addressValues = Set("", "owner@example.com", "+14155550100", "415-555-0100", "+442079460958", " ()- . ")
 pure val codeValues = Set("123456")
+pure val weight_methods = 3
+pure val weight_chooseGoogle = 4
+pure val weight_returned = 6
 pure val weight_sent = 10
 pure val weight_verified = 10
 ```

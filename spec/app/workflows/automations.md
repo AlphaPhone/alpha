@@ -77,6 +77,20 @@ pure val minutesValues = Set(0, 15, 1441)
 pure val workflowValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
 pure val rowValues = Set(0, 1, 2)
+pure val weight_readAutomations = 2
+pure val weight_automationsRead = 3
+pure val weight_openEditor = 2
+pure val weight_editRow = 2
+pure val weight_pickPreset = 3
+pure val weight_toggleDay = 3
+pure val weight_setText = 2
+pure val weight_setTarget = 3
+pure val weight_reviewCreate = 3
+pure val weight_reviewChange = 2
+pure val weight_confirmChange = 3
+pure val weight_sendChange = 3
+pure val weight_changeAnswered = 2
+pure val weight_changeUnanswered = 3
 ```
 
 ### Changing the focused row closes its editor and actions when no change is kept

@@ -95,9 +95,16 @@ pure val stepsValues = Set(
   List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 },
        { op: T::ReadAloud, id: 2, source: 1, text: 0, items: 0, span: T::FixedDates, days: 1 }),
 )
+pure val weight_openBuilder = 2
+pure val weight_offerRead = 3
+pure val weight_rename = 2
+pure val weight_addStep = 3
+pure val weight_reviewSave = 3
+pure val weight_confirmSave = 3
 pure val weight_saveUnanswered = 3
 pure val weight_checkSave = 3
 pure val weight_saveChecked = 3
+pure val weight_letGo = 3
 pure val weight_reviewResend = 3
 pure val weight_confirmResend = 3
 ```

@@ -76,7 +76,7 @@ pure val initial: Digests = {
 }
 
 pure val ticketValues = Set(1, 2, 3)
-pure val roundValues = Set(1, 2, 3, 4)
+pure val roundValues = 1.to(10)
 pure val idValues = Set(1, 2)
 pure val countValues = Set(-1, 0, 1, 2)
 pure val upToValues = Set(0, 1, 2, 3)

@@ -60,8 +60,8 @@ pure val initial: Schedules = {
   missed: 0, done: 0, runReview: V::unreviewed, occurrence: 0, runNow: Q::unasked,
 }
 
-pure val ticketValues = Set(1, 2, 3)
-pure val idValues = Set(1, 2)
+pure val ticketValues = Set(1, 2, 3, 4)
+pure val idValues = Set(1, 2, 3)
 pure val countValues = Set(-1, 0, 1)
 pure val missedValues = Set(0, 1, 2)
 pure val hourValues = Set(7, 24)
@@ -70,6 +70,20 @@ pure val zoneValues = Set(0, 1)
 pure val sourceValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
 pure val rowValues = Set(0, 1, 2)
+pure val weight_schedulesRead = 3
+pure val weight_openEditor = 2
+pure val weight_pickTemplate = 3
+pure val weight_pickSource = 3
+pure val weight_reviewChange = 2
+pure val weight_confirmChange = 3
+pure val weight_sendChange = 3
+pure val weight_changeAnswered = 3
+pure val weight_reviewRunNow = 2
+pure val weight_confirmRunNow = 3
+pure val weight_sendRunNow = 3
+pure val weight_runNowAnswered = 2
+pure val weight_runNowUnanswered = 3
+pure val weight_letGoRunNow = 3
 ```
 
 ### The panel opens and closes, and opening it reads the schedules for the owner signed in
