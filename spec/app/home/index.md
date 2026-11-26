@@ -299,7 +299,7 @@ pure def tryAgain(h: Home, shell: S::Shell): Moved = thenReadApps(List(), h, fal
 ### Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would
 
 The Sunday demo build's Home held its 13 apps and the Apps tile (Alpha
-45f6bed30, `apps/app/src/prototype/home-shell.ts:191-192`). Alpha's apps
+45f6bed30, `apps/app/src/prototype/home-shell.ts:193-194`). Alpha's apps
 that build did not have, Wallet, Telegram and Slack, start in Apps, beside
 the phone's own apps, until the owner adds them to Home.
 
