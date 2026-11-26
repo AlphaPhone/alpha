@@ -646,7 +646,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
     const drawnPage = <Shown runtime={runtime} alpha={alpha} common={shown === page ? common : { ...common, place: placeOn(state, shown) }} />;
     const key = `${shown}:${entered.returns}`;
     return shown === "Top" ? <Under key={key} covered={page !== "Top"}>{drawnPage}</Under>
-      : <Over key={key} inert={shown !== page} aria-hidden={shown !== page || undefined}>{drawnPage}</Over>;
+      : <Over key={key} inert={shown !== page} aria-hidden={shown !== page || undefined} className={entered.opened ? undefined : "motion-safe:animate-none"}>{drawnPage}</Over>;
   };
   return (
     <section aria-label="Settings" className="relative flex h-full min-h-0 flex-col">
