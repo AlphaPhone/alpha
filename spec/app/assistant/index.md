@@ -605,6 +605,10 @@ was recorded.
 type Found = Ended | Unended | Unrecorded | Unread
 type HistoryAnswer = MissingReply | MatchedReply | MatchedAbort | UnknownReply
 type HistoryEvidence = MissingMessage({ complete: bool }) | RecordedMessage({ answer: HistoryAnswer })
+pure val evidenceValues = Set(
+  MissingMessage({ complete: true }), MissingMessage({ complete: false }),
+  RecordedMessage({ answer: MissingReply }), RecordedMessage({ answer: MatchedReply }),
+  RecordedMessage({ answer: MatchedAbort }), RecordedMessage({ answer: UnknownReply }))
 pure def observedHistory(evidence: HistoryEvidence): Found = match evidence {
   | MissingMessage(row) => if (row.complete) Unrecorded else Unread
   | RecordedMessage(row) =>
