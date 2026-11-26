@@ -282,8 +282,11 @@ export function selectedDocuments(scene: FilesScene): Faked {
       attachmentSelected({ selectionId }) {
         const found = held(selectionId);
         if (!found) return Promise.reject(new Error("Access ended"));
-        const bytes = new TextEncoder().encode(scene.texts[found.path] ?? `The words of ${leaf(found.path)}`);
-        const dataBase64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
+        const raw = scene.texts[found.path] ?? `The words of ${leaf(found.path)}`;
+        const hasWideChar = Array.from(raw).some((ch) => (ch.codePointAt(0) ?? 0) > 0xff);
+        const dataBase64 = hasWideChar
+          ? btoa(Array.from(new TextEncoder().encode(raw), (byte) => String.fromCharCode(byte)).join(""))
+          : btoa(raw);
         return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64 });
       },
       describeSelected({ selectionId }) {

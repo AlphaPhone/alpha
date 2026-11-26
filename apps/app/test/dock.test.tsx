@@ -202,13 +202,13 @@ describe("Ask Alpha dock and shell navigation", () => {
     const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Resize chat']");
     expect(grabber).not.toBeNull();
     await act(async () => {
-      grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 500, pointerId: 1 }));
-      grabber?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 360, pointerId: 1 }));
+      grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, button: 0, clientY: 500, pointerId: 1 }));
+      grabber?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, isPrimary: true, button: 0, clientY: 360, pointerId: 1 }));
       await runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Dragging"))));
     });
     expect(section?.getAttribute("data-alpha-dragging")).toBe("true");
     await act(async () => {
-      grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 360, pointerId: 1 }));
+      grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, button: 0, clientY: 360, pointerId: 1 }));
       await runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Idle"))));
     });
     expect(section?.getAttribute("data-alpha-dragging")).toBeNull();

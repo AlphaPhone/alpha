@@ -1,4 +1,4 @@
-// spec/app/assistant/composer.md
+// spec/app/assistant/composer.md, "Story: Send what I wrote"
 import { registered } from "../platform/device.vibe"
 
 module bridge {

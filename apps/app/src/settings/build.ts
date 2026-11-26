@@ -10,5 +10,6 @@ export function development(): boolean {
 
 /** The version this build of Alpha names, and the mode it was built in, for the diagnostics it exports. @throws {never} */
 export function versions(): { readonly app: string; readonly mode: string } {
-  return { app: import.meta.env.VITE_ALPHA_VERSION ?? "development", mode: import.meta.env.MODE };
+  const app: unknown = import.meta.env.VITE_ALPHA_VERSION;
+  return { app: typeof app === "string" && app.length > 0 ? app : "development", mode: import.meta.env.MODE };
 }

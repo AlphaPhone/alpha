@@ -1091,7 +1091,9 @@ const looked = started(effect {
 }, "telling the screen")
 
 // spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
-const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))
+const left = applying(Chats.Machine, (chats) => chats.chosen, effect () => {
+  try contained((try Conversation.Machine).send({ type: "leave" }), "leaving the previous conversation")
+})
 
 // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
 const opening = following(Composer.Machine, (composer) => (composer.slot === "Closed" && composer.read.status !== "Loading" ? composer.binding : undefined), Composer.Machine, (binding): Composer.Event | undefined => (binding === undefined ? undefined : { type: "open" }))

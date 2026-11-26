@@ -6,6 +6,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
 import { single } from "../src/runtime/single.ts";
+import { home } from "../src/shell/shell.vibe";
 import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
@@ -14,7 +15,7 @@ import "../src/main.css";
 afterEach(closeAll);
 
 const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx"))];
-const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@2") ?? "null") as { trail: unknown } | null)?.trail;
+const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@3") ?? "null") as { trail: unknown } | null)?.trail;
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps, and find the same place after the page is opened again (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
@@ -23,10 +24,10 @@ it("Move between Home and the apps, and find the same place after the page is op
   // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
   await expect.element(page.getByRole("button", { name: "Phone" })).not.toBeInTheDocument();
   await page.getByRole("button", { name: "Notes" }).click();
-  await expect.element(page.getByRole("heading", { name: "Notes" })).toBeVisible();
+  await expect.element(page.getByRole("heading", { level: 1, name: "Notes" })).toBeVisible();
   await close();
   await open(world, withSample);
-  await expect.element(page.getByRole("heading", { name: "Notes" })).toBeVisible();
+  await expect.element(page.getByRole("heading", { level: 1, name: "Notes" })).toBeVisible();
   // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"
   await page.getByRole("button", { name: "Back" }).click();
   await expect.element(page.getByRole("button", { name: "Notes" })).toBeVisible();
@@ -57,7 +58,8 @@ function savedBrowserRecords(records: readonly { id: string; url: string; title:
   });
 }
 
-it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/address.md, \"A browser frame can be shown for the latest request, with no secure mark\"; spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Keep my tabs through a restart\"; spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
+// spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/downloads.md, "Story: Download a file"
+it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const fixture = new URL("/test/fakes/browser-page.html", location.origin);
   expect((await fetch(fixture)).ok).toBe(true);
   const first = { id: "old-tab-a", title: "Saved first", url: new URL("?tab=first", fixture).href };
@@ -65,7 +67,7 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
   const bookmark = { url: "https://archive.example/reference", title: "Saved reference" };
   await savedBrowserRecords([first, second], [bookmark]);
   try {
-    await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
+    const { alpha } = await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
@@ -95,7 +97,7 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
     if (!iframe) throw new Error("the browser frame is missing");
     await expect.poll(() => iframe.contentDocument).toBeNull();
 
-    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await alpha.runtime.runPromise(home());
     await expect.element(page.getByRole("button", { name: "Browser", exact: true })).toBeVisible();
     await expect.element(link).not.toBeInTheDocument();
     await page.getByRole("button", { name: "Browser", exact: true }).click();

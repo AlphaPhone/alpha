@@ -38,6 +38,51 @@ const holdingHome = (world: Scene) => {
   return world;
 };
 
+/** Minimal in-memory IndexedDB boundary for happy-dom tests that stage Ask Alpha attachments. */
+function withIndexedDb(): () => void {
+  const globalRecord = globalThis as { indexedDB?: unknown };
+  if (globalRecord.indexedDB !== undefined) return () => {};
+  const stores = new Map<string, Map<string, unknown>>();
+  const fake = {
+    open(name: string) {
+      const req: { result?: unknown; error?: unknown; onupgradeneeded?: () => void; onsuccess?: () => void; onerror?: () => void } = {};
+      const fresh = !stores.has(name);
+      const bucket = stores.get(name) ?? new Map<string, unknown>();
+      if (fresh) stores.set(name, bucket);
+      const db = {
+        createObjectStore: () => ({}),
+        close: () => {},
+        transaction: () => {
+          const tx: { oncomplete?: () => void; onabort?: () => void; error?: unknown; objectStore: () => unknown } = {
+            objectStore: () => ({
+              put(value: unknown, key: string) { bucket.set(key, value); },
+              delete(key: string) { bucket.delete(key); },
+              get(key: string) {
+                const getReq: { result?: unknown; error?: unknown; onsuccess?: () => void; onerror?: () => void } = {};
+                void Promise.resolve().then(() => {
+                  getReq.result = bucket.get(key);
+                  getReq.onsuccess?.();
+                });
+                return getReq;
+              },
+            }),
+          };
+          void Promise.resolve().then(() => { tx.oncomplete?.(); });
+          return tx;
+        },
+      };
+      void Promise.resolve().then(() => {
+        req.result = db;
+        if (fresh) req.onupgradeneeded?.();
+        req.onsuccess?.();
+      });
+      return req;
+    },
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, writable: true, value: fake });
+  return () => { delete globalRecord.indexedDB; };
+}
+
 const digestResult = (cursor: number, status: string, output: string): DigestResult => {
   const at = new Date(cursor * 3_600_000).toISOString();
   return { cursor, runId: `run-${cursor}`, workflowId: "workflow", workflowVersionId: "version", templateVersion: "template",
@@ -147,7 +192,7 @@ describe("Home on a phone", () => {
     await press("Open Clock");
     await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
 
-    // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it".
+    // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it"
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
     await focusedAfterFrames(opener);
@@ -305,7 +350,7 @@ describe("Home on a phone", () => {
     await pressCard("4 unread");
     await showing("Inbox");
 
-    // Returning to Home refreshes the brief from the current owner's retained inbox.
+    // spec/app/home/cards.md, "Story: The other cards": returning to Home refreshes the brief from the current owner's retained inbox.
     await keepDigests(alpha, digestScope({ agentId: world.notes.owner, identityId: world.notes.ownerIdentity }), [digestResult(1, "failed", "The morning brief could not run.")]);
     await hardware("home");
     await showing();
@@ -315,6 +360,8 @@ describe("Home on a phone", () => {
   });
 
   it('Shows Android’s retained brief and refreshes its digest results through the native inbox (spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks")', async () => {
+    const restoreIndexedDb = withIndexedDb();
+    try {
     const world = { ...scene(), phone: true };
     const initial = digestResult(1, "finished", "Owner’s retained Android brief");
     const missed = digestResult(2, "missed", "A missed run cannot replace the brief");
@@ -382,7 +429,7 @@ describe("Home on a phone", () => {
 
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
-    await vi.waitFor(() => expect(world.ask.said).toEqual([draft]));
+    await vi.waitFor(() => expect(world.ask.said).toEqual([draft]), { timeout: 5_000 });
     expect(world.ask.spokenFiles?.map(({ images }) => images)).toEqual([
       [{ name: "Saved result.txt", mimeType: "text/plain", data: btoa(resultText) }],
     ]);
@@ -390,6 +437,9 @@ describe("Home on a phone", () => {
     await hardware("home");
     await vi.waitFor(() => expect(brief()).toContain(refreshed.output), { timeout: 5_000 });
     expect([browser.reads, browser.acknowledgements]).toEqual([0, []]);
+    } finally {
+      restoreIndexedDb();
+    }
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"

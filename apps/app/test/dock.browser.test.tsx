@@ -73,8 +73,8 @@ describe("Ask Alpha dock", () => {
 
     const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
     expect(grabber).not.toBeNull();
-    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
-    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
+    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, button: 0, clientY: 760, pointerId: 2, pointerType: "touch" }));
+    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, button: 0, clientY: 760, pointerId: 2, pointerType: "touch" }));
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
   });

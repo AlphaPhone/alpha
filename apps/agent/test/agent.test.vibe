@@ -22,9 +22,12 @@ function phoneAgent(run: Run, state: string) {
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
 
 /** A concrete path that probes route admission without targeting an existing record outside the test conversation. */
-const filled = (route: string, conversation: ConversationRecord) => {
+const filled = (route: string, conversation: ConversationRecord, taskId?: string, triggerId?: string) => {
+  const id = route.startsWith("/api/scheduled-tasks/") && taskId !== undefined ? taskId
+    : route.startsWith("/api/triggers/") && triggerId !== undefined ? triggerId
+    : conversation.id
   const path = route
-    .replace("{id}", conversation.id)
+    .replace("{id}", id)
     .replace("{roomId}", conversation.roomId)
     .replace("{eventId}", "no-such-event")
     .replace("{nodeId}", "review")
@@ -45,6 +48,8 @@ schema Listed { conversations: { id: string }[] }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
+schema ProbeReminder { item: { id: string; agentTaskId: string | null } }
+schema ProbeTrigger { trigger: { id: string } }
 
 describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, the local speech module, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action"
@@ -98,9 +103,16 @@ describe("Run Alpha's agent on the phone", () => {
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
       try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
+      const probeReminder = try promise(() => call(first, "POST", "/api/alpha/reminders/items", { title: "Route probe", dueDate: "2026-12-31" }))
+      const probed = try Schema.decodeUnknownEffect(Schema.fromJsonString(ProbeReminder))(probeReminder.body)
+      const probeTaskId = probed.item.agentTaskId ?? undefined
+      const probeTrigger = try promise(() => call(first, "POST", "/api/triggers", {
+        kind: "prompt", displayName: "Route probe", instructions: "Route probe", timezone: "UTC",
+        triggerType: "once", scheduledAtIso: "2026-12-31T00:00:00.000Z", wakeMode: "inject_now", enabled: false,
+      }))
+      const probedTrigger = try Schema.decodeUnknownEffect(Schema.fromJsonString(ProbeTrigger))(probeTrigger.body)
       for (const route of try Effect.try(() => listed())) {
-        if (route.path === "/api/triggers/{id}/runs") continue
-        const target = filled(route.path, opened)
+        const target = filled(route.path, opened, probeTaskId, probedTrigger.trigger.id)
         const status = route.stream === true
           ? try promise(async () => {
             const streamed = await runtime.stream(target, { text: "Again." })

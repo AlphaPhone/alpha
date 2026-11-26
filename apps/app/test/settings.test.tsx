@@ -74,8 +74,8 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("General");
     await hardware("back");
     // spec/app/settings/index.md, "Each page links to what another area owns there": the Account row and sheet read the signed-in account and Back returns to Settings.
-    await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
-    await press("Account");
+    await vi.waitFor(() => expect(button(/^Account/)?.textContent).toContain(account.email));
+    await press(/^Account/);
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
@@ -85,14 +85,14 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
 
     world.signedIn = false;
-    await press("Account");
+    await press(/^Account/);
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     expect(document.querySelector('[aria-label="Cloud plan"]')).toBeNull();
     await press("Close Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
+    await vi.waitFor(() => expect(button(/^Account/)?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.

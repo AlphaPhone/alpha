@@ -128,7 +128,22 @@ module page {
     const whole = review.getBoundingClientRect()
     if (whole.width <= 0 || whole.height <= 0 || whole.top < 0 || whole.left < 0 || whole.bottom > window.innerHeight || whole.right > window.innerWidth) return false
     const at = send.getBoundingClientRect()
-    return send.contains(document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2))
+    const cx = at.left + at.width / 2
+    const cy = at.top + at.height / 2
+    if (!send.contains(document.elementFromPoint(cx, cy))) return false
+    const root = Array.from(document.body.children).find((child) => child.contains(review))
+    const reviewZ = Number.parseInt(getComputedStyle(review).zIndex, 10) || 0
+    for (const child of Array.from(document.body.children)) {
+      if (child === root || child.contains(review) || review.contains(child)) continue
+      const style = getComputedStyle(child)
+      if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity) === 0) continue
+      if (style.position !== "fixed" && style.position !== "absolute") continue
+      const box = child.getBoundingClientRect()
+      if (cx < box.left || cx > box.right || cy < box.top || cy > box.bottom) continue
+      const z = Number.parseInt(style.zIndex, 10) || 0
+      if (z >= reviewZ) return false
+    }
+    return true
   }
 }
 import { sendShowing } from page

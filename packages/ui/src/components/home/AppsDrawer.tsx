@@ -4,7 +4,6 @@ import { Button } from "../Button.tsx";
 import { AppTile } from "../AppTile.tsx";
 import { Input } from "../Input.tsx";
 import { cn } from "../../lib/cn.ts";
-import { useLayerRef } from "../../lib/layers.tsx";
 import { dockClearance } from "../../lib/styles.ts";
 import { HomeAppMenu, type HomeAppMenuProps } from "./HomeAppMenu.tsx";
 import { type HomeNoticeMessage, HomeNotice } from "./HomeNotice.tsx";
@@ -129,14 +128,11 @@ export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, 
   const entries = useMemo(() => matches(apps, query), [apps, query]);
   const reading = catalog === "reading";
   const failed = catalog === "unavailable";
-  const layerRef = useLayerRef("SheetLayer");
   const drawerRef = useCallback((node: HTMLElement | null) => {
-    const cleanup = layerRef(node);
     if (node && !node.contains(node.ownerDocument.activeElement)) {
       node.querySelector<HTMLElement>("h1")?.focus();
     }
-    return cleanup;
-  }, [layerRef]);
+  }, []);
   return (
     <section ref={drawerRef} data-alpha-apps-drawer="" role="dialog" aria-modal="true" aria-label="Apps"
       className="absolute inset-0 z-sheet flex min-h-0 flex-col bg-background pt-[max(--spacing(11),var(--alpha-safe-top))] text-foreground"

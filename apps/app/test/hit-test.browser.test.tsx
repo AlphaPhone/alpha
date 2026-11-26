@@ -114,11 +114,11 @@ describe("Browser hit-test", () => {
     const start = centerOf(grabber!);
     expect(hitAtCenter(grabber!)).toContain(grabber!);
 
-    grabber!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: start.x, clientY: start.y, pointerId: 7, pointerType: "touch" }));
-    for (const dy of [-40, -100, -180, -260]) {
-      grabber!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: start.x, clientY: Math.max(20, start.y + dy), pointerId: 7, pointerType: "touch" }));
+    grabber!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, button: 0, clientX: start.x, clientY: start.y, pointerId: 7, pointerType: "touch" }));
+    for (const nextY of [Math.max(20, start.y - 80), Math.max(20, start.y - 200), 100, 20]) {
+      grabber!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, isPrimary: true, button: 0, clientX: start.x, clientY: nextY, pointerId: 7, pointerType: "touch" }));
     }
-    grabber!.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: start.x, clientY: Math.max(20, start.y - 260), pointerId: 7, pointerType: "touch" }));
+    grabber!.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, button: 0, clientX: start.x, clientY: 20, pointerId: 7, pointerType: "touch" }));
 
     await expect.poll(() => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("full");
   });
@@ -138,8 +138,10 @@ describe("Browser hit-test", () => {
       const back = page.getByRole("button", { name: "Back" }).element();
       expect(hitAtCenter(back)).toContain(back);
 
-      const mapSurface = document.querySelector("canvas, [role=region][aria-label*='Map'], [data-alpha-map]");
-      expect(mapSurface !== null || document.querySelector("input, [role=searchbox]") !== null).toBe(true);
+      const search = page.getByRole("searchbox", { name: "Search Maps" });
+      await expect.element(search, { timeout: 15_000 }).toBeVisible();
+      expect(hitAtCenter(search.element())).toContain(search.element());
+      expect(document.querySelector("canvas, section[aria-label='Maps'], [role=region][aria-label*='Map'], [data-alpha-map]")).not.toBeNull();
       expect(uncaught).toEqual([]);
     } finally {
       window.removeEventListener("error", onError);

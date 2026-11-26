@@ -43,14 +43,14 @@ describe("Account", () => {
     const { alpha } = await openAlpha(world, only("home", "view:Settings", "overlay"));
     await press("Settings");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
-    await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
-    await press("Account");
+    await vi.waitFor(() => expect(button(/^Account/)?.textContent).toContain(account.email));
+    await press(/^Account/);
     await until(alpha, alpha.runtime, Layers.Machine, (s) => Layers.listed(s, "account"));
     const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain(shownBalance));
     await hardware("back");
     await until(alpha, alpha.runtime, Layers.Machine, (s) => !Layers.listed(s, "account"));
-    expect(button("Account")?.textContent).toContain(account.email);
+    expect(button(/^Account/)?.textContent).toContain(account.email);
   });
 });

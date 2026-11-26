@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, type Ref, use, useCallback, useId } from "react";
+import { createContext, type ReactNode, type Ref, use, useCallback, useId, useRef } from "react";
 
 /** The kind of floating layer registered with the host shell. */
 export type LayerKind = "SheetLayer" | "DialogLayer" | "MenuLayer";
@@ -61,20 +61,28 @@ function assignRef<T>(ref: Ref<T> | undefined, node: T | null): (() => void) | u
 }
 
 /** Registers a mounted layer element with `LayerObserverProvider` and merges an optional forwarded ref. */
-export function useLayerRef<T extends HTMLElement>(kind: LayerKind, forwarded?: Ref<T>): (node: T | null) => (() => void) | undefined {
+export function useLayerRef<T extends HTMLElement>(kind: LayerKind, forwarded?: Ref<T>): (node: T | null) => void {
   const id = useId();
   const onLayerChange = use(LayerObserverContext);
+  const activeRef = useRef<{ node: T; dismiss: () => void; cleanup?: () => void } | null>(null);
   return useCallback((node: T | null) => {
-    const cleanForwarded = assignRef(forwarded, node);
-    if (!node || !onLayerChange) return cleanForwarded;
+    const current = activeRef.current;
+    if (node === current?.node) return;
+    if (current) {
+      activeRef.current = null;
+      onLayerChange?.({ id, kind, open: false, dismiss: current.dismiss });
+      current.cleanup?.();
+    }
+    if (!node) {
+      assignRef(forwarded, null);
+      return;
+    }
+    const cleanup = assignRef(forwarded, node);
     const dismiss = () => {
       const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
       node.dispatchEvent(event);
     };
-    onLayerChange({ id, kind, open: true, dismiss });
-    return () => {
-      onLayerChange({ id, kind, open: false, dismiss });
-      cleanForwarded?.();
-    };
-  }, [forwarded, id, kind, onLayerChange]);
+    activeRef.current = { node, dismiss, cleanup };
+    onLayerChange?.({ id, kind, open: true, dismiss });
+  }, [id, kind, onLayerChange, forwarded]);
 }

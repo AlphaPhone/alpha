@@ -58,5 +58,6 @@ it("Ask Alpha production assistant talks to eliza's agent and stops a stalled tu
   expect(button("Send")).toBeUndefined();
   await press("Stop reply");
   await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+  await until(alpha, runtime, Chats, (s) => s.page.status === "Loaded");
   expect(lines()).toContain("Take your time.");
 }, 300_000);

@@ -74,6 +74,7 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
     return
   }
   if (taker === "ByHold") return
+  if (try screens.take("ui-layer")) return
   const state = try shell.get()
   const view = state.trail.at(-1)
   if (try screens.take("assistant")) return

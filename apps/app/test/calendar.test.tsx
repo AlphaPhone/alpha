@@ -63,6 +63,27 @@ async function tap(text: string) {
 
 const chooseDate = () => press(`Choose date: ${document.querySelector("[data-host-chrome] h1")?.textContent ?? ""}`);
 
+/** The menu item whose accessible name is `name`, if one is shown. */
+const menuItem = (name: string) => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((found) => (found.getAttribute("aria-label") ?? found.textContent ?? "") === name);
+
+/** Open the event actions Radix menu. */
+async function openEventActions() {
+  const trigger = button("Event actions");
+  if (!trigger) throw new Error("no button Event actions");
+  await drawn(() => {
+    trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false, isPrimary: true }));
+    trigger.click();
+  });
+}
+
+/** Choose an item from the open Radix event actions menu. */
+async function chooseEventAction(name: string) {
+  await openEventActions();
+  const item = menuItem(name);
+  if (!item) throw new Error(`no menuitem ${name}`);
+  await drawn(() => item.click());
+}
+
 /** Open the month dialog under the title and choose `pill` there: a layout, or the Calendars sheet. */
 async function fromMonth(pill: string) {
   await chooseDate();
@@ -221,10 +242,12 @@ describe("on a phone", () => {
     world.calendar.lost = false;
     await tap("Gym");
     await until(alpha, runtime, View, (s) => s.open !== 0);
-    await press("Event actions");
-    expect(Boolean(button("Delete the series"))).toBe(false);
+    await openEventActions();
+    expect(Boolean(menuItem("Delete the series"))).toBe(false);
     // spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "Undo inside the window sends nothing, and shows the event again"
-    await press("Delete");
+    const deleteItem = menuItem("Delete");
+    if (!deleteItem) throw new Error("no menuitem Delete");
+    await drawn(() => deleteItem.click());
     await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
     expect(titles()).not.toContain("Gym");
     await press("Undo");
@@ -235,8 +258,7 @@ describe("on a phone", () => {
     await tap("Gym");
     await until(alpha, runtime, View, (s) => s.open !== 0);
     vi.useFakeTimers({ toFake: ["performance"] });
-    await press("Event actions");
-    await press("Delete");
+    await chooseEventAction("Delete");
     await later(alpha, 6_000);
     await later(alpha, 10_000);
     await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Sent");
@@ -496,14 +518,12 @@ describe("Calendar Wave 1 regressions", () => {
     // spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"
     await tap("Gym");
     await until(alpha, runtime, View, (s) => s.open !== 0);
-    await press("Event actions");
-    await press("Edit event");
+    await chooseEventAction("Edit event");
     await until(alpha, runtime, Editor, (e) => e.shown && e.form === "EditEvent");
     expect(document.querySelector("[data-alpha-subview=calendar-detail]")?.hasAttribute("inert")).toBe(true);
     await hardware("back");
     await until(alpha, runtime, Editor, (e) => !e.shown);
-    await press("Event actions");
-    await press("Delete");
+    await chooseEventAction("Delete");
     await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
     await until(alpha, runtime, View, (s) => s.open === 0);
     await press("Search events");
