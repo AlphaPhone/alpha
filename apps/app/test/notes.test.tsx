@@ -154,6 +154,22 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
   });
 
+  it("On the launcher the notes list draws no Back, a note keeps its own and Android's Back still leaves (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
+    await until(alpha, runtime, List, (s) => s.read.status === "Loaded");
+    await control("Open Groceries");
+    expect(button("Back")).toBeUndefined();
+    await press("Open Groceries");
+    await control("Back to notes");
+    await press("Back to notes");
+    await control("Open Groceries");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+  });
+
   it("Reviews a deleted note in a sheet and recovers it (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {
     const world = scene();
     world.now = Date.now();
@@ -472,12 +488,35 @@ describe("Notes", () => {
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe(question);
     await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
     await press("Send");
-    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([`Use the transcript of the selected voice note to answer this question.\n\n${question}`])));
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question])));
+    expect(world.ask.said[0]).not.toContain("Use the transcript");
+    expect(world.ask.said[0]).not.toContain("Four heights");
     expect(world.ask.metadata[0]).toMatchObject({
       observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
+      useSelectedVoiceNoteTranscript: true,
     });
     await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
     expect(button("Remove Design sync")).toBeUndefined();
+
+    // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+    await press("Back to notes");
+    await until(alpha, runtime, Voice, (state) => !state.showing);
+    await control("Open Design sync");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
+    await press("Ask Alpha about this transcript");
+    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    await fill("Message Alpha", "");
+    await until(alpha, runtime, Composer, (state) => state.away === "Free" && state.editor.transcript && !state.editor.text && state.draft.sync !== "Saving");
+    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected && state.observing);
+    await press("Send");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question, ""])));
+    expect(world.ask.metadata[1]).toMatchObject({
+      observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
+      useSelectedVoiceNoteTranscript: true,
+    });
+    await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
   });
 
   it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\"; spec/app/assistant/cards.md, \"The owner reviews the summary before it can be saved\")", async () => {

@@ -24,6 +24,10 @@ Reminders belong to the notices area: Calendar shows them among the events,
 as many as it is told of. Which app is showing, and Back between apps, belong
 to the [shell](../shell/).
 
+An event and the form rise over the days as Alpha's earlier build drew them,
+and the days stay under them as they were. Before Calendar has its first
+answer, it shows its header, never a blank screen or a spinner.
+
 ## Story: See my days
 
 > As the owner, I want one calendar of the events on my phone and in my

@@ -2,7 +2,7 @@
 import type { AgentPlugin, ModuleContext, ModuleFactory } from "@elizaos/agent-host";
 import { Effect } from "effect";
 import { clockActions, clockProvider, clockRoutes } from "./clock.ts";
-import { importLegacyStoreForRuntime, type LegacyStoreOpener } from "./legacy-import.ts";
+import { type CloudAccount, importLegacyStoreForRuntime, type LegacyStoreOpener, parseEarlierOwner } from "./legacy-import.ts";
 import { remindersAction, remindersProvider, remindersRoutes } from "./reminders.ts";
 import { AlphaAppsStore } from "./store.ts";
 import type { AgentRuntimeLike } from "./types.ts";
@@ -18,8 +18,9 @@ export function createAlphaAppsPlugin(options: {
   readonly store?: AlphaAppsStore;
   readonly earlierImport?: {
     readonly legacyStoreDir?: string;
+    readonly owner?: CloudAccount;
+    readonly account?: CloudAccount;
     readonly conversationWorldId?: string;
-    readonly embeddingDimensions?: number;
     readonly openLegacyStore?: LegacyStoreOpener;
   };
 } = {}): { readonly plugin: AgentPlugin; readonly store: AlphaAppsStore } {
@@ -38,13 +39,14 @@ export function createAlphaAppsPlugin(options: {
         sensitivity: "personal",
         cacheScope: "agent",
       });
-      if (options.earlierImport?.legacyStoreDir !== undefined && options.earlierImport.openLegacyStore !== undefined) {
+      if (options.earlierImport?.openLegacyStore !== undefined) {
         await importLegacyStoreForRuntime({
           legacyStoreDir: options.earlierImport.legacyStoreDir,
+          owner: options.earlierImport.owner,
+          account: options.earlierImport.account,
           stateDirectory: options.stateDirectory,
           runtime,
           conversationWorldId: options.earlierImport.conversationWorldId,
-          embeddingDimensions: options.earlierImport.embeddingDimensions,
           openLegacyStore: options.earlierImport.openLegacyStore,
         });
       }
@@ -58,16 +60,24 @@ export function createAlphaAppsPlugin(options: {
 
 /**
  * Hosted module factory builder for `runAgentCli`'s `hostModules`, binding the Alpha product plugin
- * to the agent's state directory and timezone. The earlier v121 import is off: `ALPHA_LEGACY_STORE_DIR`
- * is ignored until the import is bound to the v121 owner's account (alpha#1697 review, B1).
+ * to the agent's state directory and timezone, and the earlier store the phone passes to the account
+ * the launch names, so it is brought in only for its owner.
  * @public
  */
-export function alphaAppsModuleWith(_options: { readonly openLegacyStore?: LegacyStoreOpener } = {}): ModuleFactory<never> {
+export function alphaAppsModuleWith(options: { readonly openLegacyStore?: LegacyStoreOpener } = {}): ModuleFactory<never> {
   return (context: ModuleContext) => {
+    const environment = context.launch.environment;
     const { plugin } = createAlphaAppsPlugin({
       stateDirectory: context.stateDirectory,
       timeZone: context.timeZone,
       runtime: context.runtime,
+      earlierImport: {
+        legacyStoreDir: environment?.ALPHA_LEGACY_STORE_DIR,
+        owner: parseEarlierOwner(environment?.ALPHA_LEGACY_OWNER),
+        account: context.launch.account,
+        conversationWorldId: context.conversationOwner?.world,
+        openLegacyStore: options.openLegacyStore,
+      },
     });
     return Effect.succeed({ name: alphaAppsPluginName, plugin });
   };

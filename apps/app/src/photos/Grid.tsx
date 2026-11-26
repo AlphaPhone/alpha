@@ -329,7 +329,7 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
       onTouchStart={startPinch} onTouchMove={movePinch} onTouchEnd={clearPinch} onTouchCancel={clearPinch}>
       {groups.map(({ label, items, lines }, index) => (
         <section key={label} ref={index === 0 ? placeAnchor : undefined} aria-label={label || "Photos"}>
-          {label && <header className="sticky top-0 z-10 -mx-3 flex items-baseline justify-between gap-2 bg-background px-4 pt-2.5 pb-2"><h2 className="text-base font-semibold">{label}</h2><span className="text-xs text-muted-foreground">{items.length}</span></header>}
+          {label && <header className="sticky top-0 z-10 -mx-3 flex items-baseline justify-between gap-2 bg-background px-4 pt-2.5 pb-2"><h2 className="text-base font-semibold">{label}</h2></header>}
           {lines.map(({ line, members, index }) => {
             const first = line[0]?.number ?? 0;
             const present = (visibleLines === undefined ? index < thumbnailBatch : visibleLines === null || visibleLines.has(first))

@@ -1,4 +1,3 @@
-import { ChevronRight } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Avatar } from "../Avatar.tsx";
 import { AssistantCardRows, type AssistantCardFrameProps } from "./AssistantCardFrame.tsx";
@@ -30,7 +29,6 @@ export function AssistantDigestCard({ title, rows, onOpen, settled = false }: As
             <span className={cn("truncate text-sm font-semibold", settled && "text-muted-foreground")}>{row.who}</span>
             <span className="truncate text-caption text-muted-foreground">{row.text}</span>
           </span>
-          <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
         </span>
       ))}
     </AssistantCardRows>
