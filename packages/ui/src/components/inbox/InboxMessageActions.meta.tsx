@@ -35,7 +35,6 @@ export const meta: ComponentMeta<InboxMessageActionsProps> = {
       await userEvent.keyboard("{Escape}");
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     },
-    // v119 45f6bed30 prototype/template.html:966 and phone.css:1100: the reader menu's Ask Alpha is the thin-lined mark at 20px, in the row's colour.
     Compact: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await userEvent.click(within(canvasElement).getByRole("button", { name: "More actions" }));
       const ask = await screen.findByRole("menuitem", { name: "Ask Alpha" });
