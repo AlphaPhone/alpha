@@ -41,6 +41,7 @@ import type { ContactAddresses, Incoming } from "./adding.vibe";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import { type Beginning, Letters, begin, openGmailDraft } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
+import { gmailAuthorizationWindow } from "./authorization.vibe";
 import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
@@ -420,6 +421,11 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
   const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;
+  const route = shell.state?.route;
+  const connectGmail = route === undefined ? undefined : () => {
+    const popup = gmailAuthorizationWindow();
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.connect(route, popup)));
+  };
   const hidden = new Set(changes.state ? aside(changes.state) : []);
   const letters = mail.shown(state).filter(({ message: number }) => !hidden.has(number));
   const { account, folder, query } = state.selected;
@@ -565,9 +571,9 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
             if (text !== "") signIn();
           } : undefined}
           notice={notice}
-          onNoticeAction={notice === "reconnect" ? signIn : retryList}
+          onNoticeAction={notice === "reconnect" ? state.failure === "Revoked" ? connectGmail : signIn : retryList}
           state={mustChoose ? undefined : kind}
-          onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
+          onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : connectGmail}
           chosen={draftsFolder ? shelf.picks.length : state.chosen.length}
           onStartSelection={draftsFolder
             ? !state.saved && readable(state) && drafts.can(startDrafts, "Owner") ? () => void drafts.send(startDrafts, "Owner") : undefined

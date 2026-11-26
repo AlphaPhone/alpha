@@ -210,6 +210,14 @@ effect function openStripe(url: string, host: "checkout.stripe.com" | "invoice.s
 export const openCloudCheckout = (url: string) => openStripe(url, "checkout.stripe.com")
 export const openCloudInvoice = (url: string) => openStripe(url, "invoice.stripe.com")
 
+/** Open the Google consent page returned by the authenticated Cloud. */
+export effect function openGoogleAuthorization(url: URL): boolean!! {
+  return effect {
+    try tryPromise(() => client().openExternal({ url: url.href, environment: CLOUD_ENVIRONMENT }))
+    return true
+  } catch () => false
+}
+
 /**
  * The cloud on the phone, through the `ElizaCloud` plugin of eliza's Android package: eliza's `cloudClient()` of
  * `@elizaos/os-bridges`, sent only while Android has not said the phone is offline.

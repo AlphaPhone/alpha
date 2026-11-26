@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as List } from "../gen/app__inbox.effect.vibe";
 import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
 import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
@@ -13,7 +14,7 @@ import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { useInEmail } from "../src/inbox/suggestion.vibe";
 import inbox from "../src/inbox/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { Effect } from "effect";
 import { Letters, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
@@ -91,11 +92,12 @@ async function openInbox(world: Scene) {
 }
 
 it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, \"Story: Hear about new mail\"; spec/app/inbox/notices.md, \"Story: Open my message from a notice\"; spec/app/inbox/notices.md, \"Ask Alpha from a notice checks the same email again before spending the tap\")", async () => {
-  const world = { ...scene(), phone: true };
+  const world = { ...scene(), phone: true, image: true };
   const notices: InboxNoticeScene = { spent: [], released: [] };
   world.inbox.notices = notices;
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
+  await until(alpha, alpha.runtime, Conversation, ({ ready, support }) => ready && support.status === "Loaded");
   await afterDraw(() => expect(notices.selection?.grantId).toBe(world.inbox.google?.connection));
   const selection = notices.selection;
   if (!selection || !notices.enter) throw new Error("No native mail watch");
@@ -403,7 +405,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const history = String(world.inbox.history);
     await action("More messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
-    expect([title(), told()]).toEqual(["Revised term sheet", expect.stringContaining(termSheet.body)]);
+    expect([title(), told()]).toEqual(["Revised term sheet", expect.stringContaining("Attached is the revised term sheet")]);
     await action("Earlier messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
     expect([title(), world.inbox.threadReads.slice(-2)]).toEqual(["Earlier lunch plan", [{ offset: 1, history }, { offset: 0, history }]]);
@@ -479,8 +481,10 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 });
 
-it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
+it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\"; spec/app/inbox/index.md, \"The owner authorizes Gmail in Google and Inbox checks access on return\")", async () => {
   const world = { ...scene(), phone: true };
+  const consent = { authUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=alpha-fixture", requests: [] as string[][], opened: [] as string[] };
+  world.inbox.consent = consent;
   world.inbox.google = undefined;
   world.inbox.offline = true;
   world.signedIn = false;
@@ -511,15 +515,21 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await press("Try again");
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 0);
   expect(told()).toContain("Connect Gmail");
+  await press("Connect Gmail");
+  const mailScopes = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.drafts", "google.gmail.mailbox"];
+  await afterDraw(() => expect([consent.requests, consent.opened, rows()]).toEqual([[mailScopes], [consent.authUrl], []]));
 
   // spec/app/inbox/index.md, "Mail is read only while signed in, for a selected account whose grant allows reading, and not once Google refused it as withdrawn"
-  world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity"] };
-  await alpha.back();
-  await openInboxFromHome(alpha);
+  world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity", "google.calendar.read"] };
+  await seen(false);
+  await seen(true);
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 1);
   await drawn(() => [...document.querySelectorAll("button")].find((one) => one.textContent?.includes("owner@gmail.test"))?.click());
   await until(alpha, runtime, List, (s) => s.selected.account !== 0);
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
+  await press("Give access");
+  await afterDraw(() => expect([consent.requests.at(-1), consent.opened, rows()])
+    .toEqual([[...mailScopes, "google.calendar.read"], [consent.authUrl, consent.authUrl], []]));
 
   // spec/app/platform/index.md, "A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": on a phone signed in before mail leases existed, opening Inbox, twice, keeps the draft, the accounts and the owner's session, and asks to sign in.
   const draft = { ...nothing, subject: "Kept through the lease" };
