@@ -197,14 +197,8 @@ without that code keep their own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
 removes its bubble. Stop keeps what was shown, which is only settled text:
 a reply stopped before any of its text settled keeps no bubble. The
-conversation's check of a stopped reply owns the only notice. Read again
-from history it keeps no bubble either: eliza stores such a reply as
-aborted, with the provisional text it had and the cause `stop`, and
-neither that text nor a failure notice is drawn for it. A reply whose
-stream Alpha closed before it was stored (the cause `client_left`: a
-limit on the stream, a reload, or a Stop whose stream closed first) says
-only that it did not finish, never its provisional text. A reply the
-runtime ended or a restart cut reads as before.
+conversation's check of a stopped reply owns the only notice. How such a
+reply reads again from history is the rule below.
 
 ```quint
 type Failure = CredentialInvalid | InsufficientCredits | LimitReached | ProviderIssue | TimedOut
@@ -237,6 +231,55 @@ pure def sometimesStoppedMidReply(r: Reply): bool = r.stopped and r.shown >= 1
 pure def sometimesAReplyIsDeclined(r: Reply): bool = r.status == Ignored
 
 pure def sometimesAFailureReplacesTheText(r: Reply): bool = r.status == Interrupted and not(r.stopped) and r.shown == 0 and r.acks == 1
+```
+
+### Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays
+
+eliza stores a reply that ended early as aborted, with the text it had and
+the cause of its end: `stop` when a Stop reached the turn first, and
+`client_left` when the stream that carried it closed first. Alpha's own
+Stop closes the reply's stream before it posts the Stop, so eliza names
+that Stop `client_left` too, the same as a stream closed by the bridge's
+time or idle limit, a lost connection, or a reload of Alpha. So Alpha
+remembers, for as long as it runs, each turn the owner stopped and whether
+any of its text had settled by then. Read again, an aborted reply whose
+turn the owner stopped here before any text settled keeps no bubble: its
+text was never shown, and the conversation's check owned the only notice.
+One whose turn the owner stopped here after text settled keeps the text
+eliza stored, which is that settled text, with the notice that it did not
+finish (eliza may store a reply's settled text before it stores the
+reply). Any other aborted reply with the cause `stop` or `client_left`
+says only that it did not finish, never the text eliza stored, which was
+never shown: a dropped stream, a Stop from another device, or the owner's
+Stop before Alpha last started. v119 likewise drew its failure line in
+place of an aborted reply's text. One the runtime ended or a restart cut
+reads as before, its text with the notice.
+
+```quint
+type HistoryLine = NoBubble | NoticeOnly | TextAndNotice
+
+pure def stoppedBeforeSettled(r: Reply): bool = r.stopped and r.shown == 0
+
+pure def readAgainAborted(cause: str, stoppedHere: bool, settledHere: bool): HistoryLine =
+  if (not(cause == "stop" or cause == "client_left")) TextAndNotice
+  else if (not(stoppedHere)) NoticeOnly
+  else if (settledHere) TextAndNotice
+  else NoBubble
+
+pure val causeValues = Set("stop", "client_left", "runtime", "restart", "")
+
+pure def lawAStopOrDropNotSeenHereShowsOnlyTheNotice(cause: str, settledHere: bool): bool =
+  (cause == "stop" or cause == "client_left") implies readAgainAborted(cause, false, settledHere) == NoticeOnly
+
+pure def lawAnOwnerStopBeforeSettledTextKeepsNoBubble(cause: str): bool =
+  (cause == "stop" or cause == "client_left") implies readAgainAborted(cause, true, false) == NoBubble
+
+pure def lawTextThatSettledBeforeAStopStays(cause: str): bool = readAgainAborted(cause, true, true) == TextAndNotice
+
+pure def lawOnlyAStopOrALeftStreamLosesItsText(cause: str, stoppedHere: bool, settledHere: bool): bool =
+  readAgainAborted(cause, stoppedHere, settledHere) != TextAndNotice implies (cause == "stop" or cause == "client_left")
+
+pure def lawSettledTextIsNeverRememberedAsUnsettled(r: Reply): bool = r.shown >= 1 implies not(stoppedBeforeSettled(r))
 ```
 
 ### A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again
