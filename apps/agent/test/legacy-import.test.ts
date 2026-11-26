@@ -8,7 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createAlphaAppsPlugin } from "../src/plugins/index.ts";
+import type { ModuleContext } from "@elizaos/agent-host";
+import { Effect } from "effect";
+import { alphaAppsModuleWith, createAlphaAppsPlugin } from "../src/plugins/index.ts";
 import {
   type EarlierSqlClient,
   importLegacyStore,
@@ -584,6 +586,43 @@ describe("Earlier v121 PGlite one-shot importer", () => {
       expect(openedCount).toBe(0);
       expect(await opened.adapter.getRoomsByIds([CHAT_ROOM_ID])).toEqual([]);
       expect((await opened.adapter.getCaches([LEGACY_IMPORT_MARKER_KEY])).size).toBe(0);
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+
+  it("is off: the hosted module ignores ALPHA_LEGACY_STORE_DIR and leaves an empty store empty (alpha#1697 review, B1)", async () => {
+    const { storage, openEarlier } = await loadElizaStorageTools();
+    const stateDir = makeTempDir("v4-import-off-state-");
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: stateDir,
+      persistMemory: true,
+      account: { userId: "someone-else", organizationId: "org-other" },
+      embeddingDimensions: 0,
+    });
+    try {
+      let openedCount = 0;
+      const factory = alphaAppsModuleWith({
+        openLegacyStore: (dir) => {
+          openedCount += 1;
+          return openEarlier(dir);
+        },
+      });
+      const context = {
+        runtime: {},
+        launch: { environment: { ALPHA_LEGACY_STORE_DIR: sharedFixtureDir }, embeddingDimensions: 0 },
+        stateDirectory: stateDir,
+        timeZone: "UTC",
+        conversationOwner: { world: CONVERSATION_WORLD_ID },
+      } as unknown as ModuleContext;
+      const hosted = Effect.runSync(factory(context));
+      await hosted.plugin.init?.({}, { agentId: opened.agentId, adapter: opened.adapter } as never);
+      expect(openedCount).toBe(0);
+      expect(await opened.adapter.getRoomsByIds([CHAT_ROOM_ID])).toEqual([]);
+      expect(await opened.adapter.getAllWorlds()).toEqual([]);
+      expect((await opened.adapter.getCaches([LEGACY_IMPORT_MARKER_KEY])).size).toBe(0);
+      expect(fs.readdirSync(stateDir).filter((name) => name.startsWith(".earlier-import-"))).toEqual([]);
+      expect(snapshotDirectory(sharedFixtureDir)).toEqual(sharedFixtureBefore);
     } finally {
       await opened.adapter.close();
     }

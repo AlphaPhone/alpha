@@ -59,6 +59,33 @@ public final class AlphaLegacyAgentArchiveTest {
     }
   }
 
+  @Test public void whileOffTheAppMovesNothingAndNeverPassesTheEarlierStoreToTheAgent() throws Exception {
+    assertFalse("the v121 import stays off until it is bound to the v121 owner's account", AlphaLegacyAgentArchive.ENABLED);
+    Path files = temp.newFolder("files").toPath();
+    Path elizaDb = Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));
+    writeUtf8(elizaDb.resolve("PG_VERSION"), "17\n");
+    Path vault = Files.createDirectories(files.resolve(".eliza/.vault-pglite"));
+    writeUtf8(vault.resolve("marker"), "vault-bytes");
+    Path agent = Files.createDirectories(files.resolve("agent"));
+    writeUtf8(agent.resolve("agent-bundle.js"), "legacy-bundle");
+    Files.createDirectories(files.resolve("agent-legacy/eliza-workspace/.elizadb"));
+
+    Outcome outcome = AlphaLegacyAgentArchive.atAppStart(files);
+    Map<String, String> variables = new LinkedHashMap<>();
+    AlphaLegacyAgentArchive.atLaunch(files, variables);
+
+    assertEquals(Move.NOTHING_TO_MOVE, outcome.workspace());
+    assertEquals(Move.NOTHING_TO_MOVE, outcome.vault());
+    assertNull(outcome.legacyStoreDir());
+    assertFalse(variables.containsKey(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV));
+    assertTrue(variables.isEmpty());
+    assertEquals("17\n", readUtf8(elizaDb.resolve("PG_VERSION")));
+    assertEquals("vault-bytes", readUtf8(vault.resolve("marker")));
+    assertEquals("legacy-bundle", readUtf8(agent.resolve("agent-bundle.js")));
+    assertFalse(Files.exists(files.resolve("agent-legacy/vault-pglite"), LinkOption.NOFOLLOW_LINKS));
+    assertFalse(Files.exists(files.resolve("agent-legacy/payload"), LinkOption.NOFOLLOW_LINKS));
+  }
+
   @Test public void movesWorkspaceVaultAndLegacyPayloadByAtomicRenamePreservingAccountDirs() throws Exception {
     Path files = temp.newFolder("files").toPath();
     Path elizaDb = Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));

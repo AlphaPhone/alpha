@@ -30,6 +30,13 @@ final class AlphaLegacyAgentArchive {
   static final String PAYLOAD_ARCHIVE_NAME = "payload";
   static final String LEGACY_BUNDLE_NAME = "agent-bundle.js";
 
+  /**
+   * Off: the app never moves the earlier store aside and never passes {@code ALPHA_LEGACY_STORE_DIR},
+   * until the import is bound to the v121 owner's account and a rollback to v121 still finds its store
+   * (alpha#1697 review, B1 and M6).
+   */
+  static final boolean ENABLED = false;
+
   private static final Pattern ACCOUNT_STATE_DIR = Pattern.compile("[0-9a-f]{64}");
   private static final Object LOCK = new Object();
 
@@ -73,10 +80,16 @@ final class AlphaLegacyAgentArchive {
     try {
       var files = context.getFilesDir();
       if (files == null) return EMPTY_OUTCOME;
-      return moveAside(files.toPath(), ATOMIC_MOVER);
+      return atAppStart(files.toPath());
     } catch (RuntimeException ignored) {
       return EMPTY_OUTCOME;
     }
+  }
+
+  /** What {@code AlphaApplication.onCreate} does with the app's files: nothing while {@link #ENABLED} is off. */
+  static Outcome atAppStart(Path filesDir) {
+    if (!ENABLED) return EMPTY_OUTCOME;
+    return moveAside(filesDir, ATOMIC_MOVER);
   }
 
   static Outcome moveAside(Path filesDir) {
@@ -141,10 +154,16 @@ final class AlphaLegacyAgentArchive {
     try {
       var files = context.getFilesDir();
       if (files == null) return;
-      prepareLaunch(files.toPath(), variables, ATOMIC_MOVER);
+      atLaunch(files.toPath(), variables);
     } catch (RuntimeException ignored) {
       // Never block or refuse agent launch on archive inspection.
     }
+  }
+
+  /** What {@code AlphaAgentService.configureLaunch} does with the launch: nothing while {@link #ENABLED} is off. */
+  static void atLaunch(Path filesDir, Map<String, String> variables) {
+    if (!ENABLED) return;
+    prepareLaunch(filesDir, variables, ATOMIC_MOVER);
   }
 
   static void prepareLaunch(Path filesDir, Map<String, String> variables) {
