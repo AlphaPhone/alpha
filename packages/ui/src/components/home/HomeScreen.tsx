@@ -21,6 +21,8 @@ export type HomeScreenProps = {
   covered?: boolean;
   /** The card rows remain visible while their controls cannot take input. */
   cardsInert?: boolean;
+  /** The separately owned app cards cannot take input while Ask is above Home. */
+  appCardsInert?: boolean;
   /** The Apps tile remains visible while it cannot take input. */
   drawerInert?: boolean;
   /** The launcher reserves the status bar above the Home cards. */
@@ -67,7 +69,7 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], appCards, tiles, editing = false, covered = false, cardsInert = false, drawerInert = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], appCards, tiles, editing = false, covered = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
@@ -78,7 +80,7 @@ export function HomeScreen({
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
         {cards.length > 0 ? <HomeCardRow inert={cardsInert || undefined} key={cards.map((card) => (isValidElement(card) ? card.key : "")).join(" ")}>{cards}</HomeCardRow> : null}
-        {appCards ? <HomeCardRow inert={cardsInert || undefined} aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
+        {appCards ? <HomeCardRow inert={appCardsInert || undefined} aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
           <HomeTileGrid

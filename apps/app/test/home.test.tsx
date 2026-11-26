@@ -163,7 +163,7 @@ describe("Home on a phone", () => {
     const world = holdingHome({ ...scene(), phone: true });
     const clock = "org.fixture.clock/org.fixture.clock.Main";
     localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: clock }]));
-    const { alpha } = await open(world, only("home", "assistant", "view:Notes"));
+    const { alpha } = await open(world, only("home", "assistant", "view:Notes", "view:Workflows"));
     const rotate = async (landscape: boolean) => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: landscape ? 844 : 390 });
       Object.defineProperty(window, "innerHeight", { configurable: true, value: landscape ? 390 : 844 });
@@ -261,6 +261,21 @@ describe("Home on a phone", () => {
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
     expect(document.querySelector("[data-alpha-detent=sheet]")).toBeNull();
+
+    // spec/app/home/cards.md, "A Workflows or Brief card beside the landscape Ask sheet opens Workflows from the same Home visit"
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0 && state.assistant === "Bar");
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    const workflow = () => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")]
+      .find((card) => card.textContent?.startsWith("Desk check"));
+    await vi.waitFor(() => expect(workflow()?.disabled).toBe(false));
+    expect(workflow()?.closest("[inert]")).toBeNull();
+    await drawn(() => workflow()?.click());
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Workflows" && state.assistant === "Bar");
+    expect(chat()).toBeNull();
+    await vi.waitFor(() => expect(button("Add to Workflows")).toBeDefined());
+    expect(world.workflows.admissions).toEqual([]);
   });
 
   it('Find an installed app in Apps (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {

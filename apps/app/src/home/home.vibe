@@ -173,7 +173,7 @@ effect function tell(fx: Out) {
   for (const listener of [...listeners]) listener()
 }
 
-effect function homeInput(beside: boolean) {
+export effect function homeInput(beside: boolean) {
   const canvas = try Canvas
   const layers = try Layers.Machine
   const device = try Device

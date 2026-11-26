@@ -344,8 +344,8 @@ The uncovered Home pane on a landscape phone can open one of Alpha's own
 apps. The same Shell route and layout must
 still admit that tap when the app opens. An actual covering layer, voice,
 a protected Android Ask visit, Typing, Full, and the Apps drawer still
-own their input. Cards stay visible without receiving input in this
-visit. The Apps tile follows the shell's drawer rule.
+own their input. The [cards](./cards.md) rule admits Workflows and Brief
+in this visit. The Apps tile follows the shell's drawer rule.
 
 ```quint
 pure def besideHomeSheet(shell: S::Shell, landscapePhone: bool): bool =

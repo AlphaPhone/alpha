@@ -61,9 +61,11 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
   const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
   const waits = useSyncExternalStore(waiting.subscribe, waiting.snapshot, waiting.snapshot);
-  const day = useDayCards(runtime, shell.state?.image ?? false);
   const h = home.state;
   const s = shell.state;
+  const landscapePhone = landscapeHomeInput(canvas);
+  const alongside = s !== undefined && Home.besideHomeSheet(s, landscapePhone);
+  const day = useDayCards(runtime, s, alongside);
   const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: false, now: untimed }, owner);
   const homeScroller = useCallback((node: HTMLDivElement | null) => {
     if (node && canPull) return watchHomePull(node, () => { void runtime.runPromise(openNotifications()); });
@@ -74,8 +76,6 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   }, [alpha]);
   if (!h || !s || h.host === "AssistantOnly") return null;
   const can = (event: Home.Event) => home.can(event, owner);
-  const landscapePhone = landscapeHomeInput(canvas);
-  const alongside = Home.besideHomeSheet(s, landscapePhone);
   const editVisible = Home.editSite(s, alongside) && homeEditFrame(canvas) && layers !== undefined && !pageInert(layers);
   const editing = h.editing && editVisible;
   const notice = inline && inline.place === Home.noticeAt(h, s, alongside) ? inline.notice : undefined;
@@ -120,7 +120,8 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
         ...tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing),
         inert: tile.tag === "Installed" && !h.editing && !Home.favoriteAt(h, tile.app, s, alongside),
       })) : undefined}
-      cardsInert={alongside}
+      cardsInert={s.assistant !== "Bar" && (!alongside || h.editing)}
+      appCardsInert={s.assistant !== "Bar"}
       drawerInert={s.assistant !== "Bar" && !alongside}
       covered={h.editing && !editVisible}
       editing={editing}
