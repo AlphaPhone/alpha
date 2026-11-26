@@ -39,8 +39,8 @@ Ask Alpha is raised to and every view it opens to the [shell](../shell/).
 The send is an [attempt](../../kit/attempt.md): recorded while its
 attachments are stored, sent, then confirmed once the agent is heard,
 refused when nothing left the phone, or unknown. A message typed in the
-composer comes under the composer's hold number; a prompt given by a card
-or another app has none. A reply is silent, streaming, complete, stopped by
+composer comes under the composer's hold number. A prompt from a card or another app
+has none and keeps its own reviewed files. A reply is silent, streaming, complete, stopped by
 the owner or broken off.
 
 ```quint
@@ -150,7 +150,7 @@ pure val holdValues = Set(0, 1, 2, 3)
 pure val promptValues = Set(0, 1, 2)
 pure val attachmentsValues = Set(0, 2)
 pure val dayValues = Set(0, 3)
-pure val showingValues = Set(Home).union(Set(App({ view: S::Calendar }))).union(Set(App({ view: S::Notes })))
+pure val showingValues = Set(Home).union(Set(App({ view: S::Calendar }))).union(Set(App({ view: S::Notes }))).union(Set(App({ view: S::Contacts })))
 pure val viewValues = Set(S::Calendar, S::Notes)
 pure val sourceValues = Set(List(), List(S::Calendar), List(S::Notes), List(S::Notes, S::Calendar), List(S::Files))
 pure val panelValues = Set(S::Bar, S::Sheet, S::Full)
@@ -225,7 +225,8 @@ pure def alwaysTheScreenIsToldOnlyToAnAgentThatTakesIt(c: Conversation): bool =
 ### A message is asked when the agent can be reached, the screen may be sent and no turn is in flight
 
 Asking never looks at what the composer holds. A message with attachments
-first has them stored; only a typed message carries attachments.
+first has them stored. The selected Contact can send its own reviewed files
+without taking anything from the ordinary composer.
 
 ```quint
 pure def askable(c: Conversation): bool = c.ready and not(c.context.sensitive) and not(inFlight(c.turn))
@@ -245,6 +246,26 @@ pure def ask(c: Conversation, hold: int, prompt: int, attachments: int): Moved =
   { state: asked,
     out: (if (attachments > 0) List(Upload({ ticket: ticket, attachments: attachments })) else List(post(ticket, asked)))
       .concat(if (prompt > 0) List(Prompted({ prompt: prompt, taken: true })) else List()) }
+```
+
+### A selected Contact can send the files its owner reviewed for that Contact
+
+The Contact keeps a separate draft. Confirming a choice only adds the files to
+that Contact. Pressing Send starts the same attachment storage and turn as the
+ordinary composer, with the Contact's current screen and its own prompt.
+
+```quint
+pure def selectedContact(c: Conversation): bool =
+  val shown = c.context.showing
+  c.context.selected and match shown { | Home => false | App(a) => a.view == S::Contacts }
+
+pure def canAskContactFiles(c: Conversation, prompt: int, attachments: int): bool =
+  askable(c) and selectedContact(c) and prompt > 0 and attachments > 0
+
+pure def askContactFiles(c: Conversation, prompt: int, attachments: int): Moved = ask(c, 0, prompt, attachments)
+
+pure def sometimesReviewedContactFilesWaitToBePosted(c: Conversation): bool =
+  selectedContact(c) and c.turn.hold == 0 and c.turn.attachments > 0 and c.turn.send.outcome == A::Recorded
 ```
 
 ### A message that cannot be asked is given back at once: a typed one to the composer, a card's prompt to its card
@@ -272,7 +293,7 @@ pure def stepEveryMessageAskedIsPostedOnce(before: Conversation, via: str, after
         and p.context == after.context and p.told == after.observing and not(p.context.sensitive)
     | _ => true
   })
-    and (via == "ask" implies after.turn.send.id == before.turn.send.id + 1)
+    and ((via == "ask" or via == "askContactFiles") implies after.turn.send.id == before.turn.send.id + 1)
 ```
 
 ### Every message and card prompt offered is taken or given back, once
@@ -280,7 +301,7 @@ pure def stepEveryMessageAskedIsPostedOnce(before: Conversation, via: str, after
 ```quint
 pure def stepEveryAskIsAnswered(before: Conversation, via: str, after: Conversation, out: List[Effect]): bool =
   out.every(e => match e {
-    | Prompted(p) => (via == "ask" and p.taken) or (via == "decline" and not(p.taken) and after == before)
+    | Prompted(p) => ((via == "ask" or via == "askContactFiles") and p.taken) or (via == "decline" and not(p.taken) and after == before)
     | _ => true
   })
     and (via == "decline" implies (after == before and out.length() == 1))
@@ -388,11 +409,15 @@ pure def alwaysAReplyIsAwaitedOnlyFromAnAgentInReach(c: Conversation): bool =
   inFlight(c.turn) implies c.ready
 ```
 
-### Only a typed message carries attachments
+### Only the held composer or a selected Contact starts a message with attachments
 
 ```quint
-pure def alwaysOnlyATypedMessageCarriesAttachments(c: Conversation): bool =
-  c.turn.attachments >= 0 and (c.turn.attachments > 0 implies c.turn.hold > 0)
+pure def alwaysAttachmentCountsAreNonnegative(c: Conversation): bool = c.turn.attachments >= 0
+
+pure def stepAttachmentsOnlyComeFromTheHeldComposerOrTheSelectedContact(before: Conversation, via: str, after: Conversation): bool =
+  (after.turn.send.id > before.turn.send.id and after.turn.attachments > 0) implies
+    ((via == "ask" and after.turn.hold > 0) or
+      (via == "askContactFiles" and after.turn.hold == 0 and selectedContact(before)))
 ```
 
 ### A turn that has ended keeps its outcome
