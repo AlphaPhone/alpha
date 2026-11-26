@@ -526,7 +526,7 @@ export function resetReminderStores(): void {
   editorDraftStore.reset()
 }
 
-const hydrated = started(effect {
+const hydrated = started(Effect.ensuring(effect {
   const now = try (try Time).now()
   const kept = (try KeyValueStore.KeyValueStore).get(numbersKey) catch () => undefined
   const numbers = kept === undefined ? Option.none() : Schema.decodeUnknownOption(NumbersSchema)(kept)
@@ -536,10 +536,9 @@ const hydrated = started(effect {
     const decoded = Schema.decodeUnknownOption(SnapshotJsonSchema)(raw)
     if (Option.isSome(decoded)) try syncMachineFromSnapshot(decoded.value, now)
   }
-  Deferred.doneUnsafe(hydration, Effect.void)
   const machine = try Reminders.Machine
   if (Reminders.canRefresh(try machine.get())) try contained(machine.send({ type: "refresh" }), "initial reminders sync")
-}, "hydrating reminders store")
+}, Effect.sync(() => Deferred.doneUnsafe(hydration, Effect.void))), "hydrating reminders store")
 
 // spec/app/reminders/index.md, "Once the five-second window expires, a held deletion is committed and a held completion settles"
 effect function withdrawEndedUndo(): void!!(Reminders.Machine | Toasts.Machine | Said) {
