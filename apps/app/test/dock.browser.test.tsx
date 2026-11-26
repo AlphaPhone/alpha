@@ -272,8 +272,8 @@ describe("Ask Alpha dock", () => {
       .filter((field) => field.getBoundingClientRect().height > 0 && seen(field) > 0.05 && (field.value || field.placeholder))
       .map((field) => field.value || field.placeholder);
     const watch = async (ms: number) => {
-      const frames: string[][] = [];
-      for (const until = performance.now() + ms; performance.now() < until; await pause(8)) frames.push(worded());
+      const frames: { words: string[]; fading: boolean }[] = [];
+      for (const until = performance.now() + ms; performance.now() < until; await pause(8)) frames.push({ words: worded(), fading: document.querySelector("[data-alpha-ghost]") !== null });
       return frames;
     };
     const open = async () => {
@@ -286,8 +286,8 @@ describe("Ask Alpha dock", () => {
     const tapped = watch(900);
     await page.getByRole("button", { name: "Minimize chat" }).click();
     const tapFrames = await tapped;
-    expect(tapFrames.filter((words) => words.length > 1)).toEqual([]);
-    expect(tapFrames.at(-1)).toEqual(["Ask Alpha"]);
+    expect(tapFrames.filter(({ words }) => words.length > 1)).toEqual([]);
+    expect(tapFrames.at(-1)?.words).toEqual(["Ask Alpha"]);
 
     await open();
     const handle = section()?.querySelector("[aria-label='Resize chat']");
@@ -304,9 +304,10 @@ describe("Ask Alpha dock", () => {
     finger("pointerup", y + 400);
     const dragFrames = await dragged;
     await reaches("Bar");
-    expect(dragFrames.filter((words) => words.length > 1)).toEqual([]);
-    expect(dragFrames.some((words) => words.length === 0)).toBe(true);
-    expect(dragFrames.at(-1)).toEqual(["Ask Alpha"]);
+    expect(dragFrames.filter(({ words }) => words.length > 1)).toEqual([]);
+    expect(dragFrames.some(({ fading }) => fading)).toBe(true);
+    expect(dragFrames.filter(({ fading, words }) => fading && words.includes("Ask Alpha"))).toEqual([]);
+    expect(dragFrames.at(-1)?.words).toEqual(["Ask Alpha"]);
   });
 
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
