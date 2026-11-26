@@ -310,7 +310,8 @@ pure def written(s: Editor, attempt: int, confirmed: bool, known: bool, filed: b
 ### The form's edits always build on the revision of the event as last read
 
 ```quint
-pure def alwaysEditsBuildOnTheEventAsRead(s: Editor): bool = s.draft.base == s.revision
+pure def alwaysEditsBuildOnTheEventAsRead(s: Editor): bool =
+  s.draft.base == s.revision and (D::canChoose(s.draft) implies s.form == EditEvent)
 ```
 
 ### A form can be saved, and a change to a whole series can be sent
