@@ -1,5 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
-import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
+import { Alert, AppHeader, SHEET_EASE, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
 import { type PointerEvent, type SyntheticEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { type Shell, type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
@@ -53,12 +53,12 @@ type StageSide = "left" | "right";
 /** The app layer as the apps share it: the view on top, its trail's length, and whether it is still rising over Home. */
 type Risen = { view: View | undefined; depth: number; overHome: boolean; slide?: { side: StageSide } };
 
-/** v119's stage slide (45f6bed30 prototype/phone.css:412-416): 18% in from the side at 0.4 opacity, 0.42 s on its curve. */
+/** v119's stage slide (45f6bed30 prototype/phone.css:413-417): 18% in from the side at 0.4 opacity, 0.42 s on the sheet's curve. */
 function slideStage(layer: HTMLElement, side: StageSide) {
   if (typeof layer.animate !== "function" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true) return;
   layer.animate(
     [{ transform: `translateX(${side === "left" ? "18%" : "-18%"})`, opacity: 0.4 }, { transform: "none", opacity: 1 }],
-    { duration: 420, easing: "cubic-bezier(.22,1,.36,1)" },
+    { duration: 420, easing: SHEET_EASE },
   );
 }
 

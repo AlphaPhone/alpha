@@ -108,6 +108,15 @@ describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and
     await tab("Recents");
     await trail("Phone");
     expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)", "translateX(18%)"]);
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": under reduced motion nothing slides (45f6bed30 prototype/phone.css:418).
+    const motion = window.matchMedia.bind(window);
+    const reduced = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(prefers-reduced-motion: reduce)" ? { ...motion(query), matches: true } : motion(query));
+    await tab("Contacts");
+    await trail("Phone,Contacts");
+    await press("Return to Phone");
+    await trail("Phone");
+    expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)", "translateX(18%)"]);
+    reduced.mockRestore();
 
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": in landscape the app sits beside the sheet, and swaps at once, as v119's stage did (45f6bed30 prototype/model.js:6286).
     await windowSize(915, 412);
