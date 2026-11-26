@@ -22,7 +22,7 @@ export const acceptedPhotos = [...images, "image/heic", "image/tiff", "image/svg
 export const acceptedFiles = [acceptedPhotos, ...documents].join(",")
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
-export type AttachmentSource = Attached | (() => Effect.Effect<Attached | undefined>)
+export type AttachmentSource = Attached | { readonly kind: "ViewedPhoto"; readonly read: (Attached | undefined)!! }
 
 export type ReviewedDraft = (text: string, current: Effect.Effect<boolean>) => Effect.Effect<boolean>
 
@@ -159,20 +159,34 @@ effect function added(target: FileTarget, candidates: readonly { readonly name: 
     const room = Composer.maxFiles - Composer.attachments(current.editor)
     let bytes = before.reduce((size, file) => size + file.data.length, 0)
     const refused: string[] = []
-    for (const candidate of candidates) {
-      const next = candidate.file
-      if (next !== undefined && chosen.some((file) => file.id === next.id)) continue
-      if (next === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + next.data.length)) refused.push(candidate.name)
-      else {
-        chosen.push(next)
-        bytes += next.data.length
+    const viewed = candidates.length === 1 ? candidates[0]?.file : undefined
+    const replaceAt = viewed?.origin === "ViewedPhoto" ? before.findIndex((file) => file.origin === "ViewedPhoto") : -1
+    const previous = before[replaceAt]
+    if (viewed !== undefined && previous !== undefined) {
+      const duplicate = before.some((file, index) => index !== replaceAt && file.id === viewed.id)
+      if (duplicate || before.length !== current.editor.files || !batchFits(chosen.length, bytes - previous.data.length + viewed.data.length)) {
+        board.change({ attachmentNotice: `Could not attach ${viewed.name}` })
+        return 0
+      }
+      chosen[replaceAt] = viewed
+    } else {
+      for (const candidate of candidates) {
+        const next = candidate.file
+        if (next !== undefined && chosen.some((file) => file.id === next.id)) continue
+        if (next === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + next.data.length)) refused.push(candidate.name)
+        else {
+          chosen.push(next)
+          bytes += next.data.length
+        }
       }
     }
     const count = chosen.length - before.length
-    if (count > 0) {
-      const seeded = suggestion !== undefined && prior.typed === "" && !current.editor.text ? suggestion : undefined
-      const event: Composer.Event = suggestion === undefined ? { type: "attach", count }
-        : { type: "attachQuestion", owner: target.binding.owner, conversation: target.binding.conversation, ticket: target.slot, seed: seeded !== undefined }
+    if (count > 0 || previous !== undefined) {
+      const seeded = previous === undefined && suggestion !== undefined && prior.typed === "" && !current.editor.text ? suggestion : undefined
+      const event: Composer.Event = previous !== undefined
+        ? { type: "replaceReviewedPhoto", owner: target.binding.owner, conversation: target.binding.conversation, ticket: target.slot }
+        : suggestion === undefined ? { type: "attach", count }
+          : { type: "attachQuestion", owner: target.binding.owner, conversation: target.binding.conversation, ticket: target.slot, seed: seeded !== undefined }
       if (!Composer.enabled(current, event) || !(try active)) return 0
       board.change({ files: chosen, filesBinding: target.binding, filesAuthority: authority, ...(seeded === undefined ? {} : { typed: seeded }) })
       const taken = composer.send(event) catch () => undefined
@@ -184,7 +198,7 @@ effect function added(target: FileTarget, candidates: readonly { readonly name: 
       }
     }
     board.change({ attachmentNotice: refused.length === 0 ? "" : `Could not attach ${refused.join(", ")}` })
-    return count
+    return previous === undefined ? count : 1
   })
 }
 
@@ -228,7 +242,7 @@ export effect function insertPickedFiles(
   return try added(target, candidates, active)
 }
 
-// spec/app/assistant/composer.md, "A shared result adds its file and leaves the owner's draft as written"
+// spec/app/assistant/composer.md, "A shared result adds its file and leaves the owner's draft as written"; spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo"
 export effect function stageAttachment(source: AttachmentSource, active: Effect.Effect<boolean> = succeed(true), suggestion?: string): boolean!!(Talk | Composer.Machine | Conversation | Shell | Agent) {
   if (suggestion !== undefined && (suggestion.trim() === "" || suggestion.length > Composer.textLimit)) return false
   const authority = try attachmentAuthority()
@@ -236,11 +250,14 @@ export effect function stageAttachment(source: AttachmentSource, active: Effect.
   const composer = try (try Composer.Machine).get()
   const context = (try (try Conversation).get()).context
   if (context.sensitive || composer.slot !== "Open" || composer.away !== "Free" || !(try active)) return false
-  const file = typeof source === "function" ? try source() : source
+  const viewedPhoto = "kind" in source
+  const file = viewedPhoto ? try source.read : source
   if (file === undefined || !(try active) || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
   const given = Effect.try(() => selected(file.data, file.name, file.mimeType)) catch () => undefined
   if (given === undefined) return false
-  const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision, authority }, [{ name: file.name, file: try encoded(given, file.id) }], active, suggestion)
+  const encodedFile = try encoded(given, file.id)
+  const candidate: Attached | undefined = encodedFile !== undefined && viewedPhoto ? { ...encodedFile, origin: "ViewedPhoto" } : encodedFile
+  const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision, authority }, [{ name: file.name, file: candidate }], active, suggestion)
   if (accepted === 0) return false
   const shell = try Shell
   if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
@@ -327,7 +344,7 @@ export effect function removeFile(id: string): void!!(Talk | Composer.Machine) {
 }
 
 export effect function stageFiles(key: string, files: readonly Attached[]): boolean!! {
-  return effect { try tryPromise(() => store(key, files)); return true } catch () => false
+  return effect { try tryPromise(() => store(key, files.map(({ id, name, mimeType, data }) => ({ id, name, mimeType, data })))); return true } catch () => false
 }
 
 export const dropFiles = (key: string) => ignore(tryPromise(() => store(key)))

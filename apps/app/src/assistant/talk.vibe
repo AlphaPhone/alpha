@@ -17,6 +17,7 @@ export interface Attached {
   readonly name: string
   readonly mimeType: string
   readonly data: string
+  readonly origin?: "ViewedPhoto"
 }
 
 /** The batch staged for one concrete send, under the composer's own hold number and binding. */

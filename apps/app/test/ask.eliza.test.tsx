@@ -19,7 +19,7 @@ import inbox from "../src/inbox/index.tsx";
 import photos from "../src/photos/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
-import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { askExample, askExampleLines, button, chatAction, closeAll, drawn, fill, hardware, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
 import type { Answering } from "./fakes/routes.ts";
@@ -229,12 +229,16 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   expect(received).toEqual(expect.stringContaining(prompt));
 }, 300_000);
 
-it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "Story: Share what I am looking at")', async () => {
+it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "Story: Share what I am looking at"); (spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.photos.access = { scope: "full", images: "full", videos: "denied" };
   const source = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/png;base64,"));
-  if (!source) throw new Error("The phone fixture has no PNG");
+  const replacement = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/jpeg;base64,"));
+  if (!source || !replacement) throw new Error("The phone fixture needs two different photos");
   source.name = "Reviewed photo.png";
+  replacement.name = "Replacement photo.jpg";
+  const ordinary = "Ordinary attachment.png";
+  const ordinaryData = source.image.slice(source.image.indexOf(",") + 1);
   const prompt = "What should I look for in this photo?";
   const reply = "Look for the landmarks near the center.";
   const received: unknown[] = [];
@@ -255,8 +259,8 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
   await press("Photos");
   await until(alpha, library, Library, (state) => state.library.status === "Loaded");
-  const openPhoto = async () => {
-    await press(source.name);
+  const openPhoto = async (name = source.name) => {
+    await press(name);
     await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
   };
   const askAbout = async () => {
@@ -285,17 +289,44 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await askAbout();
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
   await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
-  expect(received).toEqual([]);
+  chatAction("Attach media");
+  const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Select photos"]');
+  await drawn(() => vi.waitFor(() => expect(input()).not.toBeNull()));
+  await drawn(() => {
+    const picker = input();
+    if (!picker) throw new Error("The photo file input did not open");
+    const bytes = Uint8Array.from(atob(ordinaryData), (byte) => byte.charCodeAt(0));
+    Object.defineProperty(picker, "files", { value: [new File([bytes], ordinary, { type: "image/png" })] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${ordinary} from the selection`)).toBeDefined()));
+  await press("Attach selected files");
+  await until(alpha, chat, Composer, (state) => state.editor.files === 2);
+  await fill("Message Alpha", prompt);
+  await hardware("back");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+  await press("Back to photos");
+  await until(alpha, library, Viewer, (state) => state.open === 0);
+  await openPhoto(replacement.name);
+  await askAbout();
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${replacement.name}`)).toBeDefined()));
+  const writing = await chat.runPromise(Composer.use((composer) => composer.get()));
+  const text = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Alpha"]')?.value;
+  expect([button(`Remove ${source.name}`), Boolean(button(`Remove ${ordinary}`)), writing.editor.files, text, received])
+    .toEqual([undefined, true, 2, prompt, []]);
 
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
-  await fill("Message Alpha", prompt);
   await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
   await press("Send");
   await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
   await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
   expect(received).toEqual([expect.objectContaining({
     text: expect.stringContaining(prompt),
-    images: [{ data: source.image.slice(source.image.indexOf(",") + 1), mimeType: "image/png", name: source.name }],
+    images: [
+      { data: replacement.image.slice(replacement.image.indexOf(",") + 1), mimeType: "image/jpeg", name: replacement.name },
+      { data: ordinaryData, mimeType: "image/png", name: ordinary },
+    ],
   })]);
 }, 300_000);
 
