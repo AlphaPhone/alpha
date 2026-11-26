@@ -322,6 +322,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
           onSave: state.revision > 0 && destination !== "unavailable" && !canPreviewAttachment(one) && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
           saveUnconfirmed: unsure(at + 1),
           browserDownload: destination === "download",
+          picker: destination === "picker",
         }))}
         unread={unread}
         onToggleRead={loaded && marking.can(mark, "Owner") ? () => void marking.send(mark, "Owner") : undefined}

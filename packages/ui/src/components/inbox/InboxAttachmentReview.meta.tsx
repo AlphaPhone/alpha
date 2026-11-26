@@ -13,11 +13,10 @@ export const meta: ComponentMeta<InboxAttachmentReviewProps> = {
   args: { open: true, name: "Invoice 2041.pdf", size: "184 KB", handling: "open", outcome: "review", onConfirm, onClose },
   examples: {
     Save: { handling: "save" },
-    Working: { handling: "save", outcome: "working" },
+    Working: { handling: "save", outcome: "working", picker: true },
     Opened: { outcome: "done" },
     "Save while reviewing": { onSave },
     "Saved after opening": { name: "Receipt.png", outcome: "done", preview: { kind: "image", url: raster, digest }, onSave: undefined, saveOutcome: "done" },
-    "Saved with the picker": { name: "Receipt.png", outcome: "done", preview: { kind: "image", url: raster, digest }, onSave: undefined, saveOutcome: "done", picker: true },
     "Reviewed image": {
       name: "Receipt.png", outcome: "done",
       preview: { kind: "image", url: raster, digest },
@@ -45,11 +44,7 @@ export const meta: ComponentMeta<InboxAttachmentReviewProps> = {
     "Saved after opening": async () => {
       const sheet = within(await screen.findByRole("dialog", { name: "Receipt.png" }));
       await expect(sheet.getByRole("status")).toHaveTextContent("Saved to Files");
-      await expect(sheet.queryByRole("button", { name: "Save" })).toBeNull();
-    },
-    "Saved with the picker": async () => {
-      const sheet = within(await screen.findByRole("dialog", { name: "Receipt.png" }));
-      await expect(sheet.getByRole("status")).toHaveTextContent("Saved.");
+      await expect(sheet.getByRole("button", { name: "Save" })).toBeDisabled();
     },
     "Reviewed image": async () => {
       const sheet = await screen.findByRole("dialog", { name: "Receipt.png" });

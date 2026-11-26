@@ -57,8 +57,8 @@ it("Save an attachment from inside its review, with one button per attachment", 
   const status = [...document.querySelectorAll("[role=dialog] [role=status]")].find((one) => one.textContent === "Saved.");
   const contents = document.querySelector("[aria-label='Attachment contents']");
   expect(Boolean(status && contents && status.compareDocumentPosition(contents) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  expect([world.inbox.savedAttachments.get("agenda.txt"), document.querySelector("[aria-label='Attachment contents']")?.textContent, inDialog("Save as…")])
-    .toEqual([text, text, []]);
+  expect([world.inbox.savedAttachments.get("agenda.txt"), document.querySelector("[aria-label='Attachment contents']")?.textContent, inDialog("Save as…").map((one) => one.disabled)])
+    .toEqual([text, text, [true]]);
   await confirm("Close");
   await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 });

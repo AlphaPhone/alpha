@@ -73,7 +73,7 @@ export function InboxAttachmentReview({ open, name, size, handling, outcome = "r
   const opened = outcome === "done" && handling === "open" ? preview : undefined;
   const saveUnknown = browserDownload ? "Save not confirmed. Check your downloads." : picker ? pickerSave.unknown : "Not sure it was saved. Look in Files.";
   const unknown = handling === "open" ? "Not sure it opened." : saveUnknown;
-  const saving = handling === "open" && (onSave !== undefined || saveOutcome === "working");
+  const saving = handling === "open" && (onSave !== undefined || saveOutcome !== undefined);
   return (
     <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <SheetContent
@@ -86,6 +86,7 @@ export function InboxAttachmentReview({ open, name, size, handling, outcome = "r
           </>
         }
       >
+        {handling === "open" && saveOutcome === "working" ? <p role="status" className="mb-3 text-sm text-muted-foreground">Saving…</p> : null}
         {handling === "open" && saveOutcome === "done" ? <p role="status" className="mb-3 flex items-center gap-2 text-sm"><CircleCheck aria-hidden className="size-5 text-ok" />{save.done}</p> : null}
         {handling === "open" && saveOutcome === "refused" ? <p role="alert" className="mb-3 flex items-center gap-2 text-sm"><CircleAlert aria-hidden className="size-5 text-destructive" />{save.refused}</p> : null}
         {handling === "open" && saveOutcome === "unknown" ? (
