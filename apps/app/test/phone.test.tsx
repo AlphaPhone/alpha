@@ -427,6 +427,22 @@ describe("Phone on an Alpha image", () => {
     expect(world.telephony.voicemails.at(0)?.deleted).toBe(true);
   });
 
+  it(`Open a New message for the caller without sending (spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it")`, async ({ onTestFinished }) => {
+    vi.stubEnv("ELIZA_DEV_ALLOW_TEST_MOCKS", "1");
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const world = image();
+    const alpha = await mountedImage(world);
+    await openVoicemail(alpha);
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
+    await pressVoicemailRow();
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.audio.status === "Loaded");
+
+    await press("Message");
+    const to = () => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value;
+    await vi.waitFor(() => expect(to()).toBe("+14155550100"), { timeout: 12_000 });
+    expect(world.telephony.sent).toEqual([]);
+  });
+
   it(`Shares only the reviewed open voicemail’s existing transcript (spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it")`, async () => {
     const world = image();
     const heard = { id: 11, number: "+14155550199", date: 1_700_000_100_000, seconds: 18, heard: false, deleted: false, transcript: "The carrier left these words." };

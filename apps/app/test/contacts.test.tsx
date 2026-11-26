@@ -199,6 +199,38 @@ describe("Contacts on an Alpha image", () => {
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
   });
 
+  it(`Open a New message from a contact and keep any draft already addressed (spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else")`, async ({ onTestFinished }) => {
+    vi.stubEnv("ELIZA_DEV_ALLOW_TEST_MOCKS", "1");
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const world = image();
+    const alpha = await mountedContacts(world);
+    const to = () => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value;
+    const text = () => document.querySelector<HTMLTextAreaElement>('[data-alpha-messages-composer] textarea');
+
+    await launch("Messages");
+    await until(alpha, alpha.runtime, Messages, (state) => state.front && state.list.status === "Loaded");
+    await press("New message");
+    await vi.waitFor(() => expect(text()?.getAttribute("aria-label")).toBe("Message"), { timeout: 12_000 });
+    await fill("Message", "Synthetic draft kept on this phone");
+    await until(alpha, alpha.runtime, Messages, (state) => state.newDraft.revision > 0);
+    await hardware("home");
+
+    const composeFor = async (name: string, address: string, expected: string) => {
+      await launch("Contacts");
+      await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.list.status === "Loaded");
+      await press(name);
+      await until(alpha, alpha.runtime, Contacts, (state) => state.card.status === "Loaded");
+      await press(`Message ${address}`);
+      await vi.waitFor(() => expect(to()).toBe(expected), { timeout: 12_000 });
+    };
+
+    await composeFor("Maya Chen", "+14155550100", "+14155550100");
+    expect([to(), text()?.value]).toEqual(["+14155550100", "Synthetic draft kept on this phone"]);
+    await hardware("home");
+    await composeFor("Ben Ortiz", "+14155550122", "+14155550100");
+    expect([to(), text()?.value, world.telephony.sent]).toEqual(["+14155550100", "Synthetic draft kept on this phone", []]);
+  });
+
   it("Add or change a contact in the phone's own editor where Alpha may not write contacts (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
     const world = image();
     world.telephony.editable = false;
