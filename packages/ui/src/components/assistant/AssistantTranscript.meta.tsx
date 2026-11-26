@@ -69,6 +69,8 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
     // spec/app/assistant/chats.md, "The conversation keeps its newest message in view until the owner scrolls up from it"
     "Following the end": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const log = within(canvasElement).getByRole("log");
+      // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a drag that reaches the conversation's end moves nothing else
+      await expect(getComputedStyle(log).overscrollBehaviorY).toBe("none");
       log.style.height = "160px";
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
       arrive(log);

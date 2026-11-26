@@ -250,6 +250,60 @@ describe("Ask Alpha dock", () => {
     expect(closing.every((height, at) => at === 0 || height <= (closing[at - 1] ?? height) + 1)).toBe(true);
   });
 
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": only one field shows words at a time while a sheet is put away, by a tap or by a drag, and the bar's own words show once it has gone
+  it("Put the sheet away with one field's words at a time (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Home" });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const reaches = (detent: "Bar" | "Sheet") => runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
+    const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
+    const seen = (element: Element) => {
+      let opacity = 1;
+      for (let at: Element | null = element; at; at = at.parentElement) opacity *= Number(getComputedStyle(at).opacity);
+      return opacity;
+    };
+    /** The words each drawn field shows, its text or else its placeholder, where it can be seen at all. */
+    const worded = () => [...document.querySelectorAll("textarea")]
+      .filter((field) => field.getBoundingClientRect().height > 0 && seen(field) > 0.05 && (field.value || field.placeholder))
+      .map((field) => field.value || field.placeholder);
+    const watch = async (ms: number) => {
+      const frames: string[][] = [];
+      for (const until = performance.now() + ms; performance.now() < until; await pause(8)) frames.push(worded());
+      return frames;
+    };
+    const open = async () => {
+      await page.getByRole("button", { name: "Open conversation" }).click();
+      await reaches("Sheet");
+      await pause(600);
+    };
+
+    await open();
+    const tapped = watch(900);
+    await page.getByRole("button", { name: "Minimize chat" }).click();
+    const tapFrames = await tapped;
+    expect(tapFrames.filter((words) => words.length > 1)).toEqual([]);
+    expect(tapFrames.at(-1)).toEqual(["Ask Alpha"]);
+
+    await open();
+    const handle = section()?.querySelector("[aria-label='Resize chat']");
+    const box = handle?.getBoundingClientRect();
+    const y = Math.round((box?.top ?? 0) + (box?.height ?? 0) / 2);
+    const finger = (type: string, clientY: number) => (handle?.isConnected ? handle : section())?.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientY, pointerId: 12, pointerType: "touch", isPrimary: true }));
+    const dragged = watch(1300);
+    finger("pointerdown", y);
+    for (let step = 1; step <= 8; step++) {
+      await pause(25);
+      finger("pointermove", y + step * 50);
+    }
+    await pause(120);
+    finger("pointerup", y + 400);
+    const dragFrames = await dragged;
+    await reaches("Bar");
+    expect(dragFrames.filter((words) => words.length > 1)).toEqual([]);
+    expect(dragFrames.some((words) => words.length === 0)).toBe(true);
+    expect(dragFrames.at(-1)).toEqual(["Ask Alpha"]);
+  });
+
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
   it("The resting bar's controls keep their presses and a written field scrolls (spec/app/assistant/dock.md, \"A press does one thing: a tap is never also a drag, and a late click never taps\")", async () => {
     await page.viewport(390, 844);

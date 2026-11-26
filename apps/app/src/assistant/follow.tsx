@@ -65,9 +65,10 @@ function paint(section: HTMLElement | null, d: ChatDrag) {
 /**
  * The sheet as it was drawn when it was put away, left over the bar as v119 left its panel over the bar already in place
  * (resizeForTap, :530-546; retire, :613-651): a copy that takes no input, scrolled and filled as the sheet was, so the
- * bar under it is Ask Alpha at once and keeps its own controls, never the sheet's.
+ * bar under it is Ask Alpha at once and keeps its own controls, never the sheet's. v119 had one field, which a tap moved
+ * to the bar at once (:1356-1360), so a sheet a tap puts away shrinks with its field empty.
  */
-function ghostOf(section: HTMLElement) {
+function ghostOf(section: HTMLElement, tap: boolean) {
   const ghost = section.cloneNode(true) as HTMLElement;
   for (const named of [ghost, ...ghost.querySelectorAll("[id], [aria-label]")]) {
     named.removeAttribute("id");
@@ -85,8 +86,9 @@ function ghostOf(section: HTMLElement) {
     const copy = copied[at];
     if (!copy) return;
     if (element.scrollTop) copy.scrollTop = element.scrollTop;
-    if (element instanceof HTMLTextAreaElement && copy instanceof HTMLTextAreaElement) copy.value = element.value;
+    if (element instanceof HTMLTextAreaElement && copy instanceof HTMLTextAreaElement) copy.value = tap ? "" : element.value;
   });
+  if (tap) for (const field of ghost.querySelectorAll("textarea")) field.placeholder = "";
   return ghost;
 }
 
@@ -116,6 +118,8 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const kept = dock.state?.kept ?? 0;
   const [live, setLive] = useState<Live | undefined>(undefined);
   const [seen, setSeen] = useState<Seen>({ detent });
+  /** A sheet a drag put away is still fading over the bar, whose field shows its words only once it has gone. */
+  const [handing, setHanding] = useState(false);
   const heldRef = useRef<Held | undefined>(undefined);
   const sectionRef = useRef<HTMLElement | null>(null);
   const shownRef = useRef(0);
@@ -210,7 +214,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const growing = seen.growing;
   const leaving = seen.leaving;
   /** A sheet put away is handed to the bar once Ask Alpha rests there, and not before, so it never shows open again. */
-  const handing = leaving && !isOpen(detent) ? leaving : undefined;
+  const handed = leaving && !isOpen(detent) ? leaving : undefined;
   /** v119 resizeForTap (:507-548) and retire (:613-651), run once on the sheet as it is drawn for the change. */
   const animate = useCallback((element: HTMLElement | null) => {
     sectionRef.current = element;
@@ -220,7 +224,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       motion.finished.catch(() => undefined);
       motion.cancel();
     }
-    if (!growing && !handing) {
+    if (!growing && !handed) {
       shownRef.current = element.getBoundingClientRect().height;
       floorOf();
       return;
@@ -231,8 +235,13 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     const resize = { duration: 420, easing: SHEET_EASE };
     const motions = motionsRef.current;
     const finish = () => setSeen((s) => ({ ...s, growing: undefined, leaving: undefined }));
-    if (growing) {
+    const dropGhost = () => {
       ghostRef.current?.remove();
+      ghostRef.current = undefined;
+      setHanding(false);
+    };
+    if (growing) {
+      dropGhost();
       const target = element.getBoundingClientRect().height;
       const from = growing.from === "shown" ? shownRef.current : growing.from ?? block;
       const grow = element.animate([{ height: `${from}px`, minHeight: "0px", maxHeight: "none" }, { height: `${target}px`, minHeight: "0px", maxHeight: "none" }], { ...resize, fill: "forwards" });
@@ -241,22 +250,27 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       if (header) motions.push(header.animate(revealFrames(from, target, fit), { duration: resize.duration, easing: "linear" }));
       return;
     }
-    if (!handing) return;
-    const from = handing.height ?? drawnHeight;
-    const to = handing.tap ? block : 0;
-    const ghost = ghostOf(element);
+    if (!handed) return;
+    const from = handed.height ?? drawnHeight;
+    const to = handed.tap ? block : 0;
+    const ghost = ghostOf(element, handed.tap);
     ghostRef.current?.remove();
     ghostRef.current = ghost;
     const ghostHeader = ghost.querySelector<HTMLElement>("[data-alpha-chat-header]");
     ghost.animate([{ height: `${from}px`, minHeight: "0px", maxHeight: "none" }, { height: `${to}px`, minHeight: "0px", maxHeight: "none" }], { ...resize, fill: "forwards" });
     ghostHeader?.animate(revealFrames(from, to, fit), { duration: resize.duration, easing: "linear", fill: "forwards" });
-    const fade = handing.tap
+    const fade = handed.tap
       ? ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: CLOSE_FADE_MS, delay: CLOSE_MS - CLOSE_FADE_MS, easing: "linear", fill: "forwards" })
-      : ghost.animate([{ opacity: handing.opacity ?? 1 }, { opacity: 0 }], { duration: 200, easing: "ease", fill: "forwards" });
-    const gone = () => ghost.remove();
+      : ghost.animate([{ opacity: handed.opacity ?? 1 }, { opacity: 0 }], { duration: 200, easing: "ease", fill: "forwards" });
+    const gone = () => {
+      ghost.remove();
+      if (ghostRef.current === ghost) dropGhost();
+    };
     fade.finished.then(gone, gone);
+    // v119's one field stayed in a sheet a drag put away until it had gone (retire, :613-651; :1356-1360): the bar's own words show only then.
+    setHanding(!handed.tap);
     finish();
-  }, [growing, handing]);
+  }, [growing, handed]);
 
   const { full, half } = sheetBounds(viewport());
   const resting = detent === "Sheet" && kept > 0 ? restingHeight(kept / shareScale, full, half) : undefined;
@@ -271,6 +285,8 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     /** The bar or pill under a sheet pulled down onto it or shrinking onto it. */
     underlay: (live?.form === "open" && !live.landed) || leaving !== undefined,
     leaving: leaving !== undefined,
+    /** The bar's field shows no words: a sheet a drag put away is still fading over it. */
+    quiet: handing,
     style,
     ref: animate,
     gesture,

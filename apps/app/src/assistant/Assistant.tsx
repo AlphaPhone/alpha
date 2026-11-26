@@ -619,7 +619,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
   const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
-  const { drawn: live, underlay, leaving, style: sheetStyle, ref: sheetRef, gesture, done } = useSheetFollow({
+  const { drawn: live, underlay, leaving, quiet, style: sheetStyle, ref: sheetRef, gesture, done } = useSheetFollow({
     dock, detent: assistantDetent, pill: compact, comms: onComms, voice: dock.state?.voice ?? false,
     canLand: (detent) => detent === assistantDetent || shell.can({ type: "raise", detent }) || shell.can({ type: "goBack" }),
   });
@@ -773,7 +773,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           } : undefined,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
+          placeholder: onComms ? "Ask Alpha" : quiet ? "" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !draftEditable,
           notice: notice === undefined || onComms ? undefined : {
