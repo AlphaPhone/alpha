@@ -237,7 +237,7 @@ describe("Settings", () => {
     const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
     const world = { ...scene(), phone: true, checkout };
     await settingsOpen(world);
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("No plan"));
     await drawn(() => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
     await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
@@ -274,7 +274,7 @@ describe("Settings", () => {
   it('Redeems the owner’s code once and refreshes the plan (spec/app/account/codes.md, "Story: Redeem a code")', async () => {
     const redemption: RedemptionScene = { calls: [] };
     await settingsOpen({ ...scene(), phone: true, redemption });
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => {
       const form = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Redeem code");
       if (!form) throw new Error("No redemption control");
@@ -303,7 +303,7 @@ describe("Settings", () => {
       },
     };
     await settingsOpen(world);
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => {
       const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Plans");
       if (!plans) throw new Error("No Plans control");
