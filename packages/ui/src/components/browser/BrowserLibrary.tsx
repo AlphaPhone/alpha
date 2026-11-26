@@ -2,6 +2,8 @@ import { ChevronLeft, Star, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
+import { Label } from "../Label.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "../Select.tsx";
 import { Spinner } from "../Spinner.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../Tabs.tsx";
 
@@ -40,7 +42,9 @@ const sections = ["Bookmarks", "History"] as const;
 /**
  * Bookmarks and history from the phone's Browser session, as v119 (Alpha 45f6bed30
  * apps/app/src/prototype/template.html:1802-1846): the back control and the Bookmarks and History segments in a 56px
- * header, and on History a trash button that opens the time range for clearing history, with Reset browser data.
+ * header, and on History a trash button that opens the time range for clearing history, with Reset browser data. The
+ * time range is the repo's `Select` and the actions its `Button`, drawn as v119's: a 44px white field with a 14px corner
+ * beside a dark Clear history, and Reset browser data as quiet text under them.
  */
 export function BrowserLibrary({ bookmarks, history, loading, failed, onBack, onOpen, onRemoveBookmark, onRemoveHistory, historyRanges = [], onClearHistory, onResetData, onRetry }: BrowserLibraryProps) {
   const [section, setSection] = useState<typeof sections[number]>("Bookmarks");
@@ -65,15 +69,19 @@ export function BrowserLibrary({ bookmarks, history, loading, failed, onBack, on
           <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-35">
             {one === "History" && clearOpen && (
               <div id="alpha-history-clear" role="group" aria-label="Clear history options" className="mx-5 mt-1 mb-2.5 flex flex-col gap-2 rounded-xl bg-secondary p-3.5">
-                <label htmlFor="alpha-history-range" className="text-sm font-semibold">Time range</label>
+                <Label htmlFor="alpha-history-range" className="font-semibold">Time range</Label>
                 <div className="flex flex-wrap gap-2">
-                  <select id="alpha-history-range" value={range} onChange={(event) => setRange(event.currentTarget.value)}
-                    className={cn(focusRing, "min-h-11 min-w-32.5 flex-1 rounded-md border-0 bg-background px-3 text-foreground")}>
-                    {historyRanges.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-                  </select>
-                  <button type="button" onClick={() => onClearHistory?.(range)} disabled={onClearHistory === undefined} className={cn(focusRing, "min-h-11 rounded-md bg-foreground px-3.5 font-semibold text-background disabled:opacity-50")}>Clear history</button>
+                  <Select value={range} onValueChange={setRange}>
+                    <SelectTrigger id="alpha-history-range" className="h-auto min-h-11 w-auto min-w-32.5 flex-1 rounded-md bg-background px-3 text-base" />
+                    <SelectContent>
+                      {historyRanges.map((choice) => <SelectItem key={choice.id} value={choice.id}>{choice.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={() => onClearHistory?.(range)} disabled={onClearHistory === undefined}
+                    className="h-auto min-h-11 rounded-md bg-foreground px-3.5 text-background hover:bg-foreground/90 active:bg-foreground/80">Clear history</Button>
                 </div>
-                {onResetData && <button type="button" onClick={onResetData} className={cn(focusRing, "min-h-11 self-start text-left text-sm text-muted-foreground")}>Reset browser data</button>}
+                {onResetData && <Button variant="ghost" onClick={onResetData}
+                  className="h-auto min-h-11 self-start rounded-none px-0 text-sm font-normal text-muted-foreground hover:bg-transparent active:bg-transparent">Reset browser data</Button>}
               </div>
             )}
             <LibraryList title={one} entries={one === "Bookmarks" ? bookmarks : history}

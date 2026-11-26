@@ -1,4 +1,4 @@
-// spec/app/settings/index.md, "Story: Find a setting and come back"; spec/app/settings/index.md, "Story: Reach what another area owns"; spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
+// spec/app/settings/index.md, "Story: Find a setting and come back"; spec/app/settings/index.md, "Story: Reach what another area owns"; spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"; spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it"
 import {
   Banner,
   Button,
@@ -241,12 +241,12 @@ function useDevice(runtime: SettingsRuntime) {
   };
 }
 
-/** Settings' first page; on the launcher it has no Back, as v119 drew it (prototype/model.js:6415, template.html:4159). */
+/** Settings' first page; on the launcher it has no Back, as v119 drew it (prototype/model.js:6415, template.html:4159; spec/app/shell/index.md). */
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const listener = useListener(runtime).state;
   return (
-    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} className="in-data-[alpha-launcher]:hidden" />} onPhone={pages?.phone ?? false}
+    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} firstPage />} onPhone={pages?.phone ?? false}
       developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} micMayBeOn={listener?.mayBeOn}
       onHandOver={(neighbour) => neighbour === "listener" ? common.onAndroid({ target: "android-home" }) : common.onHandOver(neighbour)} />
   );

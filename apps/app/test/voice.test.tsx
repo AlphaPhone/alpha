@@ -527,8 +527,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     ]);
   });
 
-  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("keeps Talk listening during a confirmed chat review and its decision", async () => {
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a reply ready before its turn ends is not spoken while the proposal waits, even when a later tool's progress replaced the proposal's own
+  it("keeps Talk listening during a confirmed chat review and its decision, and never speaks the reply ready beside it", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const review = textReview(world.notes.owner, "spoken-folder", { type: "files_folder_create", parent: "Download", name: "Review folder" });
     world.telephony.textReview = review;
@@ -542,10 +542,13 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
-    world.ask.nextReplyChunks = [""];
+    world.ask.nextReplyChunks = ["Your Review folder is ready for you to look over."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
       proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
-    } }];
+    } }, { action: "VIEWS", data: {} }];
+    world.ask.nextReplyProvisional = true;
+    world.ask.nextNewestProgressOnly = true;
+    world.ask.holdDoneAfterReady = Promise.resolve();
 
     speakUtterance(world, "Create a Review folder in Downloads");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && state.reviewPending);
@@ -777,7 +780,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(world.voice.speakerMutedAtPlayback).toEqual([false]);
   });
 
-  // spec/app/voice/index.md, "Stop and switch to keyboard shut the conversation down; the keyboard then takes over"
+  // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
   it("offers Stop and no keyboard control in Talk, as the Sunday demo build did, and Stop releases the microphone and speaker", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await onComposer(world);
@@ -822,7 +825,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([world.voice.startLiveCaptureCalls, world.voice.startCloudSpeechCalls]).toEqual([0, 0]);
   });
 
-  // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation"; spec/app/voice/index.md, "Stop and switch to keyboard shut the conversation down; the keyboard then takes over"; spec/app/assistant/dock.md, "While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends"
+  // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation"; spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"; spec/app/assistant/dock.md, "While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends"
   it("a signed-in owner taps Talk and talks over the relay under the account's key, Stop ends it, and after signing in to another account the first Talk speaks under the new key", async () => {
     const world = { ...scene(), phone: true };
     world.voice.onDevice = false;
