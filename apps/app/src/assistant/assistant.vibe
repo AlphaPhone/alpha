@@ -1554,7 +1554,8 @@ export const assistantBack = effect {
   if (previous !== undefined) {
     const shell = try Shell
     const view = commsViewOf(previous.app)
-    if (canReturnCommsView(try shell.get(), view) && (try contained(comms.send({ type: "stageReturned" }, "Owner"), "returning to the earlier communications stage"))) {
+    const where = try shell.get()
+    if (where.assistant === "Sheet" && canReturnCommsView(where, view) && (try contained(comms.send({ type: "stageReturned" }, "Owner"), "returning to the earlier communications stage"))) {
       return try contained(shell.send({ type: "returnCommsView", previous: view }), "returning to the earlier communications app")
     }
   }
