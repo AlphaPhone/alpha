@@ -23,6 +23,7 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
+import { say } from "../src/notices/toasts.vibe";
 import { TabHost } from "../src/platform/browser.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, readInboxFirst, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
@@ -441,6 +442,52 @@ describe("The Browser on a phone", () => {
     await drawn(() => vi.waitFor(() => expect([world.browser.layer, world.browser.hostRects]).toEqual(["above-host", []])));
     expect(world.browser.shown).toEqual(full);
     expect(document.documentElement.dataset.alphaBrowserUnder).toBeUndefined();
+  });
+
+  it("Measures Alpha's chrome again while it changes over a page below Alpha (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser(undefined, true);
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    layOutNativePage((node) => {
+      if (node.hasAttribute("data-alpha-browser-page")) return new DOMRect(0, 104, 390, 650);
+      if (node.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
+      if (node.matches("[data-host-chrome]") && node.textContent === "Saved") return new DOMRect(95, 170, 200, 48);
+      return undefined;
+    });
+    const { page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    const bar = { x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 };
+    await drawn(() => vi.waitFor(() => expect([world.browser.layer, world.browser.hostRects]).toEqual(["below-host", [bar]])));
+
+    // spec/app/browser/address.md, "The find bar opens over a shown page": a toast that appears over the page is Alpha's to touch at once
+    await drawn(() => alpha.runtime.runPromise(say("Saved")));
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([bar, { x: 95, y: 170, width: 200, height: 48, cornerRadius: 0 }])));
+    expect(pageOwns(world.browser, 195, 194)).toBe(false);
+
+    // spec/app/browser/address.md, "The find bar opens over a shown page": once it has gone, its place is the page's again
+    await later(alpha, 1_900);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([bar])));
+    expect(pageOwns(world.browser, 195, 194)).toBe(true);
+  });
+
+  it("Keeps Home hidden under a page below Alpha (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    layOutNativePage((node) => {
+      if (node.hasAttribute("data-alpha-browser-page")) return new DOMRect(0, 104, 390, 650);
+      if (node.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
+      return undefined;
+    });
+    const { page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await drawn(() => vi.waitFor(() => expect(world.browser.layer).toBe("below-host")));
+    // spec/app/browser/address.md, "The find bar opens over a shown page": while the page is below, Home's layer is never drawn over it, even as the Browser rises over Home
+    const home = document.querySelector("[data-alpha-home-layer]");
+    expect(home?.className).toMatch(/(^|\s)(invisible|in-data-\[alpha-browser-under\]:invisible)(\s|$)/);
+    expect(document.documentElement.dataset.alphaBrowserUnder).toBe("");
   });
 
   it("Explains unavailable Android page reading (spec/app/browser/reading.md, \"An explicit reading starts from the current committed HTTPS page\")", async () => {

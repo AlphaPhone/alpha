@@ -334,7 +334,7 @@ export function App({ alpha }: AppProps) {
                 inert={showing !== undefined || undefined}
                 className={cn(
                   showing === undefined ? "contents" : "absolute inset-0 isolate flex flex-col",
-                  showing !== undefined && (comms || !overHome ? "invisible" : "motion-reduce:invisible"),
+                  showing !== undefined && (comms || !overHome ? "invisible" : "motion-reduce:invisible in-data-[alpha-browser-under]:invisible"),
                 )}
               >
                 {alpha.slot("home")}
