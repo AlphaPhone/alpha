@@ -11,23 +11,31 @@ import { Machine as Reader } from "../gen/app__browser__reading.effect.vibe";
 import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Site } from "../gen/app__browser__site.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
-import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import { Machine as Speaker } from "../gen/app__voice__output.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
+import type { Alpha } from "../src/runtime/area.tsx";
 import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, readInboxFirst, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
+
+type BrowserRuntime = ReturnType<typeof browser.runtime>;
+
+/** The tab the Browser shows. */
+const selectedTab = (runtime: BrowserRuntime) => runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+
+/** The page `tab` shows: by default the selected tab's. */
+const selectedPage = (runtime: BrowserRuntime, tab = selectedTab(runtime)) => runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
 
 /** Alpha on an Alpha image with the Browser on screen. */
 async function onBrowser(world = { ...scene(), phone: true, image: true }, notices = false) {
@@ -36,6 +44,33 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }, notic
   const runtime = browser.runtime(running.alpha);
   await press("Browser");
   return { ...running, world, runtime };
+}
+
+/** Ask Alpha and the Browser on `world`, once Ask Alpha's composer is open and its conversation ready. */
+async function askingBeside(world: ReturnType<typeof scene>) {
+  const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+  const ask = assistant.runtime(alpha);
+  const runtime = browser.runtime(alpha);
+  await until(alpha, ask, Composer, (s) => s.slot === "Open");
+  await until(alpha, ask, Conversation, (s) => s.ready);
+  return { alpha, ask, runtime };
+}
+
+/** The agent's BROWSER_OPEN of `url`, for the view that asked as `metadata` names it. */
+const openAction = (url: string, metadata: unknown) => ({
+  action: "BROWSER_OPEN",
+  data: { actionName: "BROWSER_OPEN", mode: "open", operation: { type: "browser_navigate", url }, clientId: String((metadata as { viewClientId?: unknown }).viewClientId) },
+});
+
+/** Send `text` from Ask Alpha's composer, and wait until its reply completes. */
+async function sendFromComposer(alpha: Alpha, ask: ReturnType<typeof assistant.runtime>, text: string) {
+  const composer = () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+  const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+  await drawn(() => vi.waitFor(() => expect(composer()).not.toBeNull()));
+  if (composer()?.hidden) await press("Type");
+  await fill("Message Alpha", text);
+  await press("Send");
+  await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
 }
 
 /** Alpha on an Alpha image with the Browser on screen and Ask Alpha's bar over it. */
@@ -57,8 +92,7 @@ async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: s
   await drawn(() => {
     const box = [...document.querySelectorAll("textarea")].find((one) => one.getAttribute("aria-label") === "Message Alpha" || one.getAttribute("aria-label") === "Ask about this page");
     if (!box) throw new Error("no composer");
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
-    box.dispatchEvent(new Event("input", { bubbles: true }));
+    typeInto(box, text);
   });
   await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
@@ -82,6 +116,15 @@ const go = (text: string, kind: "normal" | "private" = "normal") => drawn(async 
   if (!form) throw new Error("no address field");
   form.requestSubmit();
 });
+
+/** Go to `text` in a `kind` tab and wait until its page is shown over HTTPS: the tab and its page. */
+async function goSecure(alpha: Alpha, runtime: BrowserRuntime, text: string, kind: "normal" | "private" = "normal") {
+  await go(text, kind);
+  const tab = selectedTab(runtime);
+  const page = selectedPage(runtime, tab);
+  await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
+  return { tab, page };
+}
 
 const placeNative = () => {
   const surface = document.querySelector<HTMLElement>("[data-alpha-browser-page]");
@@ -134,8 +177,7 @@ describe("The Browser on a phone", () => {
     const bookmark = [...document.querySelectorAll("button")].find((row) => row.textContent?.includes("Keys in the chip"));
     if (!bookmark) throw new Error("saved bookmark is missing");
     await drawn(() => bookmark.click());
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const page = selectedPage(runtime);
     await until(alpha, page, Page, (s) => s.phase === "Shown");
     expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["https://enclave.example/keys-in-hardware"]);
 
@@ -208,11 +250,8 @@ describe("The Browser on a phone", () => {
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Remove the username or password from this address.");
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual(history);
     await press("Cancel editing");
-    await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     // spec/app/browser/address.md, "Only the latest load of the page commits it or fails it"; spec/app/browser/address.md, "The secure mark shows only on a page that committed over HTTPS"
-    await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
+    const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
 
@@ -272,10 +311,7 @@ describe("The Browser on a phone", () => {
   ])("Keeps site data if the page moves to %s while clearing is reviewed (spec/app/browser/site.md, \"Clearing a site's data needs a loaded site, and runs one at a time\")", async (target) => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
+    const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
     const initial = page.runSync(Effect.flatMap(Page, (m) => m.get()));
     await press("Menu");
     await press("Clear site data");
@@ -313,10 +349,7 @@ describe("The Browser on a phone", () => {
     const runtime = browser.runtime(alpha);
     await press("Browser");
     await until(alpha, runtime, Tabs, (state) => state.hydrated);
-    await go("https://example.test/article", kind);
-    const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);
+    await goSecure(alpha, runtime, "https://example.test/article", kind);
     placeNative();
     const readPage = async () => {
       await press("Menu");
@@ -362,10 +395,7 @@ describe("The Browser on a phone", () => {
     const turn = await ask.runPromise(Effect.map(Conversation.use((m) => m.get()), (s) => s.turn.send.id));
     await press("Browser");
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    await go("https://example.test/article", kind);
-    const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);
+    await goSecure(alpha, runtime, "https://example.test/article", kind);
     placeNative();
     const openReview = async () => {
       release = undefined;
@@ -513,8 +543,7 @@ describe("The Browser on a phone", () => {
     world.browser.failing.set("down.example", "unreachable");
     // spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab": an http-only site has no way out.
     await go("plain.example");
-    const tab = runtime.runSync(Effect.flatMap(Tabs, (tabs) => tabs.get())).selected;
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const page = selectedPage(runtime);
     await until(alpha, page, Page, (p) => p.phase === "Failed");
     expect(button("Open in browser")).toBeUndefined();
 
@@ -538,20 +567,13 @@ describe("The Browser on a phone", () => {
     const world = { ...scene(), phone: true, image: true };
     const { alpha } = await open(world, only("home", "notice", "view:Browser", "view:Inbox"));
     await until(alpha, home.runtime(alpha), Home, (h) => h.tiles.load.status === "Loaded");
-    await drawn(() => {
-      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
-      if (!tile) throw new Error("No Inbox home tile");
-      tile.click();
-    });
     const letters = inbox.runtime(alpha);
-    await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
-    await hardware("back");
+    await readInboxFirst(alpha, letters);
     await press("Browser");
     const runtime = browser.runtime(alpha);
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
+    await until(alpha, selectedPage(runtime), Page, (p) => p.phase === "Shown");
     await press("Menu");
     await press("Email this page");
     // spec/app/inbox/suggestion.md, "Only the owner is shown it, against the draft as it is now; showing it again after the draft changed shows it against the change": the link waits in Inbox for the owner's review.
@@ -566,8 +588,8 @@ describe("The Browser on a phone", () => {
     const { alpha, runtime } = running;
     layOutNativePage(new DOMRect(0, 64, 412, 700));
     await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
+    const tab = selectedTab(runtime);
+    await until(alpha, selectedPage(runtime, tab), Page, (p) => p.phase === "Shown");
 
     // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
     const shown = await ask(running, "Summarize this page");
@@ -584,8 +606,7 @@ describe("The Browser on a phone", () => {
     await press("New private tab");
     await until(alpha, runtime, Tabs, (s) => s.privates.includes(s.selected));
     await go("news.example/on-device-agents");
-    const secret = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(secret))), Page, (p) => p.phase === "Shown");
+    await until(alpha, selectedPage(runtime), Page, (p) => p.phase === "Shown");
     expect((await ask(running, "Summarize this page"))?.browserPage).toBeUndefined();
   });
 
@@ -593,8 +614,7 @@ describe("The Browser on a phone", () => {
     const first = await onBrowser();
     await until(first.alpha, first.runtime, Tabs, (s) => s.hydrated);
     await go("enclave.example/keys-in-hardware");
-    const tab = first.runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    await until(first.alpha, first.runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
+    await until(first.alpha, selectedPage(first.runtime), Page, (p) => p.phase === "Shown");
     // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared": the session written keeps history.
     await until(first.alpha, first.runtime, Tabs, (s) => !s.stale && first.world.browser.saved.history[0] === "https://enclave.example/keys-in-hardware");
     const kept = [...first.world.browser.saved.history];
@@ -608,25 +628,12 @@ describe("The Browser on a phone", () => {
 
   it("The agent's page opens only on my Open on the Browser's card, even an address I typed, and a card left from an earlier request never opens (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/browser/index.md, \"The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time\"; spec/app/browser/index.md, \"The agent gives its tab up when it is done\"; spec/app/assistant/index.md, \"A complete reply may open one view, once, while the screen it was asked from still shows\")", async () => {
     const world = { ...scene(), phone: true, image: true };
-    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
-    const ask = assistant.runtime(alpha);
-    const runtime = browser.runtime(alpha);
-    await until(alpha, ask, Composer, (s) => s.slot === "Open");
-    await until(alpha, ask, Conversation, (s) => s.ready);
-    const composer = () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+    const { alpha, ask, runtime } = await askingBeside(world);
     const refused = { action: "BROWSER_OPEN", data: { actionName: "BROWSER_OPEN", code: "DEVICE_BROWSER_NOT_REQUESTED" } };
     const asked = async (text: string, url?: string, refusedAfter = false) => {
       world.ask.nextReplyChunks = [url === undefined ? "Sure." : "It's on your screen to open."];
-      world.ask.nextActions = (metadata) => [
-        ...(url === undefined ? [] : [{ action: "BROWSER_OPEN", data: { actionName: "BROWSER_OPEN", mode: "open", operation: { type: "browser_navigate", url }, clientId: String((metadata as { viewClientId?: unknown }).viewClientId) } }]),
-        ...(refusedAfter ? [refused] : []),
-      ];
-      const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
-      await drawn(() => vi.waitFor(() => expect(composer()).not.toBeNull()));
-      if (composer()?.hidden) await press("Type");
-      await fill("Message Alpha", text);
-      await press("Send");
-      await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+      world.ask.nextActions = (metadata) => [...(url === undefined ? [] : [openAction(url, metadata)]), ...(refusedAfter ? [refused] : [])];
+      await sendFromComposer(alpha, ask, text);
     };
     const front = () => committedAddress(runtime, world.browser.tabs);
 
@@ -687,22 +694,12 @@ describe("The Browser on a phone", () => {
   it("After I open the agent's page, my next question takes that page with it (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/browser/reading.md, \"A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on\"; spec/app/assistant/context.md, \"A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it\")", async () => {
     layOutNativePage(new DOMRect(0, 120, 390, 600));
     const world = { ...scene(), phone: true, image: true };
-    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
-    const ask = assistant.runtime(alpha);
-    const runtime = browser.runtime(alpha);
-    await until(alpha, ask, Composer, (s) => s.slot === "Open");
-    await until(alpha, ask, Conversation, (s) => s.ready);
-    const composer = () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+    const { alpha, ask, runtime } = await askingBeside(world);
     const url = "https://example.com/";
     const asked = async (text: string, page?: string) => {
       world.ask.nextReplyChunks = [page === undefined ? "It is an example domain." : "It's on your screen to open."];
-      world.ask.nextActions = (metadata) => page === undefined ? [] : [{ action: "BROWSER_OPEN", data: { actionName: "BROWSER_OPEN", mode: "open", operation: { type: "browser_navigate", url: page }, clientId: String((metadata as { viewClientId?: unknown }).viewClientId) } }];
-      const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
-      await drawn(() => vi.waitFor(() => expect(composer()).not.toBeNull()));
-      if (composer()?.hidden) await press("Type");
-      await fill("Message Alpha", text);
-      await press("Send");
-      await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+      world.ask.nextActions = (metadata) => page === undefined ? [] : [openAction(page, metadata)];
+      await sendFromComposer(alpha, ask, text);
     };
     const front = () => committedAddress(runtime, world.browser.tabs);
 

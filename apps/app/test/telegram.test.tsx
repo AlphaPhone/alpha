@@ -131,6 +131,27 @@ async function tick(runtime: TestRuntime, ms: number): Promise<void> {
   await drawn(() => runtime.runPromise(TestClock.adjust(ms)));
 }
 
+const authChanges = Auth.Machine.use((m) => Effect.succeed(m.changes));
+const listChanges = ChatList.Machine.use((m) => Effect.succeed(m.changes));
+const convChanges = Conversation.Machine.use((m) => Effect.succeed(m.changes));
+const compChanges = Composer.Machine.use((m) => Effect.succeed(m.changes));
+
+/** From phone entry, sign in with the provider's test number and code, and wait for the first page of chats. */
+async function signIn(rt: TestRuntime): Promise<void> {
+  await fillField("Phone number", "+9996621234");
+  await clickButton("Send code");
+  await until(rt, authChanges, (s) => s.step === "CodePending");
+  await fillField("Verification code", "22222");
+  await clickButton("Verify code");
+  await until(rt, listChanges, (s) => s.list.status === "Loaded" && s.pages === 1);
+}
+
+/** Sign out, and wait until sign-in rests signed out. */
+async function signOut(rt: TestRuntime): Promise<void> {
+  await rt.runPromise(Auth.Machine.use((m) => m.send({ type: "signOut" })));
+  await until(rt, authChanges, (s) => s.step === "SignedOut" && s.work === "Idle");
+}
+
 describe("Telegram user-account client over live HTTP+SSE provider", () => {
   let provider: RunningProvider;
   let runtime: TestRuntime | undefined;
@@ -212,8 +233,6 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
   // spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"
   it("authenticates via Phone->OTP, 2FA password, and QR login while rejecting bot tokens and honoring FloodWait", async () => {
     const rt = runtime!;
-    const authChanges = Auth.Machine.use((m) => Effect.succeed(m.changes));
-    const listChanges = ChatList.Machine.use((m) => Effect.succeed(m.changes));
 
     // spec/app/telegram/auth.md, "Every non-authenticated auth state is sensitive, so Ask Alpha sees nothing of sign-in screens"
     expect(document.body.textContent).toContain("User account · no bot token");
@@ -269,8 +288,7 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     expect(sessionOpt._tag).toBe("Some");
 
     // spec/app/telegram/auth.md, "Two-factor cloud password is checked as a secret and authenticates only a user account"
-    await rt.runPromise(Auth.Machine.use((m) => m.send({ type: "signOut" })));
-    await until(rt, authChanges, (s) => s.step === "SignedOut" && s.work === "Idle");
+    await signOut(rt);
     await clickButton("Continue");
     await until(rt, authChanges, (s) => s.step === "PhoneEntry");
 
@@ -295,8 +313,7 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     await until(rt, listChanges, (s) => s.list.status === "Loaded");
 
     // spec/app/telegram/auth.md, "QR login offers an alternate user-account path with expiry, optional two-factor check and secret token"
-    await rt.runPromise(Auth.Machine.use((m) => m.send({ type: "signOut" })));
-    await until(rt, authChanges, (s) => s.step === "SignedOut" && s.work === "Idle");
+    await signOut(rt);
     await clickButton("Continue");
     await until(rt, authChanges, (s) => s.step === "PhoneEntry");
 
@@ -325,18 +342,9 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
   // spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"; spec/app/telegram/conversation.md, "Story: Read and interact with a Telegram conversation"; spec/app/telegram/composer.md, "Story: Draft and send Telegram messages under my sole authority"
   it("lists dialogs, switches tabs, searches, reads history with visible-only mark-read, replies, edits, deletes with review, reacts, mutes, and enforces broadcast read-only", async () => {
     const rt = runtime!;
-    const authChanges = Auth.Machine.use((m) => Effect.succeed(m.changes));
-    const listChanges = ChatList.Machine.use((m) => Effect.succeed(m.changes));
-    const convChanges = Conversation.Machine.use((m) => Effect.succeed(m.changes));
-    const compChanges = Composer.Machine.use((m) => Effect.succeed(m.changes));
 
     await clickButton("Continue");
-    await fillField("Phone number", "+9996621234");
-    await clickButton("Send code");
-    await until(rt, authChanges, (s) => s.step === "CodePending");
-    await fillField("Verification code", "22222");
-    await clickButton("Verify code");
-    await until(rt, listChanges, (s) => s.list.status === "Loaded" && s.pages === 1);
+    await signIn(rt);
 
     expect(document.body.textContent).toContain("Maya");
     expect(document.body.textContent).toContain("Alpha Core");
@@ -421,10 +429,6 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
   // spec/app/telegram/agent.md, "Story: Let Alpha help with Telegram safely and transparently"; spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise"
   it("gates ambient context, stages Alpha drafts without sending, dispatches on owner tap, and delivers SSE notices with mute suppression", async () => {
     const rt = runtime!;
-    const authChanges = Auth.Machine.use((m) => Effect.succeed(m.changes));
-    const listChanges = ChatList.Machine.use((m) => Effect.succeed(m.changes));
-    const convChanges = Conversation.Machine.use((m) => Effect.succeed(m.changes));
-    const compChanges = Composer.Machine.use((m) => Effect.succeed(m.changes));
     const agentChanges = AgentTelegram.Machine.use((m) => Effect.succeed(m.changes));
     const noticeChanges = Notices.Machine.use((m) => Effect.succeed(m.changes));
 
@@ -434,12 +438,7 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     expect(whileAuth.sensitive).toBe(true);
 
     await clickButton("Continue");
-    await fillField("Phone number", "+9996621234");
-    await clickButton("Send code");
-    await until(rt, authChanges, (s) => s.step === "CodePending");
-    await fillField("Verification code", "22222");
-    await clickButton("Verify code");
-    await until(rt, listChanges, (s) => s.list.status === "Loaded" && s.pages === 1);
+    await signIn(rt);
     await until(rt, noticeChanges, (s) => s.since > 0);
 
     const card = await rt.runPromise(telegramHomeCard);
@@ -535,16 +534,9 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
   // spec/app/telegram/auth.md, "Remote revocation and explicit sign-out wipe local data, advance the credential revision and stop sync"
   it("wipes cached state on remote revocation and calls auth.logOut on explicit Sign Out", async () => {
     const rt = runtime!;
-    const authChanges = Auth.Machine.use((m) => Effect.succeed(m.changes));
-    const listChanges = ChatList.Machine.use((m) => Effect.succeed(m.changes));
 
     await clickButton("Continue");
-    await fillField("Phone number", "+9996621234");
-    await clickButton("Send code");
-    await until(rt, authChanges, (s) => s.step === "CodePending");
-    await fillField("Verification code", "22222");
-    await clickButton("Verify code");
-    await until(rt, listChanges, (s) => s.list.status === "Loaded" && s.pages === 1);
+    await signIn(rt);
 
     await controlJson(provider.origin, "/__control/revoke", {});
     await until(rt, authChanges, (s) => s.step === "SessionExpired" && s.trouble === "SessionRevoked");
@@ -559,15 +551,9 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     // spec/app/telegram/auth.md, "Remote revocation and explicit sign-out wipe local data, advance the credential revision and stop sync"
     await clickButton("Sign in again");
     await until(rt, authChanges, (s) => s.step === "PhoneEntry");
-    await fillField("Phone number", "+9996621234");
-    await clickButton("Send code");
-    await until(rt, authChanges, (s) => s.step === "CodePending");
-    await fillField("Verification code", "22222");
-    await clickButton("Verify code");
-    await until(rt, listChanges, (s) => s.list.status === "Loaded" && s.pages === 1);
+    await signIn(rt);
 
-    await rt.runPromise(Auth.Machine.use((m) => m.send({ type: "signOut" })));
-    await until(rt, authChanges, (s) => s.step === "SignedOut" && s.work === "Idle");
+    await signOut(rt);
     await until(rt, listChanges, (s) => !s.authenticated && s.pages === 0);
 
     const logOutReqs = (await controlJson(provider.origin, "/__control/requests?path=/rpc/auth.logOut")) as {
