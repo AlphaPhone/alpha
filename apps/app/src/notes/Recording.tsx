@@ -84,7 +84,7 @@ export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   if (state === undefined) return null;
   const send = (event: Event) => void recording.send(event, "Owner");
   const can = (event: Event) => recording.can(event, "Owner");
-  const run = (action: "pause" | "resume" | "stop") => void runtime.runPromise(control(action));
+  const run = (action: "pause" | "resume" | "stop") => void runtime.runPromise(control(action, state.take));
   const resume = { type: "resume", take: state.take, room: { allowed: true, free: true, front: true, silent: true } } as const;
   const active = state.phase === "Recording";
   const paused = state.phase === "Paused";
@@ -95,13 +95,16 @@ export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const levels = matchingTake ? meters.levels : [];
   const canStop = can({ type: "stop", take: state.take });
   const canSave = can({ type: "keepPartial" });
-  const canCancel = can({ type: "cancelDiscard" });
+  const askDiscard = { type: "askDiscard", take: state.take } as const;
+  const cancelDiscard = { type: "cancelDiscard", take: state.take } as const;
+  const confirmDiscard = { type: "confirmDiscard", take: state.take } as const;
+  const canCancel = can(cancelDiscard);
   const status = active ? (measuring ? "Recording" : "Starting…")
     : paused ? (state.recovered ? "Recovered recording" : "Paused")
       : turning ? "Saving…" : "";
 
   return <RecorderFrame seconds={seconds} levels={levels} measuring={measuring} status={status}
-    onDiscard={can({ type: "askDiscard" }) ? () => send({ type: "askDiscard" }) : undefined}
+    onDiscard={can(askDiscard) ? () => send(askDiscard) : undefined}
     discardRef={discardRef}
     details={<>
       {state.calling && <Alert variant="warn">Recording paused for a phone call</Alert>}
@@ -112,11 +115,11 @@ export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
         if (event.key !== "Escape" || !canCancel) return;
         event.preventDefault();
         event.stopPropagation();
-        send({ type: "cancelDiscard" });
+        send(cancelDiscard);
       }}>
       <span className="flex-1">Discard?</span>
-      {canCancel && <Button ref={keepRef} variant="secondary" className="rounded-dictation-type px-4" onClick={() => send({ type: "cancelDiscard" })}>Keep</Button>}
-      {can({ type: "confirmDiscard" }) && <Button className="rounded-dictation-type bg-foreground px-4 text-background hover:bg-foreground/90" onClick={() => send({ type: "confirmDiscard" })}>Discard</Button>}
+      {canCancel && <Button ref={keepRef} variant="secondary" className="rounded-dictation-type px-4" onClick={() => send(cancelDiscard)}>Keep</Button>}
+      {can(confirmDiscard) && <Button className="rounded-dictation-type bg-foreground px-4 text-background hover:bg-foreground/90" onClick={() => send(confirmDiscard)}>Discard</Button>}
       </div>}
     actions={<>
       {(active || paused || turning) && (
