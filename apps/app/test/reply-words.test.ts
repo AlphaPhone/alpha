@@ -60,12 +60,24 @@ describe("a reply's words without the agent's turn tag (spec/app/assistant/reply
 });
 
 describe("a Maps card's search handed to Maps", () => {
-  it("is taken once, and its watchers hear it left and taken", async () => {
-    const { handToMaps, handedQuery, takeHandedQuery, watchHandoff } = await import("../src/maps/handoff.ts");
+  it("stays left until Maps takes it, is offered once at a time, and its watchers hear it left, offered, taken and dropped", async () => {
+    const { dropHandedQuery, handToMaps, handedQuery, offerHandedQuery, watchHandoff } = await import("../src/maps/handoff.ts");
     let woken = 0;
     const stop = watchHandoff(() => { woken += 1; });
     handToMaps("coffee shops");
-    expect([handedQuery(), takeHandedQuery(), takeHandedQuery(), woken]).toEqual(["coffee shops", "coffee shops", undefined, 3]);
+    let answer = (_taken: boolean) => {};
+    const refusing = offerHandedQuery(() => new Promise((settle) => { answer = settle; }));
+    const onItsWay = [handedQuery(), await offerHandedQuery(() => Promise.resolve(true))];
+    answer(false);
+    await refusing;
+    const refused = handedQuery();
+    await offerHandedQuery(() => Promise.resolve(true));
+    const taken = handedQuery();
+    handToMaps("tea");
+    await offerHandedQuery(() => undefined);
+    const unoffered = handedQuery();
+    dropHandedQuery();
+    expect([onItsWay, refused, taken, unoffered, handedQuery(), woken]).toEqual([[undefined, undefined], "coffee shops", undefined, "tea", undefined, 7]);
     stop();
   });
 });
