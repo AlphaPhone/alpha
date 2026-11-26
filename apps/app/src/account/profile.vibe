@@ -1,6 +1,6 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
 import type { CredentialId } from "@elizaos/os-bridges"
-import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, type PlanOffer, subscriptionView } from "@elizaos/cloud"
+import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, type PlanOffer, type SnapshotSubscription, subscriptionView } from "@elizaos/cloud"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
 import * as Settings from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -23,6 +23,7 @@ type Plan =
     readonly balanceMicros: number
     readonly allowance: { readonly availableMicros: number; readonly resetsAt: number } | null
     readonly expiresAt: number | null
+    readonly subscription?: SnapshotSubscription
   }
 
 export type PurchaseVisibility = "Matches" | "Changed" | "Unconfirmed"
@@ -181,6 +182,8 @@ effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfi
         ? { availableMicros: allowance.available, resetsAt: allowance.resetsAt }
         : null,
       expiresAt: view.planEffectiveUntil,
+      ...(snapshot.plan.source === "subscription" && snapshot.subscription !== null && snapshot.subscription.periodEnd > now
+        ? { subscription: snapshot.subscription } : {}),
     },
   }
 }

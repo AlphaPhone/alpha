@@ -287,6 +287,52 @@ describe("Settings", () => {
     expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key: expect.any(String) }]);
   });
 
+  it('Checks the same cancellation after a lost reply and keeps the plan only once (spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in")', async () => {
+    const change = { revision: 2, ending: false, loseReply: true, commands: [] };
+    const world = { ...scene(), phone: true, checkout: { starts: [], confirmations: [], opened: [], returned: null, paid: true, change } };
+    const emailed: string[] = [];
+    world.voice.startupSignIn = {
+      reauthenticate: async ({ email }) => {
+        emailed.push(email ?? "");
+        return { request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 60_000, resendAt: world.now + 10_000 };
+      },
+      verify: async ({ code }) => {
+        if (code !== "123456") throw new Error("Wrong confirmation");
+        world.voice.billingVerified = world.voice.credentialId;
+        return { request: 1, attempt: 1, verdict: "account-confirmed" };
+      },
+    };
+    await settingsOpen(world);
+    await press("Account");
+    await vi.waitFor(() => {
+      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Plans");
+      if (!plans) throw new Error("No Plans control");
+      return drawn(() => plans.click());
+    });
+    const available = (name: string) => vi.waitFor(() => expect(button(name)).toBeDefined(), { timeout: 10_000 });
+    await available("Cancel plan");
+    await press("Cancel plan");
+    await press("Cancel plan");
+    await available("Email me a code");
+    expect(change.commands).toEqual([]);
+    await press("Email me a code");
+    await available("Verify code");
+    await fill("Confirmation code", "123456");
+    await press("Verify code");
+    await available("Cancel plan");
+    expect(emailed).toEqual([account.email]);
+    expect(change.commands).toEqual([]);
+    await press("Cancel plan");
+    await available("Keep plan");
+    expect(change.commands).toMatchObject([{ kind: "cancel", status: "succeeded", expectedRevision: 2, resultRevision: 3 }]);
+    await press("Keep plan");
+    await available("Cancel plan");
+    expect(change.commands).toMatchObject([
+      { kind: "cancel", status: "succeeded", expectedRevision: 2, resultRevision: 3 },
+      { kind: "undo", status: "succeeded", expectedRevision: 3, resultRevision: 4 },
+    ]);
+  });
+
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("General");

@@ -32,6 +32,7 @@ export interface Account extends Remote {
   readonly client: CloudClient
   readonly clientFor: (credential: CredentialId) => CloudClient | undefined
   callFor(request: HttpClientRequest.HttpClientRequest, credential: CredentialId): unknown!Failure
+  callBillingFor(request: HttpClientRequest.HttpClientRequest, credential: CredentialId): unknown!Failure
 }
 
 export service Cloud: Account {}
@@ -94,7 +95,8 @@ export function cloudAt(base: string) {
     const direct = try remoteAt(base)
     return { call: direct.call, events: direct.events, client: typed(fetching(direct)),
       clientFor: () => undefined,
-      callFor: () => Effect.fail(new Unsent({ cause: "A browser has no device credential" })) }
+      callFor: () => Effect.fail(new Unsent({ cause: "A browser has no device credential" })),
+      callBillingFor: () => Effect.fail(new Unsent({ cause: "A browser has no account session" })) }
   })
 }
 
@@ -144,14 +146,19 @@ function relayed(method: string, path: string, query: Readonly<Record<string, st
 
 /** Send the owner’s reviewed request through the phone’s device-key custody. */
 function plugged(relay: Relay, wifi: WiFi.Shape): Omit<Account, "client" | "clientFor"> {
-  effect function send(request: HttpClientRequest.HttpClientRequest, credential?: CredentialId): unknown!Failure {
+  effect function send(request: HttpClientRequest.HttpClientRequest, binding: Pick<CloudRequest, "expectedCredentialId" | "expectedSessionCredentialId">): unknown!Failure {
     const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
     const body = text === "" ? undefined : parsed(text) catch effect (cause) => { throw new Unsent({ cause }) }
     const headers = Object.fromEntries(Object.entries(request.headers).filter((one): one is [string, string] => typeof one[1] === "string"))
     const sent = relayed(request.method, request.url, Object.fromEntries(new URLSearchParams(UrlParams.toString(request.urlParams))), headers, body)
     if (sent === undefined) throw new Unsent({ cause: `the phone relays no ${request.method} to the cloud` })
     try networked(wifi)
-    const reply = timeout(tryPromise({ try: (signal) => relay.request({ ...sent, signal, ...(credential === undefined ? {} : { expectedCredentialId: credential }) }), catch: undelivered }), patience) catch effect (cause) => match (cause) {
+    const reply = timeout(tryPromise({
+      try: (signal) => relay.request({ ...sent, ...binding, signal }),
+      catch: (cause) => binding.expectedSessionCredentialId !== undefined && cause instanceof CloudRefused && cause.failure === "reauth-required"
+        ? refusal(428, undefined)
+        : undelivered(cause),
+    }), patience) catch effect (cause) => match (cause) {
       when Unsent: throw cause;
       when Refused: throw cause;
       default: throw new Unreachable({ cause });
@@ -160,8 +167,9 @@ function plugged(relay: Relay, wifi: WiFi.Shape): Omit<Account, "client" | "clie
     return try parsed(new TextDecoder().decode(reply.body))
   }
   return {
-    call: (request) => send(request),
-    callFor: (request, credential) => send(request, credential),
+    call: (request) => send(request, {}),
+    callFor: (request, expectedCredentialId) => send(request, { expectedCredentialId }),
+    callBillingFor: (request, expectedSessionCredentialId) => send(request, { expectedSessionCredentialId }),
     events: () => Stream.fail(new Unsent({ cause: "the phone's cloud plugin streams nothing" })),
   }
 }
@@ -188,16 +196,19 @@ function relaying(relay: Relay, wifi: WiFi.Shape, expectedCredentialId?: Credent
   }
 }
 
-/** Open the exact Stripe checkout Cloud answered through the Android host's URL allowlist. */
-export effect function openCloudCheckout(url: string): boolean!! {
+effect function openStripe(url: string, host: "checkout.stripe.com" | "invoice.stripe.com"): boolean!! {
   const target = Effect.try(() => new URL(url)) catch () => undefined
-  if (target === undefined || target.protocol !== "https:" || target.hostname !== "checkout.stripe.com"
-    || target.port || target.username || target.password) return false
+  if (target === undefined || target.origin !== "https://" + host || target.username || target.password
+    || (host === "invoice.stripe.com" && !target.pathname.startsWith("/i/"))) return false
   return effect {
     try tryPromise(() => client().openExternal({ url, environment: CLOUD_ENVIRONMENT }))
     return true
   } catch () => false
 }
+
+/** Stripe pages must be the exact checkout or invoice the authenticated Cloud answered. */
+export const openCloudCheckout = (url: string) => openStripe(url, "checkout.stripe.com")
+export const openCloudInvoice = (url: string) => openStripe(url, "invoice.stripe.com")
 
 /**
  * The cloud on the phone, through the `ElizaCloud` plugin of eliza's Android package: eliza's `cloudClient()` of
