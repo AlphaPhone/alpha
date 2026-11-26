@@ -121,7 +121,11 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   const ask = { ...tap, question: true, messageId: second.card.id, threadId: second.card.threadId };
   const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
   await drawn(() => enter({ ...ask, token: "dismissed" }));
-  await afterDraw(() => expect(review()).toContain(second.body));
+  await afterDraw(async () => {
+    const reader = await runtime.runPromise(Shown.use((machine) => machine.get()));
+    const shell = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
+    expect(review(), JSON.stringify({ title: title(), read: reader.body.status, assistant: shell.assistant, reads: world.inbox.bodyReads })).toContain(second.body);
+  });
   await confirm("Cancel");
   await afterDraw(() => expect(notices.released).toEqual(["dismissed"]));
   expect([notices.spent, world.ask.said]).toEqual([["ordinary"], []]);
