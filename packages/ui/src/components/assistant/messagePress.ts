@@ -114,16 +114,26 @@ export function useMessageText(
   return enabled ? { ref, onClick, onContextMenu, onPointerDown } : {};
 }
 
+interface MessageMenuOptions {
+  readonly within?: Element | null;
+  readonly dismissOnSelection?: boolean;
+}
+
 /** Dismisses an open menu without stealing focus from a selection or another message. */
-export function watchMessageMenu(menu: HTMLDivElement, close: () => void): () => void {
+export function watchMessageMenu(
+  menu: HTMLDivElement,
+  close: () => void,
+  { within = menu.closest("article"), dismissOnSelection = true }: MessageMenuOptions = {},
+): () => void {
   const document = menu.ownerDocument;
   const listeners = new AbortController();
   const { signal } = listeners;
-  const row = menu.closest("article");
   document.addEventListener("pointerdown", (event) => {
-    if (!(event.target instanceof Node) || !row?.contains(event.target)) close();
+    const target = event.target;
+    if (target instanceof Node && (menu.contains(target) || within?.contains(target))) return;
+    close();
   }, { capture: true, passive: true, signal });
-  document.addEventListener("selectionchange", () => {
+  if (dismissOnSelection) document.addEventListener("selectionchange", () => {
     if (document.getSelection()?.isCollapsed === false) close();
   }, { signal });
   return () => listeners.abort();

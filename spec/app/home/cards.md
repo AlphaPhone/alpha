@@ -37,7 +37,7 @@ type Origin = PhoneCalendar | AgentCalendar | Reminder
 type Item = { id: int, origin: Origin, calendar: int, begin: int, end: int, allDay: bool, overdue: bool, done: bool }
 type Feed = { read: R::Read, source: Source, day: int, items: List[Item], since: int, asked: int }
 type Cards = { calendar: Feed, agent: Feed, today: int }
-type CardVisit = BareCard | AdjacentCard({ kind: Kind, route: int })
+type CardVisit = BareCard | AdjacentCard({ kind: Kind, route: int }) | MailCardVisit({ route: int, beside: bool })
 type Effect = ReadCalendar({ ticket: int }) | ReadAgentCalendar({ ticket: int }) | Go({ view: S::View, visit: CardVisit })
 type Asked = { state: Cards, out: List[Effect] }
 
@@ -537,6 +537,8 @@ pure def opens(kind: Kind): S::View =
 
 pure def failed(f: Feed): bool = not(loading(f)) and (f.source == Broken or f.source == Unavailable or f.source == TimedOut)
 
+pure def canOpenCard(c: Cards, kind: Kind): bool = kind != MailCard
+
 pure def openCard(c: Cards, kind: Kind, now: int): Asked =
   val retry = kind == AgendaCard and failed(c.calendar)
   val calendar = if (retry) asking(c.calendar, now, c.today) else c.calendar
@@ -564,10 +566,30 @@ pure val shellValues = Set(S::initial, S::raise(S::initial, S::Sheet), { ...S::r
 pure val eval_witness_canOpenCardBeside = ("openCardBeside", WorkflowsCard, S::raise(S::initial, S::Sheet), true, true)
 ```
 
+### The unread mail card opens Inbox without a search or message open
+
+From bare Home, or beside Ask on a landscape phone, the same uncovered
+Home visit and visible card must still admit the tap when Inbox opens.
+Inbox keeps its selected account and folder. Inbox closes the previous
+message and clears the previous search for that exact new visit.
+
+```quint
+pure def canOpenMailCard(c: Cards, shell: S::Shell, beside: bool, shown: bool): bool =
+  shown and S::canOpenView(shell, S::Inbox)
+    and (if (beside) not(shell.drawer) and S::adjacentAskSheet(shell, true) else S::layers(shell) == 0)
+
+pure def openMailCard(c: Cards, shell: S::Shell, beside: bool, shown: bool): Asked =
+  { state: c, out: List(Go({ view: S::Inbox, visit: MailCardVisit({ route: shell.route, beside: beside }) })) }
+
+pure val eval_witness_canOpenMailCard = ("openMailCard", S::raise(S::initial, S::Sheet), true, true)
+```
+
 ### A tap opens exactly one app, and asks a calendar again only after its read did not succeed
 
 ```quint
+pure def isCardTap(via: str): bool = via == "openCard" or via == "openCardBeside" or via == "openMailCard"
+
 pure def stepATapOpensOneApp(before: Cards, via: str, after: Cards, out: List[Effect]): bool =
-  (out.select(e => match e { | Go(g) => true | _ => false }).length() == 1 iff (via == "openCard" or via == "openCardBeside"))
+  (out.select(e => match e { | Go(g) => true | _ => false }).length() == 1 iff isCardTap(via))
     and ((via == "openCard" and out.some(e => match e { | ReadCalendar(r) => true | _ => false })) implies failed(before.calendar))
 ```

@@ -344,7 +344,7 @@ The uncovered Home pane on a landscape phone can open one of Alpha's own
 apps. The same Shell route and layout must
 still admit that tap when the app opens. An actual covering layer, voice,
 a protected Android Ask visit, Typing, Full, and the Apps drawer still
-own their input. The [cards](./cards.md) rule admits Workflows and Brief
+own their input. The [cards](./cards.md) rule admits Workflows, Brief and Inbox
 in this visit. The Apps tile follows the shell's drawer rule.
 
 ```quint
@@ -526,13 +526,13 @@ pure def hiddenApps(h: Home, shell: S::Shell): List[S::View] =
 pure def offered(h: Home, tile: T::Tile, shell: S::Shell): bool =
   h.adding and hiddenApps(h, shell).some(v => T::shows(tile, v))
 
-pure def canAddToHome(h: Home, tile: T::Tile, shell: S::Shell, by: Actor): bool =
-  by == Owner and onPhone(h) and editSite(shell, false) and T::canAddTile(h.tiles, tile) and offered(h, tile, shell)
+pure def canAddToHome(h: Home, tile: T::Tile, shell: S::Shell, beside: bool, by: Actor): bool =
+  by == Owner and onPhone(h) and editSite(shell, beside) and T::canAddTile(h.tiles, tile) and offered(h, tile, shell)
 
 pure def changed(kept: T::Tiles, h: Home): Moved =
   { state: { ...h, tiles: kept }, out: List(SaveHome({ tiles: kept.favourites, ticket: kept.save.id })) }
 
-pure def addToHome(h: Home, tile: T::Tile, shell: S::Shell, by: Actor): Moved =
+pure def addToHome(h: Home, tile: T::Tile, shell: S::Shell, beside: bool, by: Actor): Moved =
   val tiles = T::addTile(h.tiles, tile)
   val added = { ...h, tiles: tiles }
   { state: { ...added, adding: h.adding and hiddenApps(added, shell).length() > 0 },
@@ -542,9 +542,9 @@ pure def addToHome(h: Home, tile: T::Tile, shell: S::Shell, by: Actor): Moved =
 ### Add to Home closes once there is nothing left to add
 
 ```quint
-pure def lawAddToHomeClosesWhenNothingIsLeft(home: Home, tile: T::Tile, shell: S::Shell): bool =
-  val added = addToHome(home, tile, shell, Owner)
-  (canAddToHome(home, tile, shell, Owner) and hiddenApps(added.state, shell).length() == 0) implies not(added.state.adding)
+pure def lawAddToHomeClosesWhenNothingIsLeft(home: Home, tile: T::Tile, shell: S::Shell, beside: bool): bool =
+  val added = addToHome(home, tile, shell, beside, Owner)
+  (canAddToHome(home, tile, shell, beside, Owner) and hiddenApps(added.state, shell).length() == 0) implies not(added.state.adding)
 ```
 
 ### A tile on Home is removed or moved only while Home is being edited
@@ -636,16 +636,22 @@ pure def beginEditing(h: Home, shell: S::Shell, beside: bool, by: Actor): Home =
 
 ### While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one
 
-```quint
-pure def canShowHidden(h: Home, shell: S::Shell): bool = h.editing and not(h.adding) and editSite(shell, false) and hiddenApps(h, shell).length() > 0
+The sheet takes Back before Ask Alpha. Beside Ask Alpha the Add sheet
+covers Home and leaves Ask usable. Losing the visit or the quiet
+landscape frame closes its layer and leaves Home editing where possible.
 
-pure def showHidden(h: Home, shell: S::Shell): Home = { ...h, adding: true }
+```quint
+pure def canShowHidden(h: Home, shell: S::Shell, beside: bool, by: Actor): bool =
+  by == Owner and h.editing and not(h.adding) and editSite(shell, beside) and hiddenApps(h, shell).length() > 0
+
+pure def showHidden(h: Home, shell: S::Shell, beside: bool, by: Actor): Home = { ...h, adding: true }
 ```
 
 ### Back closes one layer of Home's own: Add to Home, then editing; Done ends editing
 
-On bare Home these come before leaving Home. With Ask Alpha open, Back
-lowers Ask Alpha and still leaves Home in edit mode. Home ends editing.
+Back closes the Add sheet first. With Ask Alpha open and no Add sheet,
+Back lowers Ask Alpha and leaves Home in edit mode. On bare Home, Back
+then ends editing. Home ends editing.
 
 ```quint
 pure def canBackOut(h: Home): bool = h.adding or h.editing
@@ -662,9 +668,8 @@ pure def done(h: Home): Home = { ...h, editing: false, adding: false }
 ### Opening an app, Apps or the protected Ask Alpha visit ends Home editing
 
 The shell tells Home each time it moves. Raising or lowering ordinary Ask
-Alpha keeps the edit. The Add sheet belongs to bare Home. Opening Apps
-also starts the first catalog read if the phone's apps have not yet been
-read.
+Alpha keeps the edit. Opening Apps also starts the first catalog read if
+the phone's apps have not yet been read.
 
 ```quint
 pure def needsAppsForDrawer(h: Home, shell: S::Shell): bool =
@@ -674,11 +679,10 @@ pure def leavesEdit(shell: S::Shell): bool =
   shell.trail.length() > 0 or shell.drawer or shell.textAsk != S::NoTextAsk
 
 pure def canShellMoved(h: Home, shell: S::Shell): bool =
-  (h.editing and leavesEdit(shell)) or (h.adding and not(editSite(shell, false))) or needsAppsForDrawer(h, shell)
+  (h.editing and leavesEdit(shell)) or needsAppsForDrawer(h, shell)
 
 pure def shellMoved(h: Home, shell: S::Shell): Moved =
-  val fitted = if (leavesEdit(shell)) { ...h, editing: false, adding: false }
-    else if (not(editSite(shell, false))) { ...h, adding: false } else h
+  val fitted = if (leavesEdit(shell)) { ...h, editing: false, adding: false } else h
   if (needsAppsForDrawer(h, shell)) thenReadApps(List(), fitted, false)
   else { state: fitted, out: List() }
 
@@ -802,6 +806,6 @@ pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, drawer: D:
     and not(canOpenFavorite(home, app, shell, landscapePhone, 0, Agent))
     and not(canPinInstalled(home, app, shell, drawer, Agent)) and not(canShowAppInfo(home, app, shell, drawer, Agent))
     and not(canPullDown(home, shell, false, Agent))
-    and not(canAddToHome(home, tile, shell, Agent)) and not(canRemoveFromHome(home, tile, shell, false, Agent))
+    and not(canShowHidden(home, shell, false, Agent)) and not(canAddToHome(home, tile, shell, false, Agent)) and not(canRemoveFromHome(home, tile, shell, false, Agent))
     and not(canMoveTile(home, tile, onto, shell, false, Agent))
 ```

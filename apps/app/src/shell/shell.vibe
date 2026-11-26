@@ -72,7 +72,10 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs | D
   const over = try layers.get()
   const taker = Layers.backTaker(over)
   if (taker === "ByLayer") {
-    if (!(try screens.take(`layer:${Layers.top(over).id}`))) try contained(layers.send({ type: "back" }), "back")
+    const id = Layers.top(over).id
+    if (!(try screens.take(`layer:${id}`))) {
+      try contained(layers.send({ type: "back" }, (current) => Layers.top(current).id === id), "back")
+    }
     return
   }
   if (taker === "ByHold" || (try screens.take("startup/sign-in"))) return

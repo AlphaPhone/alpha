@@ -96,6 +96,7 @@ describe("Home on a phone", () => {
     // spec/app/home/index.md, "While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one"
     await press("Add to Home");
     await until(alpha, homes, Home.Machine, (h) => h.adding);
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Add to Home"));
     await press("Notes");
     await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
@@ -250,6 +251,28 @@ describe("Home on a phone", () => {
     await press("Remove Clock");
     await vi.waitFor(() => expect(tiles()).toEqual(["view:Notes"]));
     expect(chat()).not.toBeNull();
+    // spec/app/home/index.md, "While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one"
+    const add = () => [...document.querySelectorAll('[role="dialog"]')].find((node) => node.querySelector("h2")?.textContent === "Add to Home");
+    await press("Add to Home");
+    await vi.waitFor(() => expect(add()).toBeDefined());
+    expect(chat()?.closest("[inert]")).toBeNull();
+    await rotate(false);
+    await vi.waitFor(() => expect(add()).toBeUndefined());
+    await until(alpha, homes, Home.Machine, (state) => !state.adding);
+    await rotate(true);
+    await vi.waitFor(() => expect(button("Add to Home")?.disabled).toBe(false));
+    await press("Add to Home");
+    await vi.waitFor(() => expect(add()).toBeDefined());
+    await hardware("back");
+    await vi.waitFor(() => expect(add()).toBeUndefined());
+    expect(chat()).not.toBeNull();
+    await vi.waitFor(() => expect(button("Add to Home")?.disabled).toBe(false));
+    await press("Add to Home");
+    await vi.waitFor(() => expect(button("Files")).toBeDefined());
+    await press("Files");
+    await vi.waitFor(() => expect(tiles()).toEqual(["view:Notes", "view:Files"]));
+    await hardware("back");
+    await vi.waitFor(() => expect(add()).toBeUndefined());
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
     expect(button("Done")).toBeDefined();

@@ -12,6 +12,7 @@ import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
 import { BrowserFrames } from "./browser/BrowserFrames.tsx";
+import { addLayerAt } from "./home/addHome.vibe";
 import { coarsePointer, desktopPreview, landscapeHomeInput, watchPrimaryPointer } from "./shell/canvas.vibe";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
@@ -174,7 +175,8 @@ export function App({ alpha }: AppProps) {
   const inboxLandscapeBar = !phone && showing === "Inbox" && state.assistant === "Bar" && state.textAsk.tag === "NoTextAsk"
     && canvas?.landscape === true && coarse;
   const fullScreen = state.assistant === "Full" && (phone || !side);
-  const sheetBeside = layers !== undefined && !inert && adjacentAskSheet(state, landscapeHomeInput(canvas));
+  const sheetBeside = layers !== undefined && !shellFailed && (!inert || addLayerAt(layers, state.route, true) !== undefined)
+    && adjacentAskSheet(state, landscapeHomeInput(canvas));
   const voiceOverHome = phone && side && canvas?.voice === true;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
@@ -196,7 +198,7 @@ export function App({ alpha }: AppProps) {
       onTouchEnd={touchEnded}
       onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
       style={frameStyle}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4", preview && "absolute m-0 rounded-panel")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
     >
       <div
         data-alpha-shell-page=""
@@ -249,7 +251,7 @@ export function App({ alpha }: AppProps) {
           ],
           inboxLandscapeBar && "[&&>[data-alpha-detent=bar]]:start-auto [&>[data-alpha-detent=bar]]:w-[min(400px,46%)]",
           side && [
-            "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
+            "relative flex w-[var(--alpha-home-ask-width,min(400px,46%))] shrink-0 flex-col justify-end",
             "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",
             "[&>[data-alpha-detent=full]]:inset-0",
           ],

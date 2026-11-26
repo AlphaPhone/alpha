@@ -15,7 +15,7 @@ import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
-import { fromAreas, named, openAdjacentCard, others } from "./cards.vibe";
+import { fromAreas, named, openRoutedCard, others } from "./cards.vibe";
 import { messagingStateOf, renderMessagingCard } from "./MessagingCards.tsx";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
@@ -68,12 +68,13 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Hom
   const now = Math.max(state.calendar.since, state.agent.since, dayStart(state.today));
   const latest = Math.max(now, runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
   const open = (kind: Cards.Kind) => {
-    if (beside) {
-      const shown = Cards.shownBeside(kind, told.flows, told.brief);
-      const admitted = can({ type: "openCardBeside", kind, shell, landscapePhone: true, shown });
+    if (kind === "MailCard" || beside) {
+      const admitted = kind === "MailCard"
+        ? can({ type: "openMailCard", shell, beside, shown: Cards.mailCard(told.mail) !== "Hidden" })
+        : can({ type: "openCardBeside", kind, shell, landscapePhone: true, shown: Cards.shownBeside(kind, told.flows, told.brief) });
       return {
         disabled: !admitted,
-        onClick: () => { if (admitted) void runtime.runPromise(openAdjacentCard(kind, shell.route)); },
+        onClick: () => { if (admitted) void runtime.runPromise(openRoutedCard(kind, shell.route, beside)); },
       };
     }
     return {
