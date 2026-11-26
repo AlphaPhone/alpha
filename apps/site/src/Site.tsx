@@ -6,6 +6,7 @@ import type { ComponentProps, ReactNode } from "react";
 import type { Machine } from "../gen/site.effect.vibe";
 import { useMachine } from "../gen/site.react.ts";
 import { type Demo, type Scene, during, initial, reached } from "../gen/site.ts";
+import { policyPages } from "./Legal.tsx";
 
 export interface SiteProps {
   runtime: ManagedRuntime.ManagedRuntime<Machine, unknown>;
@@ -399,6 +400,9 @@ export function Site({ runtime }: SiteProps) {
           <Mark aria-hidden className="text-alpha" />
           Alpha
         </span>
+        {policyPages.map(({ path, document }) => (
+          <a className="text-muted-foreground hover:text-primary" href={path} key={path}>{document.title}</a>
+        ))}
         <a className="text-muted-foreground hover:text-primary" href="https://alphacompute.ai/">Built by <strong className="font-semibold text-foreground">Alpha Compute</strong></a>
         <a className="text-muted-foreground hover:text-primary" href={source}>GitHub</a>
       </footer>

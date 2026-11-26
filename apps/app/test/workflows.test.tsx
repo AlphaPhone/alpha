@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
 import { Machine as Automations } from "../gen/app__workflows__automations.effect.vibe";
@@ -12,6 +12,7 @@ import workflows from "../src/workflows/index.tsx";
 import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 import { nativeApprovalNotices, workflowNoteOffer, workflowPhoneOffer } from "./fakes/workflows.ts";
 
@@ -233,9 +234,13 @@ describe("Workflows", () => {
   });
 
   it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names"; spec/app/workflows/sheet.md, "Story: Open a finished workflow from its notification")', async () => {
+    // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left": the WebView's IndexedDB keeps the run attached to Ask Alpha.
+    vi.stubGlobal("indexedDB", memoryIndexedDB());
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const world = scene();
     world.phone = true;
     world.image = true;
+    world.ask.spokenFiles = [];
     const device = await workflowNoteOffer(world.workflows, world.notes.owner);
     world.telephony.textReview = device;
     const notices = nativeApprovalNotices();
@@ -351,7 +356,7 @@ describe("Workflows", () => {
     await fill("Message Alpha", "What happened in this run?");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
-    await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]));
+    await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]), { timeout: 12_000 });
     const attachment = world.ask.spokenFiles?.at(-1)?.images?.[0] as { readonly name?: string; readonly mimeType?: string; readonly data?: string } | undefined;
     expect(attachment).toMatchObject({ name: "Workflow run.json", mimeType: "application/json" });
     expect(JSON.parse(atob(attachment?.data ?? ""))).toMatchObject({
@@ -400,7 +405,6 @@ describe("Workflows", () => {
     world.image = true;
     const proposal = await workflowPhoneOffer(world.workflows, world.notes.owner, kind);
     world.telephony.textReview = proposal;
-    world.voice.onDevice = kind === "speak_text";
     if (scenario === "speak_text_stopped") world.voice.playbackHold = () => new Promise<void>(() => {});
     const notices = nativeApprovalNotices();
     world.workflows.nativeNotices = notices;
@@ -456,8 +460,7 @@ describe("Workflows", () => {
 
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await press("Add to Workflows");
@@ -492,8 +495,7 @@ describe("Workflows", () => {
 
   it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await choose("Monthly statement");

@@ -77,7 +77,13 @@ effect function openTap(tap: MailNoticeTap) {
       })) return false
       return try contained(background.consume(tap.token), "accepting the exact Gmail notification")
     },
-    dismiss: () => ignore(background.releaseQuestion(tap.token)),
+    dismiss: () => effect {
+      try ignore(background.releaseQuestion(tap.token))
+      const current = try reader.get()
+      if (current.account === account && current.message === number && current.body.ticket === held.body.ticket) {
+        try ignore(shell.send({ type: "goBack" }, (state) => state.assistant === "Sheet" && Shell.showing(state, "Inbox")))
+      }
+    },
   })
   return true
 }

@@ -23,7 +23,7 @@ import { useMachine as useLink } from "../../gen/app__calendar__link.react.ts";
 import { setUp } from "./link.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { useMachine as useEditor } from "../../gen/app__calendar__editor.react.ts";
 import { useMachine as useHeld } from "../../gen/app__calendar__deletions.react.ts";
@@ -41,13 +41,15 @@ import { type Row, onDay, shown } from "./shown.ts";
 import { type CalendarRow, type DatedReminder, calendarRowKey, datedReminders } from "./reminders.ts";
 import { remindersStore } from "../reminders/store.ts";
 import { ReminderPage } from "./ReminderPage.tsx";
+import { SourceNote } from "./SourceNote.tsx";
+import { eventKey } from "./noteOrigin.vibe";
 import { ReminderReview } from "./ReminderReview.tsx";
 import { allows } from "../../gen/kit__permission.ts";
 import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from "./time.ts";
 
 export interface CalendarProps {
   /** Provides Calendar's machines, `calendared` of calendar.vibe. */
-  runtime: ManagedRuntime.ManagedRuntime<Calendared, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Calendared | Resident, unknown>;
   /** Alpha, for the shell's Back in Calendar's own header. */
   alpha?: Alpha;
 }
@@ -536,7 +538,7 @@ function Calendars({ runtime }: CalendarProps) {
   return (
     <Sheet open={s.overlay === "CalendarsSheet"} onOpenChange={(opened) => (opened ? undefined : void view.send({ type: "closeOverlay" }))}>
       <SheetContent title="Calendars">
-        {[...new Map([...shown.all("Google"), ...shown.all("Phone")].map((row) => [row.calendar, row])).values()].map((row) => (
+        {[...new Map([...shown.all("Google"), ...(allows(s.access) ? shown.all("Phone") : [])].map((row) => [row.calendar, row])).values()].map((row) => (
           <Label key={row.calendar} className="flex items-center justify-between">
             {row.source === "Google" ? "Your agent's calendar" : `Phone calendar ${row.calendarId}`}
             <Switch checked={rowShown(row.calendar, [...s.hidden])} disabled={!view.can({ type: "toggleCalendar", calendar: row.calendar })}
@@ -617,6 +619,9 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
           ...deletes.flatMap(({ label, act }) => (act ? [{ label, onSelect: act }] : [])),
         ]} />
       ) : null}>
+      <SourceNote runtime={runtime} account={s.owner} selection={row.id}
+        target={row.source === "Phone" ? "PhoneEvent" : "AgentEvent"}
+        record={row.source === "Phone" ? row.creationId : eventKey(row.calendarId, row.key)} />
       {s.detail === "Rereading" ? <div className="mt-3"><Spinner size="sm" /></div> : null}
       {uncertain ? <div role="status" className="mt-3 flex items-center gap-2 rounded-sm bg-secondary p-3 text-meta"><span aria-hidden className="size-2 rounded-full bg-warn" /><span className="flex-1">Unconfirmed</span></div> : null}
       {notices}
@@ -794,6 +799,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   return (
     <CalendarFormPage className={reminder ? "[&>[data-host-chrome]]:pr-2" : undefined} onBack={close} saving={saving}
       onSave={(reminder || !e.extras) && (editor.can(save) || reviewingReschedule) ? submit : undefined}>
+      {fields.noteOrigin !== undefined && e.extras && !reminder && (
+        <CalendarNotice>Android Calendar will save this event without a link to the source note.</CalendarNotice>
+      )}
       {reminder && e.form === "EditReminder" ? (
         <ReminderReview open={reviewingReschedule} title="Reschedule?" action="Reschedule"
           onApprove={() => void runtime.runPromise(confirmCalendarReschedule())} onCancel={() => void editor.send({ type: "callOff" })}

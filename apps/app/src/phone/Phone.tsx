@@ -13,7 +13,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Dialer, type Dialing, keypadDigits } from "./phone.vibe";
-import { Player, Voicemails } from "./voicemail.vibe";
+import type { Player, Voicemails } from "./voicemail.vibe";
 import { callerTitle, displayNumber, judge, shortWhen } from "./words.ts";
 import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
@@ -29,6 +29,7 @@ export interface PhoneProps {
 const keys = [["1", ""], ["2", "ABC"], ["3", "DEF"], ["4", "GHI"], ["5", "JKL"], ["6", "MNO"], ["7", "PQRS"], ["8", "TUV"], ["9", "WXYZ"], ["*", ""], ["0", "+"], ["#", ""]] as const;
 const missed = new Set(["missed", "rejected", "blocked"]);
 const contacts = { type: "openView", view: "Contacts" } as const;
+const stagedContacts = { type: "openCommsView", view: "Contacts" } as const;
 
 const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
   row: TelephonyCallLogEntry;
@@ -62,8 +63,8 @@ export function Phone({ runtime, alpha }: PhoneProps) {
   const phone = usePhone(runtime);
   const shell = useShell(runtime);
   const voicemail = useVoicemail(runtime).state;
-  const zeroDown = useRef<number | undefined>(undefined);
-  const longZero = useRef(false);
+  const zeroDownRef = useRef<number | undefined>(undefined);
+  const longZeroRef = useRef(false);
   const dialRecent = useCallback((number: string) => {
     void runtime.runPromiseExit(Effect.flatMap(PhoneMachine, (machine) => machine.send({ type: "dialRecent", number })));
   }, [runtime]);
@@ -92,7 +93,8 @@ export function Phone({ runtime, alpha }: PhoneProps) {
   };
   const select = (tab: string) => {
     if (tab === "Contacts") {
-      if (shell.can(contacts)) void shell.send(contacts);
+      if (shell.can(stagedContacts)) void shell.send(stagedContacts);
+      else if (shell.can(contacts)) void shell.send(contacts);
       return;
     }
     const event = { type: "pickTab", tab: tab as Tab } as const;
@@ -152,18 +154,18 @@ export function Phone({ runtime, alpha }: PhoneProps) {
               {keys.map(([key, letters]) => (
                 <Button key={key} variant="secondary" size="icon" aria-label={key}
                   className="size-(--dial-key) flex-col gap-px" disabled={waiting || !can({ type: "press", typed: judge(dialer.digits + key) })}
-                  onPointerDown={key === "0" ? (event) => { zeroDown.current = event.timeStamp; longZero.current = false; } : undefined}
+                  onPointerDown={key === "0" ? (event) => { zeroDownRef.current = event.timeStamp; longZeroRef.current = false; } : undefined}
                   onPointerUp={key === "0" ? (event) => {
-                    const began = zeroDown.current;
-                    zeroDown.current = undefined;
+                    const began = zeroDownRef.current;
+                    zeroDownRef.current = undefined;
                     if (began === undefined || event.timeStamp - began < 500 || dialer.digits !== "") return;
-                    longZero.current = true;
+                    longZeroRef.current = true;
                     changeDigit("+");
                   } : undefined}
-                  onPointerCancel={key === "0" ? () => { zeroDown.current = undefined; longZero.current = false; } : undefined}
+                  onPointerCancel={key === "0" ? () => { zeroDownRef.current = undefined; longZeroRef.current = false; } : undefined}
                   onContextMenu={key === "0" ? (event) => event.preventDefault() : undefined}
                   onClick={(event) => {
-                    if (key === "0" && longZero.current && event.detail !== 0) { longZero.current = false; return; }
+                    if (key === "0" && longZeroRef.current && event.detail !== 0) { longZeroRef.current = false; return; }
                     changeDigit(key);
                   }}>
                   <span className="text-keypad-digit font-medium">{key}</span>

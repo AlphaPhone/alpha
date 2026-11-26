@@ -79,7 +79,7 @@ import type { Time } from "../runtime/time.vibe";
 import { useMachine as useListener } from "../../gen/app__voice__listener.react.ts";
 import type { Machine as ListenerMachine } from "../../gen/app__voice__listener.effect.vibe";
 import { ListenerControls } from "./ListenerControls.tsx";
-import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
+import type { AccessSurface } from "../startup/settingsAccess.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
@@ -91,7 +91,7 @@ import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effec
 import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessSurface | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -315,7 +315,7 @@ function Display({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each phone row on Permissions opens that one access"; spec/app/settings/index.md, "Each page links to what another area owns there"
+// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review"; spec/app/settings/index.md, "Each page links to what another area owns there"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
   const { state: pages, can, send } = usePages(runtime);
@@ -337,6 +337,8 @@ function Permissions({ runtime, common }: PageProps) {
   const facts = useFacts(runtime).state;
   const { state: pages, can, send } = usePages(runtime);
   const { state: alerts } = useBrowserAlerts(runtime);
+  const open = { type: "openPrivacyNotifications" } as const;
+  const onNotifications = can(open) ? () => void send(open) : undefined;
   if (!pages?.phone) {
     const observe = (access: FactsGen.Access): SettingsFactReading => {
       if (!facts) return { word: "waiting" };
@@ -349,24 +351,13 @@ function Permissions({ runtime, common }: PageProps) {
     };
     const alertWord = browserAlertReading(alerts);
     const notification = alertWord.word === "reported" && alertWord.value === "On" ? { ...alertWord, value: "Allowed" } : alertWord;
-    const open = { type: "openPrivacyNotifications" } as const;
     return <SettingsPermissionsPage {...common} grants={grants(facts)} browser={{
       camera: observe("CameraAccess"), microphone: observe("MicrophoneAccess"), location: observe("LocationAccess"),
       photos: { word: "reported", value: "Selected", status: "warn" }, files: { word: "reported", value: "Chosen files", status: "warn" },
       notifications: notification,
-    }} onNotifications={can(open) ? () => void send(open) : undefined} />;
+    }} onNotifications={onNotifications} />;
   }
-  const accesses = Object.fromEntries(Object.entries(accessNames).map(([access, name]) => [name, access])) as Record<SettingsAccess, FactsGen.Access>;
-  return (
-    <SettingsPermissionsPage
-      {...common}
-      grants={grants(facts)}
-      onReview={(access) => {
-        const review = { type: "reviewAccess", access: accesses[access] } as const;
-        if (can(review)) void send(review);
-      }}
-    />
-  );
+  return <SettingsPermissionsPage {...common} grants={grants(facts)} onNotifications={onNotifications} />;
 }
 
 function Phone({ alpha, common }: PageProps) {

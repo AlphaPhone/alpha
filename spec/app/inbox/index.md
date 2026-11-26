@@ -182,7 +182,9 @@ pure def emptied(account: int, s: Mailbox): Mailbox =
 Both need read access. A folder starts without a search. Spam and Trash
 are chosen only where they can be searched. A signed-out owner can open
 and type into the search field. Submitting a nonempty search there opens
-Cloud sign-in before any mail is requested.
+Cloud sign-in before any mail is requested. When the phone has no mail sign-in
+to ask for, Search and Connect Eliza Cloud open Account above the current Inbox
+visit. Back closes Account and keeps the search field and its text.
 
 ```quint
 pure def canChooseFolder(s: Mailbox, folder: Folder): bool =
@@ -491,6 +493,14 @@ pure def sometimesTheListMayBeOutOfDate(s: Mailbox): bool = s.doubtful and s.pag
 > As the owner, I want to be asked to sign in or to connect an account when
 > there is none, to choose among several, to see only what my grant
 > allows, and to see nothing once I withdraw it.
+
+### The owner authorizes Gmail in Google and Inbox checks access on return
+
+Connect Gmail, Give access and Reconnect open Google's authorization for
+the same signed-in Cloud owner. The request covers reading, sending,
+saving drafts and organizing mail. Reconnecting keeps the selected
+account's existing Calendar access. Inbox checks the grants again on
+return and only uses the access Google actually granted.
 
 ### Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out
 

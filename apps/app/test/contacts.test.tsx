@@ -66,6 +66,10 @@ describe("Contacts on an Alpha image", () => {
       await until(alpha, alpha.runtime, Contacts, (state) => state.opened && state.card.status === "Loaded");
     };
     const to = () => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value;
+    const enabled = (name: string) => vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(button(name)?.disabled).toBe(false);
+    }, { timeout: 12_000, interval: 50 });
 
     // spec/app/messages/index.md, "New message reads the contacts that have a number and brings back the owner's unsent New draft"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
     await show("Maya Chen");
@@ -74,7 +78,7 @@ describe("Contacts on an Alpha image", () => {
     await press("Message +14155550100");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Messages" && state.assistant === "Sheet");
     await until(alpha, alpha.runtime, Messages, (state) => state.front && state.pane === "Threads");
-    await drawn(() => vi.waitFor(() => expect(button("Retry")).toBeDefined()));
+    await enabled("Retry");
     expect(world.secrets.get(slot)).toBe("unreadable draft");
     world.secrets.delete(slot);
     await press("Retry");
@@ -82,6 +86,34 @@ describe("Contacts on an Alpha image", () => {
     expect(to()).toBe("+14155550100");
     const saved = world.secrets.get(slot);
     expect(saved).toBeDefined();
+
+    // spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
+    await enabled("Expand chat");
+    await press("Expand chat");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Full");
+    expect(document.querySelector("[data-alpha-shell-page]")?.hasAttribute("inert")).toBe(true);
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Messages" && state.assistant === "Sheet");
+    await enabled("Return to Contacts");
+    await press("Return to Contacts");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts" && state.assistant === "Sheet");
+    // spec/app/contacts/index.md, "Leaving Contacts forgets the rows and the open contact, and keeps a form the owner was filling in"
+    await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.opened && state.contact === "7" && state.card.status === "Loaded");
+    expect(button("Message +14155550100")).toBeDefined();
+
+    // spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
+    await press("Call +14155550100");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Phone" && state.assistant === "Sheet");
+    await filledPhoneKeypad(alpha, 12);
+    expect(document.querySelector<HTMLInputElement>("[data-alpha-phone-number]")?.value).toBe("+14155550100");
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+
+    // spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"
+    await enabled("Return to Contacts");
+    await press("Return to Contacts");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts" && state.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.opened && state.contact === "7" && state.card.status === "Loaded");
+    expect(button("Call +14155550100")).toBeDefined();
 
     await hardware("home");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);

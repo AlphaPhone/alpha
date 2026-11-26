@@ -101,6 +101,7 @@ export function InboxListScreen({
   };
   const emptyState = state === "empty" ? emptyIn[folder] : state === "signedOut" && searching ? "searchPrompt" : state;
   const compose = onCompose ?? (state === "signedOut" ? onStateAction : undefined);
+  const hasAccount = account !== undefined;
   const actions = (
     <>
       {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw className="size-5" /></Button> : null}
@@ -111,11 +112,11 @@ export function InboxListScreen({
         }
       }}><Search className="size-5" /></Button>
       <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus className="size-5" /></Button>
-      {onStartSelection || onFinishSelection ? (
+      {hasAccount || onStartSelection || onFinishSelection ? (
         <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent className="min-w-52">
-            <MenuItem onSelect={onFinishSelection ?? onStartSelection}><Check className="size-5.5" />{onFinishSelection ? "Finish selection" : folder === "drafts" ? "Select drafts" : "Select emails"}</MenuItem>
+            <MenuItem disabled={!onStartSelection && !onFinishSelection} onSelect={onFinishSelection ?? onStartSelection}><Check className="size-5.5" />{onFinishSelection ? "Finish selection" : folder === "drafts" ? "Select drafts" : "Select emails"}</MenuItem>
             {onFinishSelection ? (
               <>
                 <MenuItem disabled={!onChooseAll && !onClearSelection} onSelect={onChooseAll ?? onClearSelection}><Check className="size-5.5" />{onChooseAll || !onClearSelection ? "Select all shown" : "Deselect all"}</MenuItem>
@@ -143,9 +144,9 @@ export function InboxListScreen({
       leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5.5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className="[&_main>div]:gap-0 [&_main>div]:pt-1"
+      className="@container [&_main>div]:gap-0 [&_main>div]:pt-1 in-data-[alpha-wide]:[&>header]:max-w-none"
     >
-      {!searching && state !== "signedOut" ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
+      {!searching && hasAccount && state !== "signedOut" ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
       {!searching && (aside.length > 0 || accounts.length > 1) ? (
         <div role="group" aria-label="Mail actions" className="-mx-4 flex touch-pan-x gap-2 overflow-x-auto px-5 pb-2">
           {aside.map(({ id, onOpen }) => (
@@ -156,7 +157,7 @@ export function InboxListScreen({
           )) : null}
         </div>
       ) : null}
-      {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" className="mt-1.5 ml-1 self-start px-3 text-caption font-normal" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
+      {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" data-focus-key="inbox-connect-cloud" className="mt-1.5 ml-1 self-start px-3 text-caption font-normal" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} plain /> : null}
       {rows.length === 0 && loading ? <InboxListState kind="loading" />
         : emptyState && rows.length === 0 ? <InboxListState kind={emptyState} onAction={onStateAction} />

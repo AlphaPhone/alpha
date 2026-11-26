@@ -3,15 +3,15 @@ import type { ComponentMeta } from "vibestack/stories";
 import { fullHeight } from "./samples.ts";
 import type { SettingsPermissionsPageProps } from "./SettingsPermissionsPage.tsx";
 
-const onReview = fn();
+const onAndroid = fn();
 const onNotifications = fn();
 
 export const meta: ComponentMeta<SettingsPermissionsPageProps> = {
   args: {
     grants: { camera: "allowed", microphone: "off", location: "approximate", calendar: "allowed", photos: "unavailable", files: "off", notifications: "allowed" },
     onBack: fn(),
-    onReview,
-    onAndroid: fn(),
+    onAndroid,
+    onNotifications,
   },
   decorator: fullHeight,
   examples: {
@@ -27,7 +27,7 @@ export const meta: ComponentMeta<SettingsPermissionsPageProps> = {
   },
   play: {
     Browser: async ({ canvasElement }) => {
-      onReview.mockClear();
+      onAndroid.mockClear();
       onNotifications.mockClear();
       const canvas = within(canvasElement);
       expect(canvas.getByText("Ask")).toBeTruthy();
@@ -36,12 +36,19 @@ export const meta: ComponentMeta<SettingsPermissionsPageProps> = {
       expect(canvas.queryByRole("button", { name: /Camera|Alpha’s permissions|Access to all files/ })).toBeNull();
       await userEvent.click(canvas.getByRole("button", { name: /Notifications.*Allowed/ }));
       await expect(onNotifications.mock.calls.length).toBe(1);
-      await expect(onReview.mock.calls.length).toBe(0);
+      await expect(onAndroid.mock.calls.length).toBe(0);
     },
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      onReview.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: /Microphone/ }));
-      await expect(onReview.mock.calls).toEqual([["microphone"]]);
+      onAndroid.mockClear();
+      onNotifications.mockClear();
+      const canvas = within(canvasElement);
+      for (const name of [/Camera/, /Microphone/, /Location/, /Calendar/, /Photos/, /Files/]) {
+        await userEvent.click(canvas.getByRole("button", { name }));
+      }
+      await userEvent.click(canvas.getByRole("button", { name: /Notifications/ }));
+      await expect(onAndroid.mock.calls.map(([choice]) => choice.target))
+        .toEqual(["app-permissions", "app-permissions", "app-permissions", "app-permissions", "photo-permissions", "all-files-access"]);
+      await expect(onNotifications.mock.calls.length).toBe(1);
     },
   },
 };

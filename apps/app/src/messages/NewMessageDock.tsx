@@ -1,9 +1,9 @@
 // spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "The owner's New message uses the same send and never takes another draft's place"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { TelephonySubscription } from "@elizaos/os-bridges";
-import { Button, Input, Menu, MenuContent, MenuItem, MenuTrigger, Textarea } from "@repo/ui";
+import { Button, cn, Input, MessageAttachmentsMenu, MessagePictureChip, Textarea } from "@repo/ui";
 import { Effect } from "effect";
-import { ArrowUp, Camera, ImagePlus, Mic, Plus, RefreshCw, Square, X } from "lucide-react";
+import { ArrowUp, Mic, RefreshCw, Square, X } from "lucide-react";
 import { useRef, useState, type RefObject } from "react";
 import type { NewDraft } from "../../gen/app__messages.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
@@ -76,7 +76,7 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
     input?.click();
   };
   return <>
-    <div className="flex shrink-0 flex-wrap gap-1.5 px-3 text-caption text-muted-foreground empty:hidden">
+    <div data-alpha-messages-accessories className={cn("flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 text-caption text-muted-foreground empty:hidden", draft.pictures.length > 0 && "pb-1.5")}>
       {(saveStatus === "Saving" || saveStatus === undefined && !saved) && <p role="status" className="basis-full">Saving message draft…</p>}
       {saveStatus === "Failed" && <p role="status" className="basis-full">Message draft couldn’t be saved <button type="button" className={textAction} onClick={onRetrySave}>Retry save</button></p>}
       {sending && <p role="status" className="basis-full">Sending…</p>}
@@ -100,10 +100,8 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
         {subscriptions.map((sim) => <Button key={sim.id} variant="secondary" aria-pressed={selected !== undefined && sameSubscription(selected, sim)}
           disabled={!editable || state.simInfo.grant !== "Granted"} onClick={() => setSelected(sim)}>{sim.displayName || `SIM ${sim.slot + 1}`}</Button>)}
       </div>}
-      {draft.pictures.map((picture) => <Button key={picture.name} variant="secondary" aria-label={`Remove ${picture.name}`} disabled={!editable || !saved}
-        onClick={() => { if (textIsSaved()) void runtime.runPromise(editNewMessage(visit, { pictures: draft.pictures.filter((one) => one !== picture) }, false, revision)); }}>
-        {picture.name}<X aria-hidden />
-      </Button>)}
+      {draft.pictures.map((picture) => <MessagePictureChip key={picture.name} name={picture.name} disabled={!editable || !saved}
+        onRemove={() => { if (textIsSaved()) void runtime.runPromise(editNewMessage(visit, { pictures: draft.pictures.filter((one) => one !== picture) }, false, revision)); }} />)}
     </div>
     <CommsBar runtime={runtime} {...(title ? { person: { label: title, initials: callerInitials(title) } } : {})} closed={recording ? (
       <div data-alpha-composer data-alpha-bar-recorder="" aria-label="Message dictation" role="group" className="flex min-w-0 flex-1 items-center gap-2">
@@ -114,13 +112,10 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
       </div>
     ) : (
       <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-center gap-1">
-        {canPicture && <Menu>
-          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message attachments"><Plus /></Button></MenuTrigger>
-          <MenuContent aria-label="Message actions" side="top" sideOffset={8}>
-            <MenuItem onSelect={() => chooseFile(camera.current)}><Camera />Camera</MenuItem>
-            <MenuItem onSelect={() => chooseFile(pictures.current)}><ImagePlus />Add media</MenuItem>
-          </MenuContent>
-        </Menu>}
+        <MessageAttachmentsMenu media={canPicture ? {
+          camera: () => chooseFile(camera.current),
+          files: () => chooseFile(pictures.current),
+        } : undefined} />
         <Textarea ref={textarea} rows={1} aria-label={label} placeholder={label} value={body} maxLength={MMS_MAX_BODY} readOnly={!editable}
           onChange={(event) => onBody(event.currentTarget.value)} style={minHeight === undefined ? undefined : { minHeight }}
           className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 text-body leading-field shadow-none focus-visible:outline-none" />

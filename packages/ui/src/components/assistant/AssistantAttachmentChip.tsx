@@ -36,7 +36,7 @@ export function AssistantAttachmentChip({ attachment, onRemove, onPreview }: Ass
       {onPreview && attachment.kind === "image" ? (
         <button type="button" aria-label={`Preview ${attachment.name}`} onClick={onPreview} className={cn(press, "transition-colors duration-fast ease-standard hover:bg-accent")}>{face}{label}</button>
       ) : (
-        <span className={cn("flex min-h-10.5 min-w-0 items-center gap-1.5 py-1 pl-2.5", onRemove ? "pr-1" : "pr-2.5")}>{face}{label}</span>
+        <span className={cn("flex min-h-10.5 min-w-0 items-center gap-1.5 py-1 pl-2.5", onRemove ? attachment.kind !== "file" && "pr-1" : "pr-2.5")}>{face}{label}</span>
       )}
       {onRemove ? (
         <button type="button" aria-label={`Remove ${attachment.name}`} onClick={onRemove} className={cn(focusRing, "relative flex h-10.5 min-w-11 shrink-0 items-center justify-center transition-colors duration-fast ease-standard hover:bg-accent")}>

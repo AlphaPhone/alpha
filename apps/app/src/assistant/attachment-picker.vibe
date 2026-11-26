@@ -2,6 +2,8 @@
 import type { SelectionId, StorageVolume } from "@elizaos/os-bridges"
 import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
+import { Machine as Contact } from "../../gen/app__contacts.effect.vibe"
+import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
 import { Machine as Composer, attachments as draftFiles, maxFiles } from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
@@ -14,7 +16,8 @@ import { type Job, answer, contained, reacting, run, started, stream, together }
 import { attachmentPhotoAccess, listAttachmentPhotos, openAttachmentPhotoSettings, readPickedPhoto, type AttachmentPhotoCursor, type AttachmentPhotoRow } from "./attachment-library.vibe"
 import { attachmentDocumentsAccess, listAttachmentDocuments, openAttachmentDocumentSettings, readPickedDocument, reviewPickedDocument,
   type AttachmentDocumentLocation, type AttachmentDocumentRow, type PickedAttachmentDocument } from "./attachment-documents.vibe"
-import { attachmentAuthority, chooseDocument, insertPickedFiles, readChosenDocument, sameBinding, supportedAttachment, type FileTarget } from "./attachments.vibe"
+import { attachmentAuthority, chooseDocument, insertPickedFiles, readChosenDocument, sameBinding, supportedAttachment, type PickerTarget } from "./attachments.vibe"
+import { contactFileTarget, contactFileTargetCurrent, sameContactFileTarget, type ContactAttachmentScope } from "./contact-attachments.vibe"
 import { Talk } from "./talk.vibe"
 
 export interface AttachmentPickerRowView {
@@ -45,6 +48,7 @@ export interface AttachmentPickerView {
   readonly problem?: string
   readonly refused: readonly string[]
   readonly systemDocuments: boolean
+  readonly contact?: { readonly route: number; readonly person: string }
 }
 
 type ListedRow =
@@ -72,7 +76,7 @@ interface Listing {
 interface Visit {
   readonly id: number
   readonly route: number
-  readonly target: FileTarget
+  readonly target: PickerTarget
   readonly systemDocuments: boolean
   readonly folders: Map<number, AttachmentDocumentLocation>
   volumes: readonly StorageVolume[]
@@ -123,13 +127,14 @@ const store = Layer.effect(AttachmentPicker, effect {
         location: location === undefined ? undefined : { name: location.path.split("/").at(-1) || "", volume: location.volume, up: location.path !== "" },
         availability: visit.availability, truncated: listing?.truncated ?? false, preparing: visit.preparing,
         problem: visit.problem, refused: visit.refused, systemDocuments: visit.systemDocuments,
+        contact: "about" in visit.target ? { route: visit.route, person: visit.target.person } : undefined,
       }
       tell()
     },
     clear(visit) {
       if (current !== visit) return
       current = undefined
-      view = noView
+      view = { ...noView, contact: view.contact }
       tell()
     },
   }
@@ -164,10 +169,11 @@ function folderNumber(visit: Visit, location: AttachmentDocumentLocation): numbe
   return id
 }
 
-type PickerShell = AttachmentPicker | Picker.Machine | Composer | Conversation | Shell | Talk
+type PickerShell = AttachmentPicker | Picker.Machine | Composer | ContactAttachmentScope
 type PickerNeeds = PickerShell | Agent | Device | Documents | Files | PhotosPort
 
-effect function targetCurrent(target: FileTarget): boolean!!(Composer | Conversation | Talk) {
+effect function targetCurrent(target: PickerTarget): boolean!!(Composer | ContactAttachmentScope) {
+  if ("about" in target) return try contactFileTargetCurrent(target)
   const writing = try (try Composer).get()
   const context = (try (try Conversation).get()).context
   const seat = (try Talk).board.draftSeat
@@ -192,17 +198,22 @@ effect function releaseSystemChoices(choices: readonly Choice[]): void!!Document
 }
 
 /** Begin a new picker visit for the exact draft that supplied the paperclip. */
-export effect function openAttachmentPicker(target: FileTarget, room: number): boolean!!(PickerShell | Agent | Device | Documents) {
+export effect function openAttachmentPicker(target: PickerTarget, room: number, route?: number): boolean!!(PickerShell | Agent | Device | Documents) {
   const { board, writer } = try AttachmentPicker
   const machine = try Picker.Machine
   const shell = try Shell
   const device = try Device
   const source = try shell.get()
+  if (route !== undefined && route !== source.route) return false
   const authority = try attachmentAuthority()
   if (authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority)) return false
   return try writer.withPermits(1)(effect {
     const state = try machine.get()
-    const available = Math.min(room, maxFiles - draftFiles((try (try Composer).get()).editor))
+    const draft = "about" in target ? (try Talk).board.snapshot().contactDraft : undefined
+    const used = "about" in target
+      ? draft !== undefined && sameContactFileTarget(draft.target, target) ? draft.files.length : 0
+      : draftFiles((try (try Composer).get()).editor)
+    const available = Math.min(room, maxFiles - used)
     if (!Picker.canOpenPicker(state, available) || !(try device.showing()) || !(try targetCurrent(target)) || (try shell.get()).route !== source.route) return false
     const previous = board.current()
     const visit: Visit = {
@@ -215,6 +226,12 @@ export effect function openAttachmentPicker(target: FileTarget, room: number): b
     if (previous !== undefined) try releaseSystemChoices(previous.selection)
     return opened
   })
+}
+
+/** The same chooser serves Chat actions on the closed Contact and the raised sheet. */
+export effect function openContactAttachmentPicker(route: number, person: string): boolean!!(PickerShell | Agent | Device | Documents) {
+  const target = try contactFileTarget(person)
+  return target !== undefined && (try openAttachmentPicker(target, maxFiles, route))
 }
 
 effect function observeAccess(request: Access): void!!PickerNeeds {
@@ -524,8 +541,11 @@ const retirement = started(effect {
   const shell = try Shell
   const composer = try Composer
   const conversation = try Conversation
+  const contacts = try Contact
+  const comms = try Comms
   const touched = Stream.mergeAll([Stream.as(machine.changes, undefined), Stream.as(shell.changes, undefined),
-    Stream.as(composer.changes, undefined), Stream.as(conversation.changes, undefined)], { concurrency: "unbounded" })
+    Stream.as(composer.changes, undefined), Stream.as(conversation.changes, undefined),
+    Stream.as(contacts.changes, undefined), Stream.as(comms.changes, undefined)], { concurrency: "unbounded" })
   try Stream.runForEach(touched, effect () => {
     const choices = try writer.withPermits(1)(effect {
       const visit = board.current()

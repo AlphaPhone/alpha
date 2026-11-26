@@ -305,7 +305,7 @@ describe("Settings", () => {
     await settingsOpen(world);
     await tap("Account");
     await vi.waitFor(() => {
-      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Plans");
+      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent?.trim() === "View plans");
       if (!plans) throw new Error("No Plans control");
       return drawn(() => plans.click());
     });
@@ -548,13 +548,45 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("Paused during a call"));
   });
 
-  it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
+  it("Opens the native destination for each App permissions row", async () => {
     const { alpha, world, machines } = await settingsOpen();
     await press("Privacy");
     await press("Permissions");
     await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
-    await tap("Microphone");
-    // spec/app/startup/access.md, "Settings opens one access of this walkthrough in review, also from the list of all, and the agent may ask to show one"
+    const android = ["Camera", "Microphone", "Location", "Calendar"];
+    for (const [index, title] of android.entries()) {
+      await vi.waitFor(() => expect(titled(title)?.hasAttribute("disabled")).toBe(false));
+      await tap(title);
+      await vi.waitFor(() => expect(world.settings.opened).toEqual(android.slice(0, index + 1).map(() => "privacy")));
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    }
+    await vi.waitFor(() => expect(titled("Photos")?.hasAttribute("disabled")).toBe(false));
+    await tap("Photos");
+    await vi.waitFor(() => expect(world.photos.settingsOpens).toBe(1));
+    expect(world.photos.promptCount).toBe(0);
+    await vi.waitFor(() => expect(titled("Files")?.hasAttribute("disabled")).toBe(false));
+    await tap("Files");
+    await vi.waitFor(() => expect(world.settings.opened.at(-1)).toBe("all-files"));
+    await vi.waitFor(() => expect(titled("Notifications")?.hasAttribute("disabled")).toBe(false));
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "PrivacyNotifications");
+    await vi.waitFor(() => expect(titled("Other apps’ notifications")?.hasAttribute("disabled")).toBe(false));
+    await tap("Notifications");
+    await vi.waitFor(() => expect(world.settings.opened.at(-1)).toBe("notifications"));
+    await press("Back to Privacy");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Privacy");
+  });
+
+  it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
+    const { alpha, world, machines } = await settingsOpen();
+    await press("Privacy");
+    await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
+    await press("Review access setup");
+    const microphone = () => [...document.querySelectorAll('[role="dialog"] li')]
+      .find((row) => row.textContent?.includes("Microphone"))?.querySelector("button");
+    await vi.waitFor(() => expect(microphone()).toBeTruthy());
+    await drawn(() => microphone()?.click());
+    // spec/app/startup/access.md, "Settings opens one access of this walkthrough from its list, and the agent may ask to show one"
     await vi.waitFor(() => {
       const review = document.querySelector('[role="dialog"]');
       const current = review?.querySelector('[aria-current="step"]');
@@ -569,7 +601,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Allowed"));
     await press("Done");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
-    expect(await page(alpha)).toBe("Permissions");
+    expect(await page(alpha)).toBe("Privacy");
   });
 
   it("Choose how Alpha looks, at my size, and keep it (spec/app/settings/preferences.md, \"Story: Choose how Alpha looks\"; spec/app/settings/preferences.md, \"Story: Make the text larger or smaller\"; spec/app/settings/preferences.md, \"Story: Keep my preferences through a restart\")", async () => {
