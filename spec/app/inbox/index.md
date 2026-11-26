@@ -208,7 +208,8 @@ folders are not drawn under it. Back, the phone's or the field's own where
 one is drawn, closes the field first, empty or not, drops what it typed and
 reads the folder again without the search; only the next Back leaves
 Inbox. Emptying the field reads the folder without the search and keeps
-the field open. Off the launcher the field draws its own Back; on the
+the field open. Leaving Inbox closes a field with nothing searched, so the
+next visit opens on the folder. Off the launcher the field draws its own Back; on the
 launcher Inbox draws no Back, so the field runs the full width.
 
 ```quint
