@@ -1,4 +1,4 @@
-// spec/site/index.md, "Each policy has its own public address and is linked from Home"
+// spec/site/index.md, "Each policy has its own public address"
 import documents from "@repo/deployment/alpha-legal.json" with { type: "json" };
 import { Mark } from "@repo/ui";
 import type { ReactNode } from "react";
