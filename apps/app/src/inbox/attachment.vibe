@@ -1,4 +1,4 @@
-// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
 import type { MailMessage } from "@elizaos/cloud"
 import type { ReviewedMailAttachment } from "@elizaos/plugin-inbox-client"
 import { blobOf, decodeBase64, encoded, scaledImage, scanImageTypes } from "@elizaos/plugin-files-client"
@@ -49,17 +49,21 @@ export const forgetPreview = started(effect {
   const reader = try Message.Machine
   const shell = try Shell
   let before = 0
-  const reviews = Stream.changes(Stream.map(Stream.zipLatest(reader.changes, shell.changes), ([state, view]) =>
-    state.attachment === 0 || !showing(view, "Inbox") ? 0 : state.file.id))
-  try Stream.runForEach(reviews, effect (attempt) => {
+  let keptBefore = 0
+  const reviews = Stream.changesWith(Stream.map(Stream.zipLatest(reader.changes, shell.changes), ([state, view]) =>
+    state.attachment === 0 || !showing(view, "Inbox") ? [0, 0] as const : [state.file.id, state.keep.id] as const),
+    (one, other) => one[0] === other[0] && one[1] === other[1])
+  try Stream.runForEach(reviews, effect ([attempt, keep]) => {
     if (before !== 0 && before !== attempt) {
       if (attempt === 0 && (try reader.get()).attachment !== 0 && !showing(try shell.get(), "Inbox")) {
         try contained(reader.send({ type: "closeAttachment" }), "closing a hidden attachment review")
       }
       previews.forget(before)
       try destination.cancel(before)
+      if (keptBefore !== 0) try destination.cancel(keptBefore)
     }
     before = attempt
+    keptBefore = keep
   })
 }, "clearing an attachment preview")
 
@@ -80,8 +84,11 @@ effect function custody(request: Omit<Request, "tag">, expected: "Sent" | "Confi
   const list = try (try Inbox.Machine).get()
   const ledger = try Mail
   const { account, message, attachment, attempt, handling } = request
-  if (reader.account !== account || reader.message !== message || reader.attachment !== attachment || reader.handling !== handling ||
-    reader.file.id !== attempt || reader.file.outcome !== expected || reader.body.status !== "Loaded" || reader.fromPhone ||
+  const kept = attempt !== 0 && reader.keep.id === attempt
+  const use = kept ? reader.keep : reader.file
+  const handles = kept ? handling === "Saving" && reader.handling === "Opening" : reader.handling === handling
+  if (reader.account !== account || reader.message !== message || reader.attachment !== attachment || !handles ||
+    use.id !== attempt || use.outcome !== expected || reader.body.status !== "Loaded" || reader.fromPhone ||
     list.selected.account !== account || !Inbox.accessOf(list, account).grant.read || !showing(try (try Shell).get(), "Inbox")) return undefined
   const body = ledger.body(reader.body.ticket)
   const id = ledger.gmailId(message, account)
