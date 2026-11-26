@@ -232,7 +232,7 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
   });
 
-  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names")', async () => {
+  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names"; spec/app/workflows/sheet.md, "Story: Open a finished workflow from its notification")', async () => {
     const world = scene();
     world.phone = true;
     world.image = true;
@@ -241,7 +241,7 @@ describe("Workflows", () => {
     const notices = nativeApprovalNotices();
     world.workflows.nativeNotices = notices;
     world.workflows.stage = "Running";
-    const alpha = await openWorkflows(world);
+    const alpha = await openWorkflows(world, true);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await choose("Monthly statement");
@@ -322,6 +322,40 @@ describe("Workflows", () => {
         open: true,
         activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
       });
+    });
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Sheet, (state) => state.runId === 0);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    await later(alpha, 60_000);
+    await vi.waitFor(() => expect(notices.results).toHaveLength(1));
+    const result = notices.results[0];
+    if (result === undefined) throw new Error("No Workflow result notice");
+    expect(result.route).toMatchObject({ workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" });
+    await drawn(() => notices.tapResult(result));
+    await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
+    expect(document.querySelector('[aria-label="Run details"]')?.textContent).toContain("Your statement is ready.");
+    await vi.waitFor(() => expect(notices.consumed).toEqual(["tap-1", "tap-result"]));
+    expect(button("Remove Workflow run.json")).toBeUndefined();
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Sheet, (state) => state.runId === 0);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    await drawn(() => notices.tapResult(result, true));
+    await vi.waitFor(() => expect(button("Remove Workflow run.json")).toBeDefined(), { timeout: 10_000 });
+    expect(notices.consumed).toEqual(["tap-1", "tap-result", "tap-result-question"]);
+    expect(world.ask.said).toEqual([]);
+
+    await fill("Message Alpha", "What happened in this run?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]));
+    const attachment = world.ask.spokenFiles.at(-1)?.images?.[0];
+    expect(attachment).toMatchObject({ name: "Workflow run.json", mimeType: "application/json" });
+    expect(JSON.parse(atob(attachment?.data ?? ""))).toMatchObject({
+      workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3",
     });
   });
 

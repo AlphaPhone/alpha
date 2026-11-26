@@ -13,6 +13,17 @@ the account area. Run again is the Run now review of [Runs](./runs.md).
 The agent keeps the runs (eliza's `workflow/execution`); the phone only
 reads them.
 
+## Story: Open a finished workflow from its notification
+
+> As the owner, I want a result notice to open the exact finished run it names.
+> When I choose Ask Alpha from the notice, I want to start with that run attached.
+
+The phone reads the named workflow and run again before opening the sheet.
+The result belongs to the same owner, run and version as the notification.
+The phone consumes the tap after the exact finished run has been shown.
+An Ask Alpha tap uses the sheet’s existing handoff. It opens a draft the
+owner can review.
+
 ## Story: See a workflow's history
 
 > As the owner, I want to see the runs a workflow made, newest first, page

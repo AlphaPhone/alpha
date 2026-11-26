@@ -1,6 +1,6 @@
 // spec/app/workflows/approvals.md, "A running run may ask for one approval at a time, each asking with a higher number and a deadline, and a notice is wanted for it"; spec/app/workflows/approvals.md, "An approval stops waiting when its run ends or its deadline passes, and its notice goes with it"
 import { noticeOwnerOf, resolveNoticeTap, type NoticeOwnerIdentity, type SuspendedApprovalNotice } from "@elizaos/os-bridges"
-import { type WorkflowApproval, type WorkflowApprovalOffer, type WorkflowRun, type WorkflowNoticeRoute, openWorkflowNotice, revalidateWorkflowApprovalNotice, workflowApprovalNoticeIdentity, workflowApprovalOffers, workflowApprovalProposalId, workflowNoticeReads, workflowSha } from "@elizaos/plugin-workflow-client"
+import { type WorkflowApproval, type WorkflowApprovalOffer, type WorkflowRun, type WorkflowNoticeRoute, openWorkflowNotice, revalidateWorkflowApprovalNotice, revalidateWorkflowResultNotice, workflowApprovalNoticeIdentity, workflowApprovalProposalId, workflowNoticeOffers, workflowNoticeReads, workflowResultNoticeIdentity, workflowSha } from "@elizaos/plugin-workflow-client"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
@@ -84,41 +84,60 @@ export effect function withdrawApprovalNotice(digest: number): void!!ApprovalPre
 
 interface ApprovalTap {
   readonly token: string
+  readonly operationId: string
+  readonly bindingHash: string
   readonly session: Session
   readonly route: WorkflowNoticeRoute
   readonly run: WorkflowRun
   readonly approval: WorkflowApproval
 }
 
-export service ApprovalTaps {
-  get(): (ApprovalTap | undefined)!!
-  set(tap: ApprovalTap | undefined): void!!
-  readonly changes: Stream.Stream<ApprovalTap | undefined>
+interface ResultTap {
+  readonly token: string
+  readonly operationId: string
+  readonly bindingHash: string
+  readonly session: Session
+  readonly route: WorkflowNoticeRoute
+  readonly run: WorkflowRun
+  readonly noticeRevision?: string
 }
 
-const taps = Layer.effect(ApprovalTaps, effect {
-  const state = try SubscriptionRef.make<ApprovalTap | undefined>(undefined)
-  return { get: () => SubscriptionRef.get(state), set: (tap: ApprovalTap | undefined) => SubscriptionRef.set(state, tap), changes: SubscriptionRef.changes(state) }
+type WorkflowTap = ApprovalTap | ResultTap
+
+export service WorkflowTaps {
+  get(): (WorkflowTap | undefined)!!
+  set(tap: WorkflowTap | undefined): void!!
+  readonly changes: Stream.Stream<WorkflowTap | undefined>
+}
+
+const taps = Layer.effect(WorkflowTaps, effect {
+  const state = try SubscriptionRef.make<WorkflowTap | undefined>(undefined)
+  return { get: () => SubscriptionRef.get(state), set: (tap: WorkflowTap | undefined) => SubscriptionRef.set(state, tap), changes: SubscriptionRef.changes(state) }
 })
 
-export function sameApprovalTap(tap: ApprovalTap, approval: WorkflowApproval): boolean {
-  return tap.approval.requestDigest === approval.requestDigest && tap.approval.expiresAt === approval.expiresAt
+export function sameApprovalTap(tap: WorkflowTap, approval: WorkflowApproval): boolean {
+  return "approval" in tap && tap.approval.requestDigest === approval.requestDigest && tap.approval.expiresAt === approval.expiresAt
     && tap.approval.nodeId === approval.nodeId && tap.approval.iteration === approval.iteration
     && tap.route.runId === approval.runId && tap.route.workflowId === approval.workflowId && tap.route.versionId === approval.workflowVersionId
 }
 
-export effect function currentTap(tap: ApprovalTap): boolean!! {
+export effect function currentTap(tap: WorkflowTap): boolean!! {
   if (!sameSession(tap.session, try sessionForWorkflowNotices())) return false
   const bridge = noticesOf()
   const current = tryPromise(() => bridge.pendingTap()) catch () => undefined
-  return current?.token === tap.token && current.scope === tap.session.scope && current.runId === tap.route.runId && current.versionId === tap.route.versionId && current.workflowId === tap.route.workflowId
+  return current?.token === tap.token && current.operationId === tap.operationId && current.bindingHash === tap.bindingHash
+    && sameOwner(tap.session.owner, current) && current.scope === tap.session.scope && current.runId === tap.route.runId
+    && current.versionId === tap.route.versionId && current.workflowId === tap.route.workflowId
+    && ("approval" in tap || tap.noticeRevision === current.notice?.revision)
 }
 
-export effect function settleApprovalTap(tap: ApprovalTap): boolean!!ApprovalTaps {
-  const pending = try ApprovalTaps
+export effect function settleWorkflowTap(tap: WorkflowTap): boolean!!WorkflowTaps {
+  const pending = try WorkflowTaps
   if ((try pending.get())?.token !== tap.token || !(try currentTap(tap))) return false
   const bridge = noticesOf()
-  const done = tryPromise(() => bridge.consumeTap({ token: tap.token }).then(() => true)) catch () => false
+  const noticeRevision = "approval" in tap ? undefined : tap.noticeRevision
+  const input = { token: tap.token, ...(noticeRevision === undefined ? {} : { noticeRevision }) }
+  const done = tryPromise(() => bridge.consumeTap(input).then(() => true)) catch () => false
   if (done && (try pending.get())?.token === tap.token) try pending.set(undefined)
   return done
 }
@@ -131,7 +150,7 @@ const opening = started(effect {
   const shell = try Shell.Machine
   const layers = try Layers.Machine
   const listing = try Listing.Machine
-  const shelf = try ApprovalTaps
+  const shelf = try WorkflowTaps
   const { workflow } = try WorkflowsApi
   const { life } = try Agent
   const time = try Time
@@ -152,7 +171,10 @@ const opening = started(effect {
     const session = try sessionForWorkflowNotices()
     if (session == null) return
     const offered = tryPromise(() => bridge.pendingTap()) catch () => undefined
-    if (offered?.question === true || typeof offered?.operationId !== "string" || !offered.operationId.startsWith("approval-") || typeof offered.token !== "string") return
+    if (typeof offered?.operationId !== "string" || typeof offered.token !== "string") return
+    const approvalNotice = offered.operationId.startsWith("approval-")
+    const resultNotice = offered.operationId.startsWith("result-")
+    if (!(approvalNotice || resultNotice)) return
     const offeredToken = offered.token
     const { scope } = session
     const at = try time.now()
@@ -160,12 +182,20 @@ const opening = started(effect {
       pending: () => bridge.pendingTap(), binding: { ...session.owner, scope, current: () => !signal.aborted },
       identifiers: ["workflowId", "runId", "versionId"], signal,
       load: (tap, signal, checkpoint) => runPromise(effect {
-        if (tap.question === true || tap.token !== offeredToken || typeof tap.workflowId !== "string" ||
+        if (tap.token !== offeredToken || typeof tap.workflowId !== "string" ||
           typeof tap.runId !== "string" || typeof tap.versionId !== "string") return null
         const route: WorkflowNoticeRoute = { ...session.owner, scope, workflowId: tap.workflowId, runId: tap.runId, versionId: tap.versionId }
         const target = try openWorkflowNotice(workflow, route)
         if (target.kind === "unavailable" && target.reason === "unreadable") return try Effect.fail(new Error("The run could not be read"))
-        if (target.kind !== "run" || target.run.finished || signal.aborted) return null
+        if (target.kind !== "run" || signal.aborted) return null
+        if (resultNotice) {
+          const identity = try workflowResultNoticeIdentity(route)
+          const noticeRevision = tap.question === true ? tap.notice?.revision : undefined
+          if (tap.question === true && noticeRevision === undefined) return null
+          return target.run.finished && identity.id === tap.operationId && identity.bindingHash === tap.bindingHash
+            ? { route, run: target.run, ...(noticeRevision === undefined ? {} : { noticeRevision }) } : null
+        }
+        if (target.run.finished || tap.question === true) return null
         for (const approval of target.pending) {
           if (approval.expiresAt === undefined || approval.expiresAt <= at) continue
           const identity = try workflowApprovalNoticeIdentity(route, workflowApprovalProposalId(approval))
@@ -179,15 +209,17 @@ const opening = started(effect {
       const retry = tryPromise(() => bridge.pendingTap()) catch () => undefined
       if (retry?.token === offeredToken && retry.operationId === offered.operationId) {
         const ended = tryPromise(() => bridge.consumeTap({ token: offeredToken, unavailable: true }).then(() => true)) catch () => false
-        if (ended) try say("This workflow approval is no longer available.", true)
+        if (ended) try say(approvalNotice ? "This workflow approval is no longer available." : "This workflow run is no longer available.", true)
       }
       return
     }
-    if (resolved.kind !== "ready" || resolved.token !== offeredToken ||
-      (resolved.target.approval.expiresAt ?? 0) <= (try time.now())) return
+    if (resolved.kind !== "ready" || resolved.token !== offeredToken) return
+    if (resolved.target.approval !== undefined && (resolved.target.approval.expiresAt ?? 0) <= (try time.now())) return
     if (!Shell.showing(try shell.get(), "Workflows") &&
-      !(try contained(shell.send({ type: "openView", view: "Workflows" }), "opening an approval notification"))) return
-    if (Shell.showing(try shell.get(), "Workflows")) try shelf.set({ token: resolved.token, session, ...resolved.target })
+      !(try contained(shell.send({ type: "openView", view: "Workflows" }), "opening a workflow notification"))) return
+    if (Shell.showing(try shell.get(), "Workflows")) {
+      try shelf.set({ token: resolved.token, operationId: offered.operationId, bindingHash: offered.bindingHash, session, ...resolved.target })
+    }
   })
 }, "opening a reviewed workflow run from its notice")
 
@@ -215,6 +247,7 @@ const ownerFence = started(effect {
   const agent = Stream.catch(life.changes, () => Stream.empty)
   const pulse = Stream.merge(foreground, Stream.as(agent, undefined))
   const shown = new Map<string, SuspendedApprovalNotice>()
+  const resultIds = new Set<string>()
   const time = try Time
   let published: Session | null | undefined = undefined
 
@@ -230,6 +263,7 @@ const ownerFence = started(effect {
       const answer = tryPromise(() => bridge.publishOwner(session?.owner ?? null)) catch () => undefined
       if (answer === undefined) return
       shown.clear()
+      resultIds.clear()
       if (session === null) {
         if ((try sessionForWorkflowNotices()) === null) published = null
         return
@@ -252,15 +286,29 @@ const ownerFence = started(effect {
       published = session
     }
     if (session === null) return
-    const offered = workflowApprovalOffers(request) catch () => undefined
+    const offered = workflowNoticeOffers(request) catch () => undefined
     if (offered === undefined) return
     const now = try time.now()
     const offers = new Map<string, OfferedNotice>()
-    for (const source of offered) {
+    for (const source of offered.approvals) {
       if (source.expiresAt <= now) continue
       const notice = try offeredNotice(session, source)
       offers.set(notice.proof.id, notice)
     }
+    const visibleResults = new Set<string>()
+    for (const result of offered.results) {
+      const { workflowId, runId, versionId, title, body } = result
+      const route: WorkflowNoticeRoute = { ...session.owner, scope: session.scope, workflowId, runId, versionId }
+      const { id, bindingHash } = try workflowResultNoticeIdentity(route)
+      visibleResults.add(id)
+      if (resultIds.has(id)) continue
+      const eligible = revalidateWorkflowResultNotice(route, reads, () => true) catch () => undefined
+      if (!(try current(session))) return
+      if (eligible !== "offer") continue
+      const sent = tryPromise(() => bridge.postWorkflow({ operationId: id, bindingHash, route, title, body })) catch () => undefined
+      if (sent === "succeeded" || sent === "posted" || sent === "unknown") resultIds.add(id)
+    }
+    for (const id of resultIds) if (!visibleResults.has(id)) resultIds.delete(id)
     for (const [id, notice] of shown) if (notice.expiresAt <= now) shown.delete(id)
     const eligible = new Map(shown)
     for (const [id, notice] of offers) if (!eligible.has(id)) eligible.set(id, notice.proof)
