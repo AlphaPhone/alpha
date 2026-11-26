@@ -107,8 +107,9 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
 
     await page.getByRole("button", { name: "Menu", exact: true }).click();
     await page.getByRole("button", { name: "Downloads", exact: true }).click();
-    await expect.element(page.getByRole("heading", { name: /^Downloads?$/ })).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: "Files", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
     await expect.element(link).toBeVisible();
     expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
 
