@@ -612,14 +612,17 @@ it("Shows the newly verified Google grant when Calendar Settings reopens (spec/a
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my days (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/calendar/index.md, \"Story: Move through the days\")", async () => {
     const world = morning(phone);
-    world.calendar.granted = true;
+    world.calendar.granted = phone;
     const { alpha } = await open(world, only("view:Calendar"));
     const runtime = calendar.runtime(alpha);
 
-    // spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"; spec/app/calendar/index.md, "The phone's calendar and Google can be shown together": only a phone has a calendar of its own.
+    // spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
     await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2 && (!phone || s.phoneRows === 1));
-    expect([titles(), world.calendar.asked, Boolean(button("Allow"))]).toEqual([phone ? ["Standup", "Team lunch", "Gym"] : ["Standup", "Team lunch"], 0, false]);
+    await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
+
+    // spec/app/calendar/index.md, "What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go": only a phone has a calendar of its own, read once Android grants it, and no notice asks for it.
+    if (phone) await until(alpha, runtime, View, (s) => s.phoneRows === 1);
+    expect([titles(), Boolean(button("Allow")), world.calendar.asked]).toEqual([phone ? ["Standup", "Team lunch", "Gym"] : ["Standup", "Team lunch"], false, 0]);
 
     // spec/app/calendar/index.md, "Picking a day in the week strip or the month dialog shows that day's timeline"
     const later = world.today + 2;

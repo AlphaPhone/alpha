@@ -72,7 +72,7 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.read.ticket === 2);
   expect(world.photos.readCount).toBe(2);
 
-  await press("Edit");
+  await press("Edit photo");
   await until(alpha, runtime, Viewer, (state) => state.editing && state.preview.showing);
   await press("Noir");
   await until(alpha, runtime, Viewer, (state) => state.edit.look === "Noir" && state.preview.showing);
@@ -116,7 +116,7 @@ it('Use a photo in Messages from its still-open viewer (spec/app/photos/viewer.m
   await openPicture();
   await photoAction("Use in Messages");
   await started.promise;
-  await press("Back to photos");
+  await press("Back from photo");
   await until(alpha, runtime, Viewer, (state) => state.open === 0);
   await openPicture();
   await drawn(async () => { late.resolve(received); await late.promise; });

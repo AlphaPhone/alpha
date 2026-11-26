@@ -21,7 +21,7 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowInside, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
@@ -961,11 +961,11 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
     when { tag: "Arrived", let recorded }: run("arrived", arrived(recorded));
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
-    when { tag: "Navigate", let turn, let view, let keep }: answer("navigate", effect {
+    when { tag: "Navigate", let turn, let view, let inside }: answer("navigate", effect {
       const shell = try Shell
       const before = try shell.get()
-      const shown = keep
-        ? showing(before, view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view the agent named"))
+      const shown = inside
+        ? (showing(before, view) && !canAgentShowInside(before, view)) || (try contained(shell.send({ type: "agentShowInside", view }), "opening the page the agent named"))
         : (showing(before, view) && !canAgentShowView(before, view)) || (try contained(shell.send({ type: "agentShowView", view }), "opening the view the agent named"))
       return { type: "navigated", ticket: turn, opened: shown } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });

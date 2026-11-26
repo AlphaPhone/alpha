@@ -407,9 +407,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"
     if (phone) {
       expect(world.inbox.savedAttachments.size).toBe(0);
-      await confirm("Save");
+      await confirm("Save as…");
       await until(alpha, runtime, Shown, (s) => s.keep.outcome === "Confirmed");
-      expect([world.inbox.savedAttachments.get("agenda.txt"), told()]).toEqual([attachmentText, expect.stringContaining("Saved to Files")]);
+      expect([world.inbox.savedAttachments.get("agenda.txt"), told()]).toEqual([attachmentText, expect.stringContaining("Saved.")]);
     }
     await confirm("Close");
     await until(alpha, runtime, Shown, (s) => s.attachment === 0);

@@ -767,7 +767,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     if (origin !== undefined && conversation !== undefined && screen !== undefined && (try atSource)) {
       const open = (source: Effect.Effect<boolean>) => openRouteForVoice(placeOf("Files"), origin.route, session, turn, effect {
         return (try source) && Shell.canAgentOpenFilesFrom(try shell.get(), origin.source, origin.panel, origin.route, true)
-      }, memory, voice, shell, true)
+      }, memory, voice, shell, "Keep")
       const changes = Stream.merge(Stream.map(conversation.changes, () => undefined), Stream.map(voice.changes, () => undefined))
       try review.spokenFilesFrom(direct, message, { origin, current: stillTalking, report },
         { view: conversation, revision: screen.context.revision, moved: succeed(true), open, changes }, result.reply.actionResults)
@@ -806,8 +806,8 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     const held = page !== undefined ? { asked, page } : prepared !== undefined ? { asked, handoff: prepared } : undefined
     if (views !== undefined && held !== undefined) {
       const sameSource = effect { return (try atSource) && (try shell.get()).route === sourceRoute }
-      try views.spoken(held, sameSource, (place, keep) =>
-        openRouteForVoice(placeOf(place === "Home" ? undefined : place), sourceRoute, session, turn, atSource, memory, voice, shell, keep))
+      try views.spoken(held, sameSource, (place, inside) =>
+        openRouteForVoice(placeOf(place === "Home" ? undefined : place), sourceRoute, session, turn, atSource, memory, voice, shell, inside ? "Inside" : "Show"))
     } else if (!actions.some((action) => action.action === "VIEWS")) {
       const requested = requestedDestination(finalText)
       const place = requested === undefined ? undefined : placeForDestination(requested)
@@ -943,14 +943,20 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
 }
 
 // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "An exact spoken Files request may follow its own leased navigation once"; spec/app/shell/index.md, "Only a spoken move from its exact source route is marked as Talk's navigation"
-/** `keepPanel` opens the view under Ask Alpha at its height, as an exact spoken Files request or a saved note does; otherwise the move shows its view, lowering Ask Alpha where it would hide it. */
+/**
+ * How Talk's move treats Ask Alpha: "Show" shows the view, lowering Ask Alpha where it would hide it; "Keep" opens it
+ * under Ask Alpha at its height, as an exact spoken Files request does; "Inside" opens a page inside the view, as a
+ * saved note is, keeping a sheet and lowering the full screen.
+ */
+type SpokenMove = "Show" | "Keep" | "Inside"
+
 effect function openRouteForVoice(place: number, sourceRoute: number, session: number, turn: number, current: Effect.Effect<boolean>,
-  memory: VoiceMemory, voice: Voice.Machine.Shape, shell: Shell.Machine.Shape, keepPanel = false): boolean!! {
+  memory: VoiceMemory, voice: Voice.Machine.Shape, shell: Shell.Machine.Shape, move: SpokenMove = "Show"): boolean!! {
   const before = try shell.get()
   if (before.route !== sourceRoute || memory.spokenNavigation !== undefined || !(try current)) return false
   const target = viewOfPlace(place)
   if (target === undefined ? !Shell.canAgentGoHome(before)
-    : Shell.showing(before, target) && (keepPanel || !Shell.canAgentShowView(before, target))) return true
+    : Shell.showing(before, target) && (move === "Keep" || !(move === "Inside" ? Shell.canAgentShowInside(before, target) : Shell.canAgentShowView(before, target)))) return true
   if (!Voice.canAgentNavigates(try voice.get(), session, turn, place, sourceRoute)) return false
   const opened = try Deferred.make<boolean>()
   const allowed = () => Effect.runSync(current)
@@ -965,7 +971,8 @@ effect function openRouteForVoice(place: number, sourceRoute: number, session: n
     }
     return target === undefined
       ? try contained(shell.send({ type: "agentHomeSpoken", route: sourceRoute }, guard), "going Home for Talk")
-      : keepPanel ? try contained(shell.send({ type: "agentOpenSpoken", view: target, route: sourceRoute }, guard), "opening the view for Talk")
+      : move === "Keep" ? try contained(shell.send({ type: "agentOpenSpoken", view: target, route: sourceRoute }, guard), "opening the view for Talk")
+      : move === "Inside" ? try contained(shell.send({ type: "agentShowInsideSpoken", view: target, route: sourceRoute }, guard), "opening the page for Talk")
       : try contained(shell.send({ type: "agentShowSpoken", view: target, route: sourceRoute }, guard), "showing the view for Talk")
   }
   const decline = effect {

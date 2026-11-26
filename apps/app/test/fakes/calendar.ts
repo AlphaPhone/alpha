@@ -55,12 +55,11 @@ export interface CalendarScene {
   stalled: boolean;
   /** A change to a calendar Alpha does not write directly waits for approval. */
   queued: boolean;
-  /** The phone's own calendars and their events, and whether Android grants Calendar access, and how often it was asked. */
+  /** The phone's own calendars and their events, whether Android grants Calendar access, whether the owner denies its prompt, and how often it was asked. */
   readonly calendars: AndroidCalendarRow[];
   phoneEvents: AndroidCalendarEvent[];
   granted: boolean;
-  /** Android's prompt is answered no. */
-  denies?: boolean;
+  denies: boolean;
   /** A read of the agent's calendar feed is taken and never answered, as by an agent still busy starting. */
   silent: boolean;
   asked: number;
@@ -78,7 +77,7 @@ export interface CalendarScene {
 export function calendarScene(): CalendarScene {
   return {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
-    calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, silent: false, asked: 0,
+    calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, denies: false, silent: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0, handoffs: [],
     control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [],
   };
@@ -279,7 +278,7 @@ export function elizaCalendar(scene: CalendarScene): Faked {
     checkPermissions: () => Promise.resolve({ calendar: scene.granted ? "granted" : "prompt" }),
     requestAccess() {
       scene.asked += 1;
-      scene.granted = scene.denies !== true;
+      scene.granted = !scene.denies;
       return Promise.resolve({ status: scene.granted ? "granted" : "denied" });
     },
     list({ begin, end }): Promise<AndroidCalendarList> {
