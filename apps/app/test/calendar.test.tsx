@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
@@ -69,6 +69,22 @@ const chooseDate = () => press(`Choose date: ${document.querySelector("[data-hos
 async function fromMonth(pill: string) {
   await chooseDate();
   await press(pill);
+}
+
+/**
+ * Make Calendar's canvas wide, as a tablet's is: only there it offers Search, the layouts and the Calendars sheet. A phone
+ * world is already wide at the test window's 1024 points; a browser world draws the 412-point phone preview unless its
+ * pointer is coarse, so the window is measured again with a touch pointer.
+ */
+async function widen(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
+  if ((await runtime.runPromise(View.use((view) => view.get()))).wide) return;
+  const coarse = window.matchMedia("(pointer: coarse)");
+  Object.defineProperty(coarse, "matches", { configurable: true, value: true });
+  const original = window.matchMedia.bind(window);
+  const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(pointer: coarse)" ? coarse : original(query));
+  onTestFinished(() => media.mockRestore());
+  await drawn(() => window.dispatchEvent(new Event("resize")));
+  await until(alpha, runtime, View, (state) => state.wide);
 }
 
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
@@ -153,35 +169,34 @@ it("Rechecks Calendar access on return from Android Settings", async () => {
 
 it("Offers Search, the layouts and the Calendars sheet only on a wide screen (spec/app/calendar/index.md, \"Search and the Calendars sheet open over the days, never over an open event\")", async () => {
   const size = { width: Object.getOwnPropertyDescriptor(window, "innerWidth"), height: Object.getOwnPropertyDescriptor(window, "innerHeight") };
+  onTestFinished(() => {
+    if (size.width) Object.defineProperty(window, "innerWidth", size.width);
+    if (size.height) Object.defineProperty(window, "innerHeight", size.height);
+  });
   const resize = async (width: number, height: number) => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
     Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
     await drawn(() => window.dispatchEvent(new Event("resize")));
   };
-  try {
-    const { alpha, runtime } = await onBrowserCalendar();
-    await resize(412, 915);
-    await until(alpha, runtime, View, (state) => !state.wide);
-    expect(button("Search events")).toBeUndefined();
-    expect(button("New event")).toBeDefined();
-    await chooseDate();
-    await until(alpha, runtime, View, (state) => state.overlay === "MonthDialog");
-    expect(document.querySelector('[role="group"][aria-label="Calendar view"]')).toBeNull();
-    expect(button("Schedule")).toBeUndefined();
-    expect(button("Calendars")).toBeUndefined();
-    await hardware("back");
-    await until(alpha, runtime, View, (state) => state.overlay === "NoOverlay");
+  // A phone measures its own window: 412 points is Alpha's portrait phone, 1024 a tablet's width.
+  const { alpha, runtime } = await onCalendar(morning(true));
+  await resize(412, 915);
+  await until(alpha, runtime, View, (state) => state.front && !state.wide);
+  expect(button("Search events")).toBeUndefined();
+  expect(button("New event")).toBeDefined();
+  await chooseDate();
+  await until(alpha, runtime, View, (state) => state.overlay === "MonthDialog");
+  expect(document.querySelector('[role="group"][aria-label="Calendar view"]')).toBeNull();
+  expect(button("Schedule")).toBeUndefined();
+  await hardware("back");
+  await until(alpha, runtime, View, (state) => state.overlay === "NoOverlay");
 
-    await resize(1024, 768);
-    await until(alpha, runtime, View, (state) => state.wide);
-    expect(button("Search events")).toBeDefined();
-    await chooseDate();
-    expect(button("Schedule")).toBeDefined();
-    expect(button("Calendars")).toBeDefined();
-  } finally {
-    if (size.width) Object.defineProperty(window, "innerWidth", size.width);
-    if (size.height) Object.defineProperty(window, "innerHeight", size.height);
-  }
+  await resize(1024, 768);
+  await until(alpha, runtime, View, (state) => state.wide);
+  expect(button("Search events")).toBeDefined();
+  await chooseDate();
+  await until(alpha, runtime, View, (state) => state.overlay === "MonthDialog");
+  expect(button("Schedule")).toBeDefined();
 });
 
 const calendarSettings = () => document.querySelector('[data-settings-page="Calendar"]');
@@ -199,6 +214,7 @@ describe("Calendar without a connected account", () => {
     const timeline = document.querySelector('[aria-label="Calendar timeline"]');
     expect(timeline?.textContent).toContain("Not connected");
     expect(button("Open Calendar settings")).toBeDefined();
+    await widen(alpha, runtime);
     await chooseDate();
     await until(alpha, runtime, View, (state) => state.overlay === "MonthDialog");
     expect(document.querySelector<HTMLSelectElement>('select[aria-label="Calendar year"]')?.options).toHaveLength(101);
@@ -226,6 +242,7 @@ describe("Calendar without a connected account", () => {
 
   it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
     const { alpha, runtime } = await onDisconnected();
+    await widen(alpha, runtime);
     await fromMonth("Schedule");
     await until(alpha, runtime, View, (state) => state.layout === "Agenda" && state.overlay === "NoOverlay");
     const schedule = document.querySelector('[aria-label="Schedule"][role="region"]');
@@ -236,6 +253,7 @@ describe("Calendar without a connected account", () => {
 
   it("Shows the covered window and disconnection while searching standalone Calendar (spec/app/calendar/index.md, \"Search and the Calendars sheet open over the days, never over an open event\")", async () => {
     const { alpha, runtime } = await onDisconnected();
+    await widen(alpha, runtime);
     await press("Search events");
     await until(alpha, runtime, View, (state) => state.overlay === "Search");
     const results = document.querySelector('[aria-label="Search results"][role="region"]');
@@ -539,6 +557,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
 
     // spec/app/calendar/index.md, "Choosing a layout closes the menu, and the agenda goes back to today"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next": the agenda lists what is coming, not only today.
+    await widen(alpha, runtime);
     await chooseDate();
     await until(alpha, runtime, View, (s) => s.overlay === "MonthDialog");
     await press("Schedule");
@@ -781,6 +800,7 @@ describe("on a phone", () => {
 describe("in a browser", () => {
   it("Search my events and choose which calendars I see (spec/app/calendar/index.md, \"Story: Search my events and choose which calendars I see\")", async () => {
     const { alpha, runtime, world } = await onBrowserCalendar();
+    await widen(alpha, runtime);
 
     // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
     await press("Search events");
