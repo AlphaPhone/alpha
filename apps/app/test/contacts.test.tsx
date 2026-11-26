@@ -54,6 +54,45 @@ const launch = (name: "Contacts" | "Messages") => drawn(() => {
 });
 
 describe("Contacts on an Alpha image", () => {
+  it("Retries a contact's New message in the same Ask stage and keeps an addressed draft", async () => {
+    const world = image();
+    const slot = "sms-draft:v2:new";
+    world.secrets.set(slot, "unreadable draft");
+    const alpha = await mountedContacts(world);
+    const show = async (name: string) => {
+      await launch("Contacts");
+      await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.list.status === "Loaded");
+      await press(name);
+      await until(alpha, alpha.runtime, Contacts, (state) => state.opened && state.card.status === "Loaded");
+    };
+    const to = () => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value;
+
+    // spec/app/messages/index.md, "New message reads the contacts that have a number and brings back the owner's unsent New draft"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
+    await show("Maya Chen");
+    await press("Open Alpha");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    await press("Message +14155550100");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Messages" && state.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Messages, (state) => state.front && state.pane === "Threads");
+    await drawn(() => vi.waitFor(() => expect(button("Retry")).toBeDefined()));
+    expect(world.secrets.get(slot)).toBe("unreadable draft");
+    world.secrets.delete(slot);
+    await press("Retry");
+    await until(alpha, alpha.runtime, Messages, (state) => state.pane === "New" && state.newDraft.recipient > 0);
+    expect(to()).toBe("+14155550100");
+    const saved = world.secrets.get(slot);
+    expect(saved).toBeDefined();
+
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+    await show("Ben Ortiz");
+    await press("Message +14155550122");
+    await until(alpha, alpha.runtime, Messages, (state) => state.pane === "New" && state.newDraft.recipient > 0);
+    expect(to()).toBe("+14155550100");
+    expect(world.secrets.get(slot)).toBe(saved);
+    expect(world.telephony.sent).toEqual([]);
+  });
+
   it("Search chat over a contact and return to its dock (spec/app/assistant/search.md, \"Search from a closed Contact remembers the card that opened it\")", async () => {
     const world = image();
     world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Friday at noon" }] });

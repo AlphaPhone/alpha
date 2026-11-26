@@ -9,11 +9,12 @@ import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../gen/app__messages.ts";
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { Time } from "../runtime/time.vibe";
 import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
-import { Drafts, attachAll, discardMessageDraft, editNewMessage, messageRecipients, newDraftHeld, openMessageDraft, prepare, removeMessagePicture, sameSubscription, startNewMessage, supported, useSavedMessageDraft, writeMessageDraft } from "./composer.vibe";
+import { Drafts, type NewMessageHandoff, attachAll, discardMessageDraft, editNewMessage, messageRecipients, newDraftHeld, openMessageDraft, prepare, removeMessagePicture, retryMessageHandoff, sameSubscription, startNewMessage, supported, useSavedMessageDraft, writeMessageDraft } from "./composer.vibe";
 import { Conversations, type CopyReport, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
 import { commsHeld } from "../phone/comms.vibe";
@@ -32,6 +33,7 @@ export interface MessagesProps {
 
 
 type MessagesUI = ReturnType<typeof useMessages>;
+type HandoffProps = { handoff?: NewMessageHandoff | undefined; discardHandoff: () => void };
 
 const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
 const accessPill = "min-h-13 rounded-group bg-foreground px-7 text-lg font-semibold text-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
@@ -73,22 +75,27 @@ function clearChoice(runtime: MessagesProps["runtime"]) {
  */
 export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const messages = useMessages(runtime);
+  const route = useShell(runtime).state?.route;
   const dock = useCommsDock(runtime);
   const [view, setView] = useState<HTMLElement | null>(null);
+  const handoffs = runtime.runSync(Effect.map(Drafts, (drafts) => drafts.messageHandoff));
+  const pending = useSyncExternalStore(handoffs.subscribe, handoffs.get, handoffs.get);
+  const handoff = pending !== undefined && pending.route === route ? pending : undefined;
+  const discardHandoff = () => { if (handoff !== undefined) handoffs.replace(handoff, undefined); };
   if (messages.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Messages</Alert>;
   const { state } = messages;
   if (!state) return null;
   return (
     <section ref={setView} data-alpha-messages data-sheet={dock.open ? "open" : "closed"} aria-label="Messages" className="group/messages relative flex h-full min-h-0 flex-col overflow-hidden data-[sheet=closed]:pt-2">
-      {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} />}
+      {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} handoff={handoff} discardHandoff={discardHandoff} />}
       {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} view={view} />}
-      {state.pane === "Picker" && <Picker key="handoff" runtime={runtime} messages={messages} />}
-      {state.pane === "New" && <Picker key={state.newDraft.visit} runtime={runtime} messages={messages} />}
+      {state.pane === "Picker" && <Picker key="handoff" runtime={runtime} messages={messages} discardHandoff={discardHandoff} />}
+      {state.pane === "New" && <Picker key={state.newDraft.visit} runtime={runtime} messages={messages} handoff={handoff} discardHandoff={discardHandoff} />}
     </section>
   );
 }
 
-function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesProps & { messages: MessagesUI }) {
+function Threads({ runtime, messages: { state, can, send }, onBack, handoff, discardHandoff }: MessagesProps & HandoffProps & { messages: MessagesUI }) {
   const [searching, setSearching] = useState(false);
   const [draftOpening, setDraftOpening] = useState<"Opening" | "Failed">();
   const opening = useRef(false);
@@ -104,15 +111,24 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
   const open = (row: ThreadRow) => {
     clearChoice(runtime);
     const thread = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.of({ id: row.id, addresses: "incomplete" in row ? [] : row.addresses })));
-    if (can({ type: "openThread", thread })) void send({ type: "openThread", thread });
+    if (can({ type: "openThread", thread })) {
+      discardHandoff();
+      void send({ type: "openThread", thread });
+    }
   };
   const allow = { type: "allow", need: "SmsAccess" } as const;
   const settings = { type: "goToSettings", need: "SmsAccess" } as const;
   const unread = { type: "pickChip", chip: "UnreadThreads" } as const;
   const all = { type: "pickChip", chip: "AllThreads" } as const;
   const newMessage = { type: "newMessage" } as const;
+  const handoffOpening = handoff?.phase === "Opening";
+  const handoffFailed = handoff?.phase === "OpenFailed";
   const openNew = async () => {
-    if (opening.current || !can(newMessage)) return;
+    if (opening.current || handoffOpening || !can(newMessage)) return;
+    if (handoff?.phase === "OpenFailed") {
+      await runtime.runPromise(retryMessageHandoff(handoff)).catch(() => false);
+      return;
+    }
     opening.current = true;
     setDraftOpening("Opening");
     const opened = await runtime.runPromise(startNewMessage()).catch(() => false);
@@ -134,11 +150,11 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           <h1 className="sr-only">Messages</h1>
           <div aria-hidden className="min-w-0 flex-1" />
           {!smsNeeded(state) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
-          {can(newMessage) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new disabled={draftOpening === "Opening"} onClick={() => void openNew()}><Pencil className="size-5" /></Button>}
+          {can(newMessage) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new disabled={draftOpening === "Opening" || handoffOpening} onClick={() => void openNew()}><Pencil className="size-5" /></Button>}
         </header>
       )}
-      {draftOpening === "Opening" && <p role="status" className={`${notice} px-3`}>Opening message draft…</p>}
-      {draftOpening === "Failed" && can(newMessage) && <Banner variant="warn" action={<Button size="sm" onClick={() => void openNew()}>Retry</Button>}>Message draft couldn’t be opened</Banner>}
+      {(draftOpening === "Opening" || handoffOpening) && <p role="status" className={`${notice} px-3`}>Opening message draft…</p>}
+      {(draftOpening === "Failed" || handoffFailed) && can(newMessage) && <Banner variant="warn" action={<Button size="sm" onClick={() => void openNew()}>Retry</Button>}>Message draft couldn’t be opened</Banner>}
       {smsNeeded(state) && (can(allow) || can(settings)) && (
         <div className="grid flex-1 place-items-center px-4">
           {can(allow) ? <button type="button" data-alpha-messages-allow className={accessPill} onClick={() => void send(allow)}>Allow SMS read access</button> : <button type="button" className={accessPill} onClick={() => void send(settings)}>Open Settings for SMS access</button>}
@@ -618,7 +634,7 @@ type NewTextEdit = {
 type NewTextSave = { readonly status: "Saving" | "Failed"; readonly edit: NewTextEdit };
 
 /** A recipient choice either addresses the separate New draft or completes an existing handoff. */
-function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { messages: MessagesUI }) {
+function Picker({ runtime, messages: { state, can, send }, handoff, discardHandoff }: MessagesProps & HandoffProps & { messages: MessagesUI }) {
   const composer = useComposer(runtime);
   const [typed, setTyped] = useState("");
   const [browsing, setBrowsing] = useState(false);
@@ -627,7 +643,8 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
   const inputRef = useRef<HTMLInputElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const [composingHeight, setComposingHeight] = useState<number>();
-  const textIsSaved = useCallback(() => latestTextSave.current === undefined, []);
+  const prefill = state?.pane === "New" && handoff !== undefined && "visit" in handoff && handoff.visit === state.newDraft.visit ? handoff : undefined;
+  const textIsSaved = useCallback(() => latestTextSave.current === undefined && prefill === undefined, [prefill]);
   const showSave = (next: NewTextSave | undefined) => {
     latestTextSave.current = next;
     setTextSave(next);
@@ -661,7 +678,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
   const editable = !fresh || !composer.state || !newDraftHeld(composer.state, fresh.revision);
   const kept = fresh && runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.newDraft()));
   const selecting = fresh?.picking ?? browsing;
-  const draftTo = textSave?.edit.to?.value ?? kept?.recipients ?? "";
+  const draftTo = textSave?.edit.to?.value ?? prefill?.address ?? kept?.recipients ?? "";
   const savingChoice = textSave?.status === "Saving" && textSave.edit.to?.closePicker === true;
   const typedTo = kept && !selecting ? draftTo : typed;
   const before = kept ? messageRecipients(draftTo) : [];
@@ -671,7 +688,10 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
     if (can({ type: "findChoices" })) void send({ type: "findChoices" });
   };
   const find = (text: string) => {
-    if (fresh && !selecting) saveText(fresh.visit, { to: { value: text, closePicker: false } });
+    if (fresh && !selecting) {
+      if (prefill !== undefined) discardHandoff();
+      saveText(fresh.visit, { to: { value: text, closePicker: false } });
+    }
     else setTyped(text);
     query(text);
   };
@@ -680,6 +700,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
       if (!editable || (latestTextSave.current?.status === "Saving" && latestTextSave.current.edit.to?.closePicker)) return;
       const previous = selecting ? before : messageRecipients(typedTo.split(",").slice(0, -1).join(","));
       const recipients = [...new Set([...previous, ...addresses])].join(", ");
+      if (prefill !== undefined) discardHandoff();
       saveText(fresh.visit, { to: { value: recipients, closePicker: true } });
       return;
     }
@@ -756,9 +777,12 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
       </div>
       {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} textarea={messageRef}
         minHeight={selecting ? composingHeight : undefined}
-        body={textSave?.edit.body ?? kept.body} saveStatus={textSave?.status} textIsSaved={textIsSaved}
+        body={textSave?.edit.body ?? kept.body} saveStatus={textSave?.status ?? (prefill?.phase === "Saving" ? "Saving" : prefill?.phase === "SaveFailed" ? "Failed" : undefined)} textIsSaved={textIsSaved}
         onBody={(body) => { setComposingHeight(undefined); saveText(fresh.visit, { body }); }}
-        onRetrySave={() => saveText(fresh.visit, {})} /> : <CommsBar runtime={runtime} />}
+        onRetrySave={() => {
+          if (textSave?.status === "Failed") saveText(fresh.visit, {});
+          else if (prefill?.phase === "SaveFailed") void runtime.runPromise(retryMessageHandoff(prefill)).catch(() => false);
+        }} /> : <CommsBar runtime={runtime} />}
     </>
   );
 }
