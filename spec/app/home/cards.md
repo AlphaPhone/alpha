@@ -436,7 +436,7 @@ What Inbox loaded is what the card shows: Home reads no mail of its own.
 As v121 drew it (`legacy/apps/app/src/ui/overview/daily-overview.ts:171-198`),
 the card closes on "Open to retry · last updated 10:24 PM" only when Inbox's
 last read or account check failed, on "Updating email…" while Inbox reads
-again a page that is not current, and otherwise on "Recent email" when
+its page, and otherwise on "Recent email" when
 Inbox's page did not see every message, else the account it read, and when
 it was read ("Updated 10:24 PM", or "Updated Wed, Nov 25 10:24 PM" for an
 earlier day).

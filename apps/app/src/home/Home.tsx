@@ -19,7 +19,7 @@ import { back } from "../shell/shell.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
-import { type AppsInput, actInApps, chooseApp, closeApps, openApps, openOwnTile, told } from "./home.vibe";
+import { type AppsInput, actInApps, chooseApp, closeApps, openApps, openOwnInApps, openOwnTile, told } from "./home.vibe";
 import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
@@ -96,11 +96,8 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     const Glyph = views[view].icon;
     return { id: `view:${view}`, label: views[view].label, packageName: "", icon: <Glyph className="size-7.5" /> };
   }) : [];
-  const openInstalled = (id: string) => {
-    if (!id.startsWith("view:")) return offered({ type: "openApp", app: id, now: untimed })?.();
-    const tile = tileOf(id);
-    if (tile.tag === "Own") offered({ type: "openFromDrawer", view: tile.view, shell: s })?.();
-  };
+  const openInstalled = (app: string) => offered({ type: "openApp", app, now: untimed })?.();
+
   const opening = h.handoff.ask.tag !== "Shade" && h.handoff.attempt.outcome === "Sent" ? h.handoff.ask.app : undefined;
   const selected = drawer.state;
   const menuApp = selected?.menu;
@@ -171,7 +168,11 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
           }}
           onClose={() => { if (drawerActive) void runtime.runPromise(closeApps(s.route, paired)); }}
           onBack={() => { if (drawerActive) void alpha.runtime.runPromise(back()); }}
-          onOpen={(app) => act({ type: "openApp", app, now: untimed })}
+          onOpen={(app) => {
+            const tile = app.startsWith("view:") ? tileOf(app) : undefined;
+            if (tile?.tag !== "Own") act({ type: "openApp", app, now: untimed });
+            else if (drawerActive) void runtime.runPromise(openOwnInApps(tile.view, s.route, paired));
+          }}
           onOpenMenu={drawerActive ? (app) => {
             const event = { type: "openMenu", app, open: showingApps, listed: catalogApps.map(({ id }) => id) } as const;
             if (drawer.can(event)) act(event);

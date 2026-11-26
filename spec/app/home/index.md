@@ -305,11 +305,12 @@ beside the phone's own apps, until the owner adds them to Home.
 ```quint
 pure def drawerViews(h: Home, shell: S::Shell): List[S::View] = if (onPhone(h)) hiddenApps(h, shell) else List()
 
-pure def canOpenFromDrawer(h: Home, view: S::View, shell: S::Shell, by: Actor): bool =
-  by == Owner and shell.drawer and not(h.editing) and drawerViews(h, shell).select(v => v == view).length() > 0
-
-pure def openFromDrawer(h: Home, view: S::View, shell: S::Shell, by: Actor): Moved = { state: h, out: List(Go({ view: view })) }
+pure def drawerOpens(h: Home, view: S::View, shell: S::Shell): bool =
+  shell.drawer and not(h.editing) and drawerViews(h, shell).some(v => v == view) and S::canOpenView(shell, view)
 ```
+
+The drawer opens such an app through the shell's own `openView`, which
+closes Apps, as a tap on the app's tile would.
 
 ### The app in the menu can be added to Home or handed to Android as App info
 

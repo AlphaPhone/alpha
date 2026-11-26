@@ -15,7 +15,7 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import { openInboxAccount } from "../src/account/profile.vibe";
 import { useInEmail } from "../src/inbox/suggestion.vibe";
 import inbox from "../src/inbox/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { Effect } from "effect";
 import { Letters, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
@@ -805,4 +805,37 @@ it("shows the authorized first page of unread Inbox mail on Home", async () => {
   expect(card?.textContent).not.toContain("A private message body");
   await press("Open Inbox, 1+ unread");
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
+});
+
+// spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"; spec/app/inbox/index.md, "A check that answers after a failed read reads the first page again"
+it("says Open to retry on Home's mail card only after a failed read, and recovers on the next check", async () => {
+  const world = scene();
+  world.inbox.mail.splice(0, world.inbox.mail.length, letter(1, "Quarterly numbers", ["INBOX", "UNREAD"], "Body stays in Inbox"));
+  const { alpha } = await open(world, only("home", "view:Inbox"));
+  const inboxState = inbox.runtime(alpha);
+  await openInboxFromHome(alpha);
+  await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.pages === 1);
+  const status = () => button("Open Inbox, 1 unread")?.lastElementChild?.textContent ?? "";
+  const backHome = async () => {
+    await press("Back to apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+    await homeIsReady(alpha);
+  };
+  await backHome();
+  await afterDraw(() => expect(status()).toMatch(/^you@gmail\.example( · Updated .+)?$/u));
+
+  world.inbox.offline = true;
+  await openInboxFromHome(alpha);
+  await press("Refresh");
+  await until(alpha, inboxState, List, (state) => state.list.status === "Failed");
+  await backHome();
+  await afterDraw(() => expect(status()).toMatch(/^Open to retry( · last updated .+)?$/u));
+  expect(button("Open Inbox, 1 unread")?.textContent).toContain("Quarterly numbers");
+
+  // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
+  world.inbox.offline = false;
+  await seen(false);
+  await seen(true);
+  await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.failure === "Fine");
+  await afterDraw(() => expect(status()).toMatch(/^you@gmail\.example( · Updated .+)?$/u));
 });

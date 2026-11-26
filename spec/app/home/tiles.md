@@ -332,6 +332,11 @@ pure def sometimesARearrangedHomeIsReadBack(t: Tiles): bool =
 
 ### Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited
 
+As v121 drew them (`legacy/apps/app/src/prototype/model.js:351`, `:836`,
+`:1156`; `home-shell.ts:187`), Phone's dot is an unheard voicemail (missed
+calls wait on the Phone card), Messages' an unread conversation and Inbox's
+an unread message.
+
 ```quint
 pure val badgeViews: Set[S::View] = Set(S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack)
 
