@@ -60,9 +60,9 @@ export function StartupAccessRow({ access, word, current = false, native = false
   return (
     <li className="flex min-h-14.25 items-center gap-3.5 border-b border-border" aria-current={current ? "step" : undefined}>
       <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary [&>svg]:size-5">{icon}</span>
-      <span className="min-w-0 flex-1 leading-[1.5] wrap-anywhere">
+      <span className="min-w-0 flex-1 leading-chat wrap-anywhere">
         <span className={cn("block", current && "font-medium")}>{title}</span>
-        {current ? <span className="block text-caption leading-[1.5] text-muted-foreground/97 dark:text-muted-foreground">{rationale}</span> : null}
+        {current ? <span className="block text-caption leading-chat text-muted-foreground/97 dark:text-muted-foreground">{rationale}</span> : null}
       </span>
       {(!checking && !action) || status === "ok" ? (
         <span role={current && status === "ok" ? "status" : undefined} className="shrink-0 text-sm text-muted-foreground/97 dark:text-muted-foreground">
