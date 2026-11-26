@@ -70,7 +70,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     void send({ type: "openContact", contact: id });
   };
   const canBack = shell.can({ type: "goBack" });
-  const phoneTabs = !searching && !state.opened && shell.state?.trail.at(-2) === "Phone";
+  const phoneTabs = !state.opened && shell.state?.trail.at(-2) === "Phone";
   const back = canBack ? () => void alpha.back() : undefined;
   const select = (tab: string) => {
     if (tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") return;
@@ -96,14 +96,15 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       <span className="flex-1" />
     </>
   );
-  const header = searching ? (
+  const searchHeader = searching ? (
     <form role="search" aria-label="Search contacts" data-host-chrome="" className="mt-0.5 flex min-h-13 shrink-0 items-center gap-0.5 px-2" onSubmit={(event) => event.preventDefault()}>
       {can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" className="size-13 rounded-lg" onClick={() => void send({ type: "endSearch" })}><ChevronLeft /></Button>}
       <SearchField autoFocus keepClear className="min-w-0 flex-1 [&_button]:size-13 [&_input]:focus-visible:outline-none" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} maxLength={128} />
     </form>
-  ) : phoneTabs ? (
-    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back}>{chip}{actions}</PhoneTabs>
-  ) : (
+  ) : undefined;
+  const header = phoneTabs ? (
+    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
+  ) : searchHeader ?? (
     <AppHeader title="Contacts" className={cn("mt-0.5 shrink-0", filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
