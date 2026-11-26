@@ -538,7 +538,7 @@ function Calendars({ runtime }: CalendarProps) {
   return (
     <Sheet open={s.overlay === "CalendarsSheet"} onOpenChange={(opened) => (opened ? undefined : void view.send({ type: "closeOverlay" }))}>
       <SheetContent title="Calendars">
-        {[...new Map([...shown.all("Google"), ...shown.all("Phone")].map((row) => [row.calendar, row])).values()].map((row) => (
+        {[...new Map([...shown.all("Google"), ...(allows(s.access) ? shown.all("Phone") : [])].map((row) => [row.calendar, row])).values()].map((row) => (
           <Label key={row.calendar} className="flex items-center justify-between">
             {row.source === "Google" ? "Your agent's calendar" : `Phone calendar ${row.calendarId}`}
             <Switch checked={rowShown(row.calendar, [...s.hidden])} disabled={!view.can({ type: "toggleCalendar", calendar: row.calendar })}

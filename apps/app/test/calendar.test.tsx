@@ -87,6 +87,35 @@ async function onBrowserCalendar() {
   return running;
 }
 
+it("Rechecks Calendar access on return from Android Settings", async () => {
+  const world = morning(true);
+  const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
+  const runtime = calendar.runtime(alpha);
+  await openCalendar(alpha);
+  await until(alpha, runtime, View, (state) => state.front && state.google.status === "Loaded" && state.googleRows === 2);
+  expect(titles()).toEqual(["Standup", "Team lunch"]);
+
+  await seen(false);
+  world.calendar.granted = true;
+  await seen(true);
+  await vi.waitFor(() => expect(titles()).toEqual(["Standup", "Team lunch", "Gym"]));
+
+  await tap("Gym");
+  await until(alpha, runtime, View, (state) => state.local && state.open !== 0);
+  await seen(false);
+  world.calendar.granted = false;
+  await seen(true);
+  await until(alpha, runtime, View, (state) => state.open === 0 && state.phoneRows === 0);
+  await vi.waitFor(() => expect(titles()).toEqual(["Standup", "Team lunch"]));
+
+  await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" })));
+  await until(alpha, runtime, View, (state) => !state.front);
+  world.calendar.granted = true;
+  await openCalendar(alpha);
+  await vi.waitFor(() => expect(titles()).toEqual(["Standup", "Team lunch", "Gym"]));
+  expect(world.calendar.asked).toBe(0);
+});
+
 const calendarSettings = () => document.querySelector('[data-settings-page="Calendar"]');
 
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
