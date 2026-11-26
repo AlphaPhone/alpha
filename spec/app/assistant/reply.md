@@ -197,12 +197,8 @@ without that code keep their own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
 removes its bubble. Stop keeps what was shown, which is only settled text:
 a reply stopped before any of its text settled keeps no bubble. The
-conversation's check of a stopped reply owns the only notice. Read again
-from history it keeps no bubble either: eliza stores such a reply as
-aborted, with the provisional text it had and the cause `stop`, or
-`client_left` when Alpha's own Stop closed the reply's stream first, and
-neither that text nor a failure notice is drawn for it. A reply the
-runtime ended or a restart cut reads as before.
+conversation's check of a stopped reply owns the only notice. How such a
+reply reads again from history is the rule below.
 
 ```quint
 type Failure = CredentialInvalid | InsufficientCredits | LimitReached | ProviderIssue | TimedOut
@@ -235,6 +231,40 @@ pure def sometimesStoppedMidReply(r: Reply): bool = r.stopped and r.shown >= 1
 pure def sometimesAReplyIsDeclined(r: Reply): bool = r.status == Ignored
 
 pure def sometimesAFailureReplacesTheText(r: Reply): bool = r.status == Interrupted and not(r.stopped) and r.shown == 0 and r.acks == 1
+```
+
+### Read again from history, only a reply the owner stopped here before any text settled keeps no bubble; a dropped reply still says it did not finish
+
+eliza stores a reply that ended early as aborted, with the text it had and
+the cause of its end: `stop` when a Stop reached the turn first, and
+`client_left` when the stream that carried it closed first. Alpha's own
+Stop closes the reply's stream before it posts the Stop, so eliza names
+that Stop `client_left` too, the same as a stream dropped by the bridge's
+time or idle limit, a lost connection, or a reload of Alpha. The cause
+alone does not say the owner stopped it, so Alpha remembers, for as long
+as it runs, each turn the owner stopped before any of its text settled.
+Read again, an aborted reply with the cause `stop` or `client_left`
+whose turn Alpha remembers keeps no bubble: its text was never shown, and
+the conversation's check owned the only notice. Every other aborted reply
+reads as it did: its text with the notice that it did not finish. A dropped
+reply, one the runtime ended, one a restart cut, one stopped after text
+settled (eliza may store that settled text before it stores the reply)
+and one stopped before Alpha last started all keep their bubble.
+
+```quint
+pure def stoppedBeforeSettled(r: Reply): bool = r.stopped and r.shown == 0
+
+pure def keptOutOfHistory(cause: str, stoppedHere: bool): bool =
+  stoppedHere and (cause == "stop" or cause == "client_left")
+
+pure val causeValues = Set("stop", "client_left", "runtime", "restart", "")
+
+pure def lawADroppedReplyStillSaysItDidNotFinish(cause: str): bool = not(keptOutOfHistory(cause, false))
+
+pure def lawOnlyAStopOrALeftStreamIsKeptOut(cause: str, stoppedHere: bool): bool =
+  keptOutOfHistory(cause, stoppedHere) implies (cause == "stop" or cause == "client_left")
+
+pure def lawSettledTextIsNeverRememberedAsUnsettled(r: Reply): bool = r.shown >= 1 implies not(stoppedBeforeSettled(r))
 ```
 
 ### A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again

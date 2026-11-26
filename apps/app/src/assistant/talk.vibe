@@ -175,6 +175,8 @@ export interface Board {
   lastPost: PostedMessage | undefined
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
+  /** The ids, as the agent keeps them, of each message whose reply the owner stopped before any of its text settled, since Alpha started. */
+  readonly stoppedBeforeSettled: Set<string>
   sendWhenMade: number
   staged: StagedFiles | undefined
   lastTranscriptOffer: number
@@ -282,6 +284,7 @@ export const talk = Layer.effect(Talk, effect {
     lastPost: undefined,
     get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? restoredSentId },
     set lastSentId(id: string) { restoredSentId = id },
+    stoppedBeforeSettled: new Set(),
     sendWhenMade: 0,
     staged: undefined,
     lastTranscriptOffer: 0,
