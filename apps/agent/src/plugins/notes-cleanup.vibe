@@ -1,4 +1,4 @@
-// spec/agent/index.md, "A browser can confirm only its own recording cleanup"; "Only the phone's native channel can verify that a reviewed recording was erased"
+// spec/agent/index.md, "A browser can confirm only its own recording cleanup"; spec/agent/index.md, "Only the phone's native channel can verify that a reviewed recording was erased"
 import type { LocalRoute } from "@elizaos/agent"
 import type { ModuleContext } from "@elizaos/agent-host"
 import { notesRecordingCleanupHost } from "@elizaos/plugin-notes"

@@ -39,7 +39,7 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true
         <span className="flex size-16 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground">
           <Mark aria-hidden className="size-[118%] shrink-0" />
         </span>
-        <h2 className="font-display text-title font-light tracking-normal [font-variation-settings:'opsz'_144]">Alpha Phone</h2>
+        <h2 className="font-display text-title font-light [font-variation-settings:'opsz'_144]">Alpha Phone</h2>
         <p className="text-caption leading-normal text-muted-foreground">
           {alphaVersion.word === "reported" ? (onPhone ? alphaVersion.value : `Version ${alphaVersion.value}`) : !onPhone && alphaVersion.word === "unavailable" ? "Development preview" : <SettingsReading reading={alphaVersion} />}
         </p>

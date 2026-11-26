@@ -46,7 +46,7 @@ export interface Model extends Roles {
   /** The shape of emitted effects, when transitions return them beside the state. */
   outputShape: ComparisonShape | undefined;
   /** What importers may refer to; `visible` includes the types this module imported. */
-  exports: { types: string[]; values: string[]; variants: string[]; visible: Json[]; samples: { name: string; elem: Json }[] };
+  exports: { types: string[]; values: string[]; valueTypes: [string, Json][]; variants: string[]; visible: Json[]; samples: { name: string; elem: Json }[] };
   ts: string;
   harness: string;
   guardHarness: string;
@@ -251,7 +251,10 @@ export function generate(ir: Json, name: string, source: string, origin: (def: s
     return { name: d.name, params, result: d.typeAnnotation.res, laws: declared.laws.filter((l) => origin(l.name)?.rule === origin(d.name)?.rule) };
   });
   const roles: Roles = { ...declared, laws: declared.laws.filter((l) => !opaques.some((o) => o.laws.includes(l))), opaques };
-  checkSecrets({ funs, vals, sig, inferred, where: at, variants }, roles, types);
+  const importedTypes = new Map<string, Json>(
+    links.flatMap((l) => l.exports.valueTypes.map(([n, t]) => [qualify(l.alias, n), requalify(t, l.alias)] as const)),
+  );
+  checkSecrets({ funs, vals, sig, inferred, where: at, variants, importedTypes }, roles, types);
   const events = roles.transitions.map((t) => t.name);
   const setting = (kind: string, targets: string[], what: string, ok: (e: Json) => boolean, want: string) => new Map(settings.filter((d) => d.name.startsWith(`${kind}_`)).map((d) => {
     const target = d.name.slice(kind.length + 1);
@@ -332,11 +335,16 @@ export function generate(ir: Json, name: string, source: string, origin: (def: s
     paths: new Map([...witnesses].map(([goal, steps]) => [goal, steps.map(({ transition }) => transition.name)])),
   } : undefined;
   const refusal = run.refusalHarness ? { harness: run.refusalHarness, guards: new Set(refusals.keys()) } : undefined;
+  const valueTypes: [string, Json][] = [
+    ...vals.map((v): [string, Json] => [v.name, v.typeAnnotation ?? typeOf(v.id)]),
+    ...funs.map((d): [string, Json] => [d.name, d.typeAnnotation?.res ?? sig(d).result]),
+    ...consts.map((d): [string, Json] => [d.name, d.typeAnnotation.res]),
+  ];
   return {
     name, source, imports, ...roles, fair, within, evals: run.evals, uncompared: run.uncompared, harness: run.text, guardHarness: run.guardHarness, guideNames: guides.map((d) => d.name), witness, refusal,
     ts, render, proofTypeOfConstant, decode: types.decode, canon: types.canon,
     shape: roles.stateType ? types.comparison(roles.stateType) : undefined,
     outputShape: roles.output ? types.comparison(roles.output.out) : undefined,
-    exports: { types: localTypedefs.map((d) => d.name as string), values: [...localNames], variants: localVariants, visible: typedefs, samples: ownSamples },
+    exports: { types: localTypedefs.map((d) => d.name as string), values: [...localNames], valueTypes, variants: localVariants, visible: typedefs, samples: ownSamples },
   };
 }

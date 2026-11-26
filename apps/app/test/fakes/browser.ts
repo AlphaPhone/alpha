@@ -43,6 +43,8 @@ export interface BrowserScene {
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
+  /** Alpha's places over the shown page, as `present` last left them to Alpha. */
+  hostRects: readonly { x: number; y: number; width: number; height: number; cornerRadius: number }[];
   /** Every call the page made, by method. */
   readonly calls: string[];
   readonly shared: BrowserPageGuard[];
@@ -167,6 +169,7 @@ export function browserScene(): BrowserScene {
     tabs: new Map(),
     readingAvailable: true,
     shown: undefined,
+    hostRects: [],
     calls: [],
     failing: new Map(),
     elsewhere: [],
@@ -297,6 +300,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       present: (options) => {
         world.calls.push("present");
         world.shown = options.id === null ? undefined : { id: options.id, x: options.x, y: options.y, width: options.width, height: options.height };
+        world.hostRects = options.id !== null && "hostRects" in options && Array.isArray(options.hostRects) ? options.hostRects : [];
         draw();
         return Promise.resolve();
       },

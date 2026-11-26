@@ -300,7 +300,7 @@ function Editor({ runtime }: ContactsProps) {
   const { state, can, send } = useContacts(runtime);
   const phone = usePhone(runtime).state;
   if (!state || !phone) return null;
-  const { form, problem, editBase } = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
+  const { form, problem, editBase, refusedWrite } = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const safe = clear(phone);
   const locked = pending(state);
   const canSave = problem !== "stale" && problem !== "not-found" && can({ type: "save", clear: safe });
@@ -328,7 +328,7 @@ function Editor({ runtime }: ContactsProps) {
         </div>
         <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-2.5 overflow-y-auto px-4 pb-4">
           {locked && <p role="status" className="sr-only">Contact change pending</p>}
-          {refused(state) && <p role="alert" data-alpha-contact-notice="" className="mx-2 text-sm leading-detail">{problem === undefined ? "The phone did not save the contact" : problems[problem]}</p>}
+          {refused(state) && state.write.id === refusedWrite && <p role="alert" data-alpha-contact-notice="" className="mx-2 text-sm leading-detail">{problem === undefined ? "The phone did not save the contact" : problems[problem]}</p>}
           <Input className={nameField} aria-label="First name" placeholder="First name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.givenName} onChange={(event) => update({ ...form, givenName: event.target.value }, "Names")} />
           <Input className={nameField} aria-label="Last name" placeholder="Last name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.familyName} onChange={(event) => update({ ...form, familyName: event.target.value }, "Names")} />
           <ContactValues kind="Phone" locked={locked} base={editBase} values={form.phones} change={(phones) => update({ ...form, phones }, "Phones")} />

@@ -13,7 +13,7 @@ export const meta: ComponentMeta<SettingsLicenceDetailProps> = {
   },
   decorator: fullHeight,
   play: {
-    "With what it obliges": ({ canvasElement }) => expect(within(canvasElement).getByText("Review this component’s attribution.")).toBeTruthy(),
+    "With what it obliges": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByText("Review this component’s attribution.")).toBeTruthy(),
   },
   examples: { "With what it obliges": { name: "libwebp", licence: "BSD-3-Clause", flags: ["Weak copyleft", "No license file in package"], obligations: ["Review this component’s attribution."] } },
 };

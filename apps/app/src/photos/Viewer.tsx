@@ -166,13 +166,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
       });
     }
   }
-  function played() {
+  function played(ended = false) {
     const clip = videoRef.current;
     if (clip === null || !state?.playing) return;
     const end = state.editing ? state.edit.end : state.duration;
-    const position = Math.min(end, Math.max(0, Math.round(clip.currentTime * 10)));
+    const position = ended ? end : Math.min(end, Math.max(0, Math.round(clip.currentTime * 10)));
     if (position >= end) clip.pause();
-    if (position !== state.position && can({ type: "played", position }, "Phone")) void send({ type: "played", position }, "Phone");
+    if ((ended || position !== state.position) && can({ type: "played", position }, "Phone")) void send({ type: "played", position }, "Phone");
   }
   const close = () => {
     videoRef.current?.pause();
@@ -332,7 +332,7 @@ interface ViewportProps {
   readonly action: (event: Event) => void;
   readonly allows: (event: Event) => boolean;
   readonly attachVideo: RefCallback<HTMLVideoElement>;
-  readonly played: () => void;
+  readonly played: (ended?: boolean) => void;
   readonly onPlaybackStarted: () => void;
   readonly onDecode: (loaded: boolean) => void;
 }
@@ -448,7 +448,7 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
                 state.editing && videoRatio === undefined && "size-full")}
                 style={videoRatio === undefined ? undefined : { width: `min(100cqw, calc(100cqh * ${videoRatio}))`, aspectRatio: videoRatio }}>
                 <video ref={attachVideo} key={state.open} src={current.uri} poster={current.item?.image ?? current.browser?.item.thumbnail}
-                  muted={state.muted} playsInline preload={state.editing ? "metadata" : "none"} onPlaying={onPlaybackStarted} onLoadedData={() => onDecode(true)} onError={() => onDecode(false)} onTimeUpdate={played} onEnded={played}
+                  muted={state.muted} playsInline preload={state.editing ? "metadata" : "none"} onPlaying={onPlaybackStarted} onLoadedData={() => onDecode(true)} onError={() => onDecode(false)} onTimeUpdate={() => played(false)} onEnded={() => played(true)}
                   className={videoRatio === undefined ? "size-full object-contain" : "absolute top-1/2 left-1/2 max-w-none object-fill"}
                   style={videoRatio === undefined ? undefined : { width: `${sideways ? videoScale / videoRatio : videoScale}%`, height: `${sideways ? videoScale * videoRatio : videoScale}%`, transform: `translate(-50%, -50%) rotate(${state.edit.turns * 90}deg)` }} />
                 {!state.editing && state.playing && state.duration > 0 && <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-0.75 bg-foreground/25">

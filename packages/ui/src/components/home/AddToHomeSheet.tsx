@@ -24,8 +24,8 @@ export function AddToHomeSheet({ open, inFrame, apps, onAdd, onClose }: AddToHom
       <SheetContent
         title="Add to Home"
         data-alpha-own-gesture=""
-        overlayClassName="z-50 bg-black/25 motion-safe:animate-none dark:bg-black/25"
-        frame={inFrame && { container: inFrame, backdrop: <div aria-hidden className="absolute inset-y-0 left-0 right-[calc(var(--alpha-home-ask-width)+--spacing(4))] z-20 bg-black/25" /> }}
+        overlayClassName="z-50 bg-foreground/25 motion-safe:animate-none dark:bg-background/25"
+        frame={inFrame && { container: inFrame, backdrop: <div aria-hidden className="absolute inset-y-0 left-0 right-[calc(var(--alpha-home-ask-width)+--spacing(4))] z-20 bg-foreground/25 dark:bg-background/25" /> }}
         className={cn("bottom-0 z-50 gap-3 bg-background px-4 pt-4.5 pb-[calc(--spacing(6)+max(108px,calc(var(--alpha-dock-clearance,102px)+6px)))] text-foreground shadow-none before:hidden motion-safe:animate-none dark:shadow-none [&_h2]:px-1 [&_h2]:font-sans [&_h2]:text-date [&_h2]:leading-plain [&_h2]:font-semibold",
           inFrame && "absolute inset-x-auto left-0 right-[calc(var(--alpha-home-ask-width)+--spacing(4))] mx-0 max-h-[calc(100%_-_--spacing(4))] max-w-none pb-[max(--spacing(6),env(safe-area-inset-bottom))]")}
         onInteractOutside={inFrame ? (event) => {

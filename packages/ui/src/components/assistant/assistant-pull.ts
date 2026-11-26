@@ -58,7 +58,7 @@ export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull
   };
   return {
     onPointerDown: (event: PointerEvent<Target>) => {
-      if (pull === undefined || event.button !== 0 || track.current !== undefined) return;
+      if (pull === undefined || !event.isPrimary || event.button !== 0 || track.current !== undefined) return;
       const mouse = event.pointerType === "mouse";
       if (editable && mouse) event.preventDefault();
       if (!editable || mouse) capture(event.currentTarget, event.pointerId);

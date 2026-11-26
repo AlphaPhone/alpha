@@ -31,12 +31,13 @@ import type { Event as DeletionEvent } from "../../gen/app__calendar__deletions.
 import {
   type ReplyWord, dayEmptiness, firstColumnDay, monthCells, replyWord, rowShown, showsOffsets, statusAction, timelineFirstHour, timelineLastHour,
 } from "../../gen/app__calendar__presentation.ts";
-import { type SaveBlock, goingOffered, managedDeleteOffered, maybeOffered, offeredOn, saveBlock } from "../../gen/app__calendar__writing.ts";
+import { type Occurrences, type SaveBlock, goingOffered, managedDeleteOffered, managedScopeAllowed, maybeOffered, offeredOn, saveBlock } from "../../gen/app__calendar__writing.ts";
 import { type Deletions, type Reach, rowHidden } from "../../gen/app__calendar__deletions.ts";
 import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agent.ts";
 import { type Request, requests } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
-import { type Fields, confirmCalendarReschedule, kept, saveCalendarReminder, startForm, typed } from "./editor.vibe";
+import { releasedReach } from "./deletions.vibe";
+import { type Fields, confirmCalendarReschedule, kept, saveCalendarReminder, startForm, takeSaved, typed } from "./editor.vibe";
 import { type Row, onDay, shown } from "./shown.ts";
 import { type CalendarRow, type DatedReminder, calendarRowKey, datedReminders } from "./reminders.ts";
 import { remindersStore } from "../reminders/store.ts";
@@ -126,7 +127,7 @@ function deletedNow(d: Deletions | undefined, row: Row): boolean {
     if (id === 0) return false;
     const held = shown.lastSeen(id);
     if (!held) return row.id === id;
-    const reach: Reach = id === d.waiting ? d.reach : "OneEvent";
+    const reach: Reach = id === d.waiting ? d.reach : releasedReach(id);
     return rowHidden(reach, row.id === id, held.series !== "" && row.series === held.series, row.begin >= held.begin, row.source === held.source);
   });
 }
@@ -783,9 +784,12 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
     setPeople([...people, typedEmail]);
     setPicking(undefined);
   };
-  const scopes: ReadonlyArray<{ scope: Editor.Scope; label: string }> = [
-    { scope: "ThisOne", label: "This event" }, { scope: "ThisAndFollowing", label: "This and following" }, { scope: "WholeSeries", label: "All events" },
+  const scopes: ReadonlyArray<{ scope: Editor.Scope; occurrence: Occurrences; label: string }> = [
+    { scope: "ThisOne", occurrence: "ThisOccurrence", label: "This event" },
+    { scope: "ThisAndFollowing", occurrence: "FromThisOn", label: "This and following" },
+    { scope: "WholeSeries", occurrence: "EntireSeries", label: "All events" },
   ];
+  const target = e.target > 0 ? shown.find(e.target) ?? shown.lastSeen(e.target) : undefined;
   const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, false, Editor.canKeepMyChanges(e), !e.titled)] : "";
   const choosesCalendar = reminder || e.form === "NewEvent";
   const editingPhone = e.form === "EditEvent" && shown.find(e.target)?.source === "Phone";
@@ -826,10 +830,15 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
       {e.form === "EditEvent" && e.repeats ? (
         <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
           <span className="text-meta text-muted-foreground">Save changes to</span>
-          {scopes.map(({ scope, label }) => (
-            <CalendarChip key={scope} label={label} chosen={e.scope === scope} disabled={!editor.can({ type: "chooseScope", scope }) && e.scope !== scope}
-              className={e.scope === scope ? undefined : "bg-secondary"} onClick={() => void editor.send({ type: "chooseScope", scope })} />
-          ))}
+          {scopes.map(({ scope, occurrence, label }) => {
+            const allowed = managedScopeAllowed(target?.managed ?? false, occurrence);
+            return (
+              <CalendarChip key={scope} label={label} chosen={e.scope === scope}
+                disabled={!allowed || (!editor.can({ type: "chooseScope", scope }) && e.scope !== scope)}
+                className={e.scope === scope ? undefined : "bg-secondary"}
+                onClick={allowed ? () => void editor.send({ type: "chooseScope", scope }) : undefined} />
+            );
+          })}
         </div>
       ) : null}
       <p role="status" aria-label="Calendar form draft status" className="mx-6 my-1 text-meta text-muted-foreground">{off_}</p>
@@ -853,7 +862,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
       {Editor.canKeepMyChanges(e) ? (
         <CalendarNotice tone="caution" className="mx-6" actions={<>
           <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyChanges" })}>Keep my changes</CalendarNoticeAction>
-          <CalendarNoticeAction onClick={() => void editor.send({ type: "takeSavedChanges" })}>Use the saved event</CalendarNoticeAction>
+          <CalendarNoticeAction onClick={() => void runtime.runPromise(takeSaved(day)).then(setFields)}>Use the saved event</CalendarNoticeAction>
         </>}>This event changed since you started editing it.</CalendarNotice>
       ) : null}
       {!reminder && e.form === "NewEvent" && e.receipts.status === "Failed" ? (
@@ -898,7 +907,10 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           <CalendarIcon aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
           <span className="grow text-body leading-plain">All day</span>
           <CalendarSwitch aria-label="All day" checked={fields.allDay} disabled={editingPhone || !editor.can({ type: "setAllDay", allDay: !fields.allDay })}
-            onCheckedChange={(allDay) => change({ ...fields, allDay }, { type: "setAllDay", allDay })} />
+            onCheckedChange={(allDay) => {
+              const end = allDay ? Math.max(fields.end, dayStart(civilDay(fields.begin) + 1)) : fields.end;
+              change({ ...fields, allDay, end }, { type: "setAllDay", allDay });
+            }} />
         </CalendarFormCard>
         {/* v119 45f6bed30 prototype/template.html:1423-1430: the Video link row comes before the people. */}
         {offersVideo ? (

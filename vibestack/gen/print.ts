@@ -65,9 +65,11 @@ export interface Scope {
  * argument, a field of a record whose type is known), `strings` beside `==`, where a string literal takes the type of
  * the other side but a record or variant literal takes none, and `none` anywhere else (an element tested for, a value
  * put in a map, a fold's start, what a field is read from). There a variant literal reads as a string or a tuple, so
- * the prover's code passes it through a typed identity (`typed<i>_<module>`) that states its type.
+ * the prover's code passes it through a typed identity (`typed<i>_<module>`) that states its type. `fields` is a field
+ * of a variant updated in place (`{ ...x, f: v }` without its tag), whose type LemmaScript does not look up: a variant
+ * literal with a tag reads as the field's type there, but one without a tag reads as a string, so it states its type.
  */
-type Expected = "typed" | "strings" | "none";
+type Expected = "typed" | "strings" | "none" | "fields";
 
 /**
  * `every`, `some`, `includes` and `listMap` are not Quint: the tangler expands them into Quint's built-in `foldl`
@@ -107,8 +109,22 @@ const negative = (e: Json): Json | undefined => (e.kind === "app" && e.opcode ==
 /** Puts a binding back as it was before an inner scope shadowed it. */
 const restore = <V>(m: Map<string, V>, k: string, v: V | undefined) => (v === undefined ? m.delete(k) : m.set(k, v));
 
+/** Latest field updates in a chain of `{ ...x, f: v }` nodes, mapped by field name. */
+function fieldUpdates(e: Json, render: (v: Json) => string): Map<string, string> {
+  const byField = new Map<string, string>();
+  for (; e.kind === "app" && e.opcode === "with"; e = e.args[0])
+    if (!byField.has(e.args[1].value)) byField.set(e.args[1].value, render(e.args[2]));
+  return byField;
+}
+
+const flat = (e: Json, op: string): Json[] => (e.kind === "app" && e.opcode === op ? e.args.flatMap((x: Json) => flat(x, op)) : [e]);
+const tag = (variant: string) => JSON.stringify(variant.split("::").pop());
+/** A list that is or joins a list literal: `List("a").concat(xs)`, `xs.append("a")`. */
+const holdsLiteral = (e: Json): boolean =>
+  e.kind === "app" && (e.opcode === "List" || e.opcode === "append" || (e.opcode === "concat" && (holdsLiteral(e.args[0]) || holdsLiteral(e.args[1]))));
+
 export function printer({ types, inferred, importedConstantType, ref, helper, bind, variants, definitions, simulatorOnly, proof }: Scope) {
-  const { resolve, tagged, isScalar, setElem, keyOf, storedKey, holdsSet, named, ownerOf, typeName, tsType } = types;
+  const { fields, payload, typedef, resolve, tagged, isScalar, setElem, keyOf, storedKey, holdsSet, named, ownerOf, typeName, tsType } = types;
   const typeOf = typeOfIn(inferred);
   const forSimulator = (n: string): never => fail(`\`${n}\` is for the simulator only (a sample set or a weight_, fair_ or within_ setting) and cannot be used in a definition`);
   /** Which helpers the printed code needs (see typescript.ts), and the types of the maps it looks things up in. */
@@ -116,7 +132,7 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
   const lookups: { map: string; key: string; of: string; stored: string }[] = [];
   /** Names that stand for something else while a `match` arm is printed: the arm's binder is the matched value. */
   const renamed = new Map<string, string>();
-  const matchedAs = new Map<string, string>(); // binder -> the variant its arm matched
+  const matchedAs = new Map<string, { owner: string; variant: string }>(); // binder -> the sum type and variant its arm matched
   let locals = new Map<string, string>();
   let localId = 0;
   let nesting = 0;
@@ -129,7 +145,7 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
     try { return render(); } finally { expected = outer; }
   };
   /** Elements and fields are typed where what holds them is. */
-  const within = () => (expected === "typed" ? "typed" : "none");
+  const within = () => (expected === "typed" || expected === "fields" ? "typed" : "none");
   /** The TypeScript types whose values the prover's code passes through a typed identity, one function each (Expected). */
   const typings: string[] = [];
   const ascribe = (text: string, type: string) => {
@@ -138,7 +154,7 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
   };
   /** A variant literal, its type stated where LemmaScript would not know it. */
   const variant = (text: string, owner: Json): [string, number] =>
-    [proof && (expected === "none" || (expected === "strings" && tagged(owner.type))) ? ascribe(text, typeName(owner)) : text, ATOM];
+    [proof && (expected === "none" || (expected === "strings" && tagged(owner.type)) || (expected === "fields" && !tagged(owner.type))) ? ascribe(text, typeName(owner)) : text, ATOM];
   const reference = (name: string) => locals.get(name) ?? ref(name);
   const scoped = <T>(names: string[], render: () => T): T => {
     const outer = locals;
@@ -153,8 +169,6 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
     nesting--;
     return prec < min ? `(${text})` : text;
   };
-  const flat = (e: Json, op: string): Json[] => (e.kind === "app" && e.opcode === op ? e.args.flatMap((x: Json) => flat(x, op)) : [e]);
-  const tag = (variant: string) => JSON.stringify(variant.split("::").pop());
   /** A key of the map `m` as the generated object stores it (keyOf in types.ts). */
   const mapKey = (m: Json, k: Json) => storedKey(typeOf(m.id), ex(k, ADD + 1));
   /** The map `m`, of type `t`, with `value` under `key`. */
@@ -181,17 +195,21 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
   /** Records, lists and variants compare by structure (Scope.proof); a set inside one would compare in order in the proof. */
   const comparable = (e: Json) => !holdsSet(typeOf(e.id)) || fail("== and includes on a value that holds a set are not supported: in the proof a set is a sequence, compared in order; compare sets with subseteq both ways");
   const equal = (a: string, b: string) => `${helper("equal")}(${(helpers.add("equal"), a)}, ${b})`;
-  /** Inside another expression a record literal has no declared type to check against, so it states its own. */
+  /**
+   * Inside another expression a record literal has no declared type to check against, so it states its own. Beside
+   * `==` the prover's code passes it through a typed identity instead: LemmaScript reads past `as` there and takes the
+   * first record type with the same field names, which may be another module's.
+   */
   const typed = (text: string, e: Json): string => {
     const d = nesting > 1 ? named(typeOf(e.id), "rec") : undefined;
-    return d ? `(${text} as ${typeName(d)})` : text;
+    return !d ? text : proof && expected === "strings" ? ascribe(text, typeName(d)) : `(${text} as ${typeName(d)})`;
   };
   /** `name: value` for each pair of a record literal's arguments. */
   const pairs = (args: Json[]) => at(within(), () => args.flatMap((_, i) => (i % 2 ? [] : [`${args[i].value}: ${ex(args[i + 1], TERNARY)}`])));
-  /** `{ ...x, a: 1, b: 2 }` arrives as nested updates; this is what is updated, and the updates in order. */
-  const unroll = (e: Json): { base: Json; updates: string[] } => {
+  /** `{ ...x, a: 1, b: 2 }` arrives as nested updates; this is what is updated, and the updates in order, printed `where`. */
+  const unroll = (e: Json, where: Expected = "typed"): { base: Json; updates: string[] } => {
     const updates: string[] = [];
-    for (; e.kind === "app" && e.opcode === "with"; e = e.args[0]) updates.unshift(`${e.args[1].value}: ${at("typed", () => ex(e.args[2], TERNARY))}`);
+    for (; e.kind === "app" && e.opcode === "with"; e = e.args[0]) updates.unshift(`${e.args[1].value}: ${at(where, () => ex(e.args[2], TERNARY))}`);
     return { base: e, updates };
   };
   /**
@@ -231,7 +249,7 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
         // Inside a module-level value, the prover knows another one's type only where it is expected (Expected).
         if (!variants.has(e.name)) {
           const name = reference(e.name);
-          return [proof && constant && expected !== "typed" && !locals.has(e.name)
+          return [proof && constant && expected !== "typed" && expected !== "fields" && !locals.has(e.name)
             ? ascribe(name, importedConstantType(e.name) ?? tsType(typeOf(e.id))) : name, ATOM];
         }
         const owner = ownerOf(e.name);
@@ -314,7 +332,9 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
         const inner = a[2].expr?.args?.[1];
         if (which === "every") return [`!${recv()}.some(${arrow([item], inner, true)})`, UNARY];
         // Dafny 4.11 crashes on a sequence comprehension inside a module-level constant, so there a mapped list stays a fold.
-        if (method && !(proof && constant && method === "map")) return [`${recv()}.${method}(${at(within(), () => arrow([item], inner))})`, ATOM];
+        // LemmaScript gives the literals in what is mapped the type of what the map makes, so there the list states its own.
+        const mapped = () => (proof && method === "map" && holdsLiteral(a[0]) ? ascribe(recv(), tsType(typeOf(a[0].id))) : recv());
+        if (method && !(proof && constant && method === "map")) return [`${mapped()}.${method}(${at(within(), () => arrow([item], inner))})`, ATOM];
         if (which === "includes") {
           const [v, t] = [inner.args[1], typeOf(inner.args[1].id)];
           const value = at("none", () => ex(v, TERNARY));
@@ -326,10 +346,21 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
     if (variants.has(op)) {
       // A variant that carries a record: Paid({ receipt: 7 }) is { tag: "Paid", receipt: 7 }.
       const owner = ownerOf(op);
-      // Updating the matched value in place: Packed({ ...x, labels: … }) inside the Packed arm keeps the tag it has.
-      const { base, updates } = unroll(a[0]);
-      if (base.kind === "name" && matchedAs.get(base.name) === op.split("::").pop())
-        return [updates.length ? `({ ...${renamed.get(base.name)}, ${updates.join(", ")} } as ${typeName(owner)})` : renamed.get(base.name)!, ATOM];
+      const tagName = op.split("::").pop()!;
+      // Updating the matched value in place: Packed({ ...x, labels: … }) inside the Packed arm keeps the tag it has,
+      // provided the matched value belongs to the same sum type; otherwise rebuild field by field for the target type.
+      const { base, updates } = unroll(a[0], "fields");
+      const matched = base.kind === "name" ? matchedAs.get(base.name) : undefined;
+      if (matched) {
+        if (matched.owner === typeName(owner) && matched.variant === tagName)
+          return [updates.length ? `({ ...${renamed.get(base.name)}, ${updates.join(", ")} } as ${typeName(owner)})` : renamed.get(base.name)!, ATOM];
+        const carried = payload(fields(owner.type).find((f: Json) => f.fieldName === tagName));
+        if (carried) {
+          const byField = fieldUpdates(a[0], (v) => at("typed", () => ex(v, TERNARY)));
+          const src = renamed.get(base.name)!;
+          return variant(`({ ${[`tag: ${tag(op)}`, ...fields(carried).map((f: Json) => `${f.fieldName}: ${byField.get(f.fieldName) ?? `${src}.${f.fieldName}`}`)].join(", ")} } as ${typeName(owner)})`, owner);
+        }
+      }
       if (a[0].kind !== "app" || a[0].opcode !== "Rec") fail(`${op}(…): give the record field by field, or update the value matched in the ${op} arm`);
       return variant(`({ ${[`tag: ${tag(op)}`, ...at("typed", () => pairs(a[0].args))].join(", ")} } as ${typeName(owner)})`, owner);
     }
@@ -337,16 +368,19 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
       // match o { | Draft(d) => … | _ => … } becomes a chain of tests on the tag, with d standing for o itself.
       if (a[0].kind !== "name") fail("`match` must be on a name; bind the value with `val` first");
       const subject = ex(a[0], ATOM);
-      const isTagged = tagged(resolve(typeOf(a[0].id)));
+      const subjectType = typeOf(a[0].id);
+      const subjectOwner = subjectType.kind === "const" ? typedef(subjectType.name) : named(resolve(subjectType), "sum");
+      const subjectOwnerName = subjectOwner ? typeName(subjectOwner) : "";
+      const isTagged = tagged(resolve(subjectType));
       const arms: { test?: string; result: string }[] = [];
       for (let i = 1; i < a.length; i += 2) {
         const binder = a[i + 1].params[0]?.name;
         // Inside the arm the binder stands for the matched value; an outer arm's binder of the same name comes back after.
         const bound = binder && binder !== "_";
-        const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] : [];
-        if (bound) { renamed.set(binder, subject); matchedAs.set(binder, a[i].value); }
+        const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] as const : undefined;
+        if (bound) { renamed.set(binder, subject); matchedAs.set(binder, { owner: subjectOwnerName, variant: a[i].value }); }
         const result = ex(a[i + 1].expr, OR);
-        if (bound) { restore(renamed, binder, outer[0]); restore(matchedAs, binder, outer[1]); }
+        if (bound) { restore(renamed, binder, outer![0]); restore(matchedAs, binder, outer![1]); }
         arms.push({ test: a[i].value === "_" ? undefined : `${subject}${isTagged ? ".tag" : ""} === ${JSON.stringify(a[i].value)}`, result });
       }
       const last = arms.pop()!;

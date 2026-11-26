@@ -116,6 +116,13 @@ describe("Slack user-account HTTP+SSE provider", () => {
     });
     expect(badPkce.json).toEqual({ ok: false, error: "invalid_code_verifier" });
 
+    // spec/app/messages/index.md, "Story: Give Alpha my messages and contacts"
+    const missingRedirect = await postJson<{ ok: boolean; error?: string }>(`${slack.origin}/api/oauth.v2.access`, {
+      code,
+      code_verifier: verifier,
+    });
+    expect(missingRedirect.json).toEqual({ ok: false, error: "bad_redirect_uri" });
+
     const formBody = new URLSearchParams({
       code,
       client_id: "alpha",
@@ -539,6 +546,15 @@ describe("Telegram user-account RPC+SSE provider", () => {
       authHeader,
     );
     expect(archived.json.dialogs.map((d) => d.peer_key)).toEqual(["user:2002"]);
+
+    // spec/app/messages/index.md, "Story: See my conversations"
+    const allChats = await postJson<{ ok: boolean; dialogs: { peer_key: string; archived: boolean }[] }>(
+      `${telegram.origin}/rpc/messages.getDialogs`,
+      { folder_id: 0 },
+      authHeader,
+    );
+    expect(allChats.json.dialogs.some((d) => d.archived)).toBe(false);
+    expect(allChats.json.dialogs.map((d) => d.peer_key)).not.toContain("user:2002");
 
     const broadcastWrite = await postJson<{ ok: boolean; error_message: string }>(
       `${telegram.origin}/rpc/messages.sendMessage`,
