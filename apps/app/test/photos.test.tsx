@@ -45,6 +45,12 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
   // spec/app/photos/index.md, "Story: Browse the library": the Library is headed by day as v121 headed it, counted back from Alpha's time
   expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section h2")].map((heading) => heading.textContent)).toEqual(["Yesterday"]);
+  // spec/app/photos/index.md, "each heading with the number of items under it beside it", as v119's live camera adapter drew it
+  expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section header")].map((header) => [header.querySelector("h2")?.textContent, header.querySelector("span")?.textContent]))
+    .toEqual([["Yesterday", "3"]]);
+  // v119's live camera adapter drew images.svg on the Library tab and folder.svg on Albums
+  expect([...document.querySelectorAll('[aria-label="Photos sections"] button')].map((tab) => [tab.textContent, tab.querySelector("svg")?.classList.contains("lucide-images"), tab.querySelector("svg")?.classList.contains("lucide-folder")]))
+    .toEqual([["Library", true, false], ["Albums", false, true]]);
   const localNoon = new Date(2026, 10, 24, 12).getTime();
   const captureDaysBack = (days: number) => new Date(2026, 10, 24 - days, 9).getTime();
   expect([0, 1, 3, 29, 30].map((days) => headingOf(captureDaysBack(days), localNoon))).toEqual(["Today", "Yesterday", "Sat, Nov 21", "Mon, Oct 26", "October 2026"]);

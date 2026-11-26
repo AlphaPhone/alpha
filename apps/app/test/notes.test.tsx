@@ -121,8 +121,8 @@ describe("Notes", () => {
     expect(new Date(fields.begin).getHours()).toBe(9);
     expect(world.calendar.writes).toEqual([]);
     if (destination === "Reminders") {
-      await rendered(() => expect(button("Save")?.disabled).toBe(false));
-      await press("Save");
+      await rendered(() => expect(button("Save event")?.getAttribute("aria-disabled")).toBe("false"));
+      await press("Save event");
       await until(alpha, target, CalendarForm, (draft) => !draft.shown);
       await rendered(() => expect(button(/Design sync/)).toBeDefined());
       await press(/Design sync/);
