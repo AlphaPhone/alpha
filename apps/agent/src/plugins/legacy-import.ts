@@ -20,7 +20,7 @@ export const LEGACY_IMPORT_MARKER_KEY = "legacy-v121-import:v1";
 export const LEGACY_IMPORT_RECORD_FILE = "earlier-import.json";
 
 /** Name prefix of the plaintext store copies a build of 89bfcc1a8 left in the state directory. */
-export const EARLIER_SCRATCH_PREFIX = ".earlier-import-";
+const EARLIER_SCRATCH_PREFIX = ".earlier-import-";
 
 /** Tag of every task brought in; no scheduler of eliza's reads it. */
 export const BROUGHT_TASK_TAG = "earlier-import";
@@ -28,47 +28,6 @@ export const BROUGHT_TASK_TAG = "earlier-import";
 const BROUGHT_TASK_NAME_PREFIX = "earlier-import:";
 
 const BATCH_SIZE = 200;
-const EMBEDDING_COLUMNS = [
-  "dim_384",
-  "dim_512",
-  "dim_768",
-  "dim_1024",
-  "dim_1536",
-  "dim_2048",
-  "dim_3072",
-  "embedding",
-] as const;
-
-const SECRET_KEY_TOKENS = [
-  "auth",
-  "token",
-  "secret",
-  "credential",
-  "password",
-  "passwd",
-  "passphrase",
-  "session",
-  "oauth",
-  "jwt",
-  "bearer",
-  "cookie",
-  "apikey",
-  "api_key",
-  "api-key",
-  "private_key",
-  "private-key",
-  "privatekey",
-  "signing_key",
-  "signing-key",
-  "signingkey",
-  "refresh",
-  "vault",
-  "custody",
-  "pairing",
-  "bootstrap",
-  "jti",
-] as const;
-
 interface SqlQueryable {
   query<Row = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<{ readonly rows: readonly Row[] }>;
 }
@@ -105,7 +64,6 @@ interface LegacyImportCounts {
   readonly tasks: number;
   readonly relationships: number;
   readonly components: number;
-  readonly cache: number;
 }
 
 type SkipReason =
@@ -129,7 +87,6 @@ interface LegacyImportOptions {
   readonly stateDirectory: string;
   readonly agentId: string;
   readonly conversationWorldId?: string;
-  readonly embeddingDimensions?: number;
   readonly adapter: TargetStoreAdapter | undefined;
   readonly openLegacyStore: LegacyStoreOpener;
   readonly logger?: ImportLogger;
@@ -247,14 +204,6 @@ interface EarlierComponentRow {
   readonly created_at: unknown;
 }
 
-interface EarlierCacheRow {
-  readonly key: string;
-  readonly agent_id: string | null;
-  readonly value: unknown;
-  readonly created_at: unknown;
-  readonly expires_at: unknown;
-}
-
 interface PreparedImport {
   readonly sourceAgentId: string | null;
   readonly worlds: readonly DeviceRecordWrite[];
@@ -265,7 +214,6 @@ interface PreparedImport {
   readonly tasks: readonly DeviceRecordWrite[];
   readonly relationships: readonly DeviceRecordWrite[];
   readonly components: readonly DeviceRecordWrite[];
-  readonly cache: readonly DeviceRecordWrite[];
 }
 
 /** Strips NUL code units and lone UTF-16 surrogates while preserving valid surrogate pairs. */
@@ -306,16 +254,6 @@ export function sanitizeJsonValue(value: unknown): unknown {
   return null;
 }
 
-/** Returns true when a cache key names auth, token, secret, session, or credential material. */
-export function isSecretOrAuthCacheKey(key: string): boolean {
-  const lower = key.trim().toLowerCase();
-  if (lower === "" || lower === LEGACY_IMPORT_MARKER_KEY) return true;
-  for (const token of SECRET_KEY_TOKENS) {
-    if (lower.includes(token)) return true;
-  }
-  return false;
-}
-
 function asPlainObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -353,20 +291,6 @@ function toStringArray(value: unknown): string[] {
     if (typeof item === "string") result.push(sanitizeKeepableString(item));
   }
   return result;
-}
-
-function parseVectorText(raw: unknown): number[] | undefined {
-  if (Array.isArray(raw)) {
-    const numbers = raw.map((item) => Number(item));
-    return numbers.length > 0 && numbers.every(Number.isFinite) ? numbers : undefined;
-  }
-  if (typeof raw !== "string") return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return undefined;
-  const body = trimmed.slice(1, -1).trim();
-  if (body === "") return undefined;
-  const numbers = body.split(",").map((part) => Number(part.trim()));
-  return numbers.length > 0 && numbers.every(Number.isFinite) ? numbers : undefined;
 }
 
 function normalizeUserState(value: string | null): "FOLLOWED" | "MUTED" | null {
@@ -411,31 +335,48 @@ function tarHeader(name: string, size: number, type: "0" | "5"): Uint8Array<Arra
   return header;
 }
 
-/** Reads the earlier store's files, never opening or writing them, into a PGlite image held in memory. */
+interface StoreEntry {
+  readonly name: string;
+  readonly full: string;
+  readonly kind: "0" | "5";
+}
+
+async function listStoreEntries(directory: string, relative: string, into: StoreEntry[]): Promise<number> {
+  const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  let bytes = 0;
+  for (const entry of entries) {
+    const name = relative === "" ? entry.name : `${relative}/${entry.name}`;
+    if (name === "postmaster.pid") continue;
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      into.push({ name, full, kind: "5" });
+      bytes += await listStoreEntries(full, name, into);
+    } else if (entry.isFile()) {
+      into.push({ name, full, kind: "0" });
+      bytes += (await fs.lstat(full)).size;
+    }
+  }
+  return bytes;
+}
+
+/** Reads the earlier store's files, never opening or writing them, into a PGlite image held in memory; a store over the limit is not read. */
 async function readStoreImage(sourceDir: string): Promise<{ readonly kind: "image"; readonly image: Blob } | { readonly kind: "too_large" }> {
+  const entries: StoreEntry[] = [];
+  if (await listStoreEntries(sourceDir, "", entries) > maxEarlierStoreBytes) return { kind: "too_large" };
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let bytes = 0;
-  const walk = async (directory: string, relative: string): Promise<boolean> => {
-    const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    for (const entry of entries) {
-      const name = relative === "" ? entry.name : `${relative}/${entry.name}`;
-      if (name === "postmaster.pid") continue;
-      const full = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        chunks.push(tarHeader(`/${name}`, 0, "5"));
-        if (!await walk(full, name)) return false;
-      } else if (entry.isFile()) {
-        const data = await fs.readFile(full);
-        bytes += data.byteLength;
-        if (bytes > maxEarlierStoreBytes) return false;
-        chunks.push(tarHeader(`/${name}`, data.byteLength, "0"), new Uint8Array(data));
-        const padding = (512 - (data.byteLength % 512)) % 512;
-        if (padding > 0) chunks.push(new Uint8Array(padding));
-      }
+  for (const entry of entries) {
+    if (entry.kind === "5") {
+      chunks.push(tarHeader(`/${entry.name}`, 0, "5"));
+      continue;
     }
-    return true;
-  };
-  if (!await walk(sourceDir, "")) return { kind: "too_large" };
+    const data = new Uint8Array(await fs.readFile(entry.full));
+    bytes += data.byteLength;
+    if (bytes > maxEarlierStoreBytes) return { kind: "too_large" };
+    chunks.push(tarHeader(`/${entry.name}`, data.byteLength, "0"), data);
+    const padding = (512 - (data.byteLength % 512)) % 512;
+    if (padding > 0) chunks.push(new Uint8Array(padding));
+  }
   chunks.push(new Uint8Array(1024));
   return { kind: "image", image: new Blob(chunks) };
 }
@@ -455,7 +396,7 @@ async function isEarlierWorkspaceStore(sourceDir: string | undefined): Promise<b
 }
 
 /** Removes the plaintext copies a build of 89bfcc1a8 left in the state directory; safe to run on every start. */
-export async function sweepEarlierScratch(stateDirectory: string): Promise<void> {
+async function sweepEarlierScratch(stateDirectory: string): Promise<void> {
   const entries = await fs.readdir(stateDirectory).catch(() => [] as string[]);
   for (const name of entries) {
     if (name.startsWith(EARLIER_SCRATCH_PREFIX)) {
@@ -474,7 +415,7 @@ async function readImportRecord(stateDirectory: string): Promise<ImportRecord> {
 async function writeImportRecord(stateDirectory: string, record: ImportRecord): Promise<void> {
   await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const target = path.join(stateDirectory, LEGACY_IMPORT_RECORD_FILE);
-  const staged = `${target}.${randomUUID()}`;
+  const staged = `${target}.next`;
   await fs.writeFile(staged, JSON.stringify(record), { mode: 0o600 });
   await fs.rename(staged, target);
 }
@@ -535,31 +476,6 @@ async function resolveSingleSourceAgentId(db: SqlQueryable): Promise<{ readonly 
     return { kind: "ok", agentId: rows.rows[0]?.id ?? null };
   }
   return { kind: "ok", agentId: null };
-}
-
-async function readEmbeddingsByMemoryId(db: SqlQueryable, targetDimensions: number): Promise<Map<string, number[]>> {
-  const vectors = new Map<string, number[]>();
-  if (targetDimensions <= 0 || !await tableExists(db, "embeddings")) return vectors;
-  const cols = await tableColumns(db, "embeddings");
-  if (!cols.has("memory_id")) return vectors;
-  const presentDimCols = EMBEDDING_COLUMNS.filter((col) => cols.has(col));
-  if (presentDimCols.length === 0) return vectors;
-  const selectExprs = presentDimCols.map((col) => `"${col}"::text AS "${col}"`).join(", ");
-  const rows = await db.query<Record<string, unknown>>(
-    `SELECT memory_id::text AS memory_id, ${selectExprs} FROM embeddings WHERE memory_id IS NOT NULL`,
-  );
-  for (const row of rows.rows) {
-    const memoryId = typeof row.memory_id === "string" ? row.memory_id : "";
-    if (!memoryId) continue;
-    for (const col of presentDimCols) {
-      const parsed = parseVectorText(row[col]);
-      if (parsed !== undefined && parsed.length === targetDimensions) {
-        vectors.set(memoryId, parsed);
-        break;
-      }
-    }
-  }
-  return vectors;
 }
 
 function isConversationRoom(row: EarlierRoomRow, metadata: Record<string, unknown>): boolean {
@@ -931,35 +847,10 @@ async function readEarlierComponents(
   return components;
 }
 
-async function readEarlierCache(db: SqlQueryable, nowMs: number): Promise<DeviceRecordWrite[]> {
-  const cache: DeviceRecordWrite[] = [];
-  if (!await tableExists(db, "cache")) return cache;
-  const cols = await tableColumns(db, "cache");
-  const createdExpr = cols.has("created_at") ? "created_at" : "NULL";
-  const expiresExpr = cols.has("expires_at") ? "expires_at" : "NULL";
-  const rows = await db.query<EarlierCacheRow>(
-    `SELECT key, agent_id::text AS agent_id, value, ${createdExpr} AS created_at, ${expiresExpr} AS expires_at FROM cache`,
-  );
-  for (const row of rows.rows) {
-    if (typeof row.key !== "string" || isSecretOrAuthCacheKey(row.key)) continue;
-    if (row.expires_at !== null && row.expires_at !== undefined && toEpochMs(row.expires_at, nowMs + 1) <= nowMs) continue;
-    const key = sanitizeKeepableString(row.key);
-    if (isSecretOrAuthCacheKey(key)) continue;
-    cache.push({
-      key,
-      data: { value: sanitizeJsonValue(parseJsonColumn(row.value)) },
-      createdAt: toEpochMs(row.created_at, nowMs),
-      tableName: null,
-    });
-  }
-  return cache;
-}
-
 async function readEarlierRows(
   db: SqlQueryable,
   targetAgentId: string,
   conversationWorldId: string | undefined,
-  targetDimensions: number,
   nowMs: number,
 ): Promise<{ readonly kind: "ok"; readonly prepared: PreparedImport } | { readonly kind: "ambiguous" }> {
   const resolved = await resolveSingleSourceAgentId(db);
@@ -973,7 +864,6 @@ async function readEarlierRows(
   const { rooms, remappedRoomWorlds } = await readEarlierRooms(db, targetAgentId, conversationWorldId, latestMessageByRoom, nowMs);
   const entities = await readEarlierEntities(db, targetAgentId, remapEntity, nowMs);
   const participants = await readEarlierParticipants(db, remapEntity, nowMs);
-  const embeddingsByMemoryId = await readEmbeddingsByMemoryId(db, targetDimensions);
   const memories: DeviceRecordWrite[] = rawMemories.map((row) => {
     const tableName = typeof row.type === "string" && row.type.trim() !== "" ? sanitizeKeepableString(row.type.trim()) : "memories";
     const createdAt = toEpochMs(row.created_at, nowMs);
@@ -982,7 +872,6 @@ async function readEarlierRows(
     const worldId = remap !== undefined && (row.world_id === null || row.world_id === remap.from)
       ? remap.to
       : row.world_id ?? undefined;
-    const embedding = embeddingsByMemoryId.get(row.id);
     const data: Record<string, unknown> = {
       id: row.id,
       agentId: targetAgentId,
@@ -994,39 +883,31 @@ async function readEarlierRows(
     };
     if (row.room_id) data.roomId = row.room_id;
     if (worldId) data.worldId = worldId;
-    if (embedding !== undefined) data.embedding = embedding;
     return { key: row.id, data, createdAt, tableName };
   });
   const tasks = await readEarlierTasks(db, targetAgentId, remapEntity, nowMs);
   const relationships = await readEarlierRelationships(db, targetAgentId, remapEntity, nowMs);
   const components = await readEarlierComponents(db, targetAgentId, remapEntity, nowMs);
-  const cache = await readEarlierCache(db, nowMs);
 
   return {
     kind: "ok",
-    prepared: { sourceAgentId, worlds, rooms, entities, participants, memories, tasks, relationships, components, cache },
+    prepared: { sourceAgentId, worlds, rooms, entities, participants, memories, tasks, relationships, components },
   };
 }
 
-async function readTargetEligibility(conn: SqlQueryable, fallbackDimensions: number): Promise<{
+/** The store is in use once it holds a memory, a room, or a world other than the conversation world the host makes at every start. */
+async function readTargetEligibility(conn: SqlQueryable, conversationWorldId: string | undefined): Promise<{
   readonly marked: boolean;
   readonly populated: boolean;
-  readonly embeddingDimensions: number;
 }> {
   const status = await conn.query<{ readonly marked: boolean; readonly populated: boolean }>(
     `SELECT
        EXISTS(SELECT 1 FROM device_records WHERE collection = 'cache' AND key = $1) AS marked,
-       EXISTS(SELECT 1 FROM device_records WHERE collection IN ('memories', 'rooms', 'worlds')) AS populated`,
-    [LEGACY_IMPORT_MARKER_KEY],
+       EXISTS(SELECT 1 FROM device_records WHERE collection IN ('memories', 'rooms')
+         OR (collection = 'worlds' AND key IS DISTINCT FROM $2)) AS populated`,
+    [LEGACY_IMPORT_MARKER_KEY, conversationWorldId ?? null],
   );
-  const owner = await conn.query<{ readonly embedding_dimensions: number }>(
-    "SELECT embedding_dimensions FROM device_owner WHERE singleton",
-  );
-  return {
-    marked: status.rows[0]?.marked === true,
-    populated: status.rows[0]?.populated === true,
-    embeddingDimensions: owner.rows[0]?.embedding_dimensions ?? fallbackDimensions,
-  };
+  return { marked: status.rows[0]?.marked === true, populated: status.rows[0]?.populated === true };
 }
 
 async function writeBatch(conn: SqlQueryable, collection: string, rows: readonly DeviceRecordWrite[]): Promise<void> {
@@ -1043,10 +924,10 @@ async function writeBatch(conn: SqlQueryable, collection: string, rows: readonly
 }
 
 /**
- * One-shot importer from an archived earlier PGlite store into a fresh v4 device store.
- * Copies the source directory to a private 0700 temp directory before opening (never mutating
- * the archive), writes all migrated records plus the idempotency marker in one transaction,
- * and logs a warning without failing boot on any unreadable or corrupt earlier database.
+ * Brings the earlier v121 store into this account's empty device store, once, only for its owner.
+ * Reads the store's files into an in-memory image (never opening or writing them), writes every
+ * record plus the marker in one transaction, records the attempt and outcome in the state
+ * directory, and never fails boot.
  */
 export async function importLegacyStore(options: LegacyImportOptions): Promise<LegacyImportResult> {
   await sweepEarlierScratch(options.stateDirectory);
@@ -1055,12 +936,24 @@ export async function importLegacyStore(options: LegacyImportOptions): Promise<L
   const result: LegacyImportResult = sameAccount(options.owner, options.account)
     ? await decideAndBringIn(options, nowMs)
     : { status: "skipped", reason: skipOf.NotTheOwner };
-  const record = await readImportRecord(options.stateDirectory);
-  await writeImportRecord(options.stateDirectory, { attempts: record.attempts, outcome: result, at: nowMs }).catch(() => undefined);
+  if (!isSettledByAnEarlierLaunch(result)) {
+    const record = await readImportRecord(options.stateDirectory);
+    await writeImportRecord(options.stateDirectory, { attempts: record.attempts, outcome: result, at: nowMs }).catch(() => undefined);
+  }
   if (result.status !== "imported") {
     options.logger?.warn({ src: "alpha:earlier-import", outcome: result }, "The earlier store was not brought in");
   }
   return result;
+}
+
+function isSettledByAnEarlierLaunch(result: LegacyImportResult): boolean {
+  return result.status === "skipped" && (result.reason === "already_imported" || result.reason === "gave_up");
+}
+
+function failureOf(error: unknown): string {
+  if (!(error instanceof Error)) return "Error";
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${error.name}:${code}` : error.name;
 }
 
 async function decideAndBringIn(options: LegacyImportOptions, nowMs: number): Promise<LegacyImportResult> {
@@ -1072,7 +965,7 @@ async function decideAndBringIn(options: LegacyImportOptions, nowMs: number): Pr
   try {
     const rawConn = await adapter.getConnection();
     if (!isSqlQueryable(rawConn)) return { status: "skipped", reason: "no_adapter" };
-    const preflight = await readTargetEligibility(rawConn, options.embeddingDimensions ?? 0);
+    const preflight = await readTargetEligibility(rawConn, options.conversationWorldId);
     const record = await readImportRecord(options.stateDirectory);
     const bringing = bringingOf(true, storeHeld, preflight.marked, preflight.populated, record.attempts);
     if (bringing !== "BringIn") return { status: "skipped", reason: skipOf[bringing] };
@@ -1080,14 +973,14 @@ async function decideAndBringIn(options: LegacyImportOptions, nowMs: number): Pr
     const wait = options.wait ?? ((ms: number) => Effect.runPromise(Effect.sleep(ms)));
     for (let failures = 1; ; failures += 1) {
       try {
-        return await bringIn(options, adapter, sourceDir, preflight.embeddingDimensions, nowMs);
+        return await bringIn(options, adapter, sourceDir, nowMs);
       } catch (error) {
-        if (failures >= triesPerLaunch) return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+        if (failures >= triesPerLaunch) return { status: "failed", error: failureOf(error) };
         await wait(retryDelayMs(failures));
       }
     }
   } catch (error) {
-    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+    return { status: "failed", error: failureOf(error) };
   }
 }
 
@@ -1095,14 +988,13 @@ async function bringIn(
   options: LegacyImportOptions,
   adapter: TargetStoreAdapter,
   sourceDir: string,
-  embeddingDimensions: number,
   nowMs: number,
 ): Promise<LegacyImportResult> {
   const read = await readStoreImage(sourceDir);
-  if (read.kind === "too_large") return { status: "failed", error: "The earlier store is larger than 512 MiB" };
+  if (read.kind === "too_large") return { status: "failed", error: "source_too_large" };
   const sourceClient = await options.openLegacyStore(read.image);
   try {
-    const extracted = await readEarlierRows(sourceClient, options.agentId, options.conversationWorldId, embeddingDimensions, nowMs);
+    const extracted = await readEarlierRows(sourceClient, options.agentId, options.conversationWorldId, nowMs);
     if (extracted.kind === "ambiguous") return { status: "skipped", reason: "multi_agent_ambiguous" };
     const { prepared } = extracted;
     const counts: LegacyImportCounts = {
@@ -1114,18 +1006,17 @@ async function bringIn(
       tasks: prepared.tasks.length,
       relationships: prepared.relationships.length,
       components: prepared.components.length,
-      cache: prepared.cache.length,
     };
     const marker: DeviceRecordWrite = {
       key: LEGACY_IMPORT_MARKER_KEY,
-      data: { value: { version: 1, importedAt: nowMs, sourceAgentId: prepared.sourceAgentId, targetAgentId: options.agentId, counts } },
+      data: { value: { version: 2, importedAt: nowMs, sourceAgentId: prepared.sourceAgentId, targetAgentId: options.agentId, counts } },
       createdAt: nowMs,
       tableName: null,
     };
     return await adapter.transaction(async (tx): Promise<LegacyImportResult> => {
       const txConn = await tx.getConnection();
       if (!isSqlQueryable(txConn)) return { status: "skipped", reason: "no_adapter" };
-      const inside = await readTargetEligibility(txConn, embeddingDimensions);
+      const inside = await readTargetEligibility(txConn, options.conversationWorldId);
       if (inside.marked) return { status: "skipped", reason: "already_imported" };
       if (inside.populated) return { status: "skipped", reason: "store_in_use" };
       await writeBatch(txConn, "worlds", prepared.worlds);
@@ -1136,7 +1027,7 @@ async function bringIn(
       await writeBatch(txConn, "tasks", prepared.tasks);
       await writeBatch(txConn, "relationships", prepared.relationships);
       await writeBatch(txConn, "components", prepared.components);
-      await writeBatch(txConn, "cache", [...prepared.cache, marker]);
+      await writeBatch(txConn, "cache", [marker]);
       return { status: "imported", sourceAgentId: prepared.sourceAgentId, targetAgentId: options.agentId, counts };
     });
   } finally {
@@ -1152,7 +1043,6 @@ export async function importLegacyStoreForRuntime(options: {
   readonly stateDirectory: string | undefined;
   readonly runtime: unknown;
   readonly conversationWorldId?: string;
-  readonly embeddingDimensions?: number;
   readonly openLegacyStore: LegacyStoreOpener;
 }): Promise<LegacyImportResult> {
   if (options.stateDirectory === undefined || !path.isAbsolute(options.stateDirectory)) return { status: "skipped", reason: "no_adapter" };
@@ -1171,7 +1061,6 @@ export async function importLegacyStoreForRuntime(options: {
     stateDirectory: options.stateDirectory,
     agentId,
     conversationWorldId: options.conversationWorldId,
-    embeddingDimensions: options.embeddingDimensions,
     adapter,
     openLegacyStore: options.openLegacyStore,
     logger,

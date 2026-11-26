@@ -21,7 +21,6 @@ export function createAlphaAppsPlugin(options: {
     readonly owner?: CloudAccount;
     readonly account?: CloudAccount;
     readonly conversationWorldId?: string;
-    readonly embeddingDimensions?: number;
     readonly openLegacyStore?: LegacyStoreOpener;
   };
 } = {}): { readonly plugin: AgentPlugin; readonly store: AlphaAppsStore } {
@@ -48,7 +47,6 @@ export function createAlphaAppsPlugin(options: {
           stateDirectory: options.stateDirectory,
           runtime,
           conversationWorldId: options.earlierImport.conversationWorldId,
-          embeddingDimensions: options.earlierImport.embeddingDimensions,
           openLegacyStore: options.earlierImport.openLegacyStore,
         });
       }
@@ -78,7 +76,6 @@ export function alphaAppsModuleWith(options: { readonly openLegacyStore?: Legacy
         owner: parseEarlierOwner(environment?.ALPHA_LEGACY_OWNER),
         account: context.launch.account,
         conversationWorldId: context.conversationOwner?.world,
-        embeddingDimensions: context.launch.embeddingDimensions,
         openLegacyStore: options.openLegacyStore,
       },
     });

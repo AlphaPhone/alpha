@@ -151,6 +151,7 @@ public final class AlphaLegacyAgentArchiveTest {
     String identity = "{\"userId\":\"" + OWNER_USER.toUpperCase() + "\",\"organizationId\":\"" + OWNER_ORG + "\"}";
     assertEquals(OWNER, AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"elizacloud\",\"verifiedCloudIdentity\":" + identity + "}"));
     assertEquals(OWNER, AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"cerebras\",\"cloudServices\":{\"verifiedCloudIdentity\":" + identity + "}}"));
+    assertNull(AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"cerebras\",\"verifiedCloudIdentity\":" + identity + "}"));
     assertNull(AlphaLegacyAgentArchive.ownerOf("{\"verifiedCloudIdentity\":{\"userId\":\"" + OWNER_USER + "\"}}"));
     assertNull(AlphaLegacyAgentArchive.ownerOf("{\"verifiedCloudIdentity\":{\"userId\":\"owner\",\"organizationId\":\"" + OWNER_ORG + "\"}}"));
     assertNull(AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"elizacloud\"}"));

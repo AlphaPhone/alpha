@@ -123,14 +123,16 @@ pure def lawAnUnknownOwnerOwnsNothing(user: str, organization: str): bool =
 
 The agent's store holds a marker once the earlier store is in, written in
 the same transaction as everything brought in, so it is never brought in
-twice. It is brought in only while the agent's store holds no conversation,
-room or world of its own, so nothing the owner wrote since is mixed with it.
-Each launch that tries counts an attempt in `earlier-import.json` in the
-account's state directory before it starts, so a launch stopped part way
-counts too; after three, it is not tried again. What happened, and the
-counts brought in, are written there and logged: brought in, not the owner,
-no earlier store, already brought in, the store in use, gave up, or failed
-with the reason.
+twice. It is brought in only while the agent's store holds no memory, no
+room and no world but the conversation world the agent makes at every
+start, so nothing the owner wrote since is mixed with it. Each launch that
+tries counts an attempt in `earlier-import.json` in the account's state
+directory before it starts, so a launch stopped part way counts too; after
+three, it is not tried again. What a launch found is written there and
+logged: brought in with the counts, not the owner, no earlier store (which
+is all an account the phone passes nothing to can find), the store in use,
+or failed with the kind of error only, never its text. A launch that finds
+it already brought in, or given up, leaves the record as it was.
 
 ```quint
 type Bringing = BringIn | NotTheOwner | NoEarlierStore | AlreadyBroughtIn | StoreInUse | GaveUp
@@ -174,10 +176,12 @@ pure def lawARetryWaitsAtMostFourSeconds(failures: int): bool =
 
 The earlier store's files are read, never opened or written, into an image
 in memory, and the earlier database is opened from that image in memory, so
-a stopped launch leaves nothing behind. A store larger than 512 MiB is not
-read, and the attempt is recorded as failed. A build that ran before this
-rule copied the store to `.earlier-import-*` directories in the account's
-state directory; every start removes any it finds, before anything else.
+a stopped launch leaves nothing behind. A store whose files add up to more
+than 512 MiB is not read, and the attempt is recorded as failed. A build
+that ran before this rule copied the store to `.earlier-import-*`
+directories in an account's state directory; every start of the agent
+removes any it finds in its own account's directory before it looks for the
+earlier store.
 
 ```quint
 pure val scratchOnDisk: bool = false
@@ -193,8 +197,11 @@ tags no scheduler of eliza's reads, with its earlier name, tags and time
 kept beside it, so that nothing it did fires in a burst or under the new
 agent's permissions; a task whose time had passed is marked missed, and
 none is run. The owner may set one up again. The roles and ownership the
-earlier worlds granted are left out, and cache entries named for
-credentials, sessions, tokens or the vault are never brought in.
+earlier worlds granted are left out. The earlier agent's cache, which held
+its own running state (approval queues, confirmations, its embedding model's
+identity, its pseudonym map), is not brought in, and neither are its
+embeddings, which another model may have made: the agent embeds memories
+again if it embeds them at all.
 
 ```quint
 type BroughtTask = Paused | Missed

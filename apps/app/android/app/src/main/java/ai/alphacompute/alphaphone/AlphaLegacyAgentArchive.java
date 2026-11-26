@@ -190,16 +190,17 @@ final class AlphaLegacyAgentArchive {
     return elizaDb;
   }
 
-  /** The owner the earlier Alpha's provider slot names, or null unless it names a user and an organization. */
+  /**
+   * The owner the earlier Alpha's provider slot names, or null unless it names a user and an
+   * organization: the selection's own verified account, or for a direct Cerebras selection the
+   * Cloud account it keeps under {@code cloudServices}.
+   */
   static Owner ownerOf(String providerSlot) {
     if (providerSlot == null) return null;
     try {
       JSONObject provider = new JSONObject(providerSlot);
-      JSONObject identity = provider.optJSONObject("verifiedCloudIdentity");
-      if (identity == null) {
-        JSONObject services = provider.optJSONObject("cloudServices");
-        identity = services == null ? null : services.optJSONObject("verifiedCloudIdentity");
-      }
+      JSONObject cloud = "cerebras".equals(provider.optString("provider")) ? provider.optJSONObject("cloudServices") : provider;
+      JSONObject identity = cloud == null ? null : cloud.optJSONObject("verifiedCloudIdentity");
       if (identity == null) return null;
       String user = cloudId(identity.opt("userId"));
       String organization = cloudId(identity.opt("organizationId"));

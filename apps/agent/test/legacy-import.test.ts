@@ -15,7 +15,6 @@ import {
   BROUGHT_TASK_TAG,
   type EarlierSqlClient,
   importLegacyStore,
-  isSecretOrAuthCacheKey,
   LEGACY_IMPORT_MARKER_KEY,
   LEGACY_IMPORT_RECORD_FILE,
   sanitizeJsonValue,
@@ -32,6 +31,7 @@ interface OpenedDeviceStore {
     getConnection(): Promise<{ query<Row = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<{ readonly rows: readonly Row[] }> }>;
     transaction<A>(callback: (tx: OpenedDeviceStore["adapter"]) => Promise<A>): Promise<A>;
     getAllWorlds(): Promise<Array<{ id: string; agentId: string; name?: string }>>;
+    createWorlds(worlds: Array<{ id: string; agentId: string; name: string }>): Promise<string[]>;
     getRoomsByIds(ids: string[]): Promise<Array<{ id: string; agentId?: string; worldId?: string; name?: string; metadata?: Record<string, unknown> }>>;
     createRooms(rooms: Array<Record<string, unknown>>): Promise<string[]>;
     getEntitiesByIds(ids: string[]): Promise<Array<{ id: string; agentId: string; names: string[] }>>;
@@ -394,16 +394,11 @@ describe("Earlier v121 PGlite one-shot importer", () => {
     if (sharedFixtureRoot !== "") fs.rmSync(sharedFixtureRoot, { recursive: true, force: true });
   });
 
-  it("sanitizes NUL and lone UTF-16 surrogates while preserving valid surrogate pairs and filters secret keys", () => {
+  it("sanitizes NUL and lone UTF-16 surrogates while preserving valid surrogate pairs", () => {
     expect(sanitizeKeepableString("a\u0000b\ud800c\udfffd\ud83d\ude80")).toBe("abcd\ud83d\ude80");
     expect(sanitizeJsonValue({ "k\u0000": ["v\ud800", 42, Number.NaN, { ok: "\ud83d\ude80" }] })).toEqual({
       k: ["v", 42, null, { ok: "\ud83d\ude80" }],
     });
-    expect(isSecretOrAuthCacheKey("pref:theme")).toBe(false);
-    expect(isSecretOrAuthCacheKey("auth:session:1")).toBe(true);
-    expect(isSecretOrAuthCacheKey("google_oauth_token")).toBe(true);
-    expect(isSecretOrAuthCacheKey("user_api_key")).toBe(true);
-    expect(isSecretOrAuthCacheKey(LEGACY_IMPORT_MARKER_KEY)).toBe(true);
   });
 
   it("proves all 6 migration safety invariants against a real synthetic v121 PGlite store", async () => {
@@ -454,7 +449,6 @@ describe("Earlier v121 PGlite one-shot importer", () => {
           owner: account("OWNER-1", "org-1"),
           account: account("owner-1", "org-1"),
           conversationWorldId: CONVERSATION_WORLD_ID,
-          embeddingDimensions: 0,
           openLegacyStore: countingOpener,
         },
       });
@@ -556,13 +550,13 @@ describe("Earlier v121 PGlite one-shot importer", () => {
         "pref:expired",
         LEGACY_IMPORT_MARKER_KEY,
       ]);
-      expect(caches.get("pref:theme")).toEqual({ mode: "dark" });
+      expect(caches.has("pref:theme")).toBe(false);
       expect(caches.has("auth:session:v1")).toBe(false);
       expect(caches.has("google_oauth_token")).toBe(false);
       expect(caches.has("user_api_key")).toBe(false);
       expect(caches.has("pref:expired")).toBe(false);
       expect(caches.get(LEGACY_IMPORT_MARKER_KEY)).toMatchObject({
-        version: 1,
+        version: 2,
         sourceAgentId: OLD_AGENT_ID,
         targetAgentId: opened.agentId,
       });
@@ -587,7 +581,7 @@ describe("Earlier v121 PGlite one-shot importer", () => {
     }
   }, 120_000);
 
-  it("keeps matching-dimension embeddings and nulls mismatched embeddings when v4 enables vectors", async () => {
+  it("brings in no embeddings, even when v4 enables vectors of the same size", async () => {
     const { storage, openEarlier } = await loadElizaStorageTools();
     const stateDir = makeTempDir("v4-vec-state-");
     const opened = await storage.openDeviceStorage({
@@ -604,7 +598,6 @@ describe("Earlier v121 PGlite one-shot importer", () => {
         stateDirectory: stateDir,
         agentId: opened.agentId,
         conversationWorldId: CONVERSATION_WORLD_ID,
-        embeddingDimensions: 384,
         adapter: opened.adapter,
         openLegacyStore: openEarlier,
       });
@@ -613,8 +606,8 @@ describe("Earlier v121 PGlite one-shot importer", () => {
       const messages = await opened.adapter.getMemories({ roomId: CHAT_ROOM_ID, tableName: "messages", includeEmbedding: true });
       const with384 = messages.find((m) => m.id === USER_MSG_ID);
       const with1536 = messages.find((m) => m.id === AGENT_MSG_ID);
-      expect(with384?.embedding).toHaveLength(384);
-      expect(with384?.embedding?.[0]).toBeCloseTo(0.5);
+      expect(with384?.content.text).toBe("Remember heron and lone  x  keep \ud83d\ude80");
+      expect(with384?.embedding).toBeUndefined();
       expect(with1536?.embedding).toBeUndefined();
     } finally {
       await opened.adapter.close();
@@ -726,6 +719,7 @@ describe("Earlier v121 PGlite one-shot importer", () => {
       let openedCount = 0;
       const launch = () => importLegacyStore({
         legacyStoreDir: sharedFixtureDir,
+        conversationWorldId: CONVERSATION_WORLD_ID,
         owner: account("owner-6", "org-6"),
         account: account("owner-6", "org-6"),
         stateDirectory: stateDir,
@@ -738,14 +732,16 @@ describe("Earlier v121 PGlite one-shot importer", () => {
         },
       });
       for (const attempts of [1, 2, 3]) {
-        expect(await launch()).toEqual({ status: "failed", error: "store busy" });
-        expect(readRecord(stateDir)).toMatchObject({ attempts, outcome: { status: "failed", error: "store busy" } });
+        expect(await launch()).toEqual({ status: "failed", error: "Error" });
+        expect(readRecord(stateDir)).toMatchObject({ attempts, outcome: { status: "failed", error: "Error" } });
+        await failing.adapter.createWorlds([{ id: CONVERSATION_WORLD_ID, agentId: failing.agentId, name: "Device" }]);
       }
       expect(waits).toEqual([1000, 4000, 1000, 4000, 1000, 4000]);
       expect(openedCount).toBe(9);
       expect(await launch()).toEqual({ status: "skipped", reason: "gave_up" });
       expect(openedCount).toBe(9);
-      expect(await failing.adapter.getAllWorlds()).toEqual([]);
+      expect((await failing.adapter.getAllWorlds()).map((world) => world.id)).toEqual([CONVERSATION_WORLD_ID]);
+      expect(readRecord(stateDir)).toMatchObject({ attempts: 3, outcome: { status: "failed", error: "Error" } });
 
       const flakyState = makeTempDir("v4-flaky-record-");
       const flakyWaits: number[] = [];
