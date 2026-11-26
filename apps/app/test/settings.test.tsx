@@ -111,6 +111,28 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
   });
 
+  it("On the launcher, Settings' and Workflows' first pages draw no Back and Android's Back still leaves them (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
+    const { alpha } = await settingsOpen(world);
+    await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
+    expect(button("Back")).toBeUndefined();
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    await press("Workflows");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Workflows");
+    expect(button("Back")).toBeUndefined();
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+  });
+
+  it("Off the launcher, Settings' first page keeps its Back (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+    const { alpha } = await settingsOpen({ ...scene(), phone: false });
+    await vi.waitFor(() => expect(button("Back")).toBeDefined());
+    await press("Back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+  });
+
   it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\"; spec/app/account/billing.md, \"Story: Pay in the browser\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
@@ -376,26 +398,26 @@ describe("Settings", () => {
     const { world } = await settingsOpen();
     await press("General");
     await tap("Notifications");
-    await vi.waitFor(() => expect(titled("Other apps’ notifications")).toBeDefined());
-    await tap("Other apps’ notifications");
+    await vi.waitFor(() => expect(titled("Other apps")).toBeDefined());
+    await tap("Other apps");
     expect(world.settings.mirror.enabled).toBe(false);
     await press("Turn on");
     await vi.waitFor(() => expect(world.settings.mirror.enabled).toBe(true));
-    await vi.waitFor(() => expect(titled("Choose notification apps")?.hasAttribute("disabled")).toBe(false));
-    await tap("Choose notification apps");
+    await vi.waitFor(() => expect(titled("Choose apps")?.hasAttribute("disabled")).toBe(false));
+    await tap("Choose apps");
     await press("Add News reader");
     await vi.waitFor(() => expect(world.settings.mirror.apps).toEqual([{
       packageName: "example.reader", label: "News reader", preview: false, available: true,
     }]));
-    await vi.waitFor(() => expect(titled("Keep notification history")).toBeDefined());
-    await tap("Keep notification history");
+    await vi.waitFor(() => expect(titled("History")).toBeDefined());
+    await tap("History");
     await press("Turn on");
     await vi.waitFor(() => expect(world.settings.mirror.history).toBe(true));
     world.settings.mirrorHistory.push({ id: "old", appLabel: "Reading archive", at: 1000, state: "Posted" });
-    await vi.waitFor(() => expect(titled("View history")).toBeDefined());
-    await tap("View history");
+    await vi.waitFor(() => expect(titled("View")?.hasAttribute("disabled")).toBe(false));
+    await tap("View");
     await vi.waitFor(() => expect(document.body.textContent).toContain("Reading archive"));
-    await tap("Clear history");
+    await tap("Clear");
     await press("Clear");
     await vi.waitFor(() => expect(document.body.textContent).not.toContain("Reading archive"));
     expect(world.settings.mirrorHistory).toEqual([]);
@@ -573,7 +595,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("Notifications")?.hasAttribute("disabled")).toBe(false));
     await tap("Notifications");
     await until(alpha, machines, Pages.Machine, (s) => s.page === "PrivacyNotifications");
-    await vi.waitFor(() => expect(titled("Other apps’ notifications")?.hasAttribute("disabled")).toBe(false));
+    await vi.waitFor(() => expect(titled("Other apps")?.hasAttribute("disabled")).toBe(false));
     await tap("Notifications");
     await vi.waitFor(() => expect(world.settings.opened.at(-1)).toBe("notifications"));
     await press("Back to Privacy");

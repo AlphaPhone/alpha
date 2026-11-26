@@ -1,6 +1,7 @@
 // spec/app/notices/collection.md, "Story: Manage collection in Settings"
-import { Banner, Button, ConfirmDialog, ListGroup, ListRow, SettingsSwitchRow } from "@repo/ui";
-import { Bell, Play, Plus, Trash2, X } from "lucide-react";
+import { Banner, Button, ConfirmDialog, ListGroup, ListRow, NotificationAccessRow, SettingsNavRow, SettingsSwitchRow } from "@repo/ui";
+import { ChevronUp, Play, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { useContext } from "react";
 import type { PolicyCommand, PolicySelection } from "../../gen/app__notices__collection.ts";
 import { useMachine } from "../../gen/app__notices__collection.react.ts";
 import { area, type Resident, type Shown } from "../runtime/area.tsx";
@@ -23,11 +24,17 @@ function reviewCopy(selection: PolicySelection, label?: string): { title: string
   }
 }
 
-/** Local settings for Android’s notification mirror. @model spec/app/notices/collection.md */
+/**
+ * Local settings for Android’s notification mirror, drawn as the Sunday v119 demo build drew them (Alpha 45f6bed30,
+ * prototype/settings-adapter.ts:1146-1176): one card of Other apps with its status, Android access, the chosen apps,
+ * Choose apps, History, View and Clear, with no headings.
+ * @model spec/app/notices/collection.md
+ */
 function SettingsCollection({ runtime }: Shown<Machine | Resident>) {
   const { state, can, send } = useMachine(runtime);
+  const access = useContext(NotificationAccessRow);
   const panel = state?.panel;
-  if (!panel) return null;
+  if (!panel) return access ? <ListGroup>{access}</ListGroup> : null;
   const policy = panel.report;
   const refresh = { type: "policyRefresh" } as const;
   const apps = { type: "policyFindApps" } as const;
@@ -42,8 +49,9 @@ function SettingsCollection({ runtime }: Shown<Machine | Resident>) {
   if (panel.phase === "PolicyAway" || panel.phase === "PolicyReading" || panel.phase === "PolicyUnavailable") {
     return (
       <ListGroup>
-        <ListRow title="Other apps’ notifications" leading={<Bell />}
+        <ListRow title="Other apps" detail="Not shared with agent"
           trailing={panel.phase === "PolicyUnavailable" ? "Unavailable" : "Checking…"} />
+        {access}
         {can(refresh, "Owner") ? <ListRow title="Refresh" onClick={() => void send(refresh, "Owner")} /> : null}
       </ListGroup>
     );
@@ -53,15 +61,16 @@ function SettingsCollection({ runtime }: Shown<Machine | Resident>) {
   const saving = panel.phase === "PolicyApplying";
   const status = !policy.enabled ? "Off" : policy.paused ? "Paused" : !policy.access ? "No access" : !policy.connected ? "Waiting" : "On";
   const selected = new Set(policy.apps.map(({ packageName }) => packageName));
+  const viewHistory = can(readHistory, "Owner") ? () => void send(readHistory, "Owner") : undefined;
+  const clearHistory = action("ClearPolicyHistory");
   return (
     <>
-      <ListGroup>
-        <SettingsSwitchRow title="Other apps’ notifications" detail={`${status} · Not shared with agent`} icon={<Bell />}
-          checked={policy.enabled} saving={saving} onCheckedChange={action(policy.enabled ? "DisableCollection" : "EnableCollection")} />
-        {policy.paused && policy.enabled ? <ListRow title="Resume reading notifications" leading={<Play />} onClick={action("ResumeCollection")} /> : null}
-      </ListGroup>
       {panel.failed ? <Banner variant="warn">Couldn’t update notification collection</Banner> : null}
-      <ListGroup heading="Notification apps">
+      <ListGroup>
+        <SettingsSwitchRow title="Other apps" detail={status === "On" || status === "Off" ? "Not shared with agent" : `${status} · Not shared with agent`}
+          checked={policy.enabled} saving={saving} onCheckedChange={action(policy.enabled ? "DisableCollection" : "EnableCollection")} />
+        {access}
+        {policy.paused && policy.enabled ? <ListRow title="Resume" aria-label="Resume reading notifications" leading={<Play />} onClick={action("ResumeCollection")} /> : null}
         {policy.apps.map((app) => (
           <div key={app.packageName} className="flex items-center">
             {app.available ? <div className="min-w-0 flex-1"><SettingsSwitchRow title={app.label} detail="Show previews"
@@ -71,21 +80,19 @@ function SettingsCollection({ runtime }: Shown<Machine | Resident>) {
               onClick={action("RemoveApp", app.packageName)}><X /></Button>
           </div>
         ))}
-        <ListRow title={panel.choosing ? "Hide app choices" : "Choose notification apps"} leading={<Plus />}
+        <ListRow title="Choose apps" aria-label={panel.choosing ? "Hide app choices" : "Choose notification apps"} leading={panel.choosing ? <ChevronUp /> : <Plus />}
           disabled={!can(apps, "Owner")} onClick={() => void send(apps, "Owner")} />
         {panel.choosing ? panel.choices.filter(({ packageName }) => !selected.has(packageName)).map((app) => (
           <ListRow key={app.packageName} title={app.label} aria-label={`Add ${app.label}`} trailing={<Plus />}
             onClick={action("AddApp", app.packageName)} />
         )) : null}
-      </ListGroup>
-      <ListGroup heading="History">
-        <SettingsSwitchRow title="Keep notification history" detail={policy.historyUnavailable ? "Unavailable" : "24 h · no message text"}
+        <SettingsSwitchRow title="History" detail={policy.historyUnavailable ? "Unavailable" : "24 h · no message text"}
           checked={policy.history} onCheckedChange={action(policy.history ? "DisableHistory" : "EnableHistory")} />
-        {policy.history ? <ListRow title="View history" disabled={!can(readHistory, "Owner")} onClick={() => void send(readHistory, "Owner")} /> : null}
-        {policy.history || policy.historyUnavailable ? <ListRow title="Clear history" leading={<Trash2 />} onClick={action("ClearPolicyHistory")} /> : null}
+        <SettingsNavRow title="View" aria-label="View local metadata history" icon={<SlidersHorizontal />} disabled={!viewHistory} onOpen={viewHistory} />
+        <ListRow title="Clear" aria-label="Clear local metadata history" leading={<Trash2 />} disabled={!clearHistory} onClick={clearHistory} />
         {panel.viewing ? panel.history.length ? panel.history.map(({ id, appLabel, at, word }) =>
           <ListRow key={id} title={appLabel} detail={`${historyWords[word.toLowerCase()] ?? "Notification"} · ${new Date(at).toLocaleString()}`} />)
-          : <ListRow title="No notification history" /> : null}
+          : <ListRow title="History" trailing="None" /> : null}
       </ListGroup>
       {review ? <ConfirmDialog open title={review.title} confirmLabel={review.label} destructive={panel.selection.command === "ClearPolicyHistory"}
         onConfirm={() => { if (can(confirm, "Owner")) void send(confirm, "Owner"); }}

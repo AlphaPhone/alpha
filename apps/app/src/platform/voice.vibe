@@ -239,9 +239,9 @@ const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
 const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
 export const CLOUD_ENVIRONMENT = "production" as EnvironmentName
-/** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
 /** The key a page names to its own Cloud, whose server holds the account's real key: the page never holds one. */
 const PAGE_CREDENTIAL = "page" as CredentialId
+/** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
 const RELAY_WARMUP_BOUND = "5 seconds"
 const LOCAL_OUTPUT_WARMUP_BOUND = "10 seconds"
 
@@ -1066,6 +1066,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   }
 })
 
+// spec/app/voice/index.md, "A page served by Alpha's development server talks through that server's own Cloud speech relay, and a page that names none offers no Talk"
 /**
  * A page that is no phone: Talk over the Cloud speech relay of the page's own server, where it offers one, with the
  * browser's microphone, by the same Cloud path and the same eliza client as the phone's relay (spec/app/voice/index.md,

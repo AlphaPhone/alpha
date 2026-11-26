@@ -51,6 +51,8 @@ pure def lawANewerValueIsNeverOverwritten(earlierHeld: bool, copied: bool): bool
 > losing what the earlier agent kept, so that my conversations, memories,
 > schedules and workflows can still be brought in.
 
+Off for now: the host moves nothing aside and passes the agent no earlier store, until the import is bound to the earlier owner's account (alpha#1697 review).
+
 ### The earlier agent's store and runtime are moved aside by rename, and never opened, changed or deleted
 
 The earlier agent kept its PGlite store and workspace in
