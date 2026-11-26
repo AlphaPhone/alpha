@@ -305,8 +305,8 @@ describe("Settings", () => {
     await settingsOpen(world);
     await tap("Account");
     await vi.waitFor(() => {
-      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Plans");
-      if (!plans) throw new Error("No Plans control");
+      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "View plans");
+      if (!plans) throw new Error("No View plans control");
       return drawn(() => plans.click());
     });
     const available = (name: string) => vi.waitFor(() => expect(button(name)).toBeDefined(), { timeout: 10_000 });
