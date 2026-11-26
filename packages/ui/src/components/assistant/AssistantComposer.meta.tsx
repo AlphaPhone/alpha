@@ -23,6 +23,8 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     onSend: undefined,
     onStop: undefined,
     onOpen: undefined,
+    onType: undefined,
+    onDictate: undefined,
     onRemoveAttachment: undefined,
     onPreviewAttachment: undefined,
     onUnquote: undefined,

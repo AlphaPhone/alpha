@@ -1,11 +1,16 @@
 // spec/app/notices/index.md, "Story: Open what I tapped"
 
-/** Subscribable snapshot shelf shared by the notices desk services. */
-export function createDeskStore<T>(build: () => T): {
-  readonly snapshot: () => T;
-  readonly subscribe: (listener: () => void) => () => void;
-  readonly emit: () => void;
-} {
+interface DeskStore<T> {
+  /** @throws {never} */
+  snapshot(): T;
+  /** @throws {never} */
+  subscribe(listener: () => void): () => void;
+  /** @throws {never} */
+  emit(): void;
+}
+
+/** Subscribable snapshot shelf shared by the notices desk services. @throws {never} */
+export function createDeskStore<T>(build: () => T): DeskStore<T> {
   const listeners = new Set<() => void>();
   let current = build();
   return {

@@ -1,11 +1,11 @@
 // spec/app/notices/deletion.md, "Story: Undo a deletion"; spec/app/notices/deletion.md, "Story: See how a deletion ended"; spec/app/notices/deletion.md, "Story: Change owner or restart with a deletion pending"; spec/app/notices/deletions.md, "Story: Delete several things, each with its own Undo"; spec/app/notices/deletions.md, "Story: See how my deletions ended"; spec/app/notices/deletions.md, "Story: Change owner or restart with deletions pending"
-import { DELETION_NOTICE_TEXT, UNDO_TOO_LATE } from "@elizaos/os-bridges"
+import { DELETION_NOTICE_TEXT } from "@elizaos/os-bridges"
 import type * as Deletion from "../../gen/app__notices__deletion.effect.vibe"
 import * as Deletions from "../../gen/app__notices__deletions.effect.vibe"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed, Time } from "../runtime/index.vibe"
 import { createDeskStore } from "./desk.ts"
-import { type Said, offer, say, withdraw } from "./toasts.vibe"
+import { type Said, offer, withdraw } from "./toasts.vibe"
 
 export { DELETION_NOTICE_TEXT }
 

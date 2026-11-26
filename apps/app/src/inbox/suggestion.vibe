@@ -3,7 +3,6 @@ import * as Suggestion from "../../gen/app__inbox__suggestion.effect.vibe"
 import type { Effect as Out, Event, Target } from "../../gen/app__inbox__suggestion.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
-import { held } from "../../gen/app__inbox__shelf.effect.vibe"
 import { Machine as Shell, showing as showingView } from "../../gen/app__shell.effect.vibe"
 import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { Letters, policy } from "./composer.vibe"
@@ -121,17 +120,6 @@ export effect function useInEmail(text: string, source: string, aim: Aim, alread
   if (!showingView(try shell.get(), "Inbox")) try ignore(shell.send({ type: "openView", view: "Inbox" }))
   try ignore(shell.send({ type: "raise", detent: "Bar" }))
   return true
-}
-
-/** Alpha suggests `text` for the draft `draft`, at the revision the composer holds it at. Whether it is offered. */
-effect function suggest(text: string, draft: number): boolean!!(Offers | Suggestion.Machine | Drafts.Machine) {
-  const composer = try (try Drafts.Machine).get()
-  const aside = composer.shelf.shelved.includes(draft) ? held(composer.shelf, draft) : undefined
-  const letter = composer.open && composer.letter.id === draft ? composer.letter : aside
-  if (letter === undefined) return false
-  const number = (try Offers).add(text, undefined)
-  const sent = try exit((try Suggestion.Machine).send({ type: "suggest", text: number, draft, revision: letter.revision }, "Agent"))
-  return Exit.isSuccess(sent)
 }
 
 /** Text offered into an email, held until the owner reviews it, and put in once, as shown. */

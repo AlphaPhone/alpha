@@ -5,6 +5,7 @@ import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Actor, Count, Effect as Out, Event, Tally, Volume } from "../../gen/app__files.effect.vibe"
 import { type Filter, type Where, everything, inDates, ofKind } from "../../gen/app__files__search.effect.vibe"
 import { type Item, type Kind, fitsKind } from "../../gen/app__files__shared.effect.vibe"
+import type { Outcome } from "../../gen/kit__attempt.effect.vibe"
 import * as Bin from "../../gen/app__files__trash.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device, Files, FilesFailed, called, type Documents } from "../platform/index.vibe"
@@ -514,7 +515,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
   }
 }
 
-function receiptJob(ticket: number, ran: boolean, outcome: "Confirmed" | "Refused" | "Unknown", done: number) {
+function receiptJob<E>(ticket: number, ran: boolean, outcome: Outcome, done: number): Job<E, Answers, [by: "Phone"]> {
   return run(`receipt ${ticket}`, effect {
     try (try Answers).receipt(ticket, { ran, outcome, ...(outcome === "Refused" && done > 0 ? { partial: true } : {}) })
   }, "Phone")

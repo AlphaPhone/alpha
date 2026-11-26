@@ -206,8 +206,16 @@ async function startProvider(key: string, real: RealModel | undefined) {
     const system = typeof character === "string" ? character : "";
     listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
-    const last = messages.findLast((message) => message.role === "user")?.content;
-    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
+    const hostNoteMark = "Note from the agent host";
+    const personText = (content: unknown): string | undefined => {
+      const raw = typeof content === "string" ? content : JSON.stringify(content);
+      const cut = raw.indexOf(hostNoteMark);
+      const cleaned = (cut >= 0 ? raw.slice(0, cut) : raw).trim();
+      return cleaned === "" ? undefined : cleaned;
+    };
+    const last = messages.findLast((message) => message.role === "user" && personText(message.content) !== undefined)?.content;
+    const echoed = last === undefined ? "" : (personText(last) ?? "");
+    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", echoed] };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {

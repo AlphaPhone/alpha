@@ -1,7 +1,7 @@
 // spec/cloud/local.md, "Story: Check Alpha's contract on my computer"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Come back to Alpha after authorizing a connection in my browser"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { createCloudClient } from "@elizaos/cloud"
+import { createCloudClient, readCloudError } from "@elizaos/cloud"
 import { deployment } from "@repo/deployment"
 import { prepared, said } from "@repo/eliza-harness"
 import { ChildProcess } from "effect/process"
@@ -33,7 +33,8 @@ module node {
   import type { AddressInfo } from "node:net"
   import { runInNewContext } from "node:vm"
 
-  type Plans = Readonly<Record<"plus_monthly" | "pro_monthly", { readonly priceId: string; readonly productId: string }>>
+  type PlanEntry = { readonly priceId: string; readonly productId: string }
+  type Plans = { readonly plus_monthly: PlanEntry; readonly pro_monthly?: PlanEntry }
 
   /**
    * The payment provider's catalog, read only: what the cloud checks before it serves billing. Payments cost money and
@@ -44,7 +45,9 @@ module node {
     const cents = { plus_monthly: 3_000, pro_monthly: 10_000 }
     const monthly = { interval: "month", interval_count: 1, usage_type: "licensed", trial_period_days: null }
     const listed = new Map<string, object>()
-    for (const [plan, { priceId, productId }] of Object.entries(plans) as [keyof Plans, Plans[keyof Plans]][]) {
+    for (const [plan, entry] of Object.entries(plans) as [keyof Plans, PlanEntry | undefined][]) {
+      if (entry === undefined) continue
+      const { priceId, productId } = entry
       listed.set(`/v1/products/${productId}`, { object: "product", id: productId, livemode: false, active: true })
       listed.set(`/v1/prices/${priceId}`, {
         object: "price", id: priceId, product: productId, unit_amount: cents[plan], currency: "usd", recurring: monthly,
@@ -202,9 +205,22 @@ effect function gatesOf(local: string, name: string) {
         return
       }
       case "BillingRefused": {
-        const client = createCloudClient({ baseUrl: local, credential: () => held.key })
-        const refusal = try (tryPromise({ try: () => client.billingPortal(), catch: (cause) => new Refusal({ cause }) }) |> flip(%))
-        if ((refusal.cause as { failure?: { tag?: string } }).failure?.tag !== "CloudCredentialInvalid") throw refuse(String(refusal.cause))
+        const refusal = try tryPromise({
+          try: async () => {
+            const response = await fetch(`${local}/api/v1/subscriptions/portal`, {
+              method: "POST",
+              headers: { authorization: `Bearer ${held.key}` },
+            })
+            if (response.ok) return undefined
+            return readCloudError({
+              status: response.status,
+              headers: response.headers,
+              text: () => response.text(),
+            })
+          },
+          catch: (cause) => new Refusal({ cause }),
+        })
+        if (refusal?.failure.tag !== "CloudCredentialInvalid") throw refuse(String(refusal))
         return
       }
     }

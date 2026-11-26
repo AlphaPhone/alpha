@@ -5,6 +5,7 @@ import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Device, native, type PhoneReport, type Problem, SystemSettings, VoiceBridge } from "../platform/index.vibe"
 import { type Job, answer, due, following, reacting, run, stop, together, untimed, Time } from "../runtime/index.vibe"
+import { development, versions } from "./build.ts"
 
 module web {
   /** The licence notices shipped with Alpha, beside its page: never a remote source. */
@@ -33,7 +34,6 @@ module web {
   }
 }
 import { shared, shipped } from web
-import { development, versions } from "./build.ts"
 
 /** One licence as the notices file holds it. */
 export schema Notice { name: string; version: string; license: string; text: string; source?: string; flags?: ReadonlyArray<string> }

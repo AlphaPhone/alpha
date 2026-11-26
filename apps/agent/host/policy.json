@@ -15,6 +15,7 @@
       "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE"
     ],
     "refused": {
+      "BROWSER_OPEN": "Browser actions in Alpha's current pack are BROWSER, BROWSER_BACK, BROWSER_FORWARD and BROWSER_RELOAD; BROWSER_OPEN is refused until reviewed in spec/agent/index.md.",
       "CALCULATE": "The old phone's agent had no calculator: develop's plugins registered no calculate action."
     }
   },

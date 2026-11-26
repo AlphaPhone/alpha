@@ -1,6 +1,6 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/index.md, "Story: Keep digests to their owner and through a restart"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type WorkflowRequest, workflowHttpError, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
+import { workflowHttpError, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
 import * as Digests from "../../gen/app__digests.effect.vibe"
 import { Machine as Listing } from "../../gen/app__workflows__list.effect.vibe"
 import { Agent, Device, native, type ResidentOwner, launchOwnerAt, sameResidentOwner } from "../platform/index.vibe"
