@@ -80,7 +80,7 @@ export function App() {
       <PublishDialog open={publishing} onOpenChange={setPublishing} />
       <Ask open={S.overwrite.length > 0} onOpenChange={() => { S.overwrite = []; redraw(); }} title={`${S.overwrite.join(", ")} changed on disk`} action="Overwrite" onConfirm={() => void publish(true)} />
       <div role="status" aria-live="polite"
-        className={cn("fixed bottom-6 left-1/2 z-40 flex max-w-[80vw] -translate-x-1/2 items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-background transition-all duration-base",
+        className={cn("fixed bottom-6 left-1/2 z-toast flex max-w-[80vw] -translate-x-1/2 items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-background transition-all duration-base",
           S.toast ? "opacity-100" : "pointer-events-none translate-y-5 opacity-0")}>
         <span>{S.toast?.text}</span>
         {S.toast?.action && <button type="button" className="font-semibold underline" onClick={() => { S.toast!.action!.run(); }}>{S.toast.action.label}</button>}
