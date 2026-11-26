@@ -201,8 +201,10 @@ export interface SpokenReview {
   readonly session: number
   readonly turn: number
   readonly current: Effect.Effect<boolean>
-  /** The turn asked Files directly, so only a page open's card may show: voice shows no Files review card. */
+  /** The turn asked Files directly from Files, so only a page open's card may show: voice shows no Files or other review card there. */
   readonly pagesOnly?: boolean
+  /** The turn asked Files directly from another screen, so voice shows no Files review card while other cards stay available. */
+  readonly noFiles?: boolean
 }
 
 interface DeviceActionReply {
@@ -271,6 +273,11 @@ function repliedDeviceActions(actions: DeviceActionReply["actionResults"]): Read
 /** Whether the reply ran a device step at once, as the owner's own request, rather than for review. */
 export function ranDirect(actions: DeviceActionReply["actionResults"]): boolean {
   return [...repliedDeviceActions(actions).values()].some((action) => action === "Direct")
+}
+
+/** Whether the reply proposed a device action for the owner's review. */
+export function proposedReview(actions: DeviceActionReply["actionResults"]): boolean {
+  return [...repliedDeviceActions(actions).values()].some((action) => action === "Review")
 }
 
 function fromThisEnrollment(proposal: Proposal, opened: Session): boolean {
@@ -348,6 +355,7 @@ function spokenOperation(proposal: Proposal, opened: Session, message: string, r
   const op = operation(proposal.payload.operation)
   if (op === undefined || op.type === "sms_send" || !Number.isFinite(expires) || expires <= at) return undefined
   if (reply.spoken?.pagesOnly === true && op.type !== "browser_navigate") return undefined
+  if (reply.spoken?.noFiles === true && op.type.startsWith("files_")) return undefined
   const request = proposal.payload.requestMessageId
   if (request !== undefined && request !== message) return undefined
   if (reviewedRead(op)) return acceptsRead(opened, op) && exactReadOrigin(proposal, message, reply) !== undefined ? op : undefined

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// spec/app/assistant/reply.md, "Read again from history, only a reply the owner stopped here before any text settled keeps no bubble; a dropped reply still says it did not finish"; spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+// spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays"; spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
 import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,10 @@ const mounts: Mount[] = [
 
 /** Each bubble of the conversation, by the words it shows. */
 const bubbles = () => Array.from(document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article"), (line) => line.textContent ?? "");
+
+/** Each bubble read from the agent's history, leaving out the reply being written or kept live by a Stop. */
+const stored = () => Array.from(document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article"))
+  .filter((line) => line.closest("[data-alpha-message-id]")?.getAttribute("data-alpha-message-id") !== "reply").map((line) => line.textContent ?? "");
 
 /** Write `text` in the composer and send it, as the owner does. */
 async function send(alpha: Alpha, runtime: ReturnType<typeof assistant.runtime>, text: string) {
@@ -65,7 +69,7 @@ async function restore(alpha: Alpha, title: string) {
 }
 
 describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Story: Understand why a reply did not finish\")", () => {
-  it("a dropped reply still says it did not finish, and a send of only a reviewed email draws no empty bubble", async () => {
+  it("keeps no bubble for a reply stopped before any of its text settled, only a notice for a dropped one, and none empty for a send of only a reviewed email", async () => {
     const world = { ...scene(), phone: true };
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [
       { id: "m1", role: "user", text: "Tell me a long story" },
@@ -86,11 +90,11 @@ describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Stor
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
     await until(alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
     await drawn(() => vi.waitFor(() => expect(bubbles().length).toBeGreaterThan(0)));
-    // spec/app/assistant/reply.md, "Read again from history, only a reply the owner stopped here before any text settled keeps no bubble; a dropped reply still says it did not finish": no Stop was pressed here, so a reply whose stream closed or that a Stop elsewhere ended reads as before, with the notice that it did not finish.
+    // spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays": with no Stop pressed here, a reply a Stop reached first and a dropped stream say only that they did not finish, never their stored text, and a reply the runtime ended still says why.
     // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text": the send of only the email draws no empty bubble.
     const shown = bubbles();
-    expect([shown.length, shown.filter((text) => text.includes("The reply did not finish")).length, shown.some((text) => text.trim() === "")]).toEqual([7, 3, false]);
-    expect([shown[1]?.includes("Once upon a"), shown[3]?.includes("Then the")]).toEqual([true, true]);
+    expect([shown.map((text) => text.includes("The reply did not finish") ? "did not finish" : text), shown.some((text) => text.includes("Once upon a") || text.includes("Then the"))])
+      .toEqual([["Tell me a long story", "did not finish", "Shorter please", "did not finish", "The email asks to move lunch to Friday.", "Thanks", "did not finish"], false]);
   });
 
   it("keeps no bubble for a reply the owner stopped before any of its text settled, and keeps text that settled before a Stop", async () => {
@@ -126,10 +130,7 @@ describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Stor
     }
     Object.assign(world.ask.kept.get("c1")?.messages.find((one) => one.id === "m2a") ?? {}, { failureKind: "aborted", abortCause: "client_left" });
     await readAgain(alpha, runtime);
-    // spec/app/assistant/reply.md, "Read again from history, only a reply the owner stopped here before any text settled keeps no bubble; a dropped reply still says it did not finish": the first Stop came before any text settled, so its stored provisional text and the notice stay out; the second came after its text settled, and eliza stored that settled text as aborted, so it stays.
-    await drawn(() => vi.waitFor(() => expect(bubbles()[2]).toBe("Once upon a time there was a cat.The reply did not finish")));
-    const shown = bubbles();
-    expect([shown.slice(0, 3), shown.some((text) => text.includes("Once upon a") && !text.includes("Once upon a time"))])
-      .toEqual([["Tell me a long story", "Shorter please", "Once upon a time there was a cat.The reply did not finish"], false]);
+    // spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays": the first Stop came before any text settled, so its stored provisional text and the notice stay out; the second came after its text settled, and eliza stored that settled text as aborted, so it stays.
+    await drawn(() => vi.waitFor(() => expect(stored()).toEqual(["Tell me a long story", "Shorter please", "Once upon a time there was a cat.The reply did not finish"])));
   });
 });

@@ -233,36 +233,51 @@ pure def sometimesAReplyIsDeclined(r: Reply): bool = r.status == Ignored
 pure def sometimesAFailureReplacesTheText(r: Reply): bool = r.status == Interrupted and not(r.stopped) and r.shown == 0 and r.acks == 1
 ```
 
-### Read again from history, only a reply the owner stopped here before any text settled keeps no bubble; a dropped reply still says it did not finish
+### Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays
 
 eliza stores a reply that ended early as aborted, with the text it had and
 the cause of its end: `stop` when a Stop reached the turn first, and
 `client_left` when the stream that carried it closed first. Alpha's own
 Stop closes the reply's stream before it posts the Stop, so eliza names
-that Stop `client_left` too, the same as a stream dropped by the bridge's
-time or idle limit, a lost connection, or a reload of Alpha. The cause
-alone does not say the owner stopped it, so Alpha remembers, for as long
-as it runs, each turn the owner stopped before any of its text settled.
-Read again, an aborted reply with the cause `stop` or `client_left`
-whose turn Alpha remembers keeps no bubble: its text was never shown, and
-the conversation's check owned the only notice. Every other aborted reply
-reads as it did: its text with the notice that it did not finish. A dropped
-reply, one the runtime ended, one a restart cut, one stopped after text
-settled (eliza may store that settled text before it stores the reply)
-and one stopped before Alpha last started all keep their bubble.
+that Stop `client_left` too, the same as a stream closed by the bridge's
+time or idle limit, a lost connection, or a reload of Alpha. So Alpha
+remembers, for as long as it runs, each turn the owner stopped and whether
+any of its text had settled by then. Read again, an aborted reply whose
+turn the owner stopped here before any text settled keeps no bubble: its
+text was never shown, and the conversation's check owned the only notice.
+One whose turn the owner stopped here after text settled keeps the text
+eliza stored, which is that settled text, with the notice that it did not
+finish (eliza may store a reply's settled text before it stores the
+reply). Any other aborted reply with the cause `stop` or `client_left`
+says only that it did not finish, never the text eliza stored, which was
+never shown: a dropped stream, a Stop from another device, or the owner's
+Stop before Alpha last started. v119 likewise drew its failure line in
+place of an aborted reply's text. One the runtime ended or a restart cut
+reads as before, its text with the notice.
 
 ```quint
+type HistoryLine = NoBubble | NoticeOnly | TextAndNotice
+
 pure def stoppedBeforeSettled(r: Reply): bool = r.stopped and r.shown == 0
 
-pure def keptOutOfHistory(cause: str, stoppedHere: bool): bool =
-  stoppedHere and (cause == "stop" or cause == "client_left")
+pure def readAgainAborted(cause: str, stoppedHere: bool, settledHere: bool): HistoryLine =
+  if (not(cause == "stop" or cause == "client_left")) TextAndNotice
+  else if (not(stoppedHere)) NoticeOnly
+  else if (settledHere) TextAndNotice
+  else NoBubble
 
 pure val causeValues = Set("stop", "client_left", "runtime", "restart", "")
 
-pure def lawADroppedReplyStillSaysItDidNotFinish(cause: str): bool = not(keptOutOfHistory(cause, false))
+pure def lawAStopOrDropNotSeenHereShowsOnlyTheNotice(cause: str, settledHere: bool): bool =
+  (cause == "stop" or cause == "client_left") implies readAgainAborted(cause, false, settledHere) == NoticeOnly
 
-pure def lawOnlyAStopOrALeftStreamIsKeptOut(cause: str, stoppedHere: bool): bool =
-  keptOutOfHistory(cause, stoppedHere) implies (cause == "stop" or cause == "client_left")
+pure def lawAnOwnerStopBeforeSettledTextKeepsNoBubble(cause: str): bool =
+  (cause == "stop" or cause == "client_left") implies readAgainAborted(cause, true, false) == NoBubble
+
+pure def lawTextThatSettledBeforeAStopStays(cause: str): bool = readAgainAborted(cause, true, true) == TextAndNotice
+
+pure def lawOnlyAStopOrALeftStreamLosesItsText(cause: str, stoppedHere: bool, settledHere: bool): bool =
+  readAgainAborted(cause, stoppedHere, settledHere) != TextAndNotice implies (cause == "stop" or cause == "client_left")
 
 pure def lawSettledTextIsNeverRememberedAsUnsettled(r: Reply): bool = r.shown >= 1 implies not(stoppedBeforeSettled(r))
 ```
