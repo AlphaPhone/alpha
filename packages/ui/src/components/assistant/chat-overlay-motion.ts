@@ -198,7 +198,8 @@ export function easedTimeAt(progress: number): number {
 
 /**
  * The header's opacity keyframes while the sheet's height eases from `from` to `to` over a SHEET_EASE move: hidden until
- * the sheet has `fit` of height for it, then shown over the next ROW_REVEAL (COA:281-295).
+ * the sheet has `fit` of height for it, then shown over the next ROW_REVEAL (COA:281-295). Their offsets are already
+ * times on that curve, so the animation that plays them runs linearly.
  */
 export function revealFrames(from: number, to: number, fit: number): Keyframe[] {
   const [low, high] = [Math.min(from, to), Math.max(from, to)];
