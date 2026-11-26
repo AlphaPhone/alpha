@@ -2,7 +2,9 @@
 
 The camera of the phone: a viewfinder that focuses where the owner taps,
 zooms by pinch or by its chips, flips between the lenses and lights the
-flash, self-timer, framing grid and photo aspect ratio; it takes photos and records videos, and shows the last one taken.
+flash; it takes photos and records videos, and shows the last one taken. Its
+header holds back, flip and flash, as Alpha's approved build drew it; the
+self-timer, framing grid and photo aspect ratio have no header control.
 Opened from the lock screen of an Alpha image it is the secure camera,
 which shows only what was taken there and opens nothing else. A video's
 timer, limits and ending are the [Recording](./recording.md); a photo taken
