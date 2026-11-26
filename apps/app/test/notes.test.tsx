@@ -412,7 +412,7 @@ describe("Notes", () => {
     await press("Delete");
     await until(alpha, runtime, List, (state) => state.selectionResult === "RefusedSelection" && state.read.status === "Loaded");
     expect(world.notes.trash.map(({ note }) => note.id)).toEqual(["enclave"]);
-    expect(world.notes.deleteRequests.map(({ id }) => id)).toEqual(["enclave", "groceries"]);
+    expect(world.notes.deleteRequests?.map(({ id }) => id)).toEqual(["enclave", "groceries"]);
     await rendered(() => {
       expect(button("Select Groceries")?.getAttribute("aria-pressed")).toBe("true");
       expect(button("Select Design sync")?.getAttribute("aria-pressed")).toBe("true");
