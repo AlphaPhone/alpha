@@ -85,7 +85,7 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
   } catch (error) => error.known && act !== "Sweep" ? failed : lost
 }
 
-/** Each confirmed recording was erased by Android and acknowledged by the same resident. */
+/** The recording’s device confirms its erasure and the same agent acknowledges it. */
 effect function cleanRecorded(ids: ReadonlyArray<number>): { readonly ok: boolean; readonly known: boolean }!!(Agent | NoteStore | NoteDevice) {
   const unknown = { ok: false, known: false }
   const identity = ownerAt() catch () => ""
