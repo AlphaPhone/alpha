@@ -114,9 +114,9 @@ describe("Notes", () => {
     await until(alpha, target, CalendarForm, (state) => state.shown && state.kept);
     const state = await target.runPromise(CalendarForm.use((form) => form.get()));
     const fields = await target.runPromise(kept(state.day, state.owner));
-    const notes: unknown = expect.stringContaining(words);
+    const noted: unknown = expect.stringContaining(words);
     const revision: unknown = expect.any(String);
-    expect(fields).toMatchObject({ title: row, notes, noteOrigin: {
+    expect(fields).toMatchObject({ title: row, notes: noted, noteOrigin: {
       agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2, revision,
     } });
     expect(fields.calendar).toBe(destination);

@@ -77,7 +77,7 @@ async function fromMonth(pill: string) {
  * pointer is coarse, so the window is measured again with a touch pointer.
  */
 async function widen(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
-  if ((await runtime.runPromise(View.use((view) => view.get()))).wide) return;
+  if ((await runtime.runPromise(Effect.flatMap(View, (view) => view.get()))).wide) return;
   const coarse = window.matchMedia("(pointer: coarse)");
   Object.defineProperty(coarse, "matches", { configurable: true, value: true });
   const original = window.matchMedia.bind(window);

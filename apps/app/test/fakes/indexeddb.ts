@@ -15,7 +15,7 @@ class Request<T> {
   onupgradeneeded: Listener = null;
 }
 
-const later = (work: () => void) => void Effect.runFork(Effect.andThen(Effect.yieldNow, work));
+const later = (work: () => void) => void Effect.runFork(Effect.andThen(Effect.yieldNow, Effect.sync(work)));
 
 export function memoryIndexedDB() {
   const databases = new Map<string, Map<string, Map<IDBValidKey, unknown>>>();
