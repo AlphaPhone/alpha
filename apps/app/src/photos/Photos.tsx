@@ -290,7 +290,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
           <div role="group" aria-label="Photos sections" className={cn("mx-4 flex shrink-0 gap-0.75 rounded-segment bg-secondary p-1", state.tab === "Library" && allow === undefined ? "mb-6" : "mb-3")}>
-            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Folder /> }] as const).map(({ tab, icon }) => <button key={tab} type="button"
+            {([{ tab: "Library", icon: <Folder /> }, { tab: "Albums", icon: <Folder /> }] as const).map(({ tab, icon }) => <button key={tab} type="button"
               className={cn("flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-segment-option px-3 py-2 text-sm leading-tight font-semibold transition-colors duration-base focus-visible:outline-focus focus-visible:outline-offset-focus [&_svg]:size-4.5",
                 state.tab === tab ? "bg-foreground text-background" : "text-foreground")} aria-pressed={state.tab === tab}
               onClick={() => talk({ type: "showTab", tab })}>{icon}<span>{tab}</span></button>)}
