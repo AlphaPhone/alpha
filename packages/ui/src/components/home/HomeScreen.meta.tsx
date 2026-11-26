@@ -13,7 +13,7 @@ export const meta: ComponentMeta<HomeScreenProps> = {
   decorator: (story) => <div className="h-dvh">{story()}</div>,
   examples: {
     "Reading saved tiles": { tiles: undefined, cards: [], onBeginEditing: undefined },
-    "Cards on their way": { cards: [], cardsAwaited: true },
+    "Held under an app": { held: true },
     Editing: editing,
     "Add to Home": { ...editing, adding: true, onShowHidden: undefined },
     "Saving a change": { ...editing, onRemoveTile: undefined, onMoveTile: undefined, onShowHidden: undefined },
