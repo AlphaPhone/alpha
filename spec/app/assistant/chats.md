@@ -165,27 +165,24 @@ pure def scroll(c: Chats, around: int): Moved = shown(c.chosen, around, c.origin
 
 ### The conversation keeps its newest message in view until the owner scrolls up from it
 
-As in Alpha before VibeStack, a reply
-arriving, or the sheet growing or shrinking under the finger, keeps the
-end of the conversation in view while the owner reads there: within 80
-points of the end it follows. A scroll that the conversation's own
-movement makes, staying at or below where it was last brought to its end,
-does not stop that; only the owner scrolling up past that point does, and
-from then on nothing moves the conversation under the owner until they
-scroll back to its end. A page of history or a search hit opens where it
-was read, not at the end.
+As in Alpha before VibeStack (v119, old-line Alpha 45f6bed30, model.js:5561,
+:5579-5599), whether the conversation follows its end is judged against the
+size it had when it was last seen: within 80 points of that end it follows,
+so a reply arriving, the sheet growing or shrinking, or the conversation's
+own move to its end never stops it. Only the owner scrolling up from the
+end stops it, until they scroll back to it. A page of history or a search
+hit opens where it was read, not at the end.
 
 ```quint
 pure val followReach = 80
 
-pure def followsEnd(following: bool, belowView: int, top: int, end: int): bool =
-  belowView < followReach or (following and top >= end)
+pure def followsEnd(seenHeight: int, seenView: int, top: int): bool = seenHeight - top - seenView < followReach
 
-pure def lawScrollingUpFromTheEndStopsFollowing(following: bool, belowView: int, top: int, end: int): bool =
-  (belowView >= followReach and top < end) implies not(followsEnd(following, belowView, top, end))
+pure def lawArrivingTextNeverStopsFollowing(seenHeight: int, seenView: int, arrived: int): bool =
+  (arrived >= 0 and seenView <= seenHeight) implies followsEnd(seenHeight, seenView, seenHeight - seenView)
 
-pure def lawTheEndInViewIsFollowed(following: bool, belowView: int, top: int, end: int): bool =
-  belowView < followReach implies followsEnd(following, belowView, top, end)
+pure def lawScrollingUpFromTheEndStopsFollowing(seenHeight: int, seenView: int, up: int): bool =
+  up >= followReach implies not(followsEnd(seenHeight, seenView, seenHeight - seenView - up))
 ```
 
 ### A reply that finished after it was stopped is read again into the conversation showing
