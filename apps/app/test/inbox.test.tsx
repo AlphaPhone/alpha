@@ -300,6 +300,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
     expect([title(), told(), world.inbox.threadReads.length]).toEqual(["Revised term sheet", expect.stringContaining("https://northpoint.test/room"), threadReads]);
     expect(told()).not.toContain(termSheet.threadBody);
+    // The divergent thread copy only proves the selected read wins above. Gmail returns one body per message and history
+    // revision, so later thread pages carry the message's own text, which the phone may then keep as its saved copy.
+    delete termSheet.threadBody;
 
     if (!phone) {
       // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
