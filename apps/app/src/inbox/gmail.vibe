@@ -89,6 +89,8 @@ export service Mail {
   email(account: number): string
   /** The grant eliza's client names an account by, as the newest account check gave it. */
   grant(account: number): string | undefined
+  /** The Google connection selected by the owner, including one that no longer grants reads. */
+  connection(account: number): string | undefined
   canOperate(account: number, kind: Proposal["kind"]): boolean
   card(message: number): MailCard | undefined
   remember(account: number, card: MailCard): number!!
@@ -237,6 +239,7 @@ export const mail = Layer.effect(Mail, effect {
     generation: (account?: number) => account === undefined ? ownerGeneration : accountGenerations.get(account) ?? ownerGeneration,
     email: (account: number) => ledger.labels?.[String(account)] ?? "",
     grant: (account: number) => grants.get(account)?.id,
+    connection: (account: number) => Object.keys(ledger.credentials).find((id) => ledger.accounts[`grant:${id}`] === account),
     canOperate(account: number, kind: Proposal["kind"]) {
       const grant = grants.get(account)?.consent
       return grant !== undefined && (kind === "send" ? grant.send : grant.modify)
