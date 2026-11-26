@@ -18,7 +18,7 @@ import { feel } from "../shell/haptics.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
-import { type AppsInput, actInApps, chooseApp, closeApps, openApps, openHomeFavorite, openOwnTile, told } from "./home.vibe";
+import { type AppsInput, type HomeEditInput, actInApps, chooseApp, closeApps, editHome, homeEditFrame, openApps, openHomeFavorite, openOwnTile, told } from "./home.vibe";
 import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
@@ -74,13 +74,15 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   }, [alpha]);
   if (!h || !s || h.host === "AssistantOnly") return null;
   const can = (event: Home.Event) => home.can(event, owner);
-  const send = (event: Home.Event) => void home.send(event, owner);
-  const offered = (event: Home.Event) => (can(event) ? () => send(event) : undefined);
-  const notice = inline && inline.place === Home.noticeAt(h, s) ? inline.notice : undefined;
-  const beginEditing = { type: "beginEditing", shell: s } as const;
-  const mayEdit = !saving(h.tiles);
   const landscapePhone = landscapeHomeInput(canvas);
   const alongside = Home.besideHomeSheet(s, landscapePhone);
+  const editVisible = Home.editSite(s, alongside) && homeEditFrame(canvas) && layers !== undefined && !pageInert(layers);
+  const editing = h.editing && editVisible;
+  const notice = inline && inline.place === Home.noticeAt(h, s, alongside) ? inline.notice : undefined;
+  const beginEditing = { type: "beginEditing", shell: s, beside: alongside } as const;
+  const mayEdit = editing && !saving(h.tiles);
+  const actOnEdit = (event: HomeEditInput) => runtime.runPromise(editHome(event, s.route, alongside));
+  const offered = (event: HomeEditInput) => editVisible && can(event) ? () => { void actOnEdit(event); } : undefined;
   const showingApps = s.drawer && Home.onPhone(h);
   const paired = showingApps && adjacentAskSheet(s, landscapePhone);
   const drawerActive = showingApps && layers !== undefined && !pageInert(layers) && s.textAsk.tag === "NoTextAsk"
@@ -120,25 +122,26 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       })) : undefined}
       cardsInert={alongside}
       drawerInert={s.assistant !== "Bar" && !alongside}
-      editing={h.editing}
+      covered={h.editing && !editVisible}
+      editing={editing}
+      tileGestureScope={`${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}`}
       onOpenTile={(id) => {
         const tile = tileOf(id);
         if (tile.tag === "Own") void runtime.runPromise(openOwnTile(tile.view, s.route, alongside));
         else void runtime.runPromise(openHomeFavorite(tile.app, s.route, alongside));
       }}
       onOpenDrawer={Home.offersDrawer(h) ? () => { void runtime.runPromise(openApps(s.route, alongside)); } : undefined}
-      onBeginEditing={can(beginEditing) ? () => {
-        send(beginEditing);
-        void alpha.runtime.runPromise(feel("LongPress"));
-      } : undefined}
+      onBeginEditing={editVisible && can(beginEditing) ? () => { void actOnEdit(beginEditing).then((accepted) => {
+        if (accepted) void alpha.runtime.runPromise(feel("LongPress"));
+      }); } : undefined}
       hold={hold}
-      onRemoveTile={mayEdit ? (id) => offered({ type: "removeFromHome", tile: tileOf(id), shell: s })?.() : undefined}
-      onMoveTile={mayEdit ? ({ id, onto, behind }) => offered({ type: "moveTile", tile: tileOf(id), onto: tileOf(onto), behind, shell: s })?.() : undefined}
+      onRemoveTile={mayEdit ? (id) => offered({ type: "removeFromHome", tile: tileOf(id), shell: s, beside: alongside })?.() : undefined}
+      onMoveTile={mayEdit ? ({ id, onto, behind }) => offered({ type: "moveTile", tile: tileOf(id), onto: tileOf(onto), behind, shell: s, beside: alongside })?.() : undefined}
       scrollRef={homeScroller}
       onShowHidden={offered({ type: "showHidden", shell: s })}
       onDone={offered({ type: "done" })}
       notice={notice}
-      adding={h.adding}
+      adding={editing && !alongside && h.adding}
       hidden={Home.hiddenApps(h, s).map((view) => tileItem({ tag: "Own", view }, known.apps))}
       onAddToHome={mayEdit ? (id) => offered({ type: "addToHome", tile: tileOf(id), shell: s })?.() : undefined}
       onCloseAdding={() => offered({ type: "backOut" })?.()}

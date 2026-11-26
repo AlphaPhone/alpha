@@ -33,6 +33,8 @@ export type HomeScreenProps = {
   onBeginEditing?: () => void;
   /** Schedules and cancels a stationary press on a tile. */
   hold?: LauncherHold;
+  /** Replaces the tiles' gesture surface when its owning frame or route changes. */
+  tileGestureScope?: string;
   /** While editing, takes a tile off Home; left out while a change is being saved. */
   onRemoveTile?: (id: string) => void;
   /** While editing, moves a tile beside another; left out while a change is being saved. */
@@ -65,7 +67,7 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], appCards, tiles, editing = false, covered = false, cardsInert = false, drawerInert = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], appCards, tiles, editing = false, covered = false, cardsInert = false, drawerInert = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
@@ -80,6 +82,7 @@ export function HomeScreen({
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
           <HomeTileGrid
+            key={tileGestureScope}
             tiles={tiles}
             editing={editing}
             onOpen={onOpenTile}

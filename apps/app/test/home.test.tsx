@@ -77,7 +77,7 @@ describe("Home on a phone", () => {
     });
     expect([button("Inbox3 unread") !== undefined, button("Telegram") !== undefined, button("Slack") !== undefined, button("Notes") !== undefined]).toEqual([true, false, false, true]);
 
-    // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
+    // spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerdown", 80, 330)));
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointermove", 80, 352)));
     await later(alpha, 450);
@@ -237,6 +237,24 @@ describe("Home on a phone", () => {
     expect(dialog()?.getAttribute("aria-modal")).toBe("true");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.assistant === "Bar");
+
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    // spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
+    await drawn(() => held("Notes"));
+    await vi.waitFor(() => expect(button("Done")).toBeDefined());
+    await rotate(false);
+    expect(button("Done")).toBeUndefined();
+    await rotate(true);
+    await vi.waitFor(() => expect(button("Done")).toBeDefined());
+    await press("Remove Clock");
+    await vi.waitFor(() => expect(tiles()).toEqual(["view:Notes"]));
+    expect(chat()).not.toBeNull();
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+    expect(button("Done")).toBeDefined();
+    await hardware("back");
+    await vi.waitFor(() => expect(button("Done")).toBeUndefined());
 
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
