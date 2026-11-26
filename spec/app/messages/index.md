@@ -610,25 +610,32 @@ pure def holdsNewDraft(s: Messages, visit: int): bool = showingPane(s, New) and 
 ### A current Android text request opens New only when its saved draft is empty
 
 Opening Messages from Android can fill To and the text of the next New
-draft. It takes the request only while that request and the Messages list
-are still in front, the saved New draft was read and is empty, and the
-address names the prepared recipients. An earlier request or a draft
-already in use changes nothing. The filled draft opens in New, leaving
-Send to the owner.
+draft. The exact request opens an empty New visit from the Messages list
+after the phone confirms that its saved draft is empty. Only the admitted
+visit can save the request's address and text, after checking the request
+and draft again. The phone acknowledges only the exact still-current
+request whose fill was saved. Replacing a request leaves any admitted
+save in place and leaves the replacement unacknowledged. Send stays with
+the owner.
+
+The encrypted New draft keeps the admitted request's token and revision
+with the fill. That evidence stays available through owner edits and send
+settlement. After a restart the phone can acknowledge the same still-current
+request from that evidence without opening or filling the draft again.
 
 ```quint
-pure def canOpenAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): bool =
-  requestCurrent and empty and canStartNewDraft(s, revision, thread) and revision > s.newDraft.revision and thread > 0
+pure def canOpenAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int): bool =
+  requestCurrent and empty and canStartNewDraft(s, revision, 0)
 
-pure def openAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): Moved =
-  startNewDraft(s, revision, thread)
+pure def openAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int): Moved =
+  startNewDraft(s, revision, 0)
 
 pure def stepAndroidDraftOpensItsNewVisit(before: Messages, via: str, after: Messages): bool =
   via == "openAndroidDraft" implies (before.front and before.pane == Threads and after.front and after.pane == New
-    and after.newDraft.visit == before.newDraft.visit + 1 and after.newDraft.revision > before.newDraft.revision
-    and after.newDraft.recipient > 0 and not(after.newDraft.picking))
+    and after.newDraft.visit == before.newDraft.visit + 1 and after.newDraft.revision >= 0
+    and after.newDraft.recipient == 0 and not(after.newDraft.picking))
 
-pure val eval_witness_canOpenAndroidDraft = ("show", ("openAndroidDraft", true, true, 1, 1))
+pure val eval_witness_canOpenAndroidDraft = ("show", ("openAndroidDraft", true, true, 0))
 ```
 
 ### The owner can write before choosing To, then adjust To without moving or losing the message

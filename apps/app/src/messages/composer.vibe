@@ -23,7 +23,7 @@ import { type Job, Whole, answer, contained, following, hearing, reacting, run, 
 import { grantOf } from "../phone/phone.vibe"
 import { Callers, type MessageSource } from "../phone/voicemail.vibe"
 import { makeConversationDrafts, type ConversationDrafts, type DraftContent } from "./conversation-drafts.vibe"
-import { canonicalDraftRecipients, sameDraftSource, type DraftReference } from "./draft-record.vibe"
+import { AndroidDraftToken, androidInboundOf, canonicalDraftRecipients, sameDraftSource, type AndroidInboundDraft, type DraftReference } from "./draft-record.vibe"
 import { openDraftRecord, readLegacySmsDraft, recoverLegacySmsDraft, settleDraftRecord, writeDraftRecord, type HeldDraft } from "./draft-store.vibe"
 import { Conversations, Inbox, elsewhere, noticeTransport } from "./messages.vibe"
 
@@ -46,6 +46,7 @@ export interface NewMessageDraft {
   readonly recipients: string
   readonly body: string
   readonly pictures: ReadonlyArray<Picture>
+  readonly androidInbound?: AndroidInboundDraft
 }
 
 /** What one send carries, kept from Send until its record is retired, so that a send read back after a restart is the same one. */
@@ -1020,7 +1021,7 @@ export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePi
 }
 
 const incomingSmsDraft = Schema.Struct({
-  token: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
+  token: AndroidDraftToken,
   recipients: Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(24))).check(Schema.isMinLength(1), Schema.isMaxLength(SMS_DIRECT_MAX_RECIPIENTS)),
   body: Schema.String.check(Schema.isMaxLength(MMS_MAX_BODY)),
 })
@@ -1033,12 +1034,17 @@ effect function pendingDraft(port: AndroidDraftPort): (IncomingSmsDraft | undefi
   return Option.getOrUndefined(androidDraft(Option.getOrUndefined(Option.flatten(pending))))
 }
 
+function sameAndroidDraft(current: IncomingSmsDraft | undefined, offer: IncomingSmsDraft): boolean {
+  return current?.token === offer.token && current.body === offer.body && current.recipients.length === offer.recipients.length
+    && current.recipients.every((recipient, at) => recipient === offer.recipients[at])
+}
+
 function emptyNew(draft: NewMessageDraft): boolean {
   return draft.recipients === "" && draft.body === "" && draft.pictures.length === 0
 }
 
-/** A native handoff writes the exact next New revision once its foreground and stored draft still match. */
-effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft): boolean!!(Messages | Shell | Drafts | Conversations | Composer.Machine | Device | Layers | Telephony) {
+/** Save the native handoff only after its exact empty visit is admitted. */
+effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft): boolean!!(Messages | Shell | Drafts | Conversations | Composer.Machine | Device | Layers | Telephony | Vault) {
   const store = try Drafts
   const messages = try Messages
   const shell = try Shell
@@ -1058,47 +1064,62 @@ effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft
   const into = { type: "openView", view: "Messages" } as const
   if (!already && !(try contained(shell.send(into, (where) => where.route === starting.route), "opening Messages for the Android text"))) return false
   const route = already ? starting.route : starting.route + 1
-  const current = effect {
+  const onRoute = effect {
     const where = try shell.get()
-    return where.route === route && showing(where, "Messages") && (try uncovered)
+    return where.route === route && showing(where, "Messages")
+  }
+  const current = effect { return (try onRoute) && (try uncovered) }
+  const storedForOffer = effect {
+    if (!(try current)) return false
+    const held = openDraftRecord(newSource) catch () => undefined
+    return held !== undefined && androidInboundOf(held.record)?.token === offer.token && (try current)
+  }
+  const acknowledge = effect {
+    if (!sameAndroidDraft(try pendingDraft(port), offer) || !(try current)) return false
+    return timeout(Effect.as(tryPromise(() => port.acknowledgeSmsDraft({ token: offer.token })), true), "2 seconds") catch () => false
   }
   const shown = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (state) => state.front)), "3 seconds")
+  if (Option.isSome(shown) && (try storedForOffer)) return try acknowledge
   const accepted = Option.isSome(shown) && (try Semaphore.withPermit(store.newVisits, effect {
+    const listed = try messages.get()
+    const sameList = (page: MessagesState) => canNewMessage(page) && page.newDraft.visit === listed.newDraft.visit
+      && page.list.ticket === listed.list.ticket
     const onList = effect {
-      return (try current) && canNewMessage(try messages.get())
+      return (try current) && sameList(try messages.get())
     }
     if (!(try onList) || !(try store.openNewDraft(onList))) return false
     const before = try store.newDraft()
+    if (before.androidInbound?.token === offer.token) return true
     if (!emptyNew(before) || newDraftHeld(try composer.get(), before.revision)) return false
-    const latest = try pendingDraft(port)
-    if (latest?.token !== offer.token || !(try current) || (try store.newDraft()) !== before) return false
-    const draft = { ...before, recipients, body: offer.body, revision: before.revision + 1 }
+    const revision = before.revision + 1
+    const draft = { ...before, recipients, body: offer.body, revision, androidInbound: { token: offer.token, admittedRevision: revision } }
     const thread = try numberForNew(draft)
-    const event = { type: "openAndroidDraft", requestCurrent: true, empty: true, revision: draft.revision, thread } as const
-    const canOpen = effect {
-      return (try current) && canOpenAndroidDraft(try messages.get(), true, true, draft.revision, thread)
-        && !newDraftHeld(try composer.get(), before.revision)
+    if (thread === 0 || !sameAndroidDraft(try pendingDraft(port), offer) || !(try current)) return false
+    const event = { type: "openAndroidDraft", requestCurrent: true, empty: true, revision: before.revision } as const
+    const moved = messages.send(event, (page) => sameList(page) && canOpenAndroidDraft(page, true, true, before.revision)) catch () => undefined
+    if (moved === undefined) return false
+    const visit = moved.state.newDraft.visit
+    const sameVisit = (page: MessagesState) => holdsNewDraft(page, visit) && page.newDraft.revision === before.revision && page.newDraft.recipient === 0
+    if (!sameAndroidDraft(try pendingDraft(port), offer) || !(try current)) return false
+    const admitted = try messages.get()
+    if (!sameVisit(admitted) || admitted.newDraft.picking || (try store.newDraft()) !== before
+      || newDraftHeld(try composer.get(), before.revision) || !(try store.saveNewDraft(draft))) return false
+    if (try onRoute) {
+      const landed = { type: "editNewDraft", visit, revision: draft.revision, thread, closePicker: false } as const
+      try contained(messages.send(landed, sameVisit), "showing the saved Android text draft")
     }
-    if (!(try canOpen) || !(try store.saveNewDraft(draft))) return false
-    const stillOffered = (try pendingDraft(port))?.token === offer.token
-    if (stillOffered && (try canOpen) &&
-      (try contained(messages.send(event, (state) => canNewMessage(state)), "filling the Android text draft"))) return true
-    if ((try store.newDraft()).revision === draft.revision) {
-      try ignore(store.saveNewDraft({ ...before, revision: draft.revision + 1 }))
-    }
-    return false
+    return true
   }))
   if (!accepted && !already && (try current) && canNewMessage(try messages.get())) {
     try contained(shell.send({ type: "goBack" }, (where) => where.route === route), "closing the unused Android text opening")
   }
-  return accepted
+  return accepted && (try storedForOffer) && (try acknowledge)
 }
 
 // spec/app/messages/index.md, "A current Android text request opens New only when its saved draft is empty"
 const androidDraftEntries = started(effect {
   if (!registered("ElizaTelephony")) return
   const port = noticeTransport()
-  let taken: string | undefined
   const wakes = Stream.callback<void>((queue) => effect {
     const listener = tryPromise(() => port.addListener("smsDraft", () => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined
     if (listener !== undefined) try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
@@ -1106,12 +1127,7 @@ const androidDraftEntries = started(effect {
   })
   try Stream.runForEach(wakes, effect () => {
     const offered = try pendingDraft(port)
-    if (offered === undefined) return
-    if (taken !== offered.token) {
-      if (!(try openAndroidDraft(port, offered))) return
-      taken = offered.token
-    }
-    try ignore(tryPromise(() => port.acknowledgeSmsDraft({ token: offered.token })))
+    if (offered !== undefined) try ignore(openAndroidDraft(port, offered))
   })
 }, "reviewing Android text requests in Messages")
 

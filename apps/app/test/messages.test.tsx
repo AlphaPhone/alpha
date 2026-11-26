@@ -290,7 +290,7 @@ describe("Messages on an Alpha image", () => {
 
   it("Start a new message to a number I type (spec/app/messages/index.md, \"Story: Start a new message\")", async () => {
     const world = image();
-    const { alpha } = await openImage(world);
+    const { alpha, close } = await openImage(world);
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded");
 
@@ -350,21 +350,52 @@ describe("Messages on an Alpha image", () => {
     const first = { token: "first-android-text", recipients: ["+14155550122"], body: "Draft from Android" };
     const second = { token: "second-android-text", recipients: ["+14155550100"], body: "A different Android draft" };
     const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
+    const bridge = (globalThis as { Capacitor?: { nativePromise(name: string, method: string, input: unknown): Promise<unknown> } }).Capacitor;
+    if (!bridge) throw new Error("The phone fixture has no native bridge");
+    const nativePromise = bridge.nativePromise;
+    const write = Promise.withResolvers<void>();
+    let writing = false;
+    const pendingWrite = vi.spyOn(bridge, "nativePromise").mockImplementation((name, method, input) => {
+      if (name === "ElizaSecureStore" && method === "compareAndExchange" && typeof input === "object" && input !== null
+        && "key" in input && input.key === "sms-draft:v2:new") {
+        writing = true;
+        return write.promise.then(() => nativePromise.call(bridge, name, method, input));
+      }
+      return nativePromise.call(bridge, name, method, input);
+    });
     // The first acknowledgment is in flight when Android publishes a newer request.
     const acknowledgment = Promise.withResolvers<void>();
     world.telephony.holdSmsDraftAcknowledgment = acknowledgment.promise;
     try {
       world.telephony.smsDraft = first;
       await drawn(world.telephony.wakeSmsDraft);
+      await vi.waitFor(() => expect(writing).toBe(true));
+      await ready(alpha.runtime, Messages, "New admitted before Android draft storage", (s) => s.pane === "New" && s.newDraft.recipient === 0);
+      expect([to(), message()?.value, world.telephony.smsDraftAcknowledgments]).toEqual(["", "", []]);
+      write.resolve();
+      pendingWrite.mockRestore();
       await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([first.token]));
       await drawn(() => undefined);
       expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], first.body, sent]);
+      const imported = await alpha.runtime.runPromise(Effect.flatMap(Messages, (machine) => machine.get()));
 
       const ownerEdit = "I am editing my own draft";
       const label = message()?.getAttribute("aria-label");
       if (!label) throw new Error("The Android text draft did not show an editor");
       await fill(label, ownerEdit);
-      await vi.waitFor(() => expect(message()?.value).toBe(ownerEdit));
+      await ready(alpha.runtime, Messages, "Owner edit in Android draft is saved", (s) => s.pane === "New" && s.newDraft.revision > imported.newDraft.revision);
+      const saved = world.secrets.get("sms-draft:v2:new");
+      expect(saved).toBeDefined();
+      await close();
+      expect(world.telephony.smsDraft).toEqual(first);
+      const restarted = await openImage(world);
+      await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([first.token, first.token]));
+      await ready(restarted.alpha.runtime, Messages, "Messages list after Android draft restart", (s) => s.front && s.pane === "Threads");
+      expect(world.secrets.get("sms-draft:v2:new")).toBe(saved);
+      await press("New message");
+      await ready(restarted.alpha.runtime, Messages, "Owner-edited Android draft restored", (s) => s.pane === "New" && s.newDraft.revision > imported.newDraft.revision);
+      expect([to(), message()?.value]).toEqual([first.recipients[0], ownerEdit]);
+
       world.telephony.smsDraft = second;
       await drawn(world.telephony.wakeSmsDraft);
       acknowledgment.resolve();
@@ -375,8 +406,10 @@ describe("Messages on an Alpha image", () => {
       await vi.waitFor(() => expect(secondReads()).toBeGreaterThan(reads));
       await drawn(() => undefined);
       expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], ownerEdit, sent]);
-      expect([world.telephony.smsDraft, world.telephony.smsDraftAcknowledgments]).toEqual([second, [first.token]]);
+      expect([world.telephony.smsDraft, world.telephony.smsDraftAcknowledgments]).toEqual([second, [first.token, first.token]]);
     } finally {
+      write.resolve();
+      pendingWrite.mockRestore();
       acknowledgment.resolve();
     }
   });
