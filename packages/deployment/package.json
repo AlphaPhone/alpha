@@ -11,7 +11,8 @@
       "types": "./dist/src/deployment.d.ts",
       "default": "./dist/src/deployment.js"
     },
-    "./deployments.json": "./deployments.json"
+    "./deployments.json": "./deployments.json",
+    "./alpha-legal.json": "./alpha-legal.json"
   },
   "scripts": {
     "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && vibelang -p tsconfig.build.json",

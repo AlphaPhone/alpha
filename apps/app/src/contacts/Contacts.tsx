@@ -14,7 +14,7 @@ import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemai
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { contactChatActionsId } from "../assistant/contact-chat-id.ts";
-import { searchFromContact } from "../assistant/contact-search.ts";
+import { attachFromContact, searchFromContact } from "../assistant/contact-search.ts";
 import { returnPhoneTab } from "../phone/back.vibe";
 import { PhoneTabs } from "../phone/PhoneTabs.tsx";
 import { callerInitials, displayNumber } from "../phone/words.ts";
@@ -151,7 +151,8 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-        actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="contact" triggerId={contactChatActionsId(route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
+        actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="comms" triggerId={contactChatActionsId(route, state.contact)}
+          onAttach={() => attachFromContact(alpha, route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
         filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />
     </section>
   );

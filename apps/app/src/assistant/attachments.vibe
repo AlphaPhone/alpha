@@ -14,7 +14,8 @@ import { fresh } from "../runtime/attempts.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import type { PageSpeech } from "../voice/voice.vibe"
 import { reencodeImage } from "./image-encode.ts"
-import { type Attached, type TranscriptAttachment, Talk } from "./talk.vibe"
+import { type ContactAttachmentScope, contactFileTargetCurrent, sameContactFileTarget } from "./contact-attachments.vibe"
+import { type Attached, type ContactFileTarget, type TranscriptAttachment, Talk } from "./talk.vibe"
 
 const images = ["image/jpeg", "image/png", "image/gif", "image/webp"]
 const documents = ["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"]
@@ -147,8 +148,25 @@ export interface FileTarget {
 
 type FileSeat = Omit<FileTarget, "revision">
 type AttachmentNeeds = Talk | Composer.Machine | Conversation | Shell | Agent
+type Candidate = { readonly name: string; readonly file: Attached | undefined }
+export type PickerTarget = FileTarget | ContactFileTarget
 
-effect function added(target: FileTarget, candidates: readonly { readonly name: string; readonly file: Attached | undefined }[], active: Effect.Effect<boolean> = succeed(true), suggestion?: string): number!!(Talk | Composer.Machine | Conversation | Agent) {
+function fitFiles(before: readonly Attached[], candidates: readonly Candidate[], room: number) {
+  const chosen = [...before]
+  const refused: string[] = []
+  let bytes = chosen.reduce((size, file) => size + file.data.length, 0)
+  for (const { name, file } of candidates) {
+    if (file !== undefined && chosen.some((current) => current.id === file.id)) continue
+    if (file === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + file.data.length)) refused.push(name)
+    else {
+      chosen.push(file)
+      bytes += file.data.length
+    }
+  }
+  return { chosen, refused }
+}
+
+effect function added(target: FileTarget, candidates: readonly Candidate[], active: Effect.Effect<boolean> = succeed(true), suggestion?: string): number!!(Talk | Composer.Machine | Conversation | Agent) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
   const conversation = try Conversation
@@ -161,16 +179,15 @@ effect function added(target: FileTarget, candidates: readonly { readonly name: 
     const prior = board.snapshot()
     const before = sameBinding(prior.filesBinding, target.binding) ? prior.files : []
     if (before.length > 0 && (prior.filesAuthority === undefined || !Picker.sameArchiveAuthority(prior.filesAuthority, authority))) return 0
-    const chosen: Attached[] = [...before]
     const room = Composer.maxFiles - Composer.attachments(current.editor)
-    let bytes = before.reduce((size, file) => size + file.data.length, 0)
-    const refused: string[] = []
+    const bytes = before.reduce((size, file) => size + file.data.length, 0)
     const viewed = candidates.length === 1 ? candidates[0]?.file : undefined
     const captured = viewed?.origin?.kind === "CapturedPhoto"
     if (captured && (room < 1 || current.unsettled || current.editor.editing > 0 || before.some((file) => file.origin !== undefined)
       || !batchFits(before.length + 1, bytes + viewed.data.length))) return 0
     const replaceAt = viewed?.origin?.kind === "ViewedPhoto" ? before.findIndex((file) => file.origin !== undefined) : -1
     const previous = before[replaceAt]
+    const { chosen, refused } = fitFiles(before, previous === undefined ? candidates : [], room)
     if (viewed !== undefined && previous !== undefined) {
       const duplicate = before.some((file, index) => index !== replaceAt && file.id === viewed.id)
       if (duplicate || before.length !== current.editor.files || !batchFits(chosen.length, bytes - previous.data.length + viewed.data.length)) {
@@ -178,16 +195,6 @@ effect function added(target: FileTarget, candidates: readonly { readonly name: 
         return 0
       }
       chosen[replaceAt] = viewed
-    } else {
-      for (const candidate of candidates) {
-        const next = candidate.file
-        if (next !== undefined && chosen.some((file) => file.id === next.id)) continue
-        if (next === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + next.data.length)) refused.push(candidate.name)
-        else {
-          chosen.push(next)
-          bytes += next.data.length
-        }
-      }
     }
     const count = chosen.length - before.length
     if (count > 0 || previous !== undefined) {
@@ -234,12 +241,39 @@ export effect function documentAttachmentFile(item: DocumentAttachment): (File |
   return Effect.try(() => selected(item.dataBase64, item.name, item.mimeType)) catch () => undefined
 }
 
+effect function addedToContact(target: ContactFileTarget, candidates: readonly Candidate[], active: boolean!!): number!!(ContactAttachmentScope | Agent) {
+  const { board, attachmentLock } = try Talk
+  return try attachmentLock.withPermits(1)(effect {
+    const authority = try attachmentAuthority()
+    if (authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority) || !(try active) || !(try contactFileTargetCurrent(target))) return 0
+    const draft = board.snapshot().contactDraft
+    const before = draft !== undefined && sameContactFileTarget(draft.target, target) ? draft.files : []
+    const { chosen } = fitFiles(before, candidates, Composer.maxFiles - before.length)
+    const count = chosen.length - before.length
+    if (count > 0) board.change({ contactDraft: { target, files: chosen } })
+    return count
+  })
+}
+
+/** A removal from the Contact sheet never touches the ordinary draft. */
+export effect function removeContactFile(target: ContactFileTarget, id: string): void!!(ContactAttachmentScope | Agent) {
+  const { board, attachmentLock } = try Talk
+  try attachmentLock.withPermits(1)(effect {
+    const authority = try attachmentAuthority()
+    const draft = board.snapshot().contactDraft
+    if (draft === undefined || authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority)
+      || !sameContactFileTarget(draft.target, target) || !(try contactFileTargetCurrent(target))) return
+    const files = draft.files.filter((file) => file.id !== id)
+    if (files.length !== draft.files.length) board.change({ contactDraft: files.length === 0 ? undefined : { target, files } })
+  })
+}
+
 // spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
 export effect function insertPickedFiles(
-  target: FileTarget,
+  target: PickerTarget,
   files: readonly { readonly name: string; readonly file: File | undefined }[],
   active: Effect.Effect<boolean>,
-): number!!(Talk | Composer.Machine | Conversation | Agent) {
+): number!!(ContactAttachmentScope | Composer.Machine | Agent) {
   if (!(try active)) return 0
   const authority = try attachmentAuthority()
   if (authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority)) return 0
@@ -248,7 +282,7 @@ export effect function insertPickedFiles(
   const candidates = try Effect.forEach(files.slice(0, Composer.maxFiles), effect ({ name, file }) => {
     return { name, file: file === undefined ? undefined : try encoded(file, fresh()) }
   })
-  return try added(target, candidates, active)
+  return "about" in target ? try addedToContact(target, candidates, active) : try added(target, candidates, active)
 }
 
 // spec/app/assistant/composer.md, "A shared result adds its file and leaves the owner's draft as written"; spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo"

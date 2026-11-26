@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import documents from "@repo/deployment/alpha-legal.json" with { type: "json" };
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { act } from "react";
@@ -7,6 +8,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine, machine } from "../gen/site.effect.vibe";
 import type { Demo } from "../gen/site.ts";
+import { LegalPage, policyAt } from "../src/Legal.tsx";
 import { Site } from "../src/Site.tsx";
 import { browserPage, demo } from "../src/demo.vibe";
 
@@ -20,6 +22,35 @@ let reading: Demo["scene"] = "Home";
 vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
   const passages = [...document.querySelectorAll<HTMLElement>("[data-passage]")];
   return { top: passages.indexOf(this) <= passages.findIndex((passage) => passage.dataset.passage === reading) ? 0 : 10_000 } as DOMRect;
+});
+
+describe(`Read Alpha Cloud policies (spec/site/index.md, "Story: Read Alpha Cloud's policies")`, () => {
+  it("links both public documents from Home and reads their full text and links without JavaScript", () => {
+    const runtime = ManagedRuntime.make(Layer.provide(demo, browserPage));
+    const home = document.createElement("div");
+    home.innerHTML = renderToString(<Site runtime={runtime} />);
+    closing.push(() => runtime.dispose());
+    const links = [...home.querySelectorAll("footer a")].map((link) => link.getAttribute("href"));
+    expect(links).toEqual(expect.arrayContaining(["/terms", "/privacy"]));
+
+    for (const { path, document: approved, links: external } of [
+      { path: "/terms", document: documents.terms, links: ["https://maps.google.com/help/terms_maps/", "https://policies.google.com/privacy"] },
+      { path: "/privacy", document: documents.privacy, links: ["https://developers.google.com/terms/api-services-user-data-policy", "https://myaccount.google.com/connections"] },
+    ]) {
+      const policy = policyAt(path);
+      if (!policy) throw new Error(`No public policy at ${path}`);
+      const opened = document.createElement("div");
+      opened.innerHTML = renderToString(<LegalPage page={policy} />);
+      const article = opened.querySelector("article");
+      const sections = [...(article?.querySelectorAll("section") ?? [])].map((section) => ({
+        title: section.querySelector("h2")?.textContent,
+        paragraphs: [...section.querySelectorAll("p")].map((paragraph) => paragraph.textContent),
+      }));
+      expect({ title: article?.querySelector("h1")?.textContent, revision: article?.querySelector("time")?.dateTime, sections }).toEqual(approved);
+      expect([...(article?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("href"))).toEqual(external);
+      expect(opened.querySelector('a[href="/"]')).toBeTruthy();
+    }
+  });
 });
 
 afterEach(async () => {

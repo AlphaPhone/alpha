@@ -303,8 +303,14 @@ async function startProvider(key: string, real: RealModel | undefined) {
     const system = typeof character === "string" ? character : "";
     listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
-    const last = messages.findLast((message) => message.role === "user")?.content;
-    const pending = listed(replies, scripted(system));
+    const content = messages.findLast((message) => message.role === "user")?.content;
+    // A message with pictures is a list of parts: its words are its text parts, so a script can still be bound to them.
+    const last = Array.isArray(content)
+      ? content.flatMap((part: unknown) => typeof part === "object" && part !== null && "type" in part && part.type === "text"
+        && "text" in part && typeof part.text === "string" ? [part.text] : []).join("\n")
+      : content;
+    // Only reading: a call made before this owner's first script must not leave an empty list that later shadows it.
+    const pending = replies.get(scripted(system)) ?? [];
     const prompt = typeof last === "string" ? ownerWords(last) : undefined;
     const choice = pending.findIndex((entry) => entry.prompt === undefined || entry.prompt === prompt);
     const queued = choice < 0 ? undefined : pending.splice(choice, 1)[0]?.reply;
@@ -432,7 +438,7 @@ export async function startCloud(state: string, emails: readonly string[], credi
       apiUrl: `${provider.origin}/stripe`, secretKeyEnv: "STRIPE_SECRET_KEY", webhookSecretEnv: "STRIPE_WEBHOOK_SECRET", publishableKey: "pk_test_local",
       plans: Object.fromEntries(Object.entries(plans).map(([plan, { priceId, productId }]) => [plan, { priceId, productId }])),
     },
-    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: real?.defaultMaxTokens ?? 1024 }] },
+    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: real === undefined, defaultMaxTokens: real?.defaultMaxTokens ?? 1024 }] },
   };
   const signInReturn = `${web}/alphaphone/auth/callback`;
   const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/alphaphone/billing/return` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
@@ -511,15 +517,15 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
  * The cloud and the agent a dev server runs against: one signed-in, funded owner, whose model is the scripted one or
  * `real`, and whose agent is the pack's with the phone's own character, so a real model is given the phone's system
  * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
- * directory to keep the agent's in instead.
+ * directory to keep both in instead, so a restart over it signs the same owner in again and reopens the agent's store.
  */
 export async function startEliza(keep?: string, real?: RealModel) {
   const { character } = await builtPack();
-  const state = scratch();
+  const state = keep === undefined ? scratch() : owned(path.join(keep, "harness"));
   const cloud = await startCloud(state, [owner.email], owner.credits, real);
   const key = cloud.owners.get(owner.email)!;
   const speech = process.env.ALPHA_LOCAL_SPEECH_SOCKET;
   const browserNotesSpeech = speech === undefined || !path.isAbsolute(speech) ? undefined : speech;
   const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, browserNotesSpeech);
-  return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
+  return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); if (keep === undefined) fs.rmSync(state, { recursive: true, force: true }); } };
 }

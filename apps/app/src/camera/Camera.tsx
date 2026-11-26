@@ -1,6 +1,6 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing } from "@repo/ui";
-import { Camera as CameraIcon, ChevronLeft, Clock, FileScan, Grid3x3, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
+import { Camera as CameraIcon, ChevronLeft, FileScan, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
@@ -283,7 +283,6 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
   const flashLabel = autoFlash ? "Flash auto" : !video ? (lit ? "Flash on" : "Flash off") : lit ? "Light on" : "Light off";
   const Flash = lit || autoFlash ? Zap : ZapOff;
   const videoShutter = state.film.stage === "Running" || can({ type: "startRecording", sound: true });
-  const timer = can({ type: "cycleDelay" });
 
   return (
     <section
@@ -310,6 +309,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
       />
       {sheet && <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-(--alpha-dock-clearance,0px) h-40 bg-linear-to-b from-transparent to-background/55" />}
 
+      {/* v119's header (legacy template.html at 45f6bed30, lines 1861-1868): back, the recording time, flip and flash; it had no timer, ratio or grid. */}
       <header data-alpha-app-header="main" className="absolute inset-x-0 top-0 z-10 flex h-13 items-center gap-0.5 px-2">
         {shell.can({ type: "goBack" }) && <button type="button" className={cn(headerButton, "rounded-lg")} aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft className="size-5.5" aria-hidden /></button>}
         <span className="flex-1" />
@@ -319,18 +319,6 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
           </span>
         )}
         {!inProgress && <button type="button" className={headerButton} aria-label="Switch camera" disabled={!can({ type: "flip" })} onClick={() => fire({ type: "flip" })}><SwitchCamera className="size-5.5" aria-hidden /></button>}
-        {(timer || state.countdown > 0) && (
-          <button type="button" className={headerButton} aria-label={state.delay === 0 ? "Timer off" : `Timer ${state.delay} seconds`} aria-pressed={state.delay !== 0} disabled={!timer} onClick={() => fire({ type: "cycleDelay" })}>
-            <Clock className="size-5.5" aria-hidden />
-            {state.delay > 0 && <span aria-hidden className="absolute right-0 bottom-0.5 text-camera-badge font-bold">{state.delay}s</span>}
-          </button>
-        )}
-        {lens !== undefined && lens.aspects.length > 1 && can({ type: "toggleRatio" }) && (
-          <button type="button" className={cn(headerButton, "w-auto min-w-11 px-2 text-meta font-bold tabular-nums")} aria-label={`Aspect ratio ${state.wide ? "16:9" : "4:3"}`} onClick={() => fire({ type: "toggleRatio" })}>
-            {state.wide ? "16:9" : "4:3"}
-          </button>
-        )}
-        {can({ type: "toggleGrid" }) && <button type="button" className={headerButton} aria-label="Framing grid" aria-pressed={state.grid} onClick={() => fire({ type: "toggleGrid" })}><Grid3x3 className="size-5.5" aria-hidden /></button>}
         {lens?.flash && (canLight || writingLight) && (
           <button type="button" className={headerButton} aria-label={flashLabel} aria-busy={writingLight} disabled={!canLight} onClick={() => fire(light)}>
             <Flash className="size-5.5" aria-hidden />

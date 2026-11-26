@@ -24,7 +24,31 @@ export interface Attached {
   readonly origin?: PhotoDraft
 }
 
-/** The batch staged for one concrete send, under the composer's own hold number and binding. */
+/** The exact Contact card and owner that opened the attachment review. */
+export interface ContactFileTarget {
+  readonly person: string
+  readonly card: number
+  readonly about: string
+  readonly revision: number
+  readonly authority: ArchiveAuthority
+}
+
+export interface ContactAttachmentDraft {
+  readonly target: ContactFileTarget
+  readonly files: readonly Attached[]
+}
+
+/** Pressing Send freezes a card's reviewed files and the current shell route. */
+export interface ContactFileSend {
+  readonly route: number
+  readonly draft: ContactAttachmentDraft
+}
+
+export interface CommsRequest extends CommsPrompt {
+  readonly contact?: ContactFileSend
+}
+
+/** The batch staged for one concrete send and its exact draft. */
 export interface StagedFiles {
   readonly ticket: number
   readonly hold: number
@@ -34,6 +58,7 @@ export interface StagedFiles {
   readonly authority?: ArchiveAuthority
   readonly mail?: MailQuestion
   readonly transcript?: TranscriptAttachment
+  readonly contactDraft?: ContactAttachmentDraft
 }
 
 /** The exact note accepted into this composer's conversation. */
@@ -104,6 +129,7 @@ export interface Seen {
   readonly files: readonly Attached[]
   readonly filesBinding: Binding | undefined
   readonly filesAuthority: ArchiveAuthority | undefined
+  readonly contactDraft: ContactAttachmentDraft | undefined
   readonly transcript: TranscriptAttachment | undefined
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
@@ -159,8 +185,8 @@ export interface Board {
   forgetPosition(): void
   /** The remembered position for `ticket`, if the locator still holds that ticket. */
   positionFor(ticket: number): Sighting | undefined
-  waitingRequest: CommsPrompt | undefined
-  postingRequest: CommsPrompt | undefined
+  waitingRequest: CommsRequest | undefined
+  postingRequest: { readonly ticket: number; readonly request: CommsRequest } | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -230,7 +256,7 @@ export const talk = Layer.effect(Talk, effect {
   let readLines: readonly ReadLine[] = []
   let previewOrigin: { readonly preview: NonNullable<Seen["preview"]>; readonly conversation: number; readonly id: string } | undefined
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(),
   }
   const keep = () => {
@@ -419,7 +445,7 @@ export const talk = Layer.effect(Talk, effect {
     board.postingRequest = undefined
     board.change({
       pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "",
-      files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
+      files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
       hits: [], recordingSummary: undefined, media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
     })
     return key !== undefined && preceding === key && remembered.length > 0

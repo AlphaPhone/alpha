@@ -13,7 +13,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Dialer, type Dialing, keypadDigits } from "./phone.vibe";
-import { Player, Voicemails } from "./voicemail.vibe";
+import type { Player, Voicemails } from "./voicemail.vibe";
 import { callerTitle, displayNumber, judge, shortWhen } from "./words.ts";
 import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
@@ -63,8 +63,8 @@ export function Phone({ runtime, alpha }: PhoneProps) {
   const phone = usePhone(runtime);
   const shell = useShell(runtime);
   const voicemail = useVoicemail(runtime).state;
-  const zeroDown = useRef<number | undefined>(undefined);
-  const longZero = useRef(false);
+  const zeroDownRef = useRef<number | undefined>(undefined);
+  const longZeroRef = useRef(false);
   const dialRecent = useCallback((number: string) => {
     void runtime.runPromiseExit(Effect.flatMap(PhoneMachine, (machine) => machine.send({ type: "dialRecent", number })));
   }, [runtime]);
@@ -109,6 +109,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
   };
   const match = { type: "dialMatched", number: dialer.matchedNumber } as const;
   const waiting = state.dial.status === "Loading";
+  const sheet = shell.state?.assistant === "Sheet";
   const rows = state.rows > 0 ? dialer.rows : [];
   return (
     <section aria-label="Phone" data-alpha-phone="" className="flex min-h-0 flex-1 flex-col">
@@ -134,9 +135,9 @@ export function Phone({ runtime, alpha }: PhoneProps) {
           {rows.length > 0 && <div role="group" aria-label="Recent calls">{rows.map((row, index) => <RecentRow key={row.id} row={row}
             now={now} enabled={can({ type: "dialRecent", number: row.number })} call={dialRecent} first={index === 0} />)}</div>}
         </TabsContent>
-        <TabsContent value="Keypad" data-alpha-phone-keypad="" className="min-h-0 flex-1 overflow-y-auto rounded-none">
-          <div className="mx-auto flex min-h-full max-w-103 flex-col pb-3.5 [--dial-key:clamp(3rem,18.93vw,4.875rem)]">
-            <div className="flex min-h-20 flex-1 flex-col items-center justify-center gap-1.5 px-6 py-1">
+        <TabsContent value="Keypad" data-alpha-phone-keypad="" className={cn("min-h-0 flex-1 overflow-y-auto rounded-none", sheet && "touch-pan-y overscroll-contain")}>
+          <div className={cn("mx-auto flex min-h-full max-w-103 flex-col [--dial-key:clamp(3rem,18.93vw,4.875rem)]", sheet ? "h-full pb-5" : "pb-3.5")}>
+            <div className={cn("flex flex-col items-center justify-center gap-1.5 px-6 py-1", sheet ? "min-h-18 flex-none" : "min-h-20 flex-1")}>
               <Input type="tel" inputMode="none" autoComplete="off" maxLength={40} aria-label="Phone number" data-alpha-phone-number=""
                 value={dialer.digits} onChange={(event) => edit(event.currentTarget.value)} disabled={waiting}
                 className="h-11 rounded-none border-0 bg-transparent px-0.5 py-px text-center text-keypad-number font-medium tabular-nums shadow-none" />
@@ -150,35 +151,37 @@ export function Phone({ runtime, alpha }: PhoneProps) {
                 <p role="status" className="text-center text-sm text-muted-foreground">Only emergency calls are available.</p>
               )}
             </div>
-            <div role="group" aria-label="Keypad" className="grid shrink-0 grid-cols-3 justify-items-center gap-x-[min(5.825vw,1.5rem)] gap-y-[calc(var(--dial-key)*.15)] px-[min(10.68vw,2.75rem)]">
-              {keys.map(([key, letters]) => (
-                <Button key={key} variant="secondary" size="icon" aria-label={key}
-                  className="size-(--dial-key) flex-col gap-px" disabled={waiting || !can({ type: "press", typed: judge(dialer.digits + key) })}
-                  onPointerDown={key === "0" ? (event) => { zeroDown.current = event.timeStamp; longZero.current = false; } : undefined}
-                  onPointerUp={key === "0" ? (event) => {
-                    const began = zeroDown.current;
-                    zeroDown.current = undefined;
-                    if (began === undefined || event.timeStamp - began < 500 || dialer.digits !== "") return;
-                    longZero.current = true;
-                    changeDigit("+");
-                  } : undefined}
-                  onPointerCancel={key === "0" ? () => { zeroDown.current = undefined; longZero.current = false; } : undefined}
-                  onContextMenu={key === "0" ? (event) => event.preventDefault() : undefined}
-                  onClick={(event) => {
-                    if (key === "0" && longZero.current && event.detail !== 0) { longZero.current = false; return; }
-                    changeDigit(key);
-                  }}>
-                  <span className="text-keypad-digit font-medium">{key}</span>
-                  <span aria-hidden className="h-3 text-keypad-letters font-semibold text-muted-foreground">{letters}</span>
-                </Button>
-              ))}
-            </div>
-            <div className="grid shrink-0 grid-cols-3 items-center justify-items-center gap-x-[min(5.825vw,1.5rem)] px-[min(10.68vw,2.75rem)] pt-[min(3.88vw,1rem)]">
-              <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80 disabled:opacity-100"
-                size="icon" data-alpha-phone-call="" aria-label="Call" disabled={!can({ type: "dialTyped" }) || !dialable(state)}
-                onClick={() => void send({ type: "dialTyped" })}><Handset className="size-7.5" /></Button>
-              {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14 rounded-none"
-                disabled={waiting || !can({ type: "takeBack", typed: judge(dialer.digits.slice(0, -1)) })} onClick={() => changeDigit()}><EraseDigit className="size-6.5" /></Button>}
+            <div className={sheet ? "flex min-h-[calc(264px_+_1rem)] flex-1 flex-col justify-end [container-type:size] [--dial-key:clamp(48px,min(18.93vw,calc((100cqh_-_1rem)/5.5)),4.875rem)]" : "contents"}>
+              <div role="group" aria-label="Keypad" className="grid shrink-0 grid-cols-3 justify-items-center gap-x-[min(5.825vw,1.5rem)] gap-y-[calc(var(--dial-key)*.15)] px-[min(10.68vw,2.75rem)]">
+                {keys.map(([key, letters]) => (
+                  <Button key={key} variant="secondary" size="icon" aria-label={key}
+                    className="size-(--dial-key) flex-col gap-px" disabled={waiting || !can({ type: "press", typed: judge(dialer.digits + key) })}
+                    onPointerDown={key === "0" ? (event) => { zeroDownRef.current = event.timeStamp; longZeroRef.current = false; } : undefined}
+                    onPointerUp={key === "0" ? (event) => {
+                      const began = zeroDownRef.current;
+                      zeroDownRef.current = undefined;
+                      if (began === undefined || event.timeStamp - began < 500 || dialer.digits !== "") return;
+                      longZeroRef.current = true;
+                      changeDigit("+");
+                    } : undefined}
+                    onPointerCancel={key === "0" ? () => { zeroDownRef.current = undefined; longZeroRef.current = false; } : undefined}
+                    onContextMenu={key === "0" ? (event) => event.preventDefault() : undefined}
+                    onClick={(event) => {
+                      if (key === "0" && longZeroRef.current && event.detail !== 0) { longZeroRef.current = false; return; }
+                      changeDigit(key);
+                    }}>
+                    <span className="text-keypad-digit font-medium">{key}</span>
+                    <span aria-hidden className="h-3 text-keypad-letters font-semibold text-muted-foreground">{letters}</span>
+                  </Button>
+                ))}
+              </div>
+              <div className="grid shrink-0 grid-cols-3 items-center justify-items-center gap-x-[min(5.825vw,1.5rem)] px-[min(10.68vw,2.75rem)] pt-[min(3.88vw,1rem)]">
+                <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80 disabled:opacity-100"
+                  size="icon" data-alpha-phone-call="" aria-label="Call" disabled={!can({ type: "dialTyped" }) || !dialable(state)}
+                  onClick={() => void send({ type: "dialTyped" })}><Handset className="size-7.5" /></Button>
+                {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14 rounded-none"
+                  disabled={waiting || !can({ type: "takeBack", typed: judge(dialer.digits.slice(0, -1)) })} onClick={() => changeDigit()}><EraseDigit className="size-6.5" /></Button>}
+              </div>
             </div>
           </div>
         </TabsContent>

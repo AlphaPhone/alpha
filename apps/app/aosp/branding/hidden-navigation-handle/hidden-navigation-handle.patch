@@ -19,10 +19,17 @@
 +    @Override
 +    public void draw(Canvas canvas) {
 +        if (getId() == R.id.stashed_handle
-+                && getResources().getBoolean(R.bool.config_alpha_home_back_only)) {
++                && getResources().getBoolean(R.bool.config_alpha_hide_taskbar_handle)) {
 +            return;
 +        }
 +        super.draw(canvas);
      }
  
      /**
+--- /dev/null
++++ b/res/values/alpha-taskbar.xml
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <bool name="config_alpha_hide_taskbar_handle">false</bool>
++</resources>

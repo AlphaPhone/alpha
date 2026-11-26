@@ -5,7 +5,7 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
-import { registered } from "../platform/device.vibe"
+import { Device, registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, deletionRefused, readAddressBook, readNames, telephony } from "../platform/telephony.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -132,15 +132,43 @@ export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<str
   return addresses.map((address) => names.get(address) || displayNumber(address)).join(", ")
 }
 
-/** The rows behind Messages' counts. */
+interface NewRecipientScope { readonly visit: number; readonly recipient: number; readonly contacts: boolean }
+interface NewRecipientTitle extends NewRecipientScope { readonly title: string; readonly numbers: string }
+
+interface NewRecipientSnapshot {
+  readonly get: () => NewRecipientTitle | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  set(next: NewRecipientTitle | undefined): void
+}
+
+/** The rows and current New recipient label behind Messages' counts. */
 export service Inbox {
   get(): Texts!!
   set(change: Partial<Texts>): void!!
+  readonly newRecipient: NewRecipientSnapshot
+}
+
+function sameNewRecipient(one: NewRecipientScope | undefined, other: NewRecipientScope | undefined): boolean {
+  return one?.visit === other?.visit && one?.recipient === other?.recipient && one?.contacts === other?.contacts
 }
 
 const inbox = Layer.sync(Inbox, () => {
   let held = empty
-  return { get: () => sync(() => held), set: (change: Partial<Texts>) => sync(() => { held = { ...held, ...change } }) }
+  let title: NewRecipientTitle | undefined
+  const listeners = new Set<() => void>()
+  const newRecipient: NewRecipientSnapshot = {
+    get: () => title,
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    set: (next) => {
+      if (sameNewRecipient(title, next) && title?.title === next?.title) return
+      title = next
+      for (const listener of listeners) listener()
+    },
+  }
+  return { get: () => sync(() => held), set: (change: Partial<Texts>) => sync(() => { held = { ...held, ...change } }), newRecipient }
 })
 
 function replaceNames(previous: ReadonlyMap<string, string>, addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string> | undefined): ReadonlyMap<string, string> {
@@ -373,6 +401,42 @@ const machine = reacting(Messages, { carry })
 
 const shown = visiting(on("Messages"), Messages.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
 
+function newRecipientScope(state: Messages.Messages): NewRecipientScope | undefined {
+  if (!state.front || state.pane !== "New" || state.newDraft.recipient === 0) return undefined
+  const { visit, recipient } = state.newDraft
+  return { visit, recipient, contacts: state.book.grant === "Granted" }
+}
+
+// spec/app/messages/index.md, "The current New address names the Messages stage beside Ask Alpha"
+const nameNewRecipient = started(effect {
+  const machine = try Messages.Machine
+  const shell = try Shell
+  const device = try Device
+  const numbers = try Conversations
+  const { newRecipient } = try Inbox
+  const scope = Stream.map(Stream.zipLatest(shell.changes, machine.changes), ([where, state]) =>
+    showing(where, "Messages") ? newRecipientScope(state) : undefined)
+  const latest = Stream.changesWith(scope, sameNewRecipient)
+  try Stream.runDrain(Stream.switchMap(latest, (one) => Stream.fromEffectDrain(effect {
+    const current = effect {
+      return (try device.showing()) && showing(try shell.get(), "Messages") && sameNewRecipient(one, newRecipientScope(try machine.get()))
+    }
+    if (!(try current) || one === undefined) {
+      try sync(() => newRecipient.set(undefined))
+      return
+    }
+    const conversation = Option.getOrUndefined(try numbers.get(one.recipient))
+    if (conversation === undefined) return
+    const { addresses } = conversation
+    const displayedNumbers = addresses.map(displayNumber).join(", ")
+    const fallback = { ...one, title: displayedNumbers, numbers: displayedNumbers }
+    try sync(() => newRecipient.set(fallback))
+    if (!one.contacts) return
+    const names = timeout(readNames("messages", addresses), "2 seconds") catch () => undefined
+    if (names !== undefined && (try current)) try sync(() => newRecipient.set({ ...fallback, title: titleOf(addresses, names) }))
+  })))
+}, "the New message recipient")
+
 // spec/app/messages/index.md, "A new message, or one sent, reads the list or the open conversation again"
 const heard = hearing(arrivals, Messages.Machine, (event: Event) => event)
 
@@ -424,4 +488,4 @@ const notices = started(effect {
 }, "message notifications")
 
 /** Messages: resident for the agent, conversation navigation and Home's unread count. It reads only while its view is in front. */
-export const messages = together(machine, inbox, conversations, shown, heard, notices)
+export const messages = together(machine, inbox, conversations, shown, nameNewRecipient, heard, notices)

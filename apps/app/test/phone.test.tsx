@@ -18,14 +18,14 @@ import { phoneAction } from "../src/phone/agent.vibe";
 import { phoneContactChoices, pickPhoneContact } from "../src/phone/named-review.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, filledPhoneKeypad, hardware, only, open, press, underAct, until } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import { alphaImage, scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
 
-/** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
-const image = () => ({ ...scene(), phone: true, image: true, now: 1_700_000_400_000 });
+/** An Alpha image at a fixed time. */
+const image = () => ({ ...alphaImage(), now: 1_700_000_400_000 });
 const mounts = [
   ...only("home", "assistant", "notice", "phone/stage", "view:Phone", "view:Contacts", "view:Messages"),
   at("overlay", () => import("../src/phone/strip.tsx")),

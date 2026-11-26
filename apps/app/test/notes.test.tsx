@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { Machine as CalendarForm } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -63,6 +63,23 @@ async function openSavedVoiceNote(world: Scene) {
   await press("Open Design sync");
   await until(alpha, runtime, Voice, (state) => state.showing);
   return { alpha, runtime };
+}
+
+/** Notes opened from Home on `world`, once its list is read, choosing notes to delete. */
+async function selectingNotes(world: Scene) {
+  world.notes.deleteRequests = [];
+  const { alpha, runtime } = await openNotesFromHome(world);
+  await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+  await chooseNotesOption("Notes options", "Select", true);
+  return { alpha, runtime };
+}
+
+/** Copy the shared note's text after the notes changed under the share: it is refused, and `copy` was not called again. */
+async function copyAfterChange(world: Scene, copy: MockInstance) {
+  world.notes.revision++;
+  await pressOnTop("Copy text");
+  await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
+  expect(copy).toHaveBeenCalledTimes(1);
 }
 
 async function openNotesFromHome(world: Scene) {
@@ -299,20 +316,53 @@ describe("Notes", () => {
       expect(copy.mock.calls[0]?.[0]).toContain("Notifications stay as icons until unlock");
       expect(copy.mock.calls[0]?.[0]).not.toContain("Enclave launch");
       await reopenShare();
-      world.notes.revision++;
+      await copyAfterChange(world, copy);
+    } finally { copy.mockRestore(); }
+  });
+
+  it("Reviews the saved editor note before handing its text off (spec/app/notes/actions.md, \"Share reviews the saved note before an explicit destination receives its text\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    const menu = () => document.querySelector('[role=menu][aria-label="Note actions"]');
+    const options = () => [...menu()?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []];
+    const share = async (pinned: boolean) => {
+      await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      await rendered(() => expect(options().map((item) => item.textContent?.trim())).toEqual(["Share", pinned ? "Unpin" : "Pin", "Delete"]));
+      await drawn(() => options()[0]?.click());
+      await control("Close share");
+    };
+    try {
+      await press("Open Enclave launch");
+      await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
+      await share(true);
+      await press("Close share");
+      await rendered(() => expect(button("Close share")).toBeUndefined());
+      expect(copy).not.toHaveBeenCalled();
+      await rendered(() => expect(options()[0]?.textContent?.trim()).toBe("Share"));
+      await drawn(() => options()[0]?.click());
       await pressOnTop("Copy text");
-      await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
-      expect(copy).toHaveBeenCalledTimes(1);
+      await rendered(() => expect(copy).toHaveBeenCalledWith("Enclave launch\n\nConfirm attestation flow\nShip the keys-on-device doc\nDry run Friday"));
+      await rendered(() => {
+        expect(document.body.textContent).toContain("Note text copied.");
+        expect(options().map((item) => item.textContent?.trim())).toEqual(["Share", "Unpin", "Delete"]);
+      });
+      await hardware("back");
+      await rendered(() => expect(menu()).toBeNull());
+      await press("Done");
+      await until(alpha, runtime, Editor, (state) => !state.showing);
+      await press("Open Groceries");
+      await until(alpha, runtime, Editor, (state) => state.showing && state.kind === "Checklist" && state.draft.sync === "Kept");
+      await share(false);
+      await copyAfterChange(world, copy);
     } finally { copy.mockRestore(); }
   });
 
   it("Selects notes and only moves the reviewed notes after confirmation (spec/app/notes/index.md, \"Story: Select and delete notes\")", async () => {
     const world = scene();
     world.now = Date.now();
-    world.notes.deleteRequests = [];
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    await chooseNotesOption("Notes options", "Select", true);
+    const { alpha, runtime } = await selectingNotes(world);
     expect(button("Delete selected notes")?.disabled).toBe(true);
     await press("Select Enclave launch");
     await press("Select Groceries");
@@ -352,10 +402,7 @@ describe("Notes", () => {
 
   it("Stops the reviewed selection on refusal and keeps the remaining notes selected (spec/app/notes/index.md, \"Confirmation moves only the reviewed notes to Recently deleted and stops if a deletion is refused or unknown\")", async () => {
     const world = scene();
-    world.notes.deleteRequests = [];
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    await chooseNotesOption("Notes options", "Select", true);
+    const { alpha, runtime } = await selectingNotes(world);
     await press("Select Enclave launch");
     await press("Select Groceries");
     await press("Select Design sync");
@@ -365,7 +412,7 @@ describe("Notes", () => {
     await press("Delete");
     await until(alpha, runtime, List, (state) => state.selectionResult === "RefusedSelection" && state.read.status === "Loaded");
     expect(world.notes.trash.map(({ note }) => note.id)).toEqual(["enclave"]);
-    expect(world.notes.deleteRequests.map(({ id }) => id)).toEqual(["enclave", "groceries"]);
+    expect(world.notes.deleteRequests?.map(({ id }) => id)).toEqual(["enclave", "groceries"]);
     await rendered(() => {
       expect(button("Select Groceries")?.getAttribute("aria-pressed")).toBe("true");
       expect(button("Select Design sync")?.getAttribute("aria-pressed")).toBe("true");

@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTranscriptProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { FileText } from "lucide-react";
+import { ChevronLeft, FileText } from "lucide-react";
 import { type FormEvent, type ReactNode, type RefObject, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
@@ -28,6 +28,8 @@ import type { Machine as SearchMachine } from "../../gen/app__assistant__search.
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
+import type { Machine as ContactMachine } from "../../gen/app__contacts.effect.vibe";
+import { useMachine as useContact } from "../../gen/app__contacts.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
@@ -35,7 +37,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
 import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
-import { home } from "../shell/shell.vibe";
+import { type Backs, home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
@@ -44,10 +46,10 @@ import type { NoteStore } from "../platform/notes.vibe";
 import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import type { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
-import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
+import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, openContactAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
 import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
 import { contactChatActionsId } from "./contact-chat-id.ts";
-import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeContactFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ChatScrim, useSheetFollow } from "./follow.tsx";
 import { holdMessagePress } from "./message-actions.vibe";
@@ -57,7 +59,7 @@ import {
 } from "./recording-summary.vibe";
 import { type Attached, type Board, type Line, type Seen, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
-import { CommsBriefing } from "../phone/comms.vibe";
+import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
@@ -65,7 +67,7 @@ import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | MessagingBridge | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | NoteStore | NotesMachine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | ContactMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | MessagingBridge | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | NoteStore | NotesMachine | Backs, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
@@ -74,7 +76,7 @@ export interface AssistantProps {
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
   canReadAloud?: boolean;
-  onCloseTextAsk?: () => void;
+  onBack?: () => void;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -181,9 +183,10 @@ interface AssistantAttachmentsProps {
   preview: Attached | undefined;
   notice: string;
   composerRef: RefObject<HTMLTextAreaElement | null>;
+  route: number | undefined;
 }
 
-function AssistantAttachments({ runtime, attachments, preview, notice, composerRef }: AssistantAttachmentsProps) {
+function AssistantAttachments({ runtime, attachments, preview, notice, composerRef, route }: AssistantAttachmentsProps) {
   const board = useMemo(() => runtime.runSync(AttachmentPicker).board, [runtime]);
   const view = useSyncExternalStore(board.subscribe, board.snapshot);
   const state = attachments.state;
@@ -250,7 +253,11 @@ function AssistantAttachments({ runtime, attachments, preview, notice, composerR
         location={location}
         truncated={currentRows && view.truncated}
         onClose={() => { if (attachments.can(cancel)) void attachments.send(cancel); }}
-        onReturnFocus={() => focusChatActions(composerRef.current)}
+        onReturnFocus={() => {
+          const origin = view.contact;
+          if (origin === undefined || composerRef.current) focusChatActions(composerRef.current);
+          else if (origin.route === route) document.getElementById(contactChatActionsId(origin.route, origin.person))?.focus();
+        }}
         onTab={(tab) => { const event = { type: "switchTab", tab } as const; if (attachments.can(event)) void attachments.send(event); }}
         onSearch={(query) => { const event = { type: "setQuery", query } as const; if (attachments.can(event)) void attachments.send(event); }}
         onRetry={attachments.can(retry) ? () => void attachments.send(retry) : view.availability === "failed" && attachments.can(refresh) ? () => void attachments.send(refresh) : undefined}
@@ -589,7 +596,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
 }
 
 /** @model spec/app/assistant/index.md */
-export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onCloseTextAsk }: AssistantProps) {
+export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onBack }: AssistantProps) {
   const conversation = useConversation(runtime);
   const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
@@ -600,6 +607,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const layers = useLayers(runtime);
   const dock = useDock(runtime);
   const comms = useComms(runtime);
+  const contact = useContact(runtime).state;
   const board = useMemo(() => runtime.runSync(Effect.map(Talk, (talk) => talk.board)), [runtime]);
   const seen = useExternal(board);
   const sectionRef = useRef<HTMLElement>(null);
@@ -635,6 +643,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
   const subject = onComms ? comms.state?.key : undefined;
+  const priorStage = comms.state?.stage.at(-1);
+  const returnTo = priorStage === undefined ? undefined : commsViewOf(priorStage.app);
   const open = dockOpen(assistantDetent);
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
@@ -659,8 +669,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const brief = subject !== undefined && comms.state?.briefed === subject && shell.state?.trail.at(-1) === "Phone"
     ? runtime.runSync(Effect.flatMap(CommsBriefing, (reading) => reading.forSubject(subject))) : "";
   const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
+  const selectedContact = currentView === "Contacts" && contact?.opened && contact.form === "Shut" ? contact.contact : undefined;
+  const contactDraft = seen.contactDraft?.target.about === subject && seen.contactDraft?.target.person === selectedContact && seen.contactDraft?.target.card === contact?.card.ticket
+    && seen.contactDraft?.target.revision === talking.context.revision ? seen.contactDraft : undefined;
+  const contactFiles = contactDraft?.files ?? [];
   const sendable = subject !== undefined
-    ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
+    ? (request.trim() !== "" || contactFiles.length > 0) && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
     : newChat ? content(writing.editor) && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
   const notice = noticeOf(writing);
   const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
@@ -669,7 +683,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
 
   const send = () => {
     if (subject !== undefined) {
-      void runtime.runPromise(askComms({ about: subject, text: request }));
+      const contact = contactDraft !== undefined && searchRoute !== undefined ? { draft: contactDraft, route: searchRoute } : undefined;
+      void runtime.runPromise(askComms({ about: subject, text: request, contact }));
       return;
     }
     if (newChat) {
@@ -706,7 +721,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
 
   return (
     <>
-      <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} notice={seen.attachmentNotice} composerRef={composerRef} />
+      <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} notice={seen.attachmentNotice} composerRef={composerRef} route={searchRoute} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {scrim ? <ChatScrim typing={assistantDetent === "Typing"} field={composerRef} onLower={() => { if (shell.can(back)) void shell.send(back); }} /> : null}
       {(!onComms || open) && <AssistantConversation
@@ -723,8 +738,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
           subtitle: onComms ? <CommsTarget runtime={runtime} placement="context" /> : undefined,
           returnOnClose: textAsk,
-          onHome: textAsk ? onCloseTextAsk : () => void runtime.runPromise(home()),
-          onClose: textAsk ? onCloseTextAsk : open || live ? () => {
+          onHome: textAsk ? onBack : () => void runtime.runPromise(home()),
+          onClose: textAsk ? onBack : open || live ? () => {
             if (shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); });
           } : undefined,
           expanded: assistantDetent === "Full",
@@ -733,6 +748,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
           grabber: textAsk ? undefined : open ? grabber : live ? handle("handle") : undefined,
         }}
+        contextAction={onComms && assistantDetent === "Sheet" && onBack && returnTo !== undefined &&
+          shell.can({ type: "returnCommsView", previous: returnTo }) ? (
+            <div className="flex shrink-0 px-3 pb-1">
+              <Button variant="secondary" className="h-11 gap-1 px-3.5 text-sm font-semibold"
+                data-alpha-stage-return="" aria-label={`Return to ${returnTo}`} onClick={onBack}>
+                <ChevronLeft aria-hidden className="size-3.5" />{returnTo}
+              </Button>
+            </div>
+          ) : undefined}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{ ...transcript, briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} /> }}
         composer={{
@@ -767,9 +791,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: onComms ? undefined : waiting(writing, draftFiles, transcriptTitle),
-          onPreviewAttachment: !onComms && canPreview ? (id) => {
-            const file = draftFiles.find((one) => one.id === id);
+          attachments: onComms ? contactFiles.map(chip) : waiting(writing, draftFiles, transcriptTitle),
+          onPreviewAttachment: canPreview ? (id) => {
+            const file = (onComms ? contactFiles : draftFiles).find((one) => one.id === id);
             if (file) preview(file);
           } : undefined,
           quote: onComms ? undefined : quoted,
@@ -783,7 +807,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           } : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
-          onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
+          onAttach: selectedContact !== undefined && searchRoute !== undefined && contactFiles.length < maxFiles && !inFlight(talking.turn)
+            ? () => { void runtime.runPromise(openContactAttachmentPicker(searchRoute, selectedContact)); }
+            : !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
             const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
             if (!attachments.can(request)) return;
             void runtime.runPromise(attachmentAuthority()).then((authority) => {
@@ -804,7 +830,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onSearch: history.search,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           making: making(shown),
-          onRemoveAttachment: (id) => {
+          onRemoveAttachment: onComms ? contactDraft === undefined || inFlight(talking.turn) ? undefined : (id) => {
+            void runtime.runPromise(removeContactFile(contactDraft.target, id));
+          } : (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
             else if (id === "transcript") {
               if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
