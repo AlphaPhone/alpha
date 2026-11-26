@@ -9,7 +9,7 @@ import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { entryOf, registrationAt } from "./alpha.vibe"
 import { hostedClouds, hostedProfileProblems, type HostedCloudUnknown } from "./hosted.vibe"
 import { reconcileResources } from "./cloudflare.vibe"
-import { base64urlBytes, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexKey, isEntitlementKey, isExampleEntitlementPublicKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
+import { base64urlBytes, canonicalUnpaddedHexKey, canonicalUnpaddedSealingKey, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexKey, isEntitlementKey, isExampleEntitlementPublicKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
 import { PROFILE_ASSET } from "./profile-asset.ts"
 import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResources } from "./wrangler.vibe"
 
@@ -143,10 +143,25 @@ export function workerSecrets(values: Readonly<Record<string, string>>): Record<
   return Object.fromEntries(Object.entries(workerSecretSource).map(([name, source]) => [name, values[source] ?? ""]).filter(([, value]) => value !== ""))
 }
 
+/**
+ * Converts the two earlier 43-character unpadded base64url internal keys created before the
+ * strict base64 and 64-hex checks into their canonical encodings for staging alone, preserving
+ * the exact 32 key bytes. Production and every other secret pass through unchanged.
+ */
+export function stagingCompatibleSecrets(values: Readonly<Record<string, string>>, environment: CloudEnvironment): Record<string, string> {
+  if (environment !== "staging") return { ...values }
+  const next = { ...values }
+  const convertedSealing = next.CLOUD_SEALING_KEY ? canonicalUnpaddedSealingKey(next.CLOUD_SEALING_KEY) : undefined
+  if (convertedSealing !== undefined) next.CLOUD_SEALING_KEY = convertedSealing
+  const convertedGoogle = next.GOOGLE_CONNECT_TOKEN_KEY ? canonicalUnpaddedHexKey(next.GOOGLE_CONNECT_TOKEN_KEY) : undefined
+  if (convertedGoogle !== undefined) next.GOOGLE_CONNECT_TOKEN_KEY = convertedGoogle
+  return next
+}
+
 /** The secrets of `file` read under the rollout's rules: generated once unless frozen, written back, and refused unless complete. */
 export effect function settledSecrets(file: string, environment: CloudEnvironment) {
   const rollout = try Machine
-  const values = try readSecrets(file)
+  const values = stagingCompatibleSecrets(try readSecrets(file), environment)
   const internalMissing = internalSecrets.some((name) => !values[name])
   const provided = secretProblems(generated(values), environment)
   const read = try rollout.send({ type: "readSecrets", internalMissing, providedFit: provided.length === 0 })
