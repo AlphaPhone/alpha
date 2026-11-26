@@ -304,7 +304,8 @@ async function startProvider(key: string, real: RealModel | undefined) {
     listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
     const last = messages.findLast((message) => message.role === "user")?.content;
-    const pending = listed(replies, scripted(system));
+    // Only reading: a call made before this owner's first script must not leave an empty list that later shadows it.
+    const pending = replies.get(scripted(system)) ?? [];
     const prompt = typeof last === "string" ? ownerWords(last) : undefined;
     const choice = pending.findIndex((entry) => entry.prompt === undefined || entry.prompt === prompt);
     const queued = choice < 0 ? undefined : pending.splice(choice, 1)[0]?.reply;
