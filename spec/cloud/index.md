@@ -179,11 +179,11 @@ pure def offersAlphasServices(name: str, audience: str, capabilities: List[str])
 
 ### Alpha's own cloud mails each sign-in code from its own address on Alpha's zone
 
-The sender is `noreply@alphacompute.cc` in both environments, the address the
+The sender is `noreply@alphaphone.dev` in both environments, the address the
 mail provider verified for Alpha's zone.
 
 ```quint
-pure val ownMailSender = "noreply@alphacompute.cc"
+pure val ownMailSender = "noreply@alphaphone.dev"
 
 pure def mailsAsAlpha(sender: str): bool = sender == ownMailSender
 ```
