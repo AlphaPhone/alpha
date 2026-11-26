@@ -1,7 +1,7 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea, watchMessageMenu } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
@@ -264,6 +264,9 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
     if (!node) return;
     return () => { release(); triggerRef.current = null; };
   }, [release]);
+  const watchMenu = useCallback((node: HTMLDivElement | null) => {
+    if (node && !actions?.covered) return watchMessageMenu(node, () => choose(""), { within: triggerRef.current, dismissOnSelection: false });
+  }, [actions?.covered, choose]);
   const complete = "incomplete" in row ? undefined : row;
   const outgoing = complete?.direction === "outgoing";
   const failed = complete?.status === "failed";
@@ -334,7 +337,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
         {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
       </div>
-      {actions && <MessageActionMenu actions={actions} focusOnOpen={keyboardMenu} close={() => { choose(""); triggerRef.current?.focus({ preventScroll: true }); }} />}
+      {actions && <MessageActionMenu ref={watchMenu} actions={actions} focusOnOpen={keyboardMenu} close={() => { choose(""); triggerRef.current?.focus({ preventScroll: true }); }} />}
     </div>
   );
 });
@@ -398,6 +401,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
     focused.element.focus({ preventScroll: true });
   };
   const actions = selectedRow && !("incomplete" in selectedRow) && content(state) ? state.confirming ? {
+    covered: true,
     copy: selectedRow.body ? (report: CopyReport) => report(undefined) : undefined,
     remove: () => undefined,
   } : {
