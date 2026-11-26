@@ -12,7 +12,7 @@ import type { Outcome } from "../../gen/kit__attempt.effect.vibe"
 import { Files, called } from "../platform/files.vibe"
 import { Device } from "../platform/device.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { kindOf } from "./entries.vibe"
+import { childrenOf, kindOf } from "./entries.vibe"
 import { Handles, type Spot } from "./handles.vibe"
 
 /** What Files told the agent of one of its requests: whether it was done, and the files it found or opened. */
@@ -265,7 +265,7 @@ effect function byPaths(paths: readonly string[]): ReadonlyArray<Item | undefine
     const entry = entries.get(path)
     const id = numbers.get(path)
     if (entry === undefined || id === undefined || volume === undefined) return undefined
-    return { id, volume, name: entry.name, kind: kindOf(entry), revision: Math.max(0, Math.trunc(entry.modified)), bytes: entry.directory ? 0 : Math.max(0, Math.trunc(entry.size)) }
+    return { id, volume, name: entry.name, kind: kindOf(entry), revision: Math.max(0, Math.trunc(entry.modified)), bytes: entry.directory ? 0 : Math.max(0, Math.trunc(entry.size)), children: childrenOf(entry) }
   })
 }
 

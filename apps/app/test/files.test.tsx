@@ -475,6 +475,9 @@ describe("Files on a phone", () => {
     const { alpha, runtime, world } = await onFiles(undefined, "assistant");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
+    // spec/app/files/shared.md, "A file has a number, a name, a revision that changes whenever the file does, a kind, its size, and the storage volume it is on": a folder row counts what the phone counted in it (files-browser-adapter.ts:1316-1318)
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
+    await drawn(() => expect([...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === "Documents")?.querySelector("span.text-muted-foreground")?.textContent).toBe("2 items"));
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
     // v119 live rows read size · date with no leading type word (files-browser-adapter.ts:1315-1324); the kind stays for screen readers.
@@ -487,8 +490,9 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
     // v119 live left the 18px slot before the facts empty (selection-adapter.ts:282 `d: ''`): no kind icon, the words keep their place.
+    // spec/app/files/preview.md, "The caption and Details show facts for the exact document held": v119's live facts line (selection-adapter.ts:282, files-browser-adapter.ts:1797-1804)
     const facts = document.querySelector("[data-facts-slot]")?.parentElement;
-    expect([facts?.querySelector("svg"), facts?.querySelector("[data-facts-slot]")?.childNodes.length, facts?.textContent?.startsWith("Text · ")]).toEqual([null, 0, true]);
+    expect([facts?.querySelector("svg"), facts?.querySelector("[data-facts-slot]")?.childNodes.length, facts?.textContent]).toEqual([null, 0, "text/plain · selected on this device · Internal storage › Documents"]);
 
     // spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
     await choose("Details", "File actions");

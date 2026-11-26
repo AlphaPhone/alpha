@@ -13,6 +13,11 @@ export function kindOf(entry: { readonly directory: boolean; readonly mimeType: 
   return "Other"
 }
 
+/** How many items the phone counted in a folder it listed; a file holds none. */
+export function childrenOf(entry: { readonly directory: boolean; readonly children?: number }): number {
+  return entry.directory ? Math.max(0, Math.trunc(entry.children ?? 0)) : 0
+}
+
 module presentation {
   /** A size in the units the owner reads, to one decimal above a kilobyte. @throws {never} */
   export function sized(bytes: number): string {
@@ -37,9 +42,13 @@ module presentation {
   export function parentPath(path: string): string {
     return path.slice(0, Math.max(0, path.lastIndexOf("/")));
   }
+  /** A folder's count of items, as v119's rows read it (files-browser-adapter.ts:191 at 45f6bed30). @throws {never} */
+  export function itemCount(children: number): string {
+    return children === 1 ? "1 item" : `${children} items`
+  }
   /** A storage volume and its folder, as Files shows the location. @throws {never} */
   export function folderLocation(volume: string, folder: string): string {
     return [volume, ...folder.split("/").filter(Boolean)].join(" › ");
   }
 }
-export { changedOn, folderLocation, parentPath, sized } from presentation
+export { changedOn, folderLocation, itemCount, parentPath, sized } from presentation
