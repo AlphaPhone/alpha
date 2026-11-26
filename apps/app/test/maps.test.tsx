@@ -334,6 +334,14 @@ describe("Maps in a browser", () => {
     await hardware("back");
     await until(second.alpha, again, Screen, (s) => s.place === 0);
 
+    // spec/app/maps/index.md, "The place on the card is saved under a name, renamed under another, or forgotten": a dropped pin is the owner's, not Google's, so Google's map offers Rename, Save and Share on it, as v119 live (prototype/maps-adapter.ts:378, 489)
+    await typeMapSearch("43.75, 7.43");
+    await enter("Search Maps");
+    await until(second.alpha, again, Screen, (s) => s.place !== 0 && !s.pinning);
+    expect([document.querySelector("h2")?.textContent, Boolean(button("Rename place")), Boolean(button("Save")), Boolean(button("Share"))]).toEqual(["Dropped pin", true, true, true]);
+    await hardware("back");
+    await until(second.alpha, again, Screen, (s) => s.place === 0);
+
     // spec/app/maps/connection.md, "Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge"; spec/app/maps/places.md, "At most 200 places are saved: a full list only renames"
     await typeMapSearch("gallery");
     await enter("Search Maps");

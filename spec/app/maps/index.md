@@ -558,10 +558,12 @@ pure def sometimesSearchFailed(m: Maps): bool = mode(m) == Search and m.search.s
 
 The [saved places](./places.md) keep one entry per place, at most 200. A
 place Google served is never saved or renamed; one already saved can be
-forgotten.
+forgotten. The pin dropped last is the owner's own coordinates, not
+Google's, so it is saved, renamed and shared on any map, as v119's live
+Maps treated a pin as a local place (prototype/maps-adapter.ts:378, 489).
 
 ```quint
-pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place))
+pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place)) and m.place != m.pin
 
 pure def canNamePlace(m: Maps, name: str): bool =
   m.place > 0 and name != "" and S::hasRoom(m.saved, m.place) and not(googleShown(m)) and m.keepable and onScreen(m)
@@ -581,7 +583,7 @@ pure def forgetPlace(m: Maps): Stepped =
 ### A saved place is renamed in a name field the owner opens on its card
 
 The pin dropped last offers the same field while it is the place on the
-card, as v119 did, while there is room and the map is not Google's; any
+card, as v119 did, while there is room, on Google's map as on any other; any
 other place not saved, such as a place found by search, offers none. Its
 name only names the pin, and the owner reads "Name updated. Tap Save to
 keep this place." on the pin's card only: choosing another place, Back,
