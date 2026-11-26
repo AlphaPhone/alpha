@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { ConversationRecord } from "@elizaos/agent";
+import { ConversationRecord, type DeviceOperation } from "@elizaos/agent";
 import { Effect, Schema } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
@@ -9,13 +9,17 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
 import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
+import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
+import { Machine as Library } from "../gen/app__photos.effect.vibe";
+import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
 import inbox from "../src/inbox/index.tsx";
+import photos from "../src/photos/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
-import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { askExample, askExampleLines, button, chatAction, closeAll, drawn, fill, hardware, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
 import type { Answering } from "./fakes/routes.ts";
@@ -225,6 +229,107 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   expect(received).toEqual(expect.stringContaining(prompt));
 }, 300_000);
 
+it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "Story: Share what I am looking at"); (spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  world.photos.access = { scope: "full", images: "full", videos: "denied" };
+  const source = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/png;base64,"));
+  const replacement = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/jpeg;base64,"));
+  if (!source || !replacement) throw new Error("The phone fixture needs two different photos");
+  source.name = "Reviewed photo.png";
+  replacement.name = "Replacement photo.jpg";
+  const ordinary = "Ordinary attachment.png";
+  const ordinaryData = source.image.slice(source.image.indexOf(",") + 1);
+  const prompt = "What should I look for in this photo?";
+  const reply = "Look for the landmarks near the center.";
+  const received: unknown[] = [];
+  const forwardAgent = forward(mine.agent.origin, mine.agent.token);
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: async (request) => {
+      if (request.method === "POST" && /^\/api\/conversations\/[^/]+\/messages(?:\/stream)?$/u.test(new URL(request.url).pathname)) {
+        const body: unknown = await request.clone().json();
+        received.push(body);
+      }
+      return forwardAgent(request);
+    },
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "view:Photos", "assistant", "notice"));
+  const library = photos.runtime(alpha);
+  const chat = assistant.runtime(alpha);
+  await until(alpha, chat, Conversation, (state) => state.ready);
+  await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
+  await press("Photos");
+  await until(alpha, library, Library, (state) => state.library.status === "Loaded");
+  const openPhoto = async (name = source.name) => {
+    await press(name);
+    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+  };
+  const askAbout = async () => {
+    await drawn(() => button("Photo actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    await drawn(() => {
+      const action = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Ask Alpha");
+      if (!action) throw new Error("Ask Alpha was not offered for the photo");
+      action.click();
+    });
+  };
+  await openPhoto();
+  const priorReads = world.photos.readCount;
+  const gate = Promise.withResolvers<void>();
+  world.photos.readGate = gate.promise;
+  try {
+    await askAbout();
+    await drawn(() => vi.waitFor(() => expect(world.photos.readCount).toBe(priorReads + 1)));
+    await press("Back to photos");
+    await until(alpha, library, Viewer, (state) => state.open === 0);
+  } finally {
+    delete world.photos.readGate;
+    await drawn(async () => { gate.resolve(); await gate.promise; });
+  }
+  expect([button(`Remove ${source.name}`), received]).toEqual([undefined, []]);
+  await openPhoto();
+  await askAbout();
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  chatAction("Attach media");
+  const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Select photos"]');
+  await drawn(() => vi.waitFor(() => expect(input()).not.toBeNull()));
+  await drawn(() => {
+    const picker = input();
+    if (!picker) throw new Error("The photo file input did not open");
+    const bytes = Uint8Array.from(atob(ordinaryData), (byte) => byte.charCodeAt(0));
+    Object.defineProperty(picker, "files", { value: [new File([bytes], ordinary, { type: "image/png" })] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${ordinary} from the selection`)).toBeDefined()));
+  await press("Attach selected files");
+  await until(alpha, chat, Composer, (state) => state.editor.files === 2);
+  await fill("Message Alpha", prompt);
+  await hardware("back");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+  await press("Back to photos");
+  await until(alpha, library, Viewer, (state) => state.open === 0);
+  await openPhoto(replacement.name);
+  await askAbout();
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${replacement.name}`)).toBeDefined()));
+  const writing = await chat.runPromise(Composer.use((composer) => composer.get()));
+  const text = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Alpha"]')?.value;
+  expect([button(`Remove ${source.name}`), Boolean(button(`Remove ${ordinary}`)), writing.editor.files, text, received])
+    .toEqual([undefined, true, 2, prompt, []]);
+
+  await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
+  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await press("Send");
+  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
+  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  expect(received).toEqual([expect.objectContaining({
+    text: expect.stringContaining(prompt),
+    images: [
+      { data: replacement.image.slice(replacement.image.indexOf(",") + 1), mimeType: "image/jpeg", name: replacement.name },
+      { data: ordinaryData, mimeType: "image/png", name: ordinary },
+    ],
+  })]);
+}, 300_000);
+
 it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.camera.galleryVolume = "external_primary";
@@ -278,4 +383,52 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   });
   await press("Open last photo");
   await waitForScreen(() => expect(document.querySelector('[data-alpha-subview="photos-viewer"] img[alt="Agent capture.jpg"]')).not.toBeNull());
+}, 300_000);
+
+it('Filter Files from Home and open the named file with the resident agent (spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"); (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  const path = "Documents/notes.txt";
+  const contents = "This exact file is open on the phone.";
+  world.files.texts[path] = contents;
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: forward(mine.agent.origin, mine.agent.token),
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "assistant", "view:Files", "notice"));
+  const runtime = assistant.runtime(alpha);
+  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    assertScreen();
+  }, { timeout: 30_000 });
+  const receipts = () => [...(world.telephony.enrollment?.journal.values() ?? [])].filter((entry) => entry.acknowledged);
+  const send = async (prompt: string, operation: DeviceOperation) => {
+    await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
+    await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation } }, prompt);
+    await mine.script({ kind: "text", parts: ["[answer] I’ll look in Files."] }, prompt);
+    await fill("Message Alpha", prompt);
+    await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+  };
+
+  await until(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded" && !state.askFirst);
+  await until(alpha, runtime, Conversation, (state) => state.ready);
+  await press("Open conversation");
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0 && state.assistant === "Sheet");
+
+  const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
+  await send("Show PDFs in Download", filter);
+  await waitForScreen(() => {
+    const found = document.querySelector('[role="group"][aria-label="Found"]');
+    expect(Array.from(found?.querySelectorAll("button") ?? [], (row) => row.getAttribute("aria-label"))).toEqual(["lease.pdf"]);
+    expect(document.body.textContent).toContain("Showing 1 item in Files.");
+    expect(button("Approve")).toBeUndefined();
+    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter]);
+  });
+
+  const open = { type: "files_open", path } as const;
+  await send("Open Documents/notes.txt", open);
+  await waitForScreen(() => {
+    expect(document.querySelector('[role="dialog"][aria-label="Preview"] pre')?.textContent).toBe(contents);
+    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter, open]);
+  });
+  expect(receipts().map(({ evidence }) => evidence.result)).toEqual([undefined, undefined]);
 }, 300_000);

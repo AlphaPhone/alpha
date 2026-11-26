@@ -72,7 +72,8 @@ module web {
     return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Camera frame could not be encoded")), "image/jpeg", .92))
   }
   /** The recorder owns a canvas stream drawn once per new camera frame. */
-  export function framedVideo(video: HTMLVideoElement, framing: () => Framing): { stream: MediaStream; stop(): void } {
+  export function framedVideo(video: HTMLVideoElement, framing: () => Framing, failed: () => void): { stream: MediaStream; stop(): void } {
+    if (typeof video.requestVideoFrameCallback !== "function" || typeof video.cancelVideoFrameCallback !== "function") throw new Error("Camera recording is unavailable")
     const canvas = document.createElement("canvas")
     const scale = Math.min(1, 1920 / Math.max(video.videoWidth, video.videoHeight))
     canvas.width = Math.round(video.videoWidth * scale / 2) * 2
@@ -98,7 +99,7 @@ module web {
         request.call(track)
         callback = video.requestVideoFrameCallback(frame)
       } catch {
-        stop()
+        failed()
       }
     }
     try { callback = video.requestVideoFrameCallback(frame) } catch (cause) { stop(); throw cause }
@@ -205,8 +206,8 @@ export service CameraPort {
   zoom(level: number): boolean!!
   focus(point: Point): boolean!!
   capture(save: boolean): (CameraMedia | undefined)!!
-  record(sound: boolean): boolean!!
-  finish(): (CameraMedia | undefined)!!
+  record(sound: boolean): (Stream.Stream<"failed"> | undefined)!!
+  finish(): (CameraMedia | "failed" | undefined)!!
   release(media: CameraMedia): void!!
 }
 
@@ -325,7 +326,7 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
       const source = dataImage(save ? reply.thumbnail : reply.base64) || (path === "" ? "" : playable(path))
       return source ? { path, source, libraryId: reply.libraryId ?? libraryId(path, "i"), mime: "image/jpeg", width: reply.width, height: reply.height } : undefined
     },
-    record: (sound: boolean) => tried(() => camera().startRecording({ ...recordingOptions, saveToGallery: true, audio: sound })),
+    record: (sound: boolean) => Effect.map(tried(() => camera().startRecording({ ...recordingOptions, saveToGallery: true, audio: sound })), (ok) => ok ? Stream.empty : undefined),
     effect finish(): (CameraMedia | undefined)!! {
       const reply = tryPromise(() => camera().stopRecording()) catch () => undefined
       if (!reply?.path || reply.fileSize <= 0 || reply.duration <= 0) return undefined
@@ -340,9 +341,12 @@ interface BrowserPreview {
   readonly track: MediaStreamTrack
 }
 
+type BrowserRecording = Blob | "failed" | undefined
+
 interface BrowserFilm {
   readonly recording: MediaRecorder
-  readonly answer: Deferred.Deferred<Blob | undefined>
+  readonly answer: Deferred.Deferred<BrowserRecording>
+  readonly failed: () => boolean
   readonly release: () => void
 }
 
@@ -449,23 +453,40 @@ export const browserCamera = Layer.effect(CameraPort, effect {
       const blob = tryPromise(() => image(video, currentFraming)) catch () => undefined
       return blob === undefined ? undefined : kept(blob, video.videoWidth, video.videoHeight)
     },
-    effect record(sound: boolean): boolean!! {
+    effect record(sound: boolean): (Stream.Stream<"failed"> | undefined)!! {
       const stream = opened
       const video = view
       const ticket = owner
-      if (stream === undefined || video === null || film !== undefined) return false
+      if (stream === undefined || video === null || (film !== undefined && !film.failed())) return undefined
       const audio = sound ? (tryPromise(() => get({ audio: true })) catch () => undefined) : undefined
-      if (sound && audio === undefined) return false
-      if (opened !== stream || view !== video) { release(audio); return false }
-      const frames = Effect.try(() => framedVideo(video, () => framing)) catch () => undefined
-      if (frames === undefined) { release(audio); return false }
-      const cleanup = () => { frames.stop(); release(audio) }
-      const answer = Deferred.makeUnsafe<Blob | undefined>()
+      if (sound && audio === undefined) return undefined
+      if (opened !== stream || view !== video) { release(audio); return undefined }
+      const answer = Deferred.makeUnsafe<BrowserRecording>()
+      let faulted = false
+      let released = false
+      const frames = Effect.try(() => framedVideo(video, () => framing, fail)) catch () => undefined
+      if (frames === undefined) { release(audio); return undefined }
+      const cleanup = () => {
+        if (released) return
+        released = true
+        frames.stop()
+        release(audio)
+      }
+      function fail() {
+        if (!Deferred.doneUnsafe(answer, succeed("failed"))) return
+        faulted = true
+        cleanup()
+        const active = film
+        if (active?.answer === answer && active.recording.state !== "inactive") {
+          try { active.recording.stop() } catch { void 0 }
+        }
+      }
       const session = effect {
         const recording = try Effect.try(() => recorder(frames.stream, audio))
         const chunks: Blob[] = []
         let size = 0
         recording.ondataavailable = ({ data }) => {
+          if (faulted) return
           if (data.size > 0 && size + data.size <= recordingOptions.maxFileSize) {
             chunks.push(data)
             size += data.size
@@ -475,25 +496,26 @@ export const browserCamera = Layer.effect(CameraPort, effect {
             recording.stop()
           }
         }
-        recording.onerror = () => { cleanup(); Deferred.doneUnsafe(answer, succeed(undefined)) }
+        recording.onerror = fail
         recording.onstop = () => {
           cleanup()
-          Deferred.doneUnsafe(answer, succeed(recordingBlob(chunks, recording.mimeType)))
+          if (!faulted) Deferred.doneUnsafe(answer, succeed(recordingBlob(chunks, recording.mimeType)))
         }
         try Effect.try(() => recording.start(1000))
         return recording
       } catch () => undefined
-      if (session === undefined) { cleanup(); return false }
-      film = { recording: session, answer, release: cleanup }
-      return true
+      if (session === undefined) { cleanup(); return undefined }
+      film = { recording: session, answer, failed: () => faulted, release: cleanup }
+      const outcome = Stream.fromEffect(Deferred.await(answer))
+      return Stream.filter(outcome, (result): result is "failed" => result === "failed")
     },
-    effect finish(): (CameraMedia | undefined)!! {
+    effect finish(): (CameraMedia | "failed" | undefined)!! {
       const running = film
       if (running === undefined) return undefined
       if (running.recording.state !== "inactive") try ignore(Effect.try(() => running.recording.stop()))
       const blob = try Deferred.await(running.answer)
-      film = undefined
-      if (blob === undefined) return undefined
+      if (film === running) film = undefined
+      if (blob === undefined || blob === "failed") return blob
       const size = Effect.timeout(tryPromise((signal) => readVideoSize(blob, signal)), 2000) catch () => undefined
       return kept(blob, size?.width ?? 0, size?.height ?? 0)
     },

@@ -72,8 +72,8 @@ pure def emit(out: List[Effect], t: Bin): Done = { state: t, out: out }
 
 pure def idle(t: Bin): bool = not(C::running(t.job)) and not(busy(t.forever)) and t.prepared.size() == 0 and t.scope == Chosen
 
-pure def dropping(s: Bin): Bin =
-  { ...s, prepared: Set(), confirm: V::dismiss(s.confirm), scope: Chosen }
+pure def dropping(expired: bool, s: Bin): Bin =
+  { ...s, prepared: Set(), confirm: V::dismiss(s.confirm), scope: Chosen, expired: expired }
 
 pure def fetching(page: bool, out: List[Effect], t: Bin): Done =
   val asked = R::ask(t.read)
@@ -126,7 +126,7 @@ pure def canLeave(s: Bin, by: Actor): bool = (by == Owner or by == Phone) and s.
 
 pure def leave(s: Bin, by: Actor): Bin =
   {
-    ...dropping(s), open: false, rows: Set(), more: false, selecting: false, selected: Set(),
+    ...dropping(s.expired, s), open: false, rows: Set(), more: false, selecting: false, selected: Set(),
     job: C::cancel(s.job),
   }
 
@@ -172,7 +172,7 @@ Android's own Photos, another app, or Android's trash expiring an item.
 pure def canTrashChanged(s: Bin, by: Actor): bool = by == Phone and s.open
 
 pure def trashChanged(s: Bin, by: Actor): Done =
-  if (s.scope == EntireBrowserBin and s.preparing.status == R::Loading) listing(List(), dropping(s))
+  if (s.scope == EntireBrowserBin and s.preparing.status == R::Loading) listing(List(), dropping(false, s))
   else listing(List(), { ...s, confirm: V::revise(s.confirm) })
 ```
 
@@ -310,10 +310,10 @@ pure def canEmptyReadied(s: Bin, ticket: int, by: Actor): bool =
   by == Phone and s.open and s.scope == EntireBrowserBin and R::canAnswer(s.preparing, ticket)
 
 pure def emptyReadied(s: Bin, ticket: int, ok: bool, items: Set[int], revision: int, by: Actor): Bin =
-  val current = ok and items.size() > 0 and s.rows.subseteq(items) and s.revision == revision and s.read.status == R::Loaded
-  val answered = { ...s, preparing: R::answer(s.preparing, current) }
-  if (current) { ...answered, prepared: items, confirm: V::present(V::revise(s.confirm)), expired: false }
-  else dropping(answered)
+  val fresh = ok and items.size() > 0 and s.rows.subseteq(items) and s.revision == revision and s.read.status == R::Loaded
+  val answered = { ...s, preparing: R::answer(s.preparing, fresh) }
+  if (fresh) { ...answered, prepared: items, confirm: V::present(V::revise(s.confirm)), expired: false }
+  else dropping(false, answered)
 ```
 
 ### Once prepared, "Delete photos forever" shows the owner what will go
@@ -337,7 +337,7 @@ pure def readied(s: Bin, ticket: int, ok: bool, by: Actor): Bin =
 
 pure def canCancelForever(s: Bin, by: Actor): bool = by == Owner and (s.prepared.size() > 0 or s.scope == EntireBrowserBin) and not(busy(s.forever))
 
-pure def cancelForever(s: Bin, by: Actor): Bin = dropping(s)
+pure def cancelForever(s: Bin, by: Actor): Bin = dropping(s.expired, s)
 ```
 
 ### A confirmation not given in time expires, and says to review the trash again
@@ -347,7 +347,7 @@ The phone says when Android's prepared deletion is no longer valid.
 ```quint
 pure def canForeverExpired(s: Bin, by: Actor): bool = by == Phone and s.prepared.size() > 0 and not(busy(s.forever))
 
-pure def foreverExpired(s: Bin, by: Actor): Bin = { ...dropping(s), expired: true }
+pure def foreverExpired(s: Bin, by: Actor): Bin = dropping(true, s)
 ```
 
 ### The deletion is carried out once, only when the owner confirms it while nothing changed since it was shown

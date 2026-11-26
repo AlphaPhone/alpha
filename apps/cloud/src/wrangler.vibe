@@ -70,7 +70,7 @@ function apiVars(profile: CloudProfile, environment: CloudEnvironment, registrat
     NATIVE_AUTH_CALLBACK: signIn,
     EMAIL_FROM: `${settings.name} <${settings.mailSender}>`,
     GOOGLE_CLIENT_ID: settings.google?.clientId ?? "",
-    GOOGLE_CONNECT_CLIENT_ID: settings.google?.clientId ?? "",
+    GOOGLE_CONNECT_CLIENT_ID: settings.google?.serverClientId ?? settings.google?.clientId ?? "",
     STRIPE_PLAN: "plus_monthly",
     STRIPE_PRICE_ID: plan?.priceId ?? "",
     STRIPE_PRODUCT_ID: plan?.productId ?? "",

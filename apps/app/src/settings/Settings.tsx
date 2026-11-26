@@ -113,7 +113,7 @@ export interface Common {
   readonly onPlace: (row: number) => void;
 }
 
-const pageNames: Record<Exclude<Page, "BrowserPasswordsPage" | "CarrierInfoPage">, SettingsPageName> = {
+const pageNames: Record<Exclude<Page, "BrowserPasswordsPage" | "CarrierInfoPage" | "PrivacyNotifications">, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
   InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
@@ -291,6 +291,7 @@ function General({ runtime, alpha, common }: PageProps) {
 
 // spec/app/settings/preferences.md, "Story: Choose how Alpha looks"; spec/app/settings/preferences.md, "Story: Make the text larger or smaller"
 function Display({ runtime, common }: PageProps) {
+  const onPhone = usePages(runtime).state?.phone ?? false;
   const { state, can, send } = useTimed(runtime, usePrefs);
   if (!state) return null;
   const size = ([75, 100, 115, 130, 150] as const).find((percent) => percent === state.size) ?? 0;
@@ -300,6 +301,7 @@ function Display({ runtime, common }: PageProps) {
   return (
     <SettingsDisplayPage
       {...common}
+      onPhone={onPhone}
       theme={themeNames[state.theme]}
       keeping={loading(state.keeping)}
       onChooseTheme={(theme) => choose({ type: "chooseTheme", theme: themesNamed[theme], at: untimed })}
@@ -313,17 +315,17 @@ function Display({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"; spec/app/settings/index.md, "Each page links to what another area owns there"
+// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each phone row on Permissions opens that one access"; spec/app/settings/index.md, "Each page links to what another area owns there"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
-  const { can, send } = usePages(runtime);
+  const { state: pages, can, send } = usePages(runtime);
   if (!device) return null;
   const { recovery, ...shown } = device;
   const review = { type: "reviewAllAccess" } as const;
   return (
     <>
       {recovery}
-      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
+      <SettingsPrivacyPage {...common} {...shown} onPhone={pages?.phone ?? false} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
         {alpha.slot("settings/voice")}
         <ListenerControls runtime={runtime} common={common} />
       </SettingsPrivacyPage>
@@ -333,7 +335,27 @@ function Privacy({ runtime, alpha, common }: PageProps) {
 
 function Permissions({ runtime, common }: PageProps) {
   const facts = useFacts(runtime).state;
-  const { can, send } = usePages(runtime);
+  const { state: pages, can, send } = usePages(runtime);
+  const { state: alerts } = useBrowserAlerts(runtime);
+  if (!pages?.phone) {
+    const observe = (access: FactsGen.Access): SettingsFactReading => {
+      if (!facts) return { word: "waiting" };
+      if (FactsGen.grantIs(facts, access, "Unasked")) return { word: "reported", value: "Ask", status: "warn" };
+      const word = FactsGen.accessWord(facts, access);
+      if (word === "AccessWaiting") return { word: "waiting" };
+      if (word === "Allowed") return { word: "reported", value: "Allowed", status: "ok" };
+      if (word === "Off") return { word: "reported", value: "Off", status: "off" };
+      return { word: "unavailable", compact: true };
+    };
+    const alertWord = browserAlertReading(alerts);
+    const notification = alertWord.word === "reported" && alertWord.value === "On" ? { ...alertWord, value: "Allowed" } : alertWord;
+    const open = { type: "openPrivacyNotifications" } as const;
+    return <SettingsPermissionsPage {...common} grants={grants(facts)} browser={{
+      camera: observe("CameraAccess"), microphone: observe("MicrophoneAccess"), location: observe("LocationAccess"),
+      photos: { word: "reported", value: "Selected", status: "warn" }, files: { word: "reported", value: "Chosen files", status: "warn" },
+      notifications: notification,
+    }} onNotifications={can(open) ? () => void send(open) : undefined} />;
+  }
   const accesses = Object.fromEntries(Object.entries(accessNames).map(([access, name]) => [name, access])) as Record<SettingsAccess, FactsGen.Access>;
   return (
     <SettingsPermissionsPage
@@ -535,6 +557,23 @@ function Activity({ runtime, alpha, common }: PageProps) {
 /** A page of Settings, given the runtime, Alpha and the props every page shares. */
 export type Drawn = (props: PageProps) => ReactNode;
 
+function Notifications({ runtime, alpha, common }: PageProps) {
+  const facts = useFacts(runtime).state;
+  const pages = usePages(runtime).state;
+  const { state: web, can, send } = useBrowserAlerts(runtime);
+  const change = { type: "choose", desired: web?.status !== "Enabled" } as const;
+  const browserAlerts = pages?.phone ? undefined : {
+    enabled: !web || web.status === "Unavailable" ? undefined : web.status === "Enabled",
+    reading: !web || web.phase === "Reading",
+    saving: web?.phase === "Writing",
+    saveFailed: web?.saveFailed,
+    onChoose: can(change, "Owner") ? (enabled: boolean) => void send({ type: "choose", desired: enabled }, "Owner") : undefined,
+  };
+  return <SettingsNotificationsPage {...common} onPhone={pages?.phone} browserAlerts={browserAlerts}
+    backLabel={pages?.page === "PrivacyNotifications" ? "Back to Privacy" : "Back to General"}
+    alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={pages?.phone ? alpha.slot("settings/notification-collection") : undefined} channels={facts?.alerts ?? []} />;
+}
+
 const drawn: Partial<Record<Page, Drawn>> = {
   Top,
   General,
@@ -544,21 +583,8 @@ const drawn: Partial<Record<Page, Drawn>> = {
     const facts = useFacts(runtime).state;
     return <SettingsSoundPage {...common} sound={reading(facts, "Sound")} media={reading(facts, "MediaVolume")} ring={reading(facts, "RingVolume")} alarm={reading(facts, "AlarmVolume")} />;
   },
-  Notifications: ({ runtime, alpha, common }) => {
-    const facts = useFacts(runtime).state;
-    const pages = usePages(runtime).state;
-    const { state: web, can, send } = useBrowserAlerts(runtime);
-    const change = { type: "choose", desired: web?.status !== "Enabled" } as const;
-    const browserAlerts = pages?.phone ? undefined : {
-      enabled: !web || web.status === "Unavailable" ? undefined : web.status === "Enabled",
-      reading: !web || web.phase === "Reading",
-      saving: web?.phase === "Writing",
-      saveFailed: web?.saveFailed,
-      onChoose: can(change, "Owner") ? (enabled: boolean) => void send({ type: "choose", desired: enabled }, "Owner") : undefined,
-    };
-    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} browserAlerts={browserAlerts}
-      alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={pages?.phone ? alpha.slot("settings/notification-collection") : undefined} channels={facts?.alerts ?? []} />;
-  },
+  Notifications,
+  PrivacyNotifications: Notifications,
   Battery: ({ runtime, common }) => <SettingsBatteryPage {...common} battery={reading(useFacts(runtime).state, "Battery")} />,
   PhonePage: Phone,
   Privacy,

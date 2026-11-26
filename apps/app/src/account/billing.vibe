@@ -1,12 +1,14 @@
 // spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/billing.md, "Story: Keep billing to its sign-in"
 import { type Account as CloudProfile, checkoutFromResponse, CloudError, isCredentialInvalid, networkError, pathOf, type PlanOffer, routesByName } from "@elizaos/cloud"
+import * as Codes from "../../gen/app__account__codes.effect.vibe"
+import { changeIsOpen } from "./change.vibe"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
 import { type Account, Cloud, openCloudCheckout } from "../platform/cloud.vibe"
 import { billReturned, Device, takeBillingReturn } from "../platform/device.vibe"
-import { attemptedWith } from "../platform/remote.vibe"
+import { attemptedUsing } from "../platform/remote.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
 import { contained, due, type Job, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { accountIsInFront, type Buyer, buyerOf, type Catalog, type PurchaseVisibility, readAccount, readCatalog, sameBuyer } from "./profile.vibe"
+import { accountIsInFront, AccountWrites, type Buyer, buyerOf, type Catalog, type PurchaseVisibility, readAccount, readCatalog, sameBuyer } from "./profile.vibe"
 
 interface Purchase {
   readonly visit: number
@@ -63,18 +65,21 @@ export effect function choosePurchase(catalog: Catalog, offer: PlanOffer, review
     const plan = try snapshot(cloud)
     return sameBuyer(buyer, try currentBuyer(cloud)) ? { offers, plan } : undefined
   } catch () => undefined
-  if (!(try accountIsInFront)) return
-  const state = try billing.get()
-  const tier = tierOf(offer)
-  if (state.reviewNumber !== reviewNumber || state.offers.ticket !== catalog.ticket
-    || !Billing.canChoosePlan(state, tier, reviewNumber, 1, "Unfunded", "ByOwner", false, untimed)) return
-  if (checked?.plan.account.status !== "active" || checked.plan.plan.source !== "free" || checked.plan.balance.usdMicros > 0
-    || !checked.offers.some((found) => offerMatches(found, offer))) {
-    try contained(billing.send({ type: "askOffers", signIn: 1 }), "refreshing the reviewed plan")
-    return
-  }
-  try (try Purchases).hold({ visit: state.visit.number + 1, buyer })
-  if (try contained(billing.send({ type: "choosePlan", tier, reviewed: reviewNumber, signIn: 1, standing: "Unfunded", origin: "ByOwner", elsewhere: false, now: untimed }), "starting checkout")) try sync(refresh)
+  try (try AccountWrites).admission.withPermits(1)(effect {
+    if (try changeIsOpen()) return
+    if (!(try accountIsInFront) || !Codes.quiet(try (try Codes.Machine).get())) return
+    const state = try billing.get()
+    const tier = tierOf(offer)
+    if (state.reviewNumber !== reviewNumber || state.offers.ticket !== catalog.ticket
+      || !Billing.canChoosePlan(state, tier, reviewNumber, 1, "Unfunded", "ByOwner", false, untimed)) return
+    if (checked?.plan.account.status !== "active" || checked.plan.plan.source !== "free" || checked.plan.balance.usdMicros > 0
+      || !checked.offers.some((found) => offerMatches(found, offer))) {
+      try contained(billing.send({ type: "askOffers", signIn: 1 }), "refreshing the reviewed plan")
+      return
+    }
+    try (try Purchases).hold({ visit: state.visit.number + 1, buyer })
+    if (try contained(billing.send({ type: "choosePlan", tier, reviewed: reviewNumber, signIn: 1, standing: "Unfunded", origin: "ByOwner", elsewhere: false, now: untimed }), "starting checkout")) try sync(refresh)
+  })
 }
 
 effect function openCheckout(visit: number, tier: Tier) {
@@ -86,7 +91,7 @@ effect function openCheckout(visit: number, tier: Tier) {
     try failed(false)
     return
   }
-  const asked = try attemptedWith(Cloud, (idempotencyKey) => HttpClientRequest.post(pathOf(routesByName.checkout)) |> HttpClientRequest.bodyJsonUnsafe(%, {
+  const asked = try attemptedUsing((request) => cloud.callFor(request, purchase.buyer.credentialId), (idempotencyKey) => HttpClientRequest.post(pathOf(routesByName.checkout)) |> HttpClientRequest.bodyJsonUnsafe(%, {
     planKey: tier === "Pro" ? "pro_monthly" : "plus_monthly", idempotencyKey, presentation: "mobile",
   }), visit)
   const started = asked.confirmed ? (checkoutFromResponse(asked.body) catch () => undefined) : undefined
@@ -120,8 +125,8 @@ effect function checkCheckout(attempt: number) {
   const { command, session, signIn } = state.checkout
   if (!Billing.canCheckoutConfirmed(state, attempt, signIn, command)) return
   const before = try custodyOf(cloud, state.visit.number, purchase)
-  const answered = before === "Matches" ? (effect {
-    const body = try cloud.call(HttpClientRequest.post(pathOf(routesByName.checkoutConfirm)) |> HttpClientRequest.bodyJsonUnsafe(%, { sessionId: session }))
+  const answered = before === "Matches" && purchase !== undefined ? (effect {
+    const body = try cloud.callFor(HttpClientRequest.post(pathOf(routesByName.checkoutConfirm)) |> HttpClientRequest.bodyJsonUnsafe(%, { sessionId: session }), purchase.buyer.credentialId)
     return try checkoutFromResponse(body)
   } catch () => undefined) : undefined
   const after = before === "Matches" ? try custodyOf(cloud, state.visit.number, purchase) : before

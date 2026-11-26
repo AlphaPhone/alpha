@@ -105,15 +105,15 @@ holds the `CLOUDFLARE_ACCOUNT_ID` variable and the
 ### Alpha Cloud
 
 Alpha Cloud is `apps/cloud` on AlphaCompute's Cloudflare account, in the
-`alphacompute.cc` zone; never the Eliza Labs account. Deploy staging end to
+`alphaphone.dev` zone; never the Eliza Labs account. Deploy staging end to
 end before production. The production deploy is the owner's step, and no
 deploy moves a phone: until the cutover release below, phones use Eliza
 Cloud.
 
 | | Production | Staging |
 |---|---|---|
-| API Worker | `api.alphacompute.cc` | `api-staging.alphacompute.cc` |
-| Web Worker (App Links, return pages) | `cloud.alphacompute.cc` | `cloud-staging.alphacompute.cc` |
+| API Worker | `api.alphaphone.dev` | `api-staging.alphaphone.dev` |
+| Web Worker (App Links, return pages) | `cloud.alphaphone.dev` | `cloud-staging.alphaphone.dev` |
 | Worker names | `alphacompute-cloud-api`, `…-edge` | `alphacompute-cloud-api-staging`, `…-edge` |
 
 The hosts are the `cutoverCandidate` rows of
@@ -128,9 +128,9 @@ deploy: the app's sign-in callback and App Link host come from them.
   `apps/cloud` change.
 - **Accounts, per environment:** Cloudflare (Workers Paid, a token with
   Workers Scripts and Workers Routes Edit, Hyperdrive Edit, and Zone Read and
-  DNS Edit on `alphacompute.cc`), an empty Postgres database on a direct TLS
+  DNS Edit on `alphaphone.dev`), an empty Postgres database on a direct TLS
   connection (not a transaction pooler), Cerebras, Cartesia, Resend with
-  `alphacompute.cc` verified, Google OAuth web clients for sign-in and the
+  `alphaphone.dev` verified, Google OAuth web clients for sign-in and the
   Gmail and Calendar connector with the redirect URIs
   `https://<api host>/api/v1/auth/google/callback` and
   `https://<api host>/api/v1/oauth/google/callback` (start Google's Gmail and
@@ -154,11 +154,11 @@ deploy: the app's sign-in callback and App Link host come from them.
   the internal keys and prints the entitlement public key. Back the file up
   encrypted; it is the only copy of keys whose loss signs everyone out.
   Rotate a provider key with `--apply`, never by editing the generated values.
-- **Operator inputs:** one JSON file outside the checkout in the shape of
+- **Operator profile:** one JSON file outside the checkout in the shape of
   Alpha's cloud profile (`apps/cloud/src/alpha.vibe`), with fictitious values
   filled in at `apps/cloud/profile/candidate.example.json`;
-  `pnpm cloud profile --inputs <file> --out <file>` checks it. Per
-  environment:
+  `pnpm cloud bundle --environment <e> --profile <file>` validates and
+  dry-run bundles it. Per environment:
   - `databaseIdentity`: a new `openssl rand -hex 32`, never reused; the first
     `migrate` writes it into the empty database and every later command
     refuses another.
@@ -206,12 +206,12 @@ deploy: the app's sign-in callback and App Link host come from them.
 
   | What it says | What to do |
   |---|---|
-  | `OperatorInputsInvalid` | the inputs are not the `OperatorInputs` shape: compare them with the fixture |
+  | `CandidateRefused` | the profile breaks a rule of Alpha's own cloud: compare it with `apps/cloud/profile/candidate.example.json` |
   | `… is missing` from `secrets` or `deploy` | fill that name in the secrets file and run `secrets` again |
   | `must lie outside the checkout and be readable by its owner alone` | move the secrets file out of the repository and `chmod 600` it |
   | `STRIPE_SECRET_KEY must be a live key in production` (or a test key in staging) | the Stripe mode does not fit the environment |
   | `… Hyperdrive is missing: run provision first`, or a render refused for an unprovisioned id | `apps/cloud/resources.json` has no resources for this environment yet: `provision --write` |
-  | `zone alphacompute.cc is not owned by the selected Cloudflare account alone` | the account id or token is of another account |
+  | `zone alphaphone.dev is not owned by the selected Cloudflare account alone` | the account id or token is of another account |
   | `migrate` or `register` refuses the database identity | `DATABASE_URL` names another database than the one `databaseIdentity` was written into |
   | `wrangler … could not start` | run `pnpm install` at the root |
   | `… is missing: build @repo/cloud first` | run the command through `pnpm cloud`, which builds it |

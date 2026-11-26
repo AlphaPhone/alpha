@@ -1,62 +1,98 @@
 // spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"
-import { Alert, AppHeader, Button, Dialog, DialogContent, DialogTitle, Spinner } from "@repo/ui";
-import { AudioLines, ChevronLeft, Pause, Play } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { Alert, Button } from "@repo/ui";
+import { Check, Mic, Pause, Square } from "lucide-react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
 import type { Event } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
-import { RecordingDisplay, control } from "./recording.vibe";
+import { RecordingDisplay, control, levelCount } from "./recording.vibe";
 
 function elapsed(seconds: number) {
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  const remainder = String(seconds % 60).padStart(2, "0");
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${remainder}` : `${minutes}:${remainder}`;
 }
 
-export function Recording({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Alpha["runtime"] }) {
+export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const recording = useMachine(runtime);
   const display = runtime.runSync(RecordingDisplay);
-  const { seconds, peak } = useSyncExternalStore(display.subscribe, display.snapshot, display.snapshot);
+  const meters = useSyncExternalStore(display.subscribe, display.snapshot, display.snapshot);
   const state = recording.state;
+  const confirming = state?.ask === "AskDiscard";
+  const restoreDiscardRef = useRef(false);
+  const keepRef = useCallback((button: HTMLButtonElement | null) => {
+    if (button === null) return;
+    button.focus({ preventScroll: true });
+    return () => { restoreDiscardRef.current = true; };
+  }, []);
+  const discardRef = (button: HTMLButtonElement | null) => {
+    if (button === null || button.disabled || !restoreDiscardRef.current) return;
+    restoreDiscardRef.current = false;
+    if (button.ownerDocument.activeElement === button.ownerDocument.body) button.focus({ preventScroll: true });
+  };
   if (state === undefined) return null;
   const send = (event: Event) => void recording.send(event, "Owner");
   const can = (event: Event) => recording.can(event, "Owner");
   const run = (action: "pause" | "resume" | "stop") => void runtime.runPromise(control(action));
   const resume = { type: "resume", take: state.take, room: { allowed: true, free: true, front: true, silent: true } } as const;
+  const active = state.phase === "Recording";
+  const paused = state.phase === "Paused";
+  const turning = state.phase === "Stopping" || (state.phase === "Keeping" && state.keeping.outcome !== "Unknown");
+  const matchingTake = meters.owner === state.owner && meters.take === state.take;
+  const measuring = active && matchingTake;
+  const seconds = matchingTake ? meters.seconds : 0;
+  const levels = matchingTake ? meters.levels : [];
+  const canStop = can({ type: "stop", take: state.take });
+  const canSave = can({ type: "keepPartial" });
+  const canCancel = can({ type: "cancelDiscard" });
+  const status = active ? (measuring ? "Recording" : "Starting…")
+    : paused ? (state.recovered ? "Recovered recording" : "Paused")
+      : turning ? "Saving…" : "";
+  const actionClass = "h-auto min-h-14 min-w-0 flex-1 whitespace-normal rounded-lg px-4 py-3 text-md in-data-[alpha-title-row]:flex-none";
+
   return (
-    <section aria-label="Voice recording" className="flex min-h-0 flex-1 flex-col" data-alpha-subview="notes-recording">
-      <AppHeader title="" leading={<Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft /></Button>}>
-        {can({ type: "stop", take: state.take }) && <Button variant="ghost" onClick={() => run("stop")}>Done</Button>}
-      </AppHeader>
-      <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-24 pt-10">
-        <AudioLines className="size-12 text-primary" aria-hidden />
-        <p className="font-display text-figure tabular-nums" aria-label="Recording duration">{elapsed(seconds)}</p>
-        {state.kept > 0 && <p className="text-sm text-muted-foreground">{state.kept} {state.kept === 1 ? "segment" : "segments"} saved</p>}
-        {state.phase === "Recording" && <div className="flex flex-col items-center gap-2">
-          <p className="text-sm text-muted-foreground">Recording</p>
-          <meter aria-label="Microphone level" min={0} max={1} value={peak} className="w-32" />
-        </div>}
-        {state.phase === "Paused" && <p className="text-sm text-muted-foreground">{state.recovered ? "Recovered recording" : "Paused"}</p>}
-        {state.calling && <Alert variant="warn">Recording paused for a phone call</Alert>}
-        {state.phase === "Stopping" && <Spinner label="Finishing your recording" />}
-        {state.phase === "Keeping" && state.keeping.outcome !== "Unknown" && <Spinner label="Saving your voice note" />}
-        {state.phase === "Failed" && <Alert variant="warn">{state.damaged ? "Only part of this recording could be recovered" : "Recording stopped. The saved audio is still here."}</Alert>}
-        <div className="flex flex-wrap justify-center gap-3">
-          {can({ type: "pause", take: state.take }) && <Button variant="secondary" onClick={() => run("pause")}><Pause /> Pause</Button>}
-          {can(resume) && <Button variant="secondary" onClick={() => run("resume")}><Play /> Resume</Button>}
-          {can({ type: "keepPartial" }) && <Button onClick={() => send({ type: "keepPartial" })}>Save recording</Button>}
-          {can({ type: "lookUp" }) && <Button variant="secondary" onClick={() => send({ type: "lookUp" })}>Check again</Button>}
-          {can({ type: "askDiscard" }) && <Button variant="ghost" onClick={() => send({ type: "askDiscard" })}>Discard</Button>}
+    <section aria-label="Voice recording" className="@container flex min-h-0 flex-1 flex-col px-6" data-alpha-subview="notes-recording">
+      <header className="flex min-h-14 shrink-0 items-center gap-4">
+        <h2 className="flex-1 font-display text-title leading-serif font-light">Voice note</h2>
+        <Button ref={discardRef} variant="ghost" className="min-w-0 px-1 font-normal text-muted-foreground" aria-label="Discard recording"
+          disabled={!can({ type: "askDiscard" })} onClick={() => send({ type: "askDiscard" })}>Discard</Button>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto py-6">
+        <span role="timer" className="whitespace-nowrap font-display text-recorder-timer font-light tabular-nums" aria-label="Recording duration" style={{ fontSize: "min(var(--text-recorder-timer), 20cqw)" }}>{elapsed(seconds)}</span>
+        <div role="img" aria-label="Microphone levels" className="mt-6.5 flex h-24 shrink-0 items-center gap-0.75">
+          {Array.from({ length: levelCount }, (_, index) => {
+            const peak = levels[levels.length - levelCount + index] ?? 0;
+            return <span key={index} aria-hidden className="flex-1 rounded-clip bg-alpha motion-safe:transition-[height] motion-safe:duration-fast"
+              style={{ height: Math.max(4, Math.round(Math.sqrt(peak) * 92)), opacity: measuring ? 1 : 0.35 }} />;
+          })}
         </div>
+        <p role="status" className="mt-3 min-h-5.5 text-sm text-muted-foreground">{status}</p>
+        {state.calling && <Alert variant="warn">Recording paused for a phone call</Alert>}
+        {state.phase === "Failed" && <Alert variant="warn">{state.damaged ? "Only part of this recording could be recovered" : "Recording stopped. The saved audio is still here."}</Alert>}
       </div>
-      <Dialog open={state.ask === "AskDiscard"} onOpenChange={(open) => { if (!open && can({ type: "cancelDiscard" })) send({ type: "cancelDiscard" }); }}>
-        <DialogContent>
-          <DialogTitle>Discard this recording?</DialogTitle>
-          <p className="text-sm text-muted-foreground">You’ll lose the recorded audio.</p>
-          <div className="flex justify-end gap-2">
-            {can({ type: "cancelDiscard" }) && <Button variant="secondary" onClick={() => send({ type: "cancelDiscard" })}>Cancel</Button>}
-            {can({ type: "confirmDiscard" }) && <Button variant="destructive" onClick={() => send({ type: "confirmDiscard" })}>Discard</Button>}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {confirming && <div role="group" aria-label="Discard this recording?" className="my-3 flex shrink-0 flex-wrap items-center gap-3"
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || !canCancel) return;
+          event.preventDefault();
+          event.stopPropagation();
+          send({ type: "cancelDiscard" });
+        }}>
+        <span className="flex-1">Discard?</span>
+        {canCancel && <Button ref={keepRef} variant="secondary" className="rounded-dictation-type px-4" onClick={() => send({ type: "cancelDiscard" })}>Keep</Button>}
+        {can({ type: "confirmDiscard" }) && <Button className="rounded-dictation-type bg-foreground px-4 text-background hover:bg-foreground/90" onClick={() => send({ type: "confirmDiscard" })}>Discard</Button>}
+      </div>}
+      <div className="flex shrink-0 items-center gap-3 pt-5 pb-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(4))] in-data-[alpha-title-row]:flex-col in-data-[alpha-title-row]:items-stretch">
+        {(active || paused || turning) && (
+          active
+            ? <Button variant="secondary" className={actionClass} disabled={!can({ type: "pause", take: state.take })} onClick={() => run("pause")}><Pause className="size-5" /> Pause</Button>
+            : <Button variant="secondary" className={actionClass} disabled={!can(resume)} onClick={() => run("resume")}><Mic className="size-5" /> Resume</Button>
+        )}
+        {can({ type: "lookUp" }) && <Button variant="secondary" className={actionClass} onClick={() => send({ type: "lookUp" })}>Check again</Button>}
+        {canSave
+          ? <Button className={actionClass} onClick={() => send({ type: "keepPartial" })}><Check className="size-5" /> Save recording</Button>
+          : <Button className={actionClass} disabled={!canStop} onClick={() => run("stop")}><Square className="size-5" /> {turning ? "Saving…" : "Stop recording"}</Button>}
+      </div>
     </section>
   );
 }

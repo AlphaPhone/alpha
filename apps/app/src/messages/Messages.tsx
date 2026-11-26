@@ -13,7 +13,7 @@ import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { Time } from "../runtime/time.vibe";
 import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
-import { Drafts, attachAll, editNewMessage, messageRecipients, newDraftHeld, prepare, sameSubscription, startNewMessage, supported } from "./composer.vibe";
+import { Drafts, attachAll, discardMessageDraft, editNewMessage, messageRecipients, newDraftHeld, openMessageDraft, prepare, removeMessagePicture, sameSubscription, startNewMessage, supported, useSavedMessageDraft, writeMessageDraft } from "./composer.vibe";
 import { Conversations, type CopyReport, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
 import { commsHeld } from "../phone/comms.vibe";
@@ -90,6 +90,8 @@ export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
 
 function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesProps & { messages: MessagesUI }) {
   const [searching, setSearching] = useState(false);
+  const [draftOpening, setDraftOpening] = useState<"Opening" | "Failed">();
+  const opening = useRef(false);
   if (!state) return null;
   const { threads, sought, names } = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
@@ -108,6 +110,15 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
   const settings = { type: "goToSettings", need: "SmsAccess" } as const;
   const unread = { type: "pickChip", chip: "UnreadThreads" } as const;
   const all = { type: "pickChip", chip: "AllThreads" } as const;
+  const newMessage = { type: "newMessage" } as const;
+  const openNew = async () => {
+    if (opening.current || !can(newMessage)) return;
+    opening.current = true;
+    setDraftOpening("Opening");
+    const opened = await runtime.runPromise(startNewMessage()).catch(() => false);
+    opening.current = false;
+    setDraftOpening(opened ? undefined : "Failed");
+  };
   return (
     <>
       {searching ? (
@@ -123,11 +134,11 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           <h1 className="sr-only">Messages</h1>
           <div aria-hidden className="min-w-0 flex-1" />
           {!smsNeeded(state) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
-          {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new onClick={() => {
-            void runtime.runPromise(startNewMessage());
-          }}><Pencil className="size-5" /></Button>}
+          {can(newMessage) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new disabled={draftOpening === "Opening"} onClick={() => void openNew()}><Pencil className="size-5" /></Button>}
         </header>
       )}
+      {draftOpening === "Opening" && <p role="status" className={`${notice} px-3`}>Opening message draft…</p>}
+      {draftOpening === "Failed" && can(newMessage) && <Banner variant="warn" action={<Button size="sm" onClick={() => void openNew()}>Retry</Button>}>Message draft couldn’t be opened</Banner>}
       {smsNeeded(state) && (can(allow) || can(settings)) && (
         <div className="grid flex-1 place-items-center px-4">
           {can(allow) ? <button type="button" data-alpha-messages-allow className={accessPill} onClick={() => void send(allow)}>Allow SMS read access</button> : <button type="button" className={accessPill} onClick={() => void send(settings)}>Open Settings for SMS access</button>}
@@ -441,16 +452,24 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   }, [subscriptionChoice, thread]);
   const selectedSim = simChoice?.thread === thread ? simChoice.subscription : undefined;
   const { state, can, send } = composer;
-  if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
+  if (!state || !phone || addresses.length === 0) return <CommsBar runtime={runtime} />;
+  if (state.thread !== thread) return <>
+    {state.thread === 0 && <button type="button" className={`${textLink} mx-4`} onClick={() => void runtime.runPromise(openMessageDraft(thread))}>Open saved draft</button>}
+    {state.saveFailed && can({ type: "retrySave" }) && <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "retrySave" })}>Retry save</Button>}>Your previous message draft couldn’t be saved</Banner>}
+    {state.slot.draft.sync === "Conflicted" && <Banner variant="warn" action={<>
+      {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
+      {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void runtime.runPromise(useSavedMessageDraft(state.thread))}>Use the saved draft</Button>}
+    </>}>Your previous message draft has a conflict</Banner>}
+    <CommsBar runtime={runtime} />
+  </>;
   const person = { label: title, initials: callerInitials(title) };
   const text = state.slot.author === "Nobody" ? "" : runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.text(thread)));
-  const pictures = runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.pictures()));
+  const pictures = runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.pictures(thread)));
   const subscriptions = runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.subscriptions()));
   const write = (next: string) => {
     const event = { type: "typeText", empty: next.length === 0 } as const;
     if (!can(event)) return;
-    runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.write(thread, next)));
-    void send(event);
+    void runtime.runPromise(writeMessageDraft(thread, next));
   };
   const outgoing = state.outgoing;
   const here = outgoing.thread === thread;
@@ -533,7 +552,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           </span>
           <p className="text-body leading-detail whitespace-pre-wrap">{text}</p>
           <div className="sticky bottom-0 flex shrink-0 flex-wrap justify-end gap-2 bg-inherit">
-            {can({ type: "undo" }) && <button type="button" className={`${draftAction} px-3`} onClick={() => void send({ type: "undo" })}>Don’t send</button>}
+            {can({ type: "undo" }) && <button type="button" className={`${draftAction} px-3`} onClick={() => void runtime.runPromise(discardMessageDraft(thread))}>Don’t send</button>}
             {editable && <button type="button" className={`${draftAction} px-4 inset-ring-[1.5px] inset-ring-muted-foreground`} data-alpha-draft-edit onClick={edit}>Edit</button>}
             {dock.open && <button type="button" className={`${draftAction} bg-alpha px-4.5 font-semibold text-alpha-foreground disabled:opacity-50`} data-alpha-draft-send disabled={!sendable} onClick={submit}>{sendLabel}</button>}
           </div>
@@ -543,9 +562,11 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
             {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
-            {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "takeSaved" })}>Use the saved draft</Button>}
+            {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void runtime.runPromise(useSavedMessageDraft(thread))}>Use the saved draft</Button>}
           </>}>Another draft was saved for this conversation</Banner>
         )}
+        {state.saveFailed && <Banner variant="warn" action={can({ type: "retrySave" }) && <Button size="sm" onClick={() => void send({ type: "retrySave" })}>Retry save</Button>}>Message draft couldn’t be saved</Banner>}
+        {state.pendingClear.source === "ConversationDraft" && state.pendingClear.thread === thread && can({ type: "clearSentDraft" }) && <button type="button" className={textLink} onClick={() => void send({ type: "clearSentDraft" })}>Finish updating the saved draft</button>}
         {checking && <p role="status" data-alpha-messages-notice className={notice}>Alpha is still waiting for the send result</p>}
         {here && outgoing.denied && <p role="status" data-alpha-messages-notice className={notice}>The phone did not send the message</p>}
         {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <p role="status" data-alpha-messages-notice className={notice}>The message did not reach everyone</p>}
@@ -554,8 +575,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {pictures.map((picture, at) => (
           <button type="button" key={picture.name} aria-label={`Remove ${picture.name}`} disabled={!can({ type: "detach" })} className={`${accessoryChip} gap-1.5 bg-secondary px-3 font-normal text-foreground`} onClick={() => {
             if (!can({ type: "detach" })) return;
-            runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.setPictures(pictures.filter((_, other) => other !== at))));
-            void send({ type: "detach" });
+            void runtime.runPromise(removeMessagePicture(thread, at));
           }}>{picture.name}<X aria-hidden className="size-3.5" /></button>
         ))}
         {(subscriptions.length > 1 || selectedSim !== undefined && subscriptions.length === 1) && (
@@ -590,35 +610,77 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   );
 }
 
+type NewTextEdit = {
+  readonly body?: string | undefined;
+  readonly to?: { readonly value: string; readonly closePicker: boolean } | undefined;
+};
+
+type NewTextSave = { readonly status: "Saving" | "Failed"; readonly edit: NewTextEdit };
+
 /** A recipient choice either addresses the separate New draft or completes an existing handoff. */
 function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { messages: MessagesUI }) {
   const composer = useComposer(runtime);
   const [typed, setTyped] = useState("");
   const [browsing, setBrowsing] = useState(false);
+  const [textSave, setTextSave] = useState<NewTextSave>();
+  const latestTextSave = useRef<NewTextSave | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const [composingHeight, setComposingHeight] = useState<number>();
+  const textIsSaved = useCallback(() => latestTextSave.current === undefined, []);
+  const showSave = (next: NewTextSave | undefined) => {
+    latestTextSave.current = next;
+    setTextSave(next);
+  };
+  // spec/app/messages/index.md, "The owner can write before choosing To, then adjust To without moving or losing the message"
+  const flushText = async (visit: number) => {
+    let saving = latestTextSave.current;
+    while (saving?.status === "Saving") {
+      const { body, to } = saving.edit;
+      const edit = { ...(body === undefined ? {} : { body }), ...(to === undefined ? {} : { recipients: to.value }) };
+      const saved = await runtime.runPromise(editNewMessage(visit, edit, to?.closePicker ?? false)).catch(() => false);
+      const latest = latestTextSave.current;
+      if (latest === undefined) return;
+      if (!saved) {
+        showSave({ ...latest, status: "Failed" });
+        return;
+      }
+      if (to?.closePicker) setTyped("");
+      const remaining = { body: latest.edit.body === body ? undefined : latest.edit.body, to: latest.edit.to === to ? undefined : latest.edit.to };
+      saving = remaining.body === undefined && remaining.to === undefined ? undefined : { status: "Saving", edit: remaining };
+      showSave(saving);
+    }
+  };
+  const saveText = (visit: number, edit: NewTextEdit) => {
+    const previous = latestTextSave.current;
+    showSave({ status: "Saving", edit: { ...previous?.edit, ...edit } });
+    if (previous?.status !== "Saving") void flushText(visit);
+  };
   if (!state) return null;
   const fresh = state.pane === "New" ? state.newDraft : undefined;
   const editable = !fresh || !composer.state || !newDraftHeld(composer.state, fresh.revision);
   const kept = fresh && runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.newDraft()));
   const selecting = fresh?.picking ?? browsing;
-  const typedTo = kept && !selecting ? kept.recipients : typed;
-  const before = kept ? messageRecipients(kept.recipients) : [];
+  const draftTo = textSave?.edit.to?.value ?? kept?.recipients ?? "";
+  const savingChoice = textSave?.status === "Saving" && textSave.edit.to?.closePicker === true;
+  const typedTo = kept && !selecting ? draftTo : typed;
+  const before = kept ? messageRecipients(draftTo) : [];
   const held = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
   const query = (text: string) => {
     runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: text.split(",").at(-1)?.trim() ?? "" })));
     if (can({ type: "findChoices" })) void send({ type: "findChoices" });
   };
   const find = (text: string) => {
-    if (fresh && !selecting) void runtime.runPromise(editNewMessage(fresh.visit, { recipients: text }, false));
+    if (fresh && !selecting) saveText(fresh.visit, { to: { value: text, closePicker: false } });
     else setTyped(text);
     query(text);
   };
   const open = (addresses: ReadonlyArray<string>, typedIn: boolean) => {
     if (fresh) {
+      if (!editable || (latestTextSave.current?.status === "Saving" && latestTextSave.current.edit.to?.closePicker)) return;
       const previous = selecting ? before : messageRecipients(typedTo.split(",").slice(0, -1).join(","));
       const recipients = [...new Set([...previous, ...addresses])].join(", ");
-      void runtime.runPromise(editNewMessage(fresh.visit, { recipients }, true, fresh.revision));
-      setTyped("");
+      saveText(fresh.visit, { to: { value: recipients, closePicker: true } });
       return;
     }
     clearChoice(runtime);
@@ -638,6 +700,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
     } else {
       const event = { type: "openNewContacts", visit: fresh.visit } as const;
       if (!can(event)) return;
+      setComposingHeight(messageRef.current?.offsetHeight);
       setTyped("");
       runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
       void send(event);
@@ -649,16 +712,16 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
   return (
     <>
       <header data-alpha-navigation-header className={`${header} pr-4 pb-2`}>
-        {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ChevronLeft /></Button>}
+        {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" disabled={textSave?.status === "Saving"} onClick={() => void send({ type: "back" })}><ChevronLeft /></Button>}
         <form className="min-w-0 flex-1" onSubmit={(event) => {
           event.preventDefault();
           if (numbers.length > 0 && (!fresh || selecting)) open(numbers, true);
           else if (fresh && selecting) query(typedTo);
         }}>
           <Input ref={inputRef} type="text" aria-label="To" placeholder={selecting ? `Recipient ${fresh ? before.length + 1 : to.slice(0, -1).filter(Boolean).length + 1}` : "To"} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
-            data-alpha-messages-recipients value={typedTo} readOnly={!editable} onChange={(event) => find(event.target.value)} className="h-11 rounded-tile border-0 px-4 text-body leading-[normal] focus-visible:outline-none" />
+            data-alpha-messages-recipients value={typedTo} readOnly={!editable || savingChoice} onChange={(event) => find(event.target.value)} className="h-11 rounded-tile border-0 px-4 text-body leading-[normal] focus-visible:outline-none" />
         </form>
-        <Button variant="ghost" size="icon" aria-label={selecting ? "Close contact picker" : "Choose contacts"} aria-expanded={selecting} disabled={!editable && !selecting} onClick={togglePicker}>{selecting && fresh ? <X /> : <Plus />}</Button>
+        <Button variant="ghost" size="icon" aria-label={selecting ? "Close contact picker" : "Choose contacts"} aria-expanded={selecting} disabled={savingChoice || !editable && !selecting} onClick={togglePicker}><Plus /></Button>
       </header>
       {offer?.ticket === state.offeredPicture && (
         <div aria-label="Picture for this message" className="flex px-5 py-2">
@@ -677,7 +740,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
           <ul aria-label="Contacts" data-alpha-messages-contact-picker={selecting || undefined}>
             {held.choices.flatMap((contact) => contact.phones.filter((phone) => !fresh || !before.some((number) => number === phone)).map((phone) => (
               <li key={`${contact.id}:${phone}`}>
-                <button type="button" className={contactRow} aria-label={contact.name} aria-description={phone} onClick={() => {
+                <button type="button" className={contactRow} aria-label={contact.name} aria-description={phone} disabled={savingChoice} onClick={() => {
                   if (fresh || to.length === 1) { open([phone], false); return; }
                   find([...to.slice(0, -1), phone].join(", "));
                 }}>
@@ -691,7 +754,11 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
         )}
         {showChoices && can({ type: "loadMoreChoices" }) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</button>}
       </div>
-      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} /> : <CommsBar runtime={runtime} />}
+      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} textarea={messageRef}
+        minHeight={selecting ? composingHeight : undefined}
+        body={textSave?.edit.body ?? kept.body} saveStatus={textSave?.status} textIsSaved={textIsSaved}
+        onBody={(body) => { setComposingHeight(undefined); saveText(fresh.visit, { body }); }}
+        onRetrySave={() => saveText(fresh.visit, {})} /> : <CommsBar runtime={runtime} />}
     </>
   );
 }

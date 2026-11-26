@@ -89,6 +89,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
     return () => { element.pause(); videoRef.current = null; };
   }, []);
   const returnCropFocusRef = useRef(0);
+  const infoButton = useRef<HTMLButtonElement>(null);
   const openPhoto = state?.open;
   const previewShowing = state?.preview.showing;
   const cropButton = useCallback((button: HTMLButtonElement | null) => {
@@ -115,6 +116,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
   const date = capturedAt !== undefined && Number.isFinite(capturedAt.getTime()) ? capturedAt : undefined;
   const expiry = inTrash && showingRow?.kind === "phone" ? trashDaysLeft(showingRow.item.expiresAt, now) : undefined;
   const day = date === undefined ? name : headingOf(timestamp, now, true);
+  const infoLabel = state.kind === "Clip" ? "Video info" : "Photo info";
   const info = state.info ? loadedRow?.item : undefined;
   const duration = info?.duration;
   const facts = info === undefined ? [] : [
@@ -124,7 +126,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
     { label: "Dimensions", value: info.width > 0 && info.height > 0 ? `${info.width} × ${info.height}` : "" },
     { label: "Length", value: state.kind === "Clip" && duration !== undefined && duration > 0 && Number.isFinite(duration) ? clipTime(duration * 10) : "" },
     { label: "Folder", value: loadedRow?.kind === "phone" ? loadedRow.item.folder?.replace(/\/+$/u, "") ?? "" : "" },
-    { label: "Albums", value: state.secure ? "" : albumNamesFor(info.id).join(", ") },
+    { label: "Albums", value: albumNamesFor(info.id).join(", ") },
   ].filter(({ value }) => value !== "");
   function action(event: Event) {
     if (can(event, "Owner")) void send(event, "Owner");
@@ -294,12 +296,17 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
         {before !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Previous photo" onClick={() => action({ type: "swipe", neighbour: before })}><ChevronLeft /></Button>}
         {!inTrash && control(state.favourite ? "Remove from favorites" : "Favorite", { type: "toggleFavourite" }, <Heart className={state.favourite ? "fill-current" : undefined} />)}
         {!inTrash && allows({ type: "startEdit" }) && <Button variant="ghost" size="icon" aria-label={state.kind === "Clip" ? "Edit video" : "Edit"} onClick={() => editAction({ type: "startEdit" })}><Pencil /></Button>}
-        {control("Info", { type: "toggleInfo" }, <Info />)}
+        {!inTrash && allows({ type: "toggleInfo" }) && <Button ref={infoButton} variant="ghost" size="icon" aria-label={infoLabel}
+          onClick={() => action({ type: "toggleInfo" })}><Info /></Button>}
         {after !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
       </div>}
       <Sheet open={state.info && loadedRow !== undefined} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
-        <SheetContent aria-label="Photo info" title={day} description={date && formatTime.format(date)}
-          actions={onAddToAlbum && <Button variant="secondary" onClick={() => { action({ type: "toggleInfo" }); onAddToAlbum(); }}><FolderInput />Add to album</Button>}>
+        <SheetContent aria-label={infoLabel} aria-labelledby={undefined} title={day} description={date && formatTime.format(date)}
+          onCloseAutoFocus={(event) => {
+            if (infoButton.current === null) return;
+            event.preventDefault();
+            infoButton.current.focus({ preventScroll: true });
+          }}>
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
             {facts.map(({ label, value }) => <Fragment key={label}>
               <dt className="text-muted-foreground">{label}</dt><dd className="wrap-anywhere">{value}</dd>

@@ -4,9 +4,9 @@ import {
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
   type InboxNoticeKind, ToastRegion,
 } from "@repo/ui";
-import type { MailCard, MailMessage } from "@elizaos/cloud";
+import type { MailCard } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { type Folder, type Mailbox, accessOf, readable, searchableIn, showsAttachment } from "../../gen/app__inbox.ts";
 import type { Machine as List } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useList } from "../../gen/app__inbox.react.ts";
@@ -25,6 +25,8 @@ import { deletableShelfDraft, type ShelfPick } from "../../gen/app__inbox__draft
 import { held } from "../../gen/app__inbox__shelf.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import type { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
@@ -44,10 +46,11 @@ import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts"
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
 import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
 import type { Telephony } from "../platform/telephony.vibe";
+import { ThreadPages } from "./thread.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn | Telephony, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Shell | Canvas | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn | Telephony | ThreadPages, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -161,13 +164,16 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
   return null;
 }
 
+type LinkReview = (at: number, facts: { readonly secure: boolean; readonly mismatch: boolean }) => void;
+
 /** The body of a message with nothing able to run, its remote images only once they may load, and its links each reviewed. */
-function Body({ read, images, onReview }: { read: MailMessage; images: boolean; onReview: (link: number) => void }) {
-  const { formatted, links, document } = useMemo(() => {
-    const prepared = prepareMessage(read);
-    return { ...prepared, document: prepared.formatted ? frameDocument(prepared.formatted, images) : undefined };
-  }, [read, images]);
-  const frame = useCallback((node: HTMLIFrameElement | null) => node ? connectMailFrame(node, onReview) : undefined, [onReview]);
+function Body({ text, contents, images, onReview }: { text: string; contents: ReturnType<typeof prepareMessage>; images: boolean; onReview: LinkReview }) {
+  const { formatted, links } = contents;
+  const document = useMemo(() => formatted ? frameDocument(formatted, images) : undefined, [formatted, images]);
+  const frameRef = useCallback((node: HTMLIFrameElement | null) => node ? connectMailFrame(node, (at) => {
+    const link = links[at - 1];
+    if (link) onReview(at, { secure: link.secure, mismatch: link.mismatch });
+  }) : undefined, [links, onReview]);
   const additional = links.flatMap((link, at) => formatted?.inline.has(link.url) ? [] : [{ ...link, at: at + 1 }]);
   const list = (
     <ul aria-label="Links" className={formatted ? "flex flex-col items-start gap-1" : "mt-5 flex flex-col items-start gap-1"}>
@@ -176,7 +182,7 @@ function Body({ read, images, onReview }: { read: MailMessage; images: boolean; 
           {link.secure ? (
             <Button variant="ghost" size="sm" aria-label={link.mismatch ? link.label : link.url}
               className="h-auto min-h-11 min-w-0 justify-start rounded-sm px-0 text-left font-normal whitespace-normal text-primary hover:bg-transparent active:bg-transparent"
-              onClick={() => onReview(link.at)}>
+              onClick={() => onReview(link.at, { secure: link.secure, mismatch: link.mismatch })}>
               {link.mismatch ? link.label : URL.parse(link.url)?.hostname ?? link.label}
             </Button>
           ) : link.label}
@@ -186,8 +192,8 @@ function Body({ read, images, onReview }: { read: MailMessage; images: boolean; 
   );
   return <>
     {document
-      ? <iframe ref={frame} title="Formatted email" sandbox="allow-same-origin" referrerPolicy="no-referrer" className="block h-96 w-full border-0" srcDoc={document} />
-      : <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{read.bodyText || "(Empty message)"}</p>}
+      ? <iframe ref={frameRef} title="Formatted email" sandbox="allow-same-origin" referrerPolicy="no-referrer" className="block h-96 w-full border-0" srcDoc={document} />
+      : <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{text || "(Empty message)"}</p>}
     {additional.length > 0
       ? formatted ? <details className="mt-4"><summary className="min-h-11 cursor-pointer content-center text-sm text-muted-foreground">Other links ({additional.length})</summary>{list}</details> : list
       : null}
@@ -202,13 +208,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const remote = usePreferences(runtime).state?.images ?? false;
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const mail = runtime.runSync(Mail);
-  const read = state ? mail.body(state.body.ticket) : undefined;
-  const reviewLink = useCallback((at: number) => {
-    const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
-    if (!link || at < 1) return;
-    const event = { type: "reviewLink", link: at, secure: link.secure, mismatch: link.mismatch } as const;
+  const read = state?.body.status === "Loaded" ? mail.body(state.body.ticket) : undefined;
+  const reviewLink = useCallback<LinkReview>((at, { secure, mismatch }) => {
+    const event = { type: "reviewLink", link: at, secure, mismatch } as const;
     if (can(event)) void send(event);
-  }, [can, read, send]);
+  }, [can, send]);
   if (!state || state.message === 0) return null;
   const access = accessOf(list, state.account);
   const card = mail.card(state.message) ?? read?.message;
@@ -226,7 +230,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
     return changes.can(event, "Owner") ? () => void changes.send(event, "Owner") : undefined;
   };
   const fault = state.body.status === "Failed" && state.fault in faultNames ? faultNames[state.fault as keyof typeof faultNames] : undefined;
-  const faultAction = fault === "conversationChanged" ? (can(reopen) ? () => void send(reopen) : undefined) : can(retry) ? () => void send(retry) : undefined;
+  const gmailId = fault === "tooLarge" && access.grant.read ? mail.gmailId(state.message, state.account) : undefined;
+  const faultAction = gmailId ? () => {
+    const account = mail.email(state.account);
+    window.open(`https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#all/${encodeURIComponent(gmailId)}`, "_blank", "noopener,noreferrer");
+  } : fault === "conversationChanged" ? (can(reopen) ? () => void send(reopen) : undefined) : can(retry) ? () => void send(retry) : undefined;
   const told = marking.state?.told;
   const notice = told !== undefined && told in markNotices ? markNotices[told as keyof typeof markNotices] : undefined;
   const files = loaded ? read.attachments : [];
@@ -256,6 +264,21 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
   const original = read?.message;
+  // spec/app/inbox/message.md, "A thread control selects an exact position from the message and thread currently shown"
+  const conversation = loaded && state.thread > 1 && original
+    ? runtime.runSync(ThreadPages).get({ account: state.account, generation: mail.generation(state.account), threadId: original.threadId })
+    : undefined;
+  const threadPage = conversation?.pages[0];
+  const selectPosition = (position: number | null | undefined, paging: boolean) => {
+    if (position === null || position === undefined) return undefined;
+    const event = { type: "selectThreadPosition", ticket: state.body.ticket, access, thread: state.thread, position, paging, remote } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
+  const threadRows = threadPage?.messages.flatMap(({ message }, at) => {
+    if (message.id === original?.id) return [];
+    const position = threadPage.offset + at;
+    return [{ position, sender: senderName(message.from), date: arrived(message.receivedAt, today), snippet: message.snippet, onOpen: selectPosition(position, false) }];
+  });
   const from = senderAddress(card?.from ?? "");
   const replyTo = original && "replyTo" in original && typeof original.replyTo === "string" ? original.replyTo : undefined;
   const answered = original === undefined || read === undefined ? undefined : {
@@ -273,10 +296,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         replyTo={replyTo && replyTo.toLowerCase() !== from.toLowerCase() ? replyTo : undefined}
         date={card ? arrived(card.receivedAt, today) : ""}
         fullDate={card ? arrivedFully(card.receivedAt) : undefined}
-        place={state.position + 1}
+        place={Math.max(1, state.position + 1)}
         count={Math.max(state.thread, 1)}
-        onOlder={can(earlier) ? () => void send(earlier) : undefined}
-        onNewer={can(newer) ? () => void send(newer) : undefined}
+        threadRows={threadRows}
+        onOlder={threadPage ? selectPosition(conversation?.earlier.get(threadPage.offset), true) : can(earlier) ? () => void send(earlier) : undefined}
+        onNewer={threadPage ? selectPosition(threadPage.nextOffset, true) : can(newer) ? () => void send(newer) : undefined}
         onClose={() => void send({ type: "close" })}
         reading={state.body.status === "Loading"}
         fault={fault}
@@ -302,9 +326,9 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         onReplyAll={loaded && new Set([...(card?.to ?? []), ...(card?.cc ?? [])].map((one) => one.toLowerCase())).size > 1 ? onBegin({ kind: "ReplyAll", account: state.account, message: answered }) : undefined}
         onForward={loaded ? onBegin({ kind: "Forward", account: state.account, message: answered }) : undefined}
       >
-        {state.fromPhone && card ? <p className="whitespace-pre-wrap break-words">{card.snippet}</p> : null}
-        {loaded ? (
-          <Body read={read} images={imagesLoad(state)} onReview={reviewLink} />
+        {state.fromPhone ? <p className="whitespace-pre-wrap break-words">{mail.savedBody(list, state.message) ?? "Message not saved on this device."}</p> : null}
+        {loaded && contents ? (
+          <Body text={read.bodyText} contents={contents} images={imagesLoad(state)} onReview={reviewLink} />
         ) : null}
       </InboxMessageScreen>
       <InboxLinkReview open={link !== undefined} destination={link?.url ?? ""} claimed={state.warning ? link?.label : undefined} onOpen={() => void send({ type: "openLink" })} onClose={() => void send({ type: "closeLink" })} />
@@ -325,6 +349,29 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
 
 const sizeOf = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : bytes >= 1_000 ? `${Math.round(bytes / 1_000)} KB` : `${bytes} B`);
 
+function useInboxPaneFocus({ readerOpen, split, covered }: { readerOpen: boolean; split: boolean; covered: boolean }) {
+  const lastPaneRef = useRef<"list" | "reader">(undefined);
+  const openingRowRef = useRef<number>(undefined);
+  const wasReadingRef = useRef(false);
+  const listPaneRef = useCallback((pane: HTMLDivElement | null) => {
+    if (!pane || readerOpen || covered || !wasReadingRef.current) return;
+    wasReadingRef.current = false;
+    const focused = document.activeElement;
+    if (focused !== document.body && !focused?.closest('[data-alpha-subview="inbox-detail"]')) return;
+    const row = openingRowRef.current === undefined ? null : pane.querySelector<HTMLButtonElement>(`[data-inbox-row="${openingRowRef.current}"] button`);
+    (row ?? pane).focus({ preventScroll: true });
+  }, [covered, readerOpen]);
+  const readerPaneRef = useCallback((pane: HTMLDivElement | null) => {
+    if (!pane) return;
+    wasReadingRef.current = true;
+    const focused = document.activeElement;
+    if (!split && lastPaneRef.current === "list" && (focused === document.body || focused?.closest('[data-alpha-subview="inbox-list"]'))) {
+      pane.focus({ preventScroll: true });
+    }
+  }, [split]);
+  return { lastPaneRef, openingRowRef, listPaneRef, readerPaneRef };
+}
+
 /**
  * Inbox: the list of the account, folder and search chosen, saved on the phone while Gmail cannot be reached, and the
  * message opened from it, with the review and Undo of a change. Each control is offered exactly when its machine takes
@@ -337,12 +384,29 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const changes = useTimed(runtime, useChanges);
   const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
+  const canvas = useCanvas(runtime).state;
   const remote = usePreferences(runtime).state?.images ?? false;
   const [typed, setTyped] = useState<{ text: string; over: string; folder: string } | undefined>();
   const [selection, setSelection] = useState<string>();
   const [unopenedDraft, setUnopenedDraft] = useState<number>();
+  const composingNow = drafts.state?.open === true;
+  const openMessage = message.state?.account === state?.selected.account ? message.state?.message ?? 0 : 0;
+  const readerOpen = !composingNow && openMessage !== 0;
+  const split = readerOpen && canvas?.split === true;
+  const covered = composingNow || (readerOpen && !split);
+  const { lastPaneRef, openingRowRef, listPaneRef, readerPaneRef } = useInboxPaneFocus({ readerOpen, split, covered });
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Inbox</Alert>;
   if (!state || !message.state || !drafts.state) return null;
+  const mail = runtime.runSync(Mail);
+  const retryAccess = can({ type: "checkAccess" })
+    ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.retry()))
+    : undefined;
+  if (state.signedIn && !mail.ownerConfirmed()) {
+    const waiting = state.accounts.status !== "Failed";
+    return <InboxListScreen folder="incoming" rows={[]} search="" onSearchChange={() => undefined} loading={waiting}
+      state={waiting ? undefined : "failed"} onStateAction={retryAccess}
+      onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined} />;
+  }
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
   const onBegin = (beginning: Beginning) => {
     const event = { type: "compose", kind: beginning.kind, account: beginning.account, others: 0, files: 0, mib: 0 } as const;
@@ -350,13 +414,10 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       ? () => void runtime.runPromise(begin(beginning))
       : undefined;
   };
-  const mail = runtime.runSync(Mail);
   const cards = (number: number) => mail.card(number);
-  if (drafts.state.open) return <><Compose runtime={runtime} list={state} /><ChangeReview runtime={runtime} list={state} cards={cards} /><FileOffer runtime={runtime} /><Suggested runtime={runtime} /></>;
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
-  const retryList = refresh ?? (can({ type: "checkAccess" }) ? () => void send({ type: "checkAccess" }) : undefined);
+  const retryList = refresh ?? retryAccess;
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
-  if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />}{review}</>;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
   const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;
   const hidden = new Set(changes.state ? aside(changes.state) : []);
@@ -376,11 +437,11 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const chosenMessages = new Set(state.chosen);
   const access = accessOf(state, account);
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
-  const checking = state.accounts.status === "Loading";
+  const checkingOrOffline = state.accounts.status === "Loading" || state.accounts.status === "Failed";
   const row = ({ message: number, card, draftId }: Letter): InboxListRow => {
     const open = { type: "open", access, account, message: number, remote } as const;
-    const saved = { type: "openSaved", account, message: number, checking, kept: state.saved } as const;
-    const opening = draftsFolder ? undefined : message.can(open) ? open : message.can(saved) ? saved : undefined;
+    const saved = { type: "openSaved", account, message: number, checkingOrOffline, kept: state.saved } as const;
+    const opening = draftsFolder ? undefined : message.can(saved) ? saved : message.can(open) ? open : undefined;
     const editing = draftsFolder && !selectingDrafts && draftId !== undefined && !state.saved && readable(state) ? () => {
       setUnopenedDraft(undefined);
       void runtime.runPromise(openGmailDraft(account, draftId)).then((opened) => {
@@ -397,8 +458,11 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         : folder === "Sent" ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
       initial: draftsFolder ? "D" : folder === "Sent" ? (card.to[0] ?? "?").slice(0, 1).toUpperCase() : undefined,
       subject: card.subject || "(no subject)", snippet: card.snippet,
-      time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: showsAttachment(card.hasAttachments === true), chosen, selecting,
-      onOpen: editing ?? (opening ? () => void message.send(opening) : undefined),
+      time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: showsAttachment(card.hasAttachments === true), chosen, selecting, current: openMessage === number,
+      onOpen: editing ?? (opening ? () => {
+        openingRowRef.current = number;
+        void message.send(opening);
+      } : undefined),
       onChosenChange: selecting && can(toggle) ? () => void send(toggle) : undefined,
       onSwipe: canArchive ? () => void send(swipe).then((applied) => {
         if (applied._tag !== "Success") return;
@@ -457,75 +521,86 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const mustChoose = state.accounts.status === "Loaded" && account === 0 && state.connected.length > 0;
   return (
     <>
-      <InboxListScreen
-        onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined}
-        account={account === 0 ? undefined : mail.email(account)}
-        folder={folderNames[folder]}
-        unavailable={!state.searchable}
-        onChooseFolder={readable(state) ? (name) => {
-          const event = { type: "chooseFolder", folder: folderOf[name] } as const;
-          if (can(event)) {
-            setSelection(undefined);
+      <div className="flex h-full min-h-0 min-w-0">
+        <div ref={listPaneRef} data-alpha-subview="inbox-list" tabIndex={-1} inert={covered}
+          onFocusCapture={() => { lastPaneRef.current = "list"; }}
+          className={covered ? "hidden" : split ? "h-full w-[clamp(300px,36%,400px)] shrink-0 border-r border-border" : "min-h-0 min-w-0 flex-1"}>
+        <InboxListScreen
+          onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined}
+          account={account === 0 ? undefined : mail.email(account)}
+          folder={folderNames[folder]}
+          unavailable={!state.searchable}
+          onChooseFolder={readable(state) ? (name) => {
+            const event = { type: "chooseFolder", folder: folderOf[name] } as const;
+            if (can(event)) {
+              setSelection(undefined);
+              setTyped(undefined);
+              void send(event);
+            }
+          } : undefined}
+          searching={searching}
+          search={typedHere ?? query}
+          onOpenSearch={canSearch ? () => {
+            finishSelection();
+            setTyped({ text: query, over: query, folder: folderKey });
+          } : undefined}
+          onCloseSearch={() => {
             setTyped(undefined);
-            void send(event);
-          }
-        } : undefined}
-        searching={searching}
-        search={typedHere ?? query}
-        onOpenSearch={canSearch ? () => {
-          finishSelection();
-          setTyped({ text: query, over: query, folder: folderKey });
-        } : undefined}
-        onCloseSearch={() => {
-          setTyped(undefined);
-          if (can(clearSearch)) void send(clearSearch);
-        }}
-        onSearchChange={(text) => {
-          if (text === "" && can(clearSearch)) {
-            setTyped({ text, over: "", folder: folderKey });
-            void send(clearSearch);
-          } else setTyped({ text, over: query, folder: folderKey });
-        }}
-        onSearch={canSearch ? (text) => {
-          const event = { type: "search", query: text } as const;
-          if (can(event)) {
-            setTyped(undefined);
-            void send(event);
-          }
-        } : undefined}
-        notice={notice}
-        onNoticeAction={notice === "reconnect" ? signIn : retryList}
-        state={mustChoose ? undefined : kind}
-        onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
-        chosen={draftsFolder ? shelf.picks.length : state.chosen.length}
-        onStartSelection={draftsFolder
-          ? !state.saved && readable(state) && drafts.can(startDrafts, "Owner") ? () => void drafts.send(startDrafts, "Owner") : undefined
-          : !selecting && can(chooseAll) ? () => setSelection(folderKey) : undefined}
-        onFinishSelection={selectingDrafts ? () => void drafts.send(finishDrafts, "Owner") : selecting || chosenMessages.size > 0 ? finishSelection : undefined}
-        onClearSelection={selectingDrafts
-          ? shelf.picks.length > 0 && drafts.can(clearLocal, "Owner") ? () => void drafts.send(clearLocal, "Owner") : undefined
-          : selecting && chosenMessages.size > 0 ? clearSelection : undefined}
-        onChooseAll={draftsFolder
-          ? selectingDrafts && !allLocalChosen && drafts.can(chooseLocal, "Owner") ? () => void drafts.send(chooseLocal, "Owner") : undefined
-          : can(chooseAll) ? () => void send(chooseAll) : undefined}
-        onDeleteDrafts={selectingDrafts && drafts.can(reviewDrafts, "Owner") ? () => void drafts.send(reviewDrafts, "Owner") : undefined}
-        onArchive={state.selected.folder === "Archived" ? undefined : chosenChange("Archive")}
-        onTrash={state.selected.folder === "Trashed" ? undefined : chosenChange("Trash")}
-        onRestore={state.selected.folder === "Archived" ? chosenChange("Unarchive") : state.selected.folder === "Trashed" ? chosenChange("Untrash") : undefined}
-        labelChanges={accessOf(state, account).grant.modify}
-        onStar={chosenChange(state.selected.folder === "Starred" ? "Unstar" : "Star")}
-        onMarkRead={chosenChange("MarkRead")}
-        onMarkUnread={chosenChange("MarkUnread")}
-        onRefresh={refresh}
-        onCompose={selectingDrafts ? undefined : onBegin({ kind: "Fresh", account })}
-        accounts={accounts}
-        onChooseAccount={chooseAccount}
-        aside={shelved.map(({ id, onOpen }) => ({ id, onOpen }))}
-        rows={draftsFolder ? [...shelved, ...letters.map(row)] : letters.map(row)}
-        loading={state.list.status === "Loading" && !state.further}
-        onLoadMore={can({ type: "loadMore" }) ? () => void send({ type: "loadMore" }) : undefined}
-        loadingMore={state.list.status === "Loading" && state.further}
-      />
+            if (can(clearSearch)) void send(clearSearch);
+          }}
+          onSearchChange={(text) => {
+            if (text === "" && can(clearSearch)) {
+              setTyped({ text, over: "", folder: folderKey });
+              void send(clearSearch);
+            } else setTyped({ text, over: query, folder: folderKey });
+          }}
+          onSearch={canSearch ? (text) => {
+            const event = { type: "search", query: text } as const;
+            if (can(event)) {
+              setTyped(undefined);
+              void send(event);
+            }
+          } : undefined}
+          notice={notice}
+          onNoticeAction={notice === "reconnect" ? signIn : retryList}
+          state={mustChoose ? undefined : kind}
+          onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
+          chosen={draftsFolder ? shelf.picks.length : state.chosen.length}
+          onStartSelection={draftsFolder
+            ? !state.saved && readable(state) && drafts.can(startDrafts, "Owner") ? () => void drafts.send(startDrafts, "Owner") : undefined
+            : !selecting && can(chooseAll) ? () => setSelection(folderKey) : undefined}
+          onFinishSelection={selectingDrafts ? () => void drafts.send(finishDrafts, "Owner") : selecting || chosenMessages.size > 0 ? finishSelection : undefined}
+          onClearSelection={selectingDrafts
+            ? shelf.picks.length > 0 && drafts.can(clearLocal, "Owner") ? () => void drafts.send(clearLocal, "Owner") : undefined
+            : selecting && chosenMessages.size > 0 ? clearSelection : undefined}
+          onChooseAll={draftsFolder
+            ? selectingDrafts && !allLocalChosen && drafts.can(chooseLocal, "Owner") ? () => void drafts.send(chooseLocal, "Owner") : undefined
+            : can(chooseAll) ? () => void send(chooseAll) : undefined}
+          onDeleteDrafts={selectingDrafts && drafts.can(reviewDrafts, "Owner") ? () => void drafts.send(reviewDrafts, "Owner") : undefined}
+          onArchive={state.selected.folder === "Archived" ? undefined : chosenChange("Archive")}
+          onTrash={state.selected.folder === "Trashed" ? undefined : chosenChange("Trash")}
+          onRestore={state.selected.folder === "Archived" ? chosenChange("Unarchive") : state.selected.folder === "Trashed" ? chosenChange("Untrash") : undefined}
+          labelChanges={accessOf(state, account).grant.modify}
+          onStar={chosenChange(state.selected.folder === "Starred" ? "Unstar" : "Star")}
+          onMarkRead={chosenChange("MarkRead")}
+          onMarkUnread={chosenChange("MarkUnread")}
+          onRefresh={refresh}
+          onCompose={selectingDrafts ? undefined : onBegin({ kind: "Fresh", account })}
+          accounts={accounts}
+          onChooseAccount={chooseAccount}
+          aside={shelved.map(({ id, onOpen }) => ({ id, onOpen }))}
+          rows={draftsFolder ? [...shelved, ...letters.map(row)] : letters.map(row)}
+          loading={state.list.status === "Loading" && !state.further}
+          onLoadMore={can({ type: "loadMore" }) ? () => void send({ type: "loadMore" }) : undefined}
+          loadingMore={state.list.status === "Loading" && state.further}
+        />
+        </div>
+        {readerOpen ? <div ref={readerPaneRef} data-alpha-subview="inbox-detail" tabIndex={-1}
+          onFocusCapture={() => { lastPaneRef.current = "reader"; }} className="min-h-0 min-w-0 flex-1">
+          <Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />
+        </div> : null}
+        {composingNow ? <div data-alpha-subview="inbox-composing" className="min-h-0 min-w-0 flex-1"><Compose runtime={runtime} list={state} /></div> : null}
+      </div>
       <InboxDiscardDialog open={selectingDrafts && shelf.reviewing}
         drafts={shelf.picks.map(({ draft }) => ({ id: draft, subject: localLetters.words(draft).subject || "(No subject)" }))}
         gmailCopy={shelf.picks.some(({ draft }) => held(composing.shelf, draft).gmail !== 0)}

@@ -373,6 +373,22 @@ pure def alwaysAFurtherPageNeedsAFreshList(s: Mailbox): bool =
   s.cursor != 0 implies (s.pages > 0 and not(s.saved))
 ```
 
+### Inbox reads ahead only from a fresh list on screen
+
+While Inbox shows a fresh list, the phone may read the next page and the
+first two messages ahead. These answers stay in memory. Only opening a
+message or asking for the next page can use an answer, under the same
+account, grant, selection and revision. Leaving Inbox, hiding it, composing
+or changing the selection retires the reads. A missed or failed read ahead
+leaves the request the owner makes to run as usual.
+
+```quint
+pure def aheadAllowed(s: Mailbox, visible: bool, composing: bool): bool =
+  visible and not(composing) and readable(s) and s.accounts.status == R::Loaded and
+    s.pages > 0 and not(s.saved) and s.selected.folder != DraftsFolder and s.failure == Fine and
+    (s.list.status == R::Loaded or (s.list.status == R::Loading and s.further))
+```
+
 ### A second page can be shown with more offered, and the mailbox can have moved between pages
 
 When it has, the list says newer mail may be missing until Refresh.

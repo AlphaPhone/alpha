@@ -16,7 +16,7 @@ import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
 import { HistoryWordsPort, type RunVisibility, workflowsVisible } from "./history.vibe"
 import { Rows } from "./list.vibe"
-import { ApprovalPresentation, ApprovalTaps, approvalNoticesAvailable, approvalPresentation, currentTap, offerApprovalNotice, sameApprovalTap, settleApprovalTap, withdrawApprovalNotice } from "./native-approval.vibe"
+import { ApprovalPresentation, WorkflowTaps, approvalNoticesAvailable, approvalPresentation, currentTap, offerApprovalNotice, sameApprovalTap, settleWorkflowTap, withdrawApprovalNotice } from "./native-approval.vibe"
 
 interface Pending {
   readonly number: number
@@ -256,7 +256,7 @@ const watching = applying(Sheet, (state) => ({ owner: state.owner, runId: state.
     if (live.digest !== pending.number) try ignore(approvals.send({
       type: "approvalAsked", owner, runId, digest: pending.number, expires: approval.expiresAt, running: !open.raw.finished, now: untimed,
     }))
-    const tap = try (try ApprovalTaps).get()
+    const tap = try (try WorkflowTaps).get()
     if (tap !== undefined && sameApprovalTap(tap, approval)) {
       if (live.tapDigest !== pending.number && (try currentTap(tap))) {
         try ignore(approvals.send({ type: "noticeOpened", runId, digest: pending.number }))
@@ -271,9 +271,9 @@ const handledTap = applying(Model.Machine, (state) => ({ opened: state.opened, r
   effect ({ opened, runId, digest }) => {
     if (opened !== "Ready" || !(try workflowsVisible())) return
     const exact = try (try ApprovalWords).get()
-    const tap = try (try ApprovalTaps).get()
+    const tap = try (try WorkflowTaps).get()
     if (exact?.number !== digest || exact.runId !== runId || tap === undefined || !sameApprovalTap(tap, exact.approval)) return
-    try settleApprovalTap(tap)
+    try settleWorkflowTap(tap)
   })
 
 export const approvals = together(

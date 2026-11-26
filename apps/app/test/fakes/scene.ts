@@ -5,7 +5,7 @@ import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts
 import { type ClockScene, clockRoutes, clockScene } from "./clock.ts";
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
 import { type NotesScene, notesRoutes, notesScene } from "./notes.ts";
-import { type CheckoutScene, cloudRoutes } from "./cloud.ts";
+import { type CheckoutScene, type RedemptionScene, cloudRoutes } from "./cloud.ts";
 import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
 import { type RemindersScene, remindersRoutes, remindersScene } from "./reminders.ts";
@@ -30,6 +30,7 @@ export interface Scene {
   now: number;
   signedIn: boolean;
   checkout?: CheckoutScene;
+  redemption?: RedemptionScene;
   /** The phone's device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
   readonly mailLease: MailLeaseScene;
   residentAvailable: boolean;
@@ -97,16 +98,17 @@ export function services(world: Scene) {
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
       ...clockRoutes(world.clock, () => world.now),
-      ...remindersRoutes(world.reminders, () => world.now),
       ...(review === undefined ? [] : [textReviewRoute(review, world.notes.ownerIdentity)]),
-      ...notesRoutes(world.notes),
+      ...notesRoutes(world.notes, () => world.now),
+      // Workflows answers the inbox's workflow category read (eliza's workflowApprovalOffers) and passes every other read on to Reminders.
       ...workflowRoutes(world.workflows),
+      ...remindersRoutes(world.reminders, () => world.now),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
       ...walletRoutes(world.wallet, () => world.now),
     ]),
     cloud: answering([
-      ...cloudRoutes(() => world.signedIn, () => world.now, world.checkout),
+      ...cloudRoutes(() => world.signedIn, () => world.now, world.checkout, world.redemption),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),

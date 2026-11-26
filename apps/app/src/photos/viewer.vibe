@@ -34,11 +34,10 @@ module sources {
   /** @throws {never} */
   export const browserOperation = (): string => `browser-edit:${crypto.randomUUID()}`
 
-  export async function attachmentBytes(uri: string, name: string) {
-    if (!uri.startsWith("data:image/") && !uri.startsWith("blob:")) return undefined
-    const response = await fetch(uri)
-    const file = await response.blob()
-    if (!response.ok || !file.type.startsWith("image/") || file.size === 0 || file.size > 5_000_000) return undefined
+  export async function attachmentBytes(source: string | Blob, name: string) {
+    const response = typeof source === "string" && source.startsWith("data:image/") ? await fetch(source) : undefined
+    const file = source instanceof Blob ? source : response?.ok === true ? await response.blob() : undefined
+    if (file === undefined || !file.type.startsWith("image/") || file.size === 0 || file.size > 5_000_000) return undefined
     return new Promise<{ name: string; mimeType: string; size: number; data: string } | undefined>((resolve) => {
       const reader = new FileReader()
       reader.onload = () => resolve(typeof reader.result === "string"
@@ -298,22 +297,50 @@ effect function closeEditor() {
   }
 }
 
-effect function askAboutPhoto(photo: number, revision: number) {
-  const machine = try Viewer.Machine
-  const open = try OpenedPhoto
-  const current = try open.current()
-  const row = (try (try Catalog).displayed()).rows.get(photo)
-  if (current.photo !== photo || row === undefined) return
-  const item = row.item
-  const picture = tryPromise(() => attachmentBytes(current.uri, item.name ?? "Photo.jpg")) catch () => undefined
-  const state = try machine.get()
-  if (state.open !== photo || state.revision !== revision || state.secure || !Viewer.shown(state)) return
-  if (picture === undefined) {
-    try say("This photo could not be attached.", true)
-    return
+effect function selectedAskPhoto(view: MediaView) {
+  const { phone, capture } = try PhotosPort
+  const original = view.browser
+  if (original !== undefined) {
+    const current = capture(original.item.id) catch () => undefined
+    if (current === undefined || current.item.revision !== original.item.revision || current.item.sourceRevision !== original.item.sourceRevision
+      || current.item.trashedAt !== undefined || current.item.mimeType !== original.item.mimeType || current.item.size !== original.item.size) return undefined
+    const picture = tryPromise(() => attachmentBytes(current.file, current.item.name)) catch () => undefined
+    return picture === undefined ? undefined : { id: current.item.id, ...picture }
   }
-  const attached = try attachToAlpha({ id: item.id, name: picture.name, mimeType: picture.mimeType, data: picture.data })
-  if (!attached) try say("This photo could not be attached.", true)
+  const expected = view.item
+  if (Option.isNone(phone) || expected === undefined) return undefined
+  const current = tryPromise(() => phone.value.read({ id: expected.id })) catch () => undefined
+  if (current === undefined || current.id !== expected.id || current.kind !== "image" || current.trashed === true || current.image === undefined
+    || current.revision !== expected.revision || current.mutationRevision !== expected.mutationRevision || current.contentRevision !== expected.contentRevision) return undefined
+  const uri = current.image
+  const picture = tryPromise(() => attachmentBytes(uri, current.name ?? "Photo.jpg")) catch () => undefined
+  return picture === undefined ? undefined : { id: current.id, ...picture }
+}
+
+effect function askAboutPhoto(photo: number, revision: number, ticket: number) {
+  const viewer = try Viewer.Machine
+  const catalog = try Catalog
+  const opened = try OpenedPhoto
+  const view = try opened.current()
+  const row = (try catalog.displayed()).rows.get(photo)
+  if (view.photo !== photo || row === undefined) return
+  const scope = try Effect.context<Viewer.Machine | Catalog | OpenedPhoto | Library.Machine | Shell | PhotosPort>()
+  const current = Effect.provideContext(effect {
+    const state = try viewer.get()
+    const library = try (try Library.Machine).get()
+    const latest = (try catalog.displayed()).rows.get(photo)
+    if (state.open !== photo || state.revision !== revision || state.read.ticket !== ticket || state.kind !== "Still"
+      || !Viewer.canAskAlpha(state, "Owner") || (try opened.current()) !== view || !library.visible || !showing(try (try Shell).get(), "Photos")) return false
+    return row.kind === "phone"
+      ? latest?.kind === "phone" && latest.item.id === row.item.id && latest.item.revision === row.item.revision
+        && latest.item.mutationRevision === row.item.mutationRevision && latest.item.contentRevision === row.item.contentRevision && latest.item.trashed !== true
+      : latest?.kind === "browser" && latest.item.id === row.item.id && latest.item.revision === row.item.revision
+        && latest.item.sourceRevision === row.item.sourceRevision && latest.item.trashedAt === undefined
+  }, scope)
+  if (!(try current)) return
+  const read = Effect.provideContext(selectedAskPhoto(view), scope)
+  if (try attachToAlpha({ kind: "ViewedPhoto", read }, current)) return
+  if (try current) try say("This photo could not be attached.", true)
 }
 
 /** A permitted native still with a known, bounded original. */
@@ -383,7 +410,7 @@ function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Actor]> {
     when { tag: "Request", let change, let photo, let revision }: run("change", ignore(effect {
       try (try Library.Machine).send({ type: "requested", change, photo, revision }, "Owner")
     }), "Phone");
-    when { tag: "AskAbout", let photo, let revision }: run("ask", askAboutPhoto(photo, revision), "Phone");
+    when { tag: "AskAbout", let photo, let revision, let ticket }: run("ask", askAboutPhoto(photo, revision, ticket), "Phone");
     when { tag: "Compose", let photo, let revision, let ticket }: run("offer picture", offerPhoto(photo, revision, ticket, "email"), "Phone");
     when { tag: "TextPicture", let photo, let revision, let ticket }: run("offer picture", offerPhoto(photo, revision, ticket, "message"), "Phone");
   }

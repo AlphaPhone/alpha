@@ -23,6 +23,7 @@ export const meta: ComponentMeta<InboxMessageScreenProps> = {
   },
   examples: {
     "Earlier in the thread": { place: 2, onNewer: fn() },
+    "With conversation previews": { onOlder: undefined, threadRows: [{ position: 0, sender: "Sam Rivera", date: "Oct 31", snippet: "Is a window table available?", onOpen: fn() }] },
     "Images hidden": { imagesHidden: true, onShowImages },
     "With attachments": { attachments: [{ id: "1", name: "Invoice 2041.pdf", size: "184 KB", onOpen: fn(), onSave: fn() }, { id: "2", name: "Menu.png", size: "2.1 MB", onOpen: fn(), onSave: undefined, saveUnconfirmed: true }] },
     "Copied with Reply-To": { cc: "Bruno Costa", replyTo: "events@example.com" },

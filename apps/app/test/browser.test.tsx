@@ -22,6 +22,7 @@ import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -29,8 +30,8 @@ underAct();
 afterEach(closeAll);
 
 /** Alpha on an Alpha image with the Browser on screen. */
-async function onBrowser(world = { ...scene(), phone: true, image: true }) {
-  const running = await open(world, only("home", "view:Browser"));
+async function onBrowser(world = { ...scene(), phone: true, image: true }, notices = false) {
+  const running = await open(world, notices ? only("home", "notice", "view:Browser") : only("home", "view:Browser"));
   await until(running.alpha, home.runtime(running.alpha), Home, (h) => h.tiles.load.status === "Loaded");
   const runtime = browser.runtime(running.alpha);
   await press("Browser");
@@ -62,7 +63,7 @@ async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: s
   await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, asking, Conversation, (c) => c.turn.reply === "Complete" && (world.ask.metadata?.length ?? 0) > 0);
-  return world.ask.metadata?.[0] as { observation?: { view?: string }; browserPage?: { url?: string; text?: string; tabId?: string } } | undefined;
+  return world.ask.metadata?.[0] as { observation?: { view?: string; selectedObject?: { kind?: string; id?: string; revision?: string } }; browserPage?: { url?: string; text?: string; tabId?: string; revision?: string } } | undefined;
 }
 
 async function committedAddress(runtime: ReturnType<typeof browser.runtime>, tabs: ReturnType<typeof scene>["browser"]["tabs"]) {
@@ -240,8 +241,14 @@ describe("The Browser on a phone", () => {
     await press("Find in page");
     await until(alpha, page, Page, (p) => p.finding);
     await fill("Find in page", "agent");
-    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+    const status = () => document.querySelector('[role="search"][aria-label="Find in page"] [role="status"]')?.textContent;
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("1 of 4")));
     await press("Next match");
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("2 of 4")));
+    await press("Previous match");
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("1 of 4")));
+    await fill("Find in page", "absent");
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("No matches")));
     // spec/app/browser/address.md, "Closing the find bar clears the search"
     await press("Close find in page");
     await until(alpha, page, Page, (p) => !p.finding && p.matches === 0);
@@ -390,6 +397,9 @@ describe("The Browser on a phone", () => {
   });
 
   it.each([false, true])("Opens Password manager and returns through Settings (spec/app/settings/index.md, \"The owner can open Password manager from the Browser menu\") on phone %s", async (phone) => {
+    // The web host keeps the Browser's session in the WebView's IndexedDB, which happy-dom does not draw.
+    vi.stubGlobal("indexedDB", memoryIndexedDB());
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const world = { ...scene(), phone, image: phone };
     const { alpha } = await open(world, only("home", "view:Browser", "view:Settings"));
     await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
@@ -415,10 +425,17 @@ describe("The Browser on a phone", () => {
   });
 
   it("Only opens a private HTTPS page after the owner confirms it (spec/app/browser/share.md, \"Story: Open the page in another browser\")", async () => {
-    const { alpha, runtime, world } = await onBrowser();
+    const { alpha, runtime, world } = await onBrowser(undefined, true);
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await press("Menu");
-    expect(button("Open externally, passkeys unsupported here")).toBeUndefined();
+    await press("Find in page");
+    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("Load a page before finding text in it.")));
+    expect(button("Close find in page")).toBeUndefined();
+    await later(alpha, 10000);
+    await press("Open externally, passkeys unsupported here");
+    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("Load an HTTPS page before opening another browser.")));
+    expect(button("Close menu")).toBeDefined();
+    expect(world.browser.handedOff).toEqual([]);
     await press("New private tab");
     await until(alpha, runtime, Tabs, (s) => s.privates.length === 1 && s.layer === "Address");
     await drawn(async () => {
@@ -555,7 +572,11 @@ describe("The Browser on a phone", () => {
     // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
     const shown = await ask(running, "Summarize this page");
     expect(shown?.observation?.view).toBe("browser");
-    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: `tab${tab}` });
+    // eliza binds the page to the tab the observation selects: the same session-qualified tab id and revision.
+    const selected = shown?.observation?.selectedObject;
+    expect(selected?.kind).toBe("browser-tab");
+    expect(selected?.id).toMatch(new RegExp(`:tab${tab}$`));
+    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: selected?.id, revision: selected?.revision });
     expect(shown?.browserPage?.text).toContain("agent");
 
     // spec/app/browser/reading.md, "A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on"
@@ -632,7 +653,9 @@ describe("The Browser on a phone", () => {
     await asked("open the Wikipedia article about the Eiffel Tower", eiffel);
     await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
     await asked("open example.org", "https://example.org/");
-    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("example.org")));
+    // The owner's own words name example.org too: wait for the card itself to name the newer page.
+    const card = () => [...document.querySelectorAll("[aria-label='Operation details']")].map((details) => details.textContent ?? "");
+    await drawn(() => vi.waitFor(() => expect(card().some((text) => text.includes("example.org"))).toBe(true)));
     expect(document.body.textContent).not.toContain("en.wikipedia.org/wiki/Eiffel_Tower");
     await press("Open");
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://example.org/"), { timeout: 10_000 }));

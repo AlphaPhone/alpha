@@ -1,5 +1,6 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, type PlanOffer, subscriptionView } from "@elizaos/cloud"
+import type { CredentialId } from "@elizaos/os-bridges"
+import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, type PlanOffer, type SnapshotSubscription, subscriptionView } from "@elizaos/cloud"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
 import * as Settings from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -22,9 +23,15 @@ type Plan =
     readonly balanceMicros: number
     readonly allowance: { readonly availableMicros: number; readonly resetsAt: number } | null
     readonly expiresAt: number | null
+    readonly subscription?: SnapshotSubscription
   }
 
 export type PurchaseVisibility = "Matches" | "Changed" | "Unconfirmed"
+
+/** Serializes decisions initiated in Account. */
+export service AccountWrites { readonly admission: Semaphore.Semaphore }
+
+export const accountWrites = Layer.effect(AccountWrites, Effect.map(Semaphore.make(1), (admission) => ({ admission })))
 
 type ReadProfile = {
   readonly tag: "Read"
@@ -32,6 +39,7 @@ type ReadProfile = {
   readonly name: string
   readonly plan?: Plan
   readonly purchase?: PurchaseVisibility
+  readonly codesAvailable?: boolean
 }
 
 /** What Cloud says about the account for this request. The page never holds a credential. */
@@ -129,7 +137,7 @@ effect function readForOwner<A>(cloud: Account, owner: CloudProfile, profile: Re
 export interface Buyer {
   readonly userId: string
   readonly organizationId: string
-  readonly credentialId: string
+  readonly credentialId: CredentialId
   readonly expiresAt: number
 }
 
@@ -174,6 +182,8 @@ effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfi
         ? { availableMicros: allowance.available, resetsAt: allowance.resetsAt }
         : null,
       expiresAt: view.planEffectiveUntil,
+      ...(snapshot.plan.source === "subscription" && snapshot.subscription !== null && snapshot.subscription.periodEnd > now
+        ? { subscription: snapshot.subscription } : {}),
     },
   }
 }
@@ -199,14 +209,14 @@ function untilExpiry(profile: Profile): Stream.Stream<Profile> {
   })
 }
 
-function visit<R>(cloud: Account, place: "Account" | "Settings", checkPurchase: (owner: CloudProfile) => PurchaseVisibility!!R): Stream.Stream<Profile, never, R> {
+function visit<R>(cloud: Account, place: "Account" | "Settings", checkPurchase: (owner: CloudProfile) => { readonly purchase: PurchaseVisibility; readonly codesAvailable: boolean }!!R): Stream.Stream<Profile, never, R> {
   return Stream.unwrap(effect {
     const opened = try exit(readAccount(cloud))
     if (Exit.isFailure(opened)) return Stream.succeed(profileFailure(Cause.squash(opened.cause)))
     const owner = opened.value
     const profile = profileOf(owner)
     if (place !== "Account") return Stream.succeed<Profile>(profile)
-    const current = { ...profile, purchase: try checkPurchase(owner) }
+    const current = { ...profile, ...(try checkPurchase(owner)) }
     return Stream.concat(Stream.succeed<Profile>({ ...current, plan: { tag: "CheckingPlan" } }), Stream.flatMap(Stream.fromEffect(readPlan(cloud, owner, current)), untilExpiry))
   })
 }
@@ -253,7 +263,7 @@ export effect function readCatalog(ticket: number, publish: (catalog: Catalog | 
 }
 
 /** Reads the account while Settings or its Account sheet is visible. Leaving interrupts the read and drops its answer. */
-export function profileLive<R>(publish: (value: Profile) => void, publishCatalog: (catalog: Catalog | undefined) => void, refreshed: Stream.Stream<void>, checkPurchase: (owner: CloudProfile) => PurchaseVisibility!!R) {
+export function profileLive<R>(publish: (value: Profile) => void, publishCatalog: (catalog: Catalog | undefined) => void, refreshed: Stream.Stream<void>, checkPurchase: (owner: CloudProfile) => { readonly purchase: PurchaseVisibility; readonly codesAvailable: boolean }!!R) {
   return started(effect {
     const { changes } = try Layers.Machine
     const cloud = try Cloud

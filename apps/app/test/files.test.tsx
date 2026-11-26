@@ -125,7 +125,10 @@ describe("Files on a phone", () => {
     expect(listed().sort()).toEqual(["Old", "notes.txt"]);
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
-    await choose("Browse storage");
+    await openMenu("Files options");
+    expect(menuItem("Browse storage")).toBeUndefined();
+    await drawn(() => menuItem("Grid view")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await hardware("back");
     await press("Images");
     await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded");
     // spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
@@ -159,7 +162,7 @@ describe("Files on a phone", () => {
     world.files.listMost = 5_000;
 
     // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
-    await choose("Browse storage");
+    await hardware("back");
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded");
     await openRow("Documents");
@@ -271,6 +274,9 @@ describe("Files on a phone", () => {
     world.files.stored.splice(world.files.stored.findIndex((one) => one.path === "Download"), 1);
     await showInFiles();
     await until(alpha, runtime, Browser, (s) => s.open && s.handed && s.inCategory && s.category === "Download" && s.listing.status === "Loaded");
+    await choose("Browse storage");
+    await until(alpha, runtime, Browser, (s) => s.open && !s.handed && !s.inCategory && s.trail.length === 0);
+    expect(alpha.runtime.runSync(Shell.use((m) => m.get())).trail.at(-1)).toBe("Files");
   });
 
   it("Browse my storage without access (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
@@ -459,7 +465,8 @@ describe("Files on a phone", () => {
     await fill("To", "+15550123456");
     await press("Text +15550123456");
     await until(alpha, alpha.runtime, MessageComposer, (s) => s.pictures === 1);
-    const pictures = alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()));
+    const { thread } = alpha.runtime.runSync(MessageComposer.use((composer) => composer.get()));
+    const pictures = alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures(thread)));
     expect(pictures).toEqual([{ name: "handed.png", wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(png, (byte) => byte.charCodeAt(0)) }]);
     expect(world.telephony.sent).toEqual([]);
   });
@@ -586,7 +593,7 @@ describe("Files on a phone", () => {
     await press("code.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
     const previousViewer = runtime.runSync(Shown.use((m) => m.get())).viewer;
-    await choose("Rename", "File actions");
+    await press("Rename code.txt");
     await fill("Name", "codes.txt");
     await pressOnTop("Rename");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.viewer > previousViewer);

@@ -90,7 +90,24 @@ public class MainActivity extends BridgeActivity {
   if (textAsk.returnExternally() && !moveTaskToBack(true)) return false;
   closedTextAsk = ticket;
   textAsk = null;
+  wakeSmsDraft();
   return true;
+ }
+
+ private boolean receiveSmsDraft(Intent intent) {
+  if (intent == null || !SmsDraftOpenRequest.ACTION.equals(intent.getAction())) return false;
+  if (AlphaImageCapability.verified(this) && AlphaAssistActivity.unlocked(this)) {
+   try {
+    if (SmsDraftOpenRequest.bind(this, intent.getStringExtra(SmsDraftOpenRequest.TOKEN))) wakeSmsDraft();
+   } catch (RuntimeException foreignExtras) { return true; }
+  }
+  return true;
+ }
+
+ private void wakeSmsDraft() {
+  if (getBridge() == null || !AlphaDevicePlugin.shareForeground(this) || isAssistantSurface()) return;
+  var handle = getBridge().getPlugin("ElizaTelephony");
+  if (handle != null && handle.getInstance() instanceof AlphaTelephonyPlugin telephony) telephony.wakeSmsDraft();
  }
 
  private record InsetsState(int top, int bottom, boolean keyboard) {
@@ -120,7 +137,7 @@ public class MainActivity extends BridgeActivity {
    handoffTo(live, frontStart);
    return;
   }
-  if (receiveTextAsk(incoming)) setIntent(new Intent(this, MainActivity.class));
+  if (receiveTextAsk(incoming) || receiveSmsDraft(incoming)) setIntent(new Intent(this, MainActivity.class));
   homeTask = state == null ? isHomeTaskStart(getIntent()) : state.getBoolean(HOME_TASK, isHomeTaskStart(getIntent()));
   if (isHome(getIntent())) SmsNoticeOpenRequest.clear();
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
@@ -239,6 +256,7 @@ public class MainActivity extends BridgeActivity {
 
  @Override public void onDestroy() {
   composerVisit.incrementAndGet();
+  SmsDraftOpenRequest.retire(this);
   if (livePage.get() == this) livePage.clear();
   super.onDestroy();
  }
@@ -248,6 +266,7 @@ public class MainActivity extends BridgeActivity {
   super.onWindowFocusChanged(focused);
   if (focused && getBridge() != null) {
    InboxNoticeDelivery.get(this).changed();
+   wakeSmsDraft();
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
   }
  }
@@ -266,6 +285,7 @@ public class MainActivity extends BridgeActivity {
 
  @Override public void onStop() {
   volumeShutter = false;
+  SmsDraftOpenRequest.retire(this);
   super.onStop();
  }
 
@@ -280,7 +300,7 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void onNewIntent(Intent intent) {
-  if (receiveTextAsk(intent)) return;
+  if (receiveTextAsk(intent) || receiveSmsDraft(intent)) return;
   if (BillingReturn.capture(intent) && getBridge() != null) {
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha-billing-return'))", null);
   }
@@ -294,6 +314,7 @@ public class MainActivity extends BridgeActivity {
   if (home) {
    composerVisit.incrementAndGet();
    textAsk = null;
+   SmsDraftOpenRequest.retire(this);
    SmsNoticeOpenRequest.clear();
   }
   super.onNewIntent(intent);

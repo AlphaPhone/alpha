@@ -45,6 +45,7 @@ export interface VoiceScene {
   relayWarmupHangs: boolean;
   onDevice: boolean;
   credentialId: string;
+  organizationId: string;
   streamTiming: unknown;
   stopCloudSpeechCalls: number;
   hushCalls: number;
@@ -63,9 +64,10 @@ export interface VoiceScene {
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
-  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
+  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "reauthenticate" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
   /** The phone's sign-in settling on the account whose key is `credentialId` now, as `ElizaSignInPlugin.java` tells it. */
   signedInHere?: () => void;
+  billingVerified?: string;
 }
 
 export function voiceScene(): VoiceScene {
@@ -97,6 +99,7 @@ export function voiceScene(): VoiceScene {
     relayWarmupHangs: false,
     onDevice: true,
     credentialId: "cred-1",
+    organizationId: "org-1",
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
     hushCalls: 0,
@@ -211,12 +214,12 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         await voice.recordingStartGate?.();
         return { recordingId };
       },
-      stopRecording: async () => {
+      stopRecording: () => {
         if (voice.refuseRecordingStop) {
           activeRecording = undefined;
-          throw new Error("Recording could not be saved");
+          return Promise.reject(new Error("Recording could not be saved"));
         }
-        return finish();
+        return Promise.resolve().then(finish);
       },
       dictationForeground: () => Promise.resolve({ available: voice.dictationInFront }),
       cancelRecording: async () => {
@@ -307,7 +310,7 @@ export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: M
       status: ({ environment }) => Promise.resolve({
         environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
         account: signedIn()
-          ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
+          ? { signedIn: true, userId: "user-1", organizationId: voice.organizationId, credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
           : { signedIn: false },
       }),
       ...voice.startupSignIn,

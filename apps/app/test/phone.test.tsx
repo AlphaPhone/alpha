@@ -8,6 +8,7 @@ import { Machine as Phone, type Phone as PhoneState } from "../gen/app__phone.ef
 import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
 import { Machine as Comms } from "../gen/app__phone__comms.effect.vibe";
 import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
+import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { at } from "../src/areas.ts";
 import { propose } from "../src/contacts/requests.vibe";
@@ -178,8 +179,24 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Recents" && state.recents.status === "Loaded");
     expect(button("Call Maya Chen")).toBeDefined();
 
+    // spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts"
     await tab("Contacts");
     await contactsFront();
+    const contactsListed = () => until(alpha, alpha.runtime, Contacts, (state) =>
+      state.front && !state.searching && !state.sought && state.list.status === "Loaded" && state.rows === 2);
+    await contactsListed();
+    await press("Search contacts");
+    await fill("Search contacts", "Maya");
+    await until(alpha, alpha.runtime, Contacts, (state) =>
+      state.searching && state.sought && state.list.status === "Loaded" && state.rows === 1);
+    expect(button("Maya Chen")).toBeDefined();
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await tab("Contacts");
+    await contactsFront();
+    await contactsListed();
+    expect(button("Ben Ortiz")).toBeDefined();
     await press("Open Alpha");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     await fill("Ask Alpha", "Keep the Contacts draft");
@@ -616,16 +633,34 @@ describe("The call strip on an Alpha image", () => {
     world.telephony.report();
     await until(alpha, alpha.runtime, Strip, (s) => s.calls.length === 1);
     expect(button("End call")).toBeUndefined();
+    await openPhone(alpha);
+    expect(document.querySelector("[data-alpha-call-strip]")).toBeNull();
+    expect(button("End call")).toBeUndefined();
 
     // spec/app/phone/index.md, "The phone says whether a call is live, whether it may be an emergency call, and whether the carrier is ready"
     world.telephony.live = [{ id: "c1", state: "active", connectedAt: world.now }];
     world.telephony.report();
     await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "OrdinaryCall");
     await until(alpha, alpha.runtime, Strip, (s) => s.shown && s.calls[0]?.phase === "Active");
+    const topStrip = () => document.querySelector('[data-alpha-call-strip="over"]');
+    const dock = () => document.querySelector('[data-alpha-comms-dock]');
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(topStrip()?.querySelector('button[aria-label="End call"]')).toBeInstanceOf(HTMLButtonElement);
+      expect(dock()?.querySelector('[aria-label="Call or ask"]')).toBeInstanceOf(HTMLInputElement);
+      expect(dock()?.querySelector('[aria-label="End call"]')).toBeNull();
+    });
+    await press("Talk");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Talk is unavailable right now");
+    }, { timeout: 12_000 });
+    expect(world.voice.startLiveCaptureCalls).toBe(0);
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
 
     // spec/app/phone/call.md, "Return and End act only on the call the bar shows, and End is asked once"
     await drawn(() => {
-      const bar = document.querySelector("[role=region][aria-label='Ongoing call'] button");
+      const bar = topStrip()?.querySelector('button[aria-label^="Return to call, On call"]');
       if (!(bar instanceof HTMLButtonElement)) throw new Error("no call bar");
       bar.click();
     });
@@ -634,12 +669,18 @@ describe("The call strip on an Alpha image", () => {
     await press("End call");
     await until(alpha, alpha.runtime, Strip, (s) => !s.shown);
     expect(world.telephony.ended).toEqual(["c1"]);
+    expect(topStrip()?.querySelector("button")?.getAttribute("aria-label")).toBe("Call ended");
+    expect((topStrip()?.querySelector("button") as HTMLButtonElement | null)?.disabled).toBe(true);
 
     // spec/app/phone/index.md, "Alpha acts outside only when the phone has ruled out an emergency call"
     world.telephony.live = [{ id: "c2", state: "active", connectedAt: world.now }];
     world.telephony.emergency = null;
     world.telephony.report();
     await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "MaybeEmergencyCall");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.querySelector('[data-alpha-call-strip="stage"] button[aria-label="End call"]')).not.toBeNull();
+    });
     await alpha.runtime.runPromise(propose({ type: "phone_call", target: { kind: "number", number: "+14155550122" } }, true));
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "Dial");
     expect([inReview("Call"), world.telephony.dialed]).toEqual([undefined, []]);

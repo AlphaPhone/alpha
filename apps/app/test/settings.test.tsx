@@ -15,7 +15,7 @@ import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
-import { account, checkoutSession, checkoutUrl, type CheckoutScene } from "./fakes/cloud.ts";
+import { account, checkoutSession, checkoutUrl, type CheckoutScene, type RedemptionScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -34,8 +34,8 @@ vi.stubGlobal("fetch", fetchWithNotices);
 
 const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/notification-collection", "overlay"));
 
-/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
-const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
+/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its decorative icon or its value beside it. */
+const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span:not([aria-hidden]) > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
 const tap = (title: string) => drawn(() => {
@@ -59,11 +59,33 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
+  it("Opens browser Notifications from App permissions and returns to Privacy", async () => {
+    const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
+    await press("Privacy");
+    await press("Permissions");
+    await vi.waitFor(() => {
+      const panel = document.querySelector('[data-settings-page="App permissions"]');
+      expect(panel?.textContent).toContain("Selected");
+      expect(panel?.textContent).toContain("Chosen files");
+      expect(panel?.textContent).not.toContain("Calendar");
+    });
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "PrivacyNotifications");
+    await press("Back to Privacy");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Privacy");
+    await press("Back to Settings");
+    await press("General");
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Notifications");
+    await press("Back to General");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "General");
+  });
+
   it("Recovers an unavailable browser account only after Try again", async () => {
     const world = { ...scene(), signedIn: false };
     const { alpha } = await settingsOpen(world);
-    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
-    await press("Account");
+    await vi.waitFor(() => expect(titled("Account")?.textContent).toContain("Signed out"));
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
 
     world.signedIn = true;
@@ -75,12 +97,12 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
 
     world.signedIn = false;
-    await drawn(() => button("Account")?.focus());
-    await press("Account");
+    await drawn(() => titled("Account")?.focus());
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
     await press("Back");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    await vi.waitFor(() => expect(document.activeElement).toBe(button("Account")));
+    await vi.waitFor(() => expect(document.activeElement).toBe(titled("Account")));
     expect(await page(alpha)).toBe("Top");
   });
 
@@ -249,6 +271,68 @@ describe("Settings", () => {
     expect(checkout.confirmations).toEqual([checkoutSession]);
   });
 
+  it('Redeems the owner’s code once and refreshes the plan (spec/app/account/codes.md, "Story: Redeem a code")', async () => {
+    const redemption: RedemptionScene = { calls: [] };
+    await settingsOpen({ ...scene(), phone: true, redemption });
+    await press("Account");
+    await vi.waitFor(() => {
+      const form = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Redeem code");
+      if (!form) throw new Error("No redemption control");
+      return drawn(() => form.click());
+    });
+    await fill("Redemption code", "ABCD-2345-EFGH-6789");
+    await press("Redeem");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Code redeemed"));
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
+    expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key: expect.any(String) }]);
+  });
+
+  it('Checks the same cancellation after a lost reply and keeps the plan only once (spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in")', async () => {
+    const change = { revision: 2, ending: false, loseReply: true, commands: [] };
+    const world = { ...scene(), phone: true, checkout: { starts: [], confirmations: [], opened: [], returned: null, paid: true, change } };
+    const emailed: string[] = [];
+    world.voice.startupSignIn = {
+      reauthenticate: async ({ email }) => {
+        emailed.push(email ?? "");
+        return { request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 60_000, resendAt: world.now + 10_000 };
+      },
+      verify: async ({ code }) => {
+        if (code !== "123456") throw new Error("Wrong confirmation");
+        world.voice.billingVerified = world.voice.credentialId;
+        return { request: 1, attempt: 1, verdict: "account-confirmed" };
+      },
+    };
+    await settingsOpen(world);
+    await press("Account");
+    await vi.waitFor(() => {
+      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Plans");
+      if (!plans) throw new Error("No Plans control");
+      return drawn(() => plans.click());
+    });
+    const available = (name: string) => vi.waitFor(() => expect(button(name)).toBeDefined(), { timeout: 10_000 });
+    await available("Cancel plan");
+    await press("Cancel plan");
+    await press("Cancel plan");
+    await available("Email me a code");
+    expect(change.commands).toEqual([]);
+    await press("Email me a code");
+    await available("Verify code");
+    await fill("Confirmation code", "123456");
+    await press("Verify code");
+    await available("Cancel plan");
+    expect(emailed).toEqual([account.email]);
+    expect(change.commands).toEqual([]);
+    await press("Cancel plan");
+    await available("Keep plan");
+    expect(change.commands).toMatchObject([{ kind: "cancel", status: "succeeded", expectedRevision: 2, resultRevision: 3 }]);
+    await press("Keep plan");
+    await available("Cancel plan");
+    expect(change.commands).toMatchObject([
+      { kind: "cancel", status: "succeeded", expectedRevision: 2, resultRevision: 3 },
+      { kind: "undo", status: "succeeded", expectedRevision: 3, resultRevision: 4 },
+    ]);
+  });
+
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("General");
@@ -266,12 +350,13 @@ describe("Settings", () => {
       expect(Boolean(button("Refresh"))).toBe(phone);
       await press("General");
       expect(Boolean(button("Refresh"))).toBe(phone);
+      // spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to": only on a phone does General offer Wi-Fi.
+      if (!phone) return void expect(titled("Wi-Fi")).toBeUndefined();
       // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
       await tap("Wi-Fi");
       await until(alpha, machines, Android.Machine, (s) => s.start.read.status !== "Loading");
       const exactly = await machines.runPromise(Android.Machine.use((android) => android.get()));
-      expect(exactly.told).toBe(phone ? "Silent" : "SaidUnavailable");
-      if (!phone) return;
+      expect(exactly.told).toBe("Silent");
       await tap("Mobile data");
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
@@ -392,11 +477,11 @@ describe("Settings", () => {
     const { world } = await settingsOpen(sceneWithProton);
     await press("Apps");
     await press("Passwords");
-    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Not installed"));
+    await vi.waitFor(() => expect(button(/^Proton Pass/)?.textContent).toContain("Not installed"));
     expect(world.settings.opened).toEqual([]);
     expect(button("Get Proton Pass")).toBeUndefined();
-    await press("Proton Pass");
-    expect(button("Proton Pass")?.getAttribute("aria-expanded")).toBe("true");
+    await press(/^Proton Pass/);
+    expect(button(/^Proton Pass/)?.getAttribute("aria-expanded")).toBe("true");
     expect(button("Open Proton Pass")).toBeUndefined();
     await press("Get Proton Pass");
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install"]));
@@ -404,7 +489,7 @@ describe("Settings", () => {
     world.settings.passwordProvider = { installation: "installed", selection: "proton", support: "available" };
     await vi.waitFor(() => expect(button("Refresh password provider status")?.disabled).toBe(false));
     await press("Refresh password provider status");
-    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Verified"));
+    await vi.waitFor(() => expect(button(/^Proton Pass/)?.textContent).toContain("Verified"));
     expect(button("Get Proton Pass")).toBeUndefined();
     expect(document.body.textContent).toContain("Selected");
     await press("Open Proton Pass");
@@ -413,7 +498,7 @@ describe("Settings", () => {
     await press("Choose provider");
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install", "password-provider open", "password-provider settings"]));
     await hardware("back");
-    await vi.waitFor(() => expect(button("Proton Pass")).toBeUndefined());
+    await vi.waitFor(() => expect(button(/^Proton Pass/)).toBeUndefined());
   });
 
   it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {

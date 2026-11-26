@@ -10,11 +10,10 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, deletionRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, offer, withdraw } from "../notices/toasts.vibe"
-import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { type Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
-import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
 import { displayNumber, matches } from "../phone/words.ts"
 
@@ -24,7 +23,9 @@ module nativeNotice {
   interface Transport {
     smsNoticePending(): Promise<{ threadId?: unknown; token?: unknown }>
     acknowledgeSmsNotice(input: { token: string }): Promise<void>
-    addListener(name: "smsNotice", wake: () => void): Promise<PluginListenerHandle>
+    smsDraftPending(): Promise<unknown>
+    acknowledgeSmsDraft(input: { token: string }): Promise<void>
+    addListener(name: "smsNotice" | "smsDraft", wake: () => void): Promise<PluginListenerHandle>
   }
 
   let made: Transport | undefined
@@ -34,11 +35,13 @@ module nativeNotice {
   }
 }
 import { noticeTransport } from nativeNotice
+export { noticeTransport }
 
 /** A conversation Messages has given a number: the phone's thread, where it has one, and the numbers it is with. */
 export interface Conversation {
   readonly id: string
   readonly addresses: ReadonlyArray<string>
+  readonly promoted?: true
 }
 
 export type CopyReport = (outcome: "copied" | "failed" | undefined) => void
@@ -53,12 +56,15 @@ export service Conversations {
 }
 
 module text {
+  type StoredConversation = { id: string; addresses: string[]; promoted?: true }
+
   /** What the store kept: the conversations in the order they were numbered, from 1. @throws {never} */
-  export function kept(raw: string | undefined): { id: string; addresses: string[] }[] {
+  export function kept(raw: string | undefined): StoredConversation[] {
     if (raw === undefined) return []
     try {
       const found: unknown = JSON.parse(raw)
-      return Array.isArray(found) ? found.filter((one): one is { id: string; addresses: string[] } => typeof one?.id === "string" && Array.isArray(one?.addresses)) : []
+      return Array.isArray(found) ? found.filter((one): one is StoredConversation => typeof one?.id === "string" && Array.isArray(one?.addresses)
+        && one.addresses.every((address: unknown) => typeof address === "string") && (one.promoted === undefined || one.promoted === true)) : []
     } catch {
       return []
     }
@@ -85,7 +91,7 @@ const conversations = Layer.effect(Conversations, effect {
       if (found > 0 && previous !== undefined) {
         const id = conversation.id || previous.id
         const addresses = conversation.addresses.length > 0 ? conversation.addresses : previous.addresses
-        const current = { id, addresses }
+        const current: Conversation = { id, addresses, ...(previous.promoted || (previous.id === "" && id !== "") ? { promoted: true } : {}) }
         numbers.set(key, found)
         if (id !== previous.id || recipientKey(current) !== recipientKey(previous)) {
           known[found - 1] = current
@@ -164,7 +170,8 @@ effect function threadOf(conversation: Conversation): Option.Option<ThreadId>!!T
   if (conversation.id !== "") return Option.some(conversation.id as ThreadId)
   const page = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   const same = (row: ThreadRow) => !("incomplete" in row) && [...row.addresses].sort().join(",") === [...conversation.addresses].sort().join(",")
-  return Option.fromNullishOr(page?.rows.find(same)?.id)
+  const matching = page?.rows.filter(same)
+  return Option.fromNullishOr(matching?.length === 1 ? matching[0]?.id : undefined)
 }
 
 // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
@@ -379,24 +386,5 @@ const notices = started(effect {
   })
 }, "message notifications")
 
-// spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it"; spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
-/** A number handed to Messages: Messages opens on the conversation with it, through the picker, as if the owner typed it. */
-const callers = Layer.effect(Callers, effect {
-  const whole = try Whole
-  effect function handed(number: string): void!!(Conversations | Inbox | Messages.Machine | Shell) {
-    const thread = try (try Conversations).of({ id: "", addresses: [number] })
-    try (try Inbox).set({ typed: number })
-    if (!(try contained((try Shell).send({ type: "openView", view: "Messages" }), "the number handed to Messages"))) return
-    const machine = try Messages.Machine
-    const front = try Stream.runHead(Stream.filter(machine.changes, (s) => s.front))
-    if (Option.isSome(front) && front.value.pane !== "Threads") try ignore(machine.send({ type: "back" }))
-    try ignore(machine.send({ type: "newMessage" }))
-    try ignore(machine.send({ type: "choose", thread, typed: true }))
-  }
-  return {
-    message: (number: string) => flatMap(whole.context, (context) => Effect.provideContext(handed(number), context as Context.Context<Conversations | Inbox | Messages.Machine | Shell>)),
-  }
-})
-
-/** Messages: resident, since Phone, Voicemail, Contacts and the agent hand it a number and Home reads its unread count; it reads only while its view is in front. */
-export const messages = together(machine, inbox, conversations, shown, heard, notices, callers)
+/** Messages: resident for the agent, conversation navigation and Home's unread count. It reads only while its view is in front. */
+export const messages = together(machine, inbox, conversations, shown, heard, notices)

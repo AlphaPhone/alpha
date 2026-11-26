@@ -32,7 +32,9 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
   channels: readonly { id: string; name: string; blocked: boolean }[];
   /** What Alpha tells about the last start of an Android page. */
   told?: AndroidTold;
-  /** Goes back to General. */
+  /** The heading of the parent page Back returns to. */
+  backLabel?: "Back to General" | "Back to Privacy";
+  /** Goes back to the parent settings page. */
   onBack?: () => void;
   /** Hands over to the notices area, which collects other apps' notifications. */
   onHandOver?: (neighbour: Neighbour) => void;
@@ -43,10 +45,10 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
  * card, notification access, and the collection of other apps' notifications. The web shows its own saved Alerts choice.
  * @model spec/app/settings/facts.md
  */
-export function SettingsNotificationsPage({ browserAlerts, alerts, doNotDisturb, collection, collectionPolicy, onPhone = true, channels, told, onBack, onHandOver, starting, onAndroid }: SettingsNotificationsPageProps) {
+export function SettingsNotificationsPage({ browserAlerts, alerts, doNotDisturb, collection, collectionPolicy, onPhone = true, channels, told, backLabel = "Back to General", onBack, onHandOver, starting, onAndroid }: SettingsNotificationsPageProps) {
   if (!onPhone) {
     return (
-      <SettingsPage title="Notifications" onBack={onBack} backLabel="Back to General">
+      <SettingsPage title="Notifications" onBack={onBack} backLabel={backLabel}>
         {browserAlerts?.saveFailed ? <Banner variant="warn">Couldn’t save alerts</Banner> : null}
         <ListGroup>
           <SettingsSwitchRow title="Alerts" checked={browserAlerts?.enabled === true} onCheckedChange={browserAlerts?.onChoose}
@@ -57,7 +59,7 @@ export function SettingsNotificationsPage({ browserAlerts, alerts, doNotDisturb,
   }
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="Notifications" told={told} onBack={onBack} backLabel="Back to General">
+    <SettingsPage title="Notifications" told={told} onBack={onBack} backLabel={backLabel}>
       <ListGroup>
         <SettingsFactRow title="Alpha notifications" reading={alerts} />
         {doNotDisturb ? <SettingsFactRow title="Do Not Disturb" reading={doNotDisturb} /> : null}

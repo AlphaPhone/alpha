@@ -5,16 +5,17 @@ import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Effect as Out, Event, Output } from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Status } from "../../gen/app__workflows__runs.effect.vibe"
-import { type MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
+import { MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Agent } from "../platform/agent.vibe"
-import { Device } from "../platform/device.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { VoiceBridge, nativeReadingAvailable } from "../platform/voice.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { type Job, answer, applying, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi, type PromptRun, readPromptRuns } from "./api.vibe"
 import { Rows } from "./list.vibe"
-import { ApprovalTaps, currentTap } from "./native-approval.vibe"
+import { WorkflowTaps, currentTap, settleWorkflowTap } from "./native-approval.vibe"
 
 interface RunWords {
   readonly number: number
@@ -85,12 +86,12 @@ function promptRun(record: PromptRun, index: number): Omit<RunWords, "number"> {
 
 module speech {
   /** @throws {never} */
-  export function canSpeak(): boolean {
+  export function browserCanSpeak(): boolean {
     return typeof speechSynthesis !== "undefined" && typeof SpeechSynthesisUtterance !== "undefined"
   }
 
   export function said(text: string, signal: AbortSignal): Promise<void> {
-    if (!canSpeak() || signal.aborted) return Promise.resolve()
+    if (!browserCanSpeak() || signal.aborted) return Promise.resolve()
     return new Promise((resolve) => {
       const words = new SpeechSynthesisUtterance(text)
       const ended = () => {
@@ -110,8 +111,10 @@ module speech {
     })
   }
 }
-import { said } from speech
-export { canSpeak } from speech
+import { browserCanSpeak, said } from speech
+
+/** Android reads through Alpha's on-device speech bridge. */
+export const canSpeak = (): boolean => native() ? nativeReadingAvailable() : browserCanSpeak()
 
 module handoff {
   import { Base64 } from "effect/encoding"
@@ -127,14 +130,14 @@ import { runReference } from handoff
 
 const selectedRow = (place: Listing.Place): number => place.tag === "ListingDetail" ? place.row : 0
 
-effect function reading(ticket: number, owner: number, after: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | ApprovalTaps) {
+effect function reading(ticket: number, owner: number, after: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | WorkflowTaps) {
   const failed: Event = { type: "runsRead", ticket, ok: false, count: 0, more: false }
   const listing = try Listing.Machine
   const sheet = try Sheet.Machine
   const held = try Rows
   const history = try HistoryWordsPort
   const { workflow } = try WorkflowsApi
-  const tap = try (try ApprovalTaps).get()
+  const tap = try (try WorkflowTaps).get()
   const current = try listing.get()
   const row = selectedRow(current.place)
   const selected = try held.row(owner, row)
@@ -197,16 +200,49 @@ effect function output(ticket: number, number: number): Event!!(Agent | Workflow
   return { type: "outputRead", ticket, ok: true, text, status: statusOf(receipt) }
 }
 
-type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | ApprovalTaps | RunVisibility | MediaHandoff | Toasts | Said
+type SpeechNeeds = Agent | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | RunVisibility | VoiceBridge | MediaHandoff | Toasts | Said
+type Needs = SpeechNeeds | WorkflowsApi | WorkflowTaps
 
-effect function speak(id: number, runId: number): Event!!(Listing.Machine | HistoryWordsPort) {
-  const listing = try (try Listing.Machine).get()
-  const current = try (try HistoryWordsPort).view(listing.owner, selectedRow(listing.place))
-  const opened = current.opened
-  if (opened?.number === runId && opened.raw.output !== undefined) {
-    try ignore(tryPromise((signal) => said(opened.raw.output ?? "", signal)))
+effect function speak(id: number, runId: number): Event!!SpeechNeeds {
+  const done: Event = { type: "speechEnded", id }
+  const listing = try Listing.Machine
+  const sheet = try Sheet.Machine
+  const history = try HistoryWordsPort
+  const rows = try Rows
+  const view = try listing.get()
+  const row = selectedRow(view.place)
+  const opened = (try history.view(view.owner, row)).opened
+  const text = opened?.raw.output
+  if (opened?.number !== runId || !opened.raw.finished || text === undefined || text.trim() === "") return done
+  const context = try Effect.context<SpeechNeeds>()
+  const current = effect () => try Effect.provideContext(effect {
+    const read = try sheet.get()
+    const shown = try listing.get()
+    const run = (try history.view(view.owner, row)).opened?.raw
+    if (read.owner !== view.owner || read.runId !== runId || read.speech.id !== id || !Sheet.canStopSpeech(read)
+      || shown.owner !== view.owner || selectedRow(shown.place) !== row ||
+      run?.id !== opened.raw.id || run.versionId !== opened.raw.versionId || run.output !== text ||
+      (try (try Shell).get()).assistant !== "Bar" || !(try workflowsVisible())) return false
+    const scope = ownerAt() catch () => ""
+    return try rows.sameOwner(scope, view.owner)
+  }, context)
+  if (!(try current())) return done
+  if (!native()) {
+    try ignore(tryPromise((signal) => said(text, signal)))
+    return done
   }
-  return { type: "speechEnded", id }
+  const handoff = try MediaHandoff
+  const retired = try Deferred.make<void>()
+  const retire = effect () => { try Deferred.succeed(retired, undefined) }
+  try ensuring(effect {
+    if ((try (try VoiceBridge).canRead()) &&
+        (try handoff.offerPageSpeech({ item: id, source: "workflow", words: text, current, retire }))) {
+      try Deferred.await(retired)
+    } else if (try current()) {
+      try say("Couldn’t read this run aloud.", true)
+    }
+  }, handoff.stopPageSpeech(id, "workflow"))
+  return done
 }
 
 export effect function backHistory(): boolean!!Sheet.Machine {
@@ -235,7 +271,7 @@ function carry(fx: Out): Job<Event, Needs, []> {
     when { tag: "ReadRuns", let ticket, let owner, let after }: answer("workflow history", reading(ticket, owner, after), { type: "runsRead", ticket, ok: false, count: 0, more: false });
     when { tag: "ReadOutput", let ticket, let runId }: answer("workflow output", output(ticket, runId), { type: "outputRead", ticket, ok: false, text: "Empty", status: "NoRun" });
     when { tag: "Speak", let id, let runId }: answer("workflow speech", speak(id, runId), { type: "speechEnded", id });
-    when { tag: "Silence" }: run("workflow speech", succeed(undefined));
+    when { tag: "Silence" }: stop("workflow speech");
     when { tag: "AskAlpha", let runId }: run("workflow question", askAboutRun(runId));
   }
 }
@@ -274,9 +310,9 @@ const followRun = started(effect {
   })))
 }, "following an open workflow run")
 
-// spec/app/workflows/approvals.md, "A tap reads the approval it names again from the agent, whatever the phone believed"
+// spec/app/workflows/approvals.md, "A tap reads the approval it names again from the agent, whatever the phone believed"; spec/app/workflows/sheet.md, "Story: Open a finished workflow from its notification"
 const followTap = started(effect {
-  const tapShelf = try ApprovalTaps
+  const tapShelf = try WorkflowTaps
   const list = try Listing.Machine
   const sheet = try Sheet.Machine
   const rows = try Rows
@@ -285,7 +321,7 @@ const followTap = started(effect {
   let entered = ""
   try Stream.runForEach(signals, () => effect {
     const tap = try tapShelf.get()
-    if (tap === undefined || tap.token === entered || !(try workflowsVisible())) return
+    if (tap === undefined || !(try workflowsVisible())) return
     const state = try list.get()
     if (state.list.status !== "Loaded") return
     const row = (try rows.view(state.owner)).rows.find((one) => one.kind === "Routine" && one.id === tap.route.workflowId && !one.removed)
@@ -296,14 +332,36 @@ const followTap = started(effect {
     }
     if (state.place.tag !== "ListingDetail" || state.place.row !== row.number) return
     const runSheet = try sheet.get()
-    if (runSheet.owner !== state.owner || runSheet.history.status !== "Loaded" || runSheet.runId !== 0) return
+    if (runSheet.owner !== state.owner || runSheet.history.status !== "Loaded") return
     const current = try history.view(state.owner, row.number)
+    if (tap.token === entered) {
+      if ("approval" in tap || runSheet.output.status !== "Loaded" || current.opened?.raw.id !== tap.route.runId ||
+        current.opened.raw.versionId !== tap.route.versionId || !current.opened.raw.finished) return
+      if (!(try settleWorkflowTap(tap)) || tap.noticeRevision === undefined || !(try workflowsVisible())) return
+      const live = try sheet.get()
+      if (live.owner === state.owner && live.runId === runSheet.runId && Sheet.canAskAbout(live)) {
+        try ignore(sheet.send({ type: "askAbout" }))
+      }
+      return
+    }
+    if (runSheet.runId !== 0) return
     const run = current.all.find((one) => one.raw?.id === tap.route.runId && one.raw.versionId === tap.route.versionId)
     if (run === undefined || !(try currentTap(tap))) return
     const opened = sheet.send({ type: "openRun", runId: run.number, status: run.status, version: 1,
       newest: current.workflow?.versionId === tap.route.versionId ? 1 : 2 }) catch () => undefined
     if (opened !== undefined) entered = tap.token
   })
-}, "showing the run named by an approval notification")
+}, "showing the run named by a workflow notification")
 
-export const history = together(reacting(Sheet, { carry }), remembered, followRow, followRun, followTap)
+const followSpeech = started(effect {
+  const sheet = try Sheet.Machine
+  const device = try Device
+  const shell = try Shell
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const shown = Stream.map(shell.changes, (state) => state.assistant === "Bar" && showing(state, "Workflows"))
+  try Stream.runForEach(Stream.changes(Stream.map(Stream.zipLatest(visible, shown), ([visible, showing]) => visible && showing)), effect (front) => {
+    if (!front && Sheet.canStopSpeech(try sheet.get())) try ignore(sheet.send({ type: "stopSpeech" }))
+  })
+}, "stopping speech when the workflow is covered")
+
+export const history = together(reacting(Sheet, { carry }), remembered, followRow, followRun, followTap, followSpeech)

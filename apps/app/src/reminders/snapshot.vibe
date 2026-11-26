@@ -7,6 +7,7 @@ import { isItemOverdue, remindersStore } from "./store.ts"
 
 /** The on-device copy of the resident reminder document. */
 export const snapshotKey = "alpha.reminders.snapshot@1"
+export const numbersKey = "alpha.reminders.numbers@1"
 
 /** Update the Home agenda with visible dated reminders. */
 export function pushToHomeAgenda(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<string>, nowMs: number): void {
@@ -26,5 +27,7 @@ export effect function persistReminderSnapshot(snapshot: RemindersSnapshot, nowM
   const view = remindersStore.replace(snapshot)
   const encoded = Effect.try(() => JSON.stringify(view.snapshot)) catch () => undefined
   if (encoded !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(snapshotKey, encoded))
+  const numbers = Effect.try(() => JSON.stringify({ items: [...view.itemSpecIds], lists: [...view.listSpecIds] })) catch () => undefined
+  if (numbers !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(numbersKey, numbers))
   pushToHomeAgenda(view.snapshot, view.hiddenIds, nowMs)
 }

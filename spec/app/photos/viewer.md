@@ -74,7 +74,7 @@ type Effect =
   | Render({ revision: int, edit: Edit, cropSource: bool })
   | WriteCopy({ attempt: int, photo: int, revision: int, edit: Edit, replace: bool })
   | FindCopy({ attempt: int, ticket: int })
-  | AskAbout({ photo: int, revision: int })
+  | AskAbout({ photo: int, revision: int, ticket: int })
   | Compose({ photo: int, revision: int, ticket: int })
   | TextPicture({ photo: int, revision: int, ticket: int })
   | Request({ change: C::Change, photo: int, revision: int })
@@ -315,11 +315,11 @@ pure def played(s: Viewer, position: int, by: Actor): Viewer =
 The sheet shows the loaded item's date, filename, file size and dimensions.
 For a video with a known duration it also shows the length. The phone's
 folder and the names of personal albums that contain that exact item
-appear when those facts are available. The locked viewer omits personal
-album names.
+appear when those facts are available. The locked viewer does not offer
+Info. Recently deleted keeps recovery and deletion in its viewer.
 
 ```quint
-pure def canToggleInfo(s: Viewer, by: Actor): bool = by == Owner and shown(s) and not(s.editing)
+pure def canToggleInfo(s: Viewer, by: Actor): bool = by == Owner and shown(s) and not(s.editing or s.secure)
 
 pure def toggleInfo(s: Viewer, by: Actor): Viewer = { ...s, info: not(s.info) }
 ```
@@ -391,7 +391,8 @@ pure def sometimesSecureShown(s: Viewer): bool = s.secure and shown(s)
 
 ### Only the owner sends the revision showing to Alpha, to an email or to Android's share sheet, favourites it, or deletes it, and never from the lock screen
 
-Asking Alpha raises Ask Alpha with this item, which the shell shows; Inbox
+Asking Alpha reads the exact item again for the open chat draft and raises
+Ask Alpha with this item. It needs a separate Send to reach Alpha. Inbox
 offers the permitted JPEG, PNG or WebP original for email, up to 5 MiB,
 under the same open view and revision. Inbox keeps its own account and draft
 review. A later read of another revision or a closed viewer cannot offer a file. A share, a favourite or a delete is carried out by
@@ -402,7 +403,7 @@ there is none.
 ```quint
 pure def canAskAlpha(s: Viewer, by: Actor): bool = by == Owner and shown(s) and not(s.editing) and not(s.secure)
 
-pure def askAlpha(s: Viewer, by: Actor): Done = emit(List(AskAbout({ photo: s.open, revision: s.revision })), { ...s, playing: false })
+pure def askAlpha(s: Viewer, by: Actor): Done = emit(List(AskAbout({ photo: s.open, revision: s.revision, ticket: s.read.ticket })), { ...s, playing: false })
 
 pure def canEmail(s: Viewer, by: Actor): bool = canAskAlpha(s, by) and s.kind == Still
 
@@ -427,7 +428,7 @@ pure def trashOpen(s: Viewer, neighbour: int, by: Actor): Done =
 
 pure def stepItemLeavesOnlyByTheOwner(before: Viewer, via: str, after: Viewer, out: List[Effect]): bool =
   out.every(e => match e {
-    | AskAbout(a) => via == "askAlpha" and a.photo == before.open and a.revision == before.revision and shown(before) and not(before.secure)
+    | AskAbout(a) => via == "askAlpha" and a.photo == before.open and a.revision == before.revision and a.ticket == before.read.ticket and shown(before) and not(before.secure)
     | Compose(c) => via == "email" and c.photo == before.open and c.revision == before.revision
         and c.ticket == before.read.ticket and canEmail(before, Owner)
     | TextPicture(p) => via == "useInMessages" and p.photo == before.open and p.revision == before.revision

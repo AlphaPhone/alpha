@@ -154,7 +154,7 @@ function contentOf(text: string): Pick<StickyNote, "title" | "body"> {
   return line < 0 ? { title: text, body: "" } : { title: text.slice(0, line), body: text.slice(line) };
 }
 
-function interact(scene: NotesScene, input: unknown): Response {
+function interact(scene: NotesScene, input: unknown, now: () => number): Response {
   const found = decoded(input);
   if (found._tag === "None") return refused(400);
   const { capability, params } = found.value;
@@ -187,7 +187,8 @@ function interact(scene: NotesScene, input: unknown): Response {
     scene.deleteRequests?.push({ id: present.id, expectedRevision: params.expectedRevision });
     if (present.id === scene.refuseDiscardId) return refused(409);
     scene.notes = scene.notes.filter((item) => item !== present);
-    scene.trash.push({ note: present, deletedAt: iso(at) });
+    // The store and the phone share one clock, as the resident agent does on the device: a deletion is stamped at the world's time.
+    scene.trash.push({ note: present, deletedAt: iso(now()) });
     scene.revision += 1;
     return result(scene, present);
   }
@@ -203,7 +204,7 @@ function interact(scene: NotesScene, input: unknown): Response {
 }
 
 /** The resident agent's Notes and owner routes. */
-export function notesRoutes(scene: NotesScene): Route[] {
+export function notesRoutes(scene: NotesScene, now: () => number): Route[] {
   return [
     (request, url) => {
       if (request.method === "GET" && url.pathname === "/api/auth/me") {
@@ -217,7 +218,7 @@ export function notesRoutes(scene: NotesScene): Route[] {
         const advertised = scene.deleteAtRevision === false ? {} : { deleteAtRevision: true };
         return scene.failing ? refused(503) : Response.json({ success: true, data: { ...snapshot(scene), ...advertised } });
       }
-      if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body));
+      if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body, now));
       if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
         return request.json().then(async (body: Record<string, unknown>) => {
           const gate = scene.viewClaimGate;

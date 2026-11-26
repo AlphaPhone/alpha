@@ -1,6 +1,6 @@
 // spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off"
 module browser {
-  import { createBrowserRecordingJournal, createNotesAudioStore, type BrowserRecording } from "@elizaos/plugin-notes-client"
+  import { createBrowserRecordingJournal, createNotesAudioStore, NotesAudioRefused, type BrowserRecording } from "@elizaos/plugin-notes-client"
   import type { Command } from "../../gen/app__notes__recording.effect.vibe"
   import type { Tape } from "./noteDevice.vibe"
   import { browserNotePlayback } from "./notePlayback.vibe"
@@ -72,10 +72,10 @@ module browser {
   /** The browser retains only its original connection's recordings, in the installed audio store. */
   export function browserNoteDevice() {
     const audio = createNotesAudioStore({ databaseName: audioDatabase })
-    const playback = browserNotePlayback(audio)
     const journal = createBrowserRecordingJournal(journalDatabase)
     const listeners = new Set<(value: Tape) => void>()
     let owner: string | undefined
+    const playback = browserNotePlayback(audio, () => owner)
     let active: Capture | undefined
     let opening = false
     let permission: PermissionState = "prompt"
@@ -246,8 +246,20 @@ module browser {
         const authority = owner
         if (authority === undefined) throw Error("Recording connection changed")
         return oneRecording(authority, async () => {
+          const finish = async (receipt: { readonly audioId: string; readonly noteId: string; readonly durationMs: number }) => {
+            if (receipt.noteId !== noteId || owner !== authority) throw Error("Recording connection changed")
+            await journal.discard(recordingId, authority)
+            if (owner !== authority) throw Error("Recording connection changed")
+            if (active?.row.recordingId === recordingId && active.row.ownerDigest === authority && active.phase === "stopped") active = undefined
+            return { audioId: receipt.audioId, noteId: receipt.noteId, durationMs: receipt.durationMs }
+          }
           const prior = (await audio.pendingAudio(authority)).find((row) => row.audioId === recordingId)
           if (prior === undefined) {
+            const committed = await audio.audioRecord(recordingId, authority).catch((error: unknown) => {
+              if (error instanceof NotesAudioRefused && error.reason === "unavailable") return undefined
+              throw error
+            })
+            if (committed !== undefined) return finish(committed)
             const row = await journal.find(recordingId, authority)
             if (row === undefined || owner !== authority) throw Error("Recording changed")
             const clip = await journal.clip(recordingId, authority)
@@ -257,9 +269,7 @@ module browser {
           if (owner !== authority) throw Error("Recording connection changed")
           await audio.claimPendingAudio(recordingId, authority)
           if (owner !== authority) throw Error("Recording connection changed")
-          const receipt = await audio.commitPendingAudio(recordingId, authority, noteId, prior?.transcript ?? "")
-          await journal.discard(recordingId, authority)
-          return { audioId: receipt.audioId, noteId: receipt.noteId, durationMs: receipt.durationMs }
+          return finish(await audio.commitPendingAudio(recordingId, authority, noteId, prior?.transcript ?? ""))
         })
       },
       async discard(recordingId: string) {

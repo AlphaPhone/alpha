@@ -24,7 +24,9 @@ export function SettingsReading({ reading }: SettingsReadingProps) {
       </span>
     );
   }
-  if (reading.word === "unavailable") return <span>Unavailable</span>;
+  if (reading.word === "unavailable") return reading.compact
+    ? <span><span aria-hidden>—</span><span className="sr-only">Unavailable</span></span>
+    : <span>Unavailable</span>;
   return reading.status ? (
     <span className="inline-flex items-center gap-1.5">
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dots[reading.status])} />

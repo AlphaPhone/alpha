@@ -3,7 +3,9 @@
 Codes the owner types into Alpha: a code that redeems Alpha Cloud
 credits or a plan, and a referral, the owner's own code to share and a
 friend's code to apply. Each code is sent once and its outcome told as
-Cloud gives it; what it granted is read back by a check of the
+Cloud gives it; Alpha keeps an opaque receipt of the submitted code so a lost response
+cannot cause a second submission. The raw code stays in memory until the
+request is sent. What it granted is read back by a check of the
 [Plan](./plan.md), which this machine asks for with `CheckPlan`. The
 current sign-in arrives from [Session](./session.md), and `elsewhere`,
 whether a payment or a plan change is under way or has an unknown
@@ -27,17 +29,18 @@ type Notice =
 type Effect =
   Redeem({ attempt: int, code: str }) | ReadReferral({ check: int }) | ApplyReferral({ attempt: int, code: str }) | CheckPlan
 type Codes = {
-  redeem: A::Attempt, redeemCode: str, apply: A::Attempt, applyCode: str, unknown: Set[str],
+  authority: str, redeem: A::Attempt, redeemCode: str, apply: A::Attempt, applyCode: str, unknown: Set[str],
   referral: R::Read, unsettled: bool, notice: Notice,
 }
 type Moved = { state: Codes, out: List[Effect] }
 
 pure val initial: Codes = {
-  redeem: A::plan(0), redeemCode: "", apply: A::plan(0), applyCode: "", unknown: Set(),
+  authority: "", redeem: A::plan(0), redeemCode: "", apply: A::plan(0), applyCode: "", unknown: Set(),
   referral: R::unread, unsettled: false, notice: Quiet,
 }
 
 pure val signInValues = Set(0, 1)
+pure val authorityValues = Set("", "first-device-credential", "second-device-credential")
 pure val attemptValues = Set(1, 2)
 pure val ticketValues = Set(1, 2)
 pure val codeValues = Set("", "FRIEND-2026", "GIFT-50")
@@ -70,7 +73,7 @@ pure def alwaysAnUnknownOutcomeKeepsItsCode(c: Codes): bool =
 
 ```quint
 pure def canRedeem(c: Codes, code: str, signIn: int, origin: O::Origin, elsewhere: bool): bool =
-  signIn > 0 and O::acts(origin) and free(c, code, elsewhere)
+  signIn > 0 and c.authority != "" and O::acts(origin) and free(c, code, elsewhere)
 
 pure def redeem(c: Codes, code: str, signIn: int, origin: O::Origin, elsewhere: bool): Moved =
   val a = A::dispatch(A::record(A::plan(c.redeem.id + 1)))
@@ -89,7 +92,7 @@ pure def redeemed(c: Codes, attempt: int, ok: bool, known: bool): Moved =
   if (ok or not(known)) { state: q, out: List(CheckPlan) } else { state: q, out: List() }
 
 pure def lawAnUnknownRedemptionIsNeverSentUnderANewNumber(code: str): bool =
-  val sent = redeem(initial, code, 1, O::ByOwner, false).state
+  val sent = redeem(bind(initial, "first-device-credential"), code, 1, O::ByOwner, false).state
   val lost = planAnswered(redeemed(sent, sent.redeem.id, false, false).state)
   code != "" implies not(canRedeem(lost, code, 1, O::ByOwner, false))
 ```
@@ -141,7 +144,7 @@ pure def sometimesARedemptionWaitsForTheCheck(c: Codes): bool = c.unsettled and 
 ### The owner's own referral code is read from Cloud, and only the newest reading is taken
 
 ```quint
-pure def canReadReferral(c: Codes, signIn: int): bool = signIn > 0 and c.referral.status != R::Loading
+pure def canReadReferral(c: Codes, signIn: int): bool = signIn > 0 and c.authority != "" and c.referral.status != R::Loading
 
 pure def readReferral(c: Codes, signIn: int): Moved =
   { state: { ...c, referral: R::ask(c.referral) }, out: List(ReadReferral({ check: c.referral.ticket + 1 })) }
@@ -157,7 +160,7 @@ An applied code or an unknown outcome checks the plan.
 
 ```quint
 pure def canApplyReferral(c: Codes, code: str, signIn: int, origin: O::Origin, elsewhere: bool): bool =
-  signIn > 0 and O::acts(origin) and free(c, code, elsewhere)
+  signIn > 0 and c.authority != "" and O::acts(origin) and free(c, code, elsewhere)
 
 pure def applyReferral(c: Codes, code: str, signIn: int, origin: O::Origin, elsewhere: bool): Moved =
   val a = A::dispatch(A::record(A::plan(c.apply.id + 1)))
@@ -219,13 +222,36 @@ refused.
 pure def canReset(c: Codes, signIn: int): bool = signIn >= 0
 
 pure def reset(c: Codes, signIn: int): Codes =
-  { ...c, redeem: A::plan(c.redeem.id + 1), apply: A::plan(c.apply.id + 1), redeemCode: "", applyCode: "", unknown: Set(),
+  { ...c, authority: "", redeem: A::plan(c.redeem.id + 1), apply: A::plan(c.apply.id + 1), redeemCode: "", applyCode: "", unknown: Set(),
     referral: O::retire(c.referral), unsettled: false, notice: Quiet }
 
 pure def stepANewSignInLeavesNothingUnderWay(before: Codes, via: str, after: Codes): bool =
   via == "reset" implies and {
     after.redeem.outcome != A::Sent, after.apply.outcome != A::Sent, not(after.unsettled), after.notice == Quiet, after.unknown.size() == 0,
   }
+```
+
+### Redemption belongs to one native credential, including between restarts
+
+The opaque identifier reported by local custody binds the code machine.
+Identical observations keep the current attempt and notice. A different
+identifier or a confirmed sign-out resets the old attempt and its notice.
+A code is sent only with that exact credential, through the native relay.
+While this machine is sending or needs a plan check, another account
+operation cannot start.
+
+```quint
+pure def canBind(c: Codes, authority: str): bool = c.authority != authority
+pure def bind(c: Codes, authority: str): Codes =
+  if (canBind(c, authority)) { ...reset(c, 0), authority: authority } else c
+pure def quiet(c: Codes): bool = c.redeem.outcome != A::Sent and c.apply.outcome != A::Sent and not(c.unsettled)
+pure def lawTheSameCredentialDoesNotRebind(before: Codes): bool =
+  not(canBind(before, before.authority))
+
+pure def lawChangingTheCredentialRetiresCodes(before: Codes, authority: str): bool =
+  val after = bind(before, authority)
+  canBind(before, authority) implies
+    (after.authority == authority and quiet(after) and after.unknown.size() == 0 and after.notice == Quiet)
 ```
 
 ### A restart holds new codes until the plan is checked when an answer was lost, and keeps the lost code from being sent again
@@ -246,6 +272,6 @@ pure def restart(c: Codes): Moved =
 
 ```quint
 pure def erase(c: Codes): Codes =
-  { ...c, redeem: A::plan(c.redeem.id + 1), apply: A::plan(c.apply.id + 1), redeemCode: "", applyCode: "", unknown: Set(),
+  { ...c, authority: "", redeem: A::plan(c.redeem.id + 1), apply: A::plan(c.apply.id + 1), redeemCode: "", applyCode: "", unknown: Set(),
     referral: O::retire(c.referral), unsettled: false, notice: Quiet }
 ```

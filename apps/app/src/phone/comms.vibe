@@ -49,7 +49,7 @@ export effect function commsHeld(held: () => void): void!! {
   try sync(held)
 }
 
-// spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
+// spec/app/phone/comms.md, "End is above the view when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCall: liveCall(phone) && !clear(phone) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
 
 // spec/app/phone/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"

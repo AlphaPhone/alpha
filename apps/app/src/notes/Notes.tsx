@@ -375,7 +375,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     <EditorScreen key={writing.note} runtime={runtime} saved={draft} />
     {bin.state?.question === "AskFull" && <RecentlyDeleted runtime={runtime} collection={collection} />}
   </>;
-  if (recorder !== undefined && unfinished(recorder)) return <Recording alpha={alpha} runtime={runtime} />;
+  if (recorder !== undefined && unfinished(recorder)) return <Recording runtime={runtime} />;
   const available = Notes.readyForNew(state);
   const newNote = { type: "newNote", kind: "Text", available, covered: false, folder: state.filter } as const;
   const openTrash = { type: "show", covered: false } as const;
