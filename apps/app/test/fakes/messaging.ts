@@ -36,6 +36,10 @@ export function slackRoutes(scene: SlackScene, now: () => number): Route[] {
     if (scene.revoked || !header.startsWith("Bearer ")) return Response.json({ ok: false, error: "invalid_auth" }, { status: 200 });
     return undefined;
   };
+  const channelShape = (ch: SlackScene["channels"][number]) => ({
+    id: ch.id, name: ch.name, is_channel: !ch.is_im, is_group: false, is_im: ch.is_im === true, is_mpim: false,
+    is_private: ch.is_private === true, is_archived: false, is_muted: ch.is_muted === true,
+  });
   return [
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/oauth.v2.access") return;
@@ -66,24 +70,16 @@ export function slackRoutes(scene: SlackScene, now: () => number): Route[] {
       if (request.method === "GET" && url.pathname === "/api/users.conversations") {
         return Response.json({
           ok: true,
-          channels: scene.channels.map((ch) => ({
-            id: ch.id, name: ch.name, is_channel: !ch.is_im, is_group: false, is_im: ch.is_im === true, is_mpim: false,
-            is_private: ch.is_private === true, is_archived: false, is_muted: ch.is_muted === true, unread_count: 0,
-          })),
+          channels: scene.channels.map((ch) => ({ ...channelShape(ch), unread_count: 0 })),
           response_metadata: { next_cursor: "" },
         });
       }
-      if (request.method === "GET" && url.pathname === "/api/conversations.info") {
+      if (request.method === "GET" && (url.pathname === "/api/conversations.info" || url.pathname === "/api/conversations.history" || url.pathname === "/api/conversations.replies")) {
         const ch = scene.channels.find((one) => one.id === url.searchParams.get("channel"));
         if (!ch) return Response.json({ ok: false, error: "channel_not_found" });
-        return Response.json({
-          ok: true,
-          channel: { id: ch.id, name: ch.name, is_channel: !ch.is_im, is_group: false, is_im: ch.is_im === true, is_mpim: false, is_private: ch.is_private === true, is_archived: false, is_muted: ch.is_muted === true },
-        });
-      }
-      if (request.method === "GET" && (url.pathname === "/api/conversations.history" || url.pathname === "/api/conversations.replies")) {
-        const ch = scene.channels.find((one) => one.id === url.searchParams.get("channel"));
-        if (!ch) return Response.json({ ok: false, error: "channel_not_found" });
+        if (url.pathname === "/api/conversations.info") {
+          return Response.json({ ok: true, channel: channelShape(ch) });
+        }
         return Response.json({
           ok: true,
           messages: ch.messages.map((m) => ({ type: "message", ...m })),
@@ -190,6 +186,19 @@ export function telegramRoutes(scene: TelegramScene, now: () => number): Route[]
     return undefined;
   };
   const selfUser = () => ({ _type: "user" as const, id: scene.user.id, first_name: scene.user.first_name, username: scene.user.username, self: true, online: true });
+  const rpcMessage = (id: number, peerKey: string, date: number, text: string, edited?: number) => ({
+    _type: "message" as const,
+    id,
+    peer_id: { _type: "peerUser" as const, user_id: scene.user.id },
+    peer_key: peerKey,
+    from_id: scene.user.id,
+    date,
+    ...(edited === undefined ? {} : { edit_date: edited }),
+    message: text,
+    out: true,
+    reactions: [],
+    mentioned: false,
+  });
   return [
     (request, url) => {
       if (request.method === "GET" && url.pathname === "/rpc/updates.stream") {
@@ -235,22 +244,14 @@ export function telegramRoutes(scene: TelegramScene, now: () => number): Route[]
             const text = typeof body.message === "string" ? body.message : "";
             scene.pts += 1;
             scene.messages.push({ id, peerKey, text, date, out: true });
-            return Response.json({
-              ok: true,
-              pts: scene.pts,
-              message: { _type: "message", id, peer_id: { _type: "peerUser", user_id: scene.user.id }, peer_key: peerKey, from_id: scene.user.id, date, message: text, out: true, reactions: [], mentioned: false },
-            });
+            return Response.json({ ok: true, pts: scene.pts, message: rpcMessage(id, peerKey, date, text) });
           }
           case "/rpc/messages.editMessage": {
             const id = typeof body.id === "number" ? body.id : 1;
             const text = typeof body.message === "string" ? body.message : "";
             const date = Math.floor(now() / 1000);
             scene.pts += 1;
-            return Response.json({
-              ok: true,
-              pts: scene.pts,
-              message: { _type: "message", id, peer_id: { _type: "peerUser", user_id: scene.user.id }, peer_key: `user:${scene.user.id}`, from_id: scene.user.id, date, edit_date: date, message: text, out: true, reactions: [], mentioned: false },
-            });
+            return Response.json({ ok: true, pts: scene.pts, message: rpcMessage(id, `user:${scene.user.id}`, date, text, date) });
           }
           case "/rpc/messages.deleteMessages": {
             const ids = Array.isArray(body.id) ? body.id.filter((one): one is number => typeof one === "number") : [];
@@ -260,11 +261,7 @@ export function telegramRoutes(scene: TelegramScene, now: () => number): Route[]
           case "/rpc/messages.sendReaction": {
             const id = typeof body.msg_id === "number" ? body.msg_id : 1;
             scene.pts += 1;
-            return Response.json({
-              ok: true,
-              pts: scene.pts,
-              message: { _type: "message", id, peer_id: { _type: "peerUser", user_id: scene.user.id }, peer_key: `user:${scene.user.id}`, from_id: scene.user.id, date: Math.floor(now() / 1000), message: "", out: true, reactions: [], mentioned: false },
-            });
+            return Response.json({ ok: true, pts: scene.pts, message: rpcMessage(id, `user:${scene.user.id}`, Math.floor(now() / 1000), "") });
           }
           case "/rpc/messages.readHistory":
             return Response.json({ ok: true, pts: scene.pts, max_id: typeof body.max_id === "number" ? body.max_id : 0 });

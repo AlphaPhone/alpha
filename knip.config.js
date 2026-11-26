@@ -5,11 +5,11 @@
 //   ignoreIssues server.vibe exports        AGENTS is used in its own file, in a body ignoreExportsUsedInFile cannot see
 //   root lemmascript                        run as an executable by vibestack/prove.ts
 //   eliza-harness openssl                   the system's own, run by packages/eliza-harness/src/services.ts for the local cloud's certificate
-//   apps entry test/drivers, *.schema, *.contract  none yet in apps/app: an area that writes one needs no change here
 //   root @vitest/browser                    loaded by Vitest's browser mode, beside @vitest/browser-playwright
 //   root @repo/design-system                read as files by vibestack/design/test/design.test.ts
-//   root android                            called by .github/workflows/release.yml as `pnpm --filter @repo/app android`, pending the Android build script
 //   apps adb, openssl                       the system's own, run by apps/app/scripts/release.ts and its tests for pilot updates, readback and key custody
+//   apps @capacitor/android                 native Android Gradle/Capacitor sync dependency
+//   apps tesseract.js, tesseract.js-core, @tesseract.js-data/eng  native/OCR runtime dependencies
 //   tailwindcss (ui, design-system, studio, apps)  resolved by @tailwindcss/vite and the lint plugin from CSS
 //   entry *.schema, *.contract              imported by the tests vibestack/testing/generate.ts writes under .cache/
 //   design-system eslint, eslint-plugin-better-tailwindcss, typescript-eslint  loaded by name in vibestack/design/test/design.test.ts
@@ -19,7 +19,6 @@ import vibelang from "vibelang/knip"
 export default {
   compilers: { vibe: vibelang, vibex: vibelang },
   "ignore": [
-    ".eliza/**",
     "legacy/**",
     "vibestack/examples/**",
     "**/test/fixtures/**"
@@ -34,7 +33,6 @@ export default {
         "vibestack/design/cli.ts",
         "vibestack/stories/cli.ts",
         "vibestack/remote-cache.ts",
-        "vibestack/chromium.ts",
         "vibestack/*/test/*.test.ts",
         "vibestack/testing/test/fixture/*/src/*.{schema,contract}.{ts,vibe}"
       ],
@@ -46,9 +44,6 @@ export default {
         "lemmascript",
         "@vitest/browser",
         "@repo/design-system"
-      ],
-      "ignoreBinaries": [
-        "android"
       ]
     },
     "packages/ui": {
@@ -73,7 +68,6 @@ export default {
     "packages/eliza-harness": {
       "entry": [
         "src/index.ts",
-        "scripts/no-bun.ts",
         "test/**/*.test.{ts,vibe}"
       ],
       "project": [
@@ -92,7 +86,6 @@ export default {
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
-        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
@@ -103,7 +96,6 @@ export default {
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
-        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
@@ -117,7 +109,6 @@ export default {
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
-        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ],
       "ignoreDependencies": [
@@ -126,17 +117,14 @@ export default {
     },
     "vibestack/studio": {
       "entry": [
-        "scripts/build.mjs",
         "src/main.vibe",
         "src/project.ts",
-        "src/doc.ts",
-        "pack-page.ts"
+        "src/doc.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx,vibe,vibex,css}",
         "test/**/*.{ts,tsx,vibe,vibex}",
-        "scripts/*.mjs",
-        "pack-page.ts"
+        "scripts/*.mjs"
       ],
       "ignoreDependencies": [
         "tailwindcss"
@@ -144,16 +132,18 @@ export default {
     },
     "apps/*": {
       "entry": [
-        "test/**/*.test.{ts,tsx,vibe}",
-        "test/drivers/*.ts",
-        "src/**/*.{schema,contract}.{ts,vibe}"
+        "test/**/*.test.{ts,tsx,vibe}"
       ],
       "project": [
         "src/**/*.{ts,tsx,vibe,vibex,css}",
         "test/**/*.{ts,tsx,vibe,vibex}"
       ],
       "ignoreDependencies": [
-        "tailwindcss"
+        "tailwindcss",
+        "@capacitor/android",
+        "@tesseract.js-data/eng",
+        "tesseract.js",
+        "tesseract.js-core"
       ],
       "ignoreBinaries": [
         "adb",

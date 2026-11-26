@@ -183,17 +183,9 @@ function deviceRead(prefs: PrefsGen.Preferences): SettingsDeviceRead {
   return status === "Loaded" ? "loaded" : status === "Failed" ? "failed" : "reading";
 }
 
-/** The device preferences as the Privacy and Inbox pages show and change them, each change offered exactly when the rules allow it. */
-function useDevice(runtime: SettingsRuntime, alpha: Alpha) {
-  const { state, can, send } = useTimed(runtime, usePrefs);
+/** Manage a Settings ConfirmDialog's open state, shell DialogLayer registration, and Back handler. */
+export function useConfirmDialogLayer(alpha: Alpha, layerId: string) {
   const [asking, setAsking] = useState(false);
-  if (!state) return undefined;
-  const read = deviceRead(state);
-  const offer = <E extends PrefsGen.Event>(event: (value: boolean) => E) => (value: boolean) => {
-    if (can(event(value), "Owner")) void send(event(value), "Owner");
-  };
-  const recover = { type: "recover", at: untimed } as const;
-  const layerId = "settings-recover-confirm";
   const closeDialog = () => {
     setAsking(false);
     alpha.taking(`layer:${layerId}`, () => Promise.resolve(false));
@@ -207,6 +199,19 @@ function useDevice(runtime: SettingsRuntime, alpha: Alpha) {
     });
     void alpha.runtime.runPromiseExit(openLayer(layerId, "DialogLayer", true));
   };
+  return { asking, openDialog, closeDialog };
+}
+
+/** The device preferences as the Privacy and Inbox pages show and change them, each change offered exactly when the rules allow it. */
+function useDevice(runtime: SettingsRuntime, alpha: Alpha) {
+  const { state, can, send } = useTimed(runtime, usePrefs);
+  const { asking, openDialog, closeDialog } = useConfirmDialogLayer(alpha, "settings-recover-confirm");
+  if (!state) return undefined;
+  const read = deviceRead(state);
+  const offer = <E extends PrefsGen.Event>(event: (value: boolean) => E) => (value: boolean) => {
+    if (can(event(value), "Owner")) void send(event(value), "Owner");
+  };
+  const recover = { type: "recover", at: untimed } as const;
   return {
     read,
     askFirst: read !== "loaded" || state.askFirst,

@@ -77,12 +77,13 @@ function row(list: string, text: string) {
   });
 }
 
-/** Open Ask Alpha on `world`, waiting for its composer slot to open and optionally for the agent. */
-async function openAssistant(world: ReturnType<typeof scene>, ready = true) {
+/** Open Ask Alpha on `world`, waiting for its composer slot to open and optionally for the agent and preferences. */
+async function openAssistant(world: ReturnType<typeof scene>, ready = true, waitPrefs = false) {
   const { alpha } = await open(world, mounts);
   const runtime = assistant.runtime(alpha);
   await until(alpha, runtime, Composer, (s) => s.slot === "Open");
   if (ready) await until(alpha, runtime, Conversation, (s) => s.ready);
+  if (waitPrefs) await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
   return { alpha, runtime };
 }
 
@@ -172,8 +173,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   it("Ask Alpha something, in a conversation made for it (spec/app/assistant/index.md, \"Story: Ask Alpha something\")", async () => {
     const world = { ...scene(), phone };
     // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
-    const { alpha, runtime } = await openAssistant(world);
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    const { alpha, runtime } = await openAssistant(world, true, true);
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
     world.ask.metadata = [];
@@ -307,8 +307,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
   it("Hear a brief acknowledgment and still get the whole answer: the acknowledgment stays the label while tools run (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
     const world = { ...scene(), phone };
-    const { alpha, runtime } = await openAssistant(world);
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    const { alpha, runtime } = await openAssistant(world, true, true);
     // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
     world.ask.acknowledgment = "Let me look";
     world.ask.holdAfterTools = true;

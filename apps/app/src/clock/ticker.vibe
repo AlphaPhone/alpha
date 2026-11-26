@@ -7,13 +7,7 @@ import * as Shell from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { activeClockTicks, fallbackClockNow, fallbackStopwatchNow } from "./shelf.vibe"
-
-/** Fallback one-second clock timestamp shelf for standalone callers outside ClockTicks. */
-export const clockNow = fallbackClockNow
-
-/** Fallback high-resolution Stopwatch timestamp shelf for standalone callers outside ClockTicks. */
-export const stopwatchNow = fallbackStopwatchNow
+import { activeClockTicks } from "./shelf.vibe"
 
 effect function optionalShellChanges(): Stream.Stream<Shell.Shell | undefined>!! {
   const ctx = try Effect.context<never>()

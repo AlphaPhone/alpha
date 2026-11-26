@@ -18,13 +18,13 @@ import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi, localTimeZone } from "./api.vibe"
 import { Rows, refresh } from "./list.vibe"
 
-export interface NoteChoice {
+interface NoteChoice {
   readonly id: string
   readonly revision: string
   readonly title: string
 }
 
-export interface CalendarChoice {
+interface CalendarChoice {
   readonly id: string
   readonly label: string
 }

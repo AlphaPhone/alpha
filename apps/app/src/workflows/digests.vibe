@@ -82,6 +82,17 @@ const words = Layer.sync(DigestWords, () => {
   }
 })
 
+/** Build a hosted digest protocol client that verifies `ownsRequest` before and after every request. */
+export function ownedDigestProtocol(request: WorkflowRequest, ownsRequest: boolean!!) {
+  const checked: WorkflowRequest = effect (path: string, body: unknown) => {
+    if (!(try ownsRequest)) throw workflowHttpError(0, {})
+    const received = try request(path, body)
+    if (!(try ownsRequest)) throw workflowHttpError(0, {})
+    return received
+  }
+  return hostedDigestProtocol(checked)
+}
+
 type Needs = Agent | Device | Rows | WorkflowsApi | DigestWords | DigestHistory | List.Machine | Plan.Machine | KeyValueStore.KeyValueStore | Time
 
 effect function read(ticket: number, owner: number): Event!!Needs {
@@ -98,13 +109,7 @@ effect function read(ticket: number, owner: number): Event!!Needs {
     const confirmed = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
     return sameResidentOwner(identity, confirmed) && (try rows.sameDigestOwner(identity, owner))
   }
-  const checked: WorkflowRequest = effect (path: string, body: unknown) => {
-    if (!(try ownsRequest)) throw workflowHttpError(0, {})
-    const received = try request(path, body)
-    if (!(try ownsRequest)) throw workflowHttpError(0, {})
-    return received
-  }
-  const protocol = hostedDigestProtocol(checked)
+  const protocol = ownedDigestProtocol(request, ownsRequest)
   const supported = (protocol.capabilities() catch () => undefined)
   if (supported === undefined) return fallback
   const payload = effect {
@@ -153,7 +158,7 @@ effect function read(ticket: number, owner: number): Event!!Needs {
   }
 }
 
-export const digestZone = localTimeZone
+const digestZone = localTimeZone
 
 const Saved = Schema.Struct({ receipt: Schema.Struct({
   mutationId: Schema.NonEmptyString, workflowId: Schema.NonEmptyString, versionId: Schema.NonEmptyString,
@@ -250,15 +255,22 @@ effect function change(id: number, wanted: Change, template: Template, hour: num
   return { ...failed, applied }
 }
 
-effect function checkChange(ticket: number, id: number): Event!!Needs {
-  const failed: Event = { type: "changeChecked", ticket, ok: false, found: false }
+effect function loadDigestCheck(keyOf: (scope: string) => string) {
   const machine = try Plan.Machine
   const current = try machine.get()
   const identity = launchOwnerAt() catch () => undefined
-  if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, current.owner))) return failed
+  if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, current.owner))) return undefined
   const store = try KeyValueStore.KeyValueStore
-  const key = digestChangeKey(digestScope(identity))
+  const key = keyOf(digestScope(identity))
   const raw = (store.get(key) catch () => undefined)
+  return { machine, current, identity, store, key, raw }
+}
+
+effect function checkChange(ticket: number, id: number): Event!!Needs {
+  const failed: Event = { type: "changeChecked", ticket, ok: false, found: false }
+  const ctx = try loadDigestCheck(digestChangeKey)
+  if (ctx === undefined) return failed
+  const { machine, current, identity, store, key, raw } = ctx
   const held = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldDigestChange)(raw) catch () => undefined)
   if (held === undefined || held.id !== id) return failed
   const { request, workflow } = try WorkflowsApi
@@ -329,13 +341,9 @@ effect function runDigest(id: number, occurrence: number): Event!!Needs {
 
 effect function checkRun(ticket: number, id: number): Event!!Needs {
   const failed: Event = { type: "runNowChecked", ticket, ok: false, found: false }
-  const machine = try Plan.Machine
-  const current = try machine.get()
-  const identity = launchOwnerAt() catch () => undefined
-  if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, current.owner))) return failed
-  const store = try KeyValueStore.KeyValueStore
-  const key = digestRunKey(digestScope(identity))
-  const raw = (store.get(key) catch () => undefined)
+  const ctx = try loadDigestCheck(digestRunKey)
+  if (ctx === undefined) return failed
+  const { machine, current, identity, store, key, raw } = ctx
   const held = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldDigestRun)(raw) catch () => undefined)
   if (held === undefined || held.id !== id) return failed
   const { workflow } = try WorkflowsApi

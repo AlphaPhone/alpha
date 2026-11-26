@@ -83,6 +83,16 @@ async function startListening(world: Scene): Promise<VoiceRuntime> {
   return runtime;
 }
 
+async function startDictationRecording(world: Scene): Promise<VoiceRuntime> {
+  const runtime = bootVoice(world);
+  await until(runtime, Voice.Machine, (s) => s.warmed);
+  await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
+  await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
+  await sendVoice(runtime, { type: "startRecording" });
+  await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+  return runtime;
+}
+
 function speakUtterance(world: Scene, text: string): void {
   world.voice.emitLocal?.("liveCaptureTranscript", {
     captureId: world.voice.activeMicSession,
@@ -190,12 +200,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   it('recognizes the same recorded clip after a failed attempt (spec/app/voice/index.md, "Story: Dictate into a field")', async () => {
     const world = { ...scene(), phone: true };
     world.voice.transcriptionFailures = 1;
-    const runtime = bootVoice(world);
-    await until(runtime, Voice.Machine, (s) => s.warmed);
-    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
-    await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
-    await sendVoice(runtime, { type: "startRecording" });
-    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+    const runtime = await startDictationRecording(world);
     await sendVoice(runtime, { type: "stopRecording", now: untimed });
     await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recorded");
     expect((await getVoice(runtime)).recorder.failure).toBe("Recognition");
@@ -209,12 +214,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   // spec/app/voice/index.md, "A clip is transcribed on the route speech takes now"
   it("recognizes one native completion even when a stale recording ID follows it before Start returns", async () => {
     const world = { ...scene(), phone: true };
-    const runtime = bootVoice(world);
-    await until(runtime, Voice.Machine, (s) => s.warmed);
-    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
-    await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
-    await sendVoice(runtime, { type: "startRecording" });
-    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+    const runtime = await startDictationRecording(world);
     await sendVoice(runtime, { type: "closeRecorder" });
 
     world.voice.recordingStartGate = () => {
@@ -233,12 +233,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   it("keeps a confirmed clip when obscured and never offers a recognition retry for a refused stop", async () => {
     const world = { ...scene(), phone: true };
     world.voice.dictationInFront = false;
-    const runtime = bootVoice(world);
-    await until(runtime, Voice.Machine, (s) => s.warmed);
-    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
-    await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
-    await sendVoice(runtime, { type: "startRecording" });
-    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+    const runtime = await startDictationRecording(world);
     world.voice.finishRecording?.();
     await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recorded");
     expect(world.voice.dictationClips).toEqual([]);
@@ -461,16 +456,69 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 /** Ask Alpha alone: the screen a spoken conversation from the composer draws. */
 const talkMounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
 
+async function openTalk(configure?: (world: Scene) => void) {
+  const world = { ...scene(), phone: true, signedIn: false };
+  configure?.(world);
+  const { alpha } = await open(world, talkMounts);
+  const area = assistant.runtime(alpha);
+  await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+  return { world, alpha, area };
+}
+
+async function waitSettled(alpha: Awaited<ReturnType<typeof open>>["alpha"], check: () => boolean) {
+  for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+  expect(check()).toBe(true);
+}
+
+async function openFilesTalk(
+  world: Scene,
+  review: ReturnType<typeof textReview>,
+  openFilesView: boolean,
+  replyText: string,
+) {
+  world.telephony.textReview = review;
+  const { alpha } = await open(world, [...talkMounts, { at: "view:Files", load: () => import("../src/files/index.tsx") }]);
+  const area = assistant.runtime(alpha);
+  if (openFilesView) {
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Files" }))));
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Files");
+    await drawnUntil(alpha, files.runtime(alpha), Files, (s) => s.access === "Granted" && s.storage.status === "Loaded");
+  } else {
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "Home");
+  }
+  await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+  await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+  await press("Talk");
+  await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+
+  const speak = async (id: string, text: string, sent: number) => {
+    review.proposal.id = id;
+    review.proposal.state = "pending";
+    review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+    world.ask.nextReplyChunks = [replyText];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: id, state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
+    } }];
+    speakUtterance(world, text);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On");
+  };
+
+  const finishFilesTalk = async () => {
+    expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  };
+
+  return { alpha, area, speak, finishFilesTalk };
+}
+
 describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold a spoken conversation\")", () => {
   it.each([
     { name: "Home", view: undefined },
     { name: "Calendar", view: "Calendar" },
     { name: "Browser", view: "Browser" },
   ] as const)("draws the compact Talk waveform over $name during on-device speech", async ({ view }) => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha } = await open(world, talkMounts);
-    const area = assistant.runtime(alpha);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    const { world, alpha, area } = await openTalk();
     if (view !== undefined) await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view }))));
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
@@ -489,10 +537,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   it("restores the local speaker before unrelated playback when Talk stops during a mute (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha } = await open(world, talkMounts);
-    const area = assistant.runtime(alpha);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    const { world, alpha, area } = await openTalk();
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOn");
     expect(world.voice.speakerGainRequests).toEqual([false]);
@@ -572,11 +617,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    world.voice.speakerGainGate = () => Promise.reject(new Error("Output gain unavailable"));
-    const { alpha } = await open(world, talkMounts);
-    const area = assistant.runtime(alpha);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    const { world, alpha, area } = await openTalk((w) => {
+      w.voice.speakerGainGate = () => Promise.reject(new Error("Output gain unavailable"));
+    });
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerUnavailable");
     expect(button("Mute speaker")).toBeUndefined();
@@ -601,12 +644,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.credentialId = "cred-owner-9";
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
-    const settled = async (check: () => boolean) => {
-      for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
-      expect(check()).toBe(true);
-    };
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
-    await settled(() => world.voice.relayWarmups.length === 1);
+    await waitSettled(alpha, () => world.voice.relayWarmups.length === 1);
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
@@ -671,28 +710,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.spokenFiles = [];
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
     const review = textReview(world.notes.owner, "other-filter", filter);
-    world.telephony.textReview = review;
-    const { alpha } = await open(world, [...talkMounts, { at: "view:Files", load: () => import("../src/files/index.tsx") }]);
-    const area = assistant.runtime(alpha);
-    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Files" }))));
-    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Files");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
-    await drawnUntil(alpha, files.runtime(alpha), Files, (s) => s.access === "Granted" && s.storage.status === "Loaded");
-    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
-
-    const speak = async (id: string, text: string, sent: number) => {
-      review.proposal.id = id;
-      review.proposal.state = "pending";
-      review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
-      world.ask.nextReplyChunks = ["There is a Files action for this turn."];
-      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
-        proposalId: id, state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
-      } }];
-      speakUtterance(world, text);
-      await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On");
-    };
+    const { speak, finishFilesTalk } = await openFilesTalk(world, review, true, "There is a Files action for this turn.");
 
     await speak("other-filter", "Show photos in Download", 1);
     expect(review.claims).toEqual([]);
@@ -700,9 +718,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await speak("asked-filter", "Show PDFs in Download", 2);
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]);
     expect(world.ask.spokenFiles.at(-1)).toEqual({ channel: "VOICE_DM", images: undefined });
-    expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
-    await press("Stop voice conversation");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+    await finishFilesTalk();
   });
 
   // spec/app/voice/index.md, "An exact spoken Files request may follow its own leased navigation once"
@@ -711,26 +727,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.metadata = [];
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
     const review = textReview(world.notes.owner, "ordinal", { type: "files_open", shown: 1 });
-    world.telephony.textReview = review;
-    const { alpha } = await open(world, [...talkMounts, { at: "view:Files", load: () => import("../src/files/index.tsx") }]);
-    const area = assistant.runtime(alpha);
-    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "Home");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
-    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
-
-    const speak = async (id: string, text: string, sent: number) => {
-      review.proposal.id = id;
-      review.proposal.state = "pending";
-      review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
-      world.ask.nextReplyChunks = ["There is a Files request."];
-      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
-        proposalId: id, state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
-      } }];
-      speakUtterance(world, text);
-      await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On");
-    };
+    const { alpha, speak, finishFilesTalk } = await openFilesTalk(world, review, false, "There is a Files request.");
 
     await speak("ordinal", "Open result 1", 1);
     expect(review.claims).toEqual([]);
@@ -741,9 +738,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await speak("named-filter", "Show PDFs in Download", 2);
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "named-filter" })]);
     expect(alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get()))).toMatchObject({ trail: ["Files"], assistant: "Bar" });
-    expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
-    await press("Stop voice conversation");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+    await finishFilesTalk();
   });
 
   // spec/app/assistant/context.md, "A spoken request about the open document attaches it for that turn"
@@ -808,23 +803,17 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
   // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Recording asks for the microphone the first time, like a conversation"; spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
   it("a dictation the microphone refuses closes quietly and restores the composer's microphone control", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    world.voice.permission = "prompt";
-    world.voice.grantOnRequest = false;
-    const { alpha } = await open(world, talkMounts);
-    const area = assistant.runtime(alpha);
-    const settled = async (check: () => boolean) => {
-      for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
-      expect(check()).toBe(true);
-    };
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
-    await settled(() => button("Talk") !== undefined);
+    const { world, alpha, area } = await openTalk((w) => {
+      w.voice.permission = "prompt";
+      w.voice.grantOnRequest = false;
+    });
+    await waitSettled(alpha, () => button("Talk") !== undefined);
 
     await drawn(() => document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.focus());
     await drawn(() => area.runPromise(dictate()));
-    await settled(() => button("Start recording") !== undefined);
+    await waitSettled(alpha, () => button("Start recording") !== undefined);
     await press("Start recording");
-    await settled(() => button("Talk") !== undefined);
+    await waitSettled(alpha, () => button("Talk") !== undefined);
     const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
     expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);

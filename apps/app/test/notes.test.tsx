@@ -117,13 +117,38 @@ describe("Notes", () => {
     expect(button(`Open ${deleted.title}`)).toBeDefined();
   });
 
-  it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
-    const world = scene();
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+  async function openLoadedNotes(world: Scene) {
+    const opened = await openNotesFromHome(world);
+    await until(opened.alpha, opened.runtime, List, (state) => state.read.status === "Loaded");
+    return opened;
+  }
+
+  async function openVoiceSync(world: Scene) {
+    const opened = await openLoadedNotes(world);
+    await control("Open Design sync");
+    await press("Open Design sync");
+    await until(opened.alpha, opened.runtime, Voice, (state) => state.showing);
+    return opened;
+  }
+
+  async function openShoppingAssistant(world: Scene) {
+    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
+    world.notes.target = "shopping";
+    const { alpha } = await open(world, only("assistant", "view:Notes"));
+    return { alpha, runtime: assistant.runtime(alpha) };
+  }
+
+  async function startFreshNote(world: Scene) {
+    const opened = await openLoadedNotes(world);
     await control("New note");
     await press("New note");
-    await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
+    await until(opened.alpha, opened.runtime, Editor, (state) => state.showing && state.fresh && state.note === 0);
+    return opened;
+  }
+
+  it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await startFreshNote(world);
     await fill("Title", "Studio invoice");
     await fill("Note", "Send by Friday");
     await press("Done");
@@ -160,10 +185,7 @@ describe("Notes", () => {
 
   it("Pins the exact saved voice note from More (spec/app/notes/voice.md, \"Pinning writes the chosen flag over the revision shown\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    await press("Open Design sync");
-    await until(alpha, runtime, Voice, (state) => state.showing);
+    const { alpha, runtime } = await openVoiceSync(world);
     const saved = () => world.notes.notes.find((row) => row.id === "sync");
     const original = saved();
     if (original === undefined) throw new Error("The fixture needs a saved voice note");
@@ -194,10 +216,7 @@ describe("Notes", () => {
 
   it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    await press("Open Design sync");
-    await until(alpha, runtime, Voice, (state) => state.showing);
+    await openVoiceSync(world);
     const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
     try {
       const reopenShare = async () => {
@@ -334,10 +353,7 @@ describe("Notes", () => {
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
     const world = scene();
-    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
-    world.notes.target = "shopping";
-    const { alpha } = await open(world, only("assistant", "view:Notes"));
-    const runtime = assistant.runtime(alpha);
+    const { alpha, runtime } = await openShoppingAssistant(world);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
     const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
@@ -449,10 +465,7 @@ describe("Notes", () => {
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
     const world = { ...scene(), phone: true };
-    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
-    world.notes.target = "shopping";
-    const { alpha } = await open(world, only("assistant", "view:Notes"));
-    const runtime = assistant.runtime(alpha);
+    const { alpha, runtime } = await openShoppingAssistant(world);
     await until(alpha, runtime, Conversation, (s) => s.ready && s.observing);
     await until(alpha, runtime, Talk, (s) => s.warmed);
     await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "chooseNetworkSpeech", agree: false }))));
@@ -477,12 +490,7 @@ describe("Notes", () => {
 
   it("Keeps editor input mounted across first autosave, deletes a voice note from More, and closes open views when leaving Notes (spec/app/notes/editor.md, \"Story: Write a note\"; spec/app/notes/voice.md, \"Story: Leave a voice note\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-
-    await control("New note");
-    await press("New note");
-    await until(alpha, runtime, Editor, (state) => state.showing && state.note === 0);
+    const { alpha, runtime } = await startFreshNote(world);
     const titleInput = document.querySelector<HTMLInputElement>("input[aria-label='Title']");
     expect(titleInput).not.toBeNull();
     titleInput?.focus();

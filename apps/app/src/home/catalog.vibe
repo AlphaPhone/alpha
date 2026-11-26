@@ -4,7 +4,7 @@ import type { Listed } from "../platform/launcher.vibe"
 import { createShelf } from "../runtime/store.ts"
 
 /** What Home last read of each installed app beyond its key, which the spec never holds: its label, icon and profile. */
-export interface Catalog {
+interface Catalog {
   readonly apps: ReadonlyMap<string, InstalledApp>
 }
 

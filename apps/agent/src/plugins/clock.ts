@@ -103,13 +103,15 @@ function formatHourMinute(hour: number, minute: number): string {
 }
 
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
-  if (minutes > 0) return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
-  return `${seconds}s`;
+  const remaining = Math.max(0, Math.ceil(ms / 1000));
+  const parts: string[] = [];
+  const hours = Math.trunc(remaining / 3600);
+  const minutes = Math.trunc((remaining % 3600) / 60);
+  const seconds = remaining % 60;
+  if (hours > 0) parts.push(`${hours}h`, `${minutes}m`);
+  else if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join(" ");
 }
 
 const dayBits: Readonly<Record<string, number>> = {
@@ -480,6 +482,15 @@ function alarmOrNotFound(store: AlphaAppsStore, alarm: ClockAlarmRecord | undefi
     : { status: 200, body: { alarm, snapshot: store.getClock() } };
 }
 
+function createdOrConflict<K extends string, T>(store: AlphaAppsStore, key: K, create: () => T) {
+  try {
+    return { status: 201, body: { [key]: create(), snapshot: store.getClock() } };
+  } catch (error) {
+    if (error instanceof AlphaStoreCapacityError) return { status: 409, body: { error: error.code, message: error.message } };
+    throw error;
+  }
+}
+
 /** HTTP routes under `/api/alpha/clock` for bidirectional sync between Alpha Clock UI and the resident agent. */
 export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute[] {
   return [
@@ -506,24 +517,18 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
         const hour = readNumber(body, "hour");
         const minute = readNumber(body, "minute");
         if (hour === undefined || minute === undefined) return { status: 400, body: { error: "invalid_alarm_time" } };
-        try {
-          const alarm = store.createAlarm({
-            id: readString(body, "id"),
-            hour,
-            minute,
-            daysMask: readNumber(body, "daysMask") ?? 0,
-            label: readRawString(body, "label") ?? "",
-            sound: normalizeSound(body.sound),
-            vibrate: readBoolean(body, "vibrate") ?? true,
-            enabled: readBoolean(body, "enabled") ?? true,
-            snoozeMinutes: readNumber(body, "snoozeMinutes") ?? 9,
-            timeZone,
-          });
-          return { status: 201, body: { alarm, snapshot: store.getClock() } };
-        } catch (error) {
-          if (error instanceof AlphaStoreCapacityError) return { status: 409, body: { error: error.code, message: error.message } };
-          throw error;
-        }
+        return createdOrConflict(store, "alarm", () => store.createAlarm({
+          id: readString(body, "id"),
+          hour,
+          minute,
+          daysMask: readNumber(body, "daysMask") ?? 0,
+          label: readRawString(body, "label") ?? "",
+          sound: normalizeSound(body.sound),
+          vibrate: readBoolean(body, "vibrate") ?? true,
+          enabled: readBoolean(body, "enabled") ?? true,
+          snoozeMinutes: readNumber(body, "snoozeMinutes") ?? 9,
+          timeZone,
+        }));
       },
     },
     {
@@ -572,18 +577,12 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
         const body = asRecord(input.body);
         const durationMs = readNumber(body, "durationMs");
         if (durationMs === undefined || durationMs <= 0) return { status: 400, body: { error: "invalid_timer_duration" } };
-        try {
-          const timer = store.createTimer({
-            id: readString(body, "id"),
-            label: readRawString(body, "label") ?? "",
-            durationMs,
-            startImmediately: readBoolean(body, "startImmediately") ?? true,
-          });
-          return { status: 201, body: { timer, snapshot: store.getClock() } };
-        } catch (error) {
-          if (error instanceof AlphaStoreCapacityError) return { status: 409, body: { error: error.code, message: error.message } };
-          throw error;
-        }
+        return createdOrConflict(store, "timer", () => store.createTimer({
+          id: readString(body, "id"),
+          label: readRawString(body, "label") ?? "",
+          durationMs,
+          startImmediately: readBoolean(body, "startImmediately") ?? true,
+        }));
       },
     },
     {
@@ -623,13 +622,7 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
           ? { city: city ?? zone.split("/").pop()?.replace(/_/g, " ") ?? zone, region: readRawString(body, "region") ?? "", timeZone: zone }
           : resolveWorldCity(city ?? readString(body, "query") ?? "");
         if (resolved === undefined) return { status: 400, body: { error: "invalid_world_city" } };
-        try {
-          const added = store.addWorldCity({ id: readString(body, "id"), ...resolved });
-          return { status: 201, body: { city: added, snapshot: store.getClock() } };
-        } catch (error) {
-          if (error instanceof AlphaStoreCapacityError) return { status: 409, body: { error: error.code, message: error.message } };
-          throw error;
-        }
+        return createdOrConflict(store, "city", () => store.addWorldCity({ id: readString(body, "id"), ...resolved }));
       },
     },
     {

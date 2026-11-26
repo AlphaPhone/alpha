@@ -2,15 +2,22 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
+import { AlphaAppsStore, alphaAppsModule, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
 import { advanceDueDate, civilToEpochMs } from "../src/plugins/store.ts";
-import type { AgentRoute, AgentRuntimeLike, ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "../src/plugins/types.ts";
+import type { AgentAction, AgentRoute, AgentRuntimeLike, ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
-  ({ content: { text }, metadata }) as unknown as Parameters<NonNullable<ReturnType<typeof createAlphaAppsPlugin>["plugin"]["actions"]>[number]["handler"]>[1];
+  ({ content: { text }, metadata }) as unknown as Parameters<AgentAction["handler"]>[1];
 
-const emptyState = {} as unknown as NonNullable<Parameters<NonNullable<ReturnType<typeof createAlphaAppsPlugin>["plugin"]["actions"]>[number]["handler"]>[2]>;
+const emptyState = {} as unknown as NonNullable<Parameters<AgentAction["handler"]>[2]>;
+
+function actionOf(plugin: ReturnType<typeof createAlphaAppsPlugin>["plugin"], name: string): AgentAction {
+  const found = plugin.actions?.find((action) => action.name === name);
+  if (found === undefined) throw new Error(`Missing action ${name}`);
+  return found;
+}
 
 function makeFakeRuntime(initialTasks: readonly {
   readonly taskId: string;
@@ -21,8 +28,9 @@ function makeFakeRuntime(initialTasks: readonly {
   readonly trigger: { readonly kind: string; readonly atIso?: string };
   readonly metadata: Readonly<Record<string, unknown>>;
 }[] = []) {
-  const tasks = [...initialTasks];
+  const tasks = initialTasks.map((task) => ({ ...task }));
   const notifications: unknown[] = [];
+  const appliedVerbs: { taskId: string; request: unknown }[] = [];
   const runtime = {
     getService: (name: string) => {
       if (name === "scheduled-tasks") {
@@ -32,6 +40,10 @@ function makeFakeRuntime(initialTasks: readonly {
             const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled" };
             tasks.push(created);
             return Promise.resolve({ kind: "created", task: created });
+          },
+          applyVerb: (taskId: string, request: unknown) => {
+            appliedVerbs.push({ taskId, request });
+            return Promise.resolve({ kind: "applied" });
           },
         };
       }
@@ -46,7 +58,7 @@ function makeFakeRuntime(initialTasks: readonly {
       return null;
     },
   } as unknown as AgentRuntimeLike;
-  return { runtime, tasks, notifications };
+  return { runtime, tasks, notifications, appliedVerbs };
 }
 
 async function callRoute(
@@ -170,9 +182,9 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(plugin.name).toBe(alphaAppsPluginName);
     expect(plugin.views?.map((v) => v.id)).toEqual(["clock", "reminders"]);
 
-    const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
-    const timerAction = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
-    const worldAction = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
+    const alarmAction = actionOf(plugin, "CLOCK_ALARM");
+    const timerAction = actionOf(plugin, "CLOCK_TIMER");
+    const worldAction = actionOf(plugin, "CLOCK_WORLD");
     const provider = plugin.providers!.find((p) => p.name === "CLOCK_CONTEXT")!;
 
     const setRes = await alarmAction.handler(runtime, emptyMessage("Set an alarm for 7:30 am weekdays labeled Standup"), emptyState, {
@@ -378,32 +390,18 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     expect(fallAlarm).toBe(Date.UTC(2026, 10, 1, 15, 0, 0));
 
     const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15, 0, 0) });
-    const appliedVerbs: { taskId: string; request: unknown }[] = [];
-    const tasks: {
-      taskId: string; kind: string; ownerVisible: boolean; promptInstructions: string;
-      status: string; trigger: { kind: string; atIso?: string }; metadata: Record<string, unknown>;
-    }[] = [];
-    const runtime = {
-      getService: (name: string) => name === "scheduled-tasks" ? {
-        list: () => Promise.resolve([...tasks]),
-        create: (task: { kind: string; ownerVisible: boolean; promptInstructions: string; trigger: { kind: string; atIso?: string }; metadata: Record<string, unknown> }) => {
-          const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled" };
-          tasks.push(created);
-          return Promise.resolve({ kind: "created", task: created });
-        },
-        applyVerb: (taskId: string, request: unknown) => {
-          appliedVerbs.push({ taskId, request });
-          return Promise.resolve({ kind: "applied" });
-        },
-      } : null,
-    } as unknown as AgentRuntimeLike;
+    const { runtime, tasks, appliedVerbs } = makeFakeRuntime();
+
+    const hosted = await Effect.runPromise(alphaAppsModule({ timeZone: "UTC", runtime } as Parameters<typeof alphaAppsModule>[0]));
+    expect(hosted.name).toBe(alphaAppsPluginName);
+    expect(hosted.plugin.name).toBe(alphaAppsPluginName);
 
     const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
     const routes = plugin.routes!;
-    const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
-    const timerAction = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
-    const worldAction = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
-    const remAction = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
+    const alarmAction = actionOf(plugin, "CLOCK_ALARM");
+    const timerAction = actionOf(plugin, "CLOCK_TIMER");
+    const worldAction = actionOf(plugin, "CLOCK_WORLD");
+    const remAction = actionOf(plugin, "REMINDERS_MANAGE");
 
     expect((await alarmAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);
     expect((await timerAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);

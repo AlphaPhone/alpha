@@ -86,11 +86,15 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted 
           <Button variant="secondary" size="sm" onClick={() => send({ type: "checkChange" })}>Check change</Button>
         </Alert>
       )}
-      {model.can({ type: "reviewResend" }) && (
-        <Button variant="secondary" onClick={() => send({ type: "reviewResend" })}>Review the same change</Button>
-      )}
-      {model.can({ type: "letGo" }) && (
-        <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>
+      {(model.can({ type: "reviewResend" }) || model.can({ type: "letGo" })) && (
+        <div className="flex flex-wrap gap-2">
+          {model.can({ type: "reviewResend" }) && (
+            <Button variant="secondary" onClick={() => send({ type: "reviewResend" })}>Review the same change</Button>
+          )}
+          {model.can({ type: "letGo" }) && (
+            <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>
+          )}
+        </div>
       )}
       {state.change.attempt.outcome === "Refused" && !state.change.offered && (
         <p role="status" className="text-sm text-muted-foreground">Your agent didn’t apply the change.</p>

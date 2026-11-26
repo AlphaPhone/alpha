@@ -1,6 +1,21 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import type { AgentPlugin, LocalRoute } from "@elizaos/agent-host";
 
+interface Revisioned {
+  readonly revision: number;
+  readonly updatedAtMs: number;
+}
+
+interface EntityClock {
+  readonly createdAtMs: number;
+  readonly updatedAtMs: number;
+}
+
+interface SnapshotEnvelope {
+  readonly version: number;
+  readonly updatedAtMs: number;
+}
+
 /** Alarm chime tone identifiers shared with the Clock app. */
 export type ClockSound = "radar" | "chime" | "pulse" | "gentle" | "classic";
 
@@ -8,12 +23,12 @@ export type ClockSound = "radar" | "chime" | "pulse" | "gentle" | "classic";
 export type ClockAlarmPhase = "idle" | "ringing" | "snoozed";
 
 /** One persisted alarm record exchanged between the Clock app and the resident agent. */
-export interface ClockAlarmRecord {
+export interface ClockAlarmRecord extends Revisioned {
   readonly id: string;
+  readonly label: string;
   readonly hour: number;
   readonly minute: number;
   readonly daysMask: number;
-  readonly label: string;
   readonly sound: ClockSound;
   readonly vibrate: boolean;
   readonly enabled: boolean;
@@ -22,40 +37,34 @@ export interface ClockAlarmRecord {
   readonly fireAtMs: number | null;
   readonly snoozeUntilMs: number | null;
   readonly missed: boolean;
-  readonly revision: number;
-  readonly updatedAtMs: number;
 }
 
 /** Runtime status of a countdown timer. */
 export type ClockTimerStatus = "ready" | "running" | "paused" | "ringing";
 
 /** One persisted timer record exchanged between the Clock app and the resident agent. */
-export interface ClockTimerRecord {
+export interface ClockTimerRecord extends Revisioned {
   readonly id: string;
   readonly label: string;
+  readonly status: ClockTimerStatus;
   readonly durationMs: number;
   readonly remainingMs: number;
-  readonly status: ClockTimerStatus;
   readonly startedAtMs: number | null;
   readonly endAtMs: number | null;
   readonly ringStartedAtMs: number | null;
-  readonly revision: number;
-  readonly updatedAtMs: number;
 }
 
 /** One pinned world clock city exchanged between the Clock app and the resident agent. */
 export interface WorldCityRecord {
   readonly id: string;
+  readonly timeZone: string;
   readonly city: string;
   readonly region: string;
-  readonly timeZone: string;
   readonly order: number;
 }
 
 /** Full synchronized Clock state snapshot. */
-export interface ClockSnapshot {
-  readonly version: number;
-  readonly updatedAtMs: number;
+export interface ClockSnapshot extends SnapshotEnvelope {
   readonly alarms: readonly ClockAlarmRecord[];
   readonly timers: readonly ClockTimerRecord[];
   readonly world: readonly WorldCityRecord[];
@@ -63,64 +72,57 @@ export interface ClockSnapshot {
   readonly deletedTimerIds: readonly string[];
 }
 
-/** Semantic accent color identifiers for reminder lists. */
-export type ReminderListColor = "accent" | "blue" | "green" | "amber" | "rose" | "violet";
-
-/** Icon identifiers for reminder lists. */
-export type ReminderListIcon = "list" | "home" | "work" | "shopping" | "heart" | "star" | "bookmark" | "bolt";
+/** Priority levels for reminders. */
+export type ReminderPriority = "high" | "medium" | "low" | "none";
 
 /** Recurrence rules for reminders. */
-export type ReminderRecurrence = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
+export type ReminderRecurrence = "daily" | "weekdays" | "weekly" | "monthly" | "yearly" | "none";
 
-/** Priority levels for reminders. */
-export type ReminderPriority = "none" | "low" | "medium" | "high";
+/** Semantic accent color identifiers for reminder lists. */
+export type ReminderListColor = "accent" | "amber" | "blue" | "green" | "rose" | "violet";
 
-/** One persisted reminder list. */
-export interface ReminderListRecord {
-  readonly id: string;
-  readonly name: string;
-  readonly color: ReminderListColor;
-  readonly icon: ReminderListIcon;
-  readonly isDefault: boolean;
-  readonly order: number;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
-}
+/** Icon identifiers for reminder lists. */
+export type ReminderListIcon = "bookmark" | "bolt" | "heart" | "home" | "list" | "shopping" | "star" | "work";
 
 /** One checklist subtask belonging to a reminder. */
 export interface ReminderSubtaskRecord {
   readonly id: string;
-  readonly title: string;
   readonly done: boolean;
+  readonly title: string;
+}
+
+/** One persisted reminder list. */
+export interface ReminderListRecord extends EntityClock {
+  readonly id: string;
+  readonly name: string;
+  readonly isDefault: boolean;
+  readonly order: number;
+  readonly color: ReminderListColor;
+  readonly icon: ReminderListIcon;
 }
 
 /** One persisted reminder item exchanged between the Reminders app and the resident agent. */
-export interface ReminderItemRecord {
+export interface ReminderItemRecord extends Revisioned, EntityClock {
   readonly id: string;
   readonly listId: string;
   readonly title: string;
   readonly notes: string;
+  readonly priority: ReminderPriority;
+  readonly recurrence: ReminderRecurrence;
+  readonly flagged: boolean;
+  readonly completed: boolean;
   readonly dueDate: string | null;
   readonly dueMinute: number | null;
   readonly alertMinutes: number | null;
-  readonly recurrence: ReminderRecurrence;
-  readonly priority: ReminderPriority;
-  readonly flagged: boolean;
-  readonly subtasks: readonly ReminderSubtaskRecord[];
-  readonly completed: boolean;
   readonly completedAtMs: number | null;
   readonly snoozedUntilMs: number | null;
   readonly notifiedAtMs: number | null;
   readonly agentTaskId: string | null;
-  readonly revision: number;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
+  readonly subtasks: readonly ReminderSubtaskRecord[];
 }
 
 /** Full synchronized Reminders state snapshot. */
-export interface RemindersSnapshot {
-  readonly version: number;
-  readonly updatedAtMs: number;
+export interface RemindersSnapshot extends SnapshotEnvelope {
   readonly lists: readonly ReminderListRecord[];
   readonly items: readonly ReminderItemRecord[];
   readonly deletedAgentTaskIds?: readonly string[];

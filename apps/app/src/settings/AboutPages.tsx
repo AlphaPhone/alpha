@@ -1,7 +1,7 @@
 // spec/app/settings/licences.md, "Story: Read the licences"; spec/app/settings/developer.md, "Story: Read the problem log"
 import { ConfirmDialog, SettingsLicenceDetail, SettingsLicencesPage, SettingsProblemLogPage, type SettingsProblemLogPageProps } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import * as DeveloperGen from "../../gen/app__settings__developer.ts";
 import { useMachine as useDeveloper } from "../../gen/app__settings__developer.react.ts";
 import type { Machine as DeveloperMachine } from "../../gen/app__settings__developer.effect.vibe";
@@ -11,9 +11,8 @@ import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
-import { closeLayer, openLayer } from "../shell/shell.vibe";
 import { type Notice, type Notices, noticesShelf } from "./about.vibe";
-import type { Common } from "./Settings.tsx";
+import { type Common, useConfirmDialogLayer } from "./Settings.tsx";
 
 export interface AboutProps {
   readonly runtime: ManagedRuntime.ManagedRuntime<LicencesMachine | DeveloperMachine | Notices | Time, unknown>;
@@ -79,26 +78,12 @@ const storesNamed = Object.fromEntries(Object.entries(stores).map(([store, name]
 /** The Problem log: what it holds, Retry when it could not be read, Clear and Export, and each store to recover. */
 export function Problems({ runtime, alpha, common }: AboutProps) {
   const { state, can, send } = useTimed(runtime, useDeveloper);
-  const [asking, setAsking] = useState(false);
+  const { asking, openDialog, closeDialog } = useConfirmDialogLayer(alpha, "settings-clear-log-confirm");
   if (!state) return null;
   const clear = { type: "clearLog", at: untimed } as const;
   const retry = { type: "openLog", at: untimed } as const;
   const startExport = { type: "startExport", at: untimed } as const;
   const word = logWords[DeveloperGen.logWord(state)];
-  const layerId = "settings-clear-log-confirm";
-  const closeDialog = () => {
-    setAsking(false);
-    alpha.taking(`layer:${layerId}`, () => Promise.resolve(false));
-    void alpha.runtime.runPromiseExit(closeLayer(layerId));
-  };
-  const openDialog = () => {
-    setAsking(true);
-    alpha.taking(`layer:${layerId}`, () => {
-      closeDialog();
-      return Promise.resolve(true);
-    });
-    void alpha.runtime.runPromiseExit(openLayer(layerId, "DialogLayer", true));
-  };
   return (
     <>
     <ConfirmDialog

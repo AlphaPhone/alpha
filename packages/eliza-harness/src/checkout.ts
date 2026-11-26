@@ -66,7 +66,8 @@ function missingClients(at: Checkout, before: ReadyStamp) {
     before.commit !== at.commit || before.clients?.includes(name) !== true || !fs.existsSync(path.join(at.root, entry)));
 }
 
-function headCommit(root: string): string | undefined {
+/** Read the current git HEAD commit hash of a checkout directory, if present. */
+export function headCommit(root: string): string | undefined {
   if (!fs.existsSync(path.join(root, ".git"))) return undefined;
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -75,7 +76,8 @@ function headCommit(root: string): string | undefined {
   }
 }
 
-function hasCommit(root: string, commit: string): boolean {
+/** Check whether a git checkout already contains the given commit object. */
+export function hasCommit(root: string, commit: string): boolean {
   try {
     execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], { cwd: root, stdio: "ignore" });
     return true;

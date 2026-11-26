@@ -18,11 +18,13 @@ export const latestTime = effect {
 
 module held {
   import { calendarClient } from "@elizaos/os-bridges"
+  import type { AndroidCalendarPlugin } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "../platform/capacitor.ts"
 
   let made: ReturnType<typeof calendarClient> | undefined
   /** eliza's client of the `ElizaCalendar` plugin, made once. @throws {never} */
   export function client(): ReturnType<typeof calendarClient> {
-    return (made ??= calendarClient())
+    return (made ??= calendarClient({ plugin: capacitorPlugin<AndroidCalendarPlugin>("ElizaCalendar") }))
   }
 }
 import { client } from held

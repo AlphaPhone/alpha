@@ -14,6 +14,7 @@ import {
   escapeHtml,
   ownGet,
   paginateSlice,
+  pruneRecordCap,
   randomToken,
   sendHtml,
   sendJson,
@@ -146,14 +147,6 @@ const DEFAULT_USER_SCOPES = [
 const APP_ID = "A01ALPHA";
 const MAX_IDEMPOTENCY = 500;
 const MAX_AUTH_CODES = 500;
-
-function pruneRecordCap(record: Record<string, unknown>, max: number): void {
-  const keys = Object.keys(record);
-  if (keys.length <= max) return;
-  for (const key of keys.slice(0, keys.length - max)) {
-    delete record[key];
-  }
-}
 
 function makeMessage(
   ts: string,

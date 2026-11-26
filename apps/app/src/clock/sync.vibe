@@ -284,6 +284,20 @@ effect function pushClockSnapshotLocked(
   return true
 }
 
+function admitRemoteRecord(
+  id: string,
+  seenRemoteIds: Set<string>,
+  remoteDeleted: ReadonlySet<string>,
+  localDeleted: ReadonlySet<string>,
+  metaSnap: ClockMetaState,
+  remoteVersion: number,
+): boolean {
+  if (id === "" || seenRemoteIds.has(id) || remoteDeleted.has(id)) return false
+  if (localDeleted.has(id) && (metaSnap.dirty || remoteVersion <= metaSnap.version)) return false
+  seenRemoteIds.add(id)
+  return true
+}
+
 function mergeAlarms(
   remote: ClockSnapshotSchema,
   currentAlarms: Alarms.Alarms,
@@ -301,12 +315,7 @@ function mergeAlarms(
   const localDeleted = new Set(metaSnap.deletedAlarmIds)
 
   for (const record of remote.alarms) {
-    if (record.id === "" || seenRemoteIds.has(record.id)) continue
-    const locallyDeleted = localDeleted.has(record.id)
-    const remotelyDeleted = remoteDeleted.has(record.id)
-    if (remotelyDeleted) continue
-    if (locallyDeleted && (metaSnap.dirty || remote.version <= metaSnap.version)) continue
-    seenRemoteIds.add(record.id)
+    if (!admitRemoteRecord(record.id, seenRemoteIds, remoteDeleted, localDeleted, metaSnap, remote.version)) continue
 
     const existingLocalId = existingAlarmByRemote.get(record.id)
     const localItem = existingLocalId !== undefined ? currentAlarms.items.find((item) => item.id === existingLocalId) : undefined
@@ -383,12 +392,7 @@ function mergeTimers(
   const localDeleted = new Set(metaSnap.deletedTimerIds)
 
   for (const record of remote.timers) {
-    if (record.id === "" || seenRemoteIds.has(record.id)) continue
-    const locallyDeleted = localDeleted.has(record.id)
-    const remotelyDeleted = remoteDeleted.has(record.id)
-    if (remotelyDeleted) continue
-    if (locallyDeleted && (metaSnap.dirty || remote.version <= metaSnap.version)) continue
-    seenRemoteIds.add(record.id)
+    if (!admitRemoteRecord(record.id, seenRemoteIds, remoteDeleted, localDeleted, metaSnap, remote.version)) continue
 
     const existingLocalId = existingTimerByRemote.get(record.id)
     const localItem = existingLocalId !== undefined ? currentTimers.items.find((item) => item.id === existingLocalId) : undefined

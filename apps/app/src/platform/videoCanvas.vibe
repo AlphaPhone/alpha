@@ -1,5 +1,6 @@
 // spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"
 module clips {
+  import { boundedSignal } from "./cloud.vibe"
   import type { BrowserEditFrame } from "./photoCanvas.vibe"
 
   export type ClipTransform = { readonly start: number; readonly end: number; readonly turns: number; readonly crop: boolean }
@@ -20,15 +21,8 @@ module clips {
   }
 
   function within(parent: AbortSignal, milliseconds: number) {
-    const deadline = AbortSignal.timeout(milliseconds)
-    const merged = new AbortController()
-    const relay = () => merged.abort(parent.aborted ? parent.reason : deadline.reason)
-    if (parent.aborted) relay()
-    else {
-      parent.addEventListener("abort", relay, { once: true })
-      deadline.addEventListener("abort", relay, { once: true })
-    }
-    return { signal: merged.signal, release: () => { parent.removeEventListener("abort", relay); deadline.removeEventListener("abort", relay) } }
+    const { signal, release } = boundedSignal(parent, milliseconds)
+    return { signal: signal ?? parent, release }
   }
 
   function drawFrame(video: HTMLVideoElement, edit: ClipTransform) {

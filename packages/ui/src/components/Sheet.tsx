@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "../lib/cn.ts";
-import { isInToastRegion, useLayerRef, usePortalContainer } from "../lib/layers.tsx";
+import { useLayerSurface } from "../lib/layers.tsx";
 import { surfaceDescription, surfaceTitle } from "../lib/styles.ts";
 import { DialogOverlay } from "./Dialog.tsx";
 
@@ -32,26 +32,17 @@ export const SheetClose = DialogPrimitive.Close;
 
 /** The panel at the foot of a dimmed page: its title, a body that scrolls, and its actions. Escape and a press outside dismiss it. */
 export function SheetContent({ title, description, actions, container, className, children, ref, onPointerDownOutside, onInteractOutside, ...props }: SheetContentProps) {
-  const defaultContainer = usePortalContainer();
-  const layerRef = useLayerRef("SheetLayer", ref);
+  const surface = useLayerSurface("SheetLayer", { container, ref, onPointerDownOutside, onInteractOutside });
   return (
-    <DialogPrimitive.Portal container={container ?? defaultContainer}>
+    <DialogPrimitive.Portal container={surface.container}>
       <DialogOverlay className="z-sheet" />
       <DialogPrimitive.Content
-        ref={layerRef}
         {...(description ? {} : { "aria-describedby": undefined })}
         className={cn(
           "fixed inset-x-0 bottom-0 z-sheet mx-auto flex max-h-[min(85dvh,calc(var(--alpha-viewport-height,100dvh)-2rem))] max-w-xl flex-col gap-4 rounded-t-sheet border-t border-border/60 bg-popover px-5 pt-6 pb-[max(--spacing(5),var(--alpha-safe-bottom))] text-popover-foreground shadow-sheet outline-none motion-safe:animate-rise dark:border-border",
           className,
         )}
-        onPointerDownOutside={(event) => {
-          if (isInToastRegion(event.target)) event.preventDefault();
-          onPointerDownOutside?.(event);
-        }}
-        onInteractOutside={(event) => {
-          if (isInToastRegion(event.target)) event.preventDefault();
-          onInteractOutside?.(event);
-        }}
+        {...surface.contentProps}
         {...props}
       >
         <div className="flex flex-col gap-1">

@@ -64,7 +64,7 @@ describe("The Browser on a phone", () => {
     const bookmark = [...document.querySelectorAll("button")].find((row) => row.textContent?.includes("Keys in the chip"));
     if (!bookmark) throw new Error("saved bookmark is missing");
     await drawn(() => bookmark.click());
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const tab = runtime.runSync(Effect.map(Effect.flatMap(Tabs, (m) => m.get()), (s) => s.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await until(alpha, page, Page, (s) => s.phase === "Shown");
     expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["https://enclave.example/keys-in-hardware"]);
@@ -102,11 +102,7 @@ describe("The Browser on a phone", () => {
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Remove the username or password from this address.");
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual(history);
     await press("Cancel editing");
-    await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    // spec/app/browser/address.md, "Only the latest load of the page commits it or fails it"; spec/app/browser/address.md, "The secure mark shows only on a page that committed over HTTPS"
-    await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
+    const { tab, page } = await openNewsPage(alpha, runtime, true);
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
 
@@ -122,11 +118,7 @@ describe("The Browser on a phone", () => {
     expect(world.settings.copied).toEqual(["https://news.example/on-device-agents"]);
 
     // spec/app/browser/address.md, "Typing searches the page, and clearing the text clears the search"; spec/app/browser/address.md, "Only the answer to the latest search counts"
-    await press("Menu");
-    await press("Find in page");
-    await until(alpha, page, Page, (p) => p.finding);
-    await fill("Find in page", "agent");
-    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+    await findOnPage(alpha, page, "agent");
     await press("Next match");
     // spec/app/browser/address.md, "Closing the find bar clears the search"
     await press("Close find in page");
@@ -144,6 +136,23 @@ describe("The Browser on a phone", () => {
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.behind === 1);
     expect([...world.browser.tabs.values()].map((one) => one.history.at(-1))).toEqual(["https://www.google.com/search?q=on%20device%20agents"]);
   });
+
+  async function openNewsPage(alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"], runtime: Awaited<ReturnType<typeof onBrowser>>["runtime"], requireSecure = false) {
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Effect.flatMap(Tabs, (m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    // spec/app/browser/address.md, "Only the latest load of the page commits it or fails it"; spec/app/browser/address.md, "The secure mark shows only on a page that committed over HTTPS"
+    await until(alpha, page, Page, (p) => p.phase === "Shown" && (!requireSecure || p.secure));
+    return { tab, page };
+  }
+
+  async function findOnPage(alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"], page: Awaited<ReturnType<typeof openNewsPage>>["page"], query: string) {
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await fill("Find in page", query);
+    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+  }
 
   it("Open, pick and close tabs (spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Clear all browsing data\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
@@ -190,20 +199,13 @@ describe("The Browser on a phone", () => {
   it("Hides the native page while Clear browsing data is open and updates Find match index reactively (spec/app/browser/index.md, \"Story: Clear all browsing data\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    const { tab, page } = await openNewsPage(alpha, runtime);
 
     const place = document.querySelector<HTMLElement>("[data-alpha-browser-page]");
     if (!place) throw new Error("browser page place is missing");
     place.getBoundingClientRect = () => new DOMRect(0, 52, 390, 680);
 
-    await press("Menu");
-    await press("Find in page");
-    await until(alpha, page, Page, (p) => p.finding);
-    await fill("Find in page", "agent");
-    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+    await findOnPage(alpha, page, "agent");
     const findStatus = () => document.querySelector("[role='search'][aria-label='Find in page'] [role='status']")?.textContent;
     await expect.poll(findStatus).toMatch(/^1 of \d+$/);
     await press("Next match");

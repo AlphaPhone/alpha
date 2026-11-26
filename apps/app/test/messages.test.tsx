@@ -20,7 +20,7 @@ import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
-import { button, closeAll, drawn, hardware, only, open, press, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, only, open, press, underAct } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -69,12 +69,20 @@ const confirm = (name: string) => drawn(() => {
 });
 
 /** Type into the text box named `name`, as a person does. */
-const write = (name: string, text: string) => drawn(() => {
-  const found = [...document.querySelectorAll("textarea, input")].find((one) => one.getAttribute("aria-label") === name);
-  if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
-});
+const write = fill;
+
+async function openHomeAsk(world: ReturnType<typeof image>, review: ReturnType<typeof textReview>, waitForPhone = false) {
+  world.telephony.textReview = review;
+  const { alpha } = await openImage(world);
+  const runtime = assistant.runtime(alpha);
+  await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+  if (waitForPhone) await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+  await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+  await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+  await press("Open conversation");
+  await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+  return { alpha, runtime };
+}
 
 /** Open the message action menu from the keyboard. */
 const bubble = (text: string) => drawn(() => {
@@ -363,15 +371,7 @@ describe("Messages on an Alpha image", () => {
     const world = image();
     const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
     const review = textReview(world.notes.owner, "reviewed-text", sms);
-    world.telephony.textReview = review;
-    const { alpha } = await openImage(world);
-    const runtime = assistant.runtime(alpha);
-    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
-    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
-    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
-    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
-    await press("Open conversation");
-    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+    const { runtime } = await openHomeAsk(world, review, true);
 
     const ask = async (proposalId: string, prompt: string) => {
       const reads = review.pendingReads;
@@ -478,14 +478,7 @@ describe("Messages on an Alpha image", () => {
     const world = image();
     const compose = { type: "sms_compose", query: "Maya", body: "Meet at the front door" } as const;
     const review = textReview(world.notes.owner, "draft-for-maya", compose);
-    world.telephony.textReview = review;
-    const { alpha } = await openImage(world);
-    const runtime = assistant.runtime(alpha);
-    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
-    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
-    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
-    await press("Open conversation");
-    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+    const { alpha, runtime } = await openHomeAsk(world, review);
 
     world.ask.nextReplyChunks = ["Review the draft for Maya."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];

@@ -251,6 +251,12 @@ effect function loadBrowserAlbums(live: readonly BrowserCapture[], allCount: num
   return try (try Catalog).shelves([...defaults, ...personal], Math.max(0, allCount - live.length))
 }
 
+effect function listedAlbums(ticket: number, albums: number[] | undefined): Library.Event!!(Catalog | Library.Machine) {
+  const fail = failedList(ticket)
+  if (albums === undefined || !Library.canListed(try (try Library.Machine).get(), ticket, "Phone")) return fail
+  return { ...fail, ok: true, rows: albums, revision: try (try Catalog).revision() }
+}
+
 /** Read the requested page and keep its payload only when the matching ticket can still answer. */
 effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | Library.Machine) {
   const { phone, browser, reviewed: deviceLibrary, peekHandoff } = try PhotosPort
@@ -261,9 +267,7 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
   if (Option.isSome(browser)) return try fetchedBrowser(request)
   if (request.tab === "Albums" && request.album === 0) {
     if (Option.isNone(phone)) return fail
-    const albums = try loadNativeAlbums(phone.value, true)
-    if (albums === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-    return { ...fail, ok: true, rows: albums, revision: try cache.revision() }
+    return try listedAlbums(request.ticket, try loadNativeAlbums(phone.value, true))
   }
   let album = request.album === 0 ? undefined : (try cache.displayed()).albums.get(request.album)
   if (request.album !== 0 && album === undefined && Option.isSome(phone)) {
@@ -339,9 +343,7 @@ effect function fetchedBrowser(request: Fetch): Library.Event!!(PhotosPort | Cat
   const machine = try Library.Machine
   if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
   if (request.tab === "Albums" && request.album === 0) {
-    const albums = try loadBrowserAlbums(live, all.length)
-    if (albums === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-    return { ...fail, ok: true, rows: albums, revision: try cache.revision() }
+    return try listedAlbums(request.ticket, try loadBrowserAlbums(live, all.length))
   }
   let album = request.album === 0 ? undefined : (try cache.displayed()).albums.get(request.album)
   if (request.album !== 0 && album === undefined) {

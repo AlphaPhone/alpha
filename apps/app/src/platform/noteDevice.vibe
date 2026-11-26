@@ -111,17 +111,16 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     Effect.catch(read(Permission, call), () => succeed({ grant: "prompt" })),
     ({ grant }): Grant => grant === "granted" ? "Granted" : grant === "denied" ? "Denied" : "Unasked",
   )
-  const changed = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => Effect.asVoid(acquireRelease(
-    Effect.orElseSucceed(tryPromise(() => api.addListener("recordingChanged", (raw) => {
-      const report = Schema.decodeUnknownOption(TapeReply)(raw)
-      if (Option.isSome(report)) Queue.offerUnsafe(queue, report.value)
-    })), () => undefined),
-    (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
-  )))
-  const openAsked = api === undefined ? Stream.empty : Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
-    Effect.orElseSucceed(tryPromise(() => api.addListener("openRequested", () => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
-    (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
-  )))
+  const listen = <A>(event: "recordingChanged" | "openRequested", onEvent: (raw: unknown, emit: (value: A) => void) => void): Stream.Stream<A> =>
+    api === undefined ? Stream.empty : Stream.callback<A>((queue) => Effect.asVoid(acquireRelease(
+      Effect.orElseSucceed(tryPromise(() => api.addListener(event, (raw) => onEvent(raw, (value) => { Queue.offerUnsafe(queue, value) }))), () => undefined),
+      (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
+    )))
+  const changed = listen<Tape>("recordingChanged", (raw, emit) => {
+    const report = Schema.decodeUnknownOption(TapeReply)(raw)
+    if (Option.isSome(report)) emit(report.value)
+  })
+  const openAsked = listen<void>("openRequested", (_raw, emit) => emit(undefined))
   return {
     available, canTranscribe, changed, openAsked,
     permission: () => granted((native) => native.permission()),

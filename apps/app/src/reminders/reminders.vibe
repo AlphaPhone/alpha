@@ -6,7 +6,6 @@ import * as Alerts from "../../gen/app__reminders__alerts.effect.vibe"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import { fromAreas } from "../home/cards.vibe"
 import { Said, offer, say, withdraw } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
@@ -15,14 +14,13 @@ import { ask, attemptedWith } from "../platform/remote.vibe"
 import { type Attempts, fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { buildMachineSyncArgs, reminderAlerts, syncAlertsWithSnapshot } from "./alerts.vibe"
+import { buildMachineSyncArgs, pushHomeFromSnapshot, reminderAlerts, syncAlertsWithSnapshot } from "./alerts.vibe"
 import { clearPersistedDraft, reminderEditor } from "./editor.vibe"
 import {
   type ReminderRecurrence,
   advanceDueDate,
   civilDayFromString,
   civilDayNumber,
-  dueInstantMs,
 } from "./recurrence.ts"
 import {
   AlertBannerShelf,
@@ -42,7 +40,6 @@ import {
   type ReminderListRecord,
   type ReminderPriority,
   type RemindersSnapshot,
-  isItemOverdue,
   normalizeSnapshot,
   priorityToSpec,
   recurrenceToSpec,
@@ -116,16 +113,42 @@ type RemindersEnv =
   | Said
   | PhoneReminders
 
-function pushToHomeAgenda(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<string>, nowMs: number): void {
-  const dated = snapshot.items
-    .filter((item) => !hiddenIds.has(item.id) && item.dueDate !== null)
-    .map((item) => ({
-      due: dueInstantMs(item.dueDate, item.dueMinute) ?? nowMs,
-      overdue: isItemOverdue(item, nowMs),
-      done: item.completed,
-      title: item.title,
-    }))
-  fromAreas.reminders(dated)
+function buildItemSpec(
+  store: RemindersShelf["store"],
+  listId: string,
+  dueDate: string | null,
+  dueMinute: number | null,
+  recurrence: ReminderRecurrence,
+  priority: ReminderPriority,
+  flagged: boolean,
+  now: number,
+) {
+  return {
+    listId: Math.max(1, store.specIdForList(listId)),
+    hasDue: dueDate !== null,
+    dueDay: civilDayFromString(dueDate) ?? civilDayNumber(now),
+    hasDueTime: dueMinute !== null,
+    dueMinute: dueMinute ?? 0,
+    repeat: recurrenceToSpec(recurrence),
+    priority: priorityToSpec(priority),
+    flagged,
+  }
+}
+
+effect function commitListMutation(
+  nextAttempt: number,
+  event: Event,
+  nextSnapshot: RemindersSnapshot,
+  now: number,
+): void!!RemindersEnv {
+  const ledger = try RemindersLedger
+  const ok = try sendChecked(event)
+  if (!ok) {
+    ledger.pendingWrites.delete(nextAttempt)
+    return
+  }
+  const after = try (try Reminders.Machine).get()
+  try persistAndBroadcast(nextSnapshot, now, after.nextListId, after.nextItemId)
 }
 
 effect function persistViewAndBroadcast(
@@ -134,7 +157,7 @@ effect function persistViewAndBroadcast(
 ): void!!(KeyValueStore.KeyValueStore | Alerts.Machine | AlertBannerShelf | RemindersShelf | PhoneReminders | RemindersLedger) {
   const encoded = Effect.try(() => JSON.stringify(view.snapshot)) catch () => undefined
   if (encoded !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(snapshotKey, encoded))
-  pushToHomeAgenda(view.snapshot, view.hiddenIds, nowMs)
+  pushHomeFromSnapshot(view.snapshot, view.hiddenIds, nowMs)
   try syncAlertsWithSnapshot(view.snapshot, nowMs)
 }
 
@@ -318,7 +341,7 @@ effect function undoHeldAction(): void!!RemindersEnv {
     ledger.setActiveUndo(undefined)
     try withdraw("reminders", held.about)
     store.setHidden(new Set())
-    pushToHomeAgenda(store.snapshot().snapshot, new Set(), now)
+    pushHomeFromSnapshot(store.snapshot().snapshot, new Set(), now)
     try say(`Restored “${held.prior.title}”`)
     return
   }
@@ -428,18 +451,7 @@ export effect function createReminderItem(input: CreateReminderInput): (Reminder
     updatedAtMs: now,
   }
   const state = try machine.get()
-  const listSpecId = Math.max(1, store.specIdForList(listId))
-  const dueDay = civilDayFromString(dueDate) ?? civilDayNumber(now)
-  const spec = {
-    listId: listSpecId,
-    hasDue: dueDate !== null,
-    dueDay,
-    hasDueTime: dueMinute !== null,
-    dueMinute: dueMinute ?? 0,
-    repeat: recurrenceToSpec(recurrence),
-    priority: priorityToSpec(priority),
-    flagged,
-  }
+  const spec = buildItemSpec(store, listId, dueDate, dueMinute, recurrence, priority, flagged, now)
   if (!Reminders.canCreateItem(state, spec)) return undefined
   const assignedItemSpecId = state.nextItemId
   const nextAttempt = state.write.id + 1
@@ -515,18 +527,7 @@ effect function updateReminderItem(id: string, patch: Partial<CreateReminderInpu
   const store = (try RemindersShelf).store
   const ledger = try RemindersLedger
   const state = try machine.get()
-  const listSpecId = Math.max(1, store.specIdForList(listId))
-  const dueDay = civilDayFromString(dueDate) ?? civilDayNumber(now)
-  const spec = {
-    listId: listSpecId,
-    hasDue: dueDate !== null,
-    dueDay,
-    hasDueTime: dueMinute !== null,
-    dueMinute: dueMinute ?? 0,
-    repeat: recurrenceToSpec(recurrence),
-    priority: priorityToSpec(updated.priority),
-    flagged: updated.flagged,
-  }
+  const spec = buildItemSpec(store, listId, dueDate, dueMinute, recurrence, updated.priority, updated.flagged, now)
   if (!Reminders.canUpdateItem(state, itemSpecId, spec)) return undefined
   const nextAttempt = state.write.id + 1
   ledger.pendingWrites.set(nextAttempt, { kind: "updateItem", item: updated })
@@ -649,7 +650,7 @@ export effect function deleteReminderItem(id: string): void!!RemindersEnv {
   ledger.setActiveUndo({ kind: "delete", itemId: id, prior: existing, about })
   const hidden = new Set([id])
   store.setHidden(hidden)
-  pushToHomeAgenda(current, hidden, now)
+  pushHomeFromSnapshot(current, hidden, now)
   try offer(`Deleted “${existing.title}”`, "reminders", about, try captureUndo())
 }
 
@@ -739,17 +740,11 @@ export effect function updateReminderList(id: string, name: string, color: Remin
   const updated: ReminderListRecord = { ...existing, name: trimmed, color, icon, updatedAtMs: now }
   const nextAttempt = state.write.id + 1
   ledger.pendingWrites.set(nextAttempt, { kind: "updateList", list: updated })
-  const ok = try sendChecked({ type: "renameList", listId: listSpecId })
-  if (!ok) {
-    ledger.pendingWrites.delete(nextAttempt)
-    return
-  }
-  const after = try machine.get()
-  try persistAndBroadcast(
+  try commitListMutation(
+    nextAttempt,
+    { type: "renameList", listId: listSpecId },
     { ...current, version: current.version + 1, updatedAtMs: now, lists: current.lists.map((list) => (list.id === id ? updated : list)) },
     now,
-    after.nextListId,
-    after.nextItemId,
   )
 }
 
@@ -773,17 +768,11 @@ export effect function deleteReminderList(id: string, mode: DeleteMode): void!!R
     : current.items.map((item) => (item.listId === id ? { ...item, listId: defaultId, revision: item.revision + 1, updatedAtMs: now } : item))
   const nextAttempt = state.write.id + 1
   ledger.pendingWrites.set(nextAttempt, { kind: "deleteList", id, mode })
-  const ok = try sendChecked({ type: "deleteList", listId: listSpecId, mode })
-  if (!ok) {
-    ledger.pendingWrites.delete(nextAttempt)
-    return
-  }
-  const after = try machine.get()
-  try persistAndBroadcast(
+  try commitListMutation(
+    nextAttempt,
+    { type: "deleteList", listId: listSpecId, mode },
     { ...current, version: current.version + 1, updatedAtMs: now, lists: nextLists, items: nextItems },
     now,
-    after.nextListId,
-    after.nextItemId,
   )
 }
 

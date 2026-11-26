@@ -262,7 +262,8 @@ async function startProvider(key: string, real: RealModel | undefined) {
     recorded.push(messages);
     if (recorded.length > MAX_ASKED_PER_SYSTEM) recorded.splice(0, recorded.length - MAX_ASKED_PER_SYSTEM);
     const last = messages.findLast((message) => message.role === "user")?.content;
-    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
+    const queued = listed(replies, scripted(system));
+    const reply = (queued[0]?.kind === "stall" && input.stream !== true ? undefined : queued.shift()) ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {

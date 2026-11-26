@@ -101,6 +101,16 @@ export const phoneCalendar = Layer.effect(PhoneCalendar, effect {
   const native = (): Creations => creations()
   const shelf = createShelf<CalendarShelfState>(emptyCalendarState(), { reset: emptyCalendarState })
   try addFinalizer(() => sync(() => { shelf.reset() }))
+  const dropStaged = (id: string) => {
+    const review = shelf.get().staged.get(id)
+    shelf.update((current) => {
+      if (!current.staged.has(id)) return current
+      const next = new Map(current.staged)
+      next.delete(id)
+      return { ...current, staged: next }
+    })
+    return review
+  }
   return {
     present,
     grant: () => !present ? succeed("Denied" as Grant) : Effect.orElseSucceed(tryPromise(async () => {
@@ -148,25 +158,12 @@ export const phoneCalendar = Layer.effect(PhoneCalendar, effect {
       return { kind: "ready", window: untilElapsed(deadline.expiresElapsed) }
     }), (): Staged => ({ kind: "refused" })),
     dispatch: (id: string) => !present ? succeed(refused) : Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
-      const review = shelf.get().staged.get(id)
-      shelf.update((current) => {
-        if (!current.staged.has(id)) return current
-        const next = new Map(current.staged)
-        next.delete(id)
-        return { ...current, staged: next }
-      })
+      const review = dropStaged(id)
       if (review === undefined) return refused
       const dispatched = await review.dispatchDeletion().then(writtenOf, (cause: unknown) => (typeof cause === "object" && cause !== null && "_tag" in cause && cause._tag === "CalendarNotAllowed" ? refused : lost))
       return dispatched
     }), () => lost),
-    cancel: (id: string) => sync(() => {
-      shelf.update((current) => {
-        if (!current.staged.has(id)) return current
-        const next = new Map(current.staged)
-        next.delete(id)
-        return { ...current, staged: next }
-      })
-    }),
+    cancel: (id: string) => sync(() => { dropStaged(id) }),
   }
 })
 

@@ -45,7 +45,7 @@ export function LayerObserverProvider({ onLayerChange, children }: LayerObserver
 }
 
 /** Returns true when an event target lies inside a `ToastRegion`. */
-export function isInToastRegion(target: EventTarget | null): boolean {
+function isInToastRegion(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest("[data-alpha-toast-region]") !== null;
 }
 
@@ -85,4 +85,34 @@ export function useLayerRef<T extends HTMLElement>(kind: LayerKind, forwarded?: 
     activeRef.current = { node, dismiss, cleanup };
     onLayerChange?.({ id, kind, open: true, dismiss });
   }, [id, kind, onLayerChange, forwarded]);
+}
+
+type OutsideEvent = { target: EventTarget | null; preventDefault: () => void };
+
+/** Returns portal container, layer-observer ref, and toast-safe outside-interaction handlers for a Radix floating surface. */
+export function useLayerSurface<T extends HTMLElement, P extends OutsideEvent = OutsideEvent, I extends OutsideEvent = OutsideEvent>(
+  kind: LayerKind,
+  options: {
+    container?: HTMLElement;
+    ref?: Ref<T>;
+    onPointerDownOutside?: (event: P) => void;
+    onInteractOutside?: (event: I) => void;
+  },
+) {
+  const defaultContainer = usePortalContainer();
+  const ref = useLayerRef(kind, options.ref);
+  return {
+    container: options.container ?? defaultContainer,
+    contentProps: {
+      ref,
+      onPointerDownOutside: (event: P) => {
+        if (isInToastRegion(event.target)) event.preventDefault();
+        options.onPointerDownOutside?.(event);
+      },
+      onInteractOutside: (event: I) => {
+        if (isInToastRegion(event.target)) event.preventDefault();
+        options.onInteractOutside?.(event);
+      },
+    },
+  };
 }

@@ -11,23 +11,22 @@ import { button, closeAll, fill, openOver, press, underAct, until } from "./alph
 import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
 
-let mine: Awaited<ReturnType<typeof owned>>;
+type OwnedHarness = Awaited<ReturnType<typeof owned>>;
+let mine: OwnedHarness;
 
 underAct();
+afterEach(closeAll);
 beforeAll(async () => {
   // spec/app/ask/index.md, "Story: Talk to my agent": the owner signs in by the code the cloud mails, and the device is given its key.
   mine = await owned("ask");
 }, 600_000);
-afterEach(closeAll);
 
-/** The worked example at Ask Alpha's place, which only its own journeys mount. */
-const asked: Mount[] = [{ at: "assistant", load: () => import("../src/ask/index.tsx") }];
-
-const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((line) => line.textContent);
+const readAskItems = () => Array.from(document.querySelectorAll("section[aria-label='Ask Alpha'] ol li"), (line) => line.textContent);
 
 // spec/app/ask/index.md, "Story: Talk to my agent"
 it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {
   expect([mine.key.mailed, mine.key.accountId === "", mine.agent.token === ""]).toEqual([expect.stringMatching(/^\d{6}$/), false, false]);
+  const asked: Mount[] = [{ at: "assistant", load: () => import("../src/ask/index.tsx") }];
   const { alpha } = await openOver(elizaWorld(mine), asked);
   const asking = ask.runtime(alpha);
   const balance = async () => (await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
@@ -42,9 +41,9 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   await press("Send");
   // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Confirmed");
-  expect(lines()).toEqual(["Say hello.", "Hello from the cloud."]);
+  expect(readAskItems()).toEqual(["Say hello.", "Hello from the cloud."]);
   const textOf = (value: unknown) => (typeof value === "string" ? value : "");
-  const last = (await mine.asked()).at(-1);
+  const last = (await mine.asked()).findLast((messages) => /^Say hello\.(\n|$)/.test(textOf(messages[1]?.content)));
   expect([last?.length, last?.[0]?.role, textOf(last?.[0]?.content).includes(mine.system), last?.[1]?.role, /^Say hello\.(\n|$)/.test(textOf(last?.[1]?.content))])
     .toEqual([2, "system", true, "user", true]);
   expect(await balance()).toBeLessThan(mine.granted);
@@ -57,7 +56,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   expect(Boolean(button("Send"))).toBe(false);
   await press("Stop");
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Refused");
-  expect([lines(), document.querySelector("section[aria-label='Ask Alpha'] [role=alert]")?.textContent]).toEqual([["Say hello.", "Hello from the cloud.", "Take your time.", "Thinking"], "The reply stopped"]);
+  expect([readAskItems(), document.querySelector("section[aria-label='Ask Alpha'] [role=alert]")?.textContent]).toEqual([["Say hello.", "Hello from the cloud.", "Take your time.", "Thinking"], "The reply stopped"]);
 }, 300_000);
 
 // spec/kit/read.md, "Story: Read from outside"

@@ -2,7 +2,7 @@
 import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { Machine as Screen } from "../gen/app__maps.effect.vibe";
+import { Machine as Screen, type Maps as ScreenState } from "../gen/app__maps.effect.vibe";
 import { Machine as Credits } from "../gen/app__maps__credits.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Atlas } from "../src/maps/atlas.vibe";
@@ -38,17 +38,27 @@ const focus = (name: string) => drawn(() => {
 /** The places the results list shows, by name. */
 const results = () => [...document.querySelectorAll("section[aria-label=Maps] button")].map((found) => found.getAttribute("aria-label")).filter((name) => name?.startsWith("Harbour"));
 
+async function openMaps(world: ReturnType<typeof scene>, ready: (s: ScreenState) => boolean = (s) => s.link.provider !== 0) {
+  const opened = await open(world, withMaps);
+  await showMaps(opened.alpha);
+  const runtime = maps.runtime(opened.alpha);
+  await until(opened.alpha, runtime, Screen, ready);
+  return { ...opened, runtime };
+}
+
+async function openGoogleMaps(world: ReturnType<typeof scene>, savedCount?: number) {
+  if (!world.maps.coverage.available) throw new Error("expected available coverage");
+  world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" };
+  return openMaps(world, (s) => s.link.google && (savedCount === undefined || s.saved.length === savedCount));
+}
+
 describe("Maps on a phone", () => {
   it("Search for a place, get directions and navigate (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\"; spec/app/maps/index.md, \"Story: Navigate\")", async () => {
     const world = { ...scene(), phone: true };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3), cloudRoute("scenic", start, harbour.coordinate, 500, 4)];
-    const { alpha } = await open(world, withMaps);
-    await showMaps(alpha);
-    const runtime = maps.runtime(alpha);
-
     // spec/app/maps/index.md, "Opening Maps, the network returning or Retry reads the coverage when no provider works, and leaves a working one alone"
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0 && s.link.offer.walk && !s.link.offer.transit);
+    const { alpha, runtime } = await openMaps(world, (s) => s.link.provider !== 0 && s.link.offer.walk && !s.link.offer.transit);
 
     // spec/app/maps/connection.md, "Retry draws a broken map again on a new surface": this page has no WebGL, so MapLibre cannot draw
     await until(alpha, runtime, Screen, (s) => s.link.surface === "Broken");
@@ -114,10 +124,7 @@ describe("Maps on a phone", () => {
     const world = { ...scene(), phone: true };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3)];
-    const { alpha } = await open(world, withMaps);
-    await showMaps(alpha);
-    const runtime = maps.runtime(alpha);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const { alpha, runtime } = await openMaps(world);
     await focus("Search Maps");
     await fill("Search Maps", "cafe");
     await enter("Search Maps");
@@ -201,10 +208,8 @@ describe("Maps in a browser", () => {
       { id: "a1", label: "Office", coordinate: { latitude: 43.7401, longitude: 7.4262 }, savedAt: 1 },
       { id: "a2", label: "Lunch", coordinate: { latitude: 43.7, longitude: 7.4 }, providerId: "eliza-cloud-google", providerPlaceId: "g1", savedAt: 2 },
     ] }));
-    const first = await open(world, withMaps);
-    await showMaps(first.alpha);
-    const runtime = maps.runtime(first.alpha);
-    await until(first.alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const first = await openMaps(world);
+    const { runtime } = first;
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart": the previous Alpha's list is read
     await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Office");
@@ -227,12 +232,8 @@ describe("Maps in a browser", () => {
     await first.close();
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart"
-    if (!world.maps.coverage.available) throw new Error("expected available coverage");
-    world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" };
-    const second = await open(world, withMaps);
-    await showMaps(second.alpha);
-    const again = maps.runtime(second.alpha);
-    await until(second.alpha, again, Screen, (s) => s.saved.length === 2 && s.link.google);
+    const second = await openGoogleMaps(world, 2);
+    const again = second.runtime;
     expect([Boolean(button("Quay")), Boolean(button("Office"))]).toEqual([true, true]);
 
     // spec/app/maps/connection.md, "Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge"; spec/app/maps/places.md, "At most 200 places are saved: a full list only renames"
@@ -263,11 +264,8 @@ describe("Maps in a browser", () => {
   it("A saved list Alpha cannot read is never written over (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
     const world = scene();
     localStorage.setItem("alpha/maps/saved@1", "{not json");
-    const { alpha } = await open(world, withMaps);
-    await showMaps(alpha);
-    const runtime = maps.runtime(alpha);
     // spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0 && !s.keepable);
+    const { alpha, runtime } = await openMaps(world, (s) => s.link.provider !== 0 && !s.keepable);
     expect(document.body.textContent).toContain("Saved places could not be read. Existing data has not been replaced.");
     await focus("Search Maps");
     await fill("Search Maps", "48.85, 2.35");
@@ -282,10 +280,7 @@ describe("Maps in a browser", () => {
   it("Search as I type, start from a place by its name and swap the ends (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\")", async () => {
     const world = scene();
     world.maps.routes = [cloudRoute("there", harbour.coordinate, gallery.coordinate, 300, 2)];
-    const { alpha } = await open(world, withMaps);
-    await showMaps(alpha);
-    const runtime = maps.runtime(alpha);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const { alpha, runtime } = await openMaps(world);
 
     // spec/app/maps/index.md, "Typing searches once the owner pauses for 350 milliseconds, and Enter searches at once"
     await focus("Search Maps");
@@ -330,10 +325,7 @@ describe("Maps in a browser", () => {
 
   it("Back off when Maps asks me to wait (spec/app/maps/connection.md, \"Story: Serve Maps through my cloud account\")", async () => {
     const world = { ...scene(), now: Date.now() };
-    const { alpha } = await open(world, withMaps);
-    await showMaps(alpha);
-    const runtime = maps.runtime(alpha);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const { alpha, runtime } = await openMaps(world);
 
     // spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"; spec/app/maps/index.md, "Cloud's wait holds the screen's requests until it ends, and its end lets them go again"
     await later(alpha, Math.max(0, Date.now() - world.now));
@@ -392,10 +384,8 @@ describe("Maps in a browser", () => {
 
   it("Isolates Atlas per runtime, clears details on leave, skips coordinate search debounce, and refuses Google without tiles (spec/app/maps/index.md, \"A place's details are read from its provider once it is on the card, and shown only while it still is\"; spec/app/maps/connection.md, \"Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge\")", async () => {
     const world = scene();
-    const first = await open(world, withMaps);
-    await showMaps(first.alpha);
-    const runtime = maps.runtime(first.alpha);
-    await until(first.alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const first = await openMaps(world);
+    const { runtime } = first;
 
     await focus("Search Maps");
     await fill("Search Maps", "43.73, 7.42");
@@ -428,13 +418,8 @@ describe("Maps in a browser", () => {
     await first.close();
     localStorage.clear();
 
-    if (!world.maps.coverage.available) throw new Error("expected available coverage");
-    world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" };
-    const second = await open(world, withMaps);
-    await showMaps(second.alpha);
-    const again = maps.runtime(second.alpha);
-    await until(second.alpha, again, Screen, (s) => s.link.google);
-    const secondStore = await again.runPromise(Atlas);
+    const second = await openGoogleMaps(world);
+    const secondStore = await second.runtime.runPromise(Atlas);
     expect(secondStore).not.toBe(store);
     expect(secondStore.spot(place)).toBeUndefined();
     expect(document.body.textContent).toContain("The Google map is missing.");

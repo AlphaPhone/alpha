@@ -43,12 +43,28 @@ async function openWorkflows(world: Scene) {
   return alpha;
 }
 
+/** Open Workflows on a fresh scene, optionally configure it, and wait until the list has loaded. */
+async function launchWorkflows(setup?: (world: Scene) => void, requireComplete = false) {
+  const world = scene();
+  setup?.(world);
+  const alpha = await openWorkflows(world);
+  const area = workflows.runtime(alpha);
+  await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && (!requireComplete || state.complete));
+  return { world, alpha, area };
+}
+
+/** Click the first row in the Run history list. */
+async function openFirstRunHistory() {
+  await drawn(() => {
+    const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
+    if (!row) throw new Error("No run history");
+    row.click();
+  });
+}
+
 describe("Workflows", () => {
   it('Filters the owner’s work and keeps removed history (spec/app/workflows/list.md, "Story: Find a workflow")', async () => {
-    const world = scene();
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { world, alpha, area } = await launchWorkflows(undefined, true);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Monthly statement", "Desk check"]);
 
     await press("Filter workflows");
@@ -69,11 +85,7 @@ describe("Workflows", () => {
   });
 
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
-    const world = scene();
-    world.phone = true;
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    const { alpha, area } = await launchWorkflows((world) => { world.phone = true; });
 
     const opener = button("Clock alarms");
     expect(opener?.textContent).toBe("Alarms");
@@ -155,11 +167,7 @@ describe("Workflows", () => {
   });
 
   it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
-    const world = scene();
-    world.workflows.stage = "Running";
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    const { world, alpha, area } = await launchWorkflows((w) => { w.workflows.stage = "Running"; });
     await choose("Monthly statement");
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
     await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
@@ -168,11 +176,7 @@ describe("Workflows", () => {
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
     expect(world.workflows.admissions).toHaveLength(1);
     expect(world.workflows.admissions[0]?.version).toBe("monthly-statement-v3");
-    await drawn(() => {
-      const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
-      if (!row) throw new Error("No run history");
-      row.click();
-    });
+    await openFirstRunHistory();
     await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Running");
     await seen(false);
     const reads = world.workflows.receiptReads;
@@ -228,19 +232,13 @@ describe("Workflows", () => {
     vi.stubGlobal("speechSynthesis", { speak, cancel });
     vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
     try {
-      const world = scene();
-      world.workflows.run = true;
-      world.workflows.stage = "Done";
-      const alpha = await openWorkflows(world);
-      const area = workflows.runtime(alpha);
-      await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+      const { alpha, area } = await launchWorkflows((w) => {
+        w.workflows.run = true;
+        w.workflows.stage = "Done";
+      });
       await choose("Monthly statement");
       await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
-      await drawn(() => {
-        const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
-        if (!row) throw new Error("No run history");
-        row.click();
-      });
+      await openFirstRunHistory();
       await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.text === "Text");
 
       await press("Read aloud");
@@ -263,12 +261,10 @@ describe("Workflows", () => {
   });
 
   it('Toggles a list row switch without navigating and tracks approval notices and Waiting for you badge (spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
-    const world = scene();
-    world.workflows.run = true;
-    world.workflows.stage = "Waiting";
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { world, alpha, area } = await launchWorkflows((w) => {
+      w.workflows.run = true;
+      w.workflows.stage = "Waiting";
+    }, true);
 
     const toggle = document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Turn Desk check off"]');
     expect(toggle).not.toBeNull();
@@ -279,11 +275,7 @@ describe("Workflows", () => {
 
     await choose("Monthly statement");
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
-    await drawn(() => {
-      const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
-      if (!row) throw new Error("No run history");
-      row.click();
-    });
+    await openFirstRunHistory();
     await until(alpha, area, Approvals, (state) => state.approval === "Waiting" && state.sheet);
     const toastsWhileWaiting = await area.runPromise(Toasts.use((machine) => machine.get()));
     expect(toastsWhileWaiting.kept.some((entry) => entry.area === "workflows-approval")).toBe(true);
@@ -296,11 +288,7 @@ describe("Workflows", () => {
   });
 
   it('Allows clearing the Clock snooze input without NaN snap-back and keeps AlarmLabel while Sent (spec/app/workflows/clock.md, "Story: Describe an alarm for Clock")', async () => {
-    const world = scene();
-    world.phone = true;
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    const { alpha, area } = await launchWorkflows((world) => { world.phone = true; });
 
     await press("Clock alarms");
     await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
@@ -317,10 +305,7 @@ describe("Workflows", () => {
   });
 
   it('Recovers from unanswered automation changes via checkChange and letGo (spec/app/workflows/automations.md, "Story: Act on an automation")', async () => {
-    const world = scene();
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { alpha, area } = await launchWorkflows(undefined, true);
 
     await choose("Desk check");
     await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");

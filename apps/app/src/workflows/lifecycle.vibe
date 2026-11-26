@@ -117,7 +117,7 @@ const declined = (failure: unknown) =>
   failure instanceof WorkflowActivationRejected || failure instanceof WorkflowPauseRejected || failure instanceof WorkflowLifecycleRejected
   || failure instanceof WorkflowMetadataRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
 
-effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
+effect function loadLifecycleDeps() {
   const machine = try Model.Machine
   const definition = try DefinitionWords
   const rows = try Rows
@@ -125,6 +125,11 @@ effect function changed(id: number, change: Change, version: number, name: numbe
   const { workflow } = try WorkflowsApi
   const state = try machine.get()
   const scope = ownerAt() catch () => ""
+  return { machine, definition, rows, store, workflow, state, scope }
+}
+
+effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
+  const { definition, rows, store, workflow, state, scope } = try loadLifecycleDeps()
   const exact = try definition.read(state.target)
   if (exact?.version !== version || !(try rows.sameOwner(scope, state.owner))) return { type: "changeAnswered", id, applied: false }
   const current = exact.workflow
@@ -174,15 +179,9 @@ effect function changed(id: number, change: Change, version: number, name: numbe
 }
 
 effect function checked(ticket: number, id: number): Event!!Needs {
-  const machine = try Model.Machine
-  const definition = try DefinitionWords
-  const rows = try Rows
-  const store = try KeyValueStore.KeyValueStore
-  const { workflow } = try WorkflowsApi
-  const state = try machine.get()
+  const { machine, definition, rows, store, workflow, state, scope } = try loadLifecycleDeps()
   const failed: Event = { type: "changeChecked", ticket, ok: false, found: false, version: Math.max(1, state.version) }
   const exact = try definition.read(state.target)
-  const scope = ownerAt() catch () => ""
   if (exact === undefined || !(try rows.sameOwner(scope, state.owner))) return failed
   const key = changeKey(scope, exact.workflow.id)
   const raw = (store.get(key) catch () => undefined)
@@ -239,8 +238,7 @@ const focus = applying(
   },
 )
 
-const sending = following(Model.Machine, (state) => Model.canSendChange(state), Model.Machine,
-  (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
+const sending = following(Model.Machine, Model.canSendChange, Model.Machine, (ready): Event | undefined => (ready ? { type: "sendChange" } : undefined))
 
 export effect function reviewName(row: number, proposed: string, unfinished: boolean, interrupted: boolean): void!!(Model.Machine | DefinitionWords) {
   const machine = try Model.Machine

@@ -14,12 +14,36 @@ underAct();
 afterEach(closeAll);
 
 describe("Camera on a phone", () => {
-  it("Frame the shot and take photos and videos (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
-    const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
+  async function openCamera(world: ReturnType<typeof scene>, withPhotos = false) {
+    const mounts = withPhotos ? only("home", "view:Camera", "view:Photos", "notice") : only("home", "view:Camera", "notice");
+    const { alpha } = await open(world, mounts);
     const runtime = camera.runtime(alpha);
     await press("Camera");
     await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    return { alpha, runtime };
+  }
+
+  async function beginRecording(alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof camera.runtime>, stage: "Opening" | "Running" = "Running") {
+    await press("Video mode");
+    await until(alpha, runtime, Machine, (state) => state.mode === "Video");
+    await press("Record video");
+    await until(alpha, runtime, Machine, (state) => state.film.stage === stage);
+  }
+
+  async function captureLast(alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof camera.runtime>, world: ReturnType<typeof scene>, kind: "photo" | "video") {
+    if (kind === "video") {
+      await beginRecording(alpha, runtime, "Running");
+      await press("Stop recording");
+      await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
+    } else {
+      await press("Take photo");
+      await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
+    }
+  }
+
+  it("Frame the shot and take photos and videos (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha, runtime } = await openCamera(world);
 
     await press("Framing grid");
     await until(alpha, runtime, Machine, (state) => state.grid);
@@ -35,10 +59,7 @@ describe("Camera on a phone", () => {
     expect(world.camera.photos).toMatchObject([{ saveToGallery: true, thumbnailOnly: true }]);
 
     // spec/app/camera/index.md, "Story: Take photos and videos"
-    await press("Video mode");
-    await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-    await press("Record video");
-    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    await beginRecording(alpha, runtime, "Running");
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
     expect(button("Record video")).toBeDefined();
@@ -57,13 +78,8 @@ describe("Camera on a phone", () => {
     const world = { ...scene(), phone: true };
     let recorderOpened = () => {};
     world.camera.recordingGate = new Promise<void>((resolve) => { recorderOpened = resolve; });
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-    await press("Video mode");
-    await press("Record video");
-    await until(alpha, runtime, Machine, (state) => state.film.stage === "Opening");
+    const { alpha, runtime } = await openCamera(world);
+    await beginRecording(alpha, runtime, "Opening");
 
     await press("Back to apps");
     await hardware("back");
@@ -72,8 +88,8 @@ describe("Camera on a phone", () => {
     expect(world.camera.savedVideos).toHaveLength(0);
     await drawn(recorderOpened);
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    expect(button("Record video")).toBeDefined();
     expect(world.camera.savedVideos).toHaveLength(1);
+    expect(button("Record video")).toBeDefined();
 
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => !state.showing);
@@ -82,10 +98,7 @@ describe("Camera on a phone", () => {
   it("Volume stays with Android while Camera asks about the microphone (spec/app/camera/index.md, \"Volume keys fire the available shutter while Camera is ready for the owner\")", async () => {
     const world = { ...scene(), phone: true };
     world.camera.microphone = "denied";
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    const { alpha, runtime } = await openCamera(world);
     await expect.poll(() => world.camera.volumeShutter).toBe(true);
     await press("Video mode");
     await expect.poll(() => world.camera.volumeShutter).toBe(false);
@@ -105,13 +118,8 @@ describe("Camera on a phone", () => {
     const world = { ...scene(), phone: true };
     let releaseThumbnail = () => {};
     world.photos.readGate = new Promise<void>((resolve) => { releaseThumbnail = resolve; });
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-    await press("Video mode");
-    await press("Record video");
-    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    const { alpha, runtime } = await openCamera(world);
+    await beginRecording(alpha, runtime, "Running");
 
     const image = world.photos.rows[0]?.image ?? "";
     world.photos.rows.unshift({
@@ -136,21 +144,8 @@ describe("Camera on a phone", () => {
 
   it.each(["photo", "video"] as const)("Open the last owned %s without library access (spec/app/camera/index.md, \"The last capture opens in Photos\")", async (kind) => {
     const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-    if (kind === "video") {
-      await press("Video mode");
-      await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-      await press("Record video");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
-      await press("Stop recording");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    } else {
-      await press("Take photo");
-      await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
-    }
+    const { alpha, runtime } = await openCamera(world, true);
+    await captureLast(alpha, runtime, world, kind);
 
     const playback = "https://localhost/_alpha_video_/capture.mp4";
     world.photos.rows.unshift({
@@ -170,12 +165,8 @@ describe("Camera on a phone", () => {
   it("An aggregate camera URI cannot choose a permitted row on another volume (spec/app/camera/index.md, \"The last capture opens in Photos\")", async () => {
     const world = { ...scene(), phone: true };
     world.photos.access = { scope: "full", images: "full", videos: "full" };
-    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-    await press("Take photo");
-    await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
+    const { alpha, runtime } = await openCamera(world, true);
+    await captureLast(alpha, runtime, world, "photo");
 
     world.photos.rows.unshift({
       id: "m:a0b1-c2d3:i:1", name: "Different still.jpg", owned: false, kind: "image", image: "",
@@ -190,22 +181,8 @@ describe("Camera on a phone", () => {
   it.each(["photo", "video"] as const)("Open the exact owned %s with full Photos access (spec/app/camera/index.md, \"The last capture opens in Photos\")", async (kind) => {
     const world = { ...scene(), phone: true };
     world.photos.access = { scope: "full", images: "full", videos: "full" };
-    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-
-    if (kind === "video") {
-      await press("Video mode");
-      await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-      await press("Record video");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
-      await press("Stop recording");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    } else {
-      await press("Take photo");
-      await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
-    }
+    const { alpha, runtime } = await openCamera(world, true);
+    await captureLast(alpha, runtime, world, kind);
 
     if (kind === "video") await expect.poll(() => world.photos.readCount).toBe(1);
     const readsInCamera = world.photos.readCount;
@@ -344,10 +321,7 @@ describe("Camera on a phone", () => {
 
   it("Recovers tap-to-focus after a lost pointer capture during pinch (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
     const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    const { alpha, runtime } = await openCamera(world);
 
     const viewfinder = button("Viewfinder. Tap to focus or pinch to zoom");
     if (!viewfinder) throw new Error("viewfinder button is missing");
@@ -367,13 +341,8 @@ describe("Camera on a phone", () => {
 
   it("Checks and saves a truncated recording when size exceeds 100 MB (spec/app/camera/recording.md, \"Reaching 100 MB stops the recording and keeps what fits: a piece that would not fit is left out, never the whole video\")", async () => {
     const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-    await press("Video mode");
-    await press("Record video");
-    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    const { alpha, runtime } = await openCamera(world);
+    await beginRecording(alpha, runtime, "Running");
 
     await drawn(() => runtime.runPromise(Effect.flatMap(Machine, (m) => m.send({ type: "chunk", piece: 10_000, now: 0 }, "Phone"))));
     await drawn(() => runtime.runPromise(Effect.flatMap(Machine, (m) => m.send({ type: "chunk", piece: 104_857_600, now: 0 }, "Phone"))));

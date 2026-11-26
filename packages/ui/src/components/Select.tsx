@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn.ts";
-import { isInToastRegion, useLayerRef, usePortalContainer } from "../lib/layers.tsx";
+import { useLayerSurface } from "../lib/layers.tsx";
 import { field, floatingPanel, floatingRow } from "../lib/styles.ts";
 
 export type SelectProps = ComponentProps<typeof SelectPrimitive.Root>;
@@ -39,20 +39,16 @@ export function SelectTrigger({ placeholder, invalid = false, className, ...prop
 
 /** The floating list of `SelectItem`s, as wide as its trigger. */
 export function SelectContent({ position = "popper", sideOffset = 8, collisionPadding = 8, container, className, children, ref, onPointerDownOutside, ...props }: SelectContentProps) {
-  const defaultContainer = usePortalContainer();
-  const layerRef = useLayerRef("MenuLayer", ref);
+  const { container: portalContainer, contentProps: { ref: layerRef, onPointerDownOutside: handlePointerDownOutside } } = useLayerSurface("MenuLayer", { container, ref, onPointerDownOutside });
   return (
-    <SelectPrimitive.Portal container={container ?? defaultContainer}>
+    <SelectPrimitive.Portal container={portalContainer}>
       <SelectPrimitive.Content
         ref={layerRef}
         position={position}
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         className={cn(floatingPanel, "max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) overflow-hidden p-0", className)}
-        onPointerDownOutside={(event) => {
-          if (isInToastRegion(event.target)) event.preventDefault();
-          onPointerDownOutside?.(event);
-        }}
+        onPointerDownOutside={handlePointerDownOutside}
         {...props}
       >
         <SelectPrimitive.Viewport className="p-1.5">{children}</SelectPrimitive.Viewport>

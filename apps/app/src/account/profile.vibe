@@ -42,7 +42,7 @@ export type Profile =
 const reading: Profile = { tag: "Reading" }
 
 /** Resident reactive shelf holding the verified account profile for Settings and the Account sheet. */
-export service AccountProfile {
+service AccountProfile {
   readonly shelf: Shelf<Profile>
 }
 

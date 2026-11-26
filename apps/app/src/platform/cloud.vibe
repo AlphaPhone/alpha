@@ -74,6 +74,7 @@ module web {
   }
 }
 import { answer, asked, boundedSignal, unauthorized } from web
+export { boundedSignal }
 
 /** eliza's client takes an origin and a fetch: this origin is never reached, since each platform's fetch below sends by its own way. */
 const placeholder = "https://cloud.invalid"

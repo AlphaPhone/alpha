@@ -53,6 +53,7 @@ export { photoEmailMaxBytes }
 export type { PhotoAttachmentUse }
 
 module browser {
+  import { Clock, Effect } from "effect"
   import { browserPhotoThumbnail, type BrowserEditFrame } from "./photoCanvas.vibe"
 
   /** A browser capture, stored in the origin with its original pixels and optional camera thumbnail. */
@@ -89,50 +90,66 @@ module browser {
   /** @throws {never} */
   export const captureEvent = (): string => event
 
+  function openWithGuard(
+    request: IDBOpenDBRequest,
+    onUpgrade: (event: IDBVersionChangeEvent, isBlocked: () => boolean) => void,
+    onOpen: (database: IDBDatabase) => void,
+    onError: (error: DOMException | null) => void,
+    onBlocked: (error: Error) => void,
+  ): void {
+    let blocked = false
+    request.onblocked = () => {
+      blocked = true
+      onBlocked(new Error("The photo library is open in another tab."))
+    }
+    request.onupgradeneeded = (event) => onUpgrade(event, () => blocked)
+    request.onsuccess = () => {
+      const database = request.result
+      database.onversionchange = () => database.close()
+      if (blocked) database.close()
+      else onOpen(database)
+    }
+    request.onerror = () => onError(request.error)
+  }
+
   async function storage(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open("alpha-photo-library", 4)
-      let blocked = false
-      request.onblocked = () => {
-        blocked = true
-        reject(new Error("The photo library is open in another tab."))
-      }
-      request.onupgradeneeded = (event) => {
-        const database = request.result
-        const upgrade = request.transaction
-        if (!database.objectStoreNames.contains(store)) database.createObjectStore(store, { keyPath: "id" })
-        if (!database.objectStoreNames.contains(edits)) database.createObjectStore(edits)
-        if (!database.objectStoreNames.contains(albums)) database.createObjectStore(albums, { keyPath: "id" })
-        if (!database.objectStoreNames.contains(originals)) database.createObjectStore(originals)
-        const data = upgrade?.objectStore(originals)
-        if (event.oldVersion !== 1 || upgrade === null || data === undefined) return
-        const walk = upgrade.objectStore(store).openCursor()
-        walk.onsuccess = () => {
-          const cursor = walk.result
-          if (!cursor) return
-          const row: unknown = cursor.value
-          if (typeof row === "object" && row !== null && "file" in row && row.file instanceof Blob) {
-            const { file, ...facts } = row
-            data.add(file, cursor.primaryKey)
-            cursor.update({ ...facts, mimeType: file.type, size: file.size })
+      openWithGuard(
+        request,
+        (event) => {
+          const database = request.result
+          const upgrade = request.transaction
+          if (!database.objectStoreNames.contains(store)) database.createObjectStore(store, { keyPath: "id" })
+          if (!database.objectStoreNames.contains(edits)) database.createObjectStore(edits)
+          if (!database.objectStoreNames.contains(albums)) database.createObjectStore(albums, { keyPath: "id" })
+          if (!database.objectStoreNames.contains(originals)) database.createObjectStore(originals)
+          const data = upgrade?.objectStore(originals)
+          if (event.oldVersion !== 1 || upgrade === null || data === undefined) return
+          const walk = upgrade.objectStore(store).openCursor()
+          walk.onsuccess = () => {
+            const cursor = walk.result
+            if (!cursor) return
+            const row: unknown = cursor.value
+            if (typeof row === "object" && row !== null && "file" in row && row.file instanceof Blob) {
+              const { file, ...facts } = row
+              data.add(file, cursor.primaryKey)
+              cursor.update({ ...facts, mimeType: file.type, size: file.size })
+            }
+            cursor.continue()
           }
-          cursor.continue()
-        }
-      }
-      request.onsuccess = () => {
-        const database = request.result
-        database.onversionchange = () => database.close()
-        if (blocked) database.close()
-        else resolve(database)
-      }
-      request.onerror = () => reject(request.error)
+        },
+        resolve,
+        reject,
+        reject,
+      )
     })
   }
 
   let lastTimestamp = 0
 
   function monotonicNow(provided?: number): number {
-    const candidate = provided !== undefined && Number.isSafeInteger(provided) ? provided : Date.now()
+    const candidate = provided !== undefined && Number.isSafeInteger(provided) ? provided : Effect.runSync(Clock.currentTimeMillis)
     lastTimestamp = Math.max(lastTimestamp, candidate)
     return lastTimestamp
   }
@@ -552,22 +569,35 @@ module browser {
     return undefined
   }
 
+  function runEditReceiptTx(
+    database: IDBDatabase,
+    stores: string | readonly string[],
+    run: (tx: IDBTransaction, results: IDBObjectStore, setResult: (next: BrowserEditReceipt) => void) => void,
+  ): Promise<BrowserEditReceipt> {
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(stores, "readwrite")
+      let result: BrowserEditReceipt = { status: "not-started" }
+      tx.oncomplete = () => resolve(result)
+      tx.onabort = () => reject(tx.error)
+      run(tx, tx.objectStore(edits), (next) => { result = next })
+    })
+  }
+
   /** A receipt and its copy or replacement are committed by the same IndexedDB transaction. */
   export async function saveBrowserEdit(request: BrowserEditSave): Promise<BrowserEditReceipt> {
     if (!isBrowserEdit(request.operation)) throw new Error("Invalid photo edit identity.")
     const database = await storage()
     const { source, frame, replace, operation } = request
     try {
-      const receipt = await new Promise<BrowserEditReceipt>((resolve, reject) => {
-        const tx = database.transaction([store, originals, edits], "readwrite")
+      const receipt = await runEditReceiptTx(database, [store, originals, edits], (tx, results, setResult) => {
         const captures = tx.objectStore(store)
-        const results = tx.objectStore(edits)
-        let result: BrowserEditReceipt = { status: "not-started" }
-        tx.oncomplete = () => resolve(result)
-        tx.onabort = () => reject(tx.error)
         const prior = results.get(operation)
         prior.onsuccess = () => {
-          if (prior.result !== undefined) { result = readReceipt(prior.result) ?? result; return }
+          if (prior.result !== undefined) {
+            const saved = readReceipt(prior.result)
+            if (saved !== undefined) setResult(saved)
+            return
+          }
           const current = captures.get(source.id)
           current.onsuccess = () => {
             const original: unknown = current.result
@@ -575,8 +605,9 @@ module browser {
               ? matching(valid(original) ? original : undefined, source)
               : !replace && (original === undefined || matching(valid(original) ? original : undefined, source)))
             if (!isCurrent) {
-              result = { status: "stale" }
-              results.add(result, operation)
+              const stale: BrowserEditReceipt = { status: "stale" }
+              setResult(stale)
+              results.add(stale, operation)
               return
             }
             const created = replace ? source.created : monotonicNow()
@@ -592,8 +623,9 @@ module browser {
               captures.add(item)
               tx.objectStore(originals).add(frame.file, id)
             }
-            result = { status: "saved", id, name, replaced: replace }
-            results.add(result, operation)
+            const saved: BrowserEditReceipt = { status: "saved", id, name, replaced: replace }
+            setResult(saved)
+            results.add(saved, operation)
           }
         }
       })
@@ -607,17 +639,12 @@ module browser {
     if (!isBrowserEdit(operation)) throw new Error("Invalid photo edit identity.")
     const database = await storage()
     try {
-      return await new Promise((resolve, reject) => {
-        const tx = database.transaction(edits, "readwrite")
-        const results = tx.objectStore(edits)
-        let result: BrowserEditReceipt = { status: "not-started" }
-        tx.oncomplete = () => resolve(result)
-        tx.onabort = () => reject(tx.error)
+      return await runEditReceiptTx(database, edits, (_tx, results, setResult) => {
         const request = results.get(operation)
         request.onsuccess = () => {
           const receipt = readReceipt(request.result)
-          if (receipt !== undefined) result = receipt
-          else results.put(result, operation)
+          if (receipt !== undefined) setResult(receipt)
+          else results.put({ status: "not-started" } satisfies BrowserEditReceipt, operation)
         }
       })
     } finally { database.close() }
@@ -633,23 +660,17 @@ module browser {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(name)
       let absent = false
-      let blocked = false
-      request.onblocked = () => {
-        blocked = true
-        reject(new Error("The photo library is open in another tab."))
-      }
-      request.onupgradeneeded = (event) => {
-        if (blocked || event.oldVersion !== 0) return
-        absent = true
-        request.transaction?.abort()
-      }
-      request.onsuccess = () => {
-        const database = request.result
-        database.onversionchange = () => database.close()
-        if (blocked) database.close()
-        else resolve(database)
-      }
-      request.onerror = () => { if (absent) resolve(undefined); else reject(request.error) }
+      openWithGuard(
+        request,
+        (event, isBlocked) => {
+          if (isBlocked() || event.oldVersion !== 0) return
+          absent = true
+          request.transaction?.abort()
+        },
+        resolve,
+        (error) => { if (absent) resolve(undefined); else reject(error) },
+        reject,
+      )
     })
   }
 

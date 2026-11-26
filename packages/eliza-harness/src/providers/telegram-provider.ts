@@ -16,6 +16,7 @@ import {
   createProviderServer,
   ownGet,
   paginateSlice,
+  pruneRecordCap,
   randomToken,
   sendJson,
 } from "./shared.ts";
@@ -177,14 +178,6 @@ const TWO_FACTOR_TEST_PHONE = "+15550109999";
 const MAX_UPDATES = 1000;
 const MAX_TRANSIENT = 500;
 const MAX_AUTH_ATTEMPTS = 5;
-
-function pruneRecordCap(record: Record<string, unknown>, max: number): void {
-  const keys = Object.keys(record);
-  if (keys.length <= max) return;
-  for (const key of keys.slice(0, keys.length - max)) {
-    delete record[key];
-  }
-}
 
 function peerKey(peer: TelegramPeer): string {
   switch (peer._type) {
@@ -879,25 +872,37 @@ function handleSendMessage(req: ParsedRequest, res: ServerResponse, ctx: Provide
   });
 }
 
+function resolveMessageTarget(
+  req: ParsedRequest,
+  res: ServerResponse,
+  state: TelegramState,
+  idField: "id" | "msg_id",
+): { readonly peer: TelegramPeer; readonly key: string; readonly target: TelegramMessage } | undefined {
+  const peer = parsePeer(req.params.peer);
+  const id = asNumber(req.params[idField]);
+  if (!peer || id === undefined) {
+    tgError(res, 400, "MESSAGE_ID_INVALID");
+    return undefined;
+  }
+  const key = peerKey(peer);
+  const target = (ownGet(state.messages, key) ?? []).find((msg) => msg.id === id);
+  if (!target) {
+    tgError(res, 404, "MESSAGE_ID_INVALID");
+    return undefined;
+  }
+  return { peer, key, target };
+}
+
 function handleEditMessage(
   req: ParsedRequest,
   res: ServerResponse,
   ctx: ProviderContext<TelegramState>,
 ): void {
   const state = ctx.getState();
-  const peer = parsePeer(req.params.peer);
-  const id = asNumber(req.params.id);
+  const resolved = resolveMessageTarget(req, res, state, "id");
+  if (!resolved) return;
+  const { peer, key, target } = resolved;
   const text = asString(req.params.message);
-  if (!peer || id === undefined) {
-    tgError(res, 400, "MESSAGE_ID_INVALID");
-    return;
-  }
-  const key = peerKey(peer);
-  const target = (ownGet(state.messages, key) ?? []).find((msg) => msg.id === id);
-  if (!target) {
-    tgError(res, 404, "MESSAGE_ID_INVALID");
-    return;
-  }
   if (!target.out) {
     tgError(res, 403, "MESSAGE_AUTHOR_REQUIRED");
     return;
@@ -982,18 +987,9 @@ function handleSendReaction(
   ctx: ProviderContext<TelegramState>,
 ): void {
   const state = ctx.getState();
-  const peer = parsePeer(req.params.peer);
-  const msgId = asNumber(req.params.msg_id);
-  if (!peer || msgId === undefined) {
-    tgError(res, 400, "MESSAGE_ID_INVALID");
-    return;
-  }
-  const key = peerKey(peer);
-  const target = (ownGet(state.messages, key) ?? []).find((msg) => msg.id === msgId);
-  if (!target) {
-    tgError(res, 404, "MESSAGE_ID_INVALID");
-    return;
-  }
+  const resolved = resolveMessageTarget(req, res, state, "msg_id");
+  if (!resolved) return;
+  const { peer, key, target } = resolved;
   const rawReaction = asString(req.params.reaction);
   const update = applyTelegramReaction(
     ctx,

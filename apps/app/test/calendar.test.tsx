@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Machine as View } from "../gen/app__calendar.effect.vibe";
+import { type Calendar as CalendarView, Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Held } from "../gen/app__calendar__deletions.effect.vibe";
@@ -93,6 +93,19 @@ async function fromMonth(pill: string) {
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
 const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Calendar" })));
 
+/** Mount Calendar on `world`, bring it to front, and wait until `ready` holds on its view machine. */
+async function mountCalendar(
+  world: ReturnType<typeof morning>,
+  areas: ReturnType<typeof only>,
+  ready: (state: CalendarView) => boolean,
+) {
+  const { alpha } = await open(world, areas);
+  const runtime = calendar.runtime(alpha);
+  await openCalendar(alpha);
+  await until(alpha, runtime, View, ready);
+  return { alpha, runtime };
+}
+
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
 describe("Calendar without a connected account", () => {
@@ -113,10 +126,7 @@ describe("Calendar without a connected account", () => {
   it("Shows the granted local calendar while the account is signed out (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
     const world = { ...morning(true), signedIn: false };
     world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (state) => state.owner === 0 && !state.connected && state.phoneRows === 1);
+    await mountCalendar(world, only("view:Calendar"), (state) => state.owner === 0 && !state.connected && state.phoneRows === 1);
     expect(titles()).toEqual(["Gym"]);
     expect(document.querySelector('[aria-label="Calendar timeline"]')?.textContent).not.toContain("Not connected");
     expect(button("Open Calendar settings")).toBeUndefined();
@@ -126,12 +136,8 @@ describe("Calendar without a connected account", () => {
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my days (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/calendar/index.md, \"Story: Move through the days\")", async () => {
     const world = morning(phone);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-
     // spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar"), (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
     expect(titles()).toEqual(["Standup", "Team lunch"]);
 
     // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": only a phone has a calendar of its own.
@@ -182,10 +188,7 @@ describe("on a phone", () => {
   it("Look at an event (spec/app/calendar/index.md, \"Story: Look at an event\")", async () => {
     const world = morning(true);
     world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.googleRows === 2 && s.phoneRows === 1);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar"), (s) => s.googleRows === 2 && s.phoneRows === 1);
 
     // spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"; spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes"
     await tap("Team lunch");
@@ -207,10 +210,7 @@ describe("on a phone", () => {
   it("Write an event (spec/app/calendar/editor.md, \"Story: Write an event\"; spec/app/calendar/editor.md, \"Story: Never create an event twice\"; spec/app/calendar/editor.md, \"Story: Delete an event, or answer an invitation\")", async () => {
     const world = morning(true);
     world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar", "notice"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.phoneRows === 1);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 1);
 
     // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"
     await press("New event");
@@ -368,10 +368,7 @@ describe("on a phone", () => {
 describe("in a browser", () => {
   it("Search my events and choose which calendars I see (spec/app/calendar/index.md, \"Story: Search my events and choose which calendars I see\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.googleRows === 2);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar"), (s) => s.googleRows === 2);
 
     // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
     await press("Search events");
@@ -395,10 +392,7 @@ describe("in a browser", () => {
 
   it("Answer an invitation (spec/app/calendar/editor.md, \"Story: Delete an event, or answer an invitation\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.googleRows === 2);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar"), (s) => s.googleRows === 2);
 
     // spec/app/calendar/editor.md, "An invitation is answered Going or Maybe once, at the revision shown, and Decline is the deletion's decline"; spec/app/calendar/editor.md, "A confirmed answer holds its event until a read shows it"; spec/app/calendar/writing.md, "An applied create, change or answer is read back; only a read back that finds it as asked says saved"
     await tap("Team lunch");
@@ -485,10 +479,7 @@ describe("Calendar Wave 1 regressions", () => {
   it("Keeps Ends on visible for all-day events, keeps new Phone repeats on direct save, and enforces inertness and deleted filtering (spec/app/calendar/writing.md, \"Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event\")", async () => {
     const world = morning(true);
     world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar", "notice"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.phoneRows === 1 && s.googleRows === 2);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 1 && s.googleRows === 2);
 
     // spec/app/calendar/index.md, "The layout menu and the month dialog open over the days, never over an open event"
     await chooseDate();
@@ -536,10 +527,7 @@ describe("Calendar Wave 1 regressions", () => {
 
   it("Preserves Google connected state on transient 503, marks Link unready on browser failure, and expires agent proposals (spec/app/calendar/link.md, \"Cloud overload is unavailable and retryable, never a changed account\"; spec/app/calendar/agent.md, \"The status follows the request's state and whether its owner was verified\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar", "notice"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
 
     // spec/app/calendar/agent.md, "The status follows the request's state and whether its owner was verified"
     const start = new Date(world.at(1, 15)).toISOString();
@@ -572,10 +560,7 @@ describe("Calendar Wave 1 regressions", () => {
 
   it("Unhides declined invitations via readShows once the calendar read shows the decline (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar", "notice"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.googleRows === 2);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.googleRows === 2);
     await tap("Team lunch");
     await until(alpha, runtime, View, (s) => s.open !== 0);
     await press("No");

@@ -69,34 +69,29 @@ export effect function closeReminderEditor(): boolean!!(Editor.Machine | KeyValu
   return true
 }
 
-/** Resolve an editor save conflict by keeping the owner's local edits on top of the latest revision. */
-export effect function keepMineReminderDraft(): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
+effect function resolveConflictDraft(
+  kind: "keepMine" | "takeSaved",
+  resolve: (current: ReminderEditorFields, latest: ReminderItemRecord) => ReminderEditorFields,
+): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
   const editor = try Editor.Machine
   const state = try editor.get()
-  if (!Editor.canKeepMine(state)) return false
-  try contained(editor.send({ type: "keepMine" }), "keeping local reminder edits")
-  const draftShelf = (try EditorDraftShelf).shelf
-  const current = draftShelf.snapshot()
+  const allowed = kind === "keepMine" ? Editor.canKeepMine(state) : Editor.canTakeSaved(state)
+  if (!allowed) return false
+  try contained(editor.send({ type: kind }), kind === "keepMine" ? "keeping local reminder edits" : "taking saved reminder changes")
+  const current = (try EditorDraftShelf).shelf.snapshot()
   const latest = current.itemId !== null ? (try RemindersShelf).store.findItem(current.itemId) : undefined
-  if (latest !== undefined) {
-    try persistEditorDraft({ ...current, revision: latest.revision })
-  }
+  if (latest !== undefined) try persistEditorDraft(resolve(current, latest))
   return true
+}
+
+/** Resolve an editor save conflict by keeping the owner's local edits on top of the latest revision. */
+export effect function keepMineReminderDraft(): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
+  return try resolveConflictDraft("keepMine", (current, latest) => ({ ...current, revision: latest.revision }))
 }
 
 /** Resolve an editor save conflict by reloading the latest saved reminder fields. */
 export effect function takeSavedReminderDraft(): boolean!!(Editor.Machine | KeyValueStore.KeyValueStore | EditorDraftShelf | RemindersShelf) {
-  const editor = try Editor.Machine
-  const state = try editor.get()
-  if (!Editor.canTakeSaved(state)) return false
-  try contained(editor.send({ type: "takeSaved" }), "taking saved reminder changes")
-  const draftShelf = (try EditorDraftShelf).shelf
-  const current = draftShelf.snapshot()
-  const latest = current.itemId !== null ? (try RemindersShelf).store.findItem(current.itemId) : undefined
-  if (latest !== undefined) {
-    try persistEditorDraft(fieldsFromItem(latest))
-  }
-  return true
+  return try resolveConflictDraft("takeSaved", (_current, latest) => fieldsFromItem(latest))
 }
 
 /** Apply field edits to the active draft, advancing the verified Editor machine and persisting the draft. */

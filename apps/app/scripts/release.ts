@@ -33,13 +33,13 @@ function shellQuote(value: string): string {
 }
 
 function pidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (!(pid > 0 && Number.isSafeInteger(pid))) return false;
   try {
     process.kill(pid, 0);
-    return true;
-  } catch (cause) {
-    return (cause as NodeJS.ErrnoException).code === "EPERM";
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
   }
+  return true;
 }
 
 export class UsageError extends Data.TaggedError("UsageError")<{ readonly message: string }> {}

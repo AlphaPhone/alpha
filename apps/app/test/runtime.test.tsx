@@ -58,6 +58,39 @@ function fakeStore(
   });
 }
 
+type SampleState = typeof Sample.initial;
+
+async function waitSampleStatus(
+  runtime: ManagedRuntime.ManagedRuntime<Sample.Machine, unknown>,
+  status: SampleState["list"]["status"],
+): Promise<SampleState> {
+  let latest: SampleState = Sample.initial;
+  await vi.waitFor(async () => {
+    latest = await runtime.runPromise(Sample.Machine.use((m) => m.get()));
+    expect(latest.list.status).toBe(status);
+  });
+  return latest;
+}
+
+function keptSampleRuntime(
+  store: KeyValueStore.KeyValueStore,
+  carry: (fx: Sample.Effect) => Job<Sample.Event, Attempts, []>,
+) {
+  return ManagedRuntime.make(Layer.provideMerge(
+    whole(reacting(Sample, { keep: 1, open: [{ type: "reopen" }], carry })),
+    harness(store, 30_000),
+  ));
+}
+
+function recordAttemptKeyCarry(keysSeen: string[]) {
+  return (fx: Sample.Effect): Job<Sample.Event, Attempts, []> => fx.tag === "Fetch"
+    ? answer("fetch", Effect.flatMap(Attempts, (a) => Effect.map(a.key(1), (idKey): Sample.Event => {
+      keysSeen.push(idKey);
+      return { type: "loaded", ticket: fx.ticket, titles: [] };
+    })), { type: "failed", ticket: fx.ticket })
+    : answer("other", Effect.never, { type: "failed", ticket: 0 });
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -104,19 +137,11 @@ describe("reactor.vibe timers, jobs, permits, and kept() durability", () => {
       expect([before.list.status, before.list.ticket]).toEqual(["Loading", 2]);
 
       await runtime.runPromise(TestClock.adjust(10_000));
-      await vi.waitFor(async () => {
-        const s = await runtime.runPromise(Sample.Machine.use((m) => m.get()));
-        expect(s.list.status).toBe("Loaded");
-      });
-      const settled = await runtime.runPromise(Sample.Machine.use((m) => m.get()));
+      const settled = await waitSampleStatus(runtime, "Loaded");
       expect(settled.titles).toEqual(["ticket-2"]);
 
       await runtime.runPromise(Sample.Machine.use((m) => m.send({ type: "refresh" })));
-      await vi.waitFor(async () => {
-        const s = await runtime.runPromise(Sample.Machine.use((m) => m.get()));
-        expect(s.list.status).toBe("Loaded");
-      });
-      const rearmed = await runtime.runPromise(Sample.Machine.use((m) => m.get()));
+      const rearmed = await waitSampleStatus(runtime, "Loaded");
       expect(rearmed.titles).toEqual(["ticket-3"]);
     } finally {
       await runtime.dispose();
@@ -176,25 +201,19 @@ describe("reactor.vibe timers, jobs, permits, and kept() durability", () => {
 
   // spec/kit/read.md, "Only the newest ticket's answer is taken, once"
   it("sends lost when an answer stream closes empty, allows tell without taken, and suppresses unticketed lost on stale ticket refusal (spec/kit/read.md, \"Only the newest ticket's answer is taken, once\")", async () => {
-    const store = fakeStore();
-    const base = harness(store, 20_000);
-    const layer = Layer.provideMerge(
+    const emptyStreamRuntime = ManagedRuntime.make(Layer.provideMerge(
       whole(reacting(Sample, {
         carry: (fx): Job<Sample.Event, never, []> => fx.tag === "Fetch"
           ? stream("fetch", Stream.empty, { type: "failed", ticket: fx.ticket })
           : answer("other", Effect.never, { type: "failed", ticket: 0 }),
       })),
-      base,
-    );
-    const runtime = ManagedRuntime.make(layer);
+      harness(fakeStore(), 20_000),
+    ));
     try {
-      await runtime.runPromise(Sample.Machine.use((m) => m.send({ type: "refresh" })));
-      await vi.waitFor(async () => {
-        const s = await runtime.runPromise(Sample.Machine.use((m) => m.get()));
-        expect(s.list.status).toBe("Failed");
-      });
+      await emptyStreamRuntime.runPromise(Sample.Machine.use((m) => m.send({ type: "refresh" })));
+      await waitSampleStatus(emptyStreamRuntime, "Failed");
     } finally {
-      await runtime.dispose();
+      await emptyStreamRuntime.dispose();
     }
 
     let refusedCount = 0;
@@ -283,20 +302,7 @@ describe("reactor.vibe timers, jobs, permits, and kept() durability", () => {
       },
     });
     const keysSeen: string[] = [];
-    const layer = Layer.provideMerge(
-      whole(reacting(Sample, {
-        keep: 1,
-        open: [{ type: "reopen" }],
-        carry: (fx): Job<Sample.Event, never, []> => fx.tag === "Fetch"
-          ? answer("fetch", Effect.flatMap(Attempts, (a) => Effect.map(a.key(1), (idKey): Sample.Event => {
-            keysSeen.push(idKey);
-            return { type: "loaded", ticket: fx.ticket, titles: [] };
-          })), { type: "failed", ticket: fx.ticket })
-          : answer("other", Effect.never, { type: "failed", ticket: 0 }),
-      })),
-      harness(store, 30_000),
-    );
-    const runtime = ManagedRuntime.make(layer);
+    const runtime = keptSampleRuntime(store, recordAttemptKeyCarry(keysSeen));
     try {
       await runtime.runPromise(Sample.Machine.use((m) => m.send({ type: "refresh" })));
       await vi.waitFor(() => expect(keysSeen.length).toBe(1));
@@ -311,19 +317,7 @@ describe("reactor.vibe timers, jobs, permits, and kept() durability", () => {
         [key, validState],
         [`${key}.epoch`, "persisted-epoch-1"],
       ]);
-      const secondRuntime = ManagedRuntime.make(Layer.provideMerge(
-        whole(reacting(Sample, {
-          keep: 1,
-          open: [{ type: "reopen" }],
-          carry: (fx): Job<Sample.Event, never, []> => fx.tag === "Fetch"
-            ? answer("fetch", Effect.flatMap(Attempts, (a) => Effect.map(a.key(1), (idKey): Sample.Event => {
-              keysSeen.push(idKey);
-              return { type: "loaded", ticket: fx.ticket, titles: [] };
-            })), { type: "failed", ticket: fx.ticket })
-            : answer("other", Effect.never, { type: "failed", ticket: 0 }),
-        })),
-        harness(fakeStore(secondBacking), 30_000),
-      ));
+      const secondRuntime = keptSampleRuntime(fakeStore(secondBacking), recordAttemptKeyCarry(keysSeen));
       try {
         await secondRuntime.runPromise(Sample.Machine.use((m) => m.send({ type: "refresh" })));
         await vi.waitFor(() => expect(keysSeen.length).toBe(2));
@@ -351,22 +345,15 @@ describe("reactor.vibe timers, jobs, permits, and kept() durability", () => {
           : undefined
       ),
     });
-    const corruptRuntime = ManagedRuntime.make(Layer.provideMerge(
-      whole(reacting(Sample, {
-        keep: 1,
-        open: [{ type: "reopen" }],
-        carry: (fx): Job<Sample.Event, never, []> => fx.tag === "Fetch"
-          ? answer("fetch", Effect.succeed<Sample.Event>({ type: "loaded", ticket: fx.ticket, titles: ["ok"] }), { type: "failed", ticket: fx.ticket })
-          : answer("other", Effect.never, { type: "failed", ticket: 0 }),
-      })),
-      harness(corruptStore, 30_000),
-    ));
+    const corruptRuntime = keptSampleRuntime(
+      corruptStore,
+      (fx): Job<Sample.Event, never, []> => fx.tag === "Fetch"
+        ? answer("fetch", Effect.succeed<Sample.Event>({ type: "loaded", ticket: fx.ticket, titles: ["ok"] }), { type: "failed", ticket: fx.ticket })
+        : answer("other", Effect.never, { type: "failed", ticket: 0 }),
+    );
     try {
       await corruptRuntime.runPromise(Sample.Machine.use((m) => m.send({ type: "refresh" })));
-      await vi.waitFor(async () => {
-        const s = await corruptRuntime.runPromise(Sample.Machine.use((m) => m.get()));
-        expect(s.list.status).toBe("Loaded");
-      });
+      await waitSampleStatus(corruptRuntime, "Loaded");
       expect(corruptBacking.get(`${key}.unreadable`)).toBe(JSON.stringify({ broken: true }));
       expect(corruptBacking.get(`${key}.epoch`)).toBe("persisted-epoch-2");
     } finally {

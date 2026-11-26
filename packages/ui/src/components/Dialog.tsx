@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn.ts";
-import { isInToastRegion, useLayerRef, usePortalContainer } from "../lib/layers.tsx";
+import { useLayerSurface } from "../lib/layers.tsx";
 import { dialogPanel, overlay, surfaceDescription, surfaceTitle } from "../lib/styles.ts";
 import { Button } from "./Button.tsx";
 
@@ -39,22 +39,13 @@ export function DialogOverlay({ className, ...props }: DialogOverlayProps) {
 
 /** The panel in the middle of a dimmed page. Needs a `DialogTitle`; without a `DialogDescription`, pass `aria-describedby={undefined}`. Escape and a press outside dismiss it. */
 export function DialogContent({ closeLabel, container, overlayClassName, className, children, ref, onPointerDownOutside, onInteractOutside, ...props }: DialogContentProps) {
-  const defaultContainer = usePortalContainer();
-  const layerRef = useLayerRef("DialogLayer", ref);
+  const surface = useLayerSurface("DialogLayer", { container, ref, onPointerDownOutside, onInteractOutside });
   return (
-    <DialogPrimitive.Portal container={container ?? defaultContainer}>
+    <DialogPrimitive.Portal container={surface.container}>
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
-        ref={layerRef}
         className={cn(dialogPanel, closeLabel && "[&>h2]:pr-11", className)}
-        onPointerDownOutside={(event) => {
-          if (isInToastRegion(event.target)) event.preventDefault();
-          onPointerDownOutside?.(event);
-        }}
-        onInteractOutside={(event) => {
-          if (isInToastRegion(event.target)) event.preventDefault();
-          onInteractOutside?.(event);
-        }}
+        {...surface.contentProps}
         {...props}
       >
         {children}

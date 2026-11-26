@@ -14,7 +14,7 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, contained, due, following, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Backs } from "../shell/shell.vibe"
 
-export const reviewKeys: Record<Permission, Steps.Key> = {
+const reviewKeys: Record<Permission, Steps.Key> = {
   CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
   PhotosAccess: "Photos", FilesAccess: "Files", NotificationsAccess: "Notifications",
 }

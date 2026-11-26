@@ -120,12 +120,6 @@ effect function dropApprovalNotice(digest: number): void!!(Toasts.Machine | Said
   }
 }
 
-export effect function openApprovalNotice(runId: number, digest: number): void!!Model.Machine {
-  const machine = try Model.Machine
-  if (!Model.canNoticeOpened(try machine.get(), runId, digest)) return
-  try ignore(machine.send({ type: "noticeOpened", runId, digest }))
-}
-
 function carry(fx: Out): Job<Event, Needs, []> {
   return match (fx) {
     when { tag: "Decide", let id, let runId, let digest, let approve }: answer("approval decision", decided(id, runId, digest, approve), { type: "restart" });

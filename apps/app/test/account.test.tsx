@@ -39,18 +39,22 @@ describe("Account", () => {
   });
 
   it("Shows verified account and Cloud plan in Settings Account without losing status on Back (spec/app/account/plan.md, \"Story: Know my plan\"; spec/app/shell/layers.md, \"Story: Keep a sheet or a dialog above the phone\")", async () => {
-    const world = { ...scene(), phone: true };
-    const { alpha } = await openAlpha(world, only("home", "view:Settings", "overlay"));
+    const { alpha } = await openAlpha({ ...scene(), phone: true }, only("home", "view:Settings", "overlay"));
     await press("Settings");
-    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
-    await vi.waitFor(() => expect(button(/^Account/)?.textContent).toContain(account.email));
+    await until(alpha, alpha.runtime, Shell, (shell) => shell.trail.at(-1) === "Settings");
+    const row = () => button(/^Account/)?.textContent ?? "";
+    const dialogText = () => document.querySelector("[role=dialog]")?.textContent ?? "";
+    const planText = () => document.querySelector("[aria-label='Cloud plan']")?.textContent ?? "";
+    await vi.waitFor(() => expect(row()).toContain(account.email));
     await press(/^Account/);
-    await until(alpha, alpha.runtime, Layers.Machine, (s) => Layers.listed(s, "account"));
-    const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
-    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
-    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain(shownBalance));
+    await until(alpha, alpha.runtime, Layers.Machine, (layers) => Layers.listed(layers, "account"));
+    const balance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
+    await vi.waitFor(() => {
+      expect(dialogText()).toContain(account.email);
+      expect(planText()).toContain(balance);
+    });
     await hardware("back");
-    await until(alpha, alpha.runtime, Layers.Machine, (s) => !Layers.listed(s, "account"));
-    expect(button(/^Account/)?.textContent).toContain(account.email);
+    await until(alpha, alpha.runtime, Layers.Machine, (layers) => !Layers.listed(layers, "account"));
+    expect(row()).toContain(account.email);
   });
 });

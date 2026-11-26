@@ -11,7 +11,7 @@ import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { advanceDueDate, alertInstantMs, civilDayFromString, civilDayNumber, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
-import { AlertBannerShelf, RemindersLedger, RemindersShelf, type RingingBannerState } from "./shelf.vibe"
+import { AlertBannerShelf, RemindersLedger, RemindersShelf } from "./shelf.vibe"
 import {
   type ReminderItemRecord,
   type RemindersSnapshot,
@@ -20,7 +20,6 @@ import {
   recurrenceToSpec,
 } from "./store.ts"
 
-export type { RingingBannerState }
 
 const snapshotKey = "alpha.reminders.snapshot@1"
 
@@ -70,7 +69,8 @@ effect function cancelNative(item: ReminderItemRecord): void!!(PhoneReminders | 
   }
 }
 
-function pushHomeFromSnapshot(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<string>, nowMs: number): void {
+/** Publish dated reminders to the Home agenda card bridge. */
+export function pushHomeFromSnapshot(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<string>, nowMs: number): void {
   const dated = snapshot.items
     .filter((item) => !hiddenIds.has(item.id) && item.dueDate !== null)
     .map((item) => ({

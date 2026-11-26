@@ -40,15 +40,19 @@ const launch = (name: "Contacts" | "Messages") => drawn(() => {
   tile.click();
 });
 
+async function openContacts(world: Scene) {
+  const running = await open(world);
+  await until(running.alpha, running.alpha.runtime, Shell, (s) => s.contacts);
+  await launch("Contacts");
+  return running;
+}
+
 describe("Contacts on an Alpha image", () => {
   it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\"; spec/app/phone/comms.md, \"Story: Address the person or Alpha from one bar\")", async () => {
     const world = image();
     world.telephony.contacts = false;
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
-
     // spec/app/contacts/index.md, "Contacts reads the list each time it comes to the front"
-    await launch("Contacts");
+    const { alpha } = await openContacts(world);
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.list.status === "Failed" && s.rows === 0);
     await press("Allow");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
@@ -106,9 +110,7 @@ describe("Contacts on an Alpha image", () => {
   it("Add or change a contact in the phone's own editor where Alpha may not write contacts (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
     const world = image();
     world.telephony.editable = false;
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
-    await launch("Contacts");
+    const { alpha } = await openContacts(world);
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2 && !s.editable);
 
     // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
@@ -126,9 +128,7 @@ describe("Contacts on an Alpha image", () => {
     if (!first) throw new Error("the phone has no starting contact");
     world.telephony.people.push(...Array.from({ length: 51 }, (_, index) =>
       ({ ...first, id: String(index + 10), displayName: `Contact ${index + 1}` })));
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
-    await launch("Contacts");
+    const { alpha } = await openContacts(world);
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 50 && s.more);
     await press("More contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 53 && !s.more);
@@ -249,7 +249,8 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"
     expect(await read({ type: "phone_keypad", number: "+14155550122" })).toEqual({ kind: "phone-keypad", status: "opened" });
     await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Keypad" && s.digits === 12);
-    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+    expect(world.telephony.placed).toHaveLength(0);
+    expect(world.telephony.dialed).toHaveLength(0);
 
     // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
     expect(await read({ type: "contact_show", query: "Ben" })).toEqual({ kind: "contact-show", status: "shown" });

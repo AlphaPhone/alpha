@@ -21,8 +21,8 @@ export interface Alpha {
   slot(place: Place): ReactNode;
   /** Back, from the header as from the phone: the shell's layers first, then the screen showing, then the app on top. */
   back(): Promise<unknown>;
-  /** While the screen at `place` shows, ask `took` for each Back: whether the screen went back a step of its own. */
-  taking(place: Place, took: () => Promise<boolean>): void;
+  /** While the screen at `place` (or an active `"ui-layer"`) shows, ask `took` for each Back: whether it went back a step of its own. */
+  taking(place: Place | "ui-layer", took: () => Promise<boolean>): void;
   dispose(): Promise<void>;
 }
 

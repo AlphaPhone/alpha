@@ -1,9 +1,8 @@
-import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { alone, checkout, repository, run } from "./checkout.ts";
+import { alone, checkout, hasCommit, headCommit, repository, run } from "./checkout.ts";
 
 /**
  * A private clone of the pinned eliza that the agent pack is built from, as Alpha's old phone build prepared its own
@@ -43,31 +42,13 @@ function stamped(root: string): Stamp {
   }
 }
 
-function packHead(root: string): string | undefined {
-  if (!fs.existsSync(path.join(root, ".git"))) return undefined;
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-function packHasCommit(root: string, commit: string): boolean {
-  try {
-    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], { cwd: root, stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** The clone holds `commit` with every one of `plugins` built. @throws {never} */
 export function packReady(plugins: readonly string[], commit = checkout().commit): boolean {
   const root = packRoot(commit);
   const stamp = stamped(root);
   return stamp.commit === commit
     && plugins.every((name) => stamp.plugins?.includes(name) === true)
-    && packHead(root) === commit;
+    && headCommit(root) === commit;
 }
 
 function workspace(root: string): Map<string, string> {
@@ -112,7 +93,7 @@ function prepare(root: string, commit: string, plugins: readonly string[]) {
     fs.mkdirSync(path.dirname(root), { recursive: true });
     run(path.dirname(root), "git", "clone", "-q", "--no-checkout", ...(source === undefined ? ["--branch", lock.branch, lock.remote] : ["--shared", source]), root);
   }
-  if (!packHasCommit(root, commit)) {
+  if (!hasCommit(root, commit)) {
     const fetchSource = source ?? lock.remote;
     try {
       run(root, "git", "fetch", "-q", "--no-tags", fetchSource, commit);

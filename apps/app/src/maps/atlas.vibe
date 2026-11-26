@@ -111,32 +111,6 @@ function boundedMap<K, V>(prior: ReadonlyMap<K, V>, key: K, value: V, limit: num
   return next
 }
 
-/**
- * The world around the Maps machine, scoped to one runtime: the places, routes, position and tiles its numbers stand
- * for. The shell writes it before telling the machine, and the screen reads it with `useSyncExternalStore`.
- */
-export interface AtlasStore {
-  readonly snapshot: () => Seen
-  readonly subscribe: (listener: () => void) => () => void
-  readonly numberOf: (spot: Spot) => number
-  readonly numberAll: (spots: ReadonlyArray<Spot>) => number[]
-  readonly spot: (place: number) => Spot | undefined
-  readonly found: (places: ReadonlyArray<number>) => void
-  readonly originsFound: (places: ReadonlyArray<number>) => void
-  readonly routed: (ticket: number, ways: ReadonlyArray<Way>) => void
-  readonly way: (ticket: number, chosen: number) => Way | undefined
-  readonly located: (here: Here) => void
-  readonly showMe: () => void
-  readonly covered: (ticket: number, coverage: Coverage) => void
-  readonly coverage: (ticket: number) => Coverage | undefined
-  readonly viewed: (view: View) => void
-  readonly creditedFor: (credited: View) => void
-  readonly accountOf: (id: string) => number
-  readonly handleOf: (place: number) => string
-  readonly forgetDetails: () => void
-  readonly forget: () => void
-}
-
 /** Scoped Maps atlas service, reset cleanly whenever its runtime scope closes. */
 export service Atlas {
   readonly snapshot: () => Seen
@@ -160,8 +134,14 @@ export service Atlas {
   readonly forget: () => void
 }
 
+/**
+ * The world around the Maps machine, scoped to one runtime: the places, routes, position and tiles its numbers stand
+ * for. The shell writes it before telling the machine, and the screen reads it with `useSyncExternalStore`.
+ */
+export type AtlasStore = Effect.Success<typeof Atlas>
+
 /** Creates an isolated `AtlasStore` backed by a `Shelf<Seen>`. */
-export function createAtlas(): AtlasStore & { readonly reset: () => void } {
+function createAtlas(): AtlasStore & { readonly reset: () => void } {
   const shelf = createShelf<Seen>(empty(), { reset: empty })
   const accounts = new Map<string, number>()
   const byProvider = new Map<string, number>()

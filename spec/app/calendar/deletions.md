@@ -33,7 +33,7 @@ type Deletions = {
 
 type Effect = Release({ id: int, reach: Reach, revision: int })
 
-type Held = { state: Deletions, out: List[Effect] }
+type Step = { state: Deletions, out: List[Effect] }
 
 pure val initial: Deletions = {
   owner: 0, waiting: 0, reach: OneEvent, revision: 0, undo: U::free, notice: false, scale: 100, paused: false,
@@ -82,7 +82,7 @@ pure def lawTheWindowIsNeverShorterThanTenSeconds(scale: int): bool = scale >= 1
 pure def canConfirm(s: Deletions, id: int, reach: Reach, revision: int, now: int): bool =
   id > 0 and revision >= 0 and not(hidden(id, s)) and s.sending == 0 and not(s.paused)
 
-pure def confirm(s: Deletions, id: int, reach: Reach, revision: int, now: int): Held =
+pure def confirm(s: Deletions, id: int, reach: Reach, revision: int, now: int): Step =
   val held = { ...s, waiting: id, reach: reach, revision: revision, undo: U::hold(now, windowOf(s.scale)), notice: true, dropped: 0, failed: 0 }
   if (s.waiting != 0) { state: { ...held, sending: s.waiting, sendingReach: s.reach }, out: List(Release({ id: s.waiting, reach: s.reach, revision: s.revision })) }
   else { state: held, out: List() }
@@ -91,7 +91,7 @@ pure def confirm(s: Deletions, id: int, reach: Reach, revision: int, now: int): 
 ### Undo inside the window sends nothing, and shows the event again
 
 ```quint
-pure def canUndo(s: Deletions, now: int): bool = s.waiting != 0 and U::canUndo(s.undo, now)
+pure def canUndo(s: Deletions, now: int): bool = s.waiting != 0 and not(s.paused) and U::canUndo(s.undo, now)
 
 pure def undo(s: Deletions, now: int): Deletions = { ...s, waiting: 0, undo: U::undo(s.undo), notice: false }
 ```
@@ -112,7 +112,7 @@ pure def undoShown(s: Deletions): Deletions = { ...s, waiting: 0, undo: U::undo(
 
 pure def canWindowEnded(s: Deletions, now: int): bool = s.waiting != 0 and U::canRelease(s.undo, now) and not(s.notice) and s.sending == 0 and not(s.paused)
 
-pure def windowEnded(s: Deletions, now: int): Held =
+pure def windowEnded(s: Deletions, now: int): Step =
   { state: { ...s, waiting: 0, undo: U::release(s.undo), sending: s.waiting, sendingReach: s.reach }, out: List(Release({ id: s.waiting, reach: s.reach, revision: s.revision })) }
 ```
 
@@ -121,7 +121,7 @@ pure def windowEnded(s: Deletions, now: int): Held =
 ```quint
 pure def canLeave(s: Deletions): bool = s.waiting != 0 and s.sending == 0 and not(s.paused)
 
-pure def leave(s: Deletions): Held =
+pure def leave(s: Deletions): Step =
   { state: { ...s, waiting: 0, undo: U::release(s.undo), notice: false, sending: s.waiting, sendingReach: s.reach }, out: List(Release({ id: s.waiting, reach: s.reach, revision: s.revision })) }
 ```
 
@@ -138,7 +138,7 @@ pure def restart(s: Deletions): Deletions =
 
 pure def canSendPaused(s: Deletions): bool = s.paused and s.sending == 0
 
-pure def sendPaused(s: Deletions): Held =
+pure def sendPaused(s: Deletions): Step =
   { state: { ...s, waiting: 0, undo: U::release(s.undo), notice: false, paused: false, sending: s.waiting, sendingReach: s.reach },
     out: List(Release({ id: s.waiting, reach: s.reach, revision: s.revision })) }
 ```

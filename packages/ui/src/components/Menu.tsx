@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
 import * as MenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "../lib/cn.ts";
-import { isInToastRegion, useLayerRef, usePortalContainer } from "../lib/layers.tsx";
+import { useLayerSurface } from "../lib/layers.tsx";
 import { floatingPanel, floatingRow } from "../lib/styles.ts";
 
 export type MenuProps = ComponentProps<typeof MenuPrimitive.Root>;
@@ -25,24 +25,15 @@ export const MenuTrigger = MenuPrimitive.Trigger;
 
 /** The floating list of `MenuItem`s. Escape, a press outside and choosing an item close it. */
 export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 8, container, className, ref, onPointerDownOutside, onInteractOutside, ...props }: MenuContentProps) {
-  const defaultContainer = usePortalContainer();
-  const layerRef = useLayerRef("MenuLayer", ref);
+  const surface = useLayerSurface("MenuLayer", { container, ref, onPointerDownOutside, onInteractOutside });
   return (
-    <MenuPrimitive.Portal container={container ?? defaultContainer}>
+    <MenuPrimitive.Portal container={surface.container}>
       <MenuPrimitive.Content
-        ref={layerRef}
         align={align}
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         className={cn(floatingPanel, "flex min-w-50 flex-col", className)}
-        onPointerDownOutside={(event) => {
-          if (isInToastRegion(event.target)) event.preventDefault();
-          onPointerDownOutside?.(event);
-        }}
-        onInteractOutside={(event) => {
-          if (isInToastRegion(event.target)) event.preventDefault();
-          onInteractOutside?.(event);
-        }}
+        {...surface.contentProps}
         {...props}
       />
     </MenuPrimitive.Portal>

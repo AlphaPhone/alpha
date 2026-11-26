@@ -100,7 +100,7 @@ effect function currentTape(): (Tape | undefined)!!(NoteDevice | Agent) {
 }
 
 /** Live admission facts for recording, computed from microphone permission, device, shell visibility, and playback. */
-export effect function room(): Rec.Admission!!(NoteDevice | Device | Shell | Voice) {
+effect function room(): Rec.Admission!!(NoteDevice | Device | Shell | Voice) {
   const device = try NoteDevice
   const front = (try (try Device).showing()) && showing(try (try Shell).get(), "Notes")
   return { allowed: (try device.permission()) === "Granted", free: device.available, front, silent: silent(try (try Voice).get()) }

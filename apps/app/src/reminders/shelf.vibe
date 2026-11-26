@@ -1,6 +1,6 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import type { DeleteMode } from "../../gen/app__reminders.effect.vibe"
-import { type Shelf, createShelf, scopedShelf } from "../runtime/shelf.vibe"
+import { type Shelf, createShelf } from "../runtime/shelf.vibe"
 import { together } from "../runtime/reactor.vibe"
 import type { ReminderRecurrence } from "./recurrence.ts"
 import {
@@ -157,8 +157,6 @@ const remindersLedgerLayer = Layer.effect(RemindersLedger, effect {
     nextUndoAbout: () => undoCounter++,
   }
 })
-
-export { scopedShelf }
 
 /** Scoped shelves and ledger for Reminders, mounted inside `remindersResident`. */
 export const remindersShelves = together(

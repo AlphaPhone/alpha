@@ -93,7 +93,7 @@ effect function googleNow(): GoogleInfo!unknown!(Cloud | Time | LinkCache) {
 
 // spec/app/calendar/link.md, "The account area's read says what Google allows now; a grant that no longer writes stops a setup under way"
 /** The account read, as the link takes it. */
-export effect function accountRead(): Event!!(Cloud | Time | LinkCache) {
+effect function accountRead(): Event!!(Cloud | Time | LinkCache) {
   return effect {
     const now = try googleNow()
     return { type: "accountRead", ok: true, grant: now.grant } as Event

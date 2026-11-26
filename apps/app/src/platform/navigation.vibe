@@ -51,18 +51,18 @@ const journeyOf = (session: string): number | undefined => {
 
 const transportName = "AlphaMapsTransport"
 
+const unavailableNavigation = {
+  start: () => succeed(false),
+  update: () => succeed(false),
+  arrived: () => Effect.void,
+  stop: () => Effect.void,
+  opened: () => succeed(false),
+  ended: Stream.empty,
+}
+
 /** On the phone: Alpha's `AlphaMapsTransport` plugin. */
 export const phoneNavigation = Layer.sync(Navigation, () => {
-  if (!registered(transportName)) {
-    return {
-      start: () => succeed(false),
-      update: () => succeed(false),
-      arrived: () => Effect.void,
-      stop: () => Effect.void,
-      opened: () => succeed(false),
-      ended: Stream.empty,
-    }
-  }
+  if (!registered(transportName)) return unavailableNavigation
   const native = plugin()
   return {
     start: (journey: number, title: string, text: string) =>
@@ -85,11 +85,4 @@ export const phoneNavigation = Layer.sync(Navigation, () => {
 })
 
 /** A browser has no service to guide with the screen off. */
-export const browserNavigation = Layer.succeed(Navigation, {
-  start: () => succeed(false),
-  update: () => succeed(false),
-  arrived: () => Effect.void,
-  stop: () => Effect.void,
-  opened: () => succeed(false),
-  ended: Stream.empty,
-})
+export const browserNavigation = Layer.succeed(Navigation, unavailableNavigation)

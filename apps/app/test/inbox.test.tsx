@@ -47,12 +47,7 @@ const menu = (item: string, label = "More actions") => drawn(() => {
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
   found.click();
 }));
-const write = (name: string, text: string) => drawn(() => {
-  const found = [...document.querySelectorAll("textarea, input")].find((field) => field.getAttribute("aria-label") === name);
-  if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
-});
+const write = fill;
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);

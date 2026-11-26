@@ -119,10 +119,13 @@ export function ownGet<T>(record: Readonly<Record<string, T>> | undefined, key: 
   return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
-/** Safe own-property lookup on numeric-keyed plain object dictionaries. */
-export function ownGetNumber<T>(record: Readonly<Record<number, T>> | undefined, key: number | undefined): T | undefined {
-  if (record === undefined || key === undefined) return undefined;
-  return Object.hasOwn(record, key) ? record[key] : undefined;
+/** Evict the oldest keys from a mutable record once its size exceeds `max`. */
+export function pruneRecordCap(record: Record<string, unknown>, max: number): void {
+  const keys = Object.keys(record);
+  if (keys.length <= max) return;
+  for (const key of keys.slice(0, keys.length - max)) {
+    delete record[key];
+  }
 }
 
 /** Safe narrow to plain record. */
