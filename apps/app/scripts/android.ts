@@ -186,7 +186,6 @@ export async function stageRuntime(): Promise<string> {
       throw new Error(`Android runtime payload refused: ${failure.reason}${subject}`, { cause });
     }
   }
-  keepGzipAssets(join(output, "android/app/src/main/assets"));
   if (existsSync(runtimes)) for (const other of readdirSync(runtimes)) if (other !== digest) rmSync(join(runtimes, other), { recursive: true, force: true });
   const data = join(android, "agent");
   mkdirSync(data, { recursive: true });
@@ -195,12 +194,10 @@ export async function stageRuntime(): Promise<string> {
 }
 
 /**
- * The Android Gradle plugin's asset merge gunzips every asset named `*.gz` once and drops the extension, so
- * an inventoried `assets/agent/vector.tar.gz` would reach the APK as `vector.tar` and the device's runtime
- * store, which opens each asset by its inventoried name, would refuse the whole runtime. Each such asset is
- * staged wrapped in one more gzip layer as `<name>.gz`, which the merge unwraps back to the exact inventoried
- * bytes and name; `verify` checks the result against the inventory. The page's OCR training data
- * (`public/ocr/eng.traineddata.gz`) gets the same wrap after `cap copy`, and `verify` audits the packaged page.
+ * The Android Gradle plugin's asset merge gunzips every asset named `*.gz` once and drops the extension. eliza's
+ * generated host keeps the runtime payload's inventoried archives (elizaOS/eliza#40652); the page's own `*.gz`
+ * assets, the OCR training data `public/ocr/eng.traineddata.gz`, are wrapped in one more gzip layer as
+ * `<name>.gz` after `cap copy`, which the merge unwraps back to the exact bytes and name. `verify` audits both.
  */
 export function keepGzipAssets(assets: string) {
   if (!existsSync(assets)) return;

@@ -287,8 +287,9 @@ The Ask Alpha action opens that message and offers to add its full plain
 text to the resident conversation. Confirming reads the message again,
 checks the account, message, latest reviewed content, resident
 conversation and pending tap, then spends that tap once. Cancel releases
-the pending Ask action and leaves the notification available. The owner
-sends the resulting question from the usual Ask Alpha composer.
+the pending Ask action, returns to the opened email, and leaves the
+notification available. The owner sends the resulting question from the
+usual Ask Alpha composer.
 
 ```quint
 type NoticeReview = { tap: bool, account: bool, reader: bool, revision: bool }

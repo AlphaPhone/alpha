@@ -1,0 +1,37 @@
+// spec/app/inbox/index.md, "Story: Connect Gmail and keep to its grant"
+import { openGoogleAuthorization } from "../platform/cloud.vibe"
+import { native } from "../platform/device.vibe"
+
+module web {
+  /** Reserve the new tab while the owner's button press still has browser activation. @throws {never} */
+  export function reserve(): { visit(url: string): boolean; close(): void } | undefined {
+    const popup = window.open("about:blank", "_blank")
+    if (popup === null) return undefined
+    popup.opener = null
+    return {
+      visit(url) {
+        if (popup.closed) return false
+        popup.location.replace(url)
+        return true
+      },
+      close: () => popup.close(),
+    }
+  }
+}
+import { reserve } from web
+
+export interface GmailAuthorizationWindow {
+  open(url: URL): boolean!!
+  close(): void
+}
+
+/** Reserve a web tab on the tap, or use the phone's external browser once the URL is answered. */
+export function gmailAuthorizationWindow(): GmailAuthorizationWindow | undefined {
+  if (native()) return { open: openGoogleAuthorization, close: () => {} }
+  const popup = reserve()
+  if (popup === undefined) return undefined
+  return {
+    open: (url) => Effect.orElseSucceed(Effect.try(() => popup.visit(url.href)), () => false),
+    close: popup.close,
+  }
+}

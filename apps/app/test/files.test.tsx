@@ -886,18 +886,21 @@ describe("Files on a phone", () => {
       review.proposal.state = "pending";
       review.proposal.payload.operation = operation;
       world.ask.nextReplyChunks = ["I found a Files action."];
+      const received = Promise.withResolvers<ReturnType<typeof readTurnContext>>();
       world.ask.nextActions = (metadata) => {
-        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        received.resolve(readTurnContext({ content: { metadata } }));
         review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
         return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true } }];
       };
       await sendChat(text);
+      const context = await received.promise;
+      expect(context.voiceUi?.agentActionMode).toBe("direct-files-v1");
     };
 
     await fromHome();
     world.ask.holdAfterTools = true;
     await send("cancel-at-source", "Show PDFs in Download", filter);
-    await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
+    expect(world.ask.turns.size).toBe(1);
     expect([review.claims, review.journal.size, world.files.calls.includes("storageQuery")]).toEqual([[], 0, false]);
     await hardware("back");
     await fromHome();

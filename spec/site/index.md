@@ -2,11 +2,12 @@
 
 Alpha's public page at alphaphone.dev, in `apps/site`: what Alpha is, that
 it is available for Pixel 10 and Pixel 10a, a link to its source on GitHub
-as the one thing to do, and a phone that stays in view while the visitor
+as the primary action, and a phone that stays in view while the visitor
 reads. The page has a passage for each thing the phone shows: Home, a
 question about today's calendar, a text Alpha asks before sending, coffee
 found on a map, an inbox summed up, and a spoken note. Every conversation is
-staged on the page; it asks no service anything.
+staged on the page; it asks no service anything. The home page also links
+to the public Alpha Cloud Terms of Service and Privacy Policy.
 
 ## Story: Walk through what Alpha does
 
@@ -131,4 +132,19 @@ pure def sometimesStill(d: Demo): bool = d.still
 pure val eval_witness_sometimesSent = (("start", 0, false), ("show", Text, 0), ("tick", 1000), ("tick", 1500), ("tick", 2500), ("tick", 4000), ("tick", 5000), ("tick", 5500))
 pure val eval_witness_sometimesSaved = (("start", 0, false), ("show", Voice, 0), ("tick", 1000), ("tick", 1500), ("tick", 2000), ("tick", 2500), ("tick", 3000), ("tick", 4000))
 pure val eval_witness_sometimesLastQuestion = (("start", 0, false), ("tick", 2000), ("tick", 5000), ("tick", 8000), ("tick", 11000))
+```
+
+## Story: Read Alpha Cloud's policies
+
+> As a visitor, I want to read Alpha Cloud's Terms of Service and Privacy
+> Policy before I sign in or use the service.
+
+### Each policy has its own public address and is linked from Home
+
+Home links to both policies. Their published text and links are available
+at their addresses without signing in or running JavaScript.
+
+```quint
+pure val termsPath = "/terms"
+pure val privacyPath = "/privacy"
 ```
