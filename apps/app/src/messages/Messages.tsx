@@ -1,7 +1,7 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea, watchMessageMenu } from "@repo/ui";
+import { Alert, AppHeader, Avatar, Banner, Button, Chip, cn, Mark, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea, watchMessageMenu } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
@@ -38,6 +38,13 @@ type MessagesUI = ReturnType<typeof useMessages>;
 type HandoffProps = { handoff?: NewMessageHandoff | undefined; discardHandoff: () => void };
 
 const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
+/**
+ * The top of the Messages list as the Pixel drew it on Sunday's v119 (Alpha 45f6bed30): 8px under the status bar
+ * (`prototype/phone.css:45`; the 8px is the list's own `pt-2`), then the serif "Messages" title with Search and the pencil New message at its end
+ * (`prototype/template.html:566-571`, `phone.css:304,311-317`). Search keeps the same top, 56px tall (`template.html:581`).
+ */
+const messagesTop = "mt-[max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] in-[main:has([data-alpha-call-strip=over])]:mt-0 in-data-[alpha-launcher]:h-14";
+const messagesHeader = cn(messagesTop, "shrink-0 in-data-[alpha-launcher]:min-h-14 in-data-[alpha-launcher]:gap-1 in-data-[alpha-launcher]:[&>button[aria-label]:not([aria-label^=Back])]:size-11 in-data-[alpha-launcher]:[&>button[aria-label]:not([aria-label^=Back])]:min-w-11");
 const accessPill = "min-h-13 rounded-group bg-foreground px-7 text-lg font-semibold text-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
 const draftAction = "min-h-11 rounded-tile text-base focus-visible:outline-2 focus-visible:outline-ring";
 const notice = "mx-2 basis-full text-caption leading-detail text-muted-foreground";
@@ -141,20 +148,18 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
   return (
     <>
       {searching ? (
-        <header className="flex h-13 shrink-0 items-center gap-0.5 px-2" data-alpha-messages-search-header>
+        <header className={cn("flex h-13 shrink-0 items-center gap-0.5 px-2", messagesTop)} data-alpha-messages-search-header>
           <Button variant="ghost" size="icon" className="size-13 rounded-lg" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
           <div role="search" aria-label="Search messages" className="min-w-0 flex-1">
-            <SearchField autoFocus aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" className="[&_button]:size-13 [&_button]:min-w-13 [&_button]:rounded-tile [&_input:focus-visible]:outline-none" />
+            <SearchField autoFocus keepClear aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" className="[&_button]:size-13 [&_button]:min-w-13 [&_button]:rounded-tile [&_input:focus-visible]:outline-none" />
           </div>
         </header>
       ) : (
-        <header className="flex h-13 shrink-0 items-center gap-0.5 px-2 [&>button]:size-13" data-alpha-messages-header data-alpha-stage-header>
-          {onBack && <Button variant="ghost" size="icon" className="rounded-lg" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
-          <h1 className="sr-only">Messages</h1>
-          <div aria-hidden className="min-w-0 flex-1" />
+        <AppHeader title="Messages" className={messagesHeader} data-alpha-messages-header="" data-alpha-stage-header=""
+          leading={onBack && <Button variant="ghost" size="icon" className="rounded-lg" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}>
           {!smsNeeded(state) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
           {can(newMessage) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new disabled={draftOpening === "Opening" || handoffOpening} onClick={() => void openNew()}><Pencil className="size-5" /></Button>}
-        </header>
+        </AppHeader>
       )}
       {(draftOpening === "Opening" || handoffOpening) && <p role="status" className={`${notice} px-3`}>Opening message draft…</p>}
       {(draftOpening === "Failed" || handoffFailed) && can(newMessage) && <Banner variant="warn" action={<Button size="sm" onClick={() => void openNew()}>Retry</Button>}>Message draft couldn’t be opened</Banner>}
@@ -335,7 +340,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
           </>
         )}
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
-        {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
+        {failed && <CircleAlert className="size-4 text-hangup" role="img" aria-label="Message failed" />}
       </div>
       {actions && <MessageActionMenu ref={watchMenu} actions={actions} focusOnOpen={keyboardMenu} close={() => { choose(""); triggerRef.current?.focus({ preventScroll: true }); }} />}
     </div>
@@ -578,7 +583,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {checking && <p role="status" data-alpha-messages-notice className={notice}>Alpha is still waiting for the send result</p>}
         {here && outgoing.denied && <p role="status" data-alpha-messages-notice className={notice}>The phone did not send the message</p>}
         {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <p role="status" data-alpha-messages-notice className={notice}>The message did not reach everyone</p>}
-        {here && (outgoing.denied || outgoing.op.outcome === "Refused" && outgoing.failed > 0) && <CircleAlert className="mx-2 size-4 text-destructive" role="img" aria-label="Message failed" />}
+        {here && (outgoing.denied || outgoing.op.outcome === "Refused" && outgoing.failed > 0) && <CircleAlert className="mx-2 size-4 text-hangup" role="img" aria-label="Message failed" />}
         {here && sentAll(outgoing) && <p role="status" data-alpha-messages-notice className={notice}>{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
         {pictures.map((picture, at) => (
           <MessagePictureChip key={picture.name} name={picture.name} disabled={!can({ type: "detach" })} onRemove={() => {
