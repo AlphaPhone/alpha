@@ -21,7 +21,7 @@ lemma Dropped(xs: seq<int>, ys: seq<int>)
   }
 }
 
-lemma Sent(r: app__photos__changes_Run, items: seq<int>)
+lemma SentRecoveryBatch(r: app__photos__changes_Run, items: seq<int>)
   requires app__photos__changes_alwaysDecidedByTheOwner(r) && app__photos__changes_alwaysOneRequestAtATime(r) && app__photos__changes_alwaysUndoFollowsADeletion(r)
   requires app__photos__changes_canSend(r, items)
   ensures app__photos__changes_running(r) && r.by_.Owner?
@@ -56,7 +56,7 @@ lemma sendNext_ensures(s: Bin, items: seq<int>, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepDeletesOnlyWhatWasConfirmed(s, "sendNext", sendNext(s, items, by_).state, sendNext(s, items, by_).out))
 {
   if inv(s) && canSendNext(s, items, by_) {
-    Sent(s.job, items);
+    SentRecoveryBatch(s.job, items);
   }
 }
 
@@ -77,5 +77,35 @@ lemma toggle_ensures(s: Bin, photo: int, by_: app__photos__actor_Actor)
       assert after.selected == s.selected + ProofLib.Filter((set_x: int) => !((set_x in s.selected)), [photo]);
       Joined(s.selected, [photo]);
     }
+  }
+}
+
+lemma emptyReadied_ensures(s: Bin, ticket: int, ok: bool, items: seq<int>, revision: int, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canEmptyReadied(s, ticket, by_) ==> alwaysNothingShownWhenClosed(emptyReadied(s, ticket, ok, items, revision, by_)))
+  ensures (inv(s) ==> canEmptyReadied(s, ticket, by_) ==> alwaysSelectionIsListed(emptyReadied(s, ticket, ok, items, revision, by_)))
+  ensures (inv(s) ==> canEmptyReadied(s, ticket, by_) ==> alwaysARecoveryIsTheOwners(emptyReadied(s, ticket, ok, items, revision, by_)))
+  ensures (inv(s) ==> canEmptyReadied(s, ticket, by_) ==> alwaysConfirmationIsPrepared(emptyReadied(s, ticket, ok, items, revision, by_)))
+  ensures (inv(s) ==> canEmptyReadied(s, ticket, by_) ==> stepAPageKeepsWhatWasListed(s, "emptyReadied", emptyReadied(s, ticket, ok, items, revision, by_)))
+  ensures (inv(s) ==> canEmptyReadied(s, ticket, by_) ==> stepDeletesOnlyWhatWasConfirmed(s, "emptyReadied", emptyReadied(s, ticket, ok, items, revision, by_), []))
+{
+  if inv(s) && canEmptyReadied(s, ticket, by_) {
+    var after := emptyReadied(s, ticket, ok, items, revision, by_);
+    assert after.rows == s.rows;
+    assert after.job == s.job;
+    assert "emptyReadied" != "listed";
+    var complete := ok && |items| > 0 && !(exists item :: item in s.rows && item !in items)
+      && s.revision == revision && s.read.status.Loaded?;
+    assert alwaysConfirmationIsPrepared(s);
+    assert !s.selecting && !app__photos__actor_busy(s.forever);
+    if complete {
+      assert after.scope.EntireBrowserBin? && after.preparing.status.Loaded?;
+      assert after.prepared == items && |after.prepared| > 0;
+      assert after.confirm.shown == after.confirm.revision;
+      assert forall item :: item in after.rows ==> item in after.prepared;
+    } else {
+      assert after.scope.Chosen? && after.prepared == [] && !after.confirm.showing;
+      assert after.confirm.shown == s.confirm.shown && after.confirm.revision == s.confirm.revision;
+    }
+    assert alwaysConfirmationIsPrepared(after);
   }
 }
