@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import home from "../src/home/index.tsx";
+import { NoteContent } from "../src/notes/content.vibe";
+import { NoteEditor } from "../src/notes/editor.vibe";
 import notes from "../src/notes/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as List } from "../gen/app__notes.effect.vibe";
-import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
+import { Machine as Editor, canPinNew, waiting } from "../gen/app__notes__editor.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -98,10 +100,57 @@ describe(`More over a new note offers v119's Share, Pin and Delete (${fresh})`, 
   it("Pin saves the new note pinned, even one holding only its starting title", async () => {
     const world = scene();
     const { alpha, runtime } = await newNote(world);
+    const beforeRevision = world.notes.revision;
+    const beforeCount = world.notes.notes.length;
     await choose("Pin");
     await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0 && !waiting(state));
+    expect(world.notes.revision).toBe(beforeRevision + 1);
+    expect(world.notes.notes.length).toBe(beforeCount + 1);
     expect(world.notes.notes.filter((row) => row.title === "New note").map((row) => (row.format?.data as { readonly pinned?: boolean } | undefined)?.pinned)).toEqual([true]);
+    expect(runtime.runSync(NoteContent).snapshot().draft?.pinned).toBeUndefined();
     await rendered(() => expect(header()).toContainEqual(["More", true]));
+  });
+
+  it("Pin follows Editor.canPinNew: enabled on a fresh editable note, disabled while Saving, and saves pinned in one write", async () => {
+    const world = scene();
+    const { alpha, runtime } = await newNote(world);
+    const beforeRevision = world.notes.revision;
+    const beforeCount = world.notes.notes.length;
+    const initialEditor = await runtime.runPromise(Editor.use((machine) => machine.get()));
+    expect(canPinNew(initialEditor, "Owner")).toBe(true);
+    expect(canPinNew(initialEditor, "Phone")).toBe(false);
+    expect(canPinNew(initialEditor, "Agent")).toBe(false);
+
+    let releaseSave: (() => void) | undefined;
+    world.notes.interactGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    try {
+      await choose("Pin");
+      await until(alpha, runtime, Editor, (state) => state.showing && state.fresh && state.draft.sync === "Saving");
+      const savingEditor = await runtime.runPromise(Editor.use((machine) => machine.get()));
+      expect(canPinNew(savingEditor, "Owner")).toBe(false);
+
+      await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      await rendered(() => expect(rows()).toEqual([["Share", true], ["Unpin", false], ["Delete", false]]));
+      await drawn(() => menu()?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+      await rendered(() => expect(menu()).toBeNull());
+
+      await drawn(() => runtime.runPromise(NoteEditor.use((writer) => writer.pinNew(false))));
+      expect(runtime.runSync(NoteContent).snapshot().draft?.pinned).toBe(true);
+    } finally {
+      delete world.notes.interactGate;
+      releaseSave?.();
+    }
+
+    await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0 && !waiting(state));
+    const savedEditor = await runtime.runPromise(Editor.use((machine) => machine.get()));
+    expect(canPinNew(savedEditor, "Owner")).toBe(false);
+    expect(world.notes.revision).toBe(beforeRevision + 1);
+    expect(world.notes.notes.length).toBe(beforeCount + 1);
+    expect(world.notes.notes.filter((row) => row.title === "New note").map((row) => (row.format?.data as { readonly pinned?: boolean } | undefined)?.pinned)).toEqual([true]);
+    expect(runtime.runSync(NoteContent).snapshot().draft?.pinned).toBeUndefined();
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    await rendered(() => expect(rows()).toContainEqual(["Unpin", true]));
   });
 
   it("Share saves the new note first, then reviews the saved note's text in the share panel", async () => {
@@ -116,6 +165,22 @@ describe(`More over a new note offers v119's Share, Pin and Delete (${fresh})`, 
       expect(world.notes.notes.filter((row) => row.title === "New note").map((row) => row.body.trim())).toEqual(["Pick up the keys"]);
       await pressOnTop("Copy text");
       await rendered(() => expect(copy).toHaveBeenCalledWith("New note\n\nPick up the keys"));
+    } finally { copy.mockRestore(); }
+  });
+
+  it("Share over an untouched title-only new note saves it first and opens the share panel", async () => {
+    const world = scene();
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    try {
+      const { alpha, runtime } = await newNote(world);
+      const beforeCount = world.notes.notes.length;
+      await choose("Share");
+      await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0 && !waiting(state));
+      await rendered(() => expect(button("Close share")).toBeDefined());
+      expect(world.notes.notes.length).toBe(beforeCount + 1);
+      expect(world.notes.notes.filter((row) => row.title === "New note").map((row) => row.body.trim())).toEqual([""]);
+      await pressOnTop("Copy text");
+      await rendered(() => expect(copy).toHaveBeenCalledWith("New note"));
     } finally { copy.mockRestore(); }
   });
 });
