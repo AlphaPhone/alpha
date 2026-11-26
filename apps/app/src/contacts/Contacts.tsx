@@ -123,6 +123,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
         </div>
       )}
   </>;
+  const editor = editing && <Over><Editor runtime={runtime} /></Over>;
   const content = (
     <section aria-label="Contacts" className="flex min-h-0 flex-1 flex-col">
       <Layers>
@@ -147,7 +148,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
           )}
         </Under>
         {state.opened && <Over inert={editing} aria-hidden={editing || undefined}><div className="flex flex-1 flex-col">{notices}<Card runtime={runtime} safe={safe} route={route} /></div></Over>}
-        {editing && <Over><Editor runtime={runtime} /></Over>}
+        {!fromPhone && editor}
       </Layers>
       {!editing && <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
@@ -157,11 +158,11 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     </section>
   );
   if (!fromPhone) return content;
-  if (editing) return <Layers><Over><Editor runtime={runtime} /></Over></Layers>;
   return (
-    <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
-      {phoneTabs && header}
+    <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="relative min-h-0 flex-1 gap-0">
+      {phoneTabs && <div className="contents" inert={editing} aria-hidden={editing || undefined}>{header}</div>}
       <TabsContent value="Contacts" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</TabsContent>
+      {editor}
     </Tabs>
   );
 }
