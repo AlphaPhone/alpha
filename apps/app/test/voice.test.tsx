@@ -201,7 +201,6 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
     await sendVoice(runtime, { type: "returned" });
     await untilCondition(runtime, () => world.voice.relayWarmups.length >= 1);
-    // Warming the network route warms speech only: the agent's model is warmed by Ask Alpha's warm-up alone (spec/app/assistant/index.md).
     expect([world.ask.warmUps, [...new Set(world.voice.relayWarmups)], world.voice.startCloudSpeechCalls]).toEqual([[], ["production"], 0]);
   });
 
@@ -1321,7 +1320,6 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.holdDoneAfterReady = new Promise<void>((resolve) => { releaseDone = resolve; });
 
     speakUtterance(world, "Check my alarms");
-    // Spoken acknowledgment starts at once and reply begins speaking from `reply_ready` BEFORE `done` is released.
     await untilCondition(
       runtime,
       () => world.voice.spoken.some((entry) => entry.text.includes("You have no alarms set.")),

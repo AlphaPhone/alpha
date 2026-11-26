@@ -2,8 +2,7 @@
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
 import { type PointerEvent, type TouchEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
-import { besideHomeSheet } from "../gen/app__home.ts";
-import { askAlphaDrawn } from "../gen/app__shell.ts";
+import { adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
@@ -175,8 +174,10 @@ export function App({ alpha }: AppProps) {
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
   const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarse;
+  const inboxLandscapeBar = !phone && showing === "Inbox" && state.assistant === "Bar" && state.textAsk.tag === "NoTextAsk"
+    && canvas?.landscape === true && coarse;
   const fullScreen = state.assistant === "Full" && (phone || !side);
-  const homeBesideSheet = layers !== undefined && !inert && besideHomeSheet(state, landscapeHomeInput(canvas, coarse));
+  const sheetBeside = layers !== undefined && !inert && adjacentAskSheet(state, landscapeHomeInput(canvas, coarse));
   const voiceOverHome = phone && side && canvas?.voice === true;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
@@ -236,13 +237,14 @@ export function App({ alpha }: AppProps) {
           "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
           "in-[body:has([data-alpha-covers-assistant])]:invisible",
           comms && "shrink-0",
-          homeBesideSheet && "[&>[data-alpha-chat-scrim]]:hidden",
+          sheetBeside && "[&>[data-alpha-chat-scrim]]:hidden",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           phone && canvas?.landscape && showing !== undefined && !comms && [
             "[&&>[data-alpha-detent]]:start-auto [&>[data-alpha-detent]]:w-[min(400px,46%)]",
             "[&&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:max-h-full",
             "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
           ],
+          inboxLandscapeBar && "[&&>[data-alpha-detent=bar]]:start-auto [&>[data-alpha-detent=bar]]:w-[min(400px,46%)]",
           side && [
             "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
             "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",

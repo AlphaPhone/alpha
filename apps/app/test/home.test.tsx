@@ -148,7 +148,7 @@ describe("Home on a phone", () => {
     expect([tiles(), localStorage.getItem(savedKey)]).toEqual([["view:Reminders", "view:Clock", "view:Notes"], chosen]);
   });
 
-  it("Opens a Home tile beside the landscape Ask sheet and lowers Ask Alpha (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\")", async () => {
+  it("Opens an app or Apps beside the landscape Ask sheet (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\"; spec/app/shell/index.md, \"Apps can open beside the landscape Ask sheet and Close leaves Ask open\")", async () => {
     const pointer = window.matchMedia("(pointer: coarse)");
     Object.defineProperty(pointer, "matches", { configurable: true, value: true });
     const originalMatch = window.matchMedia.bind(window);
@@ -162,24 +162,62 @@ describe("Home on a phone", () => {
     });
     const world = holdingHome({ ...scene(), phone: true });
     const { alpha } = await open(world, only("home", "assistant", "view:Notes"));
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 844 });
-    Object.defineProperty(window, "innerHeight", { configurable: true, value: 390 });
-    await drawn(() => window.dispatchEvent(new Event("resize")));
-    await until(alpha, alpha.runtime, Canvas, (state) => state.landscape);
-    await until(alpha, home.runtime(alpha), Home.Machine, (state) => state.tiles.load.status === "Loaded");
+    const rotate = async (landscape: boolean) => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: landscape ? 844 : 390 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: landscape ? 390 : 844 });
+      await drawn(() => window.dispatchEvent(new Event("resize")));
+      await until(alpha, alpha.runtime, Canvas, (state) => state.landscape === landscape);
+    };
+    await rotate(true);
+    const homes = home.runtime(alpha);
+    const dialog = () => document.querySelector('[data-alpha-apps-drawer]');
+    const chat = () => document.querySelector('[data-alpha-detent="sheet"]');
+    await until(alpha, homes, Home.Machine, (state) => state.tiles.load.status === "Loaded");
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     expect(tileButton("view:Notes")?.closest("[inert]")).toBeNull();
-    expect(button("Apps")?.closest("[inert]")).not.toBeNull();
+    expect(button("Apps")?.closest("[inert]")).toBeNull();
 
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "openLayer", id: "review", kind: "DialogLayer", covers: true })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 1);
     expect(tileButton("view:Notes")?.closest("[inert]")).not.toBeNull();
     await press("Notes");
-    expect(await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).toMatchObject({ trail: [], assistant: "Sheet" });
+    await press("Apps");
+    expect(await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).toMatchObject({ trail: [], drawer: false, assistant: "Sheet" });
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "review" })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 0);
 
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
+    await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
+    expect(dialog()?.getAttribute("aria-modal")).toBeNull();
+    expect(button("Open Clock")).toBeDefined();
+    await fill("Search apps", "clock");
+    expect(button("Open Mail")).toBeUndefined();
+
+    await rotate(false);
+    expect(dialog()?.hasAttribute("inert")).toBe(true);
+    await press("Close apps");
+    expect(dialog()).not.toBeNull();
+    expect(chat()).not.toBeNull();
+    await rotate(true);
+    expect(dialog()?.hasAttribute("inert")).toBe(false);
+    expect(dialog()?.querySelector("input")?.value).toBe("clock");
+    await press("Close apps");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.assistant === "Sheet");
+    expect(dialog()).toBeNull();
+    expect(chat()).not.toBeNull();
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
+    expect(dialog()?.getAttribute("aria-modal")).toBe("true");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.assistant === "Bar");
+
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
     expect(document.querySelector("[data-alpha-detent=sheet]")).toBeNull();

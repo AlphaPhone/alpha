@@ -54,7 +54,7 @@ effect function read(ticket: number, account: number, message: number, position:
   const anchor = ledger.card(message)
   const prepared = effect {
     if (place !== "SelectedMessage" || anchor === undefined || anchor.metadata.historyId === null || before.list.status !== "Loaded") return undefined
-    const key = aheadKey(before, ledger, before.list.ticket)
+    const key = aheadKey(before, ledger)
     const part = bodyPart(anchor)
     for (const slot of (try InboxAhead).bodies) {
       const warmed = try slot.take(key, part)

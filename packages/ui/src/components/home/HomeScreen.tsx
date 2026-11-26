@@ -19,8 +19,10 @@ export type HomeScreenProps = {
   editing?: boolean;
   /** Another launcher surface is over Home. */
   covered?: boolean;
-  /** Only Alpha's own app tiles are available beside the open Ask sheet. */
-  ownTilesOnly?: boolean;
+  /** The card rows remain visible while their controls cannot take input. */
+  cardsInert?: boolean;
+  /** The Apps tile remains visible while it cannot take input. */
+  drawerInert?: boolean;
   /** The launcher reserves the status bar above the Home cards. */
   launcher?: boolean;
   /** Opens a tile's app; left out where nothing may be opened. */
@@ -63,7 +65,7 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], appCards, tiles, editing = false, covered = false, ownTilesOnly = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], appCards, tiles, editing = false, covered = false, cardsInert = false, drawerInert = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
@@ -73,8 +75,8 @@ export function HomeScreen({
           <h1 className="sr-only">Home</h1>
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
-        {cards.length > 0 ? <HomeCardRow inert={ownTilesOnly || undefined} key={cards.map((card) => (isValidElement(card) ? card.key : "")).join(" ")}>{cards}</HomeCardRow> : null}
-        {appCards ? <HomeCardRow inert={ownTilesOnly || undefined} aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
+        {cards.length > 0 ? <HomeCardRow inert={cardsInert || undefined} key={cards.map((card) => (isValidElement(card) ? card.key : "")).join(" ")}>{cards}</HomeCardRow> : null}
+        {appCards ? <HomeCardRow inert={cardsInert || undefined} aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
           <HomeTileGrid
@@ -82,7 +84,7 @@ export function HomeScreen({
             editing={editing}
             onOpen={onOpenTile}
             onOpenDrawer={onOpenDrawer}
-            drawerInert={ownTilesOnly}
+            drawerInert={drawerInert}
             onBeginEditing={onBeginEditing}
             hold={hold}
             onRemove={onRemoveTile}

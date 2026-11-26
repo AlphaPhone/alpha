@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@repo/deployment": "workspace:*",
     "@repo/design-system": "workspace:*",
     "@repo/ui": "workspace:*",
     "effect": "4.1.1",
