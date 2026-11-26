@@ -16,8 +16,6 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
     androidVersion: Reading;
     /** Alpha runs on the phone, where it has an agent and an Android Settings page. */
     onPhone?: boolean;
-    /** What the resident agent last reported. */
-    agent?: "running" | "starting" | "needs-you" | "stopped";
     /** What Alpha tells about the last start of an Android page. */
     told?: AndroidTold;
     /** Goes back to the first page. */
@@ -33,7 +31,7 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
  * activity and the licences.
  * @model spec/app/settings/index.md
  */
-export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true, agent, told, onBack, onOpen, place, onPlace, children }: SettingsAboutPageProps) {
+export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true, told, onBack, onOpen, place, onPlace, children }: SettingsAboutPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
     <SettingsPage title="About" told={told} onBack={onBack} backLabel="Back to Settings">
@@ -41,18 +39,18 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true
         <span className="flex size-16 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground">
           <Mark aria-hidden className="size-[118%] shrink-0" />
         </span>
-        <h2 className="font-display text-title font-light">Alpha Phone</h2>
+        <h2 className="font-display text-title font-light tracking-normal [font-variation-settings:'opsz'_144]">Alpha Phone</h2>
         <p className="text-caption leading-normal text-muted-foreground">
-          {alphaVersion.word === "reported" ? `Version ${alphaVersion.value}` : !onPhone && alphaVersion.word === "unavailable" ? "Development preview" : <SettingsReading reading={alphaVersion} />}
+          {alphaVersion.word === "reported" ? (onPhone ? alphaVersion.value : `Version ${alphaVersion.value}`) : !onPhone && alphaVersion.word === "unavailable" ? "Development preview" : <SettingsReading reading={alphaVersion} />}
         </p>
       </div>
-      {onPhone ? (
+      {onPhone && androidVersion.word === "reported" ? (
         <ListGroup>
           <SettingsFactRow title="Android version" reading={androidVersion} />
         </ListGroup>
       ) : null}
       <ListGroup>
-        {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<Clock />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
+        {onPhone ? <SettingsNavRow title="Agent activity" icon={<Clock />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
         <SettingsNavRow title="Licenses" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
       </ListGroup>
       {children}

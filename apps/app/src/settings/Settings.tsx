@@ -469,10 +469,8 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
 function About({ runtime, alpha, common }: PageProps) {
   const facts = useFacts(runtime).state;
   const pages = usePages(runtime).state;
-  const activity = useActivity(runtime).state;
-  const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
   return (
-    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone ?? false} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
       {alpha.slot("settings/about")}
     </SettingsAboutPage>
   );
@@ -495,9 +493,6 @@ function Developer({ runtime, common }: PageProps) {
 
 const connections: Record<ActivityGen.Connection, SettingsActivityPageProps["connection"]> = {
   Ready: "ready", Starting: "starting", NeedsRestart: "needs-restart", NeedsRetry: "needs-retry", Offline: "offline", Unpackaged: "unpackaged",
-};
-const agentWords: Record<ActivityGen.AgentWord, NonNullable<Parameters<typeof SettingsAboutPage>[0]["agent"]>> = {
-  AgentRunning: "running", AgentStarting: "starting", AgentNeedsYou: "needs-you", AgentStopped: "stopped",
 };
 
 /** Agent activity as reported by the resident host, with the conversation controls owned by Ask Alpha. */

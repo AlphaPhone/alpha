@@ -71,12 +71,12 @@ pure def stepARecoveryIsHandedOver(before: Activity, after: Activity, out: List[
   out.some(e => isRecover(e)) implies (after.recovering and after.journal == before.journal and after.rows == before.rows and out.length() == 1)
 ```
 
-### About's Agent activity says whether the agent runs, is starting, needs the owner or is stopped
+### Agent activity says whether the agent runs, is starting, needs the owner or is stopped
 
-A new connection report replaces the one the page is showing. The row carries the connection the phone reports, so a stopped or
-refused agent is seen from Settings: running only while it is ready,
-starting while it starts, needing the owner while it needs a restart or
-another try, and stopped otherwise.
+About opens Agent activity. The latest connection report decides whether
+Agent activity shows phone actions or the recovery the agent needs. The
+page shows actions while the agent is ready and offers a restart or another
+try when the phone asks for one.
 
 ```quint
 pure def canConnectionReported(s: Activity, connection: Connection): bool = s.connection != connection
