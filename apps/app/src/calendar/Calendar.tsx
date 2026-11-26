@@ -23,7 +23,7 @@ import { useMachine as useLink } from "../../gen/app__calendar__link.react.ts";
 import { setUp } from "./link.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { useMachine as useEditor } from "../../gen/app__calendar__editor.react.ts";
 import { useMachine as useHeld } from "../../gen/app__calendar__deletions.react.ts";
@@ -49,7 +49,7 @@ import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from ".
 
 export interface CalendarProps {
   /** Provides Calendar's machines, `calendared` of calendar.vibe. */
-  runtime: ManagedRuntime.ManagedRuntime<Calendared, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Calendared | Resident, unknown>;
   /** Alpha, for the shell's Back in Calendar's own header. */
   alpha?: Alpha;
 }
