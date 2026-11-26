@@ -21,14 +21,12 @@ import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
 import { displayNumber } from "../src/phone/words.ts";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import { alphaImage as image } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
 
-/** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
-const image = () => ({ ...scene(), phone: true, image: true });
 const mounts = only("home", "assistant", "notice", "view:Messages", "view:Browser");
 const openImage = (world: ReturnType<typeof image>) => open(world, mounts);
 
@@ -52,6 +50,21 @@ async function openTextReview(world: ReturnType<typeof image>, review: ReturnTyp
   world.telephony.textReview = review;
   const { alpha } = await openImage(world);
   return { alpha, runtime: assistant.runtime(alpha) };
+}
+
+/** Open Ask Alpha over Home with `review` waiting on the phone, and send `text`, which the agent answers by proposing it: once the phone has read the proposal (`read`). */
+async function proposeText(world: ReturnType<typeof image>, review: ReturnType<typeof textReview>, text: string, read: string) {
+  const { alpha, runtime } = await openTextReview(world, review);
+  await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+  await openHomeConversation(alpha, runtime);
+
+  world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+  world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+  await fill("Message Alpha", text);
+  await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
+  await ready(runtime, Conversation, read, (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
+  return { alpha, runtime };
 }
 
 async function exactSmsConfirmation(
@@ -97,7 +110,6 @@ const confirm = (name: string) => drawn(() => {
   if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${name} in the confirmation`);
   found.click();
 });
-
 
 /** Open the message action menu from the keyboard. */
 const bubble = (text: string) => drawn(() => {
@@ -919,21 +931,7 @@ describe("Messages on an Alpha image", () => {
     const compose = draft ? { type: "sms_compose", target: { kind: "number", number: "+12025550142" }, body, draft: true } as const
       : { type: "sms_compose", target: { kind: "number", number: "+12025550142" }, body } as const;
     const review = textReview(world.notes.owner, draft ? "draft-to-number" : "text-to-number", compose);
-    world.telephony.textReview = review;
-    const { alpha } = await openImage(world);
-    const runtime = assistant.runtime(alpha);
-    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
-    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
-    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
-    await press("Open conversation");
-    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
-
-    world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
-    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-    await fill("Message Alpha", draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?");
-    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
-    await press("Send");
-    await ready(runtime, Conversation, "The proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
+    await proposeText(world, review, draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?", "The proposal is read");
     await vi.waitFor(() => expect(button(draft ? "Open draft" : "Send this text")).toBeDefined());
     expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To ${displayNumber("+12025550142")}`);
     expect(document.body.textContent).not.toContain(draft ? "Review this text on your phone" : "Open an editable text draft");
@@ -944,21 +942,7 @@ describe("Messages on an Alpha image", () => {
   it.each([["a contact's first name", "Maya", true], ["a name no contact has", "Bob", false]] as const)("Reviews a text to %s on its card and sends nothing (spec/app/contacts/agent.md, \"Only the phone answers the newest search, and the request goes on by what it found\")", async (_label, query, known) => {
     const world = image();
     const review = textReview(world.notes.owner, `text-${query}`, { type: "sms_compose", query, body: "I'm running late" });
-    world.telephony.textReview = review;
-    const { alpha } = await openImage(world);
-    const runtime = assistant.runtime(alpha);
-    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
-    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
-    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
-    await press("Open conversation");
-    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
-
-    world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
-    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-    await fill("Message Alpha", `text ${query} I'm running late`);
-    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
-    await press("Send");
-    await ready(runtime, Conversation, "The named proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
+    await proposeText(world, review, `text ${query} I'm running late`, "The named proposal is read");
     if (known) {
       await vi.waitFor(() => expect(document.querySelector('[aria-label="Choose a phone number"] button')?.textContent).toContain("Maya Chen"));
     } else {

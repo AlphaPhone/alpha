@@ -15,7 +15,7 @@ import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, typeInto, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -33,8 +33,7 @@ function write(text: string) {
   act(() => {
     const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
     if (!box) throw new Error("no composer");
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
-    box.dispatchEvent(new Event("input", { bubbles: true }));
+    typeInto(box, text);
   });
 }
 
