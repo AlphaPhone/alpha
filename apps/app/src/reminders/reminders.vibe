@@ -192,10 +192,13 @@ effect function syncMachineFromSnapshot(snapshot: RemindersSnapshot, nowMs: numb
   if (Reminders.canSetToday(before, today)) try contained(machine.send({ type: "setToday", day: today }), "advancing reminders today")
 }
 
+/** A typed read of the owner’s current resident reminders without changing the Reminders screen. */
+export const readReminders = () => ask(Agent, HttpClientRequest.get("/api/alpha/reminders"), SnapshotSchema)
+
 effect function fetchSnapshot(ticket: number): Event!!(Agent | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Reminders.Machine | PhoneReminders) {
   const now = try (try Time).now()
   return effect {
-    const raw = try ask(Agent, HttpClientRequest.get("/api/alpha/reminders"), SnapshotSchema)
+    const raw = try readReminders()
     const normalized = normalizeSnapshot(raw)
     try syncMachineFromSnapshot(normalized, now)
     remindersStore.setSyncError(null)
