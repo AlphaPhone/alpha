@@ -564,7 +564,18 @@ lemma recordingVerified_ensures(s: Camera, ok: bool, now: int, by_: app__photos_
   ensures (inv(s) ==> canRecordingVerified(s, by_) ==> stepTheLockScreenOpensNothingElse(s, recordingVerified(s, ok, now, by_).state, recordingVerified(s, ok, now, by_).out))
   ensures (inv(s) ==> canRecordingVerified(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingVerified", recordingVerified(s, ok, now, by_).state))
 {
-  RememberAll();
+  if inv(s) && canRecordingVerified(s, by_) {
+    var ended := app__camera__recording_verified(s.film, ok);
+    assert recordingVerified(s, ok, now, by_) == filming(ended, now, s);
+    assert !app__camera__recording_recording(ended) && !ended.stage.Running?;
+    assert app__camera__recording_alwaysWithinLimits(ended);
+    assert app__camera__recording_alwaysSavedIsWhole(ended);
+    FilmReleased(s, ended, now);
+    FilmKeepsAgent(s, ended, now);
+    FilmKeepsSession(s, ended, now, "recordingVerified");
+    FilmKeepsCameraSettings(s, ended, now);
+    FilmKeepsRecording(s, ended, now);
+  }
 }
 
 lemma StartAccounted(out: seq<Effect>, c: Camera)
@@ -801,5 +812,41 @@ lemma recordingStarted_ensures(s: Camera, ok: bool, now: int, by_: app__photos__
     FilmKeepsSession(s, held, now, "recordingStarted");
     FilmKeepsCameraSettings(s, held, now);
     FilmKeepsRecording(s, held, now);
+  }
+}
+
+lemma stopTimedOut_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysNoCameraWithoutAccess(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysNothingHeldAway(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysStartsAccounted(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysTorchBelongsToItsPreview(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysLensSettingsValid(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysFocusFollowsTheNewestTap(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysRecordingHoldsThePreview(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysOneShutterOnTheCamera(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysTheRequestWaitsOnTheCamera(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> alwaysSecureShowsOnlyItsSession(stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepALostPreviewFails(s, "stopTimedOut", stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepARetiredPreviewIsReleased(s, "stopTimedOut", stopTimedOut(s, now, by_).state, stopTimedOut(s, now, by_).out))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepOneFocusWriteAtATime(s, "stopTimedOut", stopTimedOut(s, now, by_).state, stopTimedOut(s, now, by_).out))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepSoundOnlyWithTheMicrophone(s, stopTimedOut(s, now, by_).state, stopTimedOut(s, now, by_).out))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepASavedVideoIsTheLast(s, stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepTheShutterNeverFiresCovered(s, stopTimedOut(s, now, by_).state, stopTimedOut(s, now, by_).out))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepEachRequestIsAnsweredOnce(s, stopTimedOut(s, now, by_).state, stopTimedOut(s, now, by_).out))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepTheAgentFailsOnlyForCause(s, "stopTimedOut", stopTimedOut(s, now, by_).state))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepTheLockScreenOpensNothingElse(s, stopTimedOut(s, now, by_).state, stopTimedOut(s, now, by_).out))
+  ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "stopTimedOut", stopTimedOut(s, now, by_).state))
+{
+  if inv(s) && canStopTimedOut(s, now, by_) {
+    var ended := app__camera__recording_timedOut(s.film, now);
+    assert stopTimedOut(s, now, by_) == filming(ended, now, s);
+    assert !app__camera__recording_recording(ended) && !ended.stage.Running?;
+    assert app__camera__recording_alwaysWithinLimits(ended);
+    assert app__camera__recording_alwaysSavedIsWhole(ended);
+    FilmReleased(s, ended, now);
+    FilmKeepsAgent(s, ended, now);
+    FilmKeepsSession(s, ended, now, "stopTimedOut");
+    FilmKeepsCameraSettings(s, ended, now);
+    FilmKeepsRecording(s, ended, now);
   }
 }
