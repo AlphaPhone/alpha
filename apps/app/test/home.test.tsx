@@ -379,14 +379,18 @@ describe("Home on a phone", () => {
     const seenThere: Array<{ readonly card: string | undefined; readonly utcDay: boolean }> = [];
     const wanted: string[][] = [];
     const allDay: string[] = [];
+    /** A phone at `at` in time zone `where`, whose Work calendar holds `events`. */
+    const phoneThere = (where: string, at: number, events: Scene["calendar"]["phoneEvents"]) => {
+      process.env.TZ = where;
+      const there = { ...scene(), phone: true, now: at };
+      there.calendar.granted = true;
+      there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
+      there.calendar.phoneEvents = events;
+      return there;
+    };
     try {
       for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["UTC", day + 8 * hour], ["America/Los_Angeles", day + 18 * hour]] as const) {
-        process.env.TZ = where;
-        const there = { ...scene(), phone: true, now: at };
-        there.calendar.granted = true;
-        there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
-        there.calendar.phoneEvents = [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }];
-        const opened = await open(there);
+        const opened = await open(phoneThere(where, at, [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }]));
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 1);
         await drawn(() => undefined);
         const utcMidnight = Math.floor(at / 86_400_000) * 86_400_000;
@@ -397,16 +401,11 @@ describe("Home on a phone", () => {
       }
       // spec/app/home/cards.md, "An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled": an all-day event is the owner's date, as v121 read it. In Tokyo at 06:00 on the 11th (UTC still the 10th) yesterday's all-day event has ended; in Los Angeles at 18:00 on the 11th (UTC already the 12th) today's has not.
       for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["America/Los_Angeles", day + 26 * hour]] as const) {
-        process.env.TZ = where;
-        const there = { ...scene(), phone: true, now: at };
-        there.calendar.granted = true;
-        there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
-        there.calendar.phoneEvents = [
+        const opened = await open(phoneThere(where, at, [
           { id: "y", calendarId: "1", title: "Moving day", begin: day - 86_400_000, end: day, allDay: true, recurring: false },
           { id: "t", calendarId: "1", title: "Holiday", begin: day, end: day + 86_400_000, allDay: true, recurring: false },
           { id: "n", calendarId: "1", title: "Trip", begin: day + 86_400_000, end: day + 2 * 86_400_000, allDay: true, recurring: false },
-        ];
-        const opened = await open(there);
+        ]));
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 3);
         await drawn(() => undefined);
         allDay.push(agenda()?.getAttribute("aria-label") ?? "");
