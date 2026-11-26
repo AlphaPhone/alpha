@@ -16,6 +16,7 @@ import type { Machine as ReaderMachine } from "../../gen/app__browser__reading.e
 import type { Machine as ShareMachine } from "../../gen/app__browser__share.effect.vibe";
 import type { Machine as SiteMachine } from "../../gen/app__browser__site.effect.vibe";
 import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
@@ -64,6 +65,8 @@ export function Browser({ runtime, alpha }: BrowserProps) {
 function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
   // spec/app/browser/index.md, "Story: Open, pick and close tabs"
   useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
+  // spec/app/browser/address.md, "The find bar opens over a shown page": Ask Alpha rising or resting changes what of a page below Alpha is Alpha's to touch, so the page is placed again.
+  const { state: assistant } = useShell(runtime, (shell) => shell?.assistant);
   const attach = useCallback((place: HTMLDivElement | null) => {
     if (!place) return;
     const notify = () => { void runtime.runPromise(placed); };
@@ -82,7 +85,7 @@ function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
     };
   }, [runtime]);
   // spec/app/browser/address.md, "The find bar opens over a shown page": the page keeps its full place and the find bar is drawn over it.
-  return <div data-alpha-browser-page="" aria-hidden ref={attach} className="absolute inset-x-0 top-0 bottom-0" />;
+  return <div key={assistant} data-alpha-browser-page="" aria-hidden ref={attach} className="absolute inset-x-0 top-0 bottom-0" />;
 }
 
 function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page: PageRuntime }) {

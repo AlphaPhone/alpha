@@ -19,10 +19,11 @@ module held {
    */
   export type AlphaTabHost = BrowserTabHostPlugin & {
     /**
-     * Draws a tab's page above Alpha. `hostRects` are the places of Alpha's controls drawn over the page, in the page's
-     * own pixels: the page is left out of them and a touch there is Alpha's (`AlphaBrowserPlugin.present`).
+     * Draws a tab's page above Alpha, or below it (`below-host`), where Alpha's WebView draws its controls over the page and
+     * `hostRects` are their places, in the page's own pixels: a touch there is Alpha's, anywhere else the page's
+     * (`AlphaBrowserPlugin.present`, `TabInputRouter`).
      */
-    present(options: BrowserTabPresentation | (Extract<BrowserTabPresentation, { readonly id: string }> & { readonly hostRects?: readonly HostRect[] })): Promise<void>
+    present(options: BrowserTabPresentation | (Extract<BrowserTabPresentation, { readonly id: string }> & { readonly layer: "below-host"; readonly hostRects: readonly HostRect[] })): Promise<void>
     pageContext(options: BrowserPageGuard): Promise<unknown>
     openFailedPage(options: BrowserPageGuard): Promise<void>
     setDesktopSite(options: { readonly session: string; readonly id: string; readonly enabled: boolean }): Promise<unknown>
