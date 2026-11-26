@@ -23,6 +23,9 @@ export interface AskScene {
   /** While set, the agent holds each answer to a read of the list until the test lets it go. */
   holdLists: boolean;
   readonly heldLists: (() => void)[];
+  /** While set, the agent holds each answer to a read of a conversation's messages, as it stood when asked, until the test lets it go. */
+  holdPages?: boolean;
+  readonly heldPages: (() => void)[];
   acknowledgment?: string;
   /** Text the agent streams before its acknowledgment, which it starts again after it, as eliza's planner does with a cue it displayed. */
   streamedBeforeAcknowledgment?: string;
@@ -34,8 +37,8 @@ export interface AskScene {
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
   nextReplyProvisional?: boolean;
-  /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
-  nextActions?: (metadata: unknown) => readonly unknown[];
+  /** The actions the next reply says it ran, made from the turn's metadata and the device capabilities the turn declared, as eliza's agent lists them on its done frame. */
+  nextActions?: (metadata: unknown, capabilities: readonly string[]) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
   holdDoneAfterReady?: Promise<void>;
   /** The next reply's tools ran while the stream was busy, so only the newest waiting tool frame is written, as eliza's reply stream writes progress. */
@@ -66,7 +69,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
 }
 
 /** A storage address within the fake phone's already verified local account. */
@@ -109,10 +112,10 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown, capabilities: readonly string[]): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
-  const actions = scene.nextActions?.(metadata) ?? [];
+  const actions = scene.nextActions?.(metadata, capabilities) ?? [];
   const holdDone = scene.holdDoneAfterReady;
   const newestOnly = scene.nextNewestProgressOnly === true;
   scene.nextNewestProgressOnly = undefined;
@@ -200,23 +203,27 @@ export function askRoutes(scene: AskScene): Route[] {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];
       if (request.method !== "GET" || id === undefined || id === "messages") return;
       scene.pageReads += 1;
-      if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
-      if (scene.pagesMissing) return Response.json({ error: "unknown_conversation" }, { status: 404 });
-      const one = scene.kept.get(id);
-      if (one === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
-      const messages = one.messages.map((message, at) => ({ ...message, timestamp: at + 1 }));
-      const around = url.searchParams.get("around");
-      if (around !== null) {
-        const pivot = messages.findIndex((message) => message.id === around);
-        return pivot < 0 ? Response.json({ error: "unknown_message" }, { status: 404 })
-          : Response.json({ messages: messages.slice(Math.max(0, pivot - 100), pivot + 101) });
-      }
-      const before = url.searchParams.get("before");
-      if (before === null) return Response.json({ messages: messages.slice(-200), hasMore: messages.length > 200 });
-      const beforeId = url.searchParams.get("beforeId");
-      const older = messages.filter(({ timestamp, id }) => timestamp < Number(before) || (timestamp === Number(before) && beforeId !== null && id < beforeId));
-      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
-      return Response.json({ messages: older.slice(-limit), hasMore: older.length > limit });
+      const answer = (): Response => {
+        if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
+        if (scene.pagesMissing) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+        const one = scene.kept.get(id);
+        if (one === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+        const messages = one.messages.map((message, at) => ({ ...message, timestamp: at + 1 }));
+        const around = url.searchParams.get("around");
+        if (around !== null) {
+          const pivot = messages.findIndex((message) => message.id === around);
+          return pivot < 0 ? Response.json({ error: "unknown_message" }, { status: 404 })
+            : Response.json({ messages: messages.slice(Math.max(0, pivot - 100), pivot + 101) });
+        }
+        const before = url.searchParams.get("before");
+        if (before === null) return Response.json({ messages: messages.slice(-200), hasMore: messages.length > 200 });
+        const beforeId = url.searchParams.get("beforeId");
+        const older = messages.filter(({ timestamp, id }) => timestamp < Number(before) || (timestamp === Number(before) && beforeId !== null && id < beforeId));
+        const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
+        return Response.json({ messages: older.slice(-limit), hasMore: older.length > limit });
+      };
+      const page = answer();
+      return scene.holdPages ? new Promise<Response>((resolve) => void scene.heldPages.push(() => resolve(page))) : page;
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations/messages/search") return;
@@ -256,7 +263,8 @@ export function askRoutes(scene: AskScene): Route[] {
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
         if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
-        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
+        const capabilities = request.headers.get("x-eliza-device-capabilities")?.split(",").filter((name) => name !== "") ?? [];
+        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata, capabilities);
       });
     },
     (request, url) => {
