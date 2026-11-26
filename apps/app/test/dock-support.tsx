@@ -24,6 +24,10 @@ export async function closeAllDocks() {
   localStorage.clear();
 }
 
+/** The resident agent and launch owner the dock's agent names, so that attachments can be fenced to a verified owner. */
+const dockAgent = "dock-agent";
+const dockOwner = "dock-owner";
+
 export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
   const client = Layer.succeed(
@@ -35,7 +39,11 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
           ? { version: "1", optionalFields: true }
           : url.pathname === "/api/conversations"
             ? { conversations: [] }
-            : {};
+            : url.pathname === "/api/auth/me"
+              ? { identity: { kind: "owner", id: dockAgent }, access: { role: "OWNER", mode: "local" } }
+              : url.pathname === "/api/client-devices/capabilities"
+                ? { protocol: 1, agentId: dockAgent, identityId: dockOwner, deviceActions: { protocol: 1, capabilities: [] } }
+                : {};
       return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })));
     }),
   );
