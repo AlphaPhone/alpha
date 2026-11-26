@@ -4,6 +4,7 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.os.agent.AgentService;
 import ai.eliza.plugins.signin.CredentialPolicy.Notice;
 import ai.eliza.plugins.signin.CredentialReader;
+import ai.eliza.plugins.signin.DeviceCustody;
 import android.app.Application;
 
 public final class AlphaApplication extends Application {
@@ -20,6 +21,7 @@ public final class AlphaApplication extends Application {
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(credentials);
   boolean main = getPackageName().equals(getProcessName());
+  if (main) AgentService.useGoogleBroker(DeviceCustody.googleBroker(this, BuildConfig.CLOUD_API_ORIGIN));
   CredentialReader reader = credentials.reader();
   HostedDigestDelivery digests = main ? HostedDigestDelivery.start(this, reader) : null;
   InboxNoticeDelivery inbox = main ? InboxNoticeDelivery.get(this) : null;
