@@ -3,7 +3,7 @@ import {
   type AssistantPull, type AssistantRelease, barDismissPaint, useAssistantBarDrag, type ChatDrag, CLOSE_FADE_MS, CLOSE_MS, CLOSED_COMPOSER_BLOCK, dockOpacity, dragPaint, FALLBACK_BAR, FLOOR_GAP,
   moveDrag, PANEL_TRANSITION, pressDrag, RESIZE_TRANSITION, restingHeight, revealFrames, rowReveal, SHEET_EASE, sheetBounds, TAP_SLOP,
 } from "@repo/ui";
-import { type CSSProperties, type ReactNode, type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, type RefObject, useCallback, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { isOpen, keptShare, landing, shareScale, stays } from "../../gen/app__assistant__dock.ts";
 import type { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
@@ -173,16 +173,20 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const ghostRef = useRef<HTMLElement | undefined>(undefined);
   const barRef = useRef(0);
   const paintedBarRef = useRef<HTMLElement | null>(null);
-  /** A bar pulled down to tuck keeps the finger's paint until the pill is drawn in its place, as v119's bar left with the drag (COA:640-648), so it never shows at rest for a frame first. */
-  const tuckingRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const handOver = () => {
-    clearTimeout(tuckingRef.current);
+  /**
+   * A bar pulled down to tuck keeps the finger's paint until the commit that draws it as something else, the pill, clears
+   * it, as v119's bar left with the drag (COA:640-648), so it never shows at rest for a frame first. The watch runs
+   * before the next frame is painted; a refused release drops the paint, and a new press takes it back.
+   */
+  const tuckingRef = useRef<MutationObserver | undefined>(undefined);
+  const stopTucking = () => {
+    tuckingRef.current?.disconnect();
     tuckingRef.current = undefined;
+  };
+  const handOver = () => {
+    stopTucking();
     unpaintBar(paintedBarRef, false);
   };
-  useLayoutEffect(() => {
-    if (pill && tuckingRef.current !== undefined) handOver();
-  });
   if (seen.detent !== detent) {
     const tap = live === undefined && !voice && !comms && animates();
     const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: sectionRef.current?.getBoundingClientRect().height || undefined } : undefined);
@@ -204,8 +208,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     setLive(undefined);
   };
   const drop = () => {
-    clearTimeout(tuckingRef.current);
-    tuckingRef.current = undefined;
+    stopTucking();
     done(true);
     void dock.send({ type: "shift", now: untimed });
   };
@@ -262,10 +265,13 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
         document.activeElement.blur();
       }
       const painted = dragPaint(d);
-      // A pull down from the bar or typing tucks it to the pill; the bar is handed over when the pill is drawn, or after CLOSE_MS if it never is.
-      if (!comms && held.form === "bar" && direction === "down" && !isOpen(held.start) && !isOpen(landed.detent) && paintedBarRef.current) {
-        clearTimeout(tuckingRef.current);
-        tuckingRef.current = setTimeout(handOver, CLOSE_MS);
+      // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar"
+      const tucking = paintedBarRef.current;
+      stopTucking();
+      if (!comms && held.form === "bar" && direction === "down" && !isOpen(held.start) && !isOpen(landed.detent) && tucking && !tucking.hasAttribute("data-alpha-pill") && typeof MutationObserver !== "undefined") {
+        const watch = new MutationObserver(handOver);
+        watch.observe(tucking, { attributes: true, attributeFilter: ["data-alpha-pill", "data-alpha-input-bar", "hidden"] });
+        tuckingRef.current = watch;
       }
       unpaint(sectionRef.current, paintedBarRef, false, tuckingRef.current !== undefined);
       if (held.form === "open" && !isOpen(landed.detent) && !comms && animates()) {

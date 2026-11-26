@@ -688,7 +688,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     const timing = typeof options === "object" ? options : undefined;
     expect(risen).toHaveLength(1);
     expect(tokens.keyframes.rise).toContain(`transform:${String(from?.transform)}`);
-    expect(tokens.animate.rise).toContain(`${timing?.duration}ms ${timing?.easing}`);
+    expect(tokens.animate.rise).toContain(`${String(timing?.duration)}ms ${String(timing?.easing)}`);
   });
 
   // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar"
