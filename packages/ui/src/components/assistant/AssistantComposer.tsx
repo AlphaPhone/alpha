@@ -144,13 +144,18 @@ export function AssistantComposer({
   const compact = bar && onType !== undefined;
   const swiping = usePillSwipe(compact ? onSwipeUp : undefined);
   const targeting = !bar && placeholder !== undefined;
+  const pickedFiles = attachments.every(({ kind }) => kind === "image" || kind === "file");
   const frame = bar ? "mx-4 [--alpha-composer-rest:1.75rem]" : "mx-3 [--alpha-composer-rest:1.875rem]";
   const pull = useAssistantPull<HTMLTextAreaElement>(fieldPull, true);
   return (
     <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
-      {!compact && attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
+      {!compact && attachments.length ? (
+        <AssistantPendingAttachments attachments={attachments} limit={limit}
+          className={pickedFiles ? cn("-mb-2", !bar && "-mx-3") : undefined}
+          onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} />
+      ) : null}
       {!compact && quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
