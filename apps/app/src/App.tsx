@@ -1,13 +1,13 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { type PointerEvent, type TouchEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { type PointerEvent, type TouchEvent, useCallback, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
 import { useMachine as useAccess } from "../gen/app__startup__access.react.ts";
-import { completed as accessCompleted, panel as accessPanel } from "../gen/app__startup__access.ts";
+import { completed as accessCompleted, coveredAt as accessCoveredAt, panel as accessPanel } from "../gen/app__startup__access.ts";
 import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
@@ -22,7 +22,6 @@ import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
 import { canLeaveSignInStep, SignIn, useFirstRun } from "./startup/SignIn.tsx";
 import { AccessWalkthrough } from "./startup/SettingsAccess.tsx";
 import { reloadBeforeMount } from "./startup/recovery.vibe";
-import { openStartupAccess } from "./startup/settingsAccess.vibe";
 
 export interface AppProps {
   /** Alpha as boot.tsx opened it: the root runtime, and every screen at its place. */
@@ -85,11 +84,8 @@ export function App({ alpha }: AppProps) {
   const signingIn = alpha.requiresSignIn && signedIn?.stage !== "Admitted";
   const access = useAccess(alpha.runtime).state;
   const enrolled = alpha.requiresSignIn && signedIn?.accountConfirmed === true;
-  const accessCovered = !state || cause !== undefined || updating || (layers !== undefined && pageInert(layers))
-    || state.assistant === "Sheet" || state.assistant === "Full" || state.textAsk.tag === "TextAskVisit";
-  useEffect(() => {
-    if (enrolled) alpha.runtime.runFork(openStartupAccess(accessCovered));
-  }, [alpha, enrolled, accessCovered]);
+  const accessCovered = !state || cause !== undefined || !page || !layers
+    || accessCoveredAt(state, pageInert(layers), updating || !editorsMounted(page));
   const accessHolding = enrolled && (!access || !access.begun || !accessCompleted(access) || access.finish.allSet);
   const accessMayShow = accessHolding && !accessCovered;
   const accessStage = access !== undefined && accessPanel(access);
