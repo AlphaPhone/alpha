@@ -459,7 +459,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Sheet" })));
     await settled(alpha, () => asked() === 3, asked);
     await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Full" })));
-    // Only the phone's sign-in settles; Talk warming speech for the new account asks the agent for nothing more.
+    /** Only the phone's sign-in settles; Talk warming speech for the new account asks the agent for nothing more. */
     const signedIn = phone ? 1 : 0;
     await drawn(() => world.voice.signedInHere?.());
     await settled(alpha, () => asked() === 3 + signedIn, asked);

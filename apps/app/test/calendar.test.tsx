@@ -78,7 +78,7 @@ async function fromMonth(pill: string) {
  * pointer is coarse, so the window is measured again with a touch pointer.
  */
 async function widen(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
-  if ((await runtime.runPromise(View.use((view) => view.get()))).wide) return;
+  if ((await runtime.runPromise(Effect.flatMap(View, (view) => view.get()))).wide) return;
   const coarse = window.matchMedia("(pointer: coarse)");
   Object.defineProperty(coarse, "matches", { configurable: true, value: true });
   const original = window.matchMedia.bind(window);
@@ -179,7 +179,7 @@ it("Offers Search, the layouts and the Calendars sheet only on a wide screen (sp
     Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
     await drawn(() => window.dispatchEvent(new Event("resize")));
   };
-  // A phone measures its own window: 412 points is Alpha's portrait phone, 1024 a tablet's width.
+  // spec/app/calendar/index.md, "Several days side by side only on a wide screen": a phone measures its own window; 412 points is Alpha's portrait phone, 1024 a tablet's width.
   const { alpha, runtime } = await onCalendar(morning(true));
   await resize(412, 915);
   await until(alpha, runtime, View, (state) => state.front && !state.wide);
@@ -267,7 +267,7 @@ describe("Calendar without a connected account", () => {
     await press("Back to calendar");
     await until(alpha, runtime, Editor, (state) => !state.shown && state.banner === "Available");
 
-    // Google connects while the draft waits; Calendar reads it when it comes forward again.
+    // spec/app/calendar/editor.md, "Story: Keep my draft through a restart": Google connects while the draft waits; Calendar reads it when it comes forward again.
     world.calendar.down = false;
     await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" })));
     await until(alpha, runtime, View, (state) => !state.front);
@@ -298,9 +298,9 @@ describe("Calendar without a connected account", () => {
     await until(alpha, runtime, Editor, (state) => state.titled && state.kept);
     await press("Back to calendar");
     await until(alpha, runtime, Editor, (state) => !state.shown && state.banner === "Available");
-    // A draft kept before #1742 recorded no calendar, so once Google connects it opens on the agent's calendar still holding Weekly.
+    // spec/app/calendar/editor.md, "Story: Keep my draft through a restart": a draft kept before #1742 recorded no calendar, so once Google connects it opens on the agent's calendar still holding Weekly.
     await runtime.runPromise(Effect.gen(function* () {
-      const { owner } = yield* Editor.use((editor) => editor.get());
+      const { owner } = yield* Effect.flatMap(Editor, (editor) => editor.get());
       const store = yield* KeyValueStore.KeyValueStore;
       const key = `alpha.calendar.form.${owner}`;
       const { calendar: _calendar, ...draft } = JSON.parse((yield* store.get(key)) ?? "{}");
@@ -315,7 +315,7 @@ describe("Calendar without a connected account", () => {
     await press("Resume event draft");
     await until(alpha, runtime, Editor, (state) => state.shown && state.receipts.status === "Loaded");
     const drawnOptions = () => ["Once", "Daily", "Weekdays", "Weekly", "Video link", "None", "10 min"].filter((name) => button(name) !== undefined);
-    // v119 45f6bed30 prototype/agent-calendar-adapter.ts:328 kept only a chip that sets the repeat back.
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/agent-calendar-adapter.ts:328 kept only a chip that sets the repeat back.
     expect([button("Your agent's calendar")?.getAttribute("aria-pressed"), drawnOptions(), button("Once")?.getAttribute("aria-pressed")]).toEqual(["true", ["Once"], "false"]);
     await press("Once");
     await until(alpha, runtime, Editor, (state) => state.kept);
@@ -510,7 +510,7 @@ describe("Calendar without a connected account", () => {
     await press("Reopen reminder");
     await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
     await press("Reopen");
-    // spec/app/reminders/index.md: the completion still holds its five-second Undo, and the reopen write waits for it to end
+    // spec/app/reminders/index.md, "The reviewed reopen from Calendar restores the same reminder without an alert": the completion still holds its five-second Undo, and the reopen write waits for it to end
     expect(await alpha.runtime.runPromise(Reminders.use((reminders) => reminders.get()))).toMatchObject({ undo: { holding: "Held" } });
     await later(alpha, 5_100);
     await until(alpha, alpha.runtime, Reminders, (state) => state.undo.holding !== "Held" && state.write.outcome === "Confirmed");
@@ -721,9 +721,7 @@ describe("on a phone", () => {
     await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
     await fill("Title", "Office closure");
     await press("All day");
-    // v119 45f6bed30 prototype/template.html:1423-1497: Video link, Repeat and Alert show on every new event of this phone's calendar.
-    // The live v119 adapter left them off the agent's calendar, not dimmed (45f6bed30 prototype/agent-calendar-adapter.ts:312, :328).
-    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 shows Video link, Repeat and Alert on every new event of this phone's calendar, and the live adapter left them off the agent's calendar, not dimmed (45f6bed30 prototype/agent-calendar-adapter.ts:312, :328).
     const agentChosen = () => button("Your agent's calendar")?.getAttribute("aria-pressed") === "true";
     const options = ["Once", "Daily", "Weekdays", "Weekly", "Video link", "None", "At start", "10 min", "1 hour"];
     const drawnOptions = () => options.filter((name) => button(name) !== undefined);
@@ -731,7 +729,7 @@ describe("on a phone", () => {
     await until(alpha, runtime, Editor, (e) => e.titled && e.allDay && e.kept);
     expect([agentChosen(), drawnOptions()]).toEqual([true, []]);
     expect([button("Save event")?.getAttribute("aria-disabled"), Boolean(button("Open in Android Calendar"))]).toEqual(["false", false]);
-    // On this phone's calendar every repeat, the video link and the alerts are offered; going back to the agent's sets them back and leaves them off.
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": on this phone's calendar every repeat, the video link and the alerts are offered; going back to the agent's sets them back and leaves them off.
     await press("This phone's calendar");
     expect(offered()).toEqual(options.map(() => false));
     await press("Weekdays");
