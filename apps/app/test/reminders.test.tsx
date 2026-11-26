@@ -410,7 +410,6 @@ describe("Reminders full journeys", () => {
     resetReminderStores();
     const again = await openOver(platform, withReminders);
     const againRuntime = remindersArea.runtime(again.alpha);
-    await drawn(() => again.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Reminders" }))));
     await later(again.alpha, 60_000);
     await until(again.alpha, againRuntime, RemindersMachine.Machine, (s) => s.undo.holding !== "Held" && s.write.outcome !== "Sent");
     expect(recorder.snapshot.items.some((item) => item.id === kept.id)).toBe(false);
