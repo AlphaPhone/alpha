@@ -14,7 +14,7 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
 export { placeOf, viewOfPlace }
-import { filesOnlyHeaders, type MediaCard, MediaReview, ranDirect, sameFiles, spokenText } from "../assistant/media-review.vibe"
+import { type MediaCard, MediaReview, ranDirect, sameFiles, spokenText } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { composeRecipient } from "../messages/agent.vibe"
@@ -733,9 +733,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const sent = effect (files: typeof direct) => {
     output.beginAttempt(files !== undefined)
     const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, files === undefined ? undefined : "direct-files-only-v1")) } : {}
-    const headers = sms === undefined
-      ? (files === undefined ? ((try atSource) ? enrolled?.headers : undefined) : filesOnlyHeaders(files))
-      : { ...sms.opened.headers, "x-eliza-device-capabilities": "sms.send.v1" }
+    const headers = sms !== undefined ? { ...sms.opened.headers, "x-eliza-device-capabilities": "sms.send.v1" }
+      : review === undefined ? undefined
+      : files !== undefined ? try review.turnHeaders(files, true)
+      : enrolled !== undefined && (try atSource) ? try review.turnHeaders(enrolled, false) : undefined
     return tryPromise(() => controller.send({
       text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
     }, { stream: output.hooks, ...(headers === undefined ? {} : { headers }) })) catch () => undefined

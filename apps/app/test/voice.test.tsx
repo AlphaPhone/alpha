@@ -31,7 +31,7 @@ import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct
 import { publish } from "./fakes/platform.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
-import { textReview } from "./fakes/text-review.ts";
+import { askedPage, textReview } from "./fakes/text-review.ts";
 import { agentRequest } from "./fakes/calendar.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -674,6 +674,13 @@ async function switchToKeyboard() {
   await press("Switch to keyboard");
 }
 
+/** Let the startup cover lift, as it does at the latest 2.5 s after start where Home is not drawn under it, before a step that checks nothing is on screen. */
+async function coverLifted(alpha: Alpha) {
+  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
+  for (let waited = 0; waited < 2500 && cover(); waited += 500) await later(alpha, 500);
+  expect(cover()).toBeNull();
+}
+
 async function settleComposer(alpha: Alpha, check: () => boolean) {
   for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
   expect(check()).toBe(true);
@@ -1256,16 +1263,40 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const { alpha, area } = await onComposer(world, { at: "view:Browser", load: () => import("../src/browser/index.tsx") });
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
     await startTalkWithAskFirstOff({ alpha, area });
-    review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
     world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
-    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
-      proposalId: "spoken-page", state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
-    } }];
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
     speakUtterance(world, "Visit alphacompute.ai.");
     await drawnUntil(alpha, alpha.runtime, Shell.Machine, (s) => Shell.showing(s, "Browser") && s.assistant === "Bar");
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]);
     await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
     expect(button("Open")).toBeUndefined();
+  });
+
+  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"
+  it("while Ask before Alpha acts is on, keeps a page the spoken request asked for whole on its card in chat until I choose Open", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const url = "https://www.alphacompute.ai/";
+    const review = textReview(world.notes.owner, "spoken-page", { type: "browser_navigate", url });
+    world.telephony.textReview = review;
+    const { alpha, area } = await onComposer(world, { at: "view:Browser", load: () => import("../src/browser/index.tsx") });
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded");
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.askFirst);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
+    speakUtterance(world, "Visit alphacompute.ai.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending);
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await later(alpha, 500);
+    expect([review.claims, review.receipts]).toEqual([[], []]);
+    expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(false);
+
+    await press("Open");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]), { timeout: 10_000 });
+    await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
@@ -1401,6 +1432,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.onDevice = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.session > 0 && s.phase === "Idle");
@@ -1508,6 +1540,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.grantOnRequest = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
     await settleComposer(alpha, () => button("Talk") !== undefined);
 
     await drawn(() => document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.focus());
