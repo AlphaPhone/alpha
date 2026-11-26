@@ -58,7 +58,6 @@ function topIn(viewport: HTMLElement, row: HTMLElement) {
 function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
   if (reading.follows && !(selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode))) viewport.scrollTop = viewport.scrollHeight;
-  // A change that left the conversation shorter for a moment, as a finished reply put in place of its streamed words, drew it back to an earlier place; the owner's place is kept.
   else if (!reading.follows && viewport.scrollTop < reading.top) viewport.scrollTop = reading.top;
   reading.seen = { height: viewport.scrollHeight, view: viewport.clientHeight };
 }
@@ -103,9 +102,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
     observer.observe(viewport);
     observer.observe(content);
     return () => observer.disconnect();
-    // Each change to what the conversation shows is followed as it is drawn, as v119 did after every update (45f6bed30
-    // model.js:5561-5576): a size the observer never sees, as a reply swapped for its stored message, still keeps the end.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- each change to what the conversation shows is followed as it is drawn, as v119 did (45f6bed30 model.js:5561-5576), so a size the observer never sees still keeps the end
   }, [around, page, status, visible, messages, messagesAfterLater, briefing, liveMessages, interim, turn]);
   const pageFrom = (button: HTMLElement, id: string | undefined, load: () => void) => {
     const content = button.parentElement;

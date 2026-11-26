@@ -32,16 +32,16 @@ export const meta: ComponentMeta<SettingsAboutPageProps> = {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();
       const canvas = within(canvasElement);
-      expect(canvas.getByText("0.1.0", { exact: true })).toBeTruthy();
-      expect(canvas.getByText("Android version", { exact: true })).toBeTruthy();
+      await expect(canvas.getByText("0.1.0", { exact: true })).toBeTruthy();
+      await expect(canvas.getByText("Android version", { exact: true })).toBeTruthy();
       await userEvent.click(canvas.getByRole("button", { name: /^Agent activity$/ }));
       await userEvent.click(canvas.getByRole("button", { name: "Licenses" }));
       await expect(onOpen.mock.calls).toEqual([["activity"], ["licences"]]);
     },
-    Unavailable: ({ canvasElement }) => {
+    Unavailable: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      expect(canvas.queryByText("Android version", { exact: true })).toBeNull();
-      expect(canvas.getByRole("button", { name: /^Agent activity$/ })).toBeTruthy();
+      await expect(canvas.queryByText("Android version", { exact: true })).toBeNull();
+      await expect(canvas.getByRole("button", { name: /^Agent activity$/ })).toBeTruthy();
     },
     "Development preview": ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
