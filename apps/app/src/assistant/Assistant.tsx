@@ -374,14 +374,19 @@ interface DockHandleProps {
   done: () => void;
 }
 
+/** A drag of the dock ended: it settles by the drag's direction and flick and the height the finger left above it. */
+function dockRelease(dock: DockHandleProps["dock"]): NonNullable<AssistantPull["onRelease"]> {
+  return ({ direction, flick, y }) => {
+    const height = Math.max(0, Math.round(window.innerHeight - y));
+    void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+  };
+}
+
 function dockPull(dock: DockHandleProps["dock"], detent: DockHandleProps["detent"]): NonNullable<AssistantComposerProps["fieldPull"]> {
   return {
     onPress: () => { void dock.send({ type: "press", detent, now: untimed }); },
     onDrag: () => { void dock.send({ type: "drag" }); },
-    onRelease: ({ direction, flick, y }) => {
-      const height = Math.max(0, Math.round(window.innerHeight - y));
-      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-    },
+    onRelease: dockRelease(dock),
     onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
   };
 }
@@ -750,10 +755,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             void dock.send({ type: "press", detent: assistantDetent, now: untimed });
             void dock.send({ type: "drag" });
           },
-          onRelease: ({ direction, flick, y }) => {
-            const height = Math.max(0, Math.round(window.innerHeight - y));
-            void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-          },
+          onRelease: dockRelease(dock),
           onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
         } : undefined}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
