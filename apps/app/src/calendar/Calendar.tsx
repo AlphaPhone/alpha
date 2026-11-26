@@ -798,10 +798,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   if (e.form === "NewEvent" && shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const onAgent = destination === "Agent";
-  // v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on every new event; they need this phone's calendar.
-  // The live v119 adapter left them off the agent's calendar (45f6bed30 prototype/agent-calendar-adapter.ts:312 alerts and video, :328 repeats,
-  // keeping only a "No repeat" chip for a draft that held one), so here an option the agent's calendar would refuse is not drawn.
-  // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
+  // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on this phone's calendar; its live adapter left them off the agent's (prototype/agent-calendar-adapter.ts:312, :328).
   const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
   const offersVideo = choosesOptions && (fields.video === true || offeredOn(onAgent, false, false, true));
   const offeredRepeats = repeats.filter(({ repeat }) => offeredOn(onAgent, repeat !== "NoRepeat", false, false));
@@ -1013,7 +1010,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
 }
 
 // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number"; spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"
-function Proposal({ runtime }: CalendarProps) {
+/** The agent's change waiting for the owner, under way, or how it ended: over the days, and in Ask Alpha (sheet.tsx) with `className` placing it there. */
+export function Proposal({ runtime, className = "mx-4 mb-2" }: CalendarProps & { className?: string }) {
   const agent = useChanges(runtime);
   const a = agent.state;
   if (!a) return null;
@@ -1024,7 +1022,7 @@ function Proposal({ runtime }: CalendarProps) {
   const start = f ? Date.parse(f.startAt) : NaN;
   const end = f ? Date.parse(f.endAt) : NaN;
   return (
-    <section aria-label="Calendar change" className="mx-4 mb-2 shrink-0 rounded-chip bg-secondary px-5 py-4.5 text-base leading-normal">
+    <section aria-label="Calendar change" className={`${className} shrink-0 rounded-chip bg-secondary px-5 py-4.5 text-base leading-normal`}>
       <strong>{`${changes[a.change]}${a.reply === "NoReply" ? "" : `: ${replies[a.reply]}`}${a.updated ? " (updated)" : ""}`}</strong>
       <p className="text-meta text-muted-foreground">{statuses[requestStatus(request !== undefined, a.complete, "RequestPending")]}</p>
       {row ? <p>{`${a.change === "Update" ? "Now: " : ""}${row.title || "Untitled event"} · ${shortDate.format(row.begin)} · ${interval(row)}`}</p> : null}

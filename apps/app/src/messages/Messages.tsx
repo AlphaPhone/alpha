@@ -10,6 +10,7 @@ import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../gen/app__messages.ts";
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { Time } from "../runtime/time.vibe";
@@ -107,10 +108,11 @@ export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
 }
 
 function Threads({ runtime, messages: { state, can, send }, onBack, handoff, discardHandoff }: MessagesProps & HandoffProps & { messages: MessagesUI }) {
-  const [searching, setSearching] = useState(false);
+  const launcher = useCanvas(runtime).state?.launcher ?? false;
   const [draftOpening, setDraftOpening] = useState<"Opening" | "Failed">();
   const openingRef = useRef(false);
   if (!state) return null;
+  const { searching } = state;
   const { threads, sought, names } = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
   const query = state.sought ? sought : "";
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
@@ -127,6 +129,11 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
       discardHandoff();
       void send({ type: "openThread", thread });
     }
+  };
+  const openSearch = { type: "openSearch" } as const;
+  const closeSearch = () => {
+    runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ sought: "" })));
+    void send({ type: "closeSearch" });
   };
   const allow = { type: "allow", need: "SmsAccess" } as const;
   const settings = { type: "goToSettings", need: "SmsAccess" } as const;
@@ -150,7 +157,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
     <>
       {searching ? (
         <header className={cn("flex h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:h-14", messagesTop)} data-alpha-messages-search-header>
-          <Button variant="ghost" size="icon" className="size-13 rounded-lg" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
+          {!launcher && <Button variant="ghost" size="icon" className="size-13 rounded-lg" aria-label="Back to messages" onClick={closeSearch}><ChevronLeft /></Button>}
           <div role="search" aria-label="Search messages" className="min-w-0 flex-1">
             <SearchField autoFocus keepClear aria-label="Search conversations" placeholder="Search conversations" value={query} onValueChange={search} clearLabel="Clear search" className="[&_button]:size-13 [&_button]:min-w-13 [&_button]:rounded-tile [&_input:focus-visible]:outline-none" />
           </div>
@@ -158,7 +165,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
       ) : (
         <AppHeader title="Messages" className={messagesHeader} data-alpha-messages-header="" data-alpha-stage-header=""
           leading={onBack && <Button variant="ghost" size="icon" className="rounded-lg" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}>
-          {!smsNeeded(state) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
+          {can(openSearch) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => void send(openSearch)}><Search className="size-5" /></Button>}
           {can(newMessage) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new disabled={draftOpening === "Opening" || handoffOpening} onClick={() => void openNew()}><Pencil className="size-5" /></Button>}
         </AppHeader>
       )}

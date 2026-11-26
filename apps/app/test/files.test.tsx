@@ -477,11 +477,18 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
+    // v119 live rows read size · date with no leading type word (files-browser-adapter.ts:1315-1324); the kind stays for screen readers.
+    const notesRow = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === "notes.txt");
+    const notesDetail = notesRow?.querySelector("span.text-muted-foreground")?.textContent ?? "";
+    expect([notesDetail.startsWith("Document"), notesDetail.split(" · ").length, notesRow?.getAttribute("aria-description")]).toEqual([false, 2, `Document · ${notesDetail}`]);
     // spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it"
     // spec/app/files/preview.md, "What was read of a file is shown only in its own viewer, while it can be read"
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
+    // v119 live left the 18px slot before the facts empty (selection-adapter.ts:282 `d: ''`): no kind icon, the words keep their place.
+    const facts = document.querySelector("[data-facts-slot]")?.parentElement;
+    expect([facts?.querySelector("svg"), facts?.querySelector("[data-facts-slot]")?.childNodes.length, facts?.textContent?.startsWith("Text · ")]).toEqual([null, 0, true]);
 
     // spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
     await choose("Details", "File actions");

@@ -1,7 +1,7 @@
-// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"; spec/app/browser/index.md, "The agent gives its tab up when it is done"
+// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"; spec/app/browser/index.md, "The agent gives its tab up when it is done"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/shell/index.md, "A page the agent opens in Browser lowers Ask Alpha to its bar"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, canAgentShowPage, showing } from "../../gen/app__shell.effect.vibe"
 import type { AgentPage, TabHost } from "../platform/browser.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { Pages, inputOf, pageOf, tellPage, tellTabs } from "./browser.vibe"
@@ -44,8 +44,9 @@ function opens(url: string): boolean {
 }
 
 /**
- * The owner chose Open for `url` while the request that asked for it is still their latest (`current`): open it in a new
- * normal tab of the agent's, under the agent's guard, give the tab up, and only then show it as the tab the owner chose: whether it is loading.
+ * The owner chose Open for `url`, or their whole message asked for it, while the request that asked for it is still their
+ * latest (`current`): open it in a new normal tab of the agent's, under the agent's guard, give the tab up, show it as the
+ * tab the owner chose, and lower Ask Alpha so the page fills the screen: whether it is loading.
  */
 effect function opened(url: string, current: boolean): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
   const input = inputOf(url)
@@ -62,18 +63,22 @@ effect function opened(url: string, current: boolean): boolean!!(Tabs.Machine | 
   try (try Pages).aim(tab, url)
   if (!(try tellPage(tab, { type: "submit", i: input }))) return false
   if (!(try tellTabs({ type: "agentDone" }))) return false
-  return try tellTabs({ type: "pick", tab })
+  if (!(try tellTabs({ type: "pick", tab }))) return false
+  if (canAgentShowPage(try shell.get())) try contained(shell.send({ type: "agentShowPage" }), "lowering Ask Alpha over the opened page")
+  return true
 }
 
 /**
- * The page the agent's reply asked for, held for the owner's Open on the Browser's card in place of any page an earlier
- * request left there; an address the agent may not open clears the card and shows nothing. Nothing opens here.
+ * The page the agent's reply asked for: opened at once when the owner's whole message asked for it, else held for the
+ * owner's Open on the Browser's card in place of any page an earlier request left there. Either way the card an earlier
+ * request left is cleared first, and an address the agent may not open shows nothing.
  */
-export effect function openAgentPage(page: AskedPage): boolean!!Reviewing {
+export effect function openAgentPage(page: AskedPage): boolean!!(Reviewing | Tabs.Machine | Pages | Shell | TabHost) {
   const card = try Reviewing
   const held = opens(page.operation.url)
-  card.set(held ? page : undefined)
-  return held
+  card.set(held && !page.atOnce ? page : undefined)
+  if (!held || !page.atOnce) return held
+  return try opened(page.operation.url, try page.current)
 }
 
 /** The owner chose Open on the card: the page opens as shown while the request that asked for it is still the owner's latest. */
