@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
-import { useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
@@ -253,8 +253,20 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const review = runtime.runSync(VoiceReview);
   const moreRef = useRef<HTMLButtonElement>(null);
   const state = voice.state;
+  const note = state?.showing ? collection.noteByNumber.get(state.note) : undefined;
+  const audioId = note === undefined ? "" : audioIdOf(note);
+  const noteId = note?.id;
+  const [recognition, setRecognition] = useState<{ audioId: string; noteId: string }>();
+  const localProbe = !native() && device.canTranscribe && state?.added === 0 && state.revision === collection.version;
+  useEffect(() => {
+    if (!localProbe || audioId === "" || noteId === undefined) return;
+    const controller = new AbortController();
+    void runtime.runPromise(device.transcriptionReady(audioId, noteId), { signal: controller.signal }).then((ready) => {
+      if (!controller.signal.aborted) setRecognition(ready ? { audioId, noteId } : undefined);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [audioId, device, localProbe, noteId, runtime]);
   if (!state?.showing) return null;
-  const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
   const saved = note === undefined ? undefined : savedVoice(note);
   const lines = saved?.lines.map((line) => ({ ...speaker(line.who), at: clock(line.at), text: line.text })) ?? [];
@@ -269,7 +281,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const showTranscript = { type: "showTranscript" } as const;
   const addTranscript = { type: "addTranscript" } as const;
   const back = { type: "back" } as const;
-  const audio = note !== undefined && audioIdOf(note) !== "";
+  const audio = audioId !== "";
   const current = state.revision === collection.version;
   const pending = current && state.heard > state.added ? runtime.runSync(review.get(state)) : undefined;
   const pinned = note?.format?.data.pinned === true;
@@ -282,8 +294,9 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   };
   const canPin = current && note !== undefined && voice.can(pin, "Owner");
   const pinWrite = state.part === "Pin" || state.part === "Unpin";
-  const canTranscribe = device.canTranscribe && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
-  const canRetry = device.canTranscribe && audio && current && voice.can(retry, "Owner");
+  const canRecognize = device.canTranscribe && (native() || (recognition?.audioId === audioId && recognition.noteId === noteId));
+  const canTranscribe = canRecognize && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
+  const canRetry = canRecognize && audio && current && voice.can(retry, "Owner");
   const generate = (again = false) => void runtime.runPromise(generateTranscript(state.note, state.revision, again));
   const canUseTranscript = current && note !== undefined && lines.length > 0 && voice.can(ask, "Owner");
   const copy = canUseTranscript ? () => void runtime.runPromise(copyTranscript({
@@ -321,7 +334,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
         restore={() => moreRef.current?.focus({ preventScroll: true })} />
       {canTranscribe && <Button className="mt-4" variant="secondary" onClick={() => generate()}>Generate transcript</Button>}
       {state.listen.status === "Loading" && <div className="mt-4 flex items-center gap-2">
-        <Spinner label="Transcribing on this phone" />
+        <Spinner label={native() ? "Transcribing on this phone" : "Transcribing on this computer"} />
         <span className="text-sm text-muted-foreground">Transcribing…</span>
         {voice.can(cancel, "Owner") && <Button variant="ghost" size="sm" aria-label="Cancel transcription" onClick={() => void voice.send(cancel, "Owner")}>Cancel</Button>}
       </div>}

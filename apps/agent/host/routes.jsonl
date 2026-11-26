@@ -63,6 +63,8 @@
 { "method": "POST", "path": "/api/notes/interact" }
 { "method": "POST", "path": "/api/notes/trash/erase" }
 { "method": "GET", "path": "/api/notes/trash/recordings" }
+{ "method": "GET", "path": "/api/alpha/notes/transcription" }
+{ "method": "POST", "path": "/api/alpha/notes/transcription", "maxBodyBytes": 1100000 }
 { "method": "GET", "path": "/api/workflow/status" }
 { "method": "GET", "path": "/api/workflow/hosted/loops" }
 { "method": "POST", "path": "/api/workflow/hosted/loops" }
