@@ -957,10 +957,17 @@ it("keeps attacker URLs and phone numbers from a reviewed email out of owner tex
     await press("Send");
     if (noOptionalFields) {
       await until(alpha, chatState, Conversation, (state) => state.turn.send.outcome === "Refused");
+      await afterDraw(() => expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Alpha"]')?.value).toBe("What is this email about?"));
     } else {
       await until(alpha, chatState, Conversation, (state) => state.turn.reply === "Complete");
     }
-    const result = { said: [...world.ask.said], metadata: [...(world.ask.metadata ?? [])] };
+    const result = {
+      said: [...world.ask.said],
+      metadata: [...(world.ask.metadata ?? [])],
+      draft: document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Alpha"]')?.value ?? "",
+      hasMailChip: button("Remove Mail") !== undefined,
+      alertText: document.querySelector("[role=alertdialog]")?.textContent ?? "",
+    };
     await closeAll();
     return result;
   };
@@ -980,4 +987,111 @@ it("keeps attacker URLs and phone numbers from a reviewed email out of owner tex
   const unsupported = await runCase(true);
   expect(unsupported.said).toEqual([]);
   expect(unsupported.metadata).toEqual([]);
+  expect(unsupported.draft).toBe("What is this email about?");
+  expect(unsupported.hasMailChip).toBe(true);
+  expect(unsupported.alertText).toBe("");
+});
+
+// spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+it("normalizes wide recipient lists and control characters at mail review so Ask Alpha sends cleanly", async () => {
+  const world = scene();
+  world.ask.metadata = [];
+  const base = letter(1, "Q4\tBudget\u0007Review", ["INBOX"], "Line one\u2028Line two\u2029Line three\u0000end");
+  const wide = {
+    ...base,
+    card: {
+      ...base.card,
+      from: "Finance\tLead <finance@northpoint.test>",
+      to: Array.from({ length: 30 }, (_, i) => `Recipient\t${i + 1} <to${i + 1}@northpoint.test>`),
+      cc: Array.from({ length: 25 }, (_, i) => `Copy\t${i + 1} <cc${i + 1}@northpoint.test>`),
+    },
+  };
+  world.inbox.mail.splice(0, world.inbox.mail.length, wide);
+  const { alpha } = await open(world, only("home", "view:Inbox", "assistant"));
+  const inboxState = inbox.runtime(alpha);
+  const chatState = assistant.runtime(alpha);
+  await openInboxFromHome(alpha);
+  await until(alpha, inboxState, List, (state) => state.list.status === "Loaded");
+  await row("Q4\tBudget\u0007Review");
+  await until(alpha, inboxState, Shown, (state) => state.body.status === "Loaded");
+  await menu("Ask Alpha");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await afterDraw(() => expect(document.querySelector("[role=alertdialog]")?.textContent ?? "").toContain("Share this email with Alpha?"));
+  await confirm("Add to chat");
+  await until(alpha, chatState, Conversation, (state) => state.observing);
+  await fill("Message Alpha", "Summarize this budget thread");
+  await press("Send");
+  await until(alpha, chatState, Conversation, (state) => state.turn.reply === "Complete");
+  expect(world.ask.said).toEqual(["Summarize this budget thread"]);
+  const reviewed = (world.ask.metadata[0] as { reviewedEmail?: { from: string; to: string[]; subject: string; bodyText: string } } | undefined)?.reviewedEmail;
+  expect(reviewed).toBeDefined();
+  expect(reviewed?.from).toBe("Finance Lead <finance@northpoint.test>");
+  expect(reviewed?.subject).toBe("Q4 Budget Review");
+  expect(reviewed?.to).toHaveLength(50);
+  expect(reviewed?.to[0]).toBe("Recipient 1 <to1@northpoint.test>");
+  expect(reviewed?.to[49]).toBe("Copy 20 <cc20@northpoint.test>");
+  expect(reviewed?.bodyText).toBe("Line one\nLine two\nLine threeend");
+});
+
+// spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+it("re-probes /api/status before sending a reviewed email when startup support failed once or has not landed yet", async () => {
+  const runProbeCase = async (mode: "failed" | "slow") => {
+    const world = scene();
+    world.ask.metadata = [];
+    const release = mode === "slow" ? Promise.withResolvers<void>() : undefined;
+    let holdStartup = mode === "slow";
+    if (mode === "failed") {
+      world.ask.failStatus = true;
+    } else {
+      world.ask.beforeStatus = async () => {
+        if (holdStartup) await release?.promise;
+      };
+    }
+    world.inbox.mail.splice(0, world.inbox.mail.length, letter(1, "Board update", ["INBOX"], "Board meets Friday at 10am."));
+    try {
+      const { alpha } = await open(world, only("home", "view:Inbox", "assistant"));
+      const inboxState = inbox.runtime(alpha);
+      const chatState = assistant.runtime(alpha);
+      await openInboxFromHome(alpha);
+      await until(alpha, inboxState, List, (state) => state.list.status === "Loaded");
+      await row("Board update");
+      await until(alpha, inboxState, Shown, (state) => state.body.status === "Loaded");
+      await menu("Ask Alpha");
+      await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+      await confirm("Add to chat");
+      if (mode === "failed") {
+        await until(alpha, chatState, Conversation, (state) => state.support.status === "Failed" && !state.observing);
+        world.ask.failStatus = false;
+      } else {
+        await until(alpha, chatState, Conversation, (state) => state.support.status === "Loading" && !state.observing);
+        holdStartup = false;
+      }
+      const readsBeforeSend = world.ask.statusReads;
+      await fill("Message Alpha", "When does the board meet?");
+      await press("Send");
+      await until(alpha, chatState, Conversation, (state) => state.turn.reply === "Complete");
+      const observedAfter = (await chatState.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()))).observing;
+      return {
+        said: [...world.ask.said],
+        metadata: [...(world.ask.metadata ?? [])],
+        extraReads: world.ask.statusReads - readsBeforeSend,
+        observedAfter,
+      };
+    } finally {
+      holdStartup = false;
+      release?.resolve();
+      await closeAll();
+    }
+  };
+
+  const afterFailure = await runProbeCase("failed");
+  expect(afterFailure.said).toEqual(["When does the board meet?"]);
+  expect(afterFailure.extraReads).toBeGreaterThanOrEqual(1);
+  expect(afterFailure.metadata[0]).toMatchObject({ reviewedEmail: { subject: "Board update", bodyText: "Board meets Friday at 10am." } });
+
+  const whileLoading = await runProbeCase("slow");
+  expect(whileLoading.said).toEqual(["When does the board meet?"]);
+  expect(whileLoading.observedAfter).toBe(true);
+  expect(whileLoading.extraReads).toBeGreaterThanOrEqual(1);
+  expect(whileLoading.metadata[0]).toMatchObject({ reviewedEmail: { subject: "Board update", bodyText: "Board meets Friday at 10am." } });
 });
