@@ -1,4 +1,4 @@
-// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
+// spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os-bridges";
 import { AppsDrawer, type AppsDrawerProps, type DrawerApp, HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useCallback, useSyncExternalStore } from "react";
@@ -81,7 +81,16 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     const app = known.apps.get(id);
     return app && app.packageName !== "ai.alphacompute.alphaphone" ? [drawerApp(id, app)] : [];
   }) : [];
-  const openInstalled = (app: string) => offered({ type: "openApp", app, now: untimed })?.();
+  // spec/app/home/index.md, "Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would"
+  const ownApps: DrawerApp[] = showingApps ? Home.drawerViews(h, s).map((view) => {
+    const Glyph = views[view].icon;
+    return { id: `view:${view}`, label: views[view].label, packageName: "", icon: <Glyph className="size-7.5" /> };
+  }) : [];
+  const openInstalled = (id: string) => {
+    if (!id.startsWith("view:")) return offered({ type: "openApp", app: id, now: untimed })?.();
+    const tile = tileOf(id);
+    if (tile.tag === "Own") offered({ type: "openFromDrawer", view: tile.view, shell: s })?.();
+  };
   const opening = h.handoff.ask.tag !== "Shade" && h.handoff.attempt.outcome === "Sent" ? h.handoff.ask.app : undefined;
   const selected = drawer.state;
   const menuApp = selected?.menu;
@@ -134,7 +143,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
         {deck}
       </div>
       {showingApps && (
-        <AppsDrawer apps={catalogApps} query={drawer.state?.query ?? ""}
+        <AppsDrawer apps={[...ownApps, ...catalogApps]} query={drawer.state?.query ?? ""}
           catalog={h.installed.read.status === "Failed" ? "unavailable" : h.installed.read.status === "Loaded" ? "ready" : "reading"}
           opening={opening} notice={notice} hold={hold} menu={menu}
           onSearch={(query) => {

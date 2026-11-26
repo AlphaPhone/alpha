@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Search, X } from "lucide-react";
 import { Button } from "../Button.tsx";
 import { AppTile } from "../AppTile.tsx";
@@ -10,7 +11,7 @@ import { InstalledAppIcon } from "./InstalledAppIcon.tsx";
 import { tileColumns } from "./HomeTileGrid.tsx";
 import { type LauncherHold, useLauncherPress } from "./launcherPress.ts";
 
-/** An app from the accepted launcher catalog. */
+/** An app from the accepted launcher catalog, or one of Alpha's own apps that is not on Home. */
 export interface DrawerApp {
   readonly id: string;
   readonly label: string;
@@ -20,6 +21,8 @@ export interface DrawerApp {
   readonly user?: string;
   readonly locked?: boolean;
   readonly image?: string;
+  /** One of Alpha's own apps draws its glyph, as its Home tile would. */
+  readonly icon?: ReactNode;
 }
 
 export interface AppsDrawerProps {
@@ -115,7 +118,7 @@ function DrawerTile({ app, detail, opening, hold, menu, onOpen, onOpenMenu }: {
         <AppTile drawer label={app.label} detail={detail.join(" · ")}
           aria-busy={opening === app.id || undefined} disabled={opening !== undefined}
           aria-haspopup={onOpenMenu ? "menu" : undefined} aria-expanded={onOpenMenu ? actions !== undefined : undefined}
-          icon={<InstalledAppIcon image={app.image} className={app.image ? "size-14 rounded-drawer-icon" : "size-6.5"} />}
+          icon={app.icon ?? <InstalledAppIcon image={app.image} className={app.image ? "size-14 rounded-drawer-icon" : "size-6.5"} />}
           {...activation} />
       </HomeAppMenu>
     </div>

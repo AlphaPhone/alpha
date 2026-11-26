@@ -294,6 +294,22 @@ pure def canTryAgain(h: Home, shell: S::Shell): bool =
 pure def tryAgain(h: Home, shell: S::Shell): Moved = thenReadApps(List(), h, false)
 ```
 
+### Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would
+
+v121's Home held its 13 apps and the Apps tile
+(`legacy/apps/app/src/prototype/home-shell.ts`, `appsTile`). Alpha's apps
+that v121 did not have, such as Telegram, Slack and Wallet, start in Apps,
+beside the phone's own apps, until the owner adds them to Home.
+
+```quint
+pure def drawerViews(h: Home, shell: S::Shell): List[S::View] = if (onPhone(h)) hiddenApps(h, shell) else List()
+
+pure def canOpenFromDrawer(h: Home, view: S::View, shell: S::Shell, by: Actor): bool =
+  by == Owner and shell.drawer and not(h.editing) and drawerViews(h, shell).select(v => v == view).length() > 0
+
+pure def openFromDrawer(h: Home, view: S::View, shell: S::Shell, by: Actor): Moved = { state: h, out: List(Go({ view: view })) }
+```
+
 ### The app in the menu can be added to Home or handed to Android as App info
 
 An accepted Add to Home uses the same ticketed save as other tiles. App
