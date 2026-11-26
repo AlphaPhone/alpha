@@ -15,7 +15,7 @@ import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, typeInto, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -33,8 +33,7 @@ function write(text: string) {
   act(() => {
     const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
     if (!box) throw new Error("no composer");
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
-    box.dispatchEvent(new Event("input", { bubbles: true }));
+    typeInto(box, text);
   });
 }
 
@@ -266,9 +265,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
     world.ask.refusal = undefined;
 
-    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": the
-    // transcript offers Earlier only while messages before the first one showing exist, so here, with the first message
-    // showing, the conversation is read around it directly.
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": with no Earlier, read around the first message directly.
     expect(button("Earlier")).toBeUndefined();
     await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "scroll", around: 1 })));
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
@@ -378,15 +375,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Let me look"));
     expect([document.body.textContent?.includes("Using Calendar"), document.body.textContent?.includes("Working")]).toEqual([false, false]);
-    await act(async () => { for (const release of [...world.ask.turns.values()]) release(); });
+    await drawn(() => { for (const release of [...world.ask.turns.values()]) release(); });
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: What's on today?".length);
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
     expect(document.body.textContent?.includes("Let me look")).toBe(false);
   });
 
-  // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
-  it("Warm the agent before my first message: at launch, on return and when Ask Alpha is raised, never while it cannot answer, and without a word (spec/app/assistant/index.md, \"Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it\")", async () => {
+  // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+  it("Warm the agent before my first message: at launch, on return, after a sign-in and when Ask Alpha is raised, never while it cannot answer, and without a word (spec/app/assistant/index.md, \"Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it\")", async () => {
     const world = { ...scene(), phone };
     const { alpha, runtime } = await openAssistant(world);
     const asked = () => world.ask.warmUps.length;
@@ -397,17 +394,21 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Sheet" })));
     await settled(alpha, () => asked() === 3, asked);
     await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Full" })));
+    // Only the phone's sign-in settles; Talk warming speech for the new account asks the agent for nothing more.
+    const signedIn = phone ? 1 : 0;
+    await drawn(() => world.voice.signedInHere?.());
+    await settled(alpha, () => asked() === 3 + signedIn, asked);
     world.ask.warmUpFails = true;
     await seen(false);
     await seen(true);
-    await settled(alpha, () => asked() === 4, asked);
+    await settled(alpha, () => asked() === 4 + signedIn, asked);
     world.ask.canRespond = false;
     const reads = world.ask.statusReads;
     await seen(false);
     await seen(true);
     await settled(alpha, () => world.ask.statusReads > reads, () => world.ask.statusReads);
     await later(alpha, 10);
-    expect([asked(), world.ask.opened, world.ask.said, lines(), document.body.textContent?.toLowerCase().includes("warm"), new Set(world.ask.warmUps.map((headers) => JSON.stringify(headers))).size]).toEqual([4, 0, [], [], false, 1]);
+    expect([asked(), world.ask.opened, world.ask.said, lines(), document.body.textContent?.toLowerCase().includes("warm"), new Set(world.ask.warmUps.map((headers) => JSON.stringify(headers))).size]).toEqual([4 + signedIn, 0, [], [], false, 1]);
     world.ask.canRespond = true;
     write("Hello");
     await press("Send");

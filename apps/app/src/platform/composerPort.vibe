@@ -1,6 +1,7 @@
 // spec/app/messages/composer.md, "Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call"
 module web {
   import type { MessagesNativePlugin } from "@elizaos/os-bridges"
+  import { replyTo } from "./portReply.ts"
 
   interface ComposerPort extends EventTarget {
     postMessage(data: string): void
@@ -53,10 +54,8 @@ module web {
         if (!visible()) cancelled()
       }
       function received(event: Event) {
-        if (!(event instanceof MessageEvent) || typeof event.data !== "string") return
-        let reply: unknown
-        try { reply = JSON.parse(event.data) } catch { return }
-        if (typeof reply !== "object" || reply === null || !("requestId" in reply) || reply.requestId !== requestId) return
+        const reply = replyTo(event, requestId)
+        if (reply === undefined) return
         cleanup()
         if (Object.keys(reply).length !== 2) { reject(new Error("Malformed Messages send reply.")); return }
         if ("result" in reply) { resolve(reply.result); return }

@@ -1,0 +1,127 @@
+// spec/app/home/index.md, "While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one"; spec/app/shell/layers.md, "Back closes the layer on top, and nothing under it"
+import * as Home from "../../gen/app__home.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
+import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { fresh } from "../runtime/attempts.vibe"
+import { contained, started, together } from "../runtime/reactor.vibe"
+import { homeEditFrame, landscapeHomeInput } from "../shell/canvas.vibe"
+
+type AddVisit = { readonly id: string; readonly route: number; readonly beside: boolean; readonly mounted: () => boolean }
+const addPrefix = (route: number, beside: boolean) => `home-add:${route}:${beside}:`
+
+export service HomeAdd {
+  readonly turn: Semaphore.Semaphore
+  readonly visit: Ref.Ref<AddVisit | undefined>
+}
+
+const visits = Layer.effect(HomeAdd, effect {
+  return { turn: try Semaphore.make(1), visit: try Ref.make<AddVisit | undefined>(undefined) }
+})
+
+export function addLayerAt(layers: Layers.Layers, route: number, beside: boolean): string | undefined {
+  const layer = Layers.top(layers)
+  return layers.holds.length === 0 && layers.open.length === 1 && layer.kind === "SheetLayer"
+    && layer.covers === !beside && layer.id.startsWith(addPrefix(route, beside)) ? layer.id : undefined
+}
+
+effect function surface(route: number, beside: boolean, mounted: () => boolean) {
+  const shell = try Shell
+  const canvas = try Canvas
+  const device = try Device
+  return () => {
+    const where = Effect.runSync(shell.get())
+    const frame = Effect.runSync(canvas.get())
+    return mounted() && where.route === route && Home.editSite(where, beside) && homeEditFrame(frame)
+      && (!beside || landscapeHomeInput(frame)) && Effect.runSync(device.showing())
+  }
+}
+
+export effect function openAddHome(route: number, beside: boolean, mounted: () => boolean) {
+  const owner = try HomeAdd
+  const home = try Home.Machine
+  const shell = try Shell
+  const layers = try Layers.Machine
+  const current = try surface(route, beside, mounted)
+  try Semaphore.withPermit(owner.turn, effect {
+    if ((try Ref.get(owner.visit)) !== undefined || !current()) return
+    const where = try shell.get()
+    const clear = (over: Layers.Layers) => !Layers.pageInert(over) && current()
+    if (!clear(try layers.get())) return
+    const admitted = () => {
+      const live = Effect.runSync(shell.get())
+      return clear(Effect.runSync(layers.get())) && live.image === where.image && live.contacts === where.contacts
+    }
+    if (!(try contained(home.send({ type: "showHidden", shell: where, beside }, "Owner", admitted), "opening Add to Home"))) return
+    const id = addPrefix(route, beside) + fresh()
+    if (try contained(layers.send({ type: "openLayer", id, kind: "SheetLayer", covers: !beside },
+      (over) => clear(over) && Effect.runSync(home.get()).adding), "layering Add to Home")) {
+      try Ref.set(owner.visit, { id, route, beside, mounted })
+    } else {
+      try ignore(home.send({ type: "backOut" }, "Owner", (state) => state.adding))
+    }
+  })
+}
+
+effect function retireAdd(visit: AddVisit) {
+  const layers = try Layers.Machine
+  const home = try Home.Machine
+  if (Layers.listed(try layers.get(), visit.id)) {
+    if (!(try contained(layers.send({ type: "closeLayer", id: visit.id }), "closing Add to Home"))
+      && Layers.listed(try layers.get(), visit.id)) return
+  }
+  try ignore(home.send({ type: "backOut" }, "Owner", (state) => state.adding))
+  try Ref.set((try HomeAdd).visit, undefined)
+}
+
+export effect function reconcileAddHome() {
+  const owner = try HomeAdd
+  try Semaphore.withPermit(owner.turn, effect {
+    const visit = try Ref.get(owner.visit)
+    if (visit === undefined) return
+    const over = try (try Layers.Machine).get()
+    const state = try (try Home.Machine).get()
+    const current = try surface(visit.route, visit.beside, visit.mounted)
+    if (!state.adding || !Layers.listed(over, visit.id) || over.holds.length > 0 || !current()) try retireAdd(visit)
+  })
+}
+
+export effect function actOnAddHome(id: string, tile?: Tile) {
+  const owner = try HomeAdd
+  const home = try Home.Machine
+  const shell = try Shell
+  const layers = try Layers.Machine
+  try Semaphore.withPermit(owner.turn, effect {
+    const visit = try Ref.get(owner.visit)
+    if (visit === undefined || visit.id !== id) return
+    const current = try surface(visit.route, visit.beside, visit.mounted)
+    const where = try shell.get()
+    const admitted = (state: Home.Home) => {
+      const live = Effect.runSync(shell.get())
+      return state.adding && current() && live.image === where.image && live.contacts === where.contacts
+        && addLayerAt(Effect.runSync(layers.get()), visit.route, visit.beside) === id
+    }
+    if (!admitted(try home.get())) return
+    if (tile === undefined) {
+      try retireAdd(visit)
+      return
+    }
+    const event = { type: "addToHome", tile, shell: where, beside: visit.beside } as const
+    if (try contained(home.send(event, "Owner", admitted), "restoring a Home tile")) {
+      if (!(try home.get()).adding) try retireAdd(visit)
+    }
+  })
+}
+
+const followingAdd = started(effect {
+  const device = try Device
+  const facts = Stream.zipLatestAll(
+    (try Shell).changes, (try Layers.Machine).changes, (try Home.Machine).changes, (try Canvas).changes,
+    Stream.concat(Stream.fromEffect(device.showing()), device.visible),
+  )
+  try Stream.runForEach(facts, () => reconcileAddHome())
+}, "following Add to Home")
+
+export const addHomeLayer = together(visits, followingAdd)

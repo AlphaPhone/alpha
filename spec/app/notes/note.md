@@ -190,3 +190,19 @@ pure def dropped(r: R::Read): R::Read = { ...r, status: R::Idle }
 pure def lawADroppedReadingTakesNoAnswer(ticket: int, asked: int): bool =
   not(R::canAnswer(dropped({ status: R::Loading, ticket: ticket }), asked))
 ```
+
+## Story: Review a Calendar draft from a note
+
+> As the owner, I want the saved note I have open to fill in a Calendar
+> event or reminder that I can edit and save after I review its time.
+
+The retained scheduling action prepares the draft from the exact saved record and passes it to
+the requested Calendar visit for the same resident owner. An open or
+retained Calendar draft keeps its place. Opening this draft writes no
+event or reminder. Calendar supplies tomorrow at nine as a starting
+time, which the owner can change before saving.
+
+A saved Calendar item can open the note it came from. Alpha keeps the
+link under the current owner and the saved item's exact identity. The
+owner can still open a note that changed after the draft was made, and
+Alpha says when it was edited or deleted.

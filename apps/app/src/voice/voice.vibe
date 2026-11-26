@@ -87,10 +87,10 @@ type InterimContext = Device | Layers.Machine | Shell.Machine | Voice.Machine | 
 
 export type PageSpeech = {
   readonly item: number
-  readonly source?: "workflow"
+  readonly source?: "workflow" | "workflow-step"
   readonly words: string | NativePageSpeech
   readonly current: () => boolean!!
-  readonly retire: () => void!!
+  readonly retire: (result: "Finished" | "Stopped") => void!!
 }
 
 export interface VoiceMemory {
@@ -566,22 +566,21 @@ function voiceTurnOutput({ session, turn, queue, memory, holdForText }: VoiceOut
     said = 0
     if (memory.enqueueCue(turn, line)) Queue.offerUnsafe(queue, { type: "sentence", session, turn })
   }
-  const ready = (fullText: string) => {
+  const ran = (name: string) => {
+    toolRan = true
+    if (name === "PROPOSE_DEVICE_ACTION") {
+      proposing = true
+      awaitingFiles = usedDirect
+    }
+  }
+  const ready = (fullText: string, actionResults: readonly { readonly action: string }[]) => {
+    for (const { action } of actionResults) ran(action)
     if (holdForText || proposing) return
     const full = speakableText(replyBlocks(fullText).words)
     if (full.length > shown.length) shown = full
     sayFrom(full.length >= shown.length ? full : shown, true)
   }
-  const hooks = {
-    onPreview: feed, onAcknowledgment: cue, onReady: ready,
-    onTool: (name: string) => {
-      toolRan = true
-      if (name === "PROPOSE_DEVICE_ACTION") {
-        proposing = true
-        awaitingFiles = usedDirect
-      }
-    },
-  }
+  const hooks = { onPreview: feed, onAcknowledgment: cue, onReady: ready, onTool: ran }
   return {
     hooks,
     beginAttempt(direct: boolean) {

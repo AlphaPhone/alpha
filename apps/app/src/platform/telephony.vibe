@@ -138,12 +138,17 @@ export service Telephony {
   clients(): TelephonyClients!TelephonyAbsent
 }
 
-/** The contacts' names for `numbers`, as the phone names a number for `surface`; a number it cannot name, or a phone that cannot be asked, has none. */
-export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<string>): ReadonlyMap<string, string>!!Telephony {
+/** The granted names that the phone could still show for this exact screen. */
+export effect function readNames(surface: NameSurface, numbers: ReadonlyArray<string>): ReadonlyMap<string, string>!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const asked = [...new Set(numbers.filter((number) => number !== ""))]
   if (asked.length === 0) return new Map()
-  const named = telephony("names", (c) => c.names.resolve({ surface, numbers: asked })) catch () => []
-  return new Map(named.flatMap((one) => (one.name === null ? [] : [[one.number, one.name as string] as const])))
+  const named = try telephony("names", (c) => c.names.resolve({ surface, numbers: asked }))
+  return new Map<string, string>(named.flatMap((one) => one.name === null ? [] : [[one.number, one.name] as const]))
+}
+
+/** The contacts' names for `numbers`, as the phone names a number for `surface`; a number it cannot name, or a phone that cannot be asked, has none. */
+export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<string>): ReadonlyMap<string, string>!!Telephony {
+  return readNames(surface, numbers) catch () => new Map()
 }
 
 /** The SIM a text goes out on when none was picked: the phone's default for texts or its only SIM; with several and no default, none. */

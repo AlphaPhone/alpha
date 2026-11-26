@@ -2,6 +2,7 @@
 import { createCloudClient } from "@elizaos/cloud"
 import { BridgeUnavailable, CloudRefused, type CloudClient as Relay, type CloudFailure, type CloudMethod, type CloudPath, type CloudRequest, type CredentialId, SignInRefused } from "@elizaos/os-bridges"
 import { type MailSignIn, cloudStatusOf, heldAnswer, leaseRefusalCode, refusedOffline, replied } from "../../gen/app__platform.effect.vibe"
+import { native } from "./device.vibe"
 import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt } from "./remote.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "./voice.vibe"
 import { WiFi, phoneWiFi } from "./wifi.vibe"
@@ -210,6 +211,14 @@ effect function openStripe(url: string, host: "checkout.stripe.com" | "invoice.s
 export const openCloudCheckout = (url: string) => openStripe(url, "checkout.stripe.com")
 export const openCloudInvoice = (url: string) => openStripe(url, "invoice.stripe.com")
 
+/** Open the Google consent page returned by the authenticated Cloud. */
+export effect function openGoogleAuthorization(url: URL): boolean!! {
+  return effect {
+    try tryPromise(() => client().openExternal({ url: url.href, environment: CLOUD_ENVIRONMENT }))
+    return true
+  } catch () => false
+}
+
 /**
  * The cloud on the phone, through the `ElizaCloud` plugin of eliza's Android package: eliza's `cloudClient()` of
  * `@elizaos/os-bridges`, sent only while Android has not said the phone is offline.
@@ -223,10 +232,11 @@ export const relayedCloud = Layer.provide(Layer.effect(Cloud, effect {
 // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once"
 /**
  * What the phone answers the owner's tap on a mail sign-in control: eliza's `upgradeMailLease`, which the phone starts
- * only where it holds mail back for the lease, and refuses as `Rejected` anywhere else. A page with no sign-in plugin,
- * or any other failure to ask, is a phone that wants no such sign-in.
+ * only where it holds mail back for the lease, and refuses as `Rejected` anywhere else. A browser keeps its usual
+ * sign-in route directly. A phone with no sign-in plugin also keeps the usual route.
  */
 export effect function mailSignIn(): MailSignIn!! {
+  if (!native()) return "MailSignInNotWanted"
   return effect {
     const receipt = try tryPromise({ try: () => signInAccounts().upgradeMailLease({ environment: CLOUD_ENVIRONMENT }), catch: (cause) => new MailSignInUnasked({ cause }) })
     return receipt.verdict.kind === "SignedInAs" ? "SignedInForMail" : "MailSignInEnded"

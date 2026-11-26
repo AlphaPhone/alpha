@@ -76,7 +76,7 @@ type Effect =
   | Prompt({ need: Need })
   | OpenSettings
   | CopyText
-  | OpenPhone
+  | OpenPhone({ thread: int, ticket: int })
   | OpenMessagingApp
   | RemoveMessage({ id: int })
 
@@ -346,6 +346,22 @@ pure def canOpenThread(s: Messages, thread: int): bool = showingPane(s, Threads)
 pure def openThread(s: Messages, thread: int): Moved = openConversation(thread, s)
 ```
 
+### Returning from Phone restores the conversation the Ask Alpha stage held
+
+The stage remembers the conversation's registered thread number and the
+list ticket from before the return. Messages reopens the thread on that
+exact return, whether the list has already come to the front or is still
+waiting to show. SMS access must still be available.
+
+```quint
+pure def canRestoreStageThread(s: Messages, thread: int, ticket: int): bool =
+  s.pane == Threads and readable(s) and not(removing(s)) and thread > 0 and ticket > 0
+    and (if (s.front) s.list.ticket == ticket + 1 and s.list.status != R::Idle else s.list.ticket == ticket)
+
+pure def restoreStageThread(s: Messages, thread: int, ticket: int): Moved =
+  openConversation(thread, { ...s, front: true })
+```
+
 ### A message notification opens its exact conversation once access is available
 
 The phone provides the thread identifier after an owner taps its private
@@ -467,6 +483,10 @@ inline link or selecting text leaves the message menu alone.
 
 ### Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here
 
+Call hands off the current thread and page ticket. Phone opens the keypad
+with the one participant's number and keeps Ask Alpha open at its current
+height. The owner uses Phone's Call control to start a call.
+
 ```quint
 pure def canCopy(s: Messages): bool = showingPane(s, Conversation) and content(s) and not(s.confirming)
 
@@ -474,7 +494,7 @@ pure def copy(s: Messages): Moved = { state: s, out: List(CopyText) }
 
 pure def canCall(s: Messages): bool = showingPane(s, Conversation) and not(s.confirming)
 
-pure def call(s: Messages): Moved = { state: s, out: List(OpenPhone) }
+pure def call(s: Messages): Moved = { state: s, out: List(OpenPhone({ thread: s.thread, ticket: s.page.ticket })) }
 
 pure def canOpenElsewhere(s: Messages): bool = showingPane(s, Conversation) and s.shown.partial > 0 and not(s.confirming)
 
@@ -606,6 +626,13 @@ pure def startNewDraft(s: Messages, revision: int, thread: int): Moved =
 
 pure def holdsNewDraft(s: Messages, visit: int): bool = showingPane(s, New) and s.newDraft.visit == visit
 ```
+
+### The current New address names the Messages stage beside Ask Alpha
+
+The stage and its Full strip name the recipients of the open New draft. The
+name is read only for its current validated numbers and while Contacts
+access permits it. The phone shows the numbers themselves when it cannot
+name them. Editing To keeps the same New draft and Ask Alpha history.
 
 ### A current Android text request opens New only when its saved draft is empty
 

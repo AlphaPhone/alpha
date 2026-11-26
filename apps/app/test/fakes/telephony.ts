@@ -50,6 +50,7 @@ export interface TelephonyScene {
   deletionReply: "complete" | "lost" | "malformed" | "refused";
   readonly deletionAttempts: string[];
   smsNotice: { threadId: string; token: string } | undefined;
+  wakeSmsNotice: () => void;
   smsDraft: { token: string; recipients: string[]; body: string } | undefined;
   wakeSmsDraft: () => void;
   holdSmsDraftAcknowledgment: Promise<void> | undefined;
@@ -132,6 +133,7 @@ export function telephonyScene(): TelephonyScene {
     deletionAttempts: [],
     holdContactDeletion: undefined,
     smsNotice: undefined,
+    wakeSmsNotice: () => {},
     smsDraft: undefined,
     wakeSmsDraft: () => {},
     holdSmsDraftAcknowledgment: undefined,
@@ -190,6 +192,7 @@ function telephony(world: TelephonyScene): Faked {
     acknowledgeSmsDraft(input: { token: string }): Promise<void>;
   }, Record<string, unknown>>((emit) => {
     world.changed = () => emit("messagesChanged", {});
+    world.wakeSmsNotice = () => emit("smsNotice", {});
     world.wakeSmsDraft = () => emit("smsDraft", {});
     const deletionResponse = (response: Record<string, unknown>) => {
       if (world.deletionReply === "lost") return Promise.reject(new Error("Deletion acknowledgment lost"));

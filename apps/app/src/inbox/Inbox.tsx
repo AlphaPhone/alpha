@@ -30,6 +30,7 @@ import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
+import { openInboxAccount } from "../account/profile.vibe";
 import { useTimed } from "../runtime/react.ts";
 import type { Cloud } from "../platform/cloud.vibe";
 import { untimed } from "../runtime/reactor.vibe";
@@ -41,6 +42,7 @@ import type { ContactAddresses, Incoming } from "./adding.vibe";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import { type Beginning, Letters, begin, openGmailDraft } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
+import { gmailAuthorizationWindow } from "./authorization.vibe";
 import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
@@ -418,8 +420,18 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
   const retryList = refresh ?? retryAccess;
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
-  const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
-  const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;
+  const askMailSignIn = (otherwise: () => void) => () => {
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(otherwise)));
+  };
+  const route = shell.state?.route;
+  const signIn = route === undefined ? undefined : askMailSignIn(() => {
+    alpha.runtime.runFork(openInboxAccount(route));
+  });
+  const connectGmail = route === undefined ? undefined : () => {
+    const popup = gmailAuthorizationWindow();
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.consent({ kind: "Connect", route }, popup)));
+  };
+  const reconnect = state.failure === "Revoked" ? connectGmail : signIn;
   const hidden = new Set(changes.state ? aside(changes.state) : []);
   const letters = mail.shown(state).filter(({ message: number }) => !hidden.has(number));
   const { account, folder, query } = state.selected;
@@ -565,9 +577,9 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
             if (text !== "") signIn();
           } : undefined}
           notice={notice}
-          onNoticeAction={notice === "reconnect" ? signIn : retryList}
+          onNoticeAction={notice === "reconnect" ? reconnect : retryList}
           state={mustChoose ? undefined : kind}
-          onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
+          onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : connectGmail}
           chosen={draftsFolder ? shelf.picks.length : state.chosen.length}
           onStartSelection={draftsFolder
             ? !state.saved && readable(state) && drafts.can(startDrafts, "Owner") ? () => void drafts.send(startDrafts, "Owner") : undefined
@@ -591,7 +603,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
           onCompose={selectingDrafts ? undefined : onBegin({ kind: "Fresh", account })}
           accounts={accounts}
           onChooseAccount={chooseAccount}
-          aside={shelved.map(({ id, onOpen }) => ({ id, onOpen }))}
+          aside={!draftsFolder && !can({ type: "chooseFolder", folder: "DraftsFolder" })
+            ? shelved.flatMap(({ id, onOpen }) => onOpen ? [{ id, onOpen }] : []) : undefined}
           rows={draftsFolder ? [...shelved, ...letters.map(row)] : letters.map(row)}
           loading={state.list.status === "Loading" && !state.further}
           onLoadMore={can({ type: "loadMore" }) ? () => void send({ type: "loadMore" }) : undefined}

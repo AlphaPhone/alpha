@@ -1,5 +1,5 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/chats.md, "Story: Reuse words from a message"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
-import { AssistantChatHistorySheet, AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps } from "@repo/ui";
+import { AssistantChatHistorySheet, AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps, type AssistantTranscriptProps } from "@repo/ui";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { Effect, type ManagedRuntime } from "effect";
 import { useMemo, useState } from "react";
@@ -28,12 +28,14 @@ export function chip(file: Attached): AssistantAttachment {
 }
 
 type HistoryRow = AssistantMessageProps & { id: string };
-const empty: readonly HistoryRow[] = [];
+type MessageRows = Pick<AssistantTranscriptProps, "messages" | "messagesAfterLater">;
+const empty: MessageRows = { messages: [] };
 
 interface HistoryProps {
   runtime: ManagedRuntime.ManagedRuntime<Chats.Machine | Composer.Machine, unknown>;
   board: Board;
   lines: readonly Line[];
+  later?: string;
   chats: Chats.Chats | undefined;
   writing: Composer.Composer | undefined;
   replying: boolean;
@@ -52,7 +54,7 @@ interface HistoryProps {
 }
 
 /** Recorded rows and their controls are rebuilt only when their data or available actions change. */
-export function useMessageRows({ runtime, board, lines, chats, writing, replying, holding, settled, canReadAloud, actions, onSettings, onPreview, onOpenMaps, opened, onChoose }: HistoryProps): readonly HistoryRow[] {
+export function useMessageRows({ runtime, board, lines, later, chats, writing, replying, holding, settled, canReadAloud, actions, onSettings, onPreview, onOpenMaps, opened, onChoose }: HistoryProps): MessageRows {
   const prepared = useMemo(() => lines.map((line) => ({
     line,
     cards: line.mine ? [] : mapsCardsOf(line.text).cards,
@@ -62,8 +64,13 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
     if (!chats || !writing || prepared.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
-    return prepared.flatMap(({ line, cards, reply: { words: text, choices } }): HistoryRow[] => {
-      if (!line.mine && text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length) return [];
+    const messages: HistoryRow[] = [];
+    const messagesAfterLater: HistoryRow[] = [];
+    let pastLater = false;
+    for (const { line, cards, reply: { words: text, choices } } of prepared) {
+      const rows = pastLater ? messagesAfterLater : messages;
+      if (line.id === later) pastLater = true;
+      if (!line.mine && text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length) continue;
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const open = live && onOpenMaps !== undefined && opened?.has(message) !== true ? onOpenMaps : undefined;
@@ -78,7 +85,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
       const readAloud = { type: "readAloud", message, mine: line.mine } as const;
       const reading = actions?.reading;
       const stopReading = reading !== undefined && reading.message === message && Chats.enabled(chats, readAloud) ? reading.stop : undefined;
-      return [{
+      rows.push({
         id: line.id,
         author: line.mine ? "owner" : "alpha",
         text,
@@ -105,9 +112,10 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
           const file = line.attachments?.find((one) => one.id === id);
           if (file) onPreview(file);
         } : undefined,
-      }];
-    });
-  }, [actions, board, canReadAloud, chats, holding, onChoose, onOpenMaps, onPreview, onSettings, opened, prepared, replying, runtime, settled, writing]);
+      });
+    }
+    return { messages, messagesAfterLater: messagesAfterLater.length === 0 ? undefined : messagesAfterLater };
+  }, [actions, board, canReadAloud, chats, holding, later, onChoose, onOpenMaps, onPreview, onSettings, opened, prepared, replying, runtime, settled, writing]);
 }
 
 const historyLayer = "assistant-history";

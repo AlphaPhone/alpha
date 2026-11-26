@@ -1,8 +1,8 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Keep the draft on the phone"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type PhoneDeviceTarget, type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, phoneStepUsesDevice, phoneWorkflowCivilMidnight, validatePhoneWorkflowSpec, workflowCalendarRangeFitsLocalDays, workflowSha, workflowUuid } from "@elizaos/plugin-workflow-client"
+import { PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL, SELECTED_REMINDERS_WINDOW, type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, phoneStepUsesDevice, phoneWorkflowCivilMidnight, validatePhoneWorkflowSpec, workflowCalendarRangeFitsLocalDays, workflowSha, workflowUuid } from "@elizaos/plugin-workflow-client"
 import { projectNoteForModel } from "@elizaos/plugin-notes-client"
-import { MediaReview } from "../assistant/media-review.vibe"
+import { MediaReview, type WorkflowPhone } from "../assistant/media-review.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -26,7 +26,7 @@ interface Draft {
   readonly prompt: string
   readonly generated?: PhoneWorkflowSpec
   readonly zone: string
-  readonly device?: PhoneDeviceTarget
+  readonly device?: WorkflowPhone
   readonly choices?: SourceChoices
 }
 
@@ -76,7 +76,7 @@ const operations: Readonly<Record<PhoneStep["operation"], Operation>> = {
 }
 
 const authored = ["supplied_text", "contains", "compose_draft", "model_draft"] as const
-const phone = ["selected_notes", "calendar_range", "save_note"] as const
+const phone = ["selected_notes", "selected_reminders", "calendar_range", "save_note", "app_notification", "read_aloud"] as const
 export type DraftOperation = (typeof authored)[number] | (typeof phone)[number]
 
 function offered(catalog: PhoneWorkflowCatalog, operation: string): boolean {
@@ -108,9 +108,14 @@ function shapes(steps: readonly PhoneStep[]): Step[] {
   return steps.map((step, index) => projected(step, index + 1, "source" in step ? numbers.get(step.source) ?? 0 : 0))
 }
 
-export function available(catalog: PhoneWorkflowCatalog, device = false): DraftOperation[] {
-  const candidates = device ? [...authored, ...phone] : authored
-  return candidates.filter((operation) => offered(catalog, operation))
+function onDevice(catalog: PhoneWorkflowCatalog, operation: (typeof phone)[number], device: WorkflowPhone | undefined): boolean {
+  const item = catalog.palette.flatMap((group) => group.operations).find((one) => one.id === operation && one.available)
+  const minimum = operation === "selected_reminders" ? 3 : operation === "app_notification" || operation === "read_aloud" ? 2 : 1
+  return item !== undefined && device !== undefined && device.protocol >= Math.max(minimum, item.requiredDeviceProtocol ?? 1)
+}
+
+export function available(catalog: PhoneWorkflowCatalog, device?: WorkflowPhone): DraftOperation[] {
+  return [...authored.filter((operation) => offered(catalog, operation)), ...phone.filter((operation) => onDevice(catalog, operation, device))]
 }
 
 function clockTime(hour: number, minute: number): string {
@@ -122,7 +127,8 @@ function specification(state: Build.Builder, draft: Draft): PhoneWorkflowSpec {
   const trigger: PhoneWorkflowTrigger = preset === "Manual" ? { kind: "manual" } : {
     kind: "time", localTime: clockTime(hour, minute), timeZone: draft.zone, days: preset === "Daily" ? [0, 1, 2, 3, 4, 5, 6] : [...days].sort(),
   }
-  const device = draft.steps.some(phoneStepUsesDevice) ? draft.device : undefined
+  const device = draft.device !== undefined && draft.steps.some(phoneStepUsesDevice)
+    ? { installationId: draft.device.installationId, enrollmentId: draft.device.enrollmentId } : undefined
   return { version: 1, name: draft.name.trim(), description: draft.description, trigger, steps: draft.steps,
     ...(device === undefined ? {} : { device }) }
 }
@@ -187,8 +193,8 @@ effect function offer(ticket: number): Build.Event!!Needs {
     zone: restored?.trigger.kind === "time" ? restored.trigger.timeZone : draft.zone || localZone() })
 
   return {
-    ...failed, ok: true, speaks: offered(catalog, "read_aloud") && offered(catalog, "app_notification"),
-    reminders: offered(catalog, "selected_reminders"), runDay: false,
+    ...failed, ok: true, speaks: onDevice(catalog, "read_aloud", device) && onDevice(catalog, "app_notification", device),
+    reminders: onDevice(catalog, "selected_reminders", device), runDay: (device?.protocol ?? 0) >= PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL && onDevice(catalog, "calendar_range", device),
     schedules: catalog.triggers.some((trigger) => trigger.kind === "time" && trigger.available),
     generates: catalog.generationProtocol === 1,
     steps: restored === undefined ? [] : shapes(restored.steps),
@@ -333,12 +339,12 @@ export effect function renameDraft(name: string): void!!(DraftWords | Build.Mach
   try ignore(machine.send({ type: "rename", chars: name.length }))
 }
 
-export effect function appendDraft(op: DraftOperation, source: number, text: string, ending: string, selected: readonly string[]): boolean!!(DraftWords | Build.Machine) {
+export effect function appendDraft(op: DraftOperation, source: number, text: string, ending: string, selected: readonly string[], runDays?: number): boolean!!(DraftWords | Build.Machine) {
   const machine = try Build.Machine
   const state = try machine.get()
   const box = try DraftWords
   const draft = try box.view()
-  if (draft.catalog === undefined || !offered(draft.catalog, op)) return false
+  if (draft.catalog === undefined || !available(draft.catalog, draft.device).includes(op)) return false
   const prior = draft.steps[state.steps.findIndex((step) => step.id === source)]?.id
   const id = `step-${state.next}`
   let step: PhoneStep | undefined
@@ -349,6 +355,9 @@ export effect function appendDraft(op: DraftOperation, source: number, text: str
     if (picked.length !== selected.length) return false
     if (op === "selected_notes") {
       step = { id, kind: "Read", operation: op, notes: picked.map(({ id, revision }) => ({ id, revision })) }
+    } else if (runDays !== undefined) {
+      if (!state.catalog.runDay || !Number.isInteger(runDays) || runDays < 1 || runDays > 7) return false
+      step = { id, kind: "Read", operation: op, range: { calendarIds: picked.map(({ id }) => id), days: runDays, timeZone: draft.zone, maximumEvents: 100 } }
     } else {
       const before = phoneWorkflowCivilMidnight(text, draft.zone)
       const after = phoneWorkflowCivilMidnight(ending, draft.zone)
@@ -359,10 +368,13 @@ export effect function appendDraft(op: DraftOperation, source: number, text: str
     }
   } else {
     step = op === "supplied_text" ? { id, kind: "Read", operation: op, text }
+      : op === "selected_reminders" ? { id, kind: "Read", operation: op, scope: { window: SELECTED_REMINDERS_WINDOW, timeZone: draft.zone, maximumItems: 50 } }
       : prior === undefined ? undefined
       : op === "contains" ? { id, kind: "If", operation: op, source: prior, text, caseSensitive: false }
       : op === "compose_draft" ? { id, kind: "Write", operation: op, source: prior, prefix: text, suffix: ending }
-      : op === "save_note" ? draft.device === undefined ? undefined : { id, kind: "Write", operation: op, source: prior, title: text }
+      : op === "save_note" ? { id, kind: "Write", operation: op, source: prior, title: text }
+      : op === "app_notification" ? { id, kind: "Notify", operation: op, source: prior, title: text }
+      : op === "read_aloud" ? { id, kind: "Speak", operation: op, source: prior }
       : { id, kind: "Write", operation: op, source: prior, instruction: text }
   }
   if (step === undefined) return false

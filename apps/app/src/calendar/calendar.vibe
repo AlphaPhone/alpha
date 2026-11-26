@@ -17,7 +17,7 @@ import type { AndroidCalendarEvent } from "@elizaos/os-bridges"
 import { Agent } from "../platform/agent.vibe"
 import type { Said } from "../notices/toasts.vibe"
 import type { Cloud } from "../platform/cloud.vibe"
-import type { Device } from "../platform/device.vibe"
+import { Device } from "../platform/device.vibe"
 import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
@@ -35,6 +35,7 @@ function phoneRow(event: AndroidCalendarEvent): Read {
   const end = event.allDay ? localDate(new Date(event.end).toISOString()) : event.end
   return {
     key: event.id, calendarId: event.calendarId, title: event.title ?? "", place: event.location ?? "", notes: event.body ?? "",
+    ...(event.creationId === undefined ? {} : { creationId: event.creationId }),
     begin, end, allDay: event.allDay, recurring: event.recurring, repeat: repeatText([], event.recurring), link: "", video: "",
     people: [], answer: "NotInvited", answerable: false, managed: false, series: "", editable: true, cancel: "OrganizerCancel", version: "",
   }
@@ -132,7 +133,7 @@ const decodeRevisions = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.
 
 // spec/app/calendar/index.md, "Only the newest answer for each source is shown, and only while it may still be read"; spec/app/calendar/index.md, "A read the phone cut short is shown as limited, never as complete"
 /** What `source` holds for `day`, as the answer to the read numbered `ticket`. */
-effect function readDay(source: Source, ticket: number, day: number): Event!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore) {
+effect function readDay(source: Source, ticket: number, day: number): Event!!(PhoneCalendar | Agent | View.Machine | KeyValueStore.KeyValueStore) {
   if (source === "Google") {
     return effect {
       const read = try readWhole(day)
@@ -144,8 +145,10 @@ effect function readDay(source: Source, ticket: number, day: number): Event!!(Ph
     } catch () => ({ type: "googleAnswered", ticket, ok: false, rows: 0 })
   }
   const phone = try PhoneCalendar
+  const view = try View.Machine
   return effect {
     const listed = try phone.list(readWindow(day))
+    if (!View.canPhoneAnswered(try view.get(), ticket)) return { type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false } as Event
     if (listed.status !== "ready") {
       shown.drop("Phone")
       return { type: "accessAnswered", grant: "Denied" } as Event
@@ -158,7 +161,7 @@ effect function readDay(source: Source, ticket: number, day: number): Event!!(Ph
 
 // spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes"
 /** Read the open event's day again, from its own source, and say whether it is still there. */
-effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | Agent) {
+effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | Agent | View.Machine) {
   const row = shown.find(id)
   const gone: Event = { type: "eventGone", ticket }
   if (row === undefined) return gone
@@ -170,6 +173,7 @@ effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | A
         return listed.status === "ready" ? Option.some(listed.events.map(phoneRow)) : Option.none<ReadonlyArray<Read>>()
       } catch () => Option.none<ReadonlyArray<Read>>())
   if (Option.isNone(again) || !again.value.some((candidate) => candidate.key === row.key)) return gone
+  if (row.source === "Phone" && !View.canEventFound(try (try View.Machine).get(), ticket)) return gone
   shown.keep(row.source, day, again.value)
   return { type: "eventFound", ticket }
 }
@@ -188,7 +192,7 @@ effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall" | 
   }
 }
 
-function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | Shell.Machine | Settings | Time | KeyValueStore.KeyValueStore, []> {
+function carry(fx: Out): Job<Event, PhoneCalendar | Agent | View.Machine | SystemSettings | Shell.Machine | Settings | Time | KeyValueStore.KeyValueStore, []> {
   return match (fx) {
     when { tag: "ReadDay", let source, let ticket, let day }:
       answer(`read ${source}`, readDay(source, ticket, day), source === "Google" ? { type: "googleAnswered", ticket, ok: false, rows: 0 } : { type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false });
@@ -243,6 +247,29 @@ const showing = Stream.unwrap(effect {
 /** Each time the shell brings Calendar forward. */
 const forward = Stream.filter(showing, (front) => front)
 
+// spec/app/calendar/index.md, "What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go"
+const accessOnReturn = started(effect {
+  const phone = try PhoneCalendar
+  if (!phone.present) return
+  const device = try Device
+  const shell = try Shell.Machine
+  const view = try View.Machine
+  const resumed = Stream.filter(device.visible, (visible) => visible)
+  const check = effect {
+    const entered = try shell.get()
+    if (!Shell.showing(entered, "Calendar") || !(try device.showing())) return
+    const before = (try view.get()).access
+    const grant = try phone.grant()
+    const where = try shell.get()
+    if (where.route !== entered.route || !Shell.showing(where, "Calendar") || !(try device.showing())) return
+    const current = (try view.get()).access
+    if (before.asked !== current.asked || before.grant !== current.grant || current.grant === grant) return
+    if (grant === "Denied" || grant === "Unasked") shown.drop("Phone")
+    try contained(view.send({ type: "accessAnswered", grant }), "refreshing Calendar access")
+  }
+  try Stream.runDrain(Stream.switchMap(Stream.merge(forward, resumed), () => Stream.fromEffect(check)))
+}, "refreshing Calendar access on return")
+
 // spec/app/calendar/index.md, "Calendar says when it comes in front and when it leaves; coming in front reads again"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
 const fronted = hearing(showing, View.Machine, (front): Event => ({ type: "frontChanged", front, now: untimed }))
 const returned = hearing(forward, View.Machine, (): Event => ({ type: "comeBack" }))
@@ -279,7 +306,7 @@ const reminders = started(effect {
 }, "reading reminders for Calendar")
 
 /** Calendar's view: in memory, told today by Alpha's time and the shell, and what it may read by Android and the agent. */
-export const calendar = together(kept, told, fronted, returned, widened, writing, reminders)
+export const calendar = together(kept, told, accessOnReturn, fronted, returned, widened, writing, reminders)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
 export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Shell.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Toasts | Said

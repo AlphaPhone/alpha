@@ -1,27 +1,32 @@
 // spec/app/startup/access.md, "Story: Look at access again"
 import { StartupAccessPanel, StartupAllSet, type StartupAccessRowState } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import type { Machine } from "../../gen/app__startup__access.effect.vibe";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useMachine } from "../../gen/app__startup__access.react.ts";
-import { busy, count, flow, grantOf, nextKey, offered, panel, place } from "../../gen/app__startup__access.ts";
+import { busy, count, flow, grantOf, nextKey, offered, panel, place, shownKey } from "../../gen/app__startup__access.ts";
 import { word, type Key } from "../../gen/app__startup__steps.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
+import { type AccessSurface, actOnAccess } from "./settingsAccess.vibe";
 
 const ordered: readonly Key[] = ["Notifications", "Microphone", "Camera", "Location", "Calendar", "Photos", "Files"];
-type AccessRuntime = ManagedRuntime.ManagedRuntime<Machine | Time, unknown>;
+type AccessRuntime = ManagedRuntime.ManagedRuntime<AccessSurface | Time, unknown>;
 
 function AccessView({ runtime, review }: { runtime: AccessRuntime; review: boolean }) {
-  const { state, can, send } = useTimed(runtime, useMachine);
-  if (!state) return null;
+  const { state, can } = useTimed(runtime, useMachine);
+  const shell = useShell(runtime).state;
+  if (!state || !shell) return null;
   const showing = panel(state);
+  if (showing === "Hidden") return null;
+  const visit = { route: shell.route, panel: showing, look: state.look, key: shownKey(state), since: state.since };
+  const send = (event: Parameters<typeof actOnAccess>[0]) => runtime.runFork(actOnAccess(event, visit));
   if (!review && showing === "AllSet") {
     const done = { type: "done" } as const;
     return <StartupAllSet
       trouble={state.finish.trouble === "NoTrouble" ? undefined : state.finish.trouble}
       notSaved={state.notice === "NotSaved"}
-      onDone={can(done, "Owner") ? () => void send(done, "Owner") : undefined}
+      onDone={can(done, "Owner") ? () => void send(done) : undefined}
     />;
   }
   if (showing !== (review ? "Review" : "Walkthrough")) return null;
@@ -52,11 +57,11 @@ function AccessView({ runtime, review }: { runtime: AccessRuntime; review: boole
       notice={state.notice === "Quiet" ? undefined : state.notice}
       onAct={(key) => {
         const event = current === undefined ? { type: "review", key, now: untimed } as const : act;
-        if (can(event, "Owner")) void send(event, "Owner");
+        if (can(event, "Owner")) void send(event);
       }}
-      onContinue={!review && can(proceed, "Owner") ? () => void send(proceed, "Owner") : undefined}
-      onSkip={!review && can(skip, "Owner") ? () => void send(skip, "Owner") : undefined}
-      onDone={review ? () => void send({ type: "leave", now: untimed }, "Owner") : undefined}
+      onContinue={!review && can(proceed, "Owner") ? () => void send(proceed) : undefined}
+      onSkip={!review && can(skip, "Owner") ? () => void send(skip) : undefined}
+      onDone={review ? () => void send({ type: "leave", now: untimed }) : undefined}
     />
   );
 }

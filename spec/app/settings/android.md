@@ -18,8 +18,10 @@ mode, the screen lock and default apps; Display offers Android's display and
 brightness; Sound its sound and Do Not Disturb; Battery the battery saver;
 the Phone page default apps. Notifications offers Alpha's alerts, each of
 its channels and notification access; the Workflows page its own alerts.
-Permissions offers Alpha's permissions, its access to all files and
-location; Network offers Android's Internet panel and its Wi-Fi page;
+App permissions sends Camera, Microphone, Location and Calendar to
+Android's settings for Alpha. Photos opens photo access and Files opens
+all-files access. Notifications opens Alpha's Notifications page.
+Network offers Android's Internet panel and its Wi-Fi page;
 Carrier & SIM setup offers About phone, mobile networks, the SIMs, the
 access point names and default apps; the Calendar, Camera,
 Maps and Notes pages Alpha's permissions, and the Photos page Alpha's
@@ -46,9 +48,9 @@ pure def offers(page: I::Page, target: Target): bool =
   else if (page == I::Sound) target == SoundSettings or target == DoNotDisturb
   else if (page == I::Battery) target == BatterySaver
   else if (page == I::PhonePage) target == DefaultApps
-  else if (page == I::Notifications) target == AlphaAlerts or target == AlertChannel or target == NotificationAccess
+  else if (page == I::Notifications or page == I::PrivacyNotifications) target == AlphaAlerts or target == AlertChannel or target == NotificationAccess
   else if (page == I::WorkflowsApp) target == WorkflowAlerts
-  else if (page == I::Permissions) target == AppPermissions or target == AllFilesAccess or target == LocationSettings
+  else if (page == I::Permissions) target == AppPermissions or target == PhotoPermissions or target == AllFilesAccess
   else if (page == I::NetworkPage) target == InternetPanel or target == WifiNetworks
   else if (page == I::CarrierPage)
     target == AboutPhone or target == MobileNetworks or target == SimCards or target == AccessPointNames or target == DefaultApps

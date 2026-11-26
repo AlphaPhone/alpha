@@ -72,7 +72,7 @@ export function InboxMessageScreen({
       titleControl={<span className="flex-1" />}
       leading={<Button variant="ghost" size="icon" aria-label="Back to the list" onClick={onClose}><ChevronLeft /></Button>}
       actions={reading || fault ? null : <InboxMessageActions {...actions} compact />}
-      className="motion-safe:animate-rise [&_main>div]:gap-0"
+      className="motion-safe:animate-rise [&>header]:max-w-none [&_main>div]:gap-0 [&_main>div]:max-w-192"
     >
       {fromPhone ? <p role="status" className="-mt-1 px-2 pb-2 text-xs text-muted-foreground">Saved copy · Links and attachments are off</p> : null}
       <div className="flex flex-col px-2">

@@ -32,7 +32,7 @@ lemma focus_ensures(s: Settings, focused: int)
   ensures (inv(s) ==> canFocus(s, focused) ==> stepTheBrowserShortcutReturnsToSettings(s, "focus", focus(s, focused)))
   ensures (inv(s) ==> canFocus(s, focused) ==> stepAClosedPageReturnsToTheRowLeft(s, "focus", focus(s, focused)))
   ensures (inv(s) ==> canFocus(s, focused) ==> stepOpeningKeepsThePlaceBehind(s, "focus", focus(s, focused)))
-  ensures (inv(s) ==> canFocus(s, focused) ==> stepTheWalkthroughOnlyReviewsOneAccess(s, focus(s, focused), []))
+  ensures (inv(s) ==> canFocus(s, focused) ==> stepTheWalkthroughOpensFromPrivacy(s, focus(s, focused), []))
   ensures (inv(s) ==> canFocus(s, focused) ==> stepHandingOverKeepsSettings(s, focus(s, focused), []))
 {
   if inv(s) && canFocus(s, focused) {
@@ -49,7 +49,7 @@ lemma goBack_ensures(s: Settings)
   ensures (inv(s) ==> canGoBack(s) ==> stepTheBrowserShortcutReturnsToSettings(s, "goBack", goBack(s)))
   ensures (inv(s) ==> canGoBack(s) ==> stepAClosedPageReturnsToTheRowLeft(s, "goBack", goBack(s)))
   ensures (inv(s) ==> canGoBack(s) ==> stepOpeningKeepsThePlaceBehind(s, "goBack", goBack(s)))
-  ensures (inv(s) ==> canGoBack(s) ==> stepTheWalkthroughOnlyReviewsOneAccess(s, goBack(s), []))
+  ensures (inv(s) ==> canGoBack(s) ==> stepTheWalkthroughOpensFromPrivacy(s, goBack(s), []))
   ensures (inv(s) ==> canGoBack(s) ==> stepHandingOverKeepsSettings(s, goBack(s), []))
 {
   if inv(s) && canGoBack(s) {

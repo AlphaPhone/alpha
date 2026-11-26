@@ -9,6 +9,8 @@ import { type AssistantBarDrag, useAssistantBarDrag } from "./assistant-pull.ts"
 export type AssistantConversationProps = Omit<ComponentProps<"section">, "children"> & {
   /** The top of the sheet: handle, name, context and the ways to find or start a conversation. */
   header: AssistantChatHeaderProps;
+  /** An action for the open context directly below the chat header. */
+  contextAction?: ReactNode;
   /** Which files could not be attached or saved with the message. */
   attachmentNotice?: string;
   /** The messages and the turn's state. */
@@ -19,7 +21,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   composer: AssistantComposerProps;
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
   detent?: "bar" | "sheet" | "full";
-  /** A drag anywhere on the resting bar moves Ask Alpha as a drag of its handle does; left out where it may not be dragged. */
+  /** A drag anywhere on the resting bar moves Ask Alpha as a drag of its handle does, the sheet following the finger as it rises; left out where it may not be dragged. */
   barDrag?: AssistantBarDrag;
 };
 
@@ -28,7 +30,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", barDrag, className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, contextAction, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", barDrag, className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
   const dragging = useAssistantBarDrag(barDrag ?? {});
   const full = detent === "full";
@@ -46,11 +48,12 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
           : resting ? null : cn("rounded-t-chat pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
         className,
       )}
-      {...(resting && barDrag ? dragging : {})}
+      {...(barDrag ? { ...dragging, onPointerDownCapture: resting ? dragging.onPointerDownCapture : undefined } : {})}
       {...props}
     >
       <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel && "overflow-y-auto")}>
         <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
+        {contextAction}
         {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
         {panel}
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />

@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
-import type { LibraryAccess, PhotosPlugin, Reviewed } from "@elizaos/os-bridges";
+import type { LibraryAccess, PermittedPhotosPlugin, PhotosPlugin, Reviewed } from "@elizaos/os-bridges";
 import { boardingPass } from "./img/boarding-pass.ts";
 import { plugin, type Faked } from "./phone.ts";
 
@@ -30,6 +30,7 @@ export interface PhotosScene {
   watching: boolean;
   changed(): void;
   promptCount: number;
+  settingsOpens: number;
   readCount: number;
   readGate?: Promise<void>;
   listPermittedGate?: (query: string | undefined) => Promise<void> | undefined;
@@ -43,8 +44,30 @@ export function photosScene(): PhotosScene {
   return {
     access: { scope: "denied", images: "denied", videos: "denied" },
     rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true, `data:image/jpeg;base64,${boardingPass}`), row(1, "Original.jpg", false)],
-    watching: false, changed: () => {}, promptCount: 0, readCount: 0, saves: [], editLookups: [],
+    watching: false, changed: () => {}, promptCount: 0, settingsOpens: 0, readCount: 0, saves: [], editLookups: [],
   };
+}
+
+type PhotoPermissions = Pick<PermittedPhotosPlugin, "libraryAccess" | "requestLibraryAccess" | "openLibrarySettings">;
+
+function photoPermissions(scene: PhotosScene): PhotoPermissions {
+  return {
+    libraryAccess: () => Promise.resolve(scene.access),
+    requestLibraryAccess() {
+      scene.promptCount++;
+      scene.access = { scope: "full", images: "full", videos: "denied" };
+      return Promise.resolve(scene.access);
+    },
+    openLibrarySettings: () => {
+      scene.settingsOpens += 1;
+      return Promise.resolve();
+    },
+  };
+}
+
+/** The ElizaPhotos bridge registered for the Settings and startup permission flows. */
+export function elizaPhotosPermissions(scene: PhotosScene): Faked {
+  return plugin<PhotoPermissions>(() => photoPermissions(scene));
 }
 
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
@@ -67,12 +90,7 @@ export function alphaPhotos(scene: PhotosScene): Faked {
     const session = "alpha-test-photo-edit";
     const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };
     return {
-      libraryAccess: () => Promise.resolve(scene.access),
-      requestLibraryAccess() {
-        scene.promptCount++;
-        scene.access = { scope: "full", images: "full", videos: "denied" };
-        return Promise.resolve(scene.access);
-      },
+      ...photoPermissions(scene),
       watchLibrary({ active }) {
         scene.watching = active;
         return Promise.resolve({ active });
@@ -128,7 +146,6 @@ export function alphaPhotos(scene: PhotosScene): Faked {
       changeMany: (input) => scene.changeMany?.(input) ?? Promise.reject(new Error("No matching photo change")),
       cancelEdit: () => Promise.resolve(),
       albums: () => Promise.resolve({ items: [] }),
-      openLibrarySettings: () => Promise.resolve(undefined),
     };
   });
 }

@@ -5,9 +5,9 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
-import { registered } from "../platform/device.vibe"
+import { Device, registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, deletionRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { Telephony, deletionRefused, readAddressBook, readNames, telephony } from "../platform/telephony.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, offer, withdraw } from "../notices/toasts.vibe"
 import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
@@ -132,18 +132,52 @@ export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<str
   return addresses.map((address) => names.get(address) || displayNumber(address)).join(", ")
 }
 
-/** The rows behind Messages' counts. */
+interface NewRecipientScope { readonly visit: number; readonly recipient: number; readonly contacts: boolean }
+interface NewRecipientTitle extends NewRecipientScope { readonly title: string; readonly numbers: string }
+
+interface NewRecipientSnapshot {
+  readonly get: () => NewRecipientTitle | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  set(next: NewRecipientTitle | undefined): void
+}
+
+/** The rows and current New recipient label behind Messages' counts. */
 export service Inbox {
   get(): Texts!!
   set(change: Partial<Texts>): void!!
+  readonly newRecipient: NewRecipientSnapshot
+}
+
+function sameNewRecipient(one: NewRecipientScope | undefined, other: NewRecipientScope | undefined): boolean {
+  return one?.visit === other?.visit && one?.recipient === other?.recipient && one?.contacts === other?.contacts
 }
 
 const inbox = Layer.sync(Inbox, () => {
   let held = empty
-  return { get: () => sync(() => held), set: (change: Partial<Texts>) => sync(() => { held = { ...held, ...change } }) }
+  let title: NewRecipientTitle | undefined
+  const listeners = new Set<() => void>()
+  const newRecipient: NewRecipientSnapshot = {
+    get: () => title,
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    set: (next) => {
+      if (sameNewRecipient(title, next) && title?.title === next?.title) return
+      title = next
+      for (const listener of listeners) listener()
+    },
+  }
+  return { get: () => sync(() => held), set: (change: Partial<Texts>) => sync(() => { held = { ...held, ...change } }), newRecipient }
 })
 
-const smsGrant = Effect.map(telephony("status", (c) => c.messages.status()), (status) => grantOf(status.permissions.sms))
+function replaceNames(previous: ReadonlyMap<string, string>, addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string> | undefined): ReadonlyMap<string, string> {
+  if (names === undefined) return new Map()
+  const kept = new Map(previous)
+  for (const address of addresses) kept.delete(address)
+  for (const [address, name] of names) kept.set(address, name)
+  return kept
+}
 
 // spec/app/messages/index.md, "Only the newest read of the list is shown, with what Android says about SMS access"
 effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony | Inbox | Conversations | Messages.Machine) {
@@ -151,16 +185,27 @@ effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony
   const machine = try Messages.Machine
   const held = try store.get()
   const chip = (try machine.get()).chip
-  const grant = smsGrant catch () => "Unasked" as const
-  if (grant !== "Granted") return { type: "threadsRead", ticket, ok: true, grant, count: 0, further: false }
-  const page = telephony("threadPage", (c) => c.messages.threadPage(further ? held.threadsNext : undefined)) catch () => undefined
-  if (page === undefined) return { type: "threadsRead", ticket, ok: false, grant, count: 0, further: false }
-  const names = try namesOf("messages", page.rows.flatMap((row) => ("incomplete" in row ? [] : row.addresses)))
-  const titled = (row: ThreadRow) => ("incomplete" in row ? "" : row.addresses.map((address) => names.get(address) ?? address).join(", "))
+  const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  const grant = grantOf(status?.permissions.sms)
+  const canName = status?.permissions.contacts === "granted"
+  const page = grant === "Granted"
+    ? (telephony("threadPage", (c) => c.messages.threadPage(further ? held.threadsNext : undefined)) catch () => undefined)
+    : undefined
+  if (page === undefined) {
+    if (!canName && Messages.canThreadsRead(try machine.get(), ticket, 0)) try store.set({ names: new Map() })
+    return { type: "threadsRead", ticket, ok: grant !== "Granted", grant, count: 0, further: false }
+  }
+  const addresses = page.rows.flatMap((row) => ("incomplete" in row ? [] : row.addresses))
+  const previousNames = (try store.get()).names
+  const names = canName ? (readNames("messages", addresses) catch () => undefined) : undefined
+  const currentNames = (try store.get()).names
+  const visibleNames = !canName ? new Map() : currentNames !== previousNames ? currentNames
+    : further ? replaceNames(currentNames, addresses, names) : names ?? new Map()
+  const titled = (row: ThreadRow) => ("incomplete" in row ? "" : row.addresses.map((address) => visibleNames.get(address) ?? address).join(", "))
   const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(held.sought, `${titled(row)} ${row.snippet}`, row.addresses.join(" "))))
   const rows = further ? [...held.threads, ...fitting] : fitting
   if (Messages.canThreadsRead(try machine.get(), ticket, rows.length)) {
-    try store.set({ threads: rows, threadsNext: page.next ?? undefined, names: new Map([...(try store.get()).names, ...names]) })
+    try store.set({ threads: rows, threadsNext: page.next ?? undefined, names: visibleNames })
   }
   return { type: "threadsRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
 }
@@ -180,27 +225,38 @@ effect function pageRead(ticket: number, thread: number, further: boolean): Even
   const machine = try Messages.Machine
   const held = try store.get()
   const blank: Page = { rows: 0, failed: 0, partial: 0 }
-  const grant = smsGrant catch () => "Unasked" as const
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  const grant = grantOf(status?.permissions.sms)
   const role = status?.roles.sms.held ?? false
+  const canName = status?.permissions.contacts === "granted"
+  effect function admit(seen: Page): boolean!! {
+    const current = try machine.get()
+    if (current.thread !== thread || !Messages.canPageRead(current, ticket, seen)) return false
+    if (!canName) try store.set({ names: new Map() })
+    return true
+  }
   const conversation = try (try Conversations).get(thread)
-  if (grant !== "Granted" || Option.isNone(conversation)) return { type: "pageRead", ticket, ok: grant === "Granted" || grant === "Unasked", grant, seen: blank, further: false, unreadShown: false, role }
+  if (grant !== "Granted" || Option.isNone(conversation)) {
+    try admit(blank)
+    return { type: "pageRead", ticket, ok: grant === "Granted" || grant === "Unasked", grant, seen: blank, further: false, unreadShown: false, role }
+  }
   const id = try threadOf(conversation.value)
   if (Option.isNone(id)) {
-    const current = try machine.get()
-    if (current.thread === thread && Messages.canPageRead(current, ticket, blank)) try store.set({ messagesThread: thread, messages: [], messagesNext: undefined })
+    if (try admit(blank)) try store.set({ messagesThread: thread, messages: [], messagesNext: undefined })
     return { type: "pageRead", ticket, ok: true, grant, seen: blank, further: false, unreadShown: false, role }
   }
   const page = telephony("messagePage", (c) => c.messages.messagePage(id.value, further ? held.messagesNext : undefined)) catch () => undefined
-  if (page === undefined) return { type: "pageRead", ticket, ok: false, grant, seen: blank, further: false, unreadShown: false, role }
+  if (page === undefined) {
+    try admit(blank)
+    return { type: "pageRead", ticket, ok: false, grant, seen: blank, further: false, unreadShown: false, role }
+  }
   const rows = further ? [...held.messages, ...page.rows] : page.rows
   const seen: Page = {
     rows: rows.length,
     failed: rows.filter((row) => !("incomplete" in row) && row.status === "failed").length,
     partial: rows.filter((row) => "incomplete" in row).length,
   }
-  const current = try machine.get()
-  if (current.thread === thread && Messages.canPageRead(current, ticket, seen)) {
+  if (try admit(seen)) {
     try store.set({ messagesThread: thread, messages: rows, messagesNext: page.next ?? undefined })
     if (conversation.value.id === "") try (try Conversations).of({ id: id.value, addresses: conversation.value.addresses })
   }
@@ -299,8 +355,15 @@ effect function numbers(thread: number): ReadonlyArray<string>!!Conversations {
 }
 
 // spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
-effect function called(thread: number): void!!(Conversations | Dialer | PhoneMachine | Shell) {
-  try ignore(dialing((try numbers(thread))[0] ?? ""))
+effect function called(thread: number, ticket: number): void!!(Conversations | Dialer | PhoneMachine | Shell | Messages.Machine) {
+  const shell = try Shell
+  const visit = try shell.get()
+  if (!showing(visit, "Messages")) return
+  const page = try (try Messages.Machine).get()
+  if (page.thread !== thread || page.page.ticket !== ticket || !Messages.canCall(page)) return
+  const addresses = try numbers(thread)
+  if (addresses.length !== 1) return
+  try ignore(dialing(addresses[0], { view: "Messages", route: visit.route }))
 }
 
 /** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */
@@ -322,7 +385,7 @@ function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages
     when { tag: "Prompt", let need }: answer("prompt", prompted(need), { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "CopyText" }: run("copy", copySelected());
-    when { tag: "OpenPhone" }: run("call", effect { try called((try (try Messages.Machine).get()).thread) });
+    when { tag: "OpenPhone", let thread, let ticket }: run("call", called(thread, ticket));
     when { tag: "OpenMessagingApp" }: run("elsewhere", effect { try elsewhere((try (try Messages.Machine).get()).thread) });
     when { tag: "RemoveMessage", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost" });
   }
@@ -337,6 +400,42 @@ const arrivals: Stream.Stream<Event, never, Telephony> = Stream.callback<Event, 
 const machine = reacting(Messages, { carry })
 
 const shown = visiting(on("Messages"), Messages.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
+
+function newRecipientScope(state: Messages.Messages): NewRecipientScope | undefined {
+  if (!state.front || state.pane !== "New" || state.newDraft.recipient === 0) return undefined
+  const { visit, recipient } = state.newDraft
+  return { visit, recipient, contacts: state.book.grant === "Granted" }
+}
+
+// spec/app/messages/index.md, "The current New address names the Messages stage beside Ask Alpha"
+const nameNewRecipient = started(effect {
+  const machine = try Messages.Machine
+  const shell = try Shell
+  const device = try Device
+  const numbers = try Conversations
+  const { newRecipient } = try Inbox
+  const scope = Stream.map(Stream.zipLatest(shell.changes, machine.changes), ([where, state]) =>
+    showing(where, "Messages") ? newRecipientScope(state) : undefined)
+  const latest = Stream.changesWith(scope, sameNewRecipient)
+  try Stream.runDrain(Stream.switchMap(latest, (one) => Stream.fromEffectDrain(effect {
+    const current = effect {
+      return (try device.showing()) && showing(try shell.get(), "Messages") && sameNewRecipient(one, newRecipientScope(try machine.get()))
+    }
+    if (!(try current) || one === undefined) {
+      try sync(() => newRecipient.set(undefined))
+      return
+    }
+    const conversation = Option.getOrUndefined(try numbers.get(one.recipient))
+    if (conversation === undefined) return
+    const { addresses } = conversation
+    const displayedNumbers = addresses.map(displayNumber).join(", ")
+    const fallback = { ...one, title: displayedNumbers, numbers: displayedNumbers }
+    try sync(() => newRecipient.set(fallback))
+    if (!one.contacts) return
+    const names = timeout(readNames("messages", addresses), "2 seconds") catch () => undefined
+    if (names !== undefined && (try current)) try sync(() => newRecipient.set({ ...fallback, title: titleOf(addresses, names) }))
+  })))
+}, "the New message recipient")
 
 // spec/app/messages/index.md, "A new message, or one sent, reads the list or the open conversation again"
 const heard = hearing(arrivals, Messages.Machine, (event: Event) => event)
@@ -374,12 +473,14 @@ const notices = started(effect {
     if (loaded === undefined) return
     const first = loaded.find((row) => !("incomplete" in row))
     const addresses = listed !== undefined && !("incomplete" in listed) ? listed.addresses : first !== undefined && !("incomplete" in first) ? first.addresses : []
-    const names = try namesOf("messages", addresses)
+    const previousNames = (try inbox.get()).names
+    const names = addresses.length > 0 ? (readNames("messages", addresses) catch () => undefined) : undefined
     const latest = tryPromise(() => transport.smsNoticePending()) catch () => undefined
     if (latest?.token !== token || latest?.threadId !== id || !showing(try shell.get(), "Messages")) return
     const thread = try conversations.of({ id, addresses })
     if (!Messages.canOpenNotice(try machine.get(), thread)) return
-    try inbox.set({ chosen: "", names: new Map([...held.names, ...names]) })
+    const currentNames = (try inbox.get()).names
+    try inbox.set({ chosen: "", names: currentNames === previousNames ? replaceNames(currentNames, addresses, names) : currentNames })
     if (try contained(machine.send({ type: "openNotice", thread }), "the message notification")) {
       try ignore(tryPromise(() => transport.acknowledgeSmsNotice({ token })))
     }
@@ -387,4 +488,4 @@ const notices = started(effect {
 }, "message notifications")
 
 /** Messages: resident for the agent, conversation navigation and Home's unread count. It reads only while its view is in front. */
-export const messages = together(machine, inbox, conversations, shown, heard, notices)
+export const messages = together(machine, inbox, conversations, shown, nameNewRecipient, heard, notices)

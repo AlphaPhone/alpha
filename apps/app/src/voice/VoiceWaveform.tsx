@@ -28,7 +28,12 @@ function cancel(animation: Animation) {
   animation.cancel();
 }
 
-/** Voice phase motion, with the waveform and animation parameters used in Alpha's Develop renderer. */
+/**
+ * Voice phase motion, as the Sunday demo build draws it (v119 45f6bed30, apps/app/src/prototype/voice-activity.tsx:32-84:
+ * the five-bar motif across 35 bars, the phase keyframes, the stagger and easing, Stopping as v119's interrupting;
+ * phone.css:862-869: 28px tall, 30px wide in the pill (phone.css:878), the phase colours, and each bar easing 160ms
+ * cubic-bezier(.22,1,.36,1) unless motion is reduced).
+ */
 export function VoiceWaveform({ phase, compact = false }: { phase: ShownPhase; compact?: boolean }) {
   const visual = motion[phase];
   const animated = useCallback((element: HTMLSpanElement | null) => {
@@ -64,7 +69,7 @@ export function VoiceWaveform({ phase, compact = false }: { phase: ShownPhase; c
       className={cn("flex items-center justify-between gap-0.5 overflow-hidden", tones[phase] ?? "text-alpha")}
       style={{ width: compact ? 30 : "100%", height: 28 }}>
       {(compact ? bars.slice(0, motif.length) : bars).map(({ number, height }) => (
-        <span key={number} className="w-0.5 shrink-0 rounded-full bg-current" style={{ height, transform: `scaleY(${visual.scale.at(-1)})`, opacity: visual.opacity.at(-1) }} />
+        <span key={number} className="w-0.5 shrink-0 rounded-full bg-current motion-safe:transition-[transform,opacity] duration-[160ms] ease-[cubic-bezier(.22,1,.36,1)]" style={{ height, transform: `scaleY(${visual.scale.at(-1)})`, opacity: visual.opacity.at(-1) }} />
       ))}
     </span>
   );

@@ -97,6 +97,33 @@ pure def canCloseDrawer(s: Shell): bool = s.drawer
 pure def closeDrawer(s: Shell): Shell = recordRoute({ before: s, after: { ...s, drawer: false } })
 ```
 
+### Apps can open beside the landscape Ask sheet and Close leaves Ask open
+
+On a landscape phone, the quiet Ask sheet can sit beside Home and its
+Apps drawer. Apps opens in the left pane
+without moving Ask. Close apps closes only the drawer. Escape does the
+same with focus inside Apps after its menu is closed. Back keeps its
+usual order. After a rotation the drawer remains on the same route, and
+a sheet over it takes input before the drawer until they are beside each
+other again or the owner lowers Ask.
+
+```quint
+pure def adjacentAskSheet(s: Shell, landscapePhone: bool): bool =
+  landscapePhone and s.textAsk == NoTextAsk and s.trail.length() == 0 and s.assistant == Sheet
+
+pure def canOpenDrawerBeside(s: Shell, phone: bool, landscapePhone: bool): bool =
+  phone and not(s.drawer) and adjacentAskSheet(s, landscapePhone)
+
+pure def openDrawerBeside(s: Shell, phone: bool, landscapePhone: bool): Shell = openDrawer(s, phone)
+
+pure def lawOpeningAppsBesideKeepsAsk(s: Shell, phone: bool, landscapePhone: bool): bool =
+  val opened = openDrawerBeside(s, phone, landscapePhone)
+  canOpenDrawerBeside(s, phone, landscapePhone)
+    implies (opened.drawer and opened.assistant == s.assistant and opened.route == s.route + 1)
+
+pure val eval_witness_canOpenDrawerBeside = (("raise", Sheet), ("openDrawerBeside", true, true))
+```
+
 ### Ask Alpha rises to typing, a sheet or the full screen
 
 ```quint
@@ -144,6 +171,25 @@ pure def goBack(s: Shell): Shell =
   else if (s.assistant != Bar) recordRoute({ before: s, after: { ...s, assistant: Bar } })
   else if (s.drawer) closeDrawer(s)
   else recordRoute({ before: s, after: { ...s, trail: s.trail.removeAt(s.trail.length() - 1) } })
+```
+
+### On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it
+
+As in Sunday's v119, which drew an app's Back only when Alpha was not the
+phone's launcher, the first page of Settings and of Workflows has no Back
+control in its header while Alpha is the launcher. A page inside either
+keeps its Back, and away from the launcher the first page keeps it too.
+The control is only how Back is drawn: Android's own Back gesture still
+closes the app as the rule above says.
+
+```quint
+type AppPage = FirstPage | InnerPage
+
+pure def drawsAppBack(s: Shell, launcher: bool, page: AppPage): bool =
+  canGoBack(s) and not(launcher and page == FirstPage)
+
+pure def lawAFirstPageOnTheLauncherDrawsNoBack(s: Shell): bool =
+  not(drawsAppBack(s, true, FirstPage)) and drawsAppBack(s, false, FirstPage) == canGoBack(s) and drawsAppBack(s, true, InnerPage) == canGoBack(s)
 ```
 
 ### Returning to the prior communications app keeps Ask Alpha open at its current height

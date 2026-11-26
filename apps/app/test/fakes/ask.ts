@@ -38,6 +38,8 @@ export interface AskScene {
   nextActions?: (metadata: unknown) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
   holdDoneAfterReady?: Promise<void>;
+  /** The next reply's tools ran while the stream was busy, so only the newest waiting tool frame is written, as eliza's reply stream writes progress. */
+  nextNewestProgressOnly?: boolean;
   /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
   knowsNoActionMode?: boolean;
   /** The fake native store, which survives disposal of the WebView runtime. */
@@ -106,6 +108,8 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
   const provisional = scene.nextReplyProvisional;
   const actions = scene.nextActions?.(metadata) ?? [];
   const holdDone = scene.holdDoneAfterReady;
+  const newestOnly = scene.nextNewestProgressOnly === true;
+  scene.nextNewestProgressOnly = undefined;
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
   scene.nextActions = undefined;
@@ -129,7 +133,8 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         return;
       }
       const answer = () => {
-        for (const { action } of actions as readonly { readonly action?: unknown }[]) {
+        const ran = actions as readonly { readonly action?: unknown }[];
+        for (const { action } of newestOnly ? ran.slice(-1) : ran) {
           if (typeof action === "string") controller.enqueue(frame({ type: "tool", name: action, label: "Working" }));
         }
         if (custom !== undefined && custom.length > 0) {

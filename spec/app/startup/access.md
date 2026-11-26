@@ -33,11 +33,12 @@ import read as R from "../../kit/read"
 import steps as S from "./steps"
 import actor as A from "./actor"
 import finish as F from "./finish"
+import shell as Nav from "../shell"
 
 type Choice = Allowed | Continued | Skipped
 type Look = NotLooking | AtOne | AtAll
 type Notice = Quiet | AllowFirst | StillOff | NotConfirmed | NotSaved
-type Effect = Ask({ key: S::Key, ticket: int }) | OpenSettings({ key: S::Key, ticket: int }) | Check({ key: S::Key, ticket: int }) | Save({ ticket: int }) | GoHome
+type Effect = Ask({ key: S::Key, ticket: int }) | OpenSettings({ key: S::Key, ticket: int }) | Check({ key: S::Key, ticket: int }) | Save({ ticket: int }) | GoHome | AccessStarted
 
 type Access = {
   begun: bool, steps: Set[S::Key], pregrants: bool,
@@ -116,18 +117,20 @@ pure def busy(s: Access): bool =
 
 Startup says which accesses are offered and whether the image grants them
 ahead. Every reading in flight is dropped, since no answer can cross a
-restart, and so is an asking whose save had not landed. The account area
-says again whether the owner is set up.
+restart, and so is an asking whose save had not landed. Only once this
+restart is kept can Alpha set up or review access. The account area says
+again whether the owner is set up.
 
 ```quint
-pure def begin(s: Access, phone: bool, pregrants: bool, now: int): Access =
+pure def begin(s: Access, phone: bool, pregrants: bool, now: int): Moved =
   val steps = S::everyKey.filter(key => S::offeredOn(phone, key))
-  {
+  val restarted = {
     ...s, begun: true, steps: steps, pregrants: pregrants, choices: s.kept,
     reads: Map(), store: R::unread, known: Set(), promptless: Set(), off: Set(), stale: steps,
     acted: Set(), prompting: false, since: now, stalled: false, notice: Quiet, covered: false,
     finish: F::restarted(s.finish), look: NotLooking,
   }
+  { state: restarted, out: List(AccessStarted) }
 ```
 
 ### A walkthrough an earlier version of Alpha finished counts the accesses it covered as passed, as continued
@@ -601,9 +604,14 @@ pure def signedOut(s: Access): Access =
 
 ### Sign-in, another panel or a running connection covers the walkthrough
 
-A step uncovered starts its twenty seconds again.
+Ask Alpha's sheet, full view, or native text visit, another covering
+panel, and an update that holds the editors cover access. A step uncovered
+starts its twenty seconds again.
 
 ```quint
+pure def coveredAt(shell: Nav::Shell, panel: bool, update: bool): bool =
+  panel or update or shell.assistant == Nav::Sheet or shell.assistant == Nav::Full or shell.textAsk != Nav::NoTextAsk
+
 pure def canContext(s: Access, covered: bool): bool = covered != s.covered
 
 pure def context(s: Access, covered: bool, now: int): Access =
@@ -725,7 +733,7 @@ pure def sometimesTheWalkthroughWaitsUnderAPanel(s: Access): bool = setUp(s) and
 > change what I like, and leave whenever I like without disturbing my
 > setup.
 
-### Settings opens one access of this walkthrough in review, also from the list of all, and the agent may ask to show one
+### Settings opens one access of this walkthrough from its list, and the agent may ask to show one
 
 ```quint
 pure def canReview(s: Access, key: S::Key): bool = setUp(s) and offered(s, key) and s.look != AtOne and not(s.finish.allSet)

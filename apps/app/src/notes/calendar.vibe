@@ -1,0 +1,68 @@
+// spec/app/notes/note.md, "Story: Review a Calendar draft from a note"
+import { noteScheduleDraft, type NoteScheduleKind } from "@elizaos/plugin-notes-client"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
+import { civilDay } from "../calendar/time.ts"
+import { ScanEntry, type CalendarDraft } from "../files/scanEntry.vibe"
+import { say } from "../notices/toasts.vibe"
+import { Device } from "../platform/device.vibe"
+import { launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { NoteContent } from "./content.vibe"
+
+type ViewedNote = { readonly number: number; readonly revision: number; readonly view: "editor" | "voice" }
+
+effect function sourceOf(viewed: ViewedNote, route: number) {
+  const where = try (try Shell).get()
+  if (where.route !== route || !showing(where, "Notes") || where.drawer ||
+      where.assistant === "Sheet" || where.assistant === "Full" ||
+      !(try (try Device).showing()) || pageInert(try (try Layers).get())) return undefined
+  const collection = try (try NoteContent).collection()
+  const note = collection.noteByNumber.get(viewed.number)
+  if (note === undefined || collection.version !== viewed.revision) return undefined
+  if (viewed.view === "editor") {
+    const state = try (try Editor.Machine).get()
+    if (!state.showing || state.note !== viewed.number || state.draft.base !== viewed.revision ||
+        state.deleting || state.dropping || Editor.waiting(state)) return undefined
+  } else {
+    const state = try (try Voice.Machine).get()
+    if (!state.showing || state.note !== viewed.number || state.revision !== viewed.revision || state.review.showing) return undefined
+  }
+  return { note, owner: collection.owner }
+}
+
+/** Give Calendar the exact saved note as a draft. Calendar owns its review and save. */
+export effect function reviewNoteSchedule(viewed: ViewedNote, kind: NoteScheduleKind) {
+  const shell = try Shell
+  const route = (try shell.get()).route
+  const source = try sourceOf(viewed, route)
+  if (source === undefined) return
+  const owner = launchOwnerAt() catch () => undefined
+  if (owner === undefined || owner.agentId !== source.owner || (try sourceOf(viewed, route))?.note !== source.note) return
+  const result = tryPromise(() => noteScheduleDraft(source.note, kind)) catch () => undefined
+  const confirmed = launchOwnerAt() catch () => undefined
+  if (!sameResidentOwner(owner, confirmed) || (try sourceOf(viewed, route))?.note !== source.note) return
+  if (result?.status !== "ready") {
+    try say(result?.message ?? "Couldn’t start a draft from this note.", true)
+    return
+  }
+  const tomorrow = new Date(try (try Time).now())
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const begin = tomorrow.setHours(9, 0, 0, 0)
+  const entry = try ScanEntry
+  const draft: CalendarDraft = {
+    day: civilDay(begin), disclosures: [],
+    fields: {
+      title: result.draft.title, place: "", notes: result.draft.notes, people: "",
+      begin, end: begin + 3_600_000, allDay: false,
+      ...(kind === "reminder" ? { calendar: "Reminders" as const, reminderAlert: 0 } : {}),
+      noteOrigin: { ...result.draft.origin, agent: owner.agentId, owner: owner.identityId },
+    },
+    noteSource: { route: route + 1, owner },
+  }
+  try entry.calendar(draft)
+  if (!(try contained(shell.send({ type: "openView", view: "Calendar" }), "opening the note’s Calendar draft"))) try entry.releaseEvent(draft)
+}

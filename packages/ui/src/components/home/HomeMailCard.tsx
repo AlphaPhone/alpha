@@ -9,7 +9,7 @@ export type HomeMailCardProps = Omit<ComponentProps<"button">, "children" | "tit
   more?: boolean;
   /** The unread messages Inbox loaded: subject and sender, never a body. */
   lines: readonly HomeCardLine[];
-  /** Which account and when Inbox read it, or since when it is not up to date. */
+  /** Which account and when Inbox read it, "Updating email…" while it reads, or "Open to retry" with when it last read. */
   status?: string;
 };
 

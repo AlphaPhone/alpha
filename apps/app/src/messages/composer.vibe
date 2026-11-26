@@ -154,15 +154,17 @@ module text {
 
   /** The owner may reopen New after Back or a restart. An unopened state is the empty draft. @throws {never} */
   export function keptNewDraft(raw: string | undefined): { revision: number; recipients: string; body: string; pictures: never[] } {
-    if (raw !== undefined) {
-      try {
-        const row = record(JSON.parse(raw))
-        if (row && positive(row.revision) && typeof row.recipients === "string" && typeof row.body === "string") {
-          return { revision: row.revision, recipients: row.recipients, body: row.body, pictures: [] }
-        }
-      } catch { /* Leave a corrupt saved draft to the store's ordinary recovery. */ }
+    const empty = { revision: 0, recipients: "", body: "", pictures: [] }
+    if (raw === undefined) return empty
+    try {
+      const row = record(JSON.parse(raw))
+      if (row && positive(row.revision) && typeof row.recipients === "string" && typeof row.body === "string") {
+        return { revision: row.revision, recipients: row.recipients, body: row.body, pictures: [] }
+      }
+      return empty
+    } catch {
+      return empty
     }
-    return { revision: 0, recipients: "", body: "", pictures: [] }
   }
 
   /** Add the New source to the prior durable Composer state without changing its journal scope. @throws {never} */
@@ -589,7 +591,7 @@ export effect function discardMessageDraft(thread: number): void!!(Drafts | Comp
   try stageEdit(thread, { type: "undo" }, { body: "" })
 }
 
-export effect function useSavedMessageDraft(thread: number): void!!(Drafts | Composer.Machine) {
+export effect function takeSavedMessageDraft(thread: number): void!!(Drafts | Composer.Machine) {
   const store = try Drafts
   const machine = try Composer.Machine
   try Semaphore.withPermit(store.edits, effect {
