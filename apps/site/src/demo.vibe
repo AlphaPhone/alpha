@@ -2,7 +2,7 @@
 import * as Demo from "../gen/site.effect.vibe"
 import { type Event, ticking } from "../gen/site.effect.vibe"
 
-export const untimed = 0
+const untimed = 0
 
 export const demo = Layer.provide(Layer.effect(Demo.Machine, effect {
   const inner = try Demo.Machine
