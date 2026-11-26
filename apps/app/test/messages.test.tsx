@@ -134,7 +134,16 @@ describe("Messages on an Alpha image", () => {
     await press("Maya Chen");
     await ready(alpha.runtime, Composer, "Two SIMs loaded", (state) => state.thread > 0 && state.sims === 2 && state.simInfo.grant === "Granted");
     await fill("Text Maya", "Use the reviewed line");
-    await press("Travel");
+    await ready(alpha.runtime, Composer, "The message draft is saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    const chooseTravel = async () => {
+      await press("Travel");
+      await vi.waitFor(async () => {
+        await drawn(() => undefined);
+        expect(button("Travel")?.getAttribute("aria-pressed")).toBe("true");
+        expect(button("Send")?.disabled).toBe(false);
+      }, { timeout: 12_000, interval: 50 });
+    };
+    await chooseTravel();
 
     const replacement = { ...second, id: 9 };
     world.telephony.subscriptions = [replacement, first];
@@ -142,7 +151,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Composer, "Old SIM refused", (state) => state.outgoing.denied && state.slot.author === "OwnerWrote");
     expect(world.telephony.sent).toEqual([]);
 
-    await press("Travel");
+    await chooseTravel();
     world.telephony.subscriptions = [first, replacement];
     await press("Send");
     await ready(alpha.runtime, Composer, "Replacement SIM sent", (state) => state.outgoing.op.outcome === "Confirmed");
