@@ -1,7 +1,7 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os-bridges";
 import { AppsDrawer, type AppsDrawerProps, type DrawerApp, HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
 import { useMachine as useDrawer } from "../../gen/app__home__drawer.react.ts";
@@ -13,12 +13,13 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
-import { landscapeHomeInput } from "../shell/canvas.vibe";
+import { homeEditFrame, landscapeHomeInput } from "../shell/canvas.vibe";
 import { feel } from "../shell/haptics.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
+import { actOnAddHome, addLayerAt, openAddHome, reconcileAddHome } from "./addHome.vibe";
 import { catalog, labelOf } from "./catalog.vibe";
-import { type AppsInput, type HomeEditInput, actInApps, chooseApp, closeApps, editHome, homeEditFrame, openApps, openHomeFavorite, openOwnTile, told } from "./home.vibe";
+import { type AppsInput, type HomeEditInput, actInApps, chooseApp, closeApps, editHome, openApps, openHomeFavorite, openOwnTile, told } from "./home.vibe";
 import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
@@ -67,8 +68,18 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const alongside = s !== undefined && Home.besideHomeSheet(s, landscapePhone);
   const day = useDayCards(runtime, s, alongside);
   const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: false, now: untimed }, owner);
+  const [mount, setMount] = useState<{ frame: HTMLElement; current: () => boolean }>();
   const homeScroller = useCallback((node: HTMLDivElement | null) => {
-    if (node && canPull) return watchHomePull(node, () => { void runtime.runPromise(openNotifications()); });
+    const frame = node?.closest("main");
+    if (!node || !frame) return;
+    let live = true;
+    setMount({ frame, current: () => live && node.isConnected && frame.isConnected });
+    const stopPull = canPull ? watchHomePull(node, () => { void runtime.runPromise(openNotifications()); }) : undefined;
+    return () => {
+      live = false;
+      stopPull?.();
+      void runtime.runPromiseExit(reconcileAddHome());
+    };
   }, [canPull, runtime]);
   const hold = useCallback((held: () => void) => {
     const fiber = alpha.runtime.runFork(launcherHeld(held));
@@ -81,6 +92,12 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const notice = inline && inline.place === Home.noticeAt(h, s, alongside) ? inline.notice : undefined;
   const beginEditing = { type: "beginEditing", shell: s, beside: alongside } as const;
   const mayEdit = editing && !saving(h.tiles);
+  const addLayer = layers && h.adding && Home.editSite(s, alongside) && homeEditFrame(canvas)
+    && (!alongside || mount !== undefined) ? addLayerAt(layers, s.route, alongside) : undefined;
+  const add = { type: "showHidden", shell: s, beside: alongside } as const;
+  const onShowHidden = editVisible && mount && can(add) ? () => {
+    void runtime.runPromise(openAddHome(s.route, alongside, mount.current));
+  } : undefined;
   const actOnEdit = (event: HomeEditInput) => runtime.runPromise(editHome(event, s.route, alongside));
   const offered = (event: HomeEditInput) => editVisible && can(event) ? () => { void actOnEdit(event); } : undefined;
   const showingApps = s.drawer && Home.onPhone(h);
@@ -139,13 +156,14 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       onRemoveTile={mayEdit ? (id) => offered({ type: "removeFromHome", tile: tileOf(id), shell: s, beside: alongside })?.() : undefined}
       onMoveTile={mayEdit ? ({ id, onto, behind }) => offered({ type: "moveTile", tile: tileOf(id), onto: tileOf(onto), behind, shell: s, beside: alongside })?.() : undefined}
       scrollRef={homeScroller}
-      onShowHidden={offered({ type: "showHidden", shell: s })}
+      onShowHidden={onShowHidden}
       onDone={offered({ type: "done" })}
       notice={notice}
-      adding={editing && !alongside && h.adding}
+      adding={addLayer !== undefined}
+      addInFrame={alongside ? mount?.frame : undefined}
       hidden={Home.hiddenApps(h, s).map((view) => tileItem({ tag: "Own", view }, known.apps))}
-      onAddToHome={mayEdit ? (id) => offered({ type: "addToHome", tile: tileOf(id), shell: s })?.() : undefined}
-      onCloseAdding={() => offered({ type: "backOut" })?.()}
+      onAddToHome={addLayer !== undefined && !saving(h.tiles) ? (id) => { void runtime.runPromise(actOnAddHome(addLayer, tileOf(id))); } : undefined}
+      onCloseAdding={addLayer === undefined ? undefined : () => { void runtime.runPromise(actOnAddHome(addLayer)); }}
     />
   );
   return (

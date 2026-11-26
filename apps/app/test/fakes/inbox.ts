@@ -61,6 +61,7 @@ export interface InboxScene {
   loseDraftReply?: boolean;
   readonly receiptReads: string[];
   notices?: InboxNoticeScene;
+  consent?: { authUrl: string; readonly requests: string[][]; readonly opened: string[] };
 }
 
 export interface InboxNoticeScene {
@@ -222,6 +223,13 @@ export function inboxRoutes(scene: InboxScene): Route[] {
   const lost = () => Promise.reject(new TypeError("offline"));
   let revokedSeen = false;
   return [
+    async (request, url) => {
+      if (request.method !== "POST" || url.pathname !== `${google}/connect/initiate` || scene.consent === undefined) return;
+      if (request.headers.get("authorization") !== "Bearer signed-session") return refused(403, "session_required");
+      const body: { capabilities: string[] } = await request.json();
+      scene.consent.requests.push(body.capabilities);
+      return Response.json({ authUrl: scene.consent.authUrl });
+    },
     (request, url) => {
       if (!url.pathname.startsWith(`${google}/`)) return;
       if (scene.offline) return lost();

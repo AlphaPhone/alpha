@@ -51,6 +51,8 @@ export type HomeScreenProps = {
   notice?: HomeNoticeMessage;
   /** Add to Home is open. */
   adding?: boolean;
+  /** The frame of a Home sheet that leaves the neighboring Ask pane available. */
+  addInFrame?: HTMLElement;
   /** What Add to Home lists: Alpha's own apps this phone admits that Home does not hold. */
   hidden?: readonly Omit<HomeTileItem, "badge">[];
   /** Puts an app back on Home from Add to Home; left out while a change is being saved. */
@@ -70,7 +72,7 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  */
 export function HomeScreen({
   cards = [], appCards, tiles, editing = false, covered = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
-  onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
+  onShowHidden, onDone, notice, adding = false, addInFrame, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
     <div inert={covered || undefined} className={cn("@container flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
@@ -100,7 +102,7 @@ export function HomeScreen({
         )}
         <div aria-hidden className="min-h-4 flex-1" />
       </div>
-      <AddToHomeSheet open={adding} apps={hidden} onAdd={onAddToHome} onClose={onCloseAdding} />
+      <AddToHomeSheet open={adding} inFrame={addInFrame} apps={hidden} onAdd={onAddToHome} onClose={onCloseAdding} />
     </div>
   );
 }

@@ -66,30 +66,30 @@ lemma appsRead_ensures(h: Home, ticket: int, ok: bool, listed: seq<string>, visi
   }
 }
 
-lemma addToHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, by_: Actor)
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysNothingIsToldBeforeTheStart(addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysTheTilesKeepTheirRules(addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysOffThePhoneNothingIsAsked(addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysTheInstalledAppsKeepTheirRules(addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysEditingIsAlone(addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepNumbersOnlyRise(h, "addToHome", addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepARestartForgetsAllButItsNumbers(h, "addToHome", addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepOnlyARefusalReadsQuietly(h, "addToHome", addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepReadingsAreTicketed(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepNothingOpensWhileEditing(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepOneAskAtATime(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepEveryChangeIsSentToBeSaved(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepFailuresAreToldExactly(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepBackClosesOneLayer(h, "addToHome", addToHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+lemma addToHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, beside: bool, by_: Actor)
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysNothingIsToldBeforeTheStart(addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysTheTilesKeepTheirRules(addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysOffThePhoneNothingIsAsked(addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysTheInstalledAppsKeepTheirRules(addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysEditingIsAlone(addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepNumbersOnlyRise(h, "addToHome", addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepARestartForgetsAllButItsNumbers(h, "addToHome", addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepOnlyARefusalReadsQuietly(h, "addToHome", addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepReadingsAreTicketed(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepNothingOpensWhileEditing(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepOneAskAtATime(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepEveryChangeIsSentToBeSaved(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepFailuresAreToldExactly(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepBackClosesOneLayer(h, "addToHome", addToHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "addToHome", addToHome(h, tile, shell, beside, by_).state, addToHome(h, tile, shell, beside, by_).out))
 {
-  if inv(h) && canAddToHome(h, tile, shell, by_) {
-    var after := addToHome(h, tile, shell, by_);
+  if inv(h) && canAddToHome(h, tile, shell, beside, by_) {
+    var after := addToHome(h, tile, shell, beside, by_);
     app__home__tiles_addTile_ensures(h.tiles, tile);
     assert after.out[0] in after.out;
   }
