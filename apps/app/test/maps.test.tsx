@@ -383,6 +383,13 @@ describe("Maps in a browser", () => {
     await until(alpha, runtime, Screen, (s) => s.notice === "PinNamed" && !s.renaming);
     expect([document.querySelector("h2")?.textContent, (await now()).saved, document.body.textContent?.includes("Name updated. Tap Save to keep this place."), Boolean(button("Save"))])
       .toEqual(["Quay", [], true, true]);
+    // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": the pin's name is told on its card only, and Directions clears it, as v119's openDirections replaced its message
+    await press("Directions");
+    await until(alpha, runtime, Screen, (s) => s.directions);
+    expect([(await now()).notice, document.body.textContent?.includes("Name updated. Tap Save to keep this place.")]).toEqual(["NoNotice", false]);
+    await hardware("back");
+    await until(alpha, runtime, Screen, (s) => !s.directions && s.place === pin);
+    expect([document.querySelector("h2")?.textContent, document.body.textContent?.includes("Name updated. Tap Save to keep this place.")]).toEqual(["Quay", false]);
     await press("Save");
     await until(alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Quay" && s.notice === "PlaceSaved");
     expect([document.querySelector("h2")?.textContent, document.body.textContent?.includes("Place saved on this device.")]).toEqual(["Quay", true]);
