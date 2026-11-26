@@ -170,6 +170,9 @@ pure def bounded(src: Source, now: int): bool = and {
 
 pure def alwaysConsentIsBounded(s: Sources): bool = and {
   s.now >= 0, 1 <= s.hours, s.hours <= maxHours, s.answered >= 0, 0 <= s.lastItems, s.lastItems <= maxRead,
+  s.scope >= 0, s.reviewing == Snapshot implies s.scope <= maxSnapshot,
+  s.reviewing == PhoneCalendars implies s.scope <= maxCalendars,
+  (s.reviewing == PhoneReminders or s.reviewing == Google) implies s.scope == 0,
   bounded(sourceOf(s, PhoneCalendars), s.now), bounded(sourceOf(s, PhoneReminders), s.now),
   bounded(sourceOf(s, Google), s.now), bounded(sourceOf(s, Snapshot), s.now),
   sourceOf(s, Snapshot).scope <= maxSnapshot, sourceOf(s, PhoneCalendars).scope <= maxCalendars,

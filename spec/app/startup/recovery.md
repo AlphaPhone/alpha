@@ -538,7 +538,7 @@ five seconds' wait and a time long after it.
 ```quint
 pure val numberValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val deathValues = Set(1, 2, 3, 4, 5)
-pure val ticketValues = Set(1, 2, 3, 4)
+pure val ticketValues = 1.to(20)
 pure val nowValues = Set(0, 1000, 5001, 60001, 70000)
 pure val atValues = Set(5000, 1000000)
 pure val weight_lost = 6

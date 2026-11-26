@@ -109,6 +109,7 @@ pure def retireTrip(t: Trip): Trip = forgetRoute(endGuidance(t))
 ```quint
 pure def alwaysARouteHasTurns(t: Trip): bool =
   (t.route != 0 implies (t.turns > 0 and t.route <= t.plan.ticket)) and t.route >= 0
+    and (t.plan.status == R::Loading implies t.route < t.plan.ticket)
 ```
 
 ### Route requests are numbered from one

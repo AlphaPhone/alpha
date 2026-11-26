@@ -116,7 +116,7 @@ pure def leaveOut(s: Adding): Adding = { ...s, thing: 0, mib: 0, into: 0, accoun
 pure def canPickContact(s: Adding, draft: int, admitted: bool, contacts: P::Permission): bool =
   draft != 0 and admitted and P::allows(contacts)
 
-pure def readPeople(s: Adding, draft: int, query: str, further: bool): Added =
+pure def readPeople(draft: int, query: str, further: bool, s: Adding): Added =
   val people = R::ask(s.people)
   {
     state: { ...s, contactDraft: draft, contacts: Usable, people: people, query: query,
@@ -125,7 +125,7 @@ pure def readPeople(s: Adding, draft: int, query: str, further: bool): Added =
   }
 
 pure def pickContact(s: Adding, draft: int, admitted: bool, contacts: P::Permission): Added =
-  readPeople(s, draft, "", false)
+  readPeople(draft, "", false, s)
 
 pure def canWantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Permission): bool =
   draft != 0 and not(admitted and P::allows(contacts))
@@ -149,12 +149,12 @@ draft, or a new owner retires the picker and refuses a late answer.
 pure def canFindPeople(s: Adding, draft: int, query: str): bool =
   draft != 0 and draft == s.contactDraft and s.contacts == Usable and s.people.status != R::Idle
 
-pure def findPeople(s: Adding, draft: int, query: str): Added = readPeople(s, draft, query, false)
+pure def findPeople(s: Adding, draft: int, query: str): Added = readPeople(draft, query, false, s)
 
 pure def canMorePeople(s: Adding, draft: int): bool =
   draft != 0 and draft == s.contactDraft and s.people.status == R::Loaded and s.morePeople
 
-pure def morePeople(s: Adding, draft: int): Added = readPeople(s, draft, s.query, true)
+pure def morePeople(s: Adding, draft: int): Added = readPeople(draft, s.query, true, s)
 
 pure def canPeopleRead(s: Adding, draft: int, ticket: int, addresses: int): bool =
   draft != 0 and draft == s.contactDraft and s.contacts == Usable and R::canAnswer(s.people, ticket) and addresses >= 0
@@ -180,7 +180,7 @@ pure def canContactsReported(s: Adding, draft: int): bool =
   draft != 0 and draft == s.contactDraft and s.contacts == Asked
 
 pure def contactsReported(s: Adding, draft: int, allowed: bool): Added =
-  if (allowed) readPeople(s, draft, "", false)
+  if (allowed) readPeople(draft, "", false, s)
   else { state: { ...s, contacts: InSettings }, out: List() }
 ```
 
