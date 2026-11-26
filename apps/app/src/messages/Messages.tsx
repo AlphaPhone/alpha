@@ -1,9 +1,9 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea, watchMessageMenu } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -22,6 +22,8 @@ import type { Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { dictateMessage, type voiceArea } from "./dictation.vibe";
+import { DeleteMessageDialog } from "./DeleteMessageDialog.tsx";
+import { MessageActionMenu, type MessageActions } from "./MessageActionMenu.tsx";
 import { NewMessageDock } from "./NewMessageDock.tsx";
 
 export interface MessagesProps {
@@ -41,8 +43,6 @@ const draftAction = "min-h-11 rounded-tile text-base focus-visible:outline-2 foc
 const notice = "mx-2 basis-full text-caption leading-detail text-muted-foreground";
 const textLink = "min-h-11 underline focus-visible:outline-2 focus-visible:outline-ring";
 const accessoryChip = "inline-flex min-h-11 items-center rounded-tile text-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50";
-const dialogAction = "min-h-11 px-3.5 text-base hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
-const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm font-semibold whitespace-nowrap transition-colors duration-fast hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 const contactRow = "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
 const messageURL = /\bhttps?:\/\/[^\s<>"']+/giu;
 const noMessages: ReadonlyArray<MessageRow> = [];
@@ -249,37 +249,12 @@ function PictureGlyph() {
   );
 }
 
-interface BubbleActions {
-  copy?: ((report: CopyReport) => void) | undefined;
-  remove?: (() => void) | undefined;
-}
-
-// spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
-function BubbleMenu({ actions, close }: { actions: BubbleActions; close: () => void }) {
-  const [copy, setCopy] = useState<Parameters<CopyReport>[0] | "pending">();
-  const copyAttemptRef = useRef(0);
-  return (
-    <div data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={(event) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      close();
-    }}>
-      {actions.copy && <button type="button" role="menuitem" autoFocus className={`${actionItem} min-w-25`} disabled={copy === "pending"} onClick={() => {
-        const attempt = ++copyAttemptRef.current;
-        setCopy("pending");
-        actions.copy?.((outcome) => { if (attempt === copyAttemptRef.current) setCopy(outcome); });
-      }}>{copy === "copied" ? "Copied!" : <><Copy aria-hidden className="size-4" />Copy</>}</button>}
-      {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
-      <span role="status" className={copy === "failed" ? "basis-full px-2 pb-1 text-caption text-destructive" : "sr-only"}>{copy === "copied" ? "Copied." : copy === "failed" ? "Copy failed" : ""}</span>
-    </div>
-  );
-}
-
 // spec/app/messages/index.md, "A tap toggles message actions and a stationary hold opens them"
-const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLink }: { row: MessageRow; now: number; choose: (id: string, toggle?: boolean) => void; actions?: BubbleActions | undefined; hold: (held: () => void) => () => void; onOpenLink?: MessagesProps["onOpenLink"] }) {
+const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLink }: { row: MessageRow; now: number; choose: (id: string, toggle?: boolean) => void; actions?: MessageActions | undefined; hold: (held: () => void) => () => void; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const triggerRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<{ id: number; x: number; y: number; cancel: () => void } | undefined>(undefined);
   const skipTapRef = useRef(false);
+  const [keyboardMenu, setKeyboardMenu] = useState(false);
   const release = useCallback(() => {
     pointerRef.current?.cancel();
     pointerRef.current = undefined;
@@ -289,11 +264,18 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
     if (!node) return;
     return () => { release(); triggerRef.current = null; };
   }, [release]);
+  const watchMenu = useCallback((node: HTMLDivElement | null) => {
+    if (node && !actions?.covered) return watchMessageMenu(node, () => choose(""), { within: triggerRef.current, dismissOnSelection: false });
+  }, [actions?.covered, choose]);
   const complete = "incomplete" in row ? undefined : row;
   const outgoing = complete?.direction === "outgoing";
   const failed = complete?.status === "failed";
   const status = !complete || !outgoing ? "" : failed ? "Not sent" : complete.status === "pending" ? "Sending…" : complete.kind === "sms" && complete.deliveryReport === "complete" ? "Delivered" : complete.status === "sent" ? "Sent" : "";
   const selectable = (event: MouseEvent) => !(event.target instanceof Element && event.target.closest("a")) && document.getSelection()?.isCollapsed !== false;
+  const showActions = (toggle = false, keyboard = false) => {
+    setKeyboardMenu(keyboard);
+    choose(row.id, toggle);
+  };
   const begin = (event: PointerEvent) => {
     if (!event.isPrimary || event.button !== 0) return;
     release();
@@ -303,7 +285,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
     const cancel = hold(() => {
       if (pointerRef.current?.id !== id || document.getSelection()?.isCollapsed === false) return;
       skipTapRef.current = true;
-      choose(row.id);
+      showActions();
     });
     pointerRef.current = { id, x, y, cancel };
   };
@@ -324,14 +306,14 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
         onClick={(event) => {
           const suppressed = event.detail !== 0 && skipTapRef.current;
           skipTapRef.current = false;
-          if (!suppressed && selectable(event)) choose(row.id, true);
+          if (!suppressed && selectable(event)) showActions(true, event.detail === 0);
         }}
         onContextMenu={(event) => {
           if (!selectable(event)) return;
           event.preventDefault();
           release();
           skipTapRef.current = true;
-          choose(row.id);
+          showActions();
         }}
         onPointerDown={begin}
         onPointerMove={moved}
@@ -343,7 +325,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
           if (event.target !== event.currentTarget) return;
           if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10") || event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            choose(row.id, event.key === "Enter" || event.key === " ");
+            showActions(true, true);
           }
         }}>
         {!complete ? <p data-alpha-message-body className="rounded-tile bg-secondary px-4 py-2.75 text-body leading-detail text-muted-foreground">{label}</p> : (
@@ -355,7 +337,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
         {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
       </div>
-      {actions && <BubbleMenu actions={actions} close={() => { choose(""); triggerRef.current?.focus(); }} />}
+      {actions && <MessageActionMenu ref={watchMenu} actions={actions} focusOnOpen={keyboardMenu} close={() => { choose(""); triggerRef.current?.focus({ preventScroll: true }); }} />}
     </div>
   );
 });
@@ -364,6 +346,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
 function Conversation({ runtime, messages: { state, can, send }, onOpenLink, view }: MessagesProps & { messages: MessagesUI; view: HTMLElement | null }) {
   const phone = usePhone(runtime).state;
   const [selected, setSelected] = useState("");
+  const cancelFocus = useRef<{ id: string; element: HTMLElement } | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearEndRef = useRef(true);
   const held = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
@@ -400,7 +383,25 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
   const title = titleOf(addresses, held.names) || "Conversation";
   const selectedRow = rows.find((row) => row.id === selected);
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
+  const keep = { type: "keep" } as const;
+  const cancelDelete = () => {
+    if (!can(keep)) return;
+    const trigger = Array.from(view?.querySelectorAll<HTMLElement>("[data-alpha-message-id]") ?? []).find((node) => node.dataset.alphaMessageId === selected);
+    cancelFocus.current = trigger ? { id: selected, element: trigger } : undefined;
+    void send(keep);
+  };
+  const focusAfterCancel = (event: Event) => {
+    const focused = cancelFocus.current;
+    cancelFocus.current = undefined;
+    if (!focused?.element.isConnected) return;
+    const current = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
+    if (current.chosen !== focused.id || current.messagesThread !== state.thread) return;
+    event.preventDefault();
+    choose("");
+    focused.element.focus({ preventScroll: true });
+  };
   const actions = selectedRow && !("incomplete" in selectedRow) && content(state) ? state.confirming ? {
+    covered: true,
     copy: selectedRow.body ? (report: CopyReport) => report(undefined) : undefined,
     remove: () => undefined,
   } : {
@@ -439,16 +440,10 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
       </div>
       {state.removal.outcome === "Unknown" && <p role="status" className={`${notice} px-3`}>Alpha cannot tell whether the message was deleted</p>}
       {state.removal.outcome === "Refused" && held.deleteTarget && <p role="status" className={`${notice} px-3`}>The message was not deleted</p>}
-      <Dialog open={state.confirming} onOpenChange={(open) => { if (!open && can({ type: "keep" })) void send({ type: "keep" }); }}>
-        <DialogContent container={view ?? undefined} overlayClassName="absolute z-10 bg-foreground/13 dark:bg-background/13" role="alertdialog" className="absolute inset-x-0 z-20 w-70 max-w-9/10 gap-0 bg-background shadow-none">
-          <DialogTitle className="sr-only">Delete message?</DialogTitle>
-          <DialogDescription className="mt-0 mb-4 text-lg text-foreground">Delete this message from this phone?</DialogDescription>
-          <div className="flex justify-end gap-2">
-            <button type="button" className={dialogAction} onClick={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Cancel</button>
-            <button type="button" className={`${dialogAction} text-destructive`} onClick={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}>Delete</button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DeleteMessageDialog open={state.confirming} container={view}
+        onCancel={cancelDelete}
+        onDelete={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}
+        onCloseAutoFocus={focusAfterCancel} />
       <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
     </>
   );
@@ -772,7 +767,7 @@ function Picker({ runtime, messages: { state, can, send }, handoff, discardHando
         )}
         {showChoices && can({ type: "loadMoreChoices" }) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</button>}
       </div>
-      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} textarea={messageRef}
+      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} contactsAllowed={state.book.grant === "Granted"} draft={kept} textarea={messageRef}
         minHeight={selecting ? composingHeight : undefined}
         body={textSave?.edit.body ?? kept.body} saveStatus={textSave?.status ?? (prefill?.phase === "Saving" ? "Saving" : prefill?.phase === "SaveFailed" ? "Failed" : undefined)} textIsSaved={textIsSaved}
         onBody={(body) => { setComposingHeight(undefined); saveText(fresh.visit, { body }); }}

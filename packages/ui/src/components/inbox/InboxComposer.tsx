@@ -61,6 +61,7 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
     notice?: InboxNoticeKind;
     /** Does the one thing the notice offers. */
     onNoticeAction?: () => void;
+    onTurnOnSending?: () => void;
     /** How the last send ended, while it is worth telling. */
     outcome?: InboxSendOutcomeProps;
     /** The phone's drafts are being looked up after a restart, or cannot be read; the form is not shown until they are. */
@@ -92,7 +93,7 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
  */
 export function InboxComposer({
   kind, accounts, from, onFromChange, to, suggestions = [], onContacts, contactsOpen = false, contactsStatus, onMoreContacts, cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
-  onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
+  onRestoreMine, onUseSaved, notice, onNoticeAction, onTurnOnSending, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
 }: InboxComposerProps) {
   const [more, setMore] = useState(false);
   const showMore = more || cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== "";
@@ -129,6 +130,7 @@ export function InboxComposer({
         ) : (
           <>
             {notice ? <div className="py-2"><InboxNotice kind={notice} onAction={onNoticeAction} /></div> : null}
+            {onTurnOnSending ? <div className="py-2"><InboxNotice kind="sendingOff" onAction={onTurnOnSending} /></div> : null}
             {outcome ? <div className="py-2"><InboxSendOutcome {...outcome} /></div> : null}
             {clash && onRestoreMine ? <div className="py-2"><InboxDraftClash onRestoreMine={onRestoreMine} onUseSaved={onUseSaved} /></div> : null}
             <InboxFromField accounts={accounts} value={from} onChange={onFromChange} />

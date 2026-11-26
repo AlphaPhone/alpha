@@ -295,13 +295,28 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   }), only("home", "view:Photos", "assistant", "notice"));
   const library = photos.runtime(alpha);
   const chat = assistant.runtime(alpha);
+  const readViewer = () => library.runPromise(Viewer.use((machine) => machine.get()));
+  const readDraft = () => chat.runPromise(Composer.use((machine) => machine.get()));
+  const readShell = () => alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
+  const waitForScreen = (check: () => void | Promise<void>) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    await check();
+  }, { timeout: 30_000 });
   await until(alpha, chat, Conversation, (state) => state.ready);
   await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
   await press("Photos");
   await until(alpha, library, Library, (state) => state.library.status === "Loaded");
   const openPhoto = async (name = source.name) => {
+    const previous = (await readViewer()).read.ticket;
     await press(name);
-    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+    await waitForScreen(async () => {
+      const view = await readViewer();
+      expect(view.open).toBeGreaterThan(0);
+      expect(view.read).toMatchObject({ status: "Loaded" });
+      expect(view.read.ticket).toBeGreaterThan(previous);
+      const openImage = [...document.querySelectorAll<HTMLImageElement>('[data-alpha-subview="photos-viewer"] img')];
+      expect(openImage.map((image) => image.alt)).toContain(name);
+    });
   };
   const askAbout = async () => {
     await drawn(() => button("Photo actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
@@ -311,13 +326,28 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
       action.click();
     });
   };
+  const offerPhoto = async (name: string, files: number) => {
+    const [opened, draft] = await Promise.all([readViewer(), readDraft()]);
+    await askAbout();
+    await waitForScreen(async () => {
+      const [shell, view, current] = await Promise.all([readShell(), readViewer(), readDraft()]);
+      expect([shell.assistant, shell.trail.at(-1)]).toEqual(["Sheet", "Photos"]);
+      expect(view).toMatchObject({
+        open: opened.open,
+        revision: opened.revision,
+        read: { status: "Loaded", ticket: opened.read.ticket },
+      });
+      expect([current.binding, current.read.ticket, current.editor.files]).toEqual([draft.binding, draft.read.ticket, files]);
+      expect(button(`Remove ${name}`)?.disabled).toBe(false);
+    });
+  };
   await openPhoto();
   const priorReads = world.photos.readCount;
   const gate = Promise.withResolvers<void>();
   world.photos.readGate = gate.promise;
   try {
     await askAbout();
-    await drawn(() => vi.waitFor(() => expect(world.photos.readCount).toBe(priorReads + 1)));
+    await waitForScreen(() => expect(world.photos.readCount).toBe(priorReads + 1));
     await press("Back to photos");
     await until(alpha, library, Viewer, (state) => state.open === 0);
   } finally {
@@ -326,20 +356,17 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   }
   expect([button(`Remove ${source.name}`), received]).toEqual([undefined, []]);
   await openPhoto();
-  await askAbout();
-  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  await offerPhoto(source.name, 1);
   await press(`Remove ${source.name}`);
   await until(alpha, library, Viewer, (state) => state.open === 0);
   await until(alpha, chat, Composer, (state) => state.editor.files === 0);
   await hardware("back");
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
   await openPhoto();
-  await askAbout();
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  await offerPhoto(source.name, 1);
   chatAction("Attach media");
   const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Select photos"]');
-  await drawn(() => vi.waitFor(() => expect(input()).not.toBeNull()));
+  await waitForScreen(() => expect(input()).not.toBeNull());
   await drawn(() => {
     const picker = input();
     if (!picker) throw new Error("The photo file input did not open");
@@ -347,7 +374,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
     Object.defineProperty(picker, "files", { value: [new File([bytes], ordinary, { type: "image/png" })] });
     picker.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${ordinary} from the selection`)).toBeDefined()));
+  await waitForScreen(() => expect(button(`Remove ${ordinary} from the selection`)).toBeDefined());
   await press("Attach selected files");
   await until(alpha, chat, Composer, (state) => state.editor.files === 2);
   await fill("Message Alpha", prompt);
@@ -356,19 +383,17 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await press("Back to photos");
   await until(alpha, library, Viewer, (state) => state.open === 0);
   await openPhoto(replacement.name);
-  await askAbout();
-  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${replacement.name}`)).toBeDefined()));
-  const writing = await chat.runPromise(Composer.use((composer) => composer.get()));
+  await offerPhoto(replacement.name, 2);
+  const writing = await readDraft();
   const text = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Alpha"]')?.value;
   expect([button(`Remove ${source.name}`), Boolean(button(`Remove ${ordinary}`)), writing.editor.files, text, received])
     .toEqual([undefined, true, 2, prompt, []]);
 
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
-  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
-  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  await waitForScreen(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply));
   expect(received).toEqual([expect.objectContaining({
     text: expect.stringContaining(prompt),
     images: [
@@ -381,6 +406,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
 it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo"); (spec/app/camera/agent.md, "A confirmed capture can be offered in the same draft for the owner to send")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.camera.galleryVolume = "external_primary";
+  world.telephony.enrollment = { journal: new Map() };
   let outgoing = 0;
   const forwardAgent = forward(mine.agent.origin, mine.agent.token);
   const { alpha } = await openOver(fakeWorld(world, {
@@ -407,7 +433,10 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
 
-  await waitForScreen(() => expect(button("Approve")?.disabled).toBe(false));
+  await waitForScreen(() => {
+    expect(document.querySelector('[role="log"]')?.textContent).toContain("Open the rear camera to review the shot");
+    expect(button("Approve")?.disabled).toBe(false);
+  });
   expect(world.camera.photos).toHaveLength(0);
   await press("Approve");
 
@@ -535,6 +564,7 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
 
 it('Filter Files from Home and open the named file with the resident agent (spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"); (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  world.telephony.enrollment = { journal: new Map() };
   const path = "Documents/notes.txt";
   const contents = "This exact file is open on the phone.";
   world.files.texts[path] = contents;

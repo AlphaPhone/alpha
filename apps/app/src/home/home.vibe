@@ -15,8 +15,9 @@ import { type Job, answer, contained, due, following, hearing, reacting, run, st
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { coarsePointer, landscapeHomeInput } from "../shell/canvas.vibe"
+import { homeEditFrame, landscapeHomeInput } from "../shell/canvas.vibe"
 import { stepping } from "../shell/shell.vibe"
+import { addHomeLayer, reconcileAddHome } from "./addHome.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
 
@@ -141,21 +142,30 @@ export effect function chooseApp(app: string, action: "Pin" | "Info", route: num
 
 // spec/app/home/drawer.md, "The menu names a current app and closes before Apps"; spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
 /** Back first closes the current installed app's menu, or ends the latest Home editing step. */
-export effect function backHome(): boolean!!(Home.Machine | Drawer.Machine) {
+export effect function backHome() {
   const drawer = try Drawer.Machine
   if (Drawer.canCloseMenu(try drawer.get())) return try contained(drawer.send({ type: "closeMenu" }), "closing the Apps menu")
+  try reconcileAddHome()
   const home = try Home.Machine
-  if (!Home.canBackOut(try home.get())) return false
-  return try contained(home.send({ type: "backOut" }, owner), "back on Home")
+  const shell = try Shell.Machine
+  const route = (try shell.get()).route
+  const free = try homeInput(false)
+  const current = () => {
+    const where = Effect.runSync(shell.get())
+    return where.route === route && Home.editSite(where, false) && free()
+  }
+  if (!current() || !Home.canBackOut(try home.get())) return false
+  return try contained(home.send({ type: "backOut" }, owner, current), "back on Home")
 }
 
-// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
+// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing"
 effect function tell(fx: Out) {
   const notice = noticeOf(fx)
   if (notice === undefined) return
   const shell = try (try Shell.Machine).get()
   const home = try (try Home.Machine).get()
-  const place = Home.noticeAt(home, shell)
+  const beside = Home.besideHomeSheet(shell, landscapeHomeInput(try (try Canvas).get()))
+  const place = Home.noticeAt(home, shell, beside)
   if (place === "Nowhere") return
   if (place === "AsToast") {
     try say(wordsOf(notice), true)
@@ -165,12 +175,43 @@ effect function tell(fx: Out) {
   for (const listener of [...listeners]) listener()
 }
 
-effect function homeInput(beside: boolean) {
+export effect function homeInput(beside: boolean) {
   const canvas = try Canvas
   const layers = try Layers.Machine
   const device = try Device
   return () => !Layers.pageInert(Effect.runSync(layers.get())) && Effect.runSync(device.showing())
-    && (!beside || landscapeHomeInput(Effect.runSync(canvas.get()), coarsePointer()))
+    && (!beside || landscapeHomeInput(Effect.runSync(canvas.get())))
+}
+
+export type HomeEditInput = Extract<Event, {
+  type: "beginEditing" | "removeFromHome" | "moveTile" | "done"
+}>
+
+// spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
+export effect function editHome(input: HomeEditInput, route: number, beside: boolean) {
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const canvas = try Canvas
+  const free = try homeInput(beside)
+  const before = try shell.get()
+  const event = "shell" in input ? { ...input, shell: before } : input
+  const current = () => {
+    const where = Effect.runSync(shell.get())
+    return where.route === route && where.image === before.image && where.contacts === before.contacts
+      && Home.editSite(where, beside) && free() && homeEditFrame(Effect.runSync(canvas.get()))
+  }
+  if (!current()) return false
+  const accepted = try contained(home.send(event, owner, current), "changing Home")
+  if (accepted && input.type === "beginEditing" && last?.place === "InEditBar") {
+    last = undefined
+    for (const listener of [...listeners]) listener()
+  }
+  return accepted
+}
+
+// spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
+export effect function finishHomeEditing() {
+  return try contained((try Home.Machine).send({ type: "done" }, owner), "ending Home editing")
 }
 
 // spec/app/home/index.md, "A favorite on bare Home or beside the landscape Ask sheet opens the installed app and leaves Ask where it is"
@@ -282,6 +323,7 @@ const presented = started(effect {
 
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
 export const home = together(
+  addHomeLayer,
   reacting(Home, {
     keep: 1,
     open: [{ type: "restart" }, owner],

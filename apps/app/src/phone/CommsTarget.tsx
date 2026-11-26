@@ -16,6 +16,7 @@ import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { Rows } from "../contacts/contacts.vibe";
 import { Conversations, Inbox, titleOf } from "../messages/messages.vibe";
+import { useNewRecipientTitle } from "../messages/new-recipient.ts";
 import { useCommsDock } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 import { Handset, hangupButton } from "./icons.ts";
@@ -43,6 +44,8 @@ export function CommsTarget({ runtime, placement }: {
   const contacts = useContacts(runtime).state;
   const dock = useCommsDock(runtime);
   const view = shell.state?.trail.at(-1);
+  const newDraft = view === "Messages" && messages?.front && messages.pane === "New" ? messages.newDraft : undefined;
+  const recipient = useNewRecipientTitle(runtime, newDraft, messages?.book.grant === "Granted");
   if (view !== "Phone" && view !== "Messages" && view !== "Contacts") return null;
   const call = calls.state && barDrawn(calls.state) === "LiveBar" ? shownCall(calls.state.calls) : undefined;
   const current = view === "Messages" && messages?.pane === "Conversation"
@@ -50,7 +53,7 @@ export function CommsTarget({ runtime, placement }: {
     : undefined;
   const person = current ? titleOf(current.addresses, runtime.runSync(Inbox.use((held) => held.get())).names)
     : view === "Contacts" && contacts?.opened ? runtime.runSync(Rows.use((held) => held.get())).card?.displayName ?? ""
-    : "";
+    : view === "Messages" ? recipient : "";
   const shouldShowCall = call !== undefined && (view === "Phone" || placement === "strip");
   if (placement === "context") return <>{call !== undefined && view === "Phone" ? "Call" : person === "" ? view : `${person} · ${view}`}</>;
   if (placement === "composer") {

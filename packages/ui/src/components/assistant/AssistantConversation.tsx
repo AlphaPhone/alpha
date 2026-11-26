@@ -9,6 +9,8 @@ import { type AssistantBarDrag, useAssistantBarDrag } from "./assistant-pull.ts"
 export type AssistantConversationProps = Omit<ComponentProps<"section">, "children"> & {
   /** The top of the sheet: handle, name, context and the ways to find or start a conversation. */
   header: AssistantChatHeaderProps;
+  /** An action for the open context directly below the chat header. */
+  contextAction?: ReactNode;
   /** Which files could not be attached or saved with the message. */
   attachmentNotice?: string;
   /** The messages and the turn's state. */
@@ -35,7 +37,7 @@ const noop = () => undefined;
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", barDrag, underlay, className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, contextAction, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", barDrag, underlay, className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
   const dragging = useAssistantBarDrag(barDrag ?? {});
   const full = detent === "full";
@@ -64,6 +66,7 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
     >
       <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel ? "overflow-y-auto" : "overflow-hidden")}>
         <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
+        {contextAction}
         {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
         {panel}
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />

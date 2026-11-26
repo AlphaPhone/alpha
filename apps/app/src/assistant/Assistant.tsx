@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTranscriptProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { FileText } from "lucide-react";
+import { ChevronLeft, FileText } from "lucide-react";
 import { type FormEvent, type ReactNode, type RefObject, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
@@ -59,7 +59,7 @@ import {
 } from "./recording-summary.vibe";
 import { type Attached, type Board, type Line, type Seen, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
-import { CommsBriefing } from "../phone/comms.vibe";
+import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
@@ -76,7 +76,7 @@ export interface AssistantProps {
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
   canReadAloud?: boolean;
-  onCloseTextAsk?: () => void;
+  onBack?: () => void;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -596,7 +596,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
 }
 
 /** @model spec/app/assistant/index.md */
-export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onCloseTextAsk }: AssistantProps) {
+export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onBack }: AssistantProps) {
   const conversation = useConversation(runtime);
   const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
@@ -645,6 +645,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
   const subject = onComms ? comms.state?.key : undefined;
+  const priorStage = comms.state?.stage.at(-1);
+  const returnTo = priorStage === undefined ? undefined : commsViewOf(priorStage.app);
   const open = dockOpen(assistantDetent);
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
@@ -736,16 +738,23 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
           subtitle: onComms ? <CommsTarget runtime={runtime} placement="context" /> : undefined,
           returnOnClose: textAsk,
-          onHome: textAsk ? onCloseTextAsk : () => void runtime.runPromise(home()),
-          onClose: textAsk ? onCloseTextAsk : open || live ? () => {
-            if (shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); });
-          } : undefined,
+          onHome: textAsk ? onBack : () => void runtime.runPromise(home()),
+          onClose: textAsk ? onBack : (open || live) && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); }) : undefined,
           expanded: assistantDetent === "Full",
           onResize: textAsk ? undefined : assistantDetent === "Full"
             ? () => void shell.send({ type: "goBack" })
             : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
           grabber: textAsk ? undefined : open ? grabber : live ? handle("handle") : undefined,
         }}
+        contextAction={onComms && assistantDetent === "Sheet" && onBack && returnTo !== undefined &&
+          shell.can({ type: "returnCommsView", previous: returnTo }) ? (
+            <div className="flex shrink-0 px-3 pb-1">
+              <Button variant="secondary" className="h-11 gap-1 px-3.5 text-sm font-semibold"
+                data-alpha-stage-return="" aria-label={`Return to ${returnTo}`} onClick={onBack}>
+                <ChevronLeft aria-hidden className="size-3.5" />{returnTo}
+              </Button>
+            </div>
+          ) : undefined}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{ ...transcript, briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} /> }}
         composer={{

@@ -77,7 +77,7 @@ describe("Home on a phone", () => {
     });
     expect([button("Inbox3 unread") !== undefined, button("Telegram") !== undefined, button("Slack") !== undefined, button("Notes") !== undefined]).toEqual([true, false, false, true]);
 
-    // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
+    // spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerdown", 80, 330)));
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointermove", 80, 352)));
     await later(alpha, 450);
@@ -96,6 +96,7 @@ describe("Home on a phone", () => {
     // spec/app/home/index.md, "While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one"
     await press("Add to Home");
     await until(alpha, homes, Home.Machine, (h) => h.adding);
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Add to Home"));
     await press("Notes");
     await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
@@ -148,9 +149,9 @@ describe("Home on a phone", () => {
     expect([tiles(), localStorage.getItem(savedKey)]).toEqual([["view:Reminders", "view:Clock", "view:Notes"], chosen]);
   });
 
-  it("Opens an app or Apps beside the landscape Ask sheet (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\"; spec/app/shell/index.md, \"Apps can open beside the landscape Ask sheet and Close leaves Ask open\")", async () => {
+  it.each([false, true])("Opens an app or Apps beside the landscape Ask sheet with coarse pointer %s (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\"; spec/app/shell/index.md, \"Apps can open beside the landscape Ask sheet and Close leaves Ask open\")", async (coarse) => {
     const pointer = window.matchMedia("(pointer: coarse)");
-    Object.defineProperty(pointer, "matches", { configurable: true, value: true });
+    Object.defineProperty(pointer, "matches", { configurable: true, value: coarse });
     const originalMatch = window.matchMedia.bind(window);
     const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(pointer: coarse)" ? pointer : originalMatch(query));
     const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
@@ -163,7 +164,7 @@ describe("Home on a phone", () => {
     const world = holdingHome({ ...scene(), phone: true });
     const clock = "org.fixture.clock/org.fixture.clock.Main";
     localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: clock }]));
-    const { alpha } = await open(world, only("home", "assistant", "view:Notes"));
+    const { alpha } = await open(world, only("home", "assistant", "view:Notes", "view:Workflows"));
     const rotate = async (landscape: boolean) => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: landscape ? 844 : 390 });
       Object.defineProperty(window, "innerHeight", { configurable: true, value: landscape ? 390 : 844 });
@@ -240,9 +241,64 @@ describe("Home on a phone", () => {
 
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    // spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
+    await drawn(() => held("Notes"));
+    await vi.waitFor(() => expect(button("Done")).toBeDefined());
+    await rotate(false);
+    expect(button("Done")).toBeUndefined();
+    await rotate(true);
+    await vi.waitFor(() => expect(button("Done")).toBeDefined());
+    await press("Remove Clock");
+    await vi.waitFor(() => expect(tiles()).toEqual(["view:Notes"]));
+    expect(chat()).not.toBeNull();
+    // spec/app/home/index.md, "While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one"
+    const add = () => [...document.querySelectorAll('[role="dialog"]')].find((node) => node.querySelector("h2")?.textContent === "Add to Home");
+    await press("Add to Home");
+    await vi.waitFor(() => expect(add()).toBeDefined());
+    expect(chat()?.closest("[inert]")).toBeNull();
+    await rotate(false);
+    await vi.waitFor(() => expect(add()).toBeUndefined());
+    await until(alpha, homes, Home.Machine, (state) => !state.adding);
+    await rotate(true);
+    await vi.waitFor(() => expect(button("Add to Home")?.disabled).toBe(false));
+    await press("Add to Home");
+    await vi.waitFor(() => expect(add()).toBeDefined());
+    await hardware("back");
+    await vi.waitFor(() => expect(add()).toBeUndefined());
+    expect(chat()).not.toBeNull();
+    await vi.waitFor(() => expect(button("Add to Home")?.disabled).toBe(false));
+    await press("Add to Home");
+    await vi.waitFor(() => expect(button("Files")).toBeDefined());
+    await press("Files");
+    await vi.waitFor(() => expect(tiles()).toEqual(["view:Notes", "view:Files"]));
+    await hardware("back");
+    await vi.waitFor(() => expect(add()).toBeUndefined());
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+    expect(button("Done")).toBeDefined();
+    await hardware("back");
+    await vi.waitFor(() => expect(button("Done")).toBeUndefined());
+
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
     expect(document.querySelector("[data-alpha-detent=sheet]")).toBeNull();
+
+    // spec/app/home/cards.md, "A Workflows or Brief card beside the landscape Ask sheet opens Workflows from the same Home visit"
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0 && state.assistant === "Bar");
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    const workflow = () => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")]
+      .find((card) => card.textContent?.startsWith("Desk check"));
+    await vi.waitFor(() => expect(workflow()?.disabled).toBe(false));
+    expect(workflow()?.closest("[inert]")).toBeNull();
+    await drawn(() => workflow()?.click());
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Workflows" && state.assistant === "Bar");
+    expect(chat()).toBeNull();
+    await vi.waitFor(() => expect(button("Add to Workflows")).toBeDefined());
+    expect(world.workflows.admissions).toEqual([]);
   });
 
   it('Find an installed app in Apps (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {

@@ -72,7 +72,10 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs | D
   const over = try layers.get()
   const taker = Layers.backTaker(over)
   if (taker === "ByLayer") {
-    if (!(try screens.take(`layer:${Layers.top(over).id}`))) try contained(layers.send({ type: "back" }), "back")
+    const id = Layers.top(over).id
+    if (!(try screens.take(`layer:${id}`))) {
+      try contained(layers.send({ type: "back" }, (current) => Layers.top(current).id === id), "back")
+    }
     return
   }
   if (taker === "ByHold" || (try screens.take("startup/sign-in"))) return
@@ -93,11 +96,12 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs | D
 
 // spec/app/shell/index.md, "Home leaves every app and closes every layer at once"; spec/app/shell/layers.md, "Home closes every layer, unless the phone is held"
 /** Home, from the phone: nothing while the phone is held; otherwise every layer closes and the shell goes Home. */
-export effect function home(): void!!(Shell.Machine | Layers.Machine) {
+export effect function home(): void!!(Shell.Machine | Layers.Machine | Backs) {
   const layers = try Layers.Machine
   const over = try layers.get()
   if (Layers.homeTaker(over) === "ByHold") return
   if (Layers.canHome(over)) try contained(layers.send({ type: "home" }), "home")
+  try (try Backs).take("home/finished")
   try contained((try Shell.Machine).send({ type: "goHome" }), "home")
 }
 

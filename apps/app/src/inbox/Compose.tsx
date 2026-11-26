@@ -1,6 +1,6 @@
 // spec/app/inbox/drafts.md, "Story: Write a message"; spec/app/inbox/drafts.md, "Story: Set a draft aside or discard it"; spec/app/inbox/sending.md, "Story: Send a draft I reviewed"
 import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { useMemo } from "react";
 import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
@@ -27,9 +27,11 @@ import { ContactAddresses, Incoming, pickPeople } from "./adding.vibe";
 import { Offers, fits } from "./suggestion.vibe";
 import { Letters, type Words, acceptable, backFromDraft, choiceOf, mibOf, policy, restoreMyEdits, chooseLatestSavedDraft } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
+import { MailSignIn } from "./mailbox.vibe";
+import { gmailAuthorizationWindow } from "./authorization.vibe";
 
 export interface ComposeProps {
-  runtime: ManagedRuntime.ManagedRuntime<Writing | Changes | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Mail | Time | Shell | Telephony, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Writing | Changes | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Mail | Time | Shell | Telephony | MailSignIn, unknown>;
   list: Mailbox;
 }
 
@@ -153,6 +155,13 @@ export function Compose({ runtime, list }: ComposeProps) {
     ...list.connected.filter(({ account }) => can(changeFrom(account), "Owner")).map(({ account, grant }) => ({ id: String(account), email: mail.email(account), grant })),
   ];
   const sending = { type: "prepare", kind: "Send", access, letter, kept: kept && addressed, again: false } as const;
+  // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on opens Google authorization"
+  const turnOn = { type: "turnOnSending", access, account: letter.account } as const;
+  const onTurnOn = shell && ops.can(turnOn, "Owner") ? () => {
+    const popup = gmailAuthorizationWindow();
+    const intent = { kind: "Send", route: shell.route, account: letter.account, draft, session: state.session } as const;
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (signIn) => signIn.consent(intent, popup)));
+  } : undefined;
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept: kept && addressed, again: false } as const;
   const lookUp = { type: "lookUp", access } as const;
@@ -222,6 +231,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         onAttach={adding.can(attach) && canAttach(letter, policy, 1) ? () => void adding.send(attach) : undefined}
         notice={refused ?? notice}
         onNoticeAction={refused === undefined ? checkCopy : undefined}
+        onTurnOnSending={onTurnOn}
         outcome={sendOutcome}
         storage={ready(state) ? undefined : state.load.status === "Failed" ? "unavailable" : "checking"}
         onReloadStorage={can({ type: "reload" }, "World") ? () => void send({ type: "reload" }, "World") : undefined}

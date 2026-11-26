@@ -1,8 +1,11 @@
 // spec/app/home/cards.md, "Story: See my day at a glance"
 import type { AndroidCalendarList } from "@elizaos/os-bridges"
 import * as Cards from "../../gen/app__home__cards.effect.vibe"
-import type { Effect as Out, Event, Flows, Item, Mail, Origin, Row } from "../../gen/app__home__cards.effect.vibe"
+import type { CardVisit, Effect as Out, Event, Flows, Item, Kind, Mail, Origin, Row } from "../../gen/app__home__cards.effect.vibe"
+import * as Home from "../../gen/app__home.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
+import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
+import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device, native, registered } from "../platform/device.vibe"
@@ -10,6 +13,7 @@ import { ask } from "../platform/remote.vibe"
 import { civilDay, dayStart, localDate } from "../calendar/time.ts"
 import { type Job, answer, contained, due, following, hearing, reacting, run, untimed, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
+import { homeInput } from "./home.vibe"
 
 module held {
   import { calendarClient } from "@elizaos/os-bridges"
@@ -173,16 +177,62 @@ effect function readAgent(ticket: number, day: number): Event!!Agent {
   }
 }
 
-// spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
-effect function go(view: View) {
-  try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from a card")
+/** The Inbox area prepares the previous reader and search for the next exact Inbox visit. */
+export service InboxCardEntry {
+  prepare(): (((route: number) => Effect.Effect<void>) | undefined)!!
 }
 
-function carry(fx: Out, state: () => Cards.Cards!!Cards.Machine): Job<Event, Agent | Cards.Machine | Shell.Machine, []> {
+// spec/app/home/cards.md, "A Workflows or Brief card beside the landscape Ask sheet opens Workflows from the same Home visit"; spec/app/home/cards.md, "The unread mail card opens Inbox without a search or message open"
+effect function cardVisit(kind: Kind, route: number, beside: boolean) {
+  const free = try homeInput(beside)
+  const home = try Home.Machine
+  return (state: Cards.Cards, shell: Shell.Shell) => {
+    if (shell.route !== route || !free()) return undefined
+    const h = Effect.runSync(home.get())
+    if (!Home.showsCards(h) || h.editing || (beside && !Home.onPhone(h))) return undefined
+    const { flows, brief, mail } = fromAreas.snapshot()
+    const event = kind === "MailCard"
+      ? { type: "openMailCard", shell, beside, shown: Cards.mailCard(mail) !== "Hidden" } as const
+      : { type: "openCardBeside", kind, shell, landscapePhone: beside, shown: Cards.shownBeside(kind, flows, brief?.outcome ?? "NoBrief") } as const
+    return Cards.enabled(state, event) ? event : undefined
+  }
+}
+
+export effect function openRoutedCard(kind: Kind, route: number, beside: boolean) {
+  const cards = try Cards.Machine
+  const shell = try Shell.Machine
+  const admits = try cardVisit(kind, route, beside)
+  const event = admits(try cards.get(), try shell.get())
+  if (event !== undefined) {
+    try contained(cards.send(event, (state) => admits(state, Effect.runSync(shell.get())) !== undefined), "choosing a card from Home")
+  }
+}
+
+// spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+effect function go(view: View, visit: CardVisit) {
+  const shell = try Shell.Machine
+  const event = { type: "openView", view } as const
+  if (visit.tag === "BareCard") {
+    try contained(shell.send(event), "opening an app from a card")
+    return
+  }
+  const cards = try Cards.Machine
+  const mail = visit.tag === "MailCardVisit"
+  const admits = try cardVisit(mail ? "MailCard" : visit.kind, visit.route, mail ? visit.beside : true)
+  const current = (where: Shell.Shell) => admits(Effect.runSync(cards.get()), where) !== undefined
+  if (!current(try shell.get())) return
+  const enter = mail ? (try (try InboxCardEntry).prepare()) : undefined
+  if (mail && enter === undefined) return
+  if (try contained(shell.send(event, current), "opening an app from a Home card")) {
+    if (enter !== undefined) try enter(visit.route + 1)
+  }
+}
+
+function carry(fx: Out, state: () => Cards.Cards!!Cards.Machine): Job<Event, Agent | Cards.Machine | Shell.Machine | Home.Machine | Device | Canvas | Layers | InboxCardEntry, []> {
   return match (fx) {
     when { tag: "ReadCalendar", let ticket }: answer("calendar", flatMap(state(), (c) => readPhone(ticket, c.calendar.asked)), { type: "calendarRead", ticket, source: "Broken", items: [] });
     when { tag: "ReadAgentCalendar", let ticket }: answer("agent", flatMap(state(), (c) => readAgent(ticket, c.agent.asked)), { type: "agentRead", ticket, source: "Broken", events: [] });
-    when { tag: "Go", let view }: run("go", go(view));
+    when { tag: "Go", let view, let visit }: run("go", go(view, visit));
   }
 }
 
