@@ -127,7 +127,7 @@ function useShellSwipe(alpha: Alpha, blocked: boolean, launcher: boolean, owner:
     if (element.offsetWidth !== from.width || element.offsetHeight !== from.height) return;
     const dx = (clientX - box.left) * from.across - from.x;
     const dy = (clientY - box.top) * from.down - from.y;
-    const went = swipe(launcher, false, from.width, from.height, from.x, from.y, dx, dy);
+    const went = swipe(launcher, from.width, from.height, from.x, from.y, dx, dy);
     if (went === "SwipeBack") {
       suppressClickRef.current = true;
       claim?.();

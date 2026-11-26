@@ -19,7 +19,7 @@ Alpha's own drags are its dock's.
 ### A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back
 
 ```quint
-type Swipe = NoSwipe | SwipeBack | SwipeShade | SwipeHome
+type Swipe = NoSwipe | SwipeBack | SwipeHome
 
 pure val travel = 46
 pure val edge = 30
@@ -30,15 +30,16 @@ pure def magnitude(n: int): int = if (n < 0) -n else n
 pure def edgeBack(width: int, x: int, dx: int): bool = (x < edge and dx > travel) or (x > width - edge and dx < 0 - travel)
 ```
 
-### On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe
+### On the launcher a swipe up from the bottom bar goes Home; nothing else is a shell swipe
 
-A swipe up anywhere else, and any swipe in an ordinary app, scrolls.
+A swipe up anywhere else, and any swipe in an ordinary app, scrolls. Pulls
+down on bare Home to open Android's notification shade are decided by
+`pullOpensShade` and `overflowPull` below.
 
 ```quint
-pure def swipe(launcher: bool, pullAllowed: bool, width: int, height: int, x: int, y: int, dx: int, dy: int): Swipe =
+pure def swipe(launcher: bool, width: int, height: int, x: int, y: int, dx: int, dy: int): Swipe =
   if (magnitude(dx) < travel and magnitude(dy) < travel) NoSwipe
   else if (magnitude(dy) <= magnitude(dx)) (if (edgeBack(width, x, dx)) SwipeBack else NoSwipe)
-  else if (dy > travel and launcher and pullAllowed) SwipeShade
   else if (launcher and dy < 0 - travel and y > height - barHeight) SwipeHome
   else NoSwipe
 
@@ -49,15 +50,11 @@ pure val dyValues = Set(-60, 0, 60)
 pure val widthValues = Set(412, 800)
 pure val heightValues = Set(915, 412)
 
-pure def lawAShortSwipeDoesNothing(launcher: bool, pullAllowed: bool, width: int, height: int, x: int, y: int): bool =
-  swipe(launcher, pullAllowed, width, height, x, y, 10, -10) == NoSwipe
+pure def lawAShortSwipeDoesNothing(launcher: bool, width: int, height: int, x: int, y: int): bool =
+  swipe(launcher, width, height, x, y, 10, -10) == NoSwipe
 
-pure def lawTheShadeAndHomeOnlyOnTheLauncher(pullAllowed: bool, width: int, height: int, x: int, y: int, dx: int, dy: int): bool =
-  val result = swipe(false, pullAllowed, width, height, x, y, dx, dy)
-  result != SwipeShade and result != SwipeHome
-
-pure def lawASwipeUpNeverOpensTheShade(launcher: bool, pullAllowed: bool, width: int, height: int, x: int, y: int, dx: int): bool =
-  swipe(launcher, pullAllowed, width, height, x, y, dx, -60) != SwipeShade
+pure def lawHomeOnlyOnTheLauncher(width: int, height: int, x: int, y: int, dx: int, dy: int): bool =
+  swipe(false, width, height, x, y, dx, dy) != SwipeHome
 ```
 
 ### A pull opens the shade only when it is clearly downward, one and a half times its sideways travel, starts below the 44-point status band, on Home itself and not in a field, with no keyboard up and nothing under the finger scrolled from its top

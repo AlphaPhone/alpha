@@ -31,7 +31,7 @@ whether the phone's image grants them ahead.
 import permission as P from "../../kit/permission"
 import read as R from "../../kit/read"
 import steps as S from "./steps"
-import actor as A from "./actor"
+import actor as A from "../../kit/actor"
 import finish as F from "./finish"
 import shell as Nav from "../shell"
 
@@ -210,11 +210,16 @@ pure def advanced(choice: Choice, home: bool, s: Access, now: int): Moved =
     out: if (finished and home and not(s.finish.created)) List(Save({ ticket: saving.ticket }), GoHome) else List(Save({ ticket: saving.ticket })),
   }
 
-pure def canProceed(s: Access, by: A::Actor): bool = A::answers(by, panel(s) == Walkthrough and not(busy(s)))
+pure def canProceed(s: Access, by: A::Actor): bool = A::answers(by, A::Owner) and panel(s) == Walkthrough and not(busy(s))
 
 pure def proceed(s: Access, by: A::Actor, now: int): Moved =
   if (flow(s, nextKey(s)) == S::Ready) advanced(if (s.acted.contains(nextKey(s))) Allowed else Continued, true, s, now)
   else { state: { ...s, notice: AllowFirst }, out: List() }
+
+pure def canConfirmActed(s: Access): bool =
+  panel(s) == Walkthrough and not(busy(s)) and s.acted.contains(nextKey(s)) and flow(s, nextKey(s)) == S::Ready
+
+pure def confirmActed(s: Access, now: int): Moved = advanced(Allowed, true, s, now)
 ```
 
 ### Skip passes a step whose state is known and that is not waiting on Android, or one stalled for twenty seconds
@@ -235,7 +240,7 @@ pure def canTick(s: Access, clock: int): bool =
 pure def tick(s: Access, clock: int): Access = { ...s, stalled: true }
 
 pure def canSkip(s: Access, by: A::Actor): bool =
-  A::answers(by, panel(s) == Walkthrough and (s.stalled or (flow(s, nextKey(s)) != S::Checking and not(busy(s)))))
+  A::answers(by, A::Owner) and panel(s) == Walkthrough and (s.stalled or (flow(s, nextKey(s)) != S::Checking and not(busy(s))))
 
 pure def skip(s: Access, by: A::Actor, now: int): Moved = advanced(Skipped, true, s, now)
 ```
@@ -278,16 +283,18 @@ pure def stepTheWalkthroughNeverGoesBack(before: Access, via: str, after: Access
         (via == "carriedOver" or (key == nextKey(before) and unpassed(before, key)))))
 ```
 
-### Only the owner, an access the image granted ahead, or an earlier version's walkthrough moves the walkthrough; Android's answers never do
+### Only the owner, a step the owner acted on and Android then granted, an access the image granted ahead, or an earlier version's walkthrough moves the walkthrough
 
-A reading at start or on coming back, an answer to the owner's own tap and
-a late answer to an earlier one only say what Android allows; they never
-move the walkthrough, forward or back.
+A reading at start or on coming back, and an answer for a step the owner
+has not acted on, only say what Android allows; they never move the
+walkthrough, forward or back. Once the owner has acted on the step showing
+and Android confirms it is allowed, the walkthrough advances past it as
+allowed.
 
 ```quint
 pure def stepOnlyTheOwnerOrAPregrantMovesTheWalkthrough(before: Access, via: str, after: Access): bool =
   S::everyKey.forall(key => (passed(after, key) and not(passed(before, key))) implies
-    (via == "proceed" or via == "skip" or via == "pass" or via == "carriedOver"))
+    (via == "proceed" or via == "confirmActed" or via == "skip" or via == "pass" or via == "carriedOver"))
 ```
 
 ### A restart keeps exactly the choices that were saved and every asking Android showed, and reads every access again
@@ -384,9 +391,9 @@ when it ends.
 pure def canAct(s: Access, by: A::Actor): bool =
   val key = shownKey(s)
   val f = flow(s, key)
-  A::answers(by, (panel(s) == Walkthrough or (panel(s) == Review and s.look == AtOne)) and not(busy(s))
+  A::answers(by, A::Owner) and (panel(s) == Walkthrough or (panel(s) == Review and s.look == AtOne)) and not(busy(s))
     and (s.stalled or f == S::CanRequest or f == S::NeedsSettings or f == S::Unavailable
-      or (f == S::Ready and (s.look == AtOne or P::needsSettings(grantOf(s, key))))))
+      or (f == S::Ready and (s.look == AtOne or P::needsSettings(grantOf(s, key)))))
 
 pure def act(s: Access, by: A::Actor, now: int): Moved =
   val key = shownKey(s)
@@ -744,7 +751,7 @@ pure def review(s: Access, key: S::Key, by: A::Actor, now: int): Access = { ...s
 ### "Set up Alpha access" opens the list of every access in review
 
 ```quint
-pure def canReopen(s: Access, by: A::Actor): bool = A::answers(by, setUp(s) and s.look == NotLooking and not(s.finish.allSet))
+pure def canReopen(s: Access, by: A::Actor): bool = A::answers(by, A::Owner) and setUp(s) and s.look == NotLooking and not(s.finish.allSet)
 
 pure def reopen(s: Access, by: A::Actor, now: int): Access = { ...s, look: AtAll, since: now, stalled: false }
 ```
@@ -755,7 +762,7 @@ A request still with Android is left to finish; its answer only updates
 the access.
 
 ```quint
-pure def canLeave(s: Access, by: A::Actor): bool = A::answers(by, s.look != NotLooking)
+pure def canLeave(s: Access, by: A::Actor): bool = A::answers(by, A::Owner) and s.look != NotLooking
 
 pure def leave(s: Access, by: A::Actor, now: int): Access = { ...s, look: NotLooking, since: now, stalled: false }
 ```
@@ -807,7 +814,7 @@ AI state that "All set" lists are the account area's, shown as it reports
 them.
 
 ```quint
-pure def canDone(s: Access, by: A::Actor): bool = A::answers(by, panel(s) == AllSet)
+pure def canDone(s: Access, by: A::Actor): bool = A::answers(by, A::Owner) and panel(s) == AllSet
 
 pure def done(s: Access, by: A::Actor): Moved = { state: { ...s, finish: F::dismissed(s.finish) }, out: List(GoHome) }
 ```
@@ -853,7 +860,7 @@ pure def goesHome(e: Effect): bool = match e { | GoHome => true | _ => false }
 
 pure def stepHomeOnlyAtTheEnd(before: Access, via: str, after: Access, out: List[Effect]): bool =
   out.some(e => goesHome(e)) implies
-    (completed(after) and (via == "done" or ((via == "proceed" or via == "skip") and not(completed(before)))))
+    (completed(after) and (via == "done" or ((via == "proceed" or via == "confirmActed" or via == "skip") and not(completed(before)))))
 ```
 
 ### "All set" can be shown for a new account

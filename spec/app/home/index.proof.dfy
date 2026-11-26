@@ -66,7 +66,7 @@ lemma appsRead_ensures(h: Home, ticket: int, ok: bool, listed: seq<string>, visi
   }
 }
 
-lemma addToHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, beside: bool, by_: Actor)
+lemma addToHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, beside: bool, by_: kit__actor_Actor)
   ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysNothingIsToldBeforeTheStart(addToHome(h, tile, shell, beside, by_).state))
   ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysTheTilesKeepTheirRules(addToHome(h, tile, shell, beside, by_).state))
   ensures (inv(h) ==> canAddToHome(h, tile, shell, beside, by_) ==> alwaysOffThePhoneNothingIsAsked(addToHome(h, tile, shell, beside, by_).state))
@@ -95,7 +95,7 @@ lemma addToHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_
   }
 }
 
-lemma removeFromHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, beside: bool, by_: Actor)
+lemma removeFromHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, beside: bool, by_: kit__actor_Actor)
   ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysNothingIsToldBeforeTheStart(removeFromHome(h, tile, shell, beside, by_).state))
   ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysTheTilesKeepTheirRules(removeFromHome(h, tile, shell, beside, by_).state))
   ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysOffThePhoneNothingIsAsked(removeFromHome(h, tile, shell, beside, by_).state))
@@ -124,7 +124,7 @@ lemma removeFromHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__s
   }
 }
 
-lemma moveTile_ensures(h: Home, tile: app__home__tiles_Tile, onto: app__home__tiles_Tile, behind: bool, shell: app__shell_Shell, beside: bool, by_: Actor)
+lemma moveTile_ensures(h: Home, tile: app__home__tiles_Tile, onto: app__home__tiles_Tile, behind: bool, shell: app__shell_Shell, beside: bool, by_: kit__actor_Actor)
   ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysNothingIsToldBeforeTheStart(moveTile(h, tile, onto, behind, shell, beside, by_).state))
   ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysTheTilesKeepTheirRules(moveTile(h, tile, onto, behind, shell, beside, by_).state))
   ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysOffThePhoneNothingIsAsked(moveTile(h, tile, onto, behind, shell, beside, by_).state))

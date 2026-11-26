@@ -58,15 +58,16 @@ The order is the one the owner approved on the Sunday demo build (Alpha
 build's Home held only the apps its install admitted, and it admitted no
 Wallet ("Wallet is removed from MVP", `apps/app/src/prototype/mvp-features.ts:4`,
 `:17`; `prototype/model.js:4210`), so the demo's Home has thirteen apps with
-Workflows right after Files. Wallet, like Telegram and Slack, starts in Apps
-until the owner adds it to Home.
+Workflows right after Files. Wallet, Telegram, Slack, Clock and Reminders
+start in Apps until the owner adds them to Home.
 
 ```quint
 pure val homeOrder: List[S::View] = List(
   S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
   S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
 
-pure val homeCatalog: List[S::View] = homeOrder.append(S::Wallet).append(S::Telegram).append(S::Slack)
+pure val homeCatalog: List[S::View] =
+  homeOrder.append(S::Wallet).append(S::Telegram).append(S::Slack).append(S::Clock).append(S::Reminders)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
@@ -89,11 +90,13 @@ pure def lawTheDefaultsAreHomeOrder(i: int): bool =
     and ((0 <= i and i < homeOrder.length()) implies shows(defaults.nthOr(i, noTile), homeOrder.nthOr(i, S::Phone)))
 
 pure def lawTheCatalogOffersEveryDefaultAndOptionalApp(i: int): bool =
-  homeCatalog.length() == homeOrder.length() + 3
+  homeCatalog.length() == homeOrder.length() + 5
     and not(homeOrder.includes(S::Wallet))
     and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Wallet
     and homeCatalog.nthOr(homeOrder.length() + 1, S::Phone) == S::Telegram
     and homeCatalog.nthOr(homeOrder.length() + 2, S::Phone) == S::Slack
+    and homeCatalog.nthOr(homeOrder.length() + 3, S::Phone) == S::Clock
+    and homeCatalog.nthOr(homeOrder.length() + 4, S::Phone) == S::Reminders
     and ((0 <= i and i < homeOrder.length()) implies homeCatalog.nthOr(i, S::Phone) == homeOrder.nthOr(i, S::Phone))
 ```
 

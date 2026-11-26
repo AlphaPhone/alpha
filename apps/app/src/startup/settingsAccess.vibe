@@ -1,7 +1,7 @@
 // spec/app/startup/access.md, "Story: Look at access again"; spec/app/settings/index.md, "Story: Reach what another area owns"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Access from "../../gen/app__startup__access.effect.vibe"
-import type { Actor } from "../../gen/app__startup__actor.ts"
+import type { Actor } from "../../gen/kit__actor.ts"
 import type * as Steps from "../../gen/app__startup__steps.effect.vibe"
 import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import type { Access as Permission } from "../../gen/app__settings__facts.ts"
@@ -223,9 +223,9 @@ const progressing = started(effect {
       return
     }
     const key = Access.nextKey(state)
-    const canContinue = (next: Access.Access) => Access.nextKey(next) === key && next.acted.includes(key) && Access.flow(next, key) === "Ready"
-    if (Access.canProceed(state, "Owner") && canContinue(state)) {
-      try ignore(access.send({ type: "proceed", now: untimed }, "Owner", (next) => !covered() && canContinue(next)))
+    const canContinue = (next: Access.Access) => Access.nextKey(next) === key && Access.canConfirmActed(next)
+    if (canContinue(state)) {
+      try ignore(access.send({ type: "confirmActed", now: untimed }, "Owner", (next) => !covered() && canContinue(next)))
     }
   })
 }, "continuing past confirmed access")

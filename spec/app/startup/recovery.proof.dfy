@@ -1,4 +1,4 @@
-lemma breaks_ensures(s: Recovery, side: Side, kind: app__startup__journal_Kind)
+lemma breaks_ensures(s: Recovery, side: Side, kind: Kind)
   ensures (inv(s) ==> canBreaks(s, side, kind) ==> alwaysTheScreenKnowsItsFailure(breaks(s, side, kind).state))
   ensures (inv(s) ==> canBreaks(s, side, kind) ==> alwaysTheBudgetIsBounded(breaks(s, side, kind).state))
   ensures (inv(s) ==> canBreaks(s, side, kind) ==> alwaysAHiddenLossWaitsHidden(breaks(s, side, kind).state))
@@ -66,7 +66,7 @@ lemma lost_ensures(s: Recovery, side: Side, crashed: bool, death: int, launcher:
     if !crashed && !x.visible {
       OtherSideKept(s, m.state, side);
     } else if spent(gone) && launcher && side.HomeSide? {
-      RecordedScreen(app__startup__journal_Kind.KeptFailing, side, s, onto(side, sideOf(gone, side).(built := gone.deaths), gone));
+      RecordedScreen(Kind.KeptFailing, side, s, onto(side, sideOf(gone, side).(built := gone.deaths), gone));
     } else {
       assert m == decided(now, side, launcher, gone);
       OtherSideKept(s, m.state, side);
@@ -95,7 +95,7 @@ lemma shown_ensures(s: Recovery, side: Side, launcher: bool, now: int)
     var m := shown(s, side, launcher, now);
     if x.page.Rebuilding? && x.wait.NextStart? {
       if spent(front) && launcher && side.HomeSide? {
-        RecordedScreen(app__startup__journal_Kind.KeptFailing, side, s, onto(side, sideOf(front, side).(built := front.deaths), front));
+        RecordedScreen(Kind.KeptFailing, side, s, onto(side, sideOf(front, side).(built := front.deaths), front));
       } else {
         assert m == decided(now, side, launcher, front);
         OtherSideKept(s, m.state, side);
@@ -113,7 +113,7 @@ lemma OtherSideKept(before: Recovery, after: Recovery, side: Side)
 {
 }
 
-lemma RecordedScreen(kind: app__startup__journal_Kind, side: Side, before: Recovery, s: Recovery)
+lemma RecordedScreen(kind: Kind, side: Side, before: Recovery, s: Recovery)
   requires (if side.HomeSide? then s.assistant == before.assistant else s.home == before.home)
   requires !sideOf(before, side).page.Broken? || sideOf(before, side).built != sideOf(s, side).built
   ensures stepEveryFailureShownIsRecorded(before, screen(kind, side, s).state, screen(kind, side, s).out)

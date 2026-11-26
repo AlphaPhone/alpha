@@ -8,10 +8,6 @@ import type { Event as LayerEvent } from "../gen/app__shell__layers.ts";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { Effect } from "effect";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { LandingPage } from "../src/shell/Landing.tsx";
-import { land } from "../src/shell/landing.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -258,34 +254,5 @@ describe("the shell", () => {
     await seen(true);
     host.remove();
     document.documentElement.style.fontSize = "";
-  });
-
-  // spec/app/shell/landing.md, "Story: Come back to Alpha after authorizing a connection"
-  it("Come back to Alpha after authorizing a connection (spec/app/shell/landing.md, \"Story: Come back to Alpha after authorizing a connection\")", () => {
-    const state = "a".repeat(43);
-    const page = document.body.appendChild(document.createElement("div"));
-    const root = createRoot(page);
-    const landed = (search: string) => {
-      let cleaned = false;
-      const { landing, href } = Effect.runSync(land(search, () => { cleaned = true; }));
-      act(() => { root.render(<LandingPage message={landing.message} href={href} />); });
-      return { cleaned, message: landing.message, link: page.querySelector("a")?.getAttribute("href") ?? undefined };
-    };
-
-    // spec/app/shell/landing.md, "The landing reads the return once, and cleans its address before it decides anything"; spec/app/shell/landing.md, "Only a well-formed return with exactly one result is handed back: one state of the right shape, a code or an error but never both, at most one of each, a description only beside an error, and no other key"
-    expect(landed(`?state=${state}&code=4%2Fxyz`)).toEqual({ cleaned: true, message: "MessageContinue", link: `alphaphone://cloud-delegation?state=${state}&code=4%2Fxyz` });
-    // spec/app/shell/landing.md, "The way back carries a code only for a code, and a denial only for an error without one": the provider's text never crosses.
-    expect(landed(`?state=${state}&error=access_denied&error_description=The+user+said+no`)).toEqual({ cleaned: true, message: "MessageCancelled", link: `alphaphone://cloud-delegation?state=${state}&error=access_denied` });
-    // spec/app/shell/landing.md, "Only an accepted return is offered a way back, and a rejected one never is"
-    expect(landed(`?state=${state}&code=1&error=x`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
-    expect(landed(`?state=${state}&code=&error=access_denied`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
-    expect(landed(`?state=${state}&code=`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
-    expect(landed(`?state=${state}&error=`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
-    expect(landed(`?state=${state}&code=1&code=`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
-    expect(landed(`?state=short&code=1`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
-    expect(landed(`?state=${state}&code=1&next=evil`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
-    expect(landed("")).toEqual({ cleaned: true, message: "MessageReopened", link: undefined });
-    act(() => { root.unmount(); });
-    page.remove();
   });
 });

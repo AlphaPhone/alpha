@@ -48,7 +48,7 @@ export function UpdateRows({ runtime }: UpdateRowsProps) {
       )}
       {installRowShown(state) && notes !== "" && <p className="px-4 pb-2 text-sm whitespace-pre-line text-muted-foreground">{notes}</p>}
       <ListRow
-        title="Check"
+        title={checkLabel(state)}
         aria-label={checkLabel(state)}
         leading={<RotateCw aria-hidden />}
         {...(can(check) ? { onClick: () => void send(check) } : {})}

@@ -218,22 +218,30 @@ its cloud plugin sends no mail or calendar request (eliza's
 reads that as the answer the cloud gives the device key on a mail route,
 `403` with reason `device_key_not_allowed`, through eliza's cloud client as
 through a plain read, so an area tells a phone that needs one more sign-in
-for mail from an owner who signed out, and forgets nothing it keeps. Such a
-request never left the phone.
+for mail from an owner who signed out, and forgets nothing it keeps. A
+session-bound billing request held back for want of re-authentication
+(eliza's `reauth-required` with an expected session credential) reads as
+`428`, never as a sign-out. Such requests never left the phone.
 
 ```quint
-type Hold = HeldForSignIn | HeldForMailLease
+type Hold = HeldForSignIn | HeldForMailLease | HeldForBillingReauth
 type HeldAnswer = { status: int, reason: str }
 
 pure val leaseRefusalStatus = 403
 pure val leaseRefusalCode = "access_denied"
 pure val leaseRefusalReason = "device_key_not_allowed"
+pure val billingReauthStatus = 428
 
 pure def heldAnswer(hold: Hold): HeldAnswer =
-  if (hold == HeldForSignIn) { status: signInStatus, reason: "" } else { status: leaseRefusalStatus, reason: leaseRefusalReason }
+  if (hold == HeldForSignIn) { status: signInStatus, reason: "" }
+  else if (hold == HeldForBillingReauth) { status: billingReauthStatus, reason: "" }
+  else { status: leaseRefusalStatus, reason: leaseRefusalReason }
 
 pure def lawAHoldForTheLeaseIsNeverASignOut(hold: Hold): bool =
   (hold == HeldForMailLease) implies (heldAnswer(hold).status != signInStatus and heldAnswer(hold).reason == leaseRefusalReason)
+
+pure def lawAHoldForBillingReauthReadsAs428(hold: Hold): bool =
+  (hold == HeldForBillingReauth) implies (heldAnswer(hold).status == billingReauthStatus and heldAnswer(hold).status != signInStatus)
 ```
 
 ### The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once

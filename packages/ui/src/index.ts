@@ -184,7 +184,6 @@ export * from "./components/settings/SettingsTextSizePicker.tsx";
 export * from "./components/settings/SettingsTopPage.tsx";
 export * from "./components/startup/StartupAllSet.tsx";
 export * from "./components/startup/StartupFailureScreen.tsx";
-export * from "./components/startup/StartupJournal.tsx";
 export * from "./components/startup/StartupMark.tsx";
 export * from "./components/startup/StartupSignIn.tsx";
 export * from "./components/startup/StartupSurface.tsx";

@@ -107,9 +107,13 @@ describe("Home on a phone", () => {
     await press("Telegram");
     await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 4);
     await press("Slack");
+    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 5);
+    await press("Clock");
+    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 6);
+    await press("Reminders");
     // spec/app/home/index.md, "Add to Home closes once there is nothing left to add"
-    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 5);
-    expect(tiles().slice(-4)).toEqual(["view:Notes", "view:Wallet", "view:Telegram", "view:Slack"]);
+    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 7);
+    expect(tiles().slice(-6)).toEqual(["view:Notes", "view:Wallet", "view:Telegram", "view:Slack", "view:Clock", "view:Reminders"]);
 
     // spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
     await hardware("back");
@@ -125,13 +129,13 @@ describe("Home on a phone", () => {
     await first.close();
     const second = await open(world, only("home"));
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
-    expect(tiles().slice(-4)).toEqual(["view:Notes", "view:Wallet", "view:Telegram", "view:Slack"]);
+    expect(tiles().slice(-6)).toEqual(["view:Notes", "view:Wallet", "view:Telegram", "view:Slack", "view:Clock", "view:Reminders"]);
 
     // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the same saved tiles on an Alpha image that grants contacts show Phone, Messages and Contacts in Home order too.
     await second.close();
     const third = await open({ ...world, image: true }, only("home"));
     await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
-    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes", "view:Wallet", "view:Telegram", "view:Slack"]);
+    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes", "view:Wallet", "view:Telegram", "view:Slack", "view:Clock", "view:Reminders"]);
 
     // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
     await third.close();
@@ -324,8 +328,8 @@ describe("Home on a phone", () => {
 
     await drawn(() => search()?.focus());
     await fill("Search apps", "fíxture.clock");
-    expect([Boolean(button("Open Clock")), Boolean(button("Open Mail"))]).toEqual([true, false]);
-    await press("Open Clock");
+    expect([Boolean(button("Open Clock, org.fixture.clock")), Boolean(button("Open Mail"))]).toEqual([true, false]);
+    await press("Open Clock, org.fixture.clock");
     await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
 
     // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it"
@@ -389,7 +393,7 @@ describe("Home on a phone", () => {
       await drawn(() => item?.click());
     };
     const holdClock = async () => {
-      const clock = button("Open Clock");
+      const clock = button("Open Clock, org.fixture.clock");
       expect(clock).toBeInstanceOf(HTMLButtonElement);
       await drawn(() => clock?.dispatchEvent(pointer("pointerdown", 100, 235)));
       await later(alpha, 450);
@@ -602,7 +606,7 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
     await press("Apps");
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    await press("Open Clock");
+    await press("Open Clock, org.fixture.clock");
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Refused");
     expect(document.querySelector('[role="dialog"][aria-label="Apps"]')?.textContent).toContain("Couldn't open Clock.");
 

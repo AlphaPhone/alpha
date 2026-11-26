@@ -4,9 +4,9 @@ How Alpha learns that a newer version of itself exists, and when it may
 start installing it. Alpha reads its update channel's manifest every fifteen
 minutes while it is on screen, keeps the offer that fits this phone, shows
 it in Settings, and starts an automatic update only while the owner and the
-phone are idle. Installing the offer is [Install](./install.md); a page
-that opens or is open during an update is [Page](./page.md). How a release
-reaches the channel is [Release](../../release/).
+phone are idle. A page that opens or is open during an update is
+[Page](./page.md). How a release reaches the channel is
+[Release](../../release/).
 
 ## Story: Read the update channel
 

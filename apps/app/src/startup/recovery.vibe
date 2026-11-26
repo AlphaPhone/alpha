@@ -1,6 +1,6 @@
 // spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"
 import type { Target } from "../../gen/app__settings__android.ts"
-import type { Actor } from "../../gen/app__startup__actor.ts"
+import type { Actor } from "../../gen/kit__actor.ts"
 import * as Recovery from "../../gen/app__startup__recovery.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, contained, reacting, run, stop, untimed } from "../runtime/reactor.vibe"

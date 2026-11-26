@@ -218,7 +218,7 @@ it("Shows All set only for the account result that calls for it (spec/app/startu
   }
 });
 
-it("Shows chat at once on the assistant-only surface, and elsewhere a white cover until Home is whole (spec/app/startup/index.md, \"The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home\"; spec/app/startup/index.md, \"Until the connection has resolved, Home shows only the Alpha mark\")", async () => {
+it("Shows chat at once on the assistant-only surface, and elsewhere a white cover until Home is whole (spec/app/home/index.md, \"On the assistant alone Home shows no tile and no card\"; spec/app/home/index.md, \"Story: Start Home\")", async () => {
   const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
   underAct();
   try {
@@ -231,7 +231,7 @@ it("Shows chat at once on the assistant-only surface, and elsewhere a white cove
     watching.observe(document.body, { subtree: true, childList: true, attributes: true });
     const assistant = await openOver(fakeWorld(alone), only("home", "assistant"));
     await until(assistant.alpha, assistant.alpha.runtime, Shell, () => true);
-    // spec/app/startup/index.md, "The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home": chat does not wait behind the cover for Home to settle, with no time passing, and no frame shows Home without the cover.
+    // spec/app/home/index.md, "On the assistant alone Home shows no tile and no card": chat does not wait behind the cover for Home to settle, with no time passing, and no frame shows Home without the cover.
     await vi.waitFor(() => {
       expect(document.querySelector("[data-alpha-assistant-host]")?.childElementCount).toBeGreaterThan(0);
       expect(cover()).toBeNull();
@@ -240,7 +240,7 @@ it("Shows chat at once on the assistant-only surface, and elsewhere a white cove
     expect([homeUncovered, document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0]).toEqual([false, 0]);
     await closeAll();
 
-    // spec/app/startup/index.md, "Until the connection has resolved, Home shows only the Alpha mark": on the launcher an owner who keeps Dark sees the same white cover, and it stays until Home has drawn.
+    // spec/app/home/index.md, "Story: Start Home": on the launcher an owner who keeps Dark sees the same white cover, and it stays until Home has drawn.
     localStorage.setItem("alpha.appearance", JSON.stringify({ theme: "Dark", legible: false }));
     const { alpha } = await openOver(fakeWorld({ ...scene(), phone: true }), only("home", "assistant"));
     await until(alpha, alpha.runtime, Shell, () => true);

@@ -1,4 +1,4 @@
-lemma proceed_ensures(s: Access, by_: app__startup__actor_Actor, now: int)
+lemma proceed_ensures(s: Access, by_: kit__actor_Actor, now: int)
   ensures (inv(s) ==> canProceed(s, by_) ==> alwaysThePlaceIsWithinTheCount(proceed(s, by_, now).state))
   ensures (inv(s) ==> canProceed(s, by_) ==> alwaysAStepStillReadStalls(proceed(s, by_, now).state))
   ensures (inv(s) ==> canProceed(s, by_) ==> alwaysNothingShowsBeforeAlphaKnowsWhereItRuns(proceed(s, by_, now).state))
@@ -32,7 +32,36 @@ lemma proceed_ensures(s: Access, by_: app__startup__actor_Actor, now: int)
   }
 }
 
-lemma skip_ensures(s: Access, by_: app__startup__actor_Actor, now: int)
+lemma confirmActed_ensures(s: Access, now: int)
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysThePlaceIsWithinTheCount(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysAStepStillReadStalls(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysNothingShowsBeforeAlphaKnowsWhereItRuns(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysWhatIsSavedWasChosen(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysAPromptWaitsOnItsSave(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysNothingWaitsForAnOwnerNotSetUp(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysAReviewIsOfAnOfferedAccess(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysAllSetOnlyAfterTheLastStep(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> alwaysALateAllSetSaysWhy(confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepComingBackReadsEveryAccessAgain(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepTheWalkthroughNeverGoesBack(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepOnlyTheOwnerOrAPregrantMovesTheWalkthrough(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepARestartKeepsProgress(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepAnAnswerChangesOnlyItsAccess(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepAPromptOnlyAfterItsAskingIsSaved(s, "confirmActed", confirmActed(s, now).state, confirmActed(s, now).out))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepEachRequestAwaitsItsOwnAnswer(s, confirmActed(s, now).state, confirmActed(s, now).out))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepEveryStepPassedIsSaved(s, confirmActed(s, now).state, confirmActed(s, now).out))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepANoticeHasACause(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepAReviewLeavesTheWalkthroughAlone(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepAllSetOnlyForANewAccountOrALateError(s, "confirmActed", confirmActed(s, now).state))
+  ensures (inv(s) ==> canConfirmActed(s) ==> stepHomeOnlyAtTheEnd(s, "confirmActed", confirmActed(s, now).state, confirmActed(s, now).out))
+{
+  if inv(s) && canConfirmActed(s) {
+    AdvancedSaves(Choice.Allowed, true, s, now);
+    assert confirmActed(s, now) == advanced(Choice.Allowed, true, s, now);
+  }
+}
+
+lemma skip_ensures(s: Access, by_: kit__actor_Actor, now: int)
   ensures (inv(s) ==> canSkip(s, by_) ==> alwaysThePlaceIsWithinTheCount(skip(s, by_, now).state))
   ensures (inv(s) ==> canSkip(s, by_) ==> alwaysAStepStillReadStalls(skip(s, by_, now).state))
   ensures (inv(s) ==> canSkip(s, by_) ==> alwaysNothingShowsBeforeAlphaKnowsWhereItRuns(skip(s, by_, now).state))
@@ -60,7 +89,7 @@ lemma skip_ensures(s: Access, by_: app__startup__actor_Actor, now: int)
   }
 }
 
-lemma act_ensures(s: Access, by_: app__startup__actor_Actor, now: int)
+lemma act_ensures(s: Access, by_: kit__actor_Actor, now: int)
   ensures (inv(s) ==> canAct(s, by_) ==> alwaysThePlaceIsWithinTheCount(act(s, by_, now).state))
   ensures (inv(s) ==> canAct(s, by_) ==> alwaysAStepStillReadStalls(act(s, by_, now).state))
   ensures (inv(s) ==> canAct(s, by_) ==> alwaysNothingShowsBeforeAlphaKnowsWhereItRuns(act(s, by_, now).state))
