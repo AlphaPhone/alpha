@@ -536,12 +536,30 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Open conversation");
     await until(long.alpha, runtime, Shell, (s) => s.assistant === "Sheet");
     expect([lines().length, lines()[0], lines().at(-1), button("Later")]).toEqual([200, "History 6", "History 205", undefined]);
+    await until(long.alpha, runtime, Composer, (s) => s.slot === "Open");
+    onMessage("History 205", "Reply");
+    await until(long.alpha, runtime, Composer, (s) => s.editor.quote > 0);
+    const currentPage = () => runtime.runSync(Effect.flatMap(Chats, (machine) => machine.get())).page.ticket;
+    for (let visit = 0; visit < 3; visit++) {
+      const laterPage = currentPage();
+      await press("Earlier");
+      await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.page.ticket > laterPage);
+      expect([lines()[0], lines().at(-1), button("Earlier")]).toEqual(["History 1", "History 106", undefined]);
+      expect(button("Remove quote")?.parentElement?.textContent).toContain("History 205");
+
+      const earlierPage = currentPage();
+      await press("Later");
+      await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.page.ticket > earlierPage);
+      expect([lines()[0], lines().at(-1), Boolean(button("Earlier")), button("Later")]).toEqual(["History 6", "History 205", true, undefined]);
+    }
+    const laterPage = currentPage();
     await press("Earlier");
-    await until(long.alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
-    expect([lines()[0], lines().at(-1), button("Earlier")]).toEqual(["History 1", "History 106", undefined]);
-    await press("Later");
-    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.around > 1);
-    expect([lines()[0], lines().at(-1), Boolean(button("Earlier")), button("Later")]).toEqual(["History 6", "History 205", true, undefined]);
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.page.ticket > laterPage);
+    world.ask.metadata = [];
+    write("Reply to a message outside this window");
+    await press("Send");
+    await until(long.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.metadata?.at(-1)).toMatchObject({ replyToMessageId: "history-205" });
     await long.close();
 
     world.ask.kept.clear();

@@ -19,7 +19,7 @@ import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
+import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, type View, canAgentGoHome, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
@@ -502,6 +502,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     if (authority !== undefined) try bindArchiveAuthority(board, authority)
     const pageTicket = (try history.get()).page.ticket
+    const releasePage = board.holdTurnPage(pageTicket)
+    try addFinalizer(() => sync(releasePage))
     const mine: Line = {
       id: `sent ${ticket}`, mine: true, text,
       ...(quoted === undefined ? {} : { quote: quoted.text }),
@@ -932,7 +934,7 @@ effect function historyBounds(path: string, pivot: string | undefined, answer: R
 
 // spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
 /** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. A 404 to a read of the latest messages is told as such, for the agent's list to decide. */
-effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine) {
+effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine | Speaker) {
   return effect {
     const { board } = try Talk
     const seat = board.draftSeat
@@ -964,7 +966,17 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       !Attachments.sameArchiveAuthority(seat.authority, currentOwner) || current.chosen !== conversation ||
       current.page.ticket !== ticket || owner !== (try composer.get()).binding.owner) return { type: "paged", ticket, ok: false, messages: 0 }
     try bindArchiveAuthority(board, currentOwner)
-    if (seat !== board.draftSeat) return { type: "paged", ticket, ok: false, messages: 0 }
+    const reading = try (try Chats.Machine).get()
+    const draft = try composer.get()
+    const speaker = try (try Speaker).get()
+    if (seat !== board.draftSeat || reading.chosen !== conversation || reading.page.ticket !== ticket ||
+      draft.binding.owner !== owner) return { type: "paged", ticket, ok: false, messages: 0 }
+    const readers = [
+      { conversation: draft.binding.conversation, message: draft.editor.quote },
+      { conversation: draft.binding.conversation, message: draft.held.quote },
+      { conversation, message: Chats.making(reading) ? reading.forkAt : 0 },
+      { conversation, message: speaker.text === "Message" && (speaker.stage === "Waiting" || speaker.stage === "Preparing") ? speaker.item : 0 },
+    ].filter(({ conversation, message }) => conversation > 0 && message > 0)
     const recorded = messages.map((one): Line => {
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
@@ -977,7 +989,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
-    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds)
+    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds, readers)
     if (preview !== undefined) {
       const picker = try Attachments.Machine
       try ignore(picker.send({ type: "closePreview" }, (state) => state.preview === preview && board.snapshot().preview === undefined))
