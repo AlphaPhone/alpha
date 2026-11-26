@@ -9,6 +9,7 @@ import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.v
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
 import { ScanExports } from "./files/scanEntry.vibe";
+import { InboxCardEntry } from "./home/cards.vibe";
 import { AgentPages, BrowserDownloadsHandoff, InboxBrowserLinks } from "./platform/browser.vibe";
 import { Device } from "./platform/device.vibe";
 import type { Platform } from "./platform/platform.vibe";
@@ -16,6 +17,7 @@ import { resident } from "./resident.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { Contained } from "./runtime/contained.tsx";
 import { rooted } from "./runtime/root.vibe";
+import { accessCover, startupAccessLifecycle } from "./startup/settingsAccess.vibe";
 import { startupSignIn, StartupSignIn } from "./startup/signIn.vibe";
 import * as Access from "../gen/app__startup__access.effect.vibe";
 import { back, taking } from "./shell/shell.vibe";
@@ -98,13 +100,22 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       return browser.runtime(alpha).runPromise(openMessageLink(href, "Inbox", current), { signal });
     }).pipe(Effect.orElseSucceed(() => false)),
   });
+  const inboxCard = Layer.succeed(InboxCardEntry, {
+    prepare: () => Effect.tryPromise(async (signal) => {
+      const [{ default: inbox }, { prepareInboxCardEntry }] = await Promise.all([import("./inbox/index.tsx"), import("./inbox/message.vibe")]);
+      const runtime = inbox.runtime(alpha);
+      const enter = await runtime.runPromise(prepareInboxCardEntry(), { signal });
+      return (route: number) => Effect.promise((signal) => runtime.runPromise(enter(route), { signal })).pipe(Effect.ignoreCause);
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  });
   const scans = Layer.succeed(ScanExports, {
     record: (selection) => Effect.tryPromise(async () => {
       const [{ default: files }, { retainScanExport }] = await Promise.all([import("./files/index.tsx"), import("./files/scan.vibe")]);
       await files.runtime(alpha).runPromise(retainScanExport(selection));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const root = rooted(Layer.provideMerge(Layer.provideMerge(startupSignIn(requireNativeSignIn), resident), Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, scans)));
+  const startup = Layer.provideMerge(startupAccessLifecycle(requireNativeSignIn), Layer.provideMerge(startupSignIn(requireNativeSignIn), resident));
+  const root = rooted(Layer.provideMerge(startup, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, inboxCard, scans)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,
@@ -120,14 +131,16 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       yield* signIn.back();
       return true;
     }
-    if (!(yield* signIn.confirmedAccount())) return false;
+    const covered = yield* accessCover();
+    const current = () => Effect.runSync(signIn.confirmedAccount()) && !covered();
+    if (!current()) return false;
     const permissions = yield* Access.Machine;
     const access = yield* permissions.get();
     if (Access.canDone(access, "Owner")) {
-      yield* Effect.ignore(permissions.send({ type: "done" }, "Owner"));
-      return true;
+      const done = yield* Effect.exit(permissions.send({ type: "done" }, "Owner", current));
+      return done._tag === "Success";
     }
-    return !access.covered && (!access.begun || !Access.completed(access));
+    return current() && !access.covered && (!access.begun || !Access.completed(access));
   }))));
   const stopped = (place: string, cause: unknown) => void root.runtime.runPromiseExit(Effect.logError(`the screen at ${place} stopped`, cause));
   for (const mount of mounts) {

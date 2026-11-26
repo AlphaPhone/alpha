@@ -79,7 +79,7 @@ import type { Time } from "../runtime/time.vibe";
 import { useMachine as useListener } from "../../gen/app__voice__listener.react.ts";
 import type { Machine as ListenerMachine } from "../../gen/app__voice__listener.effect.vibe";
 import { ListenerControls } from "./ListenerControls.tsx";
-import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
+import type { AccessSurface } from "../startup/settingsAccess.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
@@ -91,7 +91,7 @@ import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effec
 import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessSurface | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
