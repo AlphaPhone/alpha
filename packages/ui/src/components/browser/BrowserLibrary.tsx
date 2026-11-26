@@ -64,14 +64,14 @@ export function BrowserLibrary({ bookmarks, history, loading, failed, onBack, on
         <TabsContent key={one} value={one} className="flex min-h-0 flex-1 flex-col rounded-none data-[state=inactive]:hidden">
           <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-35">
             {one === "History" && clearOpen && (
-              <div id="alpha-history-clear" role="group" aria-label="Clear history options" className="mx-5 mt-1 mb-2.5 flex flex-col gap-2 rounded-[1.25rem] bg-secondary p-3.5">
+              <div id="alpha-history-clear" role="group" aria-label="Clear history options" className="mx-5 mt-1 mb-2.5 flex flex-col gap-2 rounded-xl bg-secondary p-3.5">
                 <label htmlFor="alpha-history-range" className="text-sm font-semibold">Time range</label>
                 <div className="flex flex-wrap gap-2">
                   <select id="alpha-history-range" value={range} onChange={(event) => setRange(event.currentTarget.value)}
-                    className={cn(focusRing, "min-h-11 min-w-32.5 flex-1 rounded-[0.875rem] border-0 bg-background px-3 text-foreground")}>
+                    className={cn(focusRing, "min-h-11 min-w-32.5 flex-1 rounded-md border-0 bg-background px-3 text-foreground")}>
                     {historyRanges.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
                   </select>
-                  <button type="button" onClick={() => onClearHistory?.(range)} disabled={onClearHistory === undefined} className={cn(focusRing, "min-h-11 rounded-[0.875rem] bg-foreground px-3.5 font-semibold text-background disabled:opacity-50")}>Clear history</button>
+                  <button type="button" onClick={() => onClearHistory?.(range)} disabled={onClearHistory === undefined} className={cn(focusRing, "min-h-11 rounded-md bg-foreground px-3.5 font-semibold text-background disabled:opacity-50")}>Clear history</button>
                 </div>
                 {onResetData && <button type="button" onClick={onResetData} className={cn(focusRing, "min-h-11 self-start text-left text-sm text-muted-foreground")}>Reset browser data</button>}
               </div>

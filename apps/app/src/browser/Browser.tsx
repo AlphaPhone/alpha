@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserQuestion, BrowserReadAloud, BrowserReview, BrowserTabs, ConfirmDialog, Mark, PrivateMark } from "@repo/ui";
-import { ArrowUpRight, AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star, Trash2 } from "lucide-react";
+import { ArrowUpRight, AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -155,9 +155,6 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const question = reader.state?.phase === "Reviewing" && readingPage?.purpose === "Ask" ? readingPage : undefined;
   const aloud = readingPage?.purpose === "Aloud" && tabs.layer === "ReadingReview" ? readingPage : undefined;
   const speechPurpose = native ? "OnPhone" : "Aloud";
-  // v119 (Alpha 45f6bed30 apps/app/src/prototype/template.html:4417-4434) offers, in this order: Reload, Stop, New tab,
-  // Private tab, Bookmark, Library, Share, Copy link, Find, Passwords, Open externally and Clear site. Clear all is under
-  // Library > History (template.html:1820, "Reset browser data"). The rows v119 did not have follow its rows.
   const offered: (BrowserMenuItem | false)[] = [
     (native || can({ type: "reload" })) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => can({ type: "reload" }) ? send({ type: "reload" }) : undefined); } },
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
@@ -222,8 +219,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={cover("Address") && edit} />
           : <BrowserPagePlace runtime={runtime} />}
       </div>
-      {/* v119 (Alpha 45f6bed30 template.html:1683): a 130px fade into the background at the bottom of the page region. */}
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-1 h-32.5 bg-linear-to-b from-transparent to-background to-70%" />
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-32.5 bg-linear-to-b from-transparent to-background to-70%" />
       {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} privateNotice={privateNotice} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
       {state.finding && tabs.layer === "Uncovered" && (
         <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
@@ -320,7 +316,7 @@ function AddressChoices({ runtime, query, privateTab, privateNotice, refusal, on
 
 const minute = 60_000;
 
-/** The time ranges history clears over, as v119 (Alpha 45f6bed30 apps/app/src/browser/history.ts:5-12). */
+/** The time ranges history clears over, the shortest first. */
 const historyRanges = [
   { id: "15-minutes", label: "Last 15 minutes", duration: 15 * minute },
   { id: "hour", label: "Last hour", duration: 60 * minute },
@@ -338,9 +334,9 @@ function Library({ runtime, onBack, onOpen, onResetData }: Pick<BrowserProps, "r
   const bookmarks = runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks()));
   const history = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.history()));
   const titles = new Map(bookmarks.map((entry) => [entry.url, entry.title]));
-  // v119 (45f6bed30 browser-adapter.ts:453-461): the review says what the chosen range clears, and Clear history clears it.
+  // spec/app/browser/library.md, "Clearing history asks first, and can be cancelled"
   const clearHistory = Effect.gen(function* () {
-    const since = clearing.duration === undefined ? undefined : (yield* Time.use((time) => time.now())) - clearing.duration;
+    const since = clearing.duration === undefined ? undefined : (yield* (yield* Time).now()) - clearing.duration;
     const sent = yield* editHistory(since === undefined ? "all" : { since });
     if (!sent) yield* cancelHistory();
   });

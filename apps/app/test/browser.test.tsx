@@ -224,7 +224,7 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.history === 2);
     expect(world.browser.saved.history).toEqual([kept, other]);
 
-    // v119 (Alpha 45f6bed30 template.html:1808-1820): the trash button opens the time range; Clear history under it asks.
+    // spec/app/browser/library.md, "Clearing history asks first, and can be cancelled"
     await press("Clear history");
     await historyRange("all");
     await clearHistoryOver();
@@ -548,7 +548,7 @@ describe("The Browser on a phone", () => {
     expect(world.browser.tabs.size).toBe(1);
     // spec/app/browser/index.md, "Cleared data takes every normal tab and the saved session with it, and keeps the private tabs"
     await hardware("back");
-    // v119 (Alpha 45f6bed30 template.html:1820): Reset browser data, under Library > History > Clear history.
+    // spec/app/browser/index.md, "Clearing is asked for from the Library's history, and confirmed or cancelled"
     await press("Menu");
     await press("Library, bookmarks and history");
     await libraryTab("History");
