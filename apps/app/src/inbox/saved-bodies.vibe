@@ -84,22 +84,24 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
   let grants: ReadonlyArray<SavedGrant> = []
 
   effect function load(): (Envelope | undefined)!! {
-    const raw = native()
-      ? Option.map((vault.read(slot) catch () => Option.none()), Redacted.value)
-      : Option.fromNullishOr(tryPromise(readSavedMail) catch () => undefined)
-    if (Option.isNone(raw) || typeof raw.value !== "string") return undefined
-    if (raw.value.length > maximumBytes) return undefined
-    return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Envelope))(raw.value))
+    let raw: unknown
+    if (native()) {
+      const found = vault.read(slot) catch () => undefined
+      if (found === undefined || Option.isNone(found)) return undefined
+      raw = Redacted.value(found.value)
+    } else raw = tryPromise(readSavedMail) catch () => undefined
+    if (typeof raw !== "string" || raw.length > maximumBytes) return undefined
+    return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Envelope))(raw))
   }
 
   effect function store(value: Envelope | undefined): void!! {
     const raw = value === undefined || value.bodies.length === 0 ? undefined : JSON.stringify(value)
     if (!native()) {
-      try ignore(tryPromise(() => writeSavedMail(raw)) catch () => undefined)
+      try ignore(tryPromise(() => writeSavedMail(raw)))
     } else if (raw === undefined) {
-      try ignore(vault.remove(slot) catch () => undefined)
+      try ignore(vault.remove(slot))
     } else {
-      try ignore(vault.write(slot, Redacted.make(raw)) catch () => undefined)
+      try ignore(vault.write(slot, Redacted.make(raw)))
     }
   }
 
