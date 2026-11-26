@@ -225,7 +225,8 @@ While the agent's calendar is chosen, a repeat, an alert or a video link
 is offered only where that calendar would take the event with it. One it
 would not take is left off the form, not drawn dimmed, as the live v119
 phone left it off; a draft that still holds one there shows only the way
-to clear it. Picking one never switches the event to another calendar, and
+to clear it, a single No repeat chip for a repeat, as the live v119 agent
+calendar drew it. The phone's calendar names that choice Once. Picking one never switches the event to another calendar, and
 Save stays in reach.
 
 ```quint

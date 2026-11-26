@@ -589,7 +589,6 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
-    // Asked for Home with the sheet over Home: Talk's own move lowers it, so Home shows, and Talk keeps listening.
     const route = (await getShell(runtime)).route;
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Here is Home."];
     speakUtterance(world, "Go home");
@@ -597,7 +596,6 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Bar", spokenRoute: route + 1 });
 
-    // Full over Home hides any destination, so opening Calendar lowers it in the same move.
     await sendShell(runtime, { type: "raise", detent: "Full" });
     world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
     speakUtterance(world, "Open my calendar");
@@ -802,7 +800,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
     speakUtterance(world, "Put a 30 minute event called camera setup in that slot.");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1);
-    await drawn(() => vi.waitFor(() => expect(button("Approve")).toBeDefined(), { timeout: 10_000 }));
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined(), { timeout: 10_000 });
     expect(document.querySelector("section[aria-label='Calendar change']")?.textContent).toContain("camera setup");
     expect(world.calendar.writes).toEqual([]);
     await press("Approve");
@@ -1307,6 +1305,32 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Open");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]), { timeout: 10_000 });
     await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
+  });
+
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+  it("from Talk over Files, shows the card of a page the agent keeps for my review, and opens it only on Open", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    world.ask.metadata = [];
+    const url = "https://www.alphacompute.ai/";
+    const review = textReview(world.notes.owner, "spoken-page", { type: "browser_navigate", url });
+    world.telephony.textReview = review;
+    const { alpha, area } = await onComposer(world, { at: "view:Files", load: () => import("../src/files/index.tsx") });
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Files" }))));
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Files");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawnUntil(alpha, files.runtime(alpha), Files, (s) => s.access === "Granted" && s.storage.status === "Loaded");
+    await startTalkWithAskFirstOff({ alpha, area });
+    world.ask.nextReplyChunks = ["Here is a page for you to open."];
+    world.ask.nextActions = () => askedPage(review, `m${world.ask.said.length}u`, []);
+    speakUtterance(world, "Find me a page about Alpha.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending);
+    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-only-v1" } });
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await later(alpha, 500);
+    expect([review.claims, review.receipts]).toEqual([[], []]);
+
+    await press("Open");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]), { timeout: 10_000 });
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

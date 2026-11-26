@@ -112,7 +112,7 @@ type Effect =
   | Kept({ messages: int, attachments: int })
   | Reread({ turn: int, recheck: int })
   | Arrived({ recorded: bool })
-  | Navigate({ turn: int, view: S::View })
+  | Navigate({ turn: int, view: S::View, inside: bool })
   | NavigateHome({ turn: int })
   | NavigateFiles({ turn: int, source: List[S::View], panel: S::Detent, route: int })
   | Navigated({ turn: int, opened: bool })
@@ -862,15 +862,19 @@ pure def sometimesTheDayIsTold(c: Conversation): bool = c.context.day > 0 and c.
 ### A complete reply may open one view, once, while the screen it was asked from still shows
 
 The phone claims the agent's request once for the turn and asks the shell
-to open the view. A request for an older turn is refused.
+to open the view. A request for an older turn is refused. A saved note the
+agent opens is asked for as a page inside Notes (`inside`): a sheet over
+Notes stays, and the full screen lowers so the note shows ([Shell](../shell/index.md),
+"Agent navigation shows an admitted app or Home, lowering Ask Alpha only
+where it would hide it").
 
 ```quint
-pure def canNavigate(c: Conversation, ticket: int, view: S::View): bool =
+pure def canNavigate(c: Conversation, ticket: int, view: S::View, inside: bool): bool =
   ticket == c.turn.send.id and c.turn.reply == Complete and c.turn.revision == c.context.revision
     and not(c.context.sensitive) and c.opening.id < ticket
 
-pure def navigate(c: Conversation, ticket: int, view: S::View): Moved =
-  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view })) }
+pure def navigate(c: Conversation, ticket: int, view: S::View, inside: bool): Moved =
+  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view, inside: inside })) }
 ```
 
 ### A complete reply may take the owner Home, once, as it may open a view
@@ -922,7 +926,7 @@ It uses the same single opening ticket as any other completed reply.
 ```quint
 pure def canNavigateFiles(c: Conversation, ticket: int, source: List[S::View], panel: S::Detent, route: int): bool =
   val showing = c.context.showing
-  canNavigate(c, ticket, S::Files) and not(c.turn.stopping) and route >= 0
+  canNavigate(c, ticket, S::Files, false) and not(c.turn.stopping) and route >= 0
     and (panel == S::Sheet or panel == S::Full)
     and match showing {
       | Home => source.length() == 0

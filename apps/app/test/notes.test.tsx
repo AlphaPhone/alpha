@@ -779,6 +779,84 @@ describe("Notes", () => {
     expect([results()[5], showing(await shell(), "Browser")]).toEqual([{ switched: true }, true]);
   });
 
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
+  it("A note the agent opens keeps Ask Alpha's sheet, also over Notes, and lowers the full screen, while asking for Notes itself under its sheet lowers it", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNamedShoppingNote(world);
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
+    await until(alpha, runtime, Conversation, (s) => s.ready);
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent }))));
+    const ask = async (text: string, viewId: string, saved: boolean) => {
+      world.ask.nextReplyChunks = ["Here it is."];
+      world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, saved)];
+      const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      await rendered(() => expect(composerField()?.hidden).toBe(false));
+      await fill("Message Alpha", text);
+      await press("Send");
+      await until(alpha, runtime, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+      await until(alpha, runtime, Conversation, (c) => c.opening.id === turn && c.opening.outcome !== "Sent");
+      return shell();
+    };
+
+    await raise("Sheet");
+    expect(await ask("open the note titled shopping list", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("shopping list"));
+
+    world.notes.target = "enclave";
+    expect(await ask("open my enclave launch note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("Enclave launch"));
+
+    await raise("Full");
+    world.notes.target = "groceries";
+    expect(await ask("open my groceries note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
+    await rendered(() => expect(editorTitle()).toBe("Groceries"));
+
+    await raise("Sheet");
+    expect(await ask("show me notes", "notes", false)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
+  });
+
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/shell/index.md, "Only a spoken move from its exact source route is marked as Talk's navigation"
+  it("A note the agent opens aloud keeps Ask Alpha's sheet, also over Notes, and lowers the full screen, while Talk keeps listening", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha, runtime } = await openNamedShoppingNote(world);
+    await until(alpha, runtime, Conversation, (s) => s.ready && s.observing);
+    await until(alpha, runtime, Talk, (s) => s.warmed);
+    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "chooseNetworkSpeech", agree: false }))));
+    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "permissionChanged", grant: "Granted" }))));
+    await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "startTalking", now: untimed }))));
+    await until(alpha, runtime, Talk, (s) => s.phase === "Listening" && s.mic === "On");
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent }))));
+    const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
+    const say = async (text: string, turn: number) => {
+      world.ask.nextReplyChunks = ["Here it is."];
+      world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)];
+      await drawn(() => Promise.resolve(world.voice.emitLocal?.("liveCaptureTranscript", { captureId: world.voice.activeMicSession, final: { turnId: `note-${turn}`, text, mode: "device" } })));
+      await rendered(() => expect(results()).toHaveLength(turn));
+      await until(alpha, runtime, Talk, (s) => s.sent === turn && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
+      return shell();
+    };
+
+    await raise("Sheet");
+    expect(await say("open my shopping list note", 1)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("shopping list"));
+
+    world.notes.target = "enclave";
+    expect(await say("open my enclave launch note", 2)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("Enclave launch"));
+
+    await raise("Full");
+    world.notes.target = "groceries";
+    expect(await say("open my groceries note", 3)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
+    await rendered(() => expect(editorTitle()).toBe("Groceries"));
+    expect(results()).toEqual([
+      { switched: true, shown: { kind: "saved-note", noteId: "shopping" } },
+      { switched: true, shown: { kind: "saved-note", noteId: "enclave" } },
+      { switched: true, shown: { kind: "saved-note", noteId: "groceries" } },
+    ]);
+  });
+
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
     const world = { ...scene(), phone: true };
     const { alpha, runtime } = await openNamedShoppingNote(world);

@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Check, ChevronLeft, ListChecks, Plus, X } from "lucide-react";
+import { Check, ChevronLeft, Ellipsis, ListChecks, Plus, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 
 /** One item of a checklist as the editor shows it. */
@@ -29,7 +29,7 @@ export type NoteEditorProps = Omit<ComponentProps<"section">, "title"> & {
   feedback?: ReactNode;
   /** Takes nothing typed while the note is on its way to Recently deleted. */
   locked?: boolean;
-  /** The note's actions: a `NoteMenu`. */
+  /** The note's actions: a `NoteMenu`. Without one, More is drawn disabled in its place, so the header does not shift when actions arrive. */
   menu?: ReactNode;
   onTitle?: (title: string) => void;
   onBody?: (body: string) => void;
@@ -61,7 +61,7 @@ export function NoteEditor({ title, kind, body = "", items = [], next = "", stat
             <ListChecks aria-hidden className="size-5.5" />
           </button>
         )}
-        {menu}
+        {menu || <button type="button" aria-label="More" disabled className={iconButton}><Ellipsis aria-hidden className="size-5.5" /></button>}
         <button type="button" onClick={onDone} className={cn(focusRing, "min-h-11 rounded-full px-3 font-semibold text-foreground active:bg-accent")}>Done</button>
       </div>
       {status && <div role="status" aria-live="polite" className="px-6 pb-1 text-xs text-muted-foreground">{status}</div>}

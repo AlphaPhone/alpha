@@ -404,17 +404,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
     const preview = document.querySelector("[aria-label='Attachment contents']");
     expect([world.inbox.attachmentReads, preview?.textContent, preview?.querySelector("strong")]).toEqual([["g1/2"], attachmentText, null]);
-    await confirm("Close");
-    await until(alpha, runtime, Shown, (s) => s.attachment === 0);
+    // spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"
     if (phone) {
-      await action("Save agenda.txt");
       expect(world.inbox.savedAttachments.size).toBe(0);
       await confirm("Save");
-      await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
+      await until(alpha, runtime, Shown, (s) => s.keep.outcome === "Confirmed");
       expect([world.inbox.savedAttachments.get("agenda.txt"), told()]).toEqual([attachmentText, expect.stringContaining("Saved to Files")]);
-      await confirm("Close");
-      await until(alpha, runtime, Shown, (s) => s.attachment === 0);
     }
+    await confirm("Close");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
     await menu("Mark unread");

@@ -7,7 +7,7 @@ import { ask, attemptedWith } from "../platform/remote.vibe"
 import { type Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
-import { type AgentCalendar, inAskAlpha, refreshes } from "../../gen/app__calendar__agent.ts"
+import { type AgentCalendar, inAskAlpha, readsRequestsAgain, refreshes } from "../../gen/app__calendar__agent.ts"
 import { Time } from "../runtime/time.vibe"
 import { asked } from "./asked.ts"
 import { type Request, complete, requestOf, requests } from "./requests.ts"
@@ -129,7 +129,9 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
     return
   }
   if (s.stage !== "Idle") return
-  const oldest = pending.at(-1)
+  // A request just declined may still read pending while its decline is on its way to the agent.
+  const declined = s.result === "Declined" ? requests.find(s.filing)?.id : undefined
+  const oldest = pending.findLast((request) => request.id !== declined)
   if (oldest === undefined) return
   try ignore((try KeyValueStore.KeyValueStore).set(shownKey, JSON.stringify(oldest)))
   const id = oldest.change === "Create" ? 0 : shown.number("Google", oldest.eventId)
@@ -141,10 +143,10 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
 }
 
 // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
-/** Tell Ask Alpha what the card has to show there: a change under way, or how one a reply filed ended. */
+/** Tell Ask Alpha what the card has to show there, a change under way or how one a reply filed ended, and the request it holds. */
 function tellAskAlpha(s: AgentCalendar): void {
   const id = requests.find(s.filing)?.id
-  asked.show(inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)))
+  asked.show(inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)), id ?? "")
 }
 
 /** Read the agent's approvals list once a reply filed a Calendar request, so its card shows in Ask Alpha. */
@@ -173,9 +175,16 @@ const listing = started(effect {
     (state) => (state.google.status === "Loading" ? Effect.void : listRequests()))
 }, "reading the agent's requests")
 
+// spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"
+/** A card declined, withdrawn or refused reads the agent's requests again, so the next pending one's card shows. */
+const relisted = started(effect {
+  const ended = Stream.changesWith((try Changes.Machine).changes, (a, b) => a.stage === b.stage && a.result === b.result)
+  try Stream.runForEach(Stream.filter(ended, (s) => s.stage === "Idle" && readsRequestsAgain(s.result)), () => listRequests())
+}, "reading the agent's requests again once a card ends")
+
 // spec/app/calendar/agent.md, "Only a change the calendar applied refreshes Calendar and Home"; spec/app/calendar/index.md, "A committed Calendar change in a reply reads the day again once, in front or not"
 const applied = following(Changes.Machine, (a) => (a.stage === "Idle" && refreshes(a.result) ? a.write.id : 0), View.Machine,
   (write): View.Event | undefined => (write === 0 ? undefined : { type: "changeCommitted" }))
 
 /** The agent's changes to the owner's Google Calendar: kept across restarts, which end what was in flight. */
-export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, restored, toldAskAlpha)
+export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, relisted, restored, toldAskAlpha)
