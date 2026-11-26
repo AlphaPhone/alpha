@@ -22,7 +22,10 @@ export const acceptedPhotos = [...images, "image/heic", "image/tiff", "image/svg
 export const acceptedFiles = [acceptedPhotos, ...documents].join(",")
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
-export type AttachmentSource = Attached | { readonly kind: "ViewedPhoto"; readonly read: (Attached | undefined)!! }
+type PhotoRead = (Attached | undefined)!!
+export type AttachmentSource = Attached | { readonly kind: "ViewedPhoto"; readonly read: PhotoRead; readonly close: void!! }
+type ComposingSource = AttachmentSource | { readonly kind: "CapturedPhoto"; readonly read: PhotoRead; readonly seat: FileSeat }
+export type CapturedPhotoOffer = (read: PhotoRead, current: boolean!!) => boolean!!
 
 export type ReviewedDraft = (text: string, current: Effect.Effect<boolean>) => Effect.Effect<boolean>
 
@@ -142,6 +145,9 @@ export interface FileTarget {
   readonly authority: Picker.ArchiveAuthority
 }
 
+type FileSeat = Omit<FileTarget, "revision">
+type AttachmentNeeds = Talk | Composer.Machine | Conversation | Shell | Agent
+
 effect function added(target: FileTarget, candidates: readonly { readonly name: string; readonly file: Attached | undefined }[], active: Effect.Effect<boolean> = succeed(true), suggestion?: string): number!!(Talk | Composer.Machine | Conversation | Agent) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
@@ -160,7 +166,10 @@ effect function added(target: FileTarget, candidates: readonly { readonly name: 
     let bytes = before.reduce((size, file) => size + file.data.length, 0)
     const refused: string[] = []
     const viewed = candidates.length === 1 ? candidates[0]?.file : undefined
-    const replaceAt = viewed?.origin === "ViewedPhoto" ? before.findIndex((file) => file.origin === "ViewedPhoto") : -1
+    const captured = viewed?.origin?.kind === "CapturedPhoto"
+    if (captured && (room < 1 || current.unsettled || current.editor.editing > 0 || before.some((file) => file.origin !== undefined)
+      || !batchFits(before.length + 1, bytes + viewed.data.length))) return 0
+    const replaceAt = viewed?.origin?.kind === "ViewedPhoto" ? before.findIndex((file) => file.origin !== undefined) : -1
     const previous = before[replaceAt]
     if (viewed !== undefined && previous !== undefined) {
       const duplicate = before.some((file, index) => index !== replaceAt && file.id === viewed.id)
@@ -243,25 +252,54 @@ export effect function insertPickedFiles(
 }
 
 // spec/app/assistant/composer.md, "A shared result adds its file and leaves the owner's draft as written"; spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo"
-export effect function stageAttachment(source: AttachmentSource, active: Effect.Effect<boolean> = succeed(true), suggestion?: string): boolean!!(Talk | Composer.Machine | Conversation | Shell | Agent) {
+export effect function stageAttachment(source: AttachmentSource, active: Effect.Effect<boolean> = succeed(true), suggestion?: string): boolean!!AttachmentNeeds {
+  return try stageInDraft(source, active, suggestion)
+}
+
+effect function stageInDraft(source: ComposingSource, active: boolean!!, suggestion?: string): boolean!!AttachmentNeeds {
   if (suggestion !== undefined && (suggestion.trim() === "" || suggestion.length > Composer.textLimit)) return false
   const authority = try attachmentAuthority()
   if (authority === undefined) return false
   const composer = try (try Composer.Machine).get()
   const context = (try (try Conversation).get()).context
   if (context.sensitive || composer.slot !== "Open" || composer.away !== "Free" || !(try active)) return false
-  const viewedPhoto = "kind" in source
-  const file = viewedPhoto ? try source.read : source
+  const seat = "kind" in source && source.kind === "CapturedPhoto" ? source.seat : undefined
+  if (seat !== undefined && (!sameBinding(seat.binding, composer.binding) || seat.slot !== composer.read.ticket ||
+    !Picker.sameArchiveAuthority(seat.authority, authority))) return false
+  const origin = "kind" in source
+    ? source.kind === "ViewedPhoto" ? { kind: source.kind, close: source.close } : { kind: source.kind }
+    : undefined
+  const file = "kind" in source ? try source.read : source
   if (file === undefined || !(try active) || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
   const given = Effect.try(() => selected(file.data, file.name, file.mimeType)) catch () => undefined
   if (given === undefined) return false
   const encodedFile = try encoded(given, file.id)
-  const candidate: Attached | undefined = encodedFile !== undefined && viewedPhoto ? { ...encodedFile, origin: "ViewedPhoto" } : encodedFile
+  const candidate: Attached | undefined = encodedFile !== undefined && origin !== undefined ? { ...encodedFile, origin } : encodedFile
   const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision, authority }, [{ name: file.name, file: candidate }], active, suggestion)
   if (accepted === 0) return false
   const shell = try Shell
-  if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
+  if ((try shell.get()).assistant === "Bar" && (origin?.kind !== "CapturedPhoto" || (try active))) try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
   return true
+}
+
+// spec/app/camera/agent.md, "A confirmed capture can be offered in the same draft for the owner to send"
+export effect function capturePhotoDraft(): (CapturedPhotoOffer | undefined)!!AttachmentNeeds {
+  const authority = try attachmentAuthority()
+  if (authority === undefined) return undefined
+  const state = try (try Composer.Machine).get()
+  const { board } = try Talk
+  const draft = board.snapshot()
+  if (state.slot !== "Open" || state.away !== "Free" || state.unsettled || state.editor.editing > 0 ||
+    !Composer.canAttach(state, 1) || Composer.attachments(state.editor) >= Composer.maxFiles || (try (try Conversation).get()).context.sensitive ||
+    (sameBinding(draft.filesBinding, state.binding) && draft.files.some((file) => file.origin !== undefined))) return undefined
+  const seat: FileSeat = { binding: state.binding, slot: state.read.ticket, authority }
+  const scope = try Effect.context<AttachmentNeeds>()
+  let pending = true
+  return (read, current) => effect {
+    if (!pending) return false
+    pending = false
+    return try Effect.provideContext(stageInDraft({ kind: "CapturedPhoto", read, seat }, current), scope)
+  }
 }
 
 // spec/app/browser/reading.md, "Confirming hands over the reviewed words as shown"
@@ -327,20 +365,25 @@ export effect function retireTranscript(expected?: TranscriptAttachment): void!!
   if (Composer.enabled(try composer.get(), event)) try contained(composer.send(event), "detaching the transcript")
 }
 
+// spec/app/photos/viewer.md, "Removing its draft attachment closes only the exact photo still showing"
 export effect function removeFile(id: string): void!!(Talk | Composer.Machine) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
-  try attachmentLock.withPermits(1)(effect {
+  const removed = try attachmentLock.withPermits(1)(effect {
     const current = try composer.get()
     const shown = board.snapshot()
-    if (!sameBinding(shown.filesBinding, current.binding) || !Composer.canRemoveFile(current)) return
+    if (!sameBinding(shown.filesBinding, current.binding) || !Composer.canRemoveFile(current)) return undefined
     const before = shown.files
+    const attachment = before.find((file) => file.id === id)
+    if (attachment === undefined) return undefined
     const files = before.filter((file) => file.id !== id)
-    if (files.length === before.length) return
     board.change({ files, attachmentNotice: "" })
     const taken = composer.send({ type: "removeFile" }) catch () => undefined
-    if (taken === undefined && board.snapshot().files === files) board.change({ files: before })
+    if (taken !== undefined) return attachment.origin
+    if (board.snapshot().files === files) board.change({ files: before })
+    return undefined
   })
+  if (removed?.kind === "ViewedPhoto") try removed.close
 }
 
 export effect function stageFiles(key: string, files: readonly Attached[]): boolean!! {

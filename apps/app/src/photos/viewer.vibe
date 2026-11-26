@@ -339,7 +339,11 @@ effect function askAboutPhoto(photo: number, revision: number, ticket: number) {
   }, scope)
   if (!(try current)) return
   const read = Effect.provideContext(selectedAskPhoto(view), scope)
-  if (try attachToAlpha({ kind: "ViewedPhoto", read }, current)) return
+  const close = Effect.provideContext(effect {
+    if (!(try current)) return
+    try ignore(viewer.send({ type: "closeRemovedPhoto", photo, revision, ticket }, "Owner"))
+  }, scope)
+  if (try attachToAlpha({ kind: "ViewedPhoto", read, close }, current)) return
   if (try current) try say("This photo could not be attached.", true)
 }
 

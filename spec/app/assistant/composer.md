@@ -640,7 +640,9 @@ pure def stepAQuestionKeepsAnExistingDraft(before: Composer, via: str, after: Co
 Asking Alpha from the Photos viewer puts one photo into this owner’s open
 draft. Its chip stays visible wherever the draft can be sent. An accepted
 second photo takes its place in the same draft and leaves the other files,
-text and attachment count as they were.
+text and attachment count as they were. An approved Camera capture can fill
+this slot when it is empty, while the draft still belongs to the same owner,
+conversation and read ticket. Both photos wait for the owner's Send.
 
 ```quint
 pure def canReplaceReviewedPhoto(c: Composer, owner: int, conversation: int, ticket: int): bool =

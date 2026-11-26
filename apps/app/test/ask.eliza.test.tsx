@@ -230,7 +230,7 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   expect(received).toEqual(expect.stringContaining(prompt));
 }, 300_000);
 
-it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "Story: Share what I am looking at"); (spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo")', async () => {
+it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "Story: Share what I am looking at"); (spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo"); (spec/app/photos/viewer.md, "Removing its draft attachment closes only the exact photo still showing")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.photos.access = { scope: "full", images: "full", videos: "denied" };
   const source = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/png;base64,"));
@@ -290,6 +290,14 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await askAbout();
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
   await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  await press(`Remove ${source.name}`);
+  await until(alpha, library, Viewer, (state) => state.open === 0);
+  await until(alpha, chat, Composer, (state) => state.editor.files === 0);
+  await hardware("back");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+  await openPhoto();
+  await askAbout();
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
   chatAction("Attach media");
   const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Select photos"]');
   await drawn(() => vi.waitFor(() => expect(input()).not.toBeNull()));
@@ -331,11 +339,16 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   })]);
 }, 300_000);
 
-it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo")', async () => {
+it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo"); (spec/app/camera/agent.md, "A confirmed capture can be offered in the same draft for the owner to send")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.camera.galleryVolume = "external_primary";
+  let outgoing = 0;
+  const forwardAgent = forward(mine.agent.origin, mine.agent.token);
   const { alpha } = await openOver(fakeWorld(world, {
-    agent: forward(mine.agent.origin, mine.agent.token),
+    agent: (request) => {
+      if (request.method === "POST" && /^\/api\/conversations\/[^/]+\/messages(?:\/stream)?$/u.test(new URL(request.url).pathname)) outgoing++;
+      return forwardAgent(request);
+    },
     cloud: forward(mine.cloud.local, mine.key.token),
   }), only("home", "assistant", "view:Camera", "view:Photos", "notice"));
   const runtime = assistant.runtime(alpha);
@@ -366,7 +379,15 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
     expect(take()?.disabled).toBe(false);
   });
   expect([world.camera.photos.length, world.camera.preview?.direction]).toEqual([0, "back"]);
-  await drawn(() => take()?.click());
+  const image = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/jpeg;base64,"))?.image;
+  if (!image) throw new Error("The phone fixture has no JPEG bytes");
+  await drawn(() => {
+    world.photos.rows.unshift({
+      id: "m:external_primary:i:1", name: "Agent capture.jpg", owned: true, kind: "image", image,
+      width: 1280, height: 720, size: 10_000, date: world.now, revision: "agent-capture",
+    });
+    take()?.click();
+  });
   await waitForScreen(() => {
     expect(world.camera.photos).toMatchObject([{ saveToGallery: true, thumbnailOnly: true }]);
     expect(button("Open last photo")).toBeDefined();
@@ -376,12 +397,13 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   await waitForScreen(() => expect(receipt()?.evidence.result).toMatchObject({
     kind: "camera_capture_photo", mediaId: "1", libraryId: "m:external_primary:i:1", width: 1280, height: 720,
   }));
-  const image = world.photos.rows.find((row) => row.kind === "image" && row.image !== "")?.image;
-  if (!image) throw new Error("The phone fixture has no image bytes");
-  world.photos.rows.unshift({
-    id: "m:external_primary:i:1", name: "Agent capture.jpg", owned: true, kind: "image", image,
-    width: 1280, height: 720, size: 10_000, date: world.now, revision: "agent-capture",
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await waitForScreen(() => {
+    expect(button("Remove Agent capture.jpg")).toBeDefined();
+    expect(outgoing).toBe(1);
   });
+  await hardware("back");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
   await press("Open last photo");
   await waitForScreen(() => expect(document.querySelector('[data-alpha-subview="photos-viewer"] img[alt="Agent capture.jpg"]')).not.toBeNull());
 }, 300_000);

@@ -46,13 +46,19 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     return alpha.runtime.runPromise(shareLatestSender(operation, authority.current));
   }
   if (operation.type === "camera_capture_photo") {
-    const [{ default: camera }, { requestCapture }] = await Promise.all([import("../camera/index.tsx"), import("../camera/camera.vibe")]);
-    const answer = await camera.runtime(alpha).runPromise(requestCapture(operation.lens));
+    const [{ default: camera }, { requestCapture }, { default: assistant }, { capturePhotoDraft }] = await Promise.all([
+      import("../camera/index.tsx"), import("../camera/camera.vibe"), import("./index.tsx"), import("./attachments.vibe"),
+    ]);
+    const draft = await assistant.runtime(alpha).runPromise(capturePhotoDraft()).catch(() => undefined);
+    if (!(await authority.current().catch(() => false))) return refused;
+    const cameraRuntime = camera.runtime(alpha);
+    const answer = await cameraRuntime.runPromise(requestCapture(operation.lens, draft));
     if (answer.result === "Uncertain") return undefined;
     if (answer.result !== "Taken") return refused;
     const media = answer.media;
     const mediaId = media?.libraryId?.match(/:i:([1-9][0-9]{0,24})$/)?.[1];
     if (media === undefined || mediaId === undefined || media.width <= 0 || media.height <= 0) return undefined;
+    if (answer.offerDraft !== undefined) cameraRuntime.runFork(answer.offerDraft);
     return { kind: "applied", result: { version: 1, kind: operation.type, operationId: call.operationId, mediaId, libraryId: media.libraryId, width: Math.round(media.width), height: Math.round(media.height), mime: "image/jpeg" } };
   }
   if (operation.type === "read_selected_notes" || operation.type === "create_note") {

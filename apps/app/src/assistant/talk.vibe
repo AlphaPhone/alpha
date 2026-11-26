@@ -11,13 +11,17 @@ import type { CommsPrompt } from "../phone/comms.vibe"
 import type { NoteTranscript } from "../notes/selection.vibe"
 import type { RecordingSummary } from "./recording-summary.vibe"
 
+export type PhotoDraft =
+  | { readonly kind: "ViewedPhoto"; readonly close: void!! }
+  | { readonly kind: "CapturedPhoto" }
+
 /** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
 export interface Attached {
   readonly id: string
   readonly name: string
   readonly mimeType: string
   readonly data: string
-  readonly origin?: "ViewedPhoto"
+  readonly origin?: PhotoDraft
 }
 
 /** The batch staged for one concrete send, under the composer's own hold number and binding. */
