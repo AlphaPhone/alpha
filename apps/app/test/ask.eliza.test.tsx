@@ -535,6 +535,7 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
 
 it('Filter Files from Home and open the named file with the resident agent (spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"); (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  world.telephony.enrollment = { journal: new Map() };
   const path = "Documents/notes.txt";
   const contents = "This exact file is open on the phone.";
   world.files.texts[path] = contents;
