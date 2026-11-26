@@ -16,11 +16,13 @@ import { badgeOnly, holding, needsSettings } from "../../gen/app__maps__connecti
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
 import { hasRoom, servedHere } from "../../gen/app__maps__places.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import { type Coverage, type Seen, type Spot, type Way, atlas } from "./atlas.vibe";
 import { degreesOf, pointIn } from "./geometry.ts";
 import googleMaps from "./google-maps-attribution.svg";
 import { coverageOf, settled, tile } from "./maps.vibe";
 import { handedQuery, takeHandedQuery, watchHandoff } from "./handoff.ts";
+import { liftOver } from "./lift.ts";
 
 const ways: ReadonlyArray<{ travel: Travel; label: string; icon: LucideIcon }> = [
   { travel: "Drive", label: "Drive", icon: Car }, { travel: "Transit", label: "Transit", icon: Bus }, { travel: "Walk", label: "Walk", icon: Footprints }, { travel: "Bicycle", label: "Bike", icon: Bike },
@@ -92,9 +94,6 @@ const pinNameOf = (state: State) => (state.place !== 0 && state.place === state.
 const titleOf = (spot: Spot, kept: Kept | undefined, state: State) =>
   kept === undefined && pinNameOf(state) !== "" ? pinNameOf(state) : kept === undefined && spot.id === "" && pointIn(spot.name) !== undefined ? "Dropped pin" : shown(kept?.name ?? spot.name);
 
-/** Where a place's pin stands above the centre: in the middle of the map left between the search field and the credits, as v119 placed it (maps/map-plane.ts:586-593, 770-776). */
-const liftOver = (bottom: number) => Math.max(0, (bottom + 46 - 100) / 2);
-
 /** Where the world map first stands: North America, as develop opens it. */
 const northAmerica = { lat: 45, lng: -98 };
 
@@ -131,14 +130,14 @@ function waitNotice(wait: State["link"]["wait"], held: number): string {
 
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
 /** Where the camera goes for `state`, named so the map applies each aim once. */
-function cameraOf(state: State, seen: Seen, following: boolean, bottom: number): MapCamera {
+function cameraOf(state: State, seen: Seen, following: boolean, bottom: number, launcher: boolean): MapCamera {
   const way = atlas.way(state.trip.route, state.chosen);
   const spot = atlas.spot(state.place);
   const results = state.place === 0 && state.search.status === "Loaded" ? seen.results.slice(0, state.results) : [];
   const aim = cameraAim(following, way !== undefined, true, spot !== undefined, true, true, results.length);
   if (aim === "FollowPhone" && seen.here !== undefined) return { kind: "follow", key: `here:${seen.here.at.lat}:${seen.here.at.lng}`, at: degreesOf(seen.here.at) };
   if (aim === "FitRoute" && way !== undefined) return { kind: "fit", key: `route:${state.trip.route}`, points: way.line.map(degreesOf), maxZoom: routeMaxZoom };
-  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom, lift: liftOver(bottom) };
+  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom, lift: liftOver(bottom, launcher) };
   if (aim === "FitResults") {
     const points = results.flatMap((place) => atlas.spot(place)?.at ?? []).map(degreesOf);
     return { kind: "fit", key: `results:${state.search.ticket}`, points, maxZoom: resultsMaxZoom };
@@ -166,6 +165,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const credits = useCredits(runtime);
   const seen = useSyncExternalStore((wake) => atlas.subscribe(wake), () => atlas.snapshot(), () => atlas.snapshot());
   const [typed, setTyped] = useState("");
+  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   const { state, can, send } = screen;
   const handed = useSyncExternalStore(watchHandoff, handedQuery, handedQuery);
   const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length } as const;
@@ -246,7 +246,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const retryMap = offer(screen, { type: "retryMap" });
   const refused = now === "Browse" && needsSettings(state.link);
   const myLocation = offer(screen, { type: "useMyLocation" });
-  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is not guiding, as on v119 (prototype/maps-adapter.ts:455), and does nothing while Maps is locating or Android's prompt is open
+  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is neither guiding nor showing directions, as on v119 (prototype/maps-adapter.ts:455, `showSearch` in ui/maps/maps-screen.ts), and does nothing while Maps is locating or Android's prompt is open
   const locate = () => myLocation?.();
   const disclosing = can({ type: "continueDisclosure" }) && now !== "Navigating";
   // spec/app/maps/index.md, "Story: Use my location": every state Maps reports stands in one card under the search field, as on develop.
@@ -288,7 +288,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
             pins={pins}
             here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
             line={way?.line.map(degreesOf)}
-            camera={cameraOf(state, seen, following, floatBottom)}
+            camera={cameraOf(state, seen, following, floatBottom, launcher)}
             compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
             onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
             onTrouble={(plane, trouble) => {
@@ -312,7 +312,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           aria-label="Search Maps"
           placeholder="Search"
           maxLength={300}
-          value={now === "Place" ? typed || placeName : now === "Search" ? typed : ""}
+          // spec/app/maps/index.md, "Story: Look at a place": a place's field holds the query or stays empty under "Search", never the place's name, which the card's title carries, as v119 live (prototype/maps-adapter.ts:456 `q`)
+          value={now === "Place" || now === "Search" ? typed : ""}
           readOnly={now === "Place"}
           onFocus={openSearch}
           onChange={(event) => typing(event.target.value)}
@@ -361,7 +362,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           actions={statusActions.length > 0 ? statusActions : undefined} />
       )}
 
-      {now !== "Navigating" && !(now === "Search" && state.sheet === "Full") && (
+      {now !== "Navigating" && now !== "Directions" && !(now === "Search" && state.sheet === "Full") && (
         <MapsRoundButton tone="float" size="md" aria-label="Recenter" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard" style={{ bottom: `min(${floatBottom}px, calc(100% - 176px))` }} onClick={locate}><LocateFixed /></MapsRoundButton>
       )}
       {now === "Navigating" && can({ type: "recenter" }) && (
