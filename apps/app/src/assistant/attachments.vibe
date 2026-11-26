@@ -179,7 +179,7 @@ effect function added(target: FileTarget, candidates: readonly Candidate[], acti
     const prior = board.snapshot()
     const before = sameBinding(prior.filesBinding, target.binding) ? prior.files : []
     if (before.length > 0 && (prior.filesAuthority === undefined || !Picker.sameArchiveAuthority(prior.filesAuthority, authority))) return 0
-    const room = Composer.maxFiles - Composer.attachments(current.editor)
+    const room = Composer.maxFiles - current.editor.files
     const bytes = before.reduce((size, file) => size + file.data.length, 0)
     const viewed = candidates.length === 1 ? candidates[0]?.file : undefined
     const captured = viewed?.origin?.kind === "CapturedPhoto"

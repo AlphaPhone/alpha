@@ -166,8 +166,10 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
       {state.fired === "DispatchFailed" && <Alert variant="warn">The agent couldn’t run it.</Alert>}
       {state.change.live && <p role="status">Waiting for the agent…</p>}
       {model.can({ type: "checkChange" }) && <Alert variant="warn" role="status">The agent didn’t confirm the change.
+        <Button size="sm" variant="secondary" onClick={() => send({ type: "checkChange" })}>Check change</Button>
         <Button size="sm" variant="secondary" onClick={() => send({ type: "readAutomations" })}>Refresh</Button>
       </Alert>}
+      {model.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>}
       {state.change.attempt.outcome === "Refused" && state.fired === "NotFired" && <Alert variant="warn">The agent didn’t apply the change.</Alert>}
       {row !== undefined && !reviewEdit && state.review.showing && (
         <div role="group" aria-label="Review workflow action" className="mt-6 border-t border-border pt-4">

@@ -184,7 +184,9 @@ effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony
   const store = try Inbox
   const machine = try Messages.Machine
   const held = try store.get()
-  const chip = (try machine.get()).chip
+  const current = try machine.get()
+  const chip = current.chip
+  const query = current.sought ? held.sought : ""
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
   const grant = grantOf(status?.permissions.sms)
   const canName = status?.permissions.contacts === "granted"
@@ -202,7 +204,7 @@ effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony
   const visibleNames = !canName ? new Map() : currentNames !== previousNames ? currentNames
     : further ? replaceNames(currentNames, addresses, names) : names ?? new Map()
   const titled = (row: ThreadRow) => ("incomplete" in row ? "" : row.addresses.map((address) => visibleNames.get(address) ?? address).join(", "))
-  const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(held.sought, `${titled(row)} ${row.snippet}`, row.addresses.join(" "))))
+  const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(query, `${titled(row)} ${row.snippet}`, row.addresses.join(" "))))
   const rows = further ? [...held.threads, ...fitting] : fitting
   if (Messages.canThreadsRead(try machine.get(), ticket, rows.length)) {
     try store.set({ threads: rows, threadsNext: page.next ?? undefined, names: visibleNames })
@@ -378,9 +380,11 @@ function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages
     when { tag: "ReadConversation", let ticket, let thread, let further }: answer("page", pageRead(ticket, thread, further), { type: "pageRead", ticket, ok: false, grant: "Unasked", seen: { rows: 0, failed: 0, partial: 0 }, further: false, unreadShown: false, role: false });
     when { tag: "ReadChoices", let ticket, let further }: answer("choices", choicesRead(ticket, further), { type: "choicesRead", ticket, ok: false, grant: "Unasked", count: 0, further: false });
     when { tag: "MarkRead", let thread }: run(`read ${thread}`, effect {
+      const held = try (try Inbox).get()
+      if (held.messagesThread !== thread) return
       const conversation = try (try Conversations).get(thread)
-      const latest = (try (try Inbox).get()).messages.reduce((at, row) => Math.max(at, row.date), 0)
-      if (Option.isSome(conversation) && conversation.value.id !== "") try ignore(telephony("markThreadRead", (c) => c.messages.markThreadRead(conversation.value.id as ThreadId, latest)))
+      const latest = held.messages.reduce((at, row) => Math.max(at, row.date), 0)
+      if (Option.isSome(conversation) && conversation.value.id !== "" && latest > 0) try ignore(telephony("markThreadRead", (c) => c.messages.markThreadRead(conversation.value.id as ThreadId, latest)))
     });
     when { tag: "Prompt", let need }: answer("prompt", prompted(need), { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });

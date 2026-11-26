@@ -39,6 +39,7 @@ export interface VoiceScene {
   startLiveCaptureCalls: number;
   stopLiveCaptureCalls: number;
   startCloudSpeechCalls: number;
+  cloudStartGate?: () => Promise<void>;
   readonly cloudStarts: { readonly environment: string; readonly credentialId: string }[];
   readonly relayWarmups: string[];
   relayWarmupHangs: boolean;
@@ -264,12 +265,13 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
         return voice.relayWarmupHangs ? new Promise<never>(() => undefined) : Promise.resolve();
       },
       cloudStreamTiming: () => Promise.resolve(voice.streamTiming),
-      startCloudSpeech: ({ sessionId, environment, credentialId }) => {
+      startCloudSpeech: async ({ sessionId, environment, credentialId }) => {
         voice.cloudStarts.push({ environment, credentialId });
-        if (credentialId !== voice.credentialId) return Promise.reject(rejection("Voice is already active or unavailable"));
+        if (credentialId !== voice.credentialId) throw rejection("Voice is already active or unavailable");
         voice.startCloudSpeechCalls += 1;
         voice.activeMicSession = sessionId;
-        return Promise.resolve({ sessionId, sampleRate: 16000, echoCancelled: voice.relayEchoCancelled ?? true });
+        if (voice.cloudStartGate) await voice.cloudStartGate();
+        return { sessionId, sampleRate: 16000, echoCancelled: voice.relayEchoCancelled ?? true };
       },
       stopCloudSpeech: ({ sessionId }) => {
         voice.stopCloudSpeechCalls += 1;

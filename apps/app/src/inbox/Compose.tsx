@@ -6,7 +6,7 @@ import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { type Composer, flushed, ready } from "../../gen/app__inbox__drafts.ts";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
-import { type Letter, canAttach } from "../../gen/app__inbox__letter.ts";
+import { type Letter, blank, canAttach } from "../../gen/app__inbox__letter.ts";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import type { Refusal } from "../../gen/app__inbox__adding.ts";
 import { useMachine as useAdding } from "../../gen/app__inbox__adding.react.ts";
@@ -284,7 +284,7 @@ export function FileOffer({ runtime }: { runtime: ComposeProps["runtime"] }) {
   if (!state || !drafts.state) return null;
   const held = runtime.runSync(Incoming).file();
   const open = state.thing !== 0 && held !== undefined && held.source !== "Picker";
-  const room = state.into === 0 || (drafts.state.open && drafts.state.letter.id === state.into && canAttach(drafts.state.letter, policy, state.mib));
+  const room = state.into === 0 ? canAttach(blank, policy, state.mib) : (drafts.state.open && drafts.state.letter.id === state.into && canAttach(drafts.state.letter, policy, state.mib));
   const takeIn = { type: "takeIn", room } as const;
   return (
     <InboxFileOfferSheet
