@@ -38,12 +38,42 @@ lemma loadMore_ensures(s: Mailbox)
   ensures (inv(s) ==> canLoadMore(s) ==> stepEveryReadIsForTheSelection(s, loadMore(s).state, loadMore(s).out))
   ensures (inv(s) ==> canLoadMore(s) ==> stepARevokedReadEmptiesTheList(s, loadMore(s).state, loadMore(s).out))
   ensures (inv(s) ==> canLoadMore(s) ==> stepACursorIsGivenUpWhenItsPageIsAsked(s, "loadMore", loadMore(s).state))
+  ensures (inv(s) ==> canLoadMore(s) ==> stepAHeldCheckForgetsNothing(s, "loadMore", loadMore(s).state))
   ensures (inv(s) ==> canLoadMore(s) ==> stepARestartKnowsNoGrant(s, "loadMore", loadMore(s).state))
 {
   if inv(s) && canLoadMore(s) {
     LoadMoreSpent(s);
     ProofLib.FilterMember((set_x: int) => !((set_x in s.spent)), [s.cursor], s.cursor);
   }
+}
+
+lemma AccountsAnsweredPart1(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
+  ensures alwaysCountsAreNotNegative(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysAPageCursorIsUsedOnce(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysAFurtherPageNeedsAFreshList(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysChosenMessagesBelongToAFreshList(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysAccountsAreKnownOnlyFromAnAnswer(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysTheAccountSelectedIsConnected(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysNothingIsShownWithoutReadAccess(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysASavedListIsBoundToItsCredential(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysTheListKeptIsOfItsCredential(accountsAnswered(s, ticket, ok, connected).state)
+  ensures alwaysAFreshCountWasRead(accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredPart2(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
+  ensures stepAFailedReadKeepsTheList(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
+  ensures stepChangingTheSelectionForgetsTheListAndItsRead(s, accountsAnswered(s, ticket, ok, connected).state)
+  ensures stepEveryReadIsForTheSelection(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out)
+  ensures stepARevokedReadEmptiesTheList(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out)
+  ensures stepACursorIsGivenUpWhenItsPageIsAsked(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
+  ensures stepAHeldCheckForgetsNothing(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
+  ensures stepARestartKnowsNoGrant(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
 }
 
 lemma accountsAnswered_ensures(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
@@ -62,9 +92,11 @@ lemma accountsAnswered_ensures(s: Mailbox, ticket: int, ok: bool, connected: seq
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepEveryReadIsForTheSelection(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out))
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepARevokedReadEmptiesTheList(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out))
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepACursorIsGivenUpWhenItsPageIsAsked(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
+  ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepAHeldCheckForgetsNothing(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepARestartKnowsNoGrant(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
 {
   if inv(s) && canAccountsAnswered(s, ticket) {
-    SoleReadableIsConnected(connected);
+    AccountsAnsweredPart1(s, ticket, ok, connected);
+    AccountsAnsweredPart2(s, ticket, ok, connected);
   }
 }

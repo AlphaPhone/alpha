@@ -279,7 +279,7 @@ describe("Camera on a phone", () => {
     expect(mutations).toEqual(["favorite", "unfavorite"]);
 
     // spec/app/photos/viewer.md, "Back from a Camera capture returns to Camera"
-    await press("Info");
+    await press("Photo info");
     await until(alpha, library, Viewer, (state) => state.info);
     await hardware("back");
     await until(alpha, library, Viewer, (state) => !state.info && state.open !== 0);

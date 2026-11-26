@@ -556,6 +556,7 @@ describe("Home on a phone", () => {
 
     // spec/app/home/index.md, "Alpha is told when it becomes, or stops being, the phone's launcher"
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: false, holders: ["com.android.launcher3"] } : role);
+    await seen(false);
     await seen(true);
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsApp");
     await pulled();

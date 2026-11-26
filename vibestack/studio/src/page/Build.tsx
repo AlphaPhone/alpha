@@ -293,7 +293,7 @@ export function BuildDrawer() {
   if (!S.drawer) return null;
   if (!snap) {
     return (
-      <aside aria-label="Build" className="fixed top-12 right-0 bottom-0 z-30 flex w-90 max-w-[92vw] flex-col gap-4 border-l border-border bg-card p-4 shadow-lg">
+      <aside aria-label="Build" className="fixed top-12 right-0 bottom-0 z-20 flex w-90 max-w-[92vw] flex-col gap-4 border-l border-border bg-card p-4 shadow-lg">
         <Skeleton className="h-10" /><Skeleton className="h-9 w-1/2" /><Skeleton className="h-24" />
       </aside>
     );
@@ -307,7 +307,7 @@ export function BuildDrawer() {
   const copyPrompt = () => { navigator.clipboard.writeText(snap.prompt).then(() => toast("Sync prompt copied"), () => toast("Could not copy")); };
 
   return (
-    <aside aria-label="Build" className="fixed top-12 right-0 bottom-0 z-30 flex w-90 max-w-[92vw] flex-col gap-5 overflow-auto border-l border-border bg-card p-4 shadow-lg">
+    <aside aria-label="Build" className="fixed top-12 right-0 bottom-0 z-20 flex w-90 max-w-[92vw] flex-col gap-5 overflow-auto border-l border-border bg-card p-4 shadow-lg">
       <div className="flex items-center justify-between border-b border-border pb-2.5">
         <span className="text-sm font-semibold">Activity</span>
         <IconButton name="close" label="Close activity drawer" onClick={() => setDrawer(false)} />

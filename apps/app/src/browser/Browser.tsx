@@ -2,7 +2,7 @@
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserQuestion, BrowserReadAloud, BrowserReview, BrowserTabs, ConfirmDialog, Mark, PrivateMark } from "@repo/ui";
 import { ArrowUpRight, AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
-import { useState, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
 import type { Browser as State } from "../../gen/app__browser.ts";
 import { useMachine } from "../../gen/app__browser.react.ts";
@@ -62,8 +62,8 @@ export function Browser({ runtime, alpha }: BrowserProps) {
   return <Tab key={state.selected} runtime={runtime} alpha={alpha} tabs={state} page={page} />;
 }
 
+/** Marks where the native tab host draws the page; subscribes to desktopPreview because the desktop canvas can move while this element's logical size stays the same. */
 function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
-  // The desktop canvas can move while this element's logical size stays the same.
   useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
   return <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />;
 }
@@ -89,8 +89,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const editing = tabs.layer === "Address";
   const native = Option.isSome(tabHost.plugin);
   const hasLibrary = native || tabHost.web !== undefined;
-  // spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab": the offer is drawn under the bar, never near Ask Alpha.
-  // A failed page has no secure mark, so only a stranded page is offered here; a committed HTTPS page leaves from the menu's reviewed "Open externally".
+  // spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab": the offer is drawn under the bar, never near Ask Alpha; a failed page has no secure mark, so only a stranded page is offered here, while a committed HTTPS page leaves from the menu's reviewed "Open externally".
   const elsewhere = { type: "openExternally", kind: state.kind, secure: false } as const;
   const offerElsewhere = state.phase === "Failed" && share.can(elsewhere);
   const privateTab = state.kind === "Private";
@@ -284,7 +283,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
 
 function AgentPageCard({ runtime }: Pick<BrowserProps, "runtime">) {
   const held = runtime.runSync(Reviewing);
-  const page = useSyncExternalStore(held.subscribe, held.get, held.get);
+  const subscribe = useCallback((listener: () => void) => held.subscribe(listener), [held]);
+  const get = useCallback(() => held.get(), [held]);
+  const page = useSyncExternalStore(subscribe, get, get);
   const address = addressParts(page?.operation.url);
   return (
     <BrowserReview open={page !== undefined} title="Open this page?" confirmLabel="Open"

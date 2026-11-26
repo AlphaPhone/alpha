@@ -447,8 +447,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     if (phone) {
       await row("Revised term sheet");
       await until(second.alpha, again, Shown, (s) => s.fromPhone);
-      expect([told().includes("Need your eyes by Friday"), document.querySelector("iframe[title='Formatted email']"),
-        button("Open agenda.txt"), button("https://northpoint.test/room")]).toEqual([true, null, undefined, undefined]);
+      await vi.waitFor(() => expect([told().includes("Need your eyes by Friday"), document.querySelector("iframe[title='Formatted email']"),
+        button("Open agenda.txt"), button("https://northpoint.test/room")]).toEqual([true, null, undefined, undefined]));
       await press("Back to the list");
       await until(second.alpha, again, Shown, (s) => s.message === 0);
     }
@@ -643,7 +643,6 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Forward");
   expect(told()).toContain("actions.txt");
   await fill("To", "reader@example.test");
-  // happy-dom submits no form on an Enter keydown, so the address is submitted as Enter would in a browser.
   await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1 && s.stored && !s.pending && s.write.status === "Loaded");
@@ -721,8 +720,8 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
 it("Keep the drafts the earlier Alpha kept (spec/app/inbox/drafts.md, \"Story: Keep the drafts the earlier Alpha kept\")", async () => {
   const world = { ...scene(), phone: true };
   const hex = (text: string) => createHash("sha256").update(text).digest("hex");
-  const owner = JSON.stringify(["production", "u1", "o1"]);
-  const draftOwner = JSON.stringify(["production", "u1", "o1", "grant-1"]);
+  const owner = JSON.stringify(["production", "user-1", "org-1"]);
+  const draftOwner = JSON.stringify(["production", "user-1", "org-1", "grant-1"]);
   const draft = (id: string, to: string, subject: string, body: string) => ({ version: 1, id, revision: `${id}-1`, owner: draftOwner, to: [to], subject, body, mode: "compose" });
   const contract = draft("c1", "lee@example.test", "Contract signed", "Attached and signed.");
   const slots = {
@@ -770,7 +769,7 @@ it("Keep the drafts the earlier Alpha kept (spec/app/inbox/drafts.md, \"Story: K
 
 it("Never send twice what the earlier Alpha was sending (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\")", async () => {
   const world = { ...scene(), phone: true };
-  const slot = (environment: string) => Effect.runPromise(inboxOperationKey(JSON.stringify([environment, "u1", "o1"]), "grant-1"));
+  const slot = (environment: string) => Effect.runPromise(inboxOperationKey(JSON.stringify([environment, "user-1", "org-1"]), "grant-1"));
   const record = (requestId: string, phase: string, state: string | null) => JSON.stringify({
     version: 1, owner: "", grantId: "grant-1", requestId, phase, review: null, composer: { draftId: "d1" },
     proposal: { kind: "send", to: ["lena@ruiz.example"], subject: "Friday", bodyText: "Count me in." },
@@ -798,7 +797,7 @@ it("Never send twice what the earlier Alpha was sending (spec/app/inbox/sending.
   world.inbox.receipts.set("33333333-3333-4333-8333-333333333333", "succeeded");
   const second = await open(world, inboxMounts);
   const again = inbox.runtime(second.alpha);
-  if (title() !== "Inbox") await tile("Inbox");
+  if (title() !== "Inbox") await openInboxFromHome(second.alpha);
   await until(second.alpha, again, Changes, (s) => s.draft < 0 && s.attempt.outcome === "Confirmed");
   expect([told(), world.inbox.changes, world.platform.earlier.size]).toEqual([expect.stringContaining("An email the earlier Alpha was sending: Sent"), [], 0]);
 });
@@ -813,7 +812,7 @@ it("Find out when an unknown send was rejected, or dismiss it (spec/app/inbox/dr
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Fresh");
   await fill("To", "friend@mail.test");
-  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1);
   await fill("Subject", "Plans");
   await later(alpha, 10);

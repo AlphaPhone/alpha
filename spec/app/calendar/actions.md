@@ -86,6 +86,11 @@ pure def canApprove(s: Actions): bool = idle(s) and bound(s) and not(s.holding)
 pure def approve(s: Actions): Actions = { ...s, approved: true }
 
 pure def alwaysASensitiveScreenReachesNoReview(s: Actions): bool = (s.sensitive and not(idle(s))) implies s.review == NotAsked
+
+pure def alwaysAnActionStartsCleanAndBound(s: Actions): bool =
+  (idle(s) implies (s.ending == Running and s.review == NotAsked))
+    and (not(idle(s)) implies (unbound(s.act) or (s.screen == OnCalendar and s.open != 0)))
+    and (running(s) implies not(s.holding))
 ```
 
 ### Creating on the phone and reading next ask Android for access first; a refusal fails before the phone's review

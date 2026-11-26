@@ -1,5 +1,3 @@
-// Proofs for spec/app/account/plan.md.
-
 lemma checked_ensures(p: Plan, ticket: int, answer: Verified, signIn: int, now: int)
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> alwaysExpiryIsHonest(checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> alwaysGraceIsBoundToASignInsRecordAndKeptOnlyOffline(checked(p, ticket, answer, signIn, now).state))
@@ -9,8 +7,8 @@ lemma checked_ensures(p: Plan, ticket: int, answer: Verified, signIn: int, now: 
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepANewSignInStartsFromNothing(p, "checked", checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepARefusalIsNeverUpgradedByTheRecord(p, checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepARefusedSignInIsEnded(p, checked(p, ticket, answer, signIn, now).state, checked(p, ticket, answer, signIn, now).out))
-  ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepOnlyCloudsAnswerWritesTheRecord(p, "checked", checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepOnlyCloudsAnswerTurnsAiOn(p, "checked", checked(p, ticket, answer, signIn, now).state))
+  ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepOnlyCloudsAnswerWritesTheRecord(p, "checked", checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepUsageIsOnlyWhatCloudReported(p, "checked", checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepAutomaticChecksAreAMinuteApart(p, "checked", checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> stepReconnectingChecksOnceForEachReturn(p, "checked", checked(p, ticket, answer, signIn, now).state, checked(p, ticket, answer, signIn, now).out))

@@ -63,7 +63,8 @@ effect function read(ticket: number, account: number, message: number, position:
     }
     return undefined
   }
-  const found = place === "SelectedMessage" || anchor === undefined
+  const authoritative = place === "SelectedMessage" || anchor === undefined
+  const found = authoritative
     ? (Effect.map(effect { return (try prepared) ?? (try body(account, message)) }, (loaded) => ({ body: loaded, position: 0, thread: 1 })) catch (cause) => faultOf(cause))
     : (threadMessage(account, anchor, position, place) catch (cause) => threadFault(cause))
   const mailbox = try list.get()
@@ -71,7 +72,7 @@ effect function read(ticket: number, account: number, message: number, position:
   const access = accessOf(mailbox, account)
   if (typeof found === "string") return failedRead(ticket, access, found)
   const number = try ledger.remember(account, found.body.message)
-  ledger.read(ticket, found.body)
+  ledger.read(ticket, found.body, authoritative)
   return {
     type: "loaded", ticket, access, ok: true, fault: "Fine", revision: revisionOf(found.body.message),
     message: number, position: found.position, thread: found.thread,
@@ -245,7 +246,7 @@ const openedUnread = started(effect {
     const current = try view.get()
     const body = ledger.body(state.body.ticket)
     if (current.body.ticket !== state.body.ticket || current.body.status !== "Loaded" || mailbox.selected.account !== state.account || body === undefined) return
-    try ignore(forkChild(ledger.keepBody(mailbox, body)))
+    if (ledger.authoritative(state.body.ticket)) try ignore(forkChild(ledger.keepBody(mailbox, body)))
     if (!body.message.isUnread) return
     try ignore(marks.send({
       type: "openedUnread", access: accessOf(mailbox, state.account), account: state.account, message: state.message,

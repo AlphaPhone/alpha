@@ -251,7 +251,8 @@ const ownerFence = started(effect {
       if (!(try current(session))) return
       published = session
     }
-    if (session === null) return
+    const host = life.status() catch () => undefined
+    if (session === null || !host?.available || host.state !== "running") return
     const offered = workflowApprovalOffers(request) catch () => undefined
     if (offered === undefined) return
     const now = try time.now()

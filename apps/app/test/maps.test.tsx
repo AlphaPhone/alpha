@@ -19,23 +19,23 @@ afterEach(closeAll);
 const withMaps = only("home", "view:Maps");
 
 /** `until`, failing with the last state it saw when that state does not come within ten seconds. */
-const until: typeof reached = async (alpha, runtime, key, ok) => {
+const until: typeof reached = (alpha, runtime, key, ok) => {
   let last: unknown;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_, fail) => { timer = setTimeout(() => fail(new Error(`not reached; last state: ${JSON.stringify(last)?.slice(0, 4000)}`)), 10_000); });
-  try {
-    await Promise.race([reached(alpha, runtime, key, (state) => { last = state; return ok(state); }), late]);
-  } finally {
-    clearTimeout(timer);
-  }
+  return Effect.runPromise(Effect.raceFirst(
+    Effect.tryPromise(() => reached(alpha, runtime, key, (state) => { last = state; return ok(state); })),
+    Effect.andThen(Effect.sleep("10 seconds"), Effect.suspend(() => Effect.fail(new Error(`not reached; last state: ${JSON.stringify(last)?.slice(0, 4000)}`)))),
+  ));
 };
 
 /** Press Enter in the field whose accessible name is `name`. */
-const enter = (name: string) => act(async () => {
-  const field = [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name);
-  if (!field?.form) throw new Error(`no form around ${name}`);
-  field.form.requestSubmit();
-});
+const enter = (name: string) => {
+  act(() => {
+    const field = [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name);
+    if (!field?.form) throw new Error(`no form around ${name}`);
+    field.form.requestSubmit();
+  });
+  return Promise.resolve();
+};
 
 /** Open Maps from the shell, as Home's tile or the agent does. */
 const showMaps = (alpha: Alpha) => act(async () => {
@@ -49,7 +49,7 @@ async function onMaps(world: ReturnType<typeof scene>) {
 }
 
 async function typeMapSearch(text: string) {
-  await act(async () => { document.querySelector<HTMLInputElement>('input[aria-label="Search Maps"]')?.focus(); });
+  act(() => { document.querySelector<HTMLInputElement>('input[aria-label="Search Maps"]')?.focus(); });
   await fill("Search Maps", text);
 }
 
@@ -172,7 +172,7 @@ describe("Maps on a phone", () => {
     expect(heard.spoken).toEqual(["Head north", "Head north"]);
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("notification"); });
+    act(() => { world.maps.guidance.stop?.("notification"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "StoppedFromNotification" && s.link.locator === "Nobody");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);
@@ -183,7 +183,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.trip.service === "Running" && s.guideNotice === "Quiet");
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("task-removed"); });
+    act(() => { world.maps.guidance.stop?.("task-removed"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "PausedAway");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);

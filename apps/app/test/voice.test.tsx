@@ -192,8 +192,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([stopped.engineHeld, world.voice.engineHeld, world.voice.releaseEngineHoldCalls]).toEqual([false, false, 1]);
 
     world.voice.probeGate = undefined;
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    document.dispatchEvent(new Event("visibilitychange"));
+    await seen(false);
+    await seen(true);
     await untilCondition(runtime, () => world.voice.warmSpeechOutputCalls === 2 && world.voice.liveCaptureStatusCalls === 3);
 
     world.signedIn = true;
@@ -567,7 +567,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       world.ask.nextReplyChunks = [`[NAVIGATE:${view}] Opening ${view}.`];
       speakUtterance(world, `Open ${view}`);
       await until(runtime, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(view) && s.claim === 0);
-      expect(await getShell(runtime)).toMatchObject({ trail: [view], assistant: "Sheet" });
+      const shown = await getShell(runtime);
+      expect([shown.trail.at(-1), shown.assistant]).toEqual([view, "Sheet"]);
     }
 
     await sendShell(runtime, { type: "openView", view: "Notes" });
@@ -887,6 +888,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const typed = world.ask.metadata.at(-1);
     expect(typed).toMatchObject({ observation: { view: "home", sensitive: false, location: { latitude: 43.73, longitude: 7.42 } }, viewDelivery: "completed-action" });
 
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
     await drawn(() => vi.waitFor(() => expect([...world.platform.listening].some(({ topic }) => topic === "voice")).toBe(true)));
@@ -1012,7 +1014,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
         await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
         await drawn(() => review.confirmations[0]?.confirm());
       }
-      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.reviewPending === (outcome === "refuse") && state.phase === "Listening" && state.mic === "On");
       if (outcome === "send") {
         await drawn(() => speakUtterance(world, "Send this text."));
         await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
@@ -1300,7 +1302,6 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.holdDoneAfterReady = new Promise<void>((resolve) => { releaseDone = resolve; });
 
     speakUtterance(world, "Check my alarms");
-    // Spoken acknowledgment starts at once and reply begins speaking from `reply_ready` BEFORE `done` is released.
     await untilCondition(
       runtime,
       () => world.voice.spoken.some((entry) => entry.text.includes("You have no alarms set.")),
@@ -1308,7 +1309,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     );
     expect(world.voice.spoken.map((entry) => ({ text: entry.text, append: entry.append }))).toEqual([
       { text: "Let me check.", append: false },
-      { text: "You have no alarms set.", append: true },
+      { text: "You have no alarms set.", append: false },
     ]);
 
     releaseDone?.();

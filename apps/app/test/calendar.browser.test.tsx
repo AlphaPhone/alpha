@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { Machine as View } from "../gen/app__calendar.effect.vibe";
@@ -30,7 +31,7 @@ it("Opens timed and all-day events in another column when the selected day is em
   await page.viewport(1280, 800);
   const { alpha } = await open(world, only("view:Calendar"));
   const view = calendar.runtime(alpha);
-  const current = () => view.runPromise(View.use((machine) => machine.get()));
+  const current = () => view.runPromise(Effect.flatMap(View, (machine) => machine.get()));
   await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
   await until(alpha, view, View, (state) => state.wide && state.phone.status === "Loaded" && state.phoneRows === 0);
   const before = await current();

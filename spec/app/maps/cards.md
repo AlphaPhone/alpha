@@ -120,3 +120,14 @@ pure def alwaysDeliveredStaysAnswered(s: ChatCards): bool = s.delivered.every(m 
 pure def sometimesAnsweredOnce(s: ChatCards): bool = s.delivered.length() >= 1
 pure def sometimesDraftBlocked(s: ChatCards): bool = s.notice == DraftOpen
 ```
+
+### A message in flight has not been delivered yet
+
+Discovered by the proof: without stating that a message in flight is not
+already delivered, settling a send could deliver the same message twice or
+drop a delivered message from those answered.
+
+```quint
+pure def alwaysInFlightHasNotBeenDelivered(s: ChatCards): bool =
+  s.inflight.every(m => not(s.delivered.includes(m)))
+```

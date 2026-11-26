@@ -6,7 +6,7 @@ import {
 } from "@repo/ui";
 import type { MailCard, MailMessage } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Folder, type Mailbox, accessOf, readable, searchableIn, showsAttachment } from "../../gen/app__inbox.ts";
 import type { Machine as List } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useList } from "../../gen/app__inbox.react.ts";
@@ -225,6 +225,9 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const remote = useRemote(runtime);
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const mail = runtime.runSync(Mail);
+  const subscribeSaved = useCallback((listener: () => void) => mail.subscribeSavedBodies(listener), [mail]);
+  const savedVersion = useCallback(() => mail.savedBodiesVersion(), [mail]);
+  useSyncExternalStore(subscribeSaved, savedVersion, savedVersion);
   const read = state ? mail.body(state.body.ticket) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
@@ -390,22 +393,22 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const readerOpen = !composingNow && openMessage !== 0;
   const split = readerOpen && canvas?.split === true;
   const covered = composingNow || (readerOpen && !split);
-  const lastPane = useRef<"list" | "reader">(undefined);
-  const openingRow = useRef<number>(undefined);
-  const wasReading = useRef(false);
+  const lastPaneRef = useRef<"list" | "reader">(undefined);
+  const openingRowRef = useRef<number>(undefined);
+  const wasReadingRef = useRef(false);
   const listPane = useCallback((pane: HTMLDivElement | null) => {
-    if (!pane || readerOpen || covered || !wasReading.current) return;
-    wasReading.current = false;
+    if (!pane || readerOpen || covered || !wasReadingRef.current) return;
+    wasReadingRef.current = false;
     const focused = document.activeElement;
     if (focused !== document.body && !focused?.closest('[data-alpha-subview="inbox-detail"]')) return;
-    const row = openingRow.current === undefined ? null : pane.querySelector<HTMLButtonElement>(`[data-inbox-row="${openingRow.current}"] button`);
+    const row = openingRowRef.current === undefined ? null : pane.querySelector<HTMLButtonElement>(`[data-inbox-row="${openingRowRef.current}"] button`);
     (row ?? pane).focus({ preventScroll: true });
   }, [covered, readerOpen]);
   const readerPane = useCallback((pane: HTMLDivElement | null) => {
     if (!pane) return;
-    wasReading.current = true;
+    wasReadingRef.current = true;
     const focused = document.activeElement;
-    if (!split && lastPane.current === "list" && (focused === document.body || focused?.closest('[data-alpha-subview="inbox-list"]'))) {
+    if (!split && lastPaneRef.current === "list" && (focused === document.body || focused?.closest('[data-alpha-subview="inbox-list"]'))) {
       pane.focus({ preventScroll: true });
     }
   }, [split]);
@@ -465,7 +468,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       subject: card.subject || "(no subject)", snippet: card.snippet,
       time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: showsAttachment(card.hasAttachments === true), chosen, selecting, current: openMessage === number,
       onOpen: editing ?? (opening ? () => {
-        openingRow.current = number;
+        openingRowRef.current = number;
         void message.send(opening);
       } : undefined),
       onChosenChange: selecting && can(toggle) ? () => void send(toggle) : undefined,
@@ -528,7 +531,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
     <>
       <div className="flex h-full min-h-0 min-w-0">
         <div ref={listPane} data-alpha-subview="inbox-list" tabIndex={-1} inert={covered}
-          onFocusCapture={() => { lastPane.current = "list"; }}
+          onFocusCapture={() => { lastPaneRef.current = "list"; }}
           className={covered ? "hidden" : split ? "h-full w-[clamp(300px,36%,400px)] shrink-0 border-r border-border" : "min-h-0 min-w-0 flex-1"}>
         <InboxListScreen
           onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined}
@@ -601,7 +604,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         />
         </div>
         {readerOpen ? <div ref={readerPane} data-alpha-subview="inbox-detail" tabIndex={-1}
-          onFocusCapture={() => { lastPane.current = "reader"; }} className="min-h-0 min-w-0 flex-1">
+          onFocusCapture={() => { lastPaneRef.current = "reader"; }} className="min-h-0 min-w-0 flex-1">
           <Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />
         </div> : null}
         {composingNow ? <div data-alpha-subview="inbox-composing" className="min-h-0 min-w-0 flex-1"><Compose runtime={runtime} list={state} /></div> : null}

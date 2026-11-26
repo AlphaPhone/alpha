@@ -42,9 +42,9 @@ import type { Agent } from "../platform/agent.vibe";
 import type { Device } from "../platform/device.vibe";
 import type { NoteStore } from "../platform/notes.vibe";
 import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
-import { Documents } from "../platform/documents.vibe";
+import type { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
-import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, upPickerFolder, usePickerVolume } from "./attachment-picker.vibe";
+import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
 import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
 import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
@@ -55,7 +55,7 @@ import { ReplyFailure } from "./ReplyFailure.tsx";
 import {
   actionsOf, actionUnits, type RecordingSummary, reviewRecordingSummary, saveRecordingSummary, summaryActions, summaryUnits,
 } from "./recording-summary.vibe";
-import { type Attached, type Line, Talk } from "./talk.vibe";
+import { type Attached, type Board, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
@@ -222,7 +222,7 @@ function AssistantAttachments({ runtime, attachments, preview, notice, composerR
     onUp: view.location.up ? () => void runtime.runPromise(upPickerFolder(state.visit)) : undefined,
     volumes: view.volumes.length > 1 ? view.volumes.map((volume) => ({
       id: volume.id, name: volume.name, selected: view.location?.volume === volume.id,
-      onPress: () => void runtime.runPromise(usePickerVolume(volume.id, state.visit)),
+      onPress: () => void runtime.runPromise(selectPickerVolume(volume.id, state.visit)),
     })) : undefined,
   } : undefined;
   return (
@@ -287,9 +287,9 @@ function MailReviewDialogs({ open, review, attach, dismiss }: MailReviewDialogsP
 // spec/app/assistant/cards.md, "The owner reviews the summary before it can be saved"
 function RecordingSummaryReview({ runtime, offer }: { runtime: AssistantProps["runtime"]; offer: RecordingSummary }) {
   const card = useCards(offer.runtime);
-  const form = useId();
-  const heading = useId();
-  const actionItems = useId();
+  const formId = useId();
+  const headingId = useId();
+  const actionItemsId = useId();
   const dismiss = { type: "dismissSummary" } as const;
   const dismissReview = () => { if (card.can(dismiss)) void card.send(dismiss); };
   const outcome = card.state?.save.outcome;
@@ -333,17 +333,17 @@ function RecordingSummaryReview({ runtime, offer }: { runtime: AssistantProps["r
     <Sheet open={card.state?.reviewing === true} onOpenChange={(open) => { if (!open) dismissReview(); }}>
       <SheetContent title="Review recording summary" description={offer.source.title} actions={<>
         <Button variant="secondary" onClick={dismissReview}>Cancel</Button>
-        <Button type="submit" form={form} disabled={!card.can({ type: "saveToNotes" })}>Save recording summary</Button>
+        <Button type="submit" form={formId} disabled={!card.can({ type: "saveToNotes" })}>Save recording summary</Button>
       </>}>
-        <form id={form} onSubmit={submit} className="grid gap-3">
-          <label htmlFor={heading} className="grid gap-1.5 text-sm font-medium">
+        <form id={formId} onSubmit={submit} className="grid gap-3">
+          <label htmlFor={headingId} className="grid gap-1.5 text-sm font-medium">
             Summary
-            <Textarea id={heading} aria-label="Summary" name="summary" defaultValue={offer.words} maxLength={summaryUnits} required
+            <Textarea id={headingId} aria-label="Summary" name="summary" defaultValue={offer.words} maxLength={summaryUnits} required
               onInput={(event) => event.currentTarget.setCustomValidity("")} />
           </label>
-          <label htmlFor={actionItems} className="grid gap-1.5 text-sm font-medium">
+          <label htmlFor={actionItemsId} className="grid gap-1.5 text-sm font-medium">
             Action items
-            <Textarea id={actionItems} aria-label="Action items" name="actions" placeholder="One action per line" maxLength={summaryActions * (actionUnits + 1)}
+            <Textarea id={actionItemsId} aria-label="Action items" name="actions" placeholder="One action per line" maxLength={summaryActions * (actionUnits + 1)}
               onInput={(event) => event.currentTarget.setCustomValidity("")} />
           </label>
         </form>
@@ -459,6 +459,180 @@ function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
   return held._tag === "Success" ? held.value : undefined;
 }
 
+function dockBarDrag(dock: DockHandleProps["dock"], detent: DockHandleProps["detent"]) {
+  return {
+    onStart: () => {
+      void dock.send({ type: "press", detent, now: untimed });
+      void dock.send({ type: "drag" });
+    },
+    onRelease: ({ direction, flick, y }: { direction: "up" | "down"; flick: boolean; y: number }) => {
+      const height = Math.max(0, Math.round(window.innerHeight - y));
+      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+    },
+    onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
+  };
+}
+
+function useMailReview(
+  runtime: AssistantProps["runtime"],
+  mail: MailQuestions.Shape,
+  composer: ReturnType<typeof useComposer>,
+  board: Board,
+  focusComposer: () => void,
+) {
+  const acceptingMailRef = useRef<MailQuestion | undefined>(undefined);
+  return {
+    attachMail: (offeredAt: number, type: (text: string) => void) => {
+      const question = mail.snapshot().question;
+      const offer = { type: "offer", kind: "Mail", revision: offeredAt + 1 } as const;
+      if (!question || acceptingMailRef.current || !composer.can(offer)) return;
+      acceptingMailRef.current = question;
+      void (async () => {
+        const accepted = await runtime.runPromise(acceptMailReview(question));
+        if (mail.snapshot().question !== question) return;
+        if (!accepted || !composer.can(offer)) {
+          mail.show({ failure: "changed" });
+          return;
+        }
+        const outcome = await composer.send(offer);
+        if (outcome._tag !== "Success" || mail.snapshot().question !== question) return;
+        mail.attach(question);
+        if (!board.snapshot().typed.trim()) type("Summarize this email");
+        focusComposer();
+      })().finally(() => {
+        acceptingMailRef.current = undefined;
+      });
+    },
+    dismissMail: () => {
+      if (acceptingMailRef.current) return;
+      const notice = mail.snapshot().question?.notice;
+      mail.show({});
+      if (notice) void runtime.runPromise(notice.dismiss());
+    },
+  };
+}
+
+// spec/app/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"
+function useChooseCardAnswer(board: Board, composer: ReturnType<typeof useComposer>, talking: Talking | undefined) {
+  const answeredRef = useRef(new Set<string>());
+  const canSend = composer.can;
+  const sendEvent = composer.send;
+  const hasConversation = talking !== undefined;
+  const ready = talking !== undefined && askable(talking);
+  return useCallback((choice: string, value: string) => {
+    if (!hasConversation || answeredRef.current.has(choice) || board.snapshot().typed.trim() !== "") return;
+    const edit = { type: "edit", blank: false, long: value.length > textLimit } as const;
+    if (!canSend(edit)) return;
+    answeredRef.current.add(choice);
+    board.type(value);
+    const answer = { type: "hold", askable: ready } as const;
+    void sendEvent(edit)
+      .then(() => {
+        board.hold(value);
+        board.type("");
+        return sendEvent(answer);
+      })
+      .then((outcome) => { if (outcome._tag !== "Success") answeredRef.current.delete(choice); });
+  }, [board, canSend, hasConversation, ready, sendEvent]);
+}
+
+function liveTranscriptMessages({
+  runtime, seen, talking, chosen, lines, draftCards, onOpenLink, onRetry, onSettings,
+}: {
+  runtime: AssistantProps["runtime"];
+  seen: ReturnType<Board["snapshot"]>;
+  talking: Talking;
+  chosen: number;
+  lines: readonly Line[];
+  draftCards: (AssistantMessageProps & { id: string })[];
+  onOpenLink: ((href: string) => void) | undefined;
+  onRetry: () => void;
+  onSettings: (() => void) | undefined;
+}): (AssistantMessageProps & { id: string })[] {
+  const replyWords = replyBlocks(seen.reply, true).words;
+  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha" as const, text: replyWords, streaming: true, onOpenLink }] : [];
+  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === chosen && card.revision === talking.context.revision).map((card) => ({
+    id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
+  }));
+  const offer = seen.recordingSummary;
+  const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === chosen
+    && lines.some((line) => !line.mine && line.id === offer.message)
+    ? [{ id: `recording summary ${offer.message}`, author: "alpha" as const, text: "",
+      children: <RecordingSummaryReview runtime={runtime} offer={offer} /> }] : [];
+  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== chosen
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
+  const failure = seen.failure;
+  const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
+  const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
+  const failed = failure === undefined || (readAgain && !liveAddsToHistory(failure.kind, liveFix, failure.waitMs)) ? [] : [{
+    id: "failure", author: "alpha" as const, text: "",
+    children: <ReplyFailure kind={failure.kind} fix={liveFix} waitMs={failure.waitMs} cutOff={failure.cutOff} live onRetry={onRetry} onSettings={onSettings} />,
+  }];
+  return [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary];
+}
+
+function composerNoticeProps({
+  notice, onComms, seen, writing, composer, conversation, board, check,
+}: {
+  notice: AssistantDraftNoticeProps["status"] | undefined;
+  onComms: boolean;
+  seen: ReturnType<Board["snapshot"]>;
+  writing: Writing;
+  composer: ReturnType<typeof useComposer>;
+  conversation: ReturnType<typeof useConversation>;
+  board: Board;
+  check: { readonly type: "checkForReply" };
+}): AssistantDraftNoticeProps | undefined {
+  if (notice === undefined || onComms) return undefined;
+  return {
+    status: notice,
+    saved: seen.saved,
+    onRetry: composer.can({ type: "retry" }) ? () => void composer.send({ type: "retry" }) : undefined,
+    onRecover: composer.can({ type: "recover" }) ? () => void composer.send({ type: "recover" }) : undefined,
+    onReopen: composer.can({ type: "open" }) ? () => void composer.send({ type: "open" }) : undefined,
+    onRestoreSaved: composer.can({ type: "restoreSaved" }) ? () => {
+      board.type(writing.unsettled || seen.typed === "" ? seen.saved : `${seen.saved}\n${seen.typed}`);
+      void composer.send({ type: "restoreSaved" });
+    } : undefined,
+    onKeepCurrent: composer.can({ type: "replaceSaved" }) ? () => void composer.send({ type: "replaceSaved" }) : undefined,
+    onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
+  };
+}
+
+function removeComposerAttachment(
+  id: string,
+  runtime: AssistantProps["runtime"],
+  composer: ReturnType<typeof useComposer>,
+  mail: MailQuestions.Shape,
+) {
+  if (id === "question") void composer.send({ type: "removeQuestion" });
+  else if (id === "transcript") {
+    if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
+  } else if (id === "mail" || id === "shown") {
+    if (id === "mail") mail.clear();
+    void composer.send({ type: "detach", kind: detached[id] });
+  } else void runtime.runPromise(removeFile(id));
+}
+
+function openComposerPicker(
+  runtime: AssistantProps["runtime"],
+  writing: Writing,
+  talking: Talking,
+  attachments: ReturnType<typeof useAttachments>,
+  board: Board,
+) {
+  const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
+  if (!attachments.can(request)) return;
+  void runtime.runPromise(attachmentAuthority()).then((authority) => {
+    if (authority === undefined) {
+      board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
+      return;
+    }
+    void runtime.runPromise(openAttachmentPicker({ binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision, authority }, request.room));
+  });
+}
+
 /** @model spec/app/assistant/index.md */
 export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onCloseTextAsk }: AssistantProps) {
   const conversation = useConversation(runtime);
@@ -476,10 +650,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mail = useMemo(() => runtime.runSync(MailQuestions), [runtime]);
   const reviewed = useExternal(mail);
   const draftCards = useMessagingDrafts(runtime, shell);
-  const acceptingMail = useRef<MailQuestion | undefined>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
+  const { attachMail, dismissMail } = useMailReview(runtime, mail, composer, board, () => composerRef.current?.focus());
   const { voice: renderVoice, voicePanel: renderDictation, interim, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
   const { onKeyboard, onDictationKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
@@ -531,23 +705,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps)));
   }, [runtime]);
   const mapsShowing = Boolean(shell.state && showing(shell.state, "Maps"));
-  // spec/app/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"
-  const answeredRef = useRef(new Set<string>());
-  const onChoose = useCallback((choice: string, value: string) => {
-    if (!talking || answeredRef.current.has(choice) || board.snapshot().typed.trim() !== "") return;
-    const edit = { type: "edit", blank: false, long: value.length > textLimit } as const;
-    if (!composer.can(edit)) return;
-    answeredRef.current.add(choice);
-    board.type(value);
-    const answer = { type: "hold", askable: askable(talking) } as const;
-    void composer.send(edit)
-      .then(() => {
-        board.hold(value);
-        board.type("");
-        return composer.send(answer);
-      })
-      .then((outcome) => { if (outcome._tag !== "Success") answeredRef.current.delete(choice); });
-  }, [board, composer, talking]);
+  const onChoose = useChooseCardAnswer(board, composer, talking);
   const messages = useMessageRows({
     runtime, board, lines, chats: shown, writing, ...free, actions: messageActions, canReadAloud,
     settled: Boolean(talking && !inFlight(talking.turn) && !pending(talking)),
@@ -576,7 +734,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
   const transcriptTitle = sameBinding(seen.transcript?.binding, writing.binding) ? seen.transcript?.offered.title : undefined;
   const previewed = seen.preview?.ticket === attachments.state?.preview ? seen.preview?.file : undefined;
-
   const type = (text: string) => {
     if (subject !== undefined) {
       void comms.send({ type: "requestTyped", about: subject, request: text }, "Owner");
@@ -585,43 +742,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     board.type(text);
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
   };
-  const attachMail = () => {
-    const question = mail.snapshot().question;
-    const offer = { type: "offer", kind: "Mail", revision: writing.offeredAt + 1 } as const;
-    if (!question || acceptingMail.current || !composer.can(offer)) return;
-    acceptingMail.current = question;
-    void (async () => {
-      const accepted = await runtime.runPromise(acceptMailReview(question));
-      if (mail.snapshot().question !== question) return;
-      if (!accepted || !composer.can(offer)) {
-        mail.show({ failure: "changed" });
-        return;
-      }
-      const outcome = await composer.send(offer);
-      if (outcome._tag !== "Success" || mail.snapshot().question !== question) return;
-      mail.attach(question);
-      if (!board.snapshot().typed.trim()) type("Summarize this email");
-      composerRef.current?.focus();
-    })().finally(() => {
-      acceptingMail.current = undefined;
-    });
-  };
-  const dismissMail = () => {
-    if (acceptingMail.current) return;
-    const notice = mail.snapshot().question?.notice;
-    mail.show({});
-    if (notice) void runtime.runPromise(notice.dismiss());
-  };
   const send = () => {
-    if (subject !== undefined) {
-      void runtime.runPromise(askComms({ about: subject, text: request }));
-      return;
-    }
-    if (newChat) {
-      board.queueSend();
-      void chats.send(start);
-      return;
-    }
+    if (subject !== undefined) { void runtime.runPromise(askComms({ about: subject, text: request })); return; }
+    if (newChat) { board.queueSend(); void chats.send(start); return; }
     board.hold(seen.typed);
     board.type("");
     void composer.send(hold);
@@ -631,24 +754,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const later = page?.bounds?.later;
   const readEarlier = { type: "scroll", around: board.numbered(earlier ?? "") } as const;
   const readLater = { type: "scroll", around: board.numbered(later ?? "") } as const;
-  const replyWords = replyBlocks(seen.reply, true).words;
-  const onOpenLink = messageActions?.openLink;
-  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
-  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
-  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
-    id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
-  }));
-  const offer = seen.recordingSummary;
-  const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
-    && lines.some((line) => !line.mine && line.id === offer.message)
-    ? [{ id: `recording summary ${offer.message}`, author: "alpha" as const, text: "",
-      children: <RecordingSummaryReview runtime={runtime} offer={offer} /> }] : [];
-  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
-    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
-  const failure = seen.failure;
-  const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
-  const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
-  const failed = failure === undefined || (readAgain && !liveAddsToHistory(failure.kind, liveFix, failure.waitMs)) ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure kind={failure.kind} fix={liveFix} waitMs={failure.waitMs} cutOff={failure.cutOff} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
+  const liveMessages = liveTranscriptMessages({
+    runtime, seen, talking, chosen: shown.chosen, lines, draftCards,
+    onOpenLink: messageActions?.openLink, onRetry: () => type(board.lastSent), onSettings: settingsAction ? onSettings : undefined,
+  });
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
@@ -682,17 +791,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         ref={sectionRef}
         voicePanel={voicePanel}
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
-        barDrag={shell.state ? {
-          onStart: () => {
-            void dock.send({ type: "press", detent: assistantDetent, now: untimed });
-            void dock.send({ type: "drag" });
-          },
-          onRelease: ({ direction, flick, y }) => {
-            const height = Math.max(0, Math.round(window.innerHeight - y));
-            void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-          },
-          onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
-        } : undefined}
+        barDrag={shell.state ? dockBarDrag(dock, assistantDetent) : undefined}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
           ? live ? { height: following, transition: "none" } : assistantDetent === "Full" ? { height: "calc(100dvh - 52px)" } : keptHeight === undefined ? undefined : { height: `clamp(38dvh, ${keptHeight}px, 60dvh)` }
@@ -715,7 +814,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           messages,
           holdMessage: open ? holdMessage : undefined,
           briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} />,
-          liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
+          liveMessages,
           interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
           visible: open,
@@ -730,62 +829,28 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           ...speechProps,
           ...(live && !open ? { variant: "bar" as const } : {}),
           voice: voicePanel ?? renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
-          onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
-            openWithFocus(false);
-            speech.onDictate?.();
-          },
+          onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => { openWithFocus(false); speech.onDictate?.(); },
           fieldRef: composerField,
-          fieldPull: pullFromField ? {
-            ...dockPull(dock, assistantDetent),
-            onLift: () => { void dock.send({ type: "fieldLift", now: untimed }); },
-          } : undefined,
+          fieldPull: pullFromField ? { ...dockPull(dock, assistantDetent), onLift: () => { void dock.send({ type: "fieldLift", now: untimed }); } } : undefined,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
           placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !draftEditable,
-          notice: notice === undefined || onComms ? undefined : {
-            status: notice,
-            saved: seen.saved,
-            onRetry: composer.can({ type: "retry" }) ? () => void composer.send({ type: "retry" }) : undefined,
-            onRecover: composer.can({ type: "recover" }) ? () => void composer.send({ type: "recover" }) : undefined,
-            onReopen: composer.can({ type: "open" }) ? () => void composer.send({ type: "open" }) : undefined,
-            onRestoreSaved: composer.can({ type: "restoreSaved" }) ? () => {
-              board.type(writing.unsettled || seen.typed === "" ? seen.saved : `${seen.saved}\n${seen.typed}`);
-              void composer.send({ type: "restoreSaved" });
-            } : undefined,
-            onKeepCurrent: composer.can({ type: "replaceSaved" }) ? () => void composer.send({ type: "replaceSaved" }) : undefined,
-            onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
-          },
+          notice: composerNoticeProps({ notice, onComms, seen, writing, composer, conversation, board, check }),
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
           attachments: onComms ? undefined : waiting(writing, draftFiles, transcriptTitle),
-          onPreviewAttachment: !onComms && canPreview ? (id) => {
-            const file = draftFiles.find((one) => one.id === id);
-            if (file) preview(file);
-          } : undefined,
+          onPreviewAttachment: !onComms && canPreview ? (id) => { const file = draftFiles.find((one) => one.id === id); if (file) preview(file); } : undefined,
           quote: onComms ? undefined : quoted,
           editing: !onComms && writing.editor.editing > 0,
           opener: !open ? grabber : undefined,
           onOpen: !open && !grabber ? () => openWithFocus(!compact) : undefined,
           onType: compact ? revealComposer : undefined,
           onSwipeUp: compact ? () => openWithFocus(false) : undefined,
-          onSend: sendable && !inFlight(talking.turn) ? () => {
-            if (assistantDetent === "Typing") openWithFocus(false);
-            send();
-          } : undefined,
+          onSend: sendable && !inFlight(talking.turn) ? () => { if (assistantDetent === "Typing") openWithFocus(false); send(); } : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
-          onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
-            if (!attachments.can(request)) return;
-            void runtime.runPromise(attachmentAuthority()).then((authority) => {
-              if (authority === undefined) {
-                board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
-                return;
-              }
-              void runtime.runPromise(openAttachmentPicker({ binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision, authority }, request.room));
-            });
-          } : undefined,
+          onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => openComposerPicker(runtime, writing, talking, attachments, board) : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onBlur: assistantDetent === "Typing" && !onComms ? (event) => {
             const next = event.relatedTarget;
@@ -800,20 +865,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             if (!(event.target instanceof Element) || !event.currentTarget.contains(event.target) || event.target.closest("button, textarea")) return;
             openWithFocus(true);
           } : undefined,
-          onRemoveAttachment: (id) => {
-            if (id === "question") void composer.send({ type: "removeQuestion" });
-            else if (id === "transcript") {
-              if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
-            } else if (id === "mail" || id === "shown") {
-              if (id === "mail") mail.clear();
-              void composer.send({ type: "detach", kind: detached[id] });
-            } else void runtime.runPromise(removeFile(id));
-          },
+          onRemoveAttachment: (id) => removeComposerAttachment(id, runtime, composer, mail),
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
           onStopEditing: composer.can({ type: "stopEditing" }) ? () => void composer.send({ type: "stopEditing" }) : undefined,
         }}
       />}
-      <MailReviewDialogs open={!onComms && open} review={reviewed} attach={attachMail} dismiss={dismissMail} />
+      <MailReviewDialogs open={!onComms && open} review={reviewed} attach={() => attachMail(writing.offeredAt, type)} dismiss={dismissMail} />
       {history.sheets}
     </>
   );

@@ -61,6 +61,8 @@ pure def forgotten(showing: bool, s: Carrier): Carrier =
 
 ### Opening the page reads nothing; leaving it, the phone locking or Alpha going to the background forgets everything it read, and an answer that comes later is refused
 
+While the page is hidden, no identifier read is in flight.
+
 ```quint
 pure def canShow(s: Carrier): bool = not(s.showing)
 
@@ -69,6 +71,8 @@ pure def show(s: Carrier): Carrier = forgotten(true, s)
 pure def canHideCarrier(s: Carrier): bool = s.showing
 
 pure def hideCarrier(s: Carrier): Carrier = forgotten(false, s)
+
+pure def alwaysAHiddenPageHasNoReadInFlight(s: Carrier): bool = not(s.showing) implies not(T::busy(s.read))
 ```
 
 ### The identifiers are read only when the owner taps Show identifiers, one read at a time, with ten seconds to answer, and a new read forgets the last

@@ -89,7 +89,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
     return () => { element.pause(); videoRef.current = null; };
   }, []);
   const returnCropFocusRef = useRef(0);
-  const infoButton = useRef<HTMLButtonElement>(null);
+  const infoButtonRef = useRef<HTMLButtonElement>(null);
   const openPhoto = state?.open;
   const previewShowing = state?.preview.showing;
   const cropButton = useCallback((button: HTMLButtonElement | null) => {
@@ -296,16 +296,16 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
         {before !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Previous photo" onClick={() => action({ type: "swipe", neighbour: before })}><ChevronLeft /></Button>}
         {!inTrash && control(state.favourite ? "Remove from favorites" : "Favorite", { type: "toggleFavourite" }, <Heart className={state.favourite ? "fill-current" : undefined} />)}
         {!inTrash && allows({ type: "startEdit" }) && <Button variant="ghost" size="icon" aria-label={state.kind === "Clip" ? "Edit video" : "Edit"} onClick={() => editAction({ type: "startEdit" })}><Pencil /></Button>}
-        {!inTrash && allows({ type: "toggleInfo" }) && <Button ref={infoButton} variant="ghost" size="icon" aria-label={infoLabel}
+        {!inTrash && allows({ type: "toggleInfo" }) && <Button ref={infoButtonRef} variant="ghost" size="icon" aria-label={infoLabel}
           onClick={() => action({ type: "toggleInfo" })}><Info /></Button>}
         {after !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
       </div>}
       <Sheet open={state.info && loadedRow !== undefined} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
         <SheetContent aria-label={infoLabel} title={day} description={date && formatTime.format(date)}
           onCloseAutoFocus={(event) => {
-            if (infoButton.current === null) return;
+            if (infoButtonRef.current === null) return;
             event.preventDefault();
-            infoButton.current.focus({ preventScroll: true });
+            infoButtonRef.current.focus({ preventScroll: true });
           }}>
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
             {facts.map(({ label, value }) => <Fragment key={label}>

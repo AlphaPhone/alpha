@@ -17,7 +17,7 @@ export function takeHandedQuery(): string | undefined {
   return query;
 }
 
-/** The search left for Maps, without taking it. */
+/** The search left for Maps, without taking it. @throws {never} */
 export function handedQuery(): string | undefined {
   return pending;
 }

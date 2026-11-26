@@ -32,7 +32,7 @@ async function showAttachments() {
 }
 
 describe("Ask Alpha dock and shell navigation", () => {
-  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
+  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
     await mountDock({ view: "Home", flush: underAct });
     const file = new File(["notes for the appointment"], "appointment.txt", { type: "text/plain" });
@@ -293,7 +293,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
     });
     const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
-    await act(async () => { textarea?.focus(); });
+    act(() => { textarea?.focus(); });
     const scrim = document.querySelector("[data-alpha-chat-scrim]");
     expect(scrim).not.toBeNull();
     await act(async () => {
@@ -313,7 +313,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
     });
     const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
-    await act(async () => { textarea?.focus(); });
+    act(() => { textarea?.focus(); });
     await act(async () => {
       textarea?.blur();
       await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));

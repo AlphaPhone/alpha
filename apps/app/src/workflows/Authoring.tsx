@@ -1,6 +1,6 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import { Effect } from "effect";
-import { Alert, Button, ConfirmDialog, Input, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Textarea, WorkflowChoice } from "@repo/ui";
+import { Alert, Button, Checkbox, ConfirmDialog, Input, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Textarea, WorkflowChoice } from "@repo/ui";
 import { ListChecks, Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { Machine as BuilderMachine } from "../../gen/app__workflows__builder.effect.vibe";
@@ -102,8 +102,8 @@ function StepInput({ options, prior, notes, calendars, list, calendarAccess, ope
           {rows?.length === 0 && <p className="text-sm text-muted-foreground">{calendar ? "No calendars found" : "No saved notes"}</p>}
           {rows && <div className="max-h-48 overflow-auto">
             {rows.map(({ id, title }) => <label key={id} className="flex min-h-11 items-center gap-3 text-sm">
-              <input type="checkbox" checked={choices.includes(id)} disabled={choices.length >= 16 && !choices.includes(id)}
-                onChange={(event) => setChoices(event.currentTarget.checked ? [...choices, id] : choices.filter((one) => one !== id))} />
+              <Checkbox checked={choices.includes(id)} disabled={choices.length >= 16 && !choices.includes(id)}
+                onCheckedChange={(checked) => setChoices(checked === true ? [...choices, id] : choices.filter((one) => one !== id))} />
               {title || (calendar ? "Unnamed calendar" : "Untitled note")}
             </label>)}
           </div>}

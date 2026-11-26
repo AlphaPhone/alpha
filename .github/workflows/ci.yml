@@ -568,4 +568,4 @@ jobs:
       - name: Run Android JVM unit tests
         timeout-minutes: 15
         working-directory: apps/app/android
-        run: ./gradlew --no-daemon testLauncherDebugUnitTest
+        run: ./gradlew --no-daemon testLauncherDebugUnitTest -PelizaParadeeApiOnly=true -PelizaSpeechBridgeCapacitor=true

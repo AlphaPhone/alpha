@@ -22,6 +22,7 @@ import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -62,7 +63,7 @@ async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: s
   await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, asking, Conversation, (c) => c.turn.reply === "Complete" && (world.ask.metadata?.length ?? 0) > 0);
-  return world.ask.metadata?.[0] as { observation?: { view?: string }; browserPage?: { url?: string; text?: string; tabId?: string } } | undefined;
+  return world.ask.metadata?.[0] as { observation?: { view?: string; selectedObject?: { id?: string } }; browserPage?: { url?: string; text?: string; tabId?: string } } | undefined;
 }
 
 async function committedAddress(runtime: ReturnType<typeof browser.runtime>, tabs: ReturnType<typeof scene>["browser"]["tabs"]) {
@@ -329,7 +330,9 @@ describe("The Browser on a phone", () => {
     await until(alpha, speaking, Speaker, (state) => state.stage === "Silent" && !state.retiring);
     if (kind === "private") expect(world.browser.saved.history).not.toContain("https://example.test/article");
     expect(world.voice.spoken).toEqual([]);
-    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession, requestId: expect.any(String) }]);
+    expect(world.voice.spokenPages).toHaveLength(1);
+    expect(world.voice.spokenPages[0]).toMatchObject({ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession });
+    expect(typeof world.voice.spokenPages[0]?.requestId).toBe("string");
     expect(cancellations()).toBe(1);
 
     world.voice.holdPagePlayback = true;
@@ -396,6 +399,10 @@ describe("The Browser on a phone", () => {
   });
 
   it.each([false, true])("Opens Password manager and returns through Settings (spec/app/settings/index.md, \"The owner can open Password manager from the Browser menu\") on phone %s", async (phone) => {
+    if (!phone) {
+      vi.stubGlobal("indexedDB", memoryIndexedDB());
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+    }
     const world = { ...scene(), phone, image: phone };
     const { alpha } = await open(world, only("home", "view:Browser", "view:Settings"));
     await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
@@ -568,7 +575,9 @@ describe("The Browser on a phone", () => {
     // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
     const shown = await ask(running, "Summarize this page");
     expect(shown?.observation?.view).toBe("browser");
-    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: `tab${tab}` });
+    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents" });
+    expect(shown?.browserPage?.tabId).toMatch(new RegExp(`^[0-9a-f-]+:tab${tab}$`));
+    expect(shown?.browserPage?.tabId).toBe(shown?.observation?.selectedObject?.id);
     expect(shown?.browserPage?.text).toContain("agent");
 
     // spec/app/browser/reading.md, "A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on"

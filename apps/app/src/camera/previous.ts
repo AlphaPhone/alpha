@@ -22,7 +22,7 @@ export function forgetPreviousPendingCopy(token: string): void {
   try {
     if (globalThis.localStorage?.getItem(PREVIOUS_PENDING_COPY) === token) globalThis.localStorage.removeItem(PREVIOUS_PENDING_COPY);
   } catch {
-    // The record stays and is removed on a later start once the phone settles it.
+    return;
   }
 }
 

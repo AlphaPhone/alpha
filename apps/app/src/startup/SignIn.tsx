@@ -1,7 +1,7 @@
 // spec/app/account/signIn.md, "Story: Sign in when Alpha needs it"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { StartupMark, StartupSignIn as SignInScreen } from "@repo/ui";
-import { Effect, Stream } from "effect";
-import { useEffect, useState } from "react";
+import { Effect } from "effect";
+import { useCallback, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__account__signIn.react.ts";
 import type { SignIn as State, Trouble } from "../../gen/app__account__signIn.ts";
 import { Time } from "../runtime/time.vibe";
@@ -26,28 +26,14 @@ const networkMessages: Record<ConnectionWarning, string> = {
   UnvalidatedWithoutWifi: "Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access.",
 };
 
-export function useFirstRun(alpha: Alpha, ready: boolean) {
+const noSubscribe = () => () => {};
+const noRead = () => undefined;
+
+export function useFirstRun(alpha: Alpha, _ready: boolean) {
   const { state: flow } = useMachine(alpha.runtime);
-  const [read, setRead] = useState<FirstRun>();
-  useEffect(() => {
-    if (!alpha.requiresSignIn) return;
-    const watch = alpha.runtime.runFork(StartupSignIn.use((signIn) =>
-      Stream.runForEach(signIn.changes, (value) => Effect.sync(() => setRead(value)))));
-    return () => { watch.interruptUnsafe(); };
-  }, [alpha]);
-  useEffect(() => {
-    if (!alpha.requiresSignIn || !ready) return;
-    const recheck = () => { alpha.runtime.runFork(StartupSignIn.use((signIn) => signIn.check())); };
-    const visible = () => { if (document.visibilityState === "visible") recheck(); };
-    recheck();
-    const events = ["online", "offline", "focus", "pageshow"];
-    for (const event of events) window.addEventListener(event, recheck);
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      for (const event of events) window.removeEventListener(event, recheck);
-      document.removeEventListener("visibilitychange", visible);
-    };
-  }, [alpha, ready]);
+  const service = alpha.requiresSignIn ? alpha.runtime.runSync(StartupSignIn) : undefined;
+  const subscribe = useCallback((listener: () => void) => service ? service.subscribe(listener) : noSubscribe(), [service]);
+  const read = useSyncExternalStore(subscribe, () => service?.snapshot(), noRead);
   return { read, flow };
 }
 
@@ -56,27 +42,20 @@ export function canLeaveSignInStep(read?: FirstRun, state?: State) {
 }
 
 export function SignIn({ alpha, read, state }: { alpha: Alpha; read?: FirstRun; state?: State }) {
-  const clock = () => Math.floor(alpha.runtime.runSync(Time.use((time) => time.latest())) / 1000);
-  const [now, setNow] = useState(0);
-  const deadline = state?.step === "Code" || state?.step === "Second" ? Math.max(state.expiresAt, state.resendAt) : 0;
-  useEffect(() => {
-    if (deadline <= 0) return;
-    const tick = () => { void alpha.runtime.runPromise(Time.use((time) => time.now()))
-      .then((time) => setNow(Math.floor(time / 1000)), () => undefined); };
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, [alpha, deadline]);
+  const service = alpha.runtime.runSync(StartupSignIn);
+  const subscribeClock = useCallback((listener: () => void) => service.subscribeClock(listener), [service]);
+  const now = useSyncExternalStore(subscribeClock, () => service.clockSnapshot(), () => 0);
+  const clock = () => Math.floor(alpha.runtime.runSync(Effect.flatMap(Time, (time) => time.latest())) / 1000);
   if (!read || read.stage === "Checking" || !state) return <StartupMark />;
   const work = (take: (signIn: StartupSignIn.Shape) => Effect.Effect<unknown>) => {
-    alpha.runtime.runFork(StartupSignIn.use(take));
+    alpha.runtime.runFork(Effect.flatMap(StartupSignIn, take));
   };
   const touch = () => work((signIn) => signIn.touch());
   const retry = () => work((signIn) => signIn.check());
   const online = read.connection !== "Offline";
   const connection = read.connection === undefined ? undefined : {
     message: networkMessages[read.connection],
-    onOpen: () => alpha.runtime.runPromise(StartupSignIn.use((signIn) => signIn.openNetwork())),
+    onOpen: () => alpha.runtime.runPromise(Effect.flatMap(StartupSignIn, (signIn) => signIn.openNetwork())),
   };
   if (read.stage === "Unavailable") return (
     <SignInScreen stage="Choose" email={false} phone={false} online={online} connection={connection} message="Sign-in unavailable" onRetry={retry} />

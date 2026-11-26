@@ -211,12 +211,12 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         await voice.recordingStartGate?.();
         return { recordingId };
       },
-      stopRecording: async () => {
+      stopRecording: () => {
         if (voice.refuseRecordingStop) {
           activeRecording = undefined;
-          throw new Error("Recording could not be saved");
+          return Promise.reject(new Error("Recording could not be saved"));
         }
-        return finish();
+        return Promise.resolve(finish());
       },
       dictationForeground: () => Promise.resolve({ available: voice.dictationInFront }),
       cancelRecording: async () => {

@@ -1,6 +1,6 @@
 // spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/network.md, "Story: See whether I am online"; spec/app/settings/carrier.md, "Story: Read what my carrier needs to activate a SIM"
 import { SettingsCarrierPage, type SettingsCarrierField, type SettingsNearbyNetwork, type SettingsNetworkPageProps, SettingsNetworkPage, type SettingsNetworkSecurity } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import * as CarrierGen from "../../gen/app__settings__carrier.ts";
 import { useMachine as useCarrier } from "../../gen/app__settings__carrier.react.ts";
 import type { Machine as CarrierMachine } from "../../gen/app__settings__carrier.effect.vibe";
@@ -43,7 +43,7 @@ const joining = (network: SettingsNearbyNetwork, passphrase: string) =>
 export function Network({ runtime, common }: PhoneProps) {
   const { state, can, send } = useTimed(runtime, useNetwork);
   if (!state) return null;
-  const networks = state.scan === "Found" ? runtime.runSync(Found.use((found) => found.get())) : [];
+  const networks = state.scan === "Found" ? runtime.runSync(Effect.flatMap(Found, (found) => found.get())) : [];
   const rescan = { type: "rescan", at: untimed } as const;
   return (
     <SettingsNetworkPage

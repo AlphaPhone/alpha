@@ -311,7 +311,7 @@ that list is this one, and eliza's route gate admits each of its routes.
 ```quint
 type Method = Get | Post | Put | Patch | Delete
 type Route = { method: Method, path: str, stream: bool }
-pure val pageRoutes: List[Route] = List(
+pure val pageRoutesCore: List[Route] = List(
   { method: Get, path: "/api/health", stream: false },
   { method: Get, path: "/api/status", stream: false },
   { method: Post, path: "/api/conversations", stream: false },
@@ -342,6 +342,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/lifeops/calendar/events", stream: false },
   { method: Patch, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
+)
+pure val pageRoutesApps: List[Route] = List(
   { method: Post, path: "/api/lifeops/calendar/events/{eventId}/response", stream: false },
   { method: Get, path: "/api/lifeops/calendar/sync-control", stream: false },
   { method: Post, path: "/api/lifeops/calendar/sync-control", stream: false },
@@ -373,6 +375,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/alpha/reminders/items/{id}/reopen", stream: false },
   { method: Post, path: "/api/alpha/reminders/items/{id}/snooze", stream: false },
   { method: Post, path: "/api/alpha/reminders/items/{id}/restore", stream: false },
+)
+pure val pageRoutesWorkflows: List[Route] = List(
   { method: Get, path: "/api/auth/me", stream: false },
   { method: Get, path: "/api/workflow/workflows", stream: false },
   { method: Get, path: "/api/workflow/removed-workflows", stream: false },
@@ -403,6 +407,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/workflow/workflows/{id}/run", stream: false },
   { method: Post, path: "/api/workflow/executions/{id}/cancel", stream: false },
   { method: Get, path: "/api/workflow/workflows/{id}/submissions/{submissionId}", stream: false },
+)
+pure val pageRoutesTasksWallet: List[Route] = List(
   { method: Get, path: "/api/workflow/phone/catalog", stream: false },
   { method: Get, path: "/api/workflow/phone/mutations/{mutationId}", stream: false },
   { method: Post, path: "/api/workflow/phone/generate", stream: false },
@@ -431,6 +437,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/wallet/requests/{id}/review", stream: false },
   { method: Post, path: "/api/wallet/requests/{id}/decide", stream: false },
 )
+pure def concatRoutes(a: List[Route], b: List[Route]): List[Route] = a.concat(b)
+pure val pageRoutes: List[Route] = concatRoutes(concatRoutes(pageRoutesCore, pageRoutesApps), concatRoutes(pageRoutesWorkflows, pageRoutesTasksWallet))
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =
   listed.length() == pageRoutes.length() and listed.every(r => pageRoutes.includes(r)) and pageRoutes.every(r => listed.includes(r))
@@ -490,7 +498,15 @@ The page can read pending receipts. It cannot complete them.
 pure val nativeNotesCleanup = "/api/alpha-runtime/notes-recording-cleanup"
 pure val nativeNotesCleanupLimit = 2048
 pure val nativeRecordingRoutes: List[Route] = List({ method: Post, path: nativeNotesCleanup, stream: false })
-pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes).concat(nativeRecordingRoutes)
+pure val nativeRoutes: List[Route] = List(
+  { method: Get, path: "/api/alpha-speech/scope", stream: false },
+  { method: Post, path: "/api/asr/local-inference/live", stream: false },
+  { method: Get, path: nativeDigestScope, stream: false },
+  { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/hosted/results", stream: false },
+  { method: Post, path: nativeDigestAck, stream: false },
+  { method: Post, path: nativeNotesCleanup, stream: false },
+)
 pure def nativeRoutesAdmitted(listed: List[Route]): bool =
   listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
     and nativeRoutes.every(route => listed.includes(route))

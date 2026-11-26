@@ -330,3 +330,11 @@ pure val eval_witness_sometimesPauseConfirmed = (("ownerChanged", 1), ("accountR
 
 pure def sometimesPauseUnknown(s: Link): bool = s.pause == PauseUnknown and s.destination
 ```
+
+### While setup is running it has no ending or pause yet, its counters never go negative, and its reviewed revision starts at none
+
+```quint
+pure def alwaysRunningHasNoEndingOrPause(s: Link): bool =
+  s.reviews >= 0 and s.writes >= 0 and s.linkReads >= 0 and s.seen >= -1
+    and (running(s) implies (s.ending == NoOutcome and s.pause == NoPause))
+```

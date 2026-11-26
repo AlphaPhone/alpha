@@ -71,23 +71,36 @@ const hearingHost = hearing(
   (status) => observed(connection(status)),
 )
 
-const readingJournal = started(effect {
-  const machine = try Activity.Machine
+const activityFront = Stream.unwrap(effect {
   const pages = Stream.map((try Pages.Machine).changes, (state) => state.page === "Activity")
   const device = try Device
   const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
-  const showing = Stream.map(Stream.zipLatest(pages, visible), ([activity, visible]) => activity && visible)
-  try Stream.runForEach(Stream.zipLatest(Stream.changes(showing), machine.changes), effect ([front, state]) => {
-    if (!front) {
-      if (Activity.canLeaveHistory(state)) try contained(machine.send({ type: "leaveHistory" }), "forget the activity journal")
-    } else if (state.connection === "Ready" && state.journal.read.status === "Idle") {
+  return Stream.changes(Stream.map(Stream.zipLatest(pages, visible), ([activity, seen]) => activity && seen))
+})
+
+const leavingJournal = hearing(
+  Stream.filter(activityFront, (front) => !front),
+  Activity.Machine,
+  (): Activity.Event => ({ type: "leaveHistory" }),
+)
+
+const readingJournal = started(effect {
+  const machine = try Activity.Machine
+  const pages = try Pages.Machine
+  const device = try Device
+  const refresh = effect {
+    const state = try machine.get()
+    if ((try pages.get()).page === "Activity" && (try device.showing()) && state.connection === "Ready" && state.journal.read.status === "Idle") {
       try contained(machine.send({ type: "refreshActions", connection: "Ready", at: untimed }), "read the activity journal")
     }
-  })
+  }
+  const enters = Stream.as(Stream.filter(activityFront, (front) => front), undefined)
+  const ready = Stream.as(Stream.filter(machine.changes, (state) => state.connection === "Ready" && state.journal.read.status === "Idle"), undefined)
+  try Stream.runForEach(Stream.merge(enters, ready), () => refresh)
 }, "activity journal visit")
 
 /** Real resident status and the owner-fenced phone-action history in Settings. */
 export const activity = together(reacting(Activity, {
   carry,
   timers: (state) => state.journal.read.status === "Loading" ? [due<Activity.Event, []>("actions", state.journal.due, unconfirmed)] : [],
-}), hearingHost, readingJournal)
+}), hearingHost, leavingJournal, readingJournal)

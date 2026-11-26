@@ -124,7 +124,8 @@ it('Use a photo in Messages from its still-open viewer (spec/app/photos/viewer.m
   await fill("To", "+15550123456");
   await press("Text +15550123456");
   await until(alpha, alpha.runtime, MessageComposer, (state) => state.pictures === 1);
-  expect(alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()))).toEqual([
+  const thread = alpha.runtime.runSync(MessageComposer.use((composer) => composer.get())).thread;
+  expect(alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures(thread)))).toEqual([
     { name: source.name, wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(binary, (byte) => byte.charCodeAt(0)) },
   ]);
   expect(world.telephony.sent).toEqual([]);
@@ -198,6 +199,7 @@ it("Check a saved copy the earlier Alpha left pending instead of forgetting it (
   expect([invalidWorld.photos.editLookups, invalidWorld.photos.saves, localStorage.getItem(previous)]).toEqual([[], [], "not an operation id!"]);
   await invalid.close();
 
+  localStorage.clear();
   localStorage.setItem(previous, "alpha-test-photo-edit");
   const world = { ...scene(), phone: true };
   const first = await open(world, only("home", "view:Photos", "notice"));

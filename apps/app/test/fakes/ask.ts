@@ -276,11 +276,10 @@ export function askRoutes(scene: AskScene): Route[] {
       return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
     },
     (request, url) => {
-      if (request.method !== "POST" || (url.pathname !== "/api/turns/warm" && url.pathname !== "/api/cloud/warm")) return;
+      if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
       scene.cloudWarmCalls += 1;
-      return Response.json({ started: true }, { status: 202 });
+      return Response.json({ warmed: true });
     },
-    /** The one agent the resident runs, named as its owner route names it (`.eliza/packages/agent-host/src/host/status.vibe`). */
     (request, url) => (request.method === "GET" && url.pathname === "/api/agents" ? Response.json({ agents: [{ id: "agent-owner", name: "Alpha", status: "running" }] }) : undefined),
   ];
 }

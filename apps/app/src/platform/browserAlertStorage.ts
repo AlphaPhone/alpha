@@ -38,9 +38,7 @@ export async function saveBrowserAlerts(enabled: boolean): Promise<void> {
       const channel = new BroadcastChannel(browserDocumentsChannel);
       try { channel.postMessage({ key: browserAlertsKey }); }
       finally { channel.close(); }
-    } catch {
-      // The choice is already saved. A tab can still read it on focus.
-    }
+    } catch { return; }
   }
 }
 
@@ -55,9 +53,7 @@ export function listenBrowserAlerts(refresh: () => void): () => void {
         if (object(event.data) && event.data.key === browserAlertsKey) refresh();
       });
     }
-  } catch {
-    // Some browsers disable the channel. Focusing still refreshes.
-  }
+  } catch { channel = undefined; }
   return () => {
     if (typeof window !== "undefined") window.removeEventListener("focus", refresh);
     channel?.close();

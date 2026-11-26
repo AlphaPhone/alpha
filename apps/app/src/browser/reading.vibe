@@ -5,7 +5,7 @@ import { Machine as Address } from "../../gen/app__browser__address.effect.vibe"
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { MediaHandoff, type ReviewedDraft } from "../assistant/attachments.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { TabHost } from "../platform/browser.vibe"
 import type { FrameRequest } from "../platform/browserWeb.vibe"
 import { Device } from "../platform/device.vibe"
@@ -162,7 +162,6 @@ effect function excerpt(ticket: number): Reader.Event!!Inputs {
     if (!(try current(question))) return outcome(ticket, "Late")
     if (question.purpose === "OnPhone") return try nativeExcerpt(question, page, ticket)
     if (question.purpose !== "Ask") return outcome(ticket, "Failed")
-    // Retry transient empty/title-only native captures within the turn budget before reporting unreadable.
     const clock = try Time
     const deadline = (try clock.now()) + 1_000
     for (let attempt = 0; ; attempt += 1) {

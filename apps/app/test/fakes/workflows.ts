@@ -138,14 +138,15 @@ export interface NativeDigestScene {
 export const alphaHostedDigests = (native: NativeDigestScene): Faked => (emit) => ({
   read: () => Promise.resolve({ snapshot: native.snapshot }),
   peekNotice: () => Promise.resolve({ notice: null }),
-  async syncManual({ lease }: { lease: string }) {
-    if (lease !== native.snapshot.lease) throw rejection("Digest lease changed");
+  syncManual({ lease }: { lease: string }) {
+    if (lease !== native.snapshot.lease) return Promise.reject(rejection("Digest lease changed"));
     native.manualLeases.push(lease);
     if (native.incoming !== undefined) {
       native.snapshot = { ...native.snapshot, rows: native.incoming };
       native.incoming = undefined;
       emit("changed", {});
     }
+    return Promise.resolve();
   },
 });
 
@@ -202,7 +203,7 @@ export const workflowsScene = (): WorkflowsScene => ({
     state: { status: "scheduled" }, trigger: { kind: "cron", expression: "0 8 * * *", tz: "UTC" }, metadata: { recordKey: "weekly-review" },
   }],
   promptEdits: [],
-  admissions: [], changes: [], statement: { ...record }, created: [], saves: new Map(), decisions: [], run: false, stage: "Done", receiptReads: 0, approvalTitle: "Review the statement preview", failingPrompts: false,
+  admissions: [], changes: [], statement: { ...record }, created: [], saves: new Map(), decisions: [], run: false, stage: "Done", receiptReads: 0, approvalTitle: "Review the statement preview", failingPrompts: false, nativeNotices: nativeApprovalNotices(),
 });
 
 function execution(world: WorkflowsScene) {

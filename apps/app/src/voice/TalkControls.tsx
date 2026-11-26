@@ -1,6 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
 import { Button, ConfirmDialog, cn } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import type { ReactNode } from "react";
 import { Keyboard, Mic, MicOff, Square, Volume2, VolumeX } from "lucide-react";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
@@ -38,7 +38,7 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
   const allow = { ...decline, agree: true } as const;
   const stop = { type: "stop", keyboard: false } as const;
   const type = { ...stop, keyboard: true } as const;
-  const typeAfterStop = async () => (await runtime.runPromiseExit(Machine.use((machine) =>
+  const typeAfterStop = async () => (await runtime.runPromiseExit(Effect.flatMap(Machine, (machine) =>
     machine.send(type, (current) => current.session === state.session),
   )))._tag === "Success";
   const mute = { type: state.muted ? "unmute" : "mute" } as const;

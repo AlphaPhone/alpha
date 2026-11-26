@@ -903,7 +903,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         if (origin === undefined || (request !== undefined && request !== message) || !fromThisEnrollment(proposal, opened)
           || !(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try reviewContext(revision, view))) return undefined
       } else if (request === undefined) {
-        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate") || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
+        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate" || op.type === "camera_capture_photo") || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
       } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
         || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
       const selected = needsMessage(op)
@@ -1181,70 +1181,12 @@ const mediaReviewContext = effect {
   }
 }
 
-export const mediaReview = Layer.effect(MediaReview, effect {
+function reviewDecisions(context: Effect.Success<typeof mediaReviewContext>): Pick<MediaReview.Shape, "choosePhone" | "reviewInFiles" | "decide"> {
   const {
-    runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
-    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow,
-  } = try mediaReviewContext
-  const { methods: files, actOnFiles, continueInFiles } = filesActions({
-    device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
-  })
-  const pending = pendingProposals({
-    proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles,
-  })
+    runtime, executors, device, telephony, shell, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt,
+  } = context
   return {
-    session,
-    effect hasSpokenReview(opened, message, reply) {
-      const source = reply.spoken
-      const actions = repliedDeviceActions(reply.actionResults)
-      if (source === undefined || actions.size === 0 || !(try source.current) ||
-        !(try enrollmentIsCurrent(opened)) || !isLatest(opened)) return false
-      const answer = try proposals(opened)
-      const at = try Clock.currentTimeMillis
-      return answer?.some((proposal) => spokenOperation(proposal, opened, message, reply, actions, at) !== undefined) === true
-        && (try enrollmentIsCurrent(opened)) && isLatest(opened) && (try source.current)
-    },
-    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-    effect spokenSms(opened, message, results, source) {
-      const actions = repliedDeviceActions(results)
-      if (actions.size !== 1 || !opened.capabilities.has("sms.send.v1") || !(try source.current)
-        || !(try enrollmentIsCurrent(opened)) || !isLatest(opened)) return undefined
-      const candidates = (try proposals(opened))?.filter((proposal) => proposal.state === "pending" && proposal.payload.workflow === undefined
-        && actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
-        && (proposal.payload.requestMessageId === undefined || proposal.payload.requestMessageId === message))
-      const proposal = candidates?.length === 1 ? candidates[0] : undefined
-      if (proposal === undefined) return undefined
-      const op = operation(proposal.payload.operation)
-      const expiresAt = Date.parse(proposal.expiresAt)
-      if (op?.type !== "sms_send" || op.recipients.length !== 1 || op.recipients[0] !== source.recipient
-        || op.subscriptionId !== source.selection.subscription.id || !Number.isFinite(expiresAt)) return undefined
-      const status = timeout(effect {
-        const clients = try telephony.clients()
-        return try tryPromise(() => clients.messages.status())
-      }, "350 millis") catch () => undefined
-      if (status?.sendMode !== "direct" || status.permissions.sms !== "granted" || status.permissions.phoneState !== "granted"
-        || status.permissions.sendSms !== "granted" || !activeSmsSelection(source.selection, status.subscriptions)
-        || !(try sameSms(source.selection)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try source.current)
-        || (try Clock.currentTimeMillis) >= expiresAt) return undefined
-      const review = words(op)
-      return { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation: source.conversation,
-        revision: source.revision, enrollmentId: opened.identity.enrollmentId, ...review,
-        detail: `SIM ${source.selection.subscription.slot + 1}\n${review.detail}`, sms: source.selection, spokenSms: source }
-    },
-    effect workflowDevice() {
-      const opened = try session()
-      if (opened === undefined || !opened.workflowPhone || !(try enrollmentIsCurrent(opened))) return undefined
-      const { installationId, enrollmentId } = opened.identity
-      return { installationId, enrollmentId }
-    },
-    workflowOffers,
-    decideWorkflow,
-    ...history,
-    messageTarget,
-    voicemailTarget,
-    ...files,
-    pending,
     effect choosePhone(card: MediaCard, choice: number) {
       const { board } = try Talk
       const view = try Conversation
@@ -1444,5 +1386,74 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         report(note)
       })
     },
+  }
+}
+
+export const mediaReview = Layer.effect(MediaReview, effect {
+  const context = try mediaReviewContext
+  const {
+    executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, history, workflowOffers, decideWorkflow,
+  } = context
+  const { methods: files, actOnFiles, continueInFiles } = filesActions({
+    device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
+  })
+  const pending = pendingProposals({
+    proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles,
+  })
+  return {
+    session,
+    effect hasSpokenReview(opened, message, reply) {
+      const source = reply.spoken
+      const actions = repliedDeviceActions(reply.actionResults)
+      if (source === undefined || actions.size === 0 || !(try source.current) ||
+        !(try enrollmentIsCurrent(opened)) || !isLatest(opened)) return false
+      const answer = try proposals(opened)
+      const at = try Clock.currentTimeMillis
+      return answer?.some((proposal) => spokenOperation(proposal, opened, message, reply, actions, at) !== undefined) === true
+        && (try enrollmentIsCurrent(opened)) && isLatest(opened) && (try source.current)
+    },
+    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+    effect spokenSms(opened, message, results, source) {
+      const actions = repliedDeviceActions(results)
+      if (actions.size !== 1 || !opened.capabilities.has("sms.send.v1") || !(try source.current)
+        || !(try enrollmentIsCurrent(opened)) || !isLatest(opened)) return undefined
+      const candidates = (try proposals(opened))?.filter((proposal) => proposal.state === "pending" && proposal.payload.workflow === undefined
+        && actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
+        && (proposal.payload.requestMessageId === undefined || proposal.payload.requestMessageId === message))
+      const proposal = candidates?.length === 1 ? candidates[0] : undefined
+      if (proposal === undefined) return undefined
+      const op = operation(proposal.payload.operation)
+      const expiresAt = Date.parse(proposal.expiresAt)
+      if (op?.type !== "sms_send" || op.recipients.length !== 1 || op.recipients[0] !== source.recipient
+        || op.subscriptionId !== source.selection.subscription.id || !Number.isFinite(expiresAt)) return undefined
+      const status = timeout(effect {
+        const clients = try telephony.clients()
+        return try tryPromise(() => clients.messages.status())
+      }, "350 millis") catch () => undefined
+      if (status?.sendMode !== "direct" || status.permissions.sms !== "granted" || status.permissions.phoneState !== "granted"
+        || status.permissions.sendSms !== "granted" || !activeSmsSelection(source.selection, status.subscriptions)
+        || !(try sameSms(source.selection)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try source.current)
+        || (try Clock.currentTimeMillis) >= expiresAt) return undefined
+      const review = words(op)
+      return { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation: source.conversation,
+        revision: source.revision, enrollmentId: opened.identity.enrollmentId, ...review,
+        detail: `SIM ${source.selection.subscription.slot + 1}\n${review.detail}`, sms: source.selection, spokenSms: source }
+    },
+    effect workflowDevice() {
+      const opened = try session()
+      if (opened === undefined || !opened.workflowPhone || !(try enrollmentIsCurrent(opened))) return undefined
+      const { installationId, enrollmentId } = opened.identity
+      return { installationId, enrollmentId }
+    },
+    workflowOffers,
+    decideWorkflow,
+    ...history,
+    messageTarget,
+    voicemailTarget,
+    ...files,
+    pending,
+    ...reviewDecisions(context),
   }
 })

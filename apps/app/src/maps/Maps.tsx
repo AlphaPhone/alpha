@@ -1,7 +1,7 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner, Toast, ToastRegion } from "@repo/ui";
 import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, Link, LocateFixed, Lock, type LucideIcon, Mail, MapPin, Navigation, Phone, RotateCw, Search, Settings, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { AppBack } from "../shell/AppBack.tsx";
@@ -21,7 +21,6 @@ import { type Seen, type Spot, type Way, atlas } from "./atlas.vibe";
 import { degreesOf, pointIn } from "./geometry.ts";
 import googleMaps from "./google-maps-attribution.svg";
 import { coverageOf, settled, tile } from "./maps.vibe";
-import { handedQuery, takeHandedQuery, watchHandoff } from "./handoff.ts";
 
 const ways: ReadonlyArray<{ travel: Travel; label: string; icon: LucideIcon }> = [
   { travel: "Drive", label: "Drive", icon: Car }, { travel: "Transit", label: "Transit", icon: Bus }, { travel: "Walk", label: "Walk", icon: Footprints }, { travel: "Bicycle", label: "Bike", icon: Bike },
@@ -172,18 +171,19 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const screen = useScreen(runtime);
   const credits = useCredits(runtime);
   const seen = useSyncExternalStore((wake) => atlas.subscribe(wake), () => atlas.snapshot(), () => atlas.snapshot());
-  const [typed, setTyped] = useState("");
   const { state, can, send } = screen;
-  const handed = useSyncExternalStore(watchHandoff, handedQuery, handedQuery);
-  const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length, meeting: 0 } as const;
-  // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a search not taken is dropped when Maps leaves
-  useEffect(() => () => { takeHandedQuery(); }, []);
-  useEffect(() => {
-    if (handOver === undefined || !can(handOver) || can({ type: "continueDisclosure" })) return;
-    takeHandedQuery();
-    setTyped(handOver.query);
-    void send(handOver);
-  }, [can, handOver, send, state]);
+  const machineQuery = state?.query ?? "";
+  const searchTicket = state?.search.ticket ?? 0;
+  const [draft, setDraft] = useState({ query: machineQuery, ticket: searchTicket, typed: machineQuery });
+  if (draft.query !== machineQuery || draft.ticket !== searchTicket) {
+    setDraft({
+      query: machineQuery,
+      ticket: searchTicket,
+      typed: machineQuery === "" ? "" : draft.typed.trim().toLowerCase() === machineQuery.toLowerCase() ? draft.typed : machineQuery,
+    });
+  }
+  const typed = draft.typed;
+  const setTyped = (value: string) => setDraft((current) => ({ ...current, typed: value }));
   if (screen.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Maps</Alert>;
   const info = credits.state;
   if (!state || !info) return null;
@@ -265,7 +265,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const infoShown = !badgeOnly(state.link) && coverage?.available === true;
   return (
     <section aria-label="Maps" className="relative isolate flex flex-1 flex-col overflow-hidden">
-      {googleMissing ? <Alert variant="warn" role="img" aria-label="Map" className="absolute inset-x-3 top-1/2 z-0">The Google map is missing.</Alert> : <MapView
+      {googleMissing ? <Alert variant="warn" role="img" aria-label="Map" className="absolute inset-x-3 top-1/2">The Google map is missing.</Alert> : <MapView
         className="absolute inset-0 h-full rounded-none"
         zoomControls={false}
         followZoom={followZoom}

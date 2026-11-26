@@ -5,6 +5,7 @@ import { projectNoteForModel } from "@elizaos/plugin-notes-client"
 import { MediaReview } from "../assistant/media-review.vibe"
 import { earlierSlot } from "../platform/adoption.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
+import { registered } from "../platform/device.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import * as Build from "../../gen/app__workflows__builder.effect.vibe"
@@ -205,6 +206,7 @@ effect function previousOf(raw: string, identity: string): {
 // spec/app/workflows/builder.md, "The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back"
 /** Take in an earlier Alpha's unsaved workflow draft for this resident session once, only while none is kept, clearing the slot only after readback matches. */
 effect function adoptPreviousDraft(scope: string, state: Build.Builder): void!!(Agent | KeyValueStore.KeyValueStore) {
+  if (!registered("AlphaConnection")) return
   const owner = launchOwnerOf(scope) catch () => undefined
   if (owner === undefined) return
   const identity = workflowSha([earlierOrigin, owner.identityId, owner.agentId]) catch () => ""

@@ -27,7 +27,7 @@ export function BrowserFindBar({ value, onValueChange, status, onPrevious, onNex
         onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); (event.shiftKey ? onPrevious : onNext)?.(); } else if (event.key === "Escape") onClose(); }}
         className="min-h-11 min-w-0 flex-1 border-0 bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
       />
-      <span role="status" aria-live="polite" className="text-meta leading-[normal] whitespace-nowrap text-muted-foreground">{status}</span>
+      <span role="status" aria-live="polite" className="text-meta leading-plain whitespace-nowrap text-muted-foreground">{status}</span>
       <Button variant="ghost" size="icon" className="disabled:opacity-100" aria-label="Previous match" disabled={onPrevious === undefined} onClick={onPrevious}><ChevronUp className="size-4.5" /></Button>
       <Button variant="ghost" size="icon" className="disabled:opacity-100" aria-label="Next match" disabled={onNext === undefined} onClick={onNext}><ChevronDown className="size-4.5" /></Button>
       <Button variant="ghost" size="icon" aria-label="Close find in page" onClick={onClose}><X className="size-4.5" /></Button>

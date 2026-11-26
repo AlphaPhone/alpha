@@ -30,14 +30,15 @@ const back = Effect.gen(function* () {
   }
   const form = yield* Editor.Machine;
   const view = yield* View.Machine;
+  const agent = yield* Changes.Machine;
   const layer = backCloses(yield* view.get());
   const step: Effect.Effect<unknown, unknown> =
-    layer === "BackForm" ? Effect.orElse(form.send({ type: "callOff" }), () => form.send({ type: "close" }))
+    layer === "BackForm" ? Effect.catch(form.send({ type: "callOff" }), () => form.send({ type: "close" }))
     : layer === "BackReview" ? (yield* Held.Machine).send({ type: "keepEvent" })
     : layer === "BackEvent" ? view.send({ type: "closeEvent" })
     : layer === "BackReminder" ? view.send({ type: "closeReminder" })
     : layer === "BackOverlay" ? view.send({ type: "closeOverlay" })
-    : Effect.orElse(form.send({ type: "callOff" }), () => (yield* Changes.Machine).send({ type: "retire" }, "Owner"));
+    : Effect.catch(form.send({ type: "callOff" }), () => agent.send({ type: "retire" }, "Owner"));
   return yield* Effect.match(step, { onFailure: () => layer === "BackForm", onSuccess: () => true });
 });
 

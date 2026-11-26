@@ -368,7 +368,7 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
 }
 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
-// spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event"; "The agent's own calendar holds no repeats, alerts or video rooms"
+// spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event"; spec/app/calendar/writing.md, "The agent's own calendar holds no repeats, alerts or video rooms"
 /** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review. */
 effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder" | "RescheduleReminder">, id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
   const phone = try PhoneCalendar

@@ -104,13 +104,13 @@ export interface MapViewProps {
 
 let protocols = 0;
 
-function styleOf(style: MapStyle, protocol: string): string | StyleSpecification {
+function styleOf(style: MapStyle, protocol: string, land: string): string | StyleSpecification {
   if (style.kind === "vector") return style.url;
   return {
     version: 8,
     sources: { cloud: { type: "raster", tiles: [`${protocol}://tiles/{z}/{x}/{y}`], tileSize: style.tileSize, minzoom: style.minZoom, maxzoom: style.maxZoom } },
     layers: [
-      { id: "land", type: "background", paint: { "background-color": "#e8e8e8" } },
+      { id: "land", type: "background", paint: { "background-color": land } },
       { id: "cloud-raster", type: "raster", source: "cloud" },
     ],
   };
@@ -133,6 +133,9 @@ function dot(className: string, label: string, onClick?: () => void): HTMLElemen
 
 /** The map accent, `--map`, read from the page: MapLibre's marker and route line take a color, not a class. */
 const mapAccent = (node: HTMLElement) => getComputedStyle(node).getPropertyValue("--map").trim() || "currentColor";
+
+/** The map canvas background, `--muted`, read from the page: MapLibre's background layer takes a color, not a class. */
+const mapLand = (node: HTMLElement) => getComputedStyle(node).getPropertyValue("--muted").trim() || "transparent";
 
 /** Where the phone is: a dot in the map accent ringed in white, the same in both themes. */
 function puck(): HTMLElement {
@@ -234,7 +237,7 @@ export function MapView(props: MapViewProps) {
       maplibregl.setWorkerUrl(mapWorkerUrl);
       maplibregl.setWorkerCount(1);
       instance = new maplibregl.Map({
-        container: node, style: styleOf(chosen, protocol), attributionControl: false,
+        container: node, style: styleOf(chosen, protocol, mapLand(node)), attributionControl: false,
         center: opening === undefined ? [0, 20] : [opening.at.lng, opening.at.lat], zoom: opening?.zoom ?? 1.5,
         ...(chosen.kind === "raster" ? { minZoom: chosen.minZoom, maxZoom: chosen.maxZoom } : {}),
       });

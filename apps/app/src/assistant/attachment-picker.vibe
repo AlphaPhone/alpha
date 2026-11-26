@@ -4,7 +4,7 @@ import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Composer, attachments as draftFiles, maxFiles } from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { Documents } from "../platform/documents.vibe"
 import { Files } from "../platform/files.vibe"
@@ -434,7 +434,7 @@ export effect function upPickerFolder(visitId: number): boolean!!PickerShell {
   })
 }
 
-export effect function usePickerVolume(id: string, visitId: number): boolean!!PickerShell {
+export effect function selectPickerVolume(id: string, visitId: number): boolean!!PickerShell {
   const { board, writer } = try AttachmentPicker
   const machine = try Picker.Machine
   return try writer.withPermits(1)(effect {

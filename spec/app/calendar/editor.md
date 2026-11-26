@@ -672,6 +672,17 @@ pure def alwaysASetAsideDraftIsKept(s: Editor): bool =
   (s.form != NoForm and not(s.shown)) implies (s.banner == Available and s.kept and D::unsaved(s.draft))
 ```
 
+### Without a form nothing is kept, and only an edited event can conflict with a newer revision
+
+Discovered by the proof: without stating this, opening an unreadable slot
+could appear to keep a draft with no form open, or resolving a conflict
+could appear to leave a discard or reschedule confirmation open.
+
+```quint
+pure def alwaysFormsKeepTheirDraftState(s: Editor): bool =
+  (s.form == NoForm implies not(s.kept)) and (D::canChoose(s.draft) implies s.form == EditEvent)
+```
+
 ### Kept edits are lost only by saving, discarding or handing off, or when their event is gone; another owner signing in leaves them in the old owner's slot
 
 ```quint

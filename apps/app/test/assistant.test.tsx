@@ -278,9 +278,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/reply.md, "At most five reply notices of at most 500 units reach the conversation, and only the latest system notice stays, until a real reply follows it": a notice the agent stored in its history is shown in Alpha's words, and offers to send the owner's message again.
     world.ask.kept.get("c1")?.messages.push({ id: "n1u", role: "user", text: "Ping" }, { id: "n1a", role: "assistant", text: systemNoticeText("runtime-error") });
-    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": the
-    // transcript offers Earlier only while messages before the first one showing exist, so here, with the first message
-    // showing, the conversation is read around it directly.
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": the transcript offers Earlier only while messages before the first one showing exist, so here, with the first message showing, the conversation is read around it directly.
     expect(button("Earlier")).toBeUndefined();
     await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "scroll", around: 1 })));
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
@@ -403,7 +401,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Let me look"));
     expect([document.body.textContent?.includes("Using Calendar"), document.body.textContent?.includes("Working")]).toEqual([false, false]);
-    await act(async () => { for (const release of [...world.ask.turns.values()]) release(); });
+    act(() => { for (const release of [...world.ask.turns.values()]) release(); });
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: What's on today?".length);
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
@@ -782,7 +780,6 @@ it("Keep what I was writing in the earlier Alpha: an unused slot takes its draft
   expect(JSON.parse(world.ask.drafts.get(draftKey(world.notes.ownerIdentity, world.notes.owner)) ?? "{}")).toMatchObject({ text: "Half a thought", sending: false });
   await first.close();
 
-  // A slot already used here takes nothing: the earlier text stays where it was.
   world.platform.earlier.set(slot, kept("Something else", false));
   const second = await open(world, mounts);
   runtime = assistant.runtime(second.alpha);
@@ -790,7 +787,6 @@ it("Keep what I was writing in the earlier Alpha: an unused slot takes its draft
   expect([document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value, world.platform.earlier.has(slot)]).toEqual(["Half a thought", true]);
   await second.close();
 
-  // A text the earlier Alpha was sending may already have gone: it waits for the owner's review and is never sent by itself.
   world.ask.drafts.clear();
   world.platform.earlier.set(slot, kept("Book the table", true));
   const third = await open(world, mounts);

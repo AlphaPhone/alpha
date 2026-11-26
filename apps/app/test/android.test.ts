@@ -65,7 +65,7 @@ function earlierPhone() {
   write(join(files, "agent/agent-bundle.js"), "bundle");
   write(join(files, "agent/launch.sh"), "#!/bin/sh");
   write(join(files, "agent/agent.log"), "turn log");
-  write(join(files, "agent/arm64-v8a/bun"), "bun");
+  write(join(files, "agent/arm64-v8a/runtime"), "runtime");
   write(join(files, `agent/${ACCOUNT}/agent-id`), "new agent");
   return files;
 }

@@ -69,7 +69,7 @@ function typed(fetch: typeof globalThis.fetch): CloudClient {
   return createCloudClient({ baseUrl: placeholder, credential: () => undefined, fetch })
 }
 
-/** fetch over `direct`, for eliza's client: the same path, query, headers and body, sent through the platform's `HttpClient`. */
+/** fetch over `direct`, for eliza's client: the same path, query, headers and body, sent through the platform's `HttpClient`. Reads a refusal's whole body while preserving status on bodyless refusals. */
 function fetching(direct: Wired): typeof globalThis.fetch {
   return (input, init) => {
     const { url, method, headers, body, signal } = asked(input, init)
@@ -81,7 +81,6 @@ function fetching(direct: Wired): typeof globalThis.fetch {
       : HttpClientRequest.bodyUint8Array(started, body.bytes, headers["content-type"])
     return runPromise(effect {
       const opened = try direct.open(request)
-      // The typed client reads a refusal's whole body. A bodyless HTTP refusal still carries its status.
       const response = opened.status >= 400 ? try opened.text : Stream.toReadableStream(opened.body)
       return answer(response, opened.status, { ...opened.headers })
     }, { signal })

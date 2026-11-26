@@ -768,6 +768,47 @@ function Drafts({ runtime, day }: CalendarProps & { day: number }) {
   );
 }
 
+function FormNotices({ e, reminder, editor, day, runtime, setFields }: {
+  e: Editor.Editor;
+  reminder: boolean;
+  editor: ReturnType<typeof useEditor>;
+  day: number;
+  runtime: CalendarProps["runtime"];
+  setFields: (fields: Fields) => void;
+}) {
+  return (
+    <>
+      {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><Undo2 aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
+      {e.banner === "Conflict" ? (
+        <CalendarNotice className="mx-6" actions={<>
+          <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyDraft" })}>Keep mine</CalendarNoticeAction>
+          {editor.can({ type: "askReplace" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "askReplace" })}>Use the other</CalendarNoticeAction> : null}
+          {editor.can({ type: "takeOtherDraft" }) ? <CalendarNoticeAction onClick={() => { setFields(runtime.runSync(kept(day, e.owner))); void editor.send({ type: "takeOtherDraft" }); }}>Replace mine</CalendarNoticeAction> : null}
+          {editor.can({ type: "callOff" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "callOff" })}>Cancel</CalendarNoticeAction> : null}
+        </>}>Another copy of this draft replaced it.</CalendarNotice>
+      ) : null}
+      {Editor.canKeepMyChanges(e) ? (
+        <CalendarNotice tone="caution" className="mx-6" actions={<>
+          <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyChanges" })}>Keep my changes</CalendarNoticeAction>
+          <CalendarNoticeAction onClick={() => void editor.send({ type: "takeSavedChanges" })}>Use the saved event</CalendarNoticeAction>
+        </>}>This event changed since you started editing it.</CalendarNotice>
+      ) : null}
+      {!reminder && e.form === "NewEvent" && e.receipts.status === "Failed" ? (
+        <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}>
+          Alpha couldn't check for events it may already have made, so it won't create this one yet.
+        </CalendarNotice>
+      ) : null}
+      {!reminder && e.unknownCreate && e.form === "NewEvent" ? (
+        <CalendarNotice tone="caution" className="mx-6" actions={<>
+          {editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction aria-label="Check if events were saved" onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}
+          {editor.can({ type: "createSeparately" }) ? <CalendarNoticeAction aria-label="Create a separate event" onClick={() => void editor.send({ type: "createSeparately" })}>Create new</CalendarNoticeAction> : null}
+          {editor.can({ type: "letDoubtGo" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "letDoubtGo" })}>Stop checking</CalendarNoticeAction> : null}
+        </>}>Alpha can't tell whether your last new event was saved.</CalendarNotice>
+      ) : null}
+    </>
+  );
+}
+
 // spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Hand Android Calendar what Alpha cannot write"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"; spec/app/calendar/writing.md, "An existing event whose timing cannot be shown as a wall-clock span keeps its original time"; spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"
 function Form({ runtime, day, today, connected, owner }: CalendarProps & { day: number; today: number; connected: boolean; owner: number }) {
   const editor = useEditor(runtime);
@@ -813,7 +854,6 @@ function Form({ runtime, day, today, connected, owner }: CalendarProps & { day: 
     retime(begin, begin + length);
   };
   const startAt = (minutes: number) => startOn(startDay, minutes);
-  // A date edit changes the chosen day, never the duration: an all-day event keeps its days, a timed one its start's wall time and its length.
   const allDays = Math.max(1, civilDay(fields.end - 1) - startDay + 1);
   const moveTo = (targetDay: number) => {
     if (locked) return;
@@ -894,33 +934,7 @@ function Form({ runtime, day, today, connected, owner }: CalendarProps & { day: 
             onConfirm={() => void editor.send({ type: "discard" })} onCancel={() => void editor.send({ type: "callOff" })} />
         </>
       ) : null}
-      {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><Undo2 aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
-      {e.banner === "Conflict" ? (
-        <CalendarNotice className="mx-6" actions={<>
-          <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyDraft" })}>Keep mine</CalendarNoticeAction>
-          {editor.can({ type: "askReplace" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "askReplace" })}>Use the other</CalendarNoticeAction> : null}
-          {editor.can({ type: "takeOtherDraft" }) ? <CalendarNoticeAction onClick={() => { setFields(runtime.runSync(kept(day, e.owner))); void editor.send({ type: "takeOtherDraft" }); }}>Replace mine</CalendarNoticeAction> : null}
-          {editor.can({ type: "callOff" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "callOff" })}>Cancel</CalendarNoticeAction> : null}
-        </>}>Another copy of this draft replaced it.</CalendarNotice>
-      ) : null}
-      {Editor.canKeepMyChanges(e) ? (
-        <CalendarNotice tone="caution" className="mx-6" actions={<>
-          <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyChanges" })}>Keep my changes</CalendarNoticeAction>
-          <CalendarNoticeAction onClick={() => void editor.send({ type: "takeSavedChanges" })}>Use the saved event</CalendarNoticeAction>
-        </>}>This event changed since you started editing it.</CalendarNotice>
-      ) : null}
-      {!reminder && e.form === "NewEvent" && e.receipts.status === "Failed" ? (
-        <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}>
-          Alpha couldn't check for events it may already have made, so it won't create this one yet.
-        </CalendarNotice>
-      ) : null}
-      {!reminder && e.unknownCreate && e.form === "NewEvent" ? (
-        <CalendarNotice tone="caution" className="mx-6" actions={<>
-          {editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction aria-label="Check if events were saved" onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}
-          {editor.can({ type: "createSeparately" }) ? <CalendarNoticeAction aria-label="Create a separate event" onClick={() => void editor.send({ type: "createSeparately" })}>Create new</CalendarNoticeAction> : null}
-          {editor.can({ type: "letDoubtGo" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "letDoubtGo" })}>Stop checking</CalendarNoticeAction> : null}
-        </>}>Alpha can't tell whether your last new event was saved.</CalendarNotice>
-      ) : null}
+      <FormNotices e={e} reminder={reminder} editor={editor} day={day} runtime={runtime} setFields={setFields} />
       <CalendarFormTitle value={fields.title} disabled={!editor.can({ type: "editTitle", blank: false })}
         onChange={(input) => change({ ...fields, title: input.target.value }, { type: "editTitle", blank: input.target.value.trim() === "" })} />
       {reminder && e.form === "NewEvent" ? <div aria-label="Selected event date" aria-live="polite" className="px-6 pt-2 text-sm text-muted-foreground">{fullDate.format(dateOf(startDay))}</div> : null}

@@ -817,6 +817,128 @@ effect function playLocalCue(text: string, requestId: string, current: () => boo
   })
 }
 
+function phoneVoiceOutput(
+  activeSession: () => number,
+  cloudSpeech: () => CloudVoiceSession | undefined,
+  setLocalSpeakerMuted: (session: number, muted: boolean, current: SpeakerSession) => boolean!!,
+) {
+  let cloudSpeechAbort: AbortController | undefined
+  let activePlaybackRequest: string | undefined
+  let cueStop: Deferred.Deferred<void> | undefined
+
+  effect function playSentence(session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
+    if (activeSession() !== session) return
+    const cloud = cloudSpeech()
+    if (cloud?.session === session) {
+      const abort = makeAbort()
+      cloudSpeechAbort = abort
+      try tryPromise({
+        try: () => cloud.stream.speak(text, abort.signal, () => undefined),
+        catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
+      })
+      return
+    }
+    if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "synthesizeLocal", cause: "no-voice-plugin" })
+    const requestId = fresh()
+    activePlaybackRequest = requestId
+    const prepared = try tryPromise({
+      try: () => localPlugin().synthesizeLocal({ requestId, text, append, replace: !append }),
+      catch: (cause) => new VoiceBridgeFailed({ method: "synthesizeLocal", cause }),
+    })
+    if (activeSession() === session && activePlaybackRequest === requestId && prepared.playbackId !== undefined && prepared.playbackId !== "") {
+      const playbackId = prepared.playbackId
+      try tryPromise({
+        try: () => localPlugin().play({ playbackId, replace: !append }),
+        catch: (cause) => new VoiceBridgeFailed({ method: "play", cause }),
+      })
+    }
+  }
+
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": audible is the first playback the speaker reports.
+  effect function playCue(session: number, _turn: number, text: string, started: () => void): void!VoiceBridgeFailed {
+    if (activeSession() !== session) return
+    const stop = try Deferred.make<void>()
+    cueStop = stop
+    try ensuring(effect {
+      const cloud = cloudSpeech()
+      if (cloud?.session === session) {
+        const abort = makeAbort()
+        cloudSpeechAbort = abort
+        try tryPromise({
+          try: () => cloud.stream.speak(text, abort.signal, started),
+          catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
+        })
+        return
+      }
+      if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "synthesizeLocal", cause: "no-voice-plugin" })
+      const requestId = fresh()
+      activePlaybackRequest = requestId
+      try playLocalCue(text, requestId, () => activeSession() === session && activePlaybackRequest === requestId, started, stop)
+    }, sync(() => { if (cueStop === stop) cueStop = undefined }))
+  }
+
+  effect function setSpeakerMuted(session: number, muted: boolean): boolean!! {
+    if (session !== activeSession()) return false
+    const cloud = cloudSpeech()
+    if (cloud?.session === session) {
+      const set = effect {
+        try tryPromise(() => cloud.stream.setOutputMuted(muted))
+        return activeSession() === session && cloudSpeech() === cloud
+      } catch () => false
+      return set
+    }
+    return try setLocalSpeakerMuted(session, muted, { active: () => activeSession() === session, local: () => cloudSpeech() === undefined })
+  }
+
+  effect function cancelSpeech(): void!! {
+    cloudSpeechAbort?.abort()
+    cloudSpeechAbort = undefined
+    if (cueStop !== undefined) try Deferred.succeed(cueStop, undefined)
+  }
+
+  function takePlaybackRequest(): string | undefined {
+    const requestId = activePlaybackRequest
+    activePlaybackRequest = undefined
+    return requestId
+  }
+
+  effect function hush(_turn: number): void!! {
+    try cancelSpeech()
+    if (!registered(LOCAL_PLUGIN)) return
+    const requestId = takePlaybackRequest()
+    try ignore(tryPromise(() => localPlugin().stopPlayback(requestId === undefined ? {} : { requestId })))
+  }
+
+  return { playSentence, playCue, setSpeakerMuted, hush, cancelSpeech, takePlaybackRequest }
+}
+
+effect function stopLiveCapture(capture: LiveCapture, discard: boolean, onRetired: () => void): void!VoiceBridgeFailed {
+  const opening = capture.phase === "Opening" || capture.phase === "Cancelling"
+  capture.phase = opening ? "Cancelling" : "Retired"
+  retireNativePreview(capture)
+  if (capture.requested) {
+    let observed = capture.openingStop
+    const request = tryPromise({
+      try: () => {
+        if (!opening) return localPlugin().stopLiveCapture({ captureId: capture.captureId, discard })
+        const attempt = capture.openingStop ??= localPlugin().stopLiveCapture({ captureId: capture.captureId, discard: true })
+        observed = attempt
+        return attempt
+      },
+      catch: (cause) => new VoiceBridgeFailed({ method: "stopLiveCapture", cause }),
+    })
+    const stopped = request catch effect (failure) => {
+      if (opening && capture.openingStop === observed) capture.openingStop = undefined
+      throw failure
+    }
+    if (stopped.captureId !== capture.captureId || stopped.serverClosed !== true) {
+      if (opening && capture.openingStop === observed) capture.openingStop = undefined
+      throw new VoiceBridgeFailed({ method: "stopLiveCapture", cause: "not-closed" })
+    }
+  }
+  onRetired()
+}
+
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   const lifetime = try Effect.scope
   const { probeStatus, warmDevice, invalidateStatus, awaitWarmup } = phoneSpeechStatus()
@@ -826,10 +948,12 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cloudKey: CredentialId | undefined
   let accountEpoch = 0
   let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
-  let cloudSpeechAbort: AbortController | undefined
-  let activePlaybackRequest: string | undefined
-  let cueStop: Deferred.Deferred<void> | undefined
   const { restoreLocalOutput, setLocalSpeakerMuted } = try phoneSpeaker()
+  const { playSentence, playCue, setSpeakerMuted, hush, cancelSpeech, takePlaybackRequest } = phoneVoiceOutput(
+    () => activeSession,
+    () => cloudSpeech,
+    setLocalSpeakerMuted,
+  )
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
 
   const publish = (event: VoiceEvent) => {
@@ -839,7 +963,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   effect function prewarm(network: boolean): void!!Agent {
     const device = warmDevice()
     const warmCloud = network
-      ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
+      ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
       : Effect.void
     if (network && registered(CLOUD_STREAM_PLUGIN)) {
       const relay = relayPlugin()
@@ -969,32 +1093,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     return capture.echoCancelled
   }
 
-  effect function stopCapture(capture: LiveCapture, discard: boolean): void!VoiceBridgeFailed {
-    const opening = capture.phase === "Opening" || capture.phase === "Cancelling"
-    capture.phase = opening ? "Cancelling" : "Retired"
-    retireNativePreview(capture)
-    if (capture.requested) {
-      let observed = capture.openingStop
-      const request = tryPromise({
-        try: () => {
-          if (!opening) return localPlugin().stopLiveCapture({ captureId: capture.captureId, discard })
-          const attempt = capture.openingStop ??= localPlugin().stopLiveCapture({ captureId: capture.captureId, discard: true })
-          observed = attempt
-          return attempt
-        },
-        catch: (cause) => new VoiceBridgeFailed({ method: "stopLiveCapture", cause }),
-      })
-      const stopped = request catch effect (failure) => {
-        if (opening && capture.openingStop === observed) capture.openingStop = undefined
-        throw failure
-      }
-      if (stopped.captureId !== capture.captureId || stopped.serverClosed !== true) {
-        if (opening && capture.openingStop === observed) capture.openingStop = undefined
-        throw new VoiceBridgeFailed({ method: "stopLiveCapture", cause: "not-closed" })
-      }
-    }
-    if (nativeCapture === capture) nativeCapture = undefined
-  }
+  const stopCapture = (capture: LiveCapture, discard: boolean) =>
+    stopLiveCapture(capture, discard, () => { if (nativeCapture === capture) nativeCapture = undefined })
 
   effect function stopNativeCapture(session: number, discard: boolean): void!VoiceBridgeFailed {
     const capture = nativeCapture
@@ -1015,87 +1115,11 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
 
   const awaitSpeechOutputWarmup = (session: number) => awaitWarmup(() => activeSession === session && cloudSpeech === undefined)
 
-  effect function playSentence(session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
-    if (activeSession !== session) return
-    const cloud = cloudSpeech
-    if (cloud?.session === session) {
-      const abort = makeAbort()
-      cloudSpeechAbort = abort
-      try tryPromise({
-        try: () => cloud.stream.speak(text, abort.signal, () => undefined),
-        catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
-      })
-      return
-    }
-    if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "synthesizeLocal", cause: "no-voice-plugin" })
-    const requestId = fresh()
-    activePlaybackRequest = requestId
-    const prepared = try tryPromise({
-      try: () => localPlugin().synthesizeLocal({ requestId, text, append, replace: !append }),
-      catch: (cause) => new VoiceBridgeFailed({ method: "synthesizeLocal", cause }),
-    })
-    if (activeSession === session && activePlaybackRequest === requestId && prepared.playbackId !== undefined && prepared.playbackId !== "") {
-      const playbackId = prepared.playbackId
-      try tryPromise({
-        try: () => localPlugin().play({ playbackId, replace: !append }),
-        catch: (cause) => new VoiceBridgeFailed({ method: "play", cause }),
-      })
-    }
-  }
-
-  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": audible is the first playback the speaker reports.
-  effect function playCue(session: number, _turn: number, text: string, started: () => void): void!VoiceBridgeFailed {
-    if (activeSession !== session) return
-    const stop = try Deferred.make<void>()
-    cueStop = stop
-    try ensuring(effect {
-      const cloud = cloudSpeech
-      if (cloud?.session === session) {
-        const abort = makeAbort()
-        cloudSpeechAbort = abort
-        try tryPromise({
-          try: () => cloud.stream.speak(text, abort.signal, started),
-          catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
-        })
-        return
-      }
-      if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "synthesizeLocal", cause: "no-voice-plugin" })
-      const requestId = fresh()
-      activePlaybackRequest = requestId
-      try playLocalCue(text, requestId, () => activeSession === session && activePlaybackRequest === requestId, started, stop)
-    }, sync(() => { if (cueStop === stop) cueStop = undefined }))
-  }
-
-  effect function setSpeakerMuted(session: number, muted: boolean): boolean!! {
-    if (session !== activeSession) return false
-    const cloud = cloudSpeech
-    if (cloud?.session === session) {
-      const set = effect {
-        try tryPromise(() => cloud.stream.setOutputMuted(muted))
-        return activeSession === session && cloudSpeech === cloud
-      } catch () => false
-      return set
-    }
-    return try setLocalSpeakerMuted(session, muted, { active: () => activeSession === session, local: () => cloudSpeech === undefined })
-  }
-
-  effect function hush(_turn: number): void!! {
-    cloudSpeechAbort?.abort()
-    cloudSpeechAbort = undefined
-    if (cueStop !== undefined) try Deferred.succeed(cueStop, undefined)
-    if (!registered(LOCAL_PLUGIN)) return
-    const requestId = activePlaybackRequest
-    activePlaybackRequest = undefined
-    try ignore(tryPromise(() => localPlugin().stopPlayback(requestId === undefined ? {} : { requestId })))
-  }
-
   effect function shut(session: number): boolean!! {
     clearCloudPreview(session)
     if (activeSession === session) {
       activeSession = 0
-      cloudSpeechAbort?.abort()
-      cloudSpeechAbort = undefined
-      if (cueStop !== undefined) try Deferred.succeed(cueStop, undefined)
+      try cancelSpeech()
     }
     let confirmed = true
     const owner = cloudSpeech
@@ -1108,8 +1132,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       confirmed = (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
     }
     if (registered(LOCAL_PLUGIN)) {
-      const req = activePlaybackRequest
-      activePlaybackRequest = undefined
+      const req = takePlaybackRequest()
       const stopPlay = try (tryPromise(() => localPlugin().stopPlayback(req === undefined ? {} : { requestId: req })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
       const stopCap = try (stopNativeCapture(session, true) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
       const restored = try restoreLocalOutput((owner) => owner === session)
@@ -1165,7 +1188,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     effect prewarm(network: boolean): void!!Agent {
       if (!network || warmedCloud) return
       warmedCloud = true
-      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
+      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
     },
     streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),

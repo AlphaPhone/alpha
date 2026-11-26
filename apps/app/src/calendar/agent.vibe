@@ -21,8 +21,8 @@ const base = "/api/lifeops/calendar"
 schema Answered { readonly state: "complete" | "partial" | "unavailable" }
 
 /** What a read back finds of the events around a change, as eliza's `EventRecord` of `@elizaos/plugin-calendar-client` reads each. */
-const Listed = Schema.Struct({ events: Schema.Array(EventRecord) })
-type Listed = typeof Listed.Type
+const ListedSchema = Schema.Struct({ events: Schema.Array(EventRecord) })
+type Listed = typeof ListedSchema.Type
 
 /** The agent's approvals list, as far as Calendar reads it: its rows, untrusted, which `requestOf` reads. */
 const Approvals = Schema.Struct({ approvals: Schema.Array(Schema.Unknown) })
@@ -88,7 +88,7 @@ function versionOf(event: Listed["events"][number]): string {
 }
 
 /** Whether `listed` shows the change `request` asked for as asked; for a deletion, whether the reviewed version is still there. */
-export function asAsked(request: Request, listed: Listed): boolean {
+function asAsked(request: Request, listed: Listed): boolean {
   const reply = { Going: "accepted", Maybe: "tentative", NotGoing: "declined", NoReply: "" }[request.reply]
   const onCalendar = (event: Listed["events"][number]) => request.calendarId === "" || event.calendarId === request.calendarId
   if (request.change === "Create") return request.fields !== undefined && listed.events.some((event) => onCalendar(event) && holds(event, request.fields!))
@@ -106,7 +106,7 @@ effect function readBack(ticket: number, filing: number): Event!!(Agent | Time) 
   const at = request?.fields === undefined ? shown.find(shown.number("Google", request?.eventId ?? ""))?.begin : Date.parse(request.fields.startAt)
   const window = feedParams(civilDay(at === undefined || !Number.isFinite(at) ? try (try Time).now() : at))
   const urlParams = request === undefined || request.calendarId === "" ? window : { ...window, calendarId: request.calendarId }
-  const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams }), Listed) catch () => undefined
+  const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams }), ListedSchema) catch () => undefined
   if (listed === undefined || request === undefined) return { type: "readBackFailed", ticket }
   return { type: "readBack", ticket, asAsked: asAsked(request, listed) }
 }

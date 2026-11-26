@@ -227,7 +227,7 @@ function legacySmsDrafts(earlier: NativeMethods | undefined) {
     try {
       if (kind === "read") {
         const slot = legacySmsSlot(fields, 1);
-        const result = await (earlier?.secureRead?.({ slot }) ?? { value: null });
+        const result = earlier?.secureRead ? await earlier.secureRead({ slot }) : { value: null };
         reply({ requestId, result });
         return;
       }

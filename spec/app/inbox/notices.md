@@ -229,6 +229,13 @@ pure def sometimesEarlierMailWasMissed(s: Notices): bool = s.expired
 
 pure def sometimesWatchingStopped(s: Notices): bool = s.halt == Refused
 
+pure val eval_witness_sometimesWatchingStopped = (
+  ("watch", { account: 1, grant: { read: true, send: false, modify: false } }, 1, true),
+  "poll", ("checked", 1, false, Forbidden, false, 1, 0, Set(), 1),
+  "poll", ("checked", 2, false, Forbidden, false, 1, 0, Set(), 1),
+  "poll", ("checked", 3, false, Forbidden, false, 1, 0, Set(), 1),
+)
+
 pure def sometimesWatchingIsUnauthorized(s: Notices): bool = s.halt == Unauthorized
 
 pure def sometimesACheckWaitsAfterARestart(s: Notices): bool =

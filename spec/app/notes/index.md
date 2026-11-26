@@ -730,6 +730,13 @@ pure def canSelectionDeleted(s: Notes, turn: int, removedIds: List[int], by: Act
   by == Phone and s.selection == Deleting and turn == s.selectionTurn and
     removedIds.every(id => s.selected.includes(id))
 
+pure val eval_witness_canSelectionDeleted = (
+  ("ownerChanged", 1, Phone), ("refresh", Owner),
+  ("listed", 1, true, 1, List(goodRow, voiceRow), List({ id: 1, name: "a" }), 1, Phone),
+  ("beginSelection", false, Owner), ("toggleSelection", 1, Owner),
+  ("reviewSelection", true, Owner), ("deleteSelection", true, Owner),
+  ("selectionDeleted", 1, List(1), true, Phone))
+
 pure def selectionDeleted(s: Notes, turn: int, removedIds: List[int], known: bool, by: Actor): Moved =
   val left = s.selected.select(id => not(removedIds.includes(id)) and shown(s).some(row => row.id == id))
   val updated = { ...s, selection: if (left == List()) NoSelection else Picking, selected: left,

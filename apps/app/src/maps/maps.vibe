@@ -2,7 +2,7 @@
 import { CloudError } from "@elizaos/cloud"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
-import { mode, pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
+import { pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
 import type { Change, Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
 import * as Credits from "../../gen/app__maps__credits.effect.vibe"
 import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
@@ -21,6 +21,7 @@ import { type Job, answer, due, following, reacting, run, started, stream, toget
 import { Time } from "../runtime/time.vibe"
 import { type Coverage, type Spot, type View, type Way, atlas } from "./atlas.vibe"
 import { type Point, coordinateOf, measured, meters, pointOf } from "./geometry.ts"
+import { handedQuery, takeHandedQuery, watchHandoff } from "./handoff.ts"
 
 type CloudPlace = Awaited<ReturnType<CloudClient["mapsPlacesSearch"]>>["places"][number]
 
@@ -521,10 +522,10 @@ const opening = started(effect {
   try Stream.runForEach(shell.changes |> Stream.map(%, (s) => showing(s, "Maps")) |> Stream.changes(%), effect (shown) => {
     if (!shown) return
     const grant = allowedOf(try location.permission())
+    try accountRead()
     try ignore(screen.send({ type: "admitDialer", on: (try device.capabilities()).image }))
     try ignore(screen.send({ type: "observeLocation", grant }))
     try ignore(screen.send({ type: "quietFix" }))
-    try accountRead()
     try ignore(screen.send({ type: "connect" }))
   })
 }, "opening Maps")
@@ -606,6 +607,38 @@ const speaking = started(effect {
   })
 }, "speaking guidance")
 
+// spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a search not taken is dropped when Maps leaves.
+const handoff = started(effect {
+  const shell = try Shell
+  const screen = try Screen.Machine
+  let wasShowing = false
+  const handed = Stream.callback<void>((queue) => acquireRelease(
+    sync(() => watchHandoff(() => { Queue.offerUnsafe(queue, undefined) })),
+    (stop) => sync(() => { stop(); if (wasShowing) takeHandedQuery() }),
+  ))
+  const wakes = Stream.mergeAll([
+    Stream.succeed(undefined),
+    handed,
+    shell.changes |> Stream.map(%, () => undefined),
+    screen.changes |> Stream.map(%, () => undefined),
+  ], { concurrency: "unbounded" })
+  try Stream.runForEach(wakes, effect () => {
+    const onMaps = showing(try shell.get(), "Maps")
+    if (!onMaps) {
+      if (wasShowing) try sync(() => takeHandedQuery())
+      wasShowing = false
+      return
+    }
+    wasShowing = true
+    const query = handedQuery()
+    if (query === undefined) return
+    const state = try screen.get()
+    if (!Screen.canHandOver(state, query, query.length, 0) || Screen.canContinueDisclosure(state)) return
+    try sync(() => takeHandedQuery())
+    try ignore(screen.send({ type: "handOver", query, chars: query.length, meeting: 0 }))
+  })
+}, "receiving a handed Maps search")
+
 /**
  * Maps: its screen and the map's credits, which live from Maps' first opening until Alpha closes; the saved places,
  * kept on the phone; and what each follows: the shell's showing Maps, the account, Android's permission and the surface.
@@ -616,6 +649,7 @@ export const maps = together(
   retried,
   opening,
   presence,
+  handoff,
   notification,
   serviceEnds,
   notificationWords,

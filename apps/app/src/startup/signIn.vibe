@@ -7,14 +7,18 @@ import {
   signInCode,
 } from "@elizaos/os-bridges"
 import * as SignIn from "../../gen/app__account__signIn.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Page from "../../gen/app__update__page.effect.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { Launcher } from "../platform/launcher.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
 import { WiFi } from "../platform/wifi.vibe"
+import { started, together, whole } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { Engagements } from "../update/activity.vibe"
+import { openStartupAccess } from "./settingsAccess.vibe"
 
 export type Stage = "Disabled" | "Checking" | "Required" | "Unavailable" | "Admitted"
 export type ConnectionWarning = "Offline" | "Unvalidated" | "WithoutWifi" | "UnvalidatedWithoutWifi"
@@ -30,6 +34,11 @@ export interface FirstRun {
 
 export service StartupSignIn {
   readonly changes: Stream.Stream<FirstRun>
+  snapshot(): FirstRun
+  subscribe(listener: () => void): () => void
+  clockSnapshot(): number
+  subscribeClock(listener: () => void): () => void
+  setClock(seconds: number): void
   active(): boolean!!
   confirmedAccount(): boolean!!
   check(): void!!
@@ -53,8 +62,21 @@ module numbers {
     if (/^1[0-9]{10}$/.test(written)) return "+" + written
     return written
   }
+
+  /** Subscribe to browser focus, visibility and network events that trigger a sign-in recheck. @throws {never} */
+  export function watchRecheck(onRecheck: () => void): () => void {
+    if (typeof window === "undefined" || typeof document === "undefined") return () => {}
+    const visible = () => { if (document.visibilityState === "visible") onRecheck() }
+    const events = ["online", "offline", "focus", "pageshow"] as const
+    for (const event of events) window.addEventListener(event, onRecheck)
+    document.addEventListener("visibilitychange", visible)
+    return () => {
+      for (const event of events) window.removeEventListener(event, onRecheck)
+      document.removeEventListener("visibilitychange", visible)
+    }
+  }
 }
-import { international } from numbers
+import { international, watchRecheck } from numbers
 
 const status = (retry = false) =>
   Effect.orElseSucceed(
@@ -75,286 +97,332 @@ function verdictOf(heard: SignInReceipt | undefined): SignIn.Verdict {
   return "Refused"
 }
 
-export function startupSignIn(enabled: boolean) {
-  if (!enabled) {
-    return Layer.merge(
-      SignIn.machine(),
-      Layer.succeed(StartupSignIn, {
-        changes: Stream.succeed(empty),
-        active: () => succeed(false),
-        confirmedAccount: () => succeed(false),
-        check: () => Effect.void,
-        touch: () => Effect.void,
-        openNetwork: () => succeed(false),
-        send: () => succeed(false),
-        chooseGoogle: () => succeed(false),
-        verify: () => succeed(false),
-        resend: () => succeed(false),
-        back: () => succeed(false),
-      }),
-    )
+const networkWarningOf = effect {
+  const wifi = try WiFi
+  const network = try wifi.connectivity()
+  if (Option.isNone(network)) return undefined
+  if (!network.value.online) return "Offline" as const
+  const wifiActive = try wifi.usingWifi()
+  if (Option.isSome(wifiActive) && !wifiActive.value) {
+    return network.value.validated ? "WithoutWifi" as const : "UnvalidatedWithoutWifi" as const
   }
-  const firstRun = Layer.effect(
-    StartupSignIn,
-    effect {
-      const signIn = try SignIn.Machine
-      const page = try Page.Machine
-      const device = try Device
-      const launcher = try Launcher
-      const wifi = try WiFi
-      const settings = try SystemSettings
-      const time = try Time
-      const engaged = try Engagements
-      const reports = try SubscriptionRef.make<FirstRun>({ ...empty, stage: "Checking" })
-      const checking = try Ref.make(false)
-      const commands = try Semaphore.make(1)
-      const exclusive = (work: boolean!!) =>
-        Effect.map(commands.withPermitsIfAvailable(1)(work), (result) => Option.getOrElse(result, () => false))
-      let nativeAttempt: SignInAttempt | undefined
-      let signedInBy: CredentialId | undefined
-      let touched = false
-      SignIn.opaque.international = international
+  if (!network.value.validated) return "Unvalidated" as const
+  return undefined
+}
 
-      const current = () => SubscriptionRef.get(reports)
-      const active = () => Effect.map(current(), (state) => state.stage !== "Disabled" && state.stage !== "Admitted")
-      const confirmedAccount = () => Effect.map(current(), (state) => state.accountConfirmed)
-      const set = (reported: FirstRun) => SubscriptionRef.set(reports, reported)
-      const seconds = effect {
-        return Math.floor((try time.now()) / 1000)
-      }
-      const foreground = effect {
-        return (try device.showing()) && Page.editorsMounted(try page.get()) && !Page.dialogShown(try page.get())
-      }
-      const admitted = (accountConfirmed: boolean) => effect {
-        try set({ ...empty, stage: "Admitted", accountConfirmed })
-        try engaged.report("startup/sign-in", { card: "NoCard", connecting: false })
-      }
-      const networkWarning = effect {
-        const network = try wifi.connectivity()
-        if (Option.isNone(network)) return undefined
-        if (!network.value.online) return "Offline" as const
-        const wifiActive = try wifi.usingWifi()
-        if (Option.isSome(wifiActive) && !wifiActive.value) {
-          return network.value.validated ? "WithoutWifi" as const : "UnvalidatedWithoutWifi" as const
-        }
-        if (!network.value.validated) return "Unvalidated" as const
-        return undefined
-      }
-      const move = (event: SignIn.Event) => Effect.option(signIn.send(event))
+const disabledSignIn = Layer.merge(
+  SignIn.machine(),
+  Layer.succeed(StartupSignIn, {
+    changes: Stream.succeed(empty),
+    snapshot: () => empty,
+    subscribe: () => () => {},
+    clockSnapshot: () => 0,
+    subscribeClock: () => () => {},
+    setClock: () => {},
+    active: () => succeed(false),
+    confirmedAccount: () => succeed(false),
+    check: () => Effect.void,
+    touch: () => Effect.void,
+    openNetwork: () => succeed(false),
+    send: () => succeed(false),
+    chooseGoogle: () => succeed(false),
+    verify: () => succeed(false),
+    resend: () => succeed(false),
+    back: () => succeed(false),
+  }),
+)
 
-      effect function reported(reply: SignInStatus | undefined): void!! {
-        const connection = (try current()).connection
-        if (!known(reply)) {
-          try set({ ...empty, stage: "Unavailable", connection })
-          return
-        }
-        const { account, readiness } = reply
-        if (account.kind === "signedIn" && (signedInBy === undefined || account.credentialId === signedInBy)) {
-          try admitted(true)
-          return
-        }
-        if (signedInBy !== undefined) {
-          // The phone has not confirmed custody of the sign-in it just reported. Recheck it before mounting.
-          try set({ ...empty, stage: "Unavailable", connection })
-          return
-        }
-        let model = try signIn.get()
-        if (model.step === "Closed") try move({ type: "require", required: true, ready: true })
-        else if (model.step === "Choose" && model.work === "Resting") try move({ type: "askMethods" })
-        model = try signIn.get()
-        try move({
-          type: "methods",
-          ticket: model.readiness.ticket,
-          ok: readiness.methodsKnown,
-          google: readiness.google,
-          sms: readiness.sms,
-        })
-        try set({
-          stage: "Required",
-          accountConfirmed: false,
-          connection,
-          email: readiness.methodsKnown && readiness.email,
-          phone: readiness.methodsKnown && readiness.sms,
-          google: readiness.methodsKnown && readiness.google,
-        })
-        try engaged.report("startup/sign-in", { card: touched ? "Touched" : "Resting", connecting: false })
-      }
-
-      const check = () => effect {
-        let before = try current()
-        if (before.stage === "Disabled" || before.stage === "Admitted" || !(try foreground)) return
-        const connection = try networkWarning
-        before = try current()
-        if (before.stage === "Admitted") return
-        if (before.connection !== connection) try set({ ...before, connection })
-        const model = try signIn.get()
-        if (
-          signedInBy === undefined && model.step !== "Closed" && (model.step !== "Choose" || model.work !== "Resting")
-        ) return
-        if (try Ref.getAndSet(checking, true)) return
-        try ensuring(
-          effect {
-            if (!registered("ElizaSignIn") || (try launcher.presentation()).assistant) {
-              try admitted(false)
-              return
-            }
-            try reported(try status(before.stage !== "Checking"))
-          },
-          Ref.set(checking, false),
-        )
-      }
-
-      const ownerTouch = () => effect {
-        if ((try current()).stage !== "Required") return
-        touched = true
-        try engaged.report("startup/sign-in", { card: "Touched" })
-      }
-
-      const openNetwork = () => effect {
-        const ready = try current()
-        if ((ready.stage !== "Required" && ready.stage !== "Unavailable") || ready.connection === undefined || !(try foreground)) return false
-        try ownerTouch()
-        return (try settings.open("WifiNetworks", "")) === "Exactly"
-      }
-
-      const canAct = effect {
-        const ready = try current()
-        if (ready.stage !== "Required" || ready.connection === "Offline" || (try Ref.get(checking)) || !(try foreground)) return false
-        const network = try wifi.connectivity()
-        return Option.isNone(network) || network.value.online
-      }
-
-      effect function applyReceipt(
-        receipt: SignInReceipt | undefined,
-        checkingAttempt: SignInAttempt | undefined,
-        ticket: number,
-        browser: boolean,
-      ): boolean!! {
-        const answer = receipt?.verdict
-        const heard = checkingAttempt !== undefined && receipt?.attempt !== checkingAttempt ? undefined : receipt
-        let verdict = verdictOf(heard)
-        let account = 0
-        let factor: SignIn.Factor = "Totp"
-        if (heard !== undefined && answer?.kind === "SignedInAs") {
-          signedInBy = answer.credentialId
-          const read = try status()
-          if (!known(read) || read.account.kind !== "signedIn" || read.account.credentialId !== signedInBy) {
-            try set({ ...empty, stage: "Unavailable", connection: try networkWarning })
-            return false
-          }
-          verdict = "Passed"
-          account = 1
-        }
-        if (heard !== undefined && answer?.kind === "FactorAsked") {
-          nativeAttempt = heard.attempt
-          if (!answer.factors.includes("totp")) {
-            factor = "Sms"
-            const sent = try Effect.option(
-              tryPromise(() => signInAccounts().sendFactorCode({ attempt: heard.attempt })),
-            )
-            if (Option.isNone(sent) || sent.value !== heard.attempt) {
-              try ignore(tryPromise(() => signInAccounts().cancel({ attempt: heard.attempt })))
-              nativeAttempt = undefined
-              verdict = "Refused"
-            }
-          }
-        }
-        const stamp = try seconds
-        const stepped = try move(
-          browser
-            ? { type: "returned", tab: ticket, verdict, account, factor, free: true, now: stamp }
-            : { type: "verified", ticket, verdict, account, factor, free: true, now: stamp },
-        )
-        if (Option.isSome(stepped) && stepped.value.state.ended === "HandedOver") try admitted(true)
-        return Option.isSome(stepped)
-      }
-
-      const send = (method: "email" | "phone", address: string) => exclusive(effect {
-        if (!(try canAct) || !(try current())[method]) return false
-        const asked = try move({
-          type: "sendCode",
-          method: method === "email" ? "Email" : "Phone",
-          address,
-          now: try seconds,
-          online: true,
-        })
-        if (Option.isNone(asked)) return false
-        const state = asked.value.state
-        try ownerTouch()
-        const request = method === "email"
-          ? { method: "email" as const, email: state.address }
-          : { method: "sms" as const, phone: state.address }
-        const receipt = tryPromise(() => signInAccounts().start({ ...request, environment: CLOUD_ENVIRONMENT })) catch () => undefined
-        const accepted = receipt?.verdict.kind === "CodeOnItsWay"
-        if (accepted) nativeAttempt = receipt.attempt
-        return Option.isSome(try move({ type: "sent", ticket: state.ticket, accepted, now: try seconds }))
-      })
-
-      const chooseGoogle = () => exclusive(effect {
-        if (!(try canAct) || !(try current()).google) return false
-        const asked = try move({ type: "chooseGoogle", now: try seconds, online: true })
-        if (Option.isNone(asked)) return false
-        try ownerTouch()
-        // Browser/picker opens before returning its attempt. Wait for that exact native result without offering a cancellation.
-        const receipt = tryPromise(() => signInAccounts().start({ method: "google", environment: CLOUD_ENVIRONMENT }))
-          catch () => undefined
-        return try applyReceipt(receipt, undefined, asked.value.state.tab.number, true)
-      })
-
-      const verify = (typed: string) => exclusive(effect {
-        const attempt = nativeAttempt
-        const code = signInCode(typed)
-        if (attempt === undefined || Option.isNone(code) || !(try canAct)) return false
-        const asked = try move({ type: "checkCode", code: code.value, now: try seconds, online: true })
-        if (Option.isNone(asked)) return false
-        const state = asked.value.state
-        const factor = state.step === "Second" ? state.factor === "Totp" ? "totp" as const : "sms" as const : undefined
-        const receipt = tryPromise(() => signInAccounts().verify({ attempt, code: code.value, factor })) catch () =>
-          undefined
-        return try applyReceipt(receipt, attempt, state.ticket, false)
-      })
-
-      const resend = () => exclusive(effect {
-        const attempt = nativeAttempt
-        if (attempt === undefined || !(try canAct)) return false
-        const asked = try move({ type: "resend", now: try seconds, online: true })
-        if (Option.isNone(asked)) return false
-        const receipt = tryPromise(() => signInAccounts().resend({ attempt })) catch () => undefined
-        const accepted = receipt?.verdict.kind === "CodeOnItsWay"
-        if (accepted) nativeAttempt = receipt.attempt
-        return Option.isSome(try move({ type: "sent", ticket: asked.value.state.ticket, accepted, now: try seconds }))
-      })
-
-      const back = () => effect {
-        const model = try signIn.get()
-        const attempt = nativeAttempt
-        if (
-          !(try active()) || (model.step !== "Code" && model.step !== "Second") || model.work !== "Resting"
-          || attempt === undefined || !(try foreground)
-        ) return false
-        return try exclusive(effect {
-          if ((try signIn.get()).ticket !== model.ticket || nativeAttempt !== attempt) return false
-          const cancelled = tryPromise(() => signInAccounts().cancel({ attempt })) catch () => false
-          if (!cancelled) return false
-          nativeAttempt = undefined
-          return Option.isSome(try move({ type: "cancel" }))
-        })
-      }
-
-      return {
-        changes: SubscriptionRef.changes(reports),
-        active,
-        confirmedAccount,
-        check,
-        touch: ownerTouch,
-        openNetwork,
-        send,
-        chooseGoogle,
-        verify,
-        resend,
-        back,
-      }
-    },
+const signInWatcher = started(effect {
+  const signIn = try StartupSignIn
+  const page = try Page.Machine
+  const readyOf = (state: Page.Page) => Page.editorsMounted(state) && !Page.dialogShown(state)
+  const readyChanges = Stream.changes(Stream.map(page.changes, readyOf))
+  const rechecks = Stream.callback<true>((queue) =>
+    acquireRelease(sync(() => watchRecheck(() => { Queue.offerUnsafe(queue, true) })), (off) => sync(off)))
+  const triggers = Stream.merge(
+    Stream.filter(readyChanges, (ready) => ready),
+    rechecks,
   )
-  return Layer.provideMerge(firstRun, SignIn.machine())
+  try Stream.runForEach(triggers, effect () => {
+    if (readyOf(try page.get())) try signIn.check()
+  })
+}, "startup sign-in checks")
+
+const signInClock = started(effect {
+  const signIn = try StartupSignIn
+  const machine = try SignIn.Machine
+  const time = try Time
+  const deadlines = Stream.changes(Stream.map(machine.changes, (state) =>
+    state.step === "Code" || state.step === "Second" ? Math.max(state.expiresAt, state.resendAt) : 0))
+  try Stream.runDrain(Stream.switchMap(deadlines, (deadline) => deadline <= 0 ? Stream.empty : Stream.fromEffect(effect {
+    let sec = Math.floor((try time.now()) / 1000)
+    signIn.setClock(sec)
+    while (sec < deadline) {
+      try time.until((sec + 1) * 1000)
+      sec = Math.floor((try time.now()) / 1000)
+      signIn.setClock(sec)
+    }
+  })))
+}, "startup sign-in countdown")
+
+const signInAccess = started(effect {
+  const signIn = try StartupSignIn
+  const shell = try Shell
+  const layers = try Layers.Machine
+  const page = try Page.Machine
+  const watched = Stream.changesWith(
+    Stream.map(
+      Stream.zipLatest(Stream.zipLatest(signIn.changes, shell.changes), Stream.zipLatest(layers.changes, page.changes)),
+      ([[read, place], [covers, update]]) => ({
+        enrolled: read.accountConfirmed,
+        covered: Page.dialogShown(update) || Layers.pageInert(covers)
+          || place.assistant === "Sheet" || place.assistant === "Full" || place.textAsk.tag === "TextAskVisit",
+      }),
+    ),
+    (before, after) => before.enrolled === after.enrolled && before.covered === after.covered,
+  )
+  try Stream.runForEach(watched, effect ({ enrolled, covered }) => {
+    if (enrolled) try openStartupAccess(covered)
+  })
+}, "automatic startup access")
+
+const firstRun = Layer.effect(
+  StartupSignIn,
+  effect {
+    const signIn = try SignIn.Machine
+    const page = try Page.Machine
+    const device = try Device
+    const launcher = try Launcher
+    const wifi = try WiFi
+    const settings = try SystemSettings
+    const time = try Time
+    const engaged = try Engagements
+    let latest: FirstRun = { ...empty, stage: "Checking" }
+    const reportListeners = new Set<() => void>()
+    let clockNow = 0
+    const clockListeners = new Set<() => void>()
+    const reports = try SubscriptionRef.make<FirstRun>(latest)
+    const checking = try Ref.make(false)
+    const commands = try Semaphore.make(1)
+    const exclusive = (work: boolean!!) =>
+      Effect.map(commands.withPermitsIfAvailable(1)(work), (result) => Option.getOrElse(result, () => false))
+    let nativeAttempt: SignInAttempt | undefined
+    let signedInBy: CredentialId | undefined
+    let touched = false
+    SignIn.opaque.international = international
+
+    const current = () => SubscriptionRef.get(reports)
+    const active = () => Effect.map(current(), (state) => state.stage !== "Disabled" && state.stage !== "Admitted")
+    const confirmedAccount = () => Effect.map(current(), (state) => state.accountConfirmed)
+    const set = (reported: FirstRun) => effect {
+      latest = reported
+      try SubscriptionRef.set(reports, reported)
+      for (const listener of reportListeners) listener()
+    }
+    const seconds = effect { return Math.floor((try time.now()) / 1000) }
+    const foreground = effect {
+      return (try device.showing()) && Page.editorsMounted(try page.get()) && !Page.dialogShown(try page.get())
+    }
+    const admitted = (accountConfirmed: boolean) => effect {
+      try set({ ...empty, stage: "Admitted", accountConfirmed })
+      try engaged.report("startup/sign-in", { card: "NoCard", connecting: false })
+    }
+    const networkWarning = Effect.provideService(networkWarningOf, WiFi, wifi)
+    const move = (event: SignIn.Event) => Effect.option(signIn.send(event))
+
+    effect function reported(reply: SignInStatus | undefined): void!! {
+      const connection = (try current()).connection
+      if (!known(reply)) {
+        try set({ ...empty, stage: "Unavailable", connection })
+        return
+      }
+      const { account, readiness } = reply
+      if (account.kind === "signedIn" && (signedInBy === undefined || account.credentialId === signedInBy)) {
+        try admitted(true)
+        return
+      }
+      if (signedInBy !== undefined) {
+        try set({ ...empty, stage: "Unavailable", connection })
+        return
+      }
+      let model = try signIn.get()
+      if (model.step === "Closed") try move({ type: "require", required: true, ready: true })
+      else if (model.step === "Choose" && model.work === "Resting") try move({ type: "askMethods" })
+      model = try signIn.get()
+      try move({ type: "methods", ticket: model.readiness.ticket, ok: readiness.methodsKnown, google: readiness.google, sms: readiness.sms })
+      try set({
+        stage: "Required", accountConfirmed: false, connection,
+        email: readiness.methodsKnown && readiness.email,
+        phone: readiness.methodsKnown && readiness.sms,
+        google: readiness.methodsKnown && readiness.google,
+      })
+      try engaged.report("startup/sign-in", { card: touched ? "Touched" : "Resting", connecting: false })
+    }
+
+    const check = () => effect {
+      let before = try current()
+      if (before.stage === "Disabled" || before.stage === "Admitted" || !(try foreground)) return
+      const connection = try networkWarning
+      before = try current()
+      if (before.stage === "Admitted") return
+      if (before.connection !== connection) try set({ ...before, connection })
+      const model = try signIn.get()
+      if (signedInBy === undefined && model.step !== "Closed" && (model.step !== "Choose" || model.work !== "Resting")) return
+      if (try Ref.getAndSet(checking, true)) return
+      try ensuring(
+        effect {
+          if (!registered("ElizaSignIn") || (try launcher.presentation()).assistant) {
+            try admitted(false)
+            return
+          }
+          try reported(try status(before.stage !== "Checking"))
+        },
+        Ref.set(checking, false),
+      )
+    }
+
+    const ownerTouch = () => effect {
+      if ((try current()).stage !== "Required") return
+      touched = true
+      try engaged.report("startup/sign-in", { card: "Touched" })
+    }
+
+    const openNetwork = () => effect {
+      const ready = try current()
+      if ((ready.stage !== "Required" && ready.stage !== "Unavailable") || ready.connection === undefined || !(try foreground)) return false
+      try ownerTouch()
+      return (try settings.open("WifiNetworks", "")) === "Exactly"
+    }
+
+    const canAct = effect {
+      const ready = try current()
+      if (ready.stage !== "Required" || ready.connection === "Offline" || (try Ref.get(checking)) || !(try foreground)) return false
+      const network = try wifi.connectivity()
+      return Option.isNone(network) || network.value.online
+    }
+
+    effect function applyReceipt(receipt: SignInReceipt | undefined, checkingAttempt: SignInAttempt | undefined, ticket: number, browser: boolean): boolean!! {
+      const answer = receipt?.verdict
+      const heard = checkingAttempt !== undefined && receipt?.attempt !== checkingAttempt ? undefined : receipt
+      let verdict = verdictOf(heard)
+      let account = 0
+      let factor: SignIn.Factor = "Totp"
+      if (heard !== undefined && answer?.kind === "SignedInAs") {
+        signedInBy = answer.credentialId
+        const read = try status()
+        if (!known(read) || read.account.kind !== "signedIn" || read.account.credentialId !== signedInBy) {
+          try set({ ...empty, stage: "Unavailable", connection: try networkWarning })
+          return false
+        }
+        verdict = "Passed"
+        account = 1
+      }
+      if (heard !== undefined && answer?.kind === "FactorAsked") {
+        nativeAttempt = heard.attempt
+        if (!answer.factors.includes("totp")) {
+          factor = "Sms"
+          const sent = try Effect.option(tryPromise(() => signInAccounts().sendFactorCode({ attempt: heard.attempt })))
+          if (Option.isNone(sent) || sent.value !== heard.attempt) {
+            try ignore(tryPromise(() => signInAccounts().cancel({ attempt: heard.attempt })))
+            nativeAttempt = undefined
+            verdict = "Refused"
+          }
+        }
+      }
+      const stamp = try seconds
+      const stepped = try move(
+        browser
+          ? { type: "returned", tab: ticket, verdict, account, factor, free: true, now: stamp }
+          : { type: "verified", ticket, verdict, account, factor, free: true, now: stamp },
+      )
+      if (Option.isSome(stepped) && stepped.value.state.ended === "HandedOver") try admitted(true)
+      return Option.isSome(stepped)
+    }
+
+    const send = (method: "email" | "phone", address: string) => exclusive(effect {
+      if (!(try canAct) || !(try current())[method]) return false
+      const asked = try move({ type: "sendCode", method: method === "email" ? "Email" : "Phone", address, now: try seconds, online: true })
+      if (Option.isNone(asked)) return false
+      const state = asked.value.state
+      try ownerTouch()
+      const request = method === "email" ? { method: "email" as const, email: state.address } : { method: "sms" as const, phone: state.address }
+      const receipt = tryPromise(() => signInAccounts().start({ ...request, environment: CLOUD_ENVIRONMENT })) catch () => undefined
+      const accepted = receipt?.verdict.kind === "CodeOnItsWay"
+      if (accepted) nativeAttempt = receipt.attempt
+      return Option.isSome(try move({ type: "sent", ticket: state.ticket, accepted, now: try seconds }))
+    })
+
+    const chooseGoogle = () => exclusive(effect {
+      if (!(try canAct) || !(try current()).google) return false
+      const asked = try move({ type: "chooseGoogle", now: try seconds, online: true })
+      if (Option.isNone(asked)) return false
+      try ownerTouch()
+      const receipt = tryPromise(() => signInAccounts().start({ method: "google", environment: CLOUD_ENVIRONMENT })) catch () => undefined
+      return try applyReceipt(receipt, undefined, asked.value.state.tab.number, true)
+    })
+
+    const verify = (typed: string) => exclusive(effect {
+      const attempt = nativeAttempt
+      const code = signInCode(typed)
+      if (attempt === undefined || Option.isNone(code) || !(try canAct)) return false
+      const asked = try move({ type: "checkCode", code: code.value, now: try seconds, online: true })
+      if (Option.isNone(asked)) return false
+      const state = asked.value.state
+      const factor = state.step === "Second" ? state.factor === "Totp" ? "totp" as const : "sms" as const : undefined
+      const receipt = tryPromise(() => signInAccounts().verify({ attempt, code: code.value, factor })) catch () => undefined
+      return try applyReceipt(receipt, attempt, state.ticket, false)
+    })
+
+    const resend = () => exclusive(effect {
+      const attempt = nativeAttempt
+      if (attempt === undefined || !(try canAct)) return false
+      const asked = try move({ type: "resend", now: try seconds, online: true })
+      if (Option.isNone(asked)) return false
+      const receipt = tryPromise(() => signInAccounts().resend({ attempt })) catch () => undefined
+      const accepted = receipt?.verdict.kind === "CodeOnItsWay"
+      if (accepted) nativeAttempt = receipt.attempt
+      return Option.isSome(try move({ type: "sent", ticket: asked.value.state.ticket, accepted, now: try seconds }))
+    })
+
+    const back = () => effect {
+      const model = try signIn.get()
+      const attempt = nativeAttempt
+      if (!(try active()) || (model.step !== "Code" && model.step !== "Second") || model.work !== "Resting" || attempt === undefined || !(try foreground)) return false
+      return try exclusive(effect {
+        if ((try signIn.get()).ticket !== model.ticket || nativeAttempt !== attempt) return false
+        const cancelled = tryPromise(() => signInAccounts().cancel({ attempt })) catch () => false
+        if (!cancelled) return false
+        nativeAttempt = undefined
+        return Option.isSome(try move({ type: "cancel" }))
+      })
+    }
+
+    return {
+      changes: SubscriptionRef.changes(reports),
+      snapshot: () => latest,
+      subscribe(listener: () => void) {
+        reportListeners.add(listener)
+        return () => { reportListeners.delete(listener) }
+      },
+      clockSnapshot: () => clockNow,
+      subscribeClock(listener: () => void) {
+        clockListeners.add(listener)
+        return () => { clockListeners.delete(listener) }
+      },
+      setClock(sec: number) {
+        if (sec === clockNow) return
+        clockNow = sec
+        for (const listener of clockListeners) listener()
+      },
+      active, confirmedAccount, check, touch: ownerTouch, openNetwork, send, chooseGoogle, verify, resend, back,
+    }
+  },
+)
+
+export function startupSignIn(enabled: boolean) {
+  if (!enabled) return disabledSignIn
+  return Layer.provideMerge(
+    whole(Layer.provideMerge(together(signInWatcher, signInClock, signInAccess), firstRun)),
+    SignIn.machine(),
+  )
 }

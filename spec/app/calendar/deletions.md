@@ -35,7 +35,7 @@ type Deletions = {
 
 type Effect = Release({ id: int, reach: Reach, revision: int })
 
-type Held = { state: Deletions, out: List[Effect] }
+type Stepped = { state: Deletions, out: List[Effect] }
 
 pure val initial: Deletions = {
   owner: 0, asked: 0, askedReach: OneEvent, askedRevision: 0,
@@ -106,7 +106,7 @@ pure def lawASeriesAlwaysGetsTheFullReview(guests: int): bool = not(shortReview(
 
 pure def lawAGuestAlwaysGetsTheFullReview(reach: Reach): bool = not(shortReview(reach, 1))
 
-pure def alwaysTheReviewedEventShows(s: Deletions): bool = s.asked != 0 implies not(hidden(s.asked, s))
+pure def alwaysTheReviewedEventShows(s: Deletions): bool = s.asked >= 0 and (s.asked != 0 implies not(hidden(s.asked, s)))
 
 pure def sometimesReviewedBesideAWaitingOne(s: Deletions): bool = s.asked != 0 and s.waiting != 0
 ```
@@ -116,7 +116,7 @@ pure def sometimesReviewedBesideAWaitingOne(s: Deletions): bool = s.asked != 0 a
 ```quint
 pure def canConfirm(s: Deletions, now: int): bool = s.asked != 0 and s.sending == 0 and not(s.paused)
 
-pure def confirm(s: Deletions, now: int): Held =
+pure def confirm(s: Deletions, now: int): Stepped =
   val held = {
     ...s, asked: 0, waiting: s.asked, reach: s.askedReach, revision: s.askedRevision, undo: U::hold(now, windowOf(s.scale)), notice: true,
     dropped: 0, failed: 0, changed: false,
@@ -149,7 +149,7 @@ pure def undoShown(s: Deletions): Deletions = { ...s, waiting: 0, undo: U::undo(
 
 pure def canWindowEnded(s: Deletions, now: int): bool = s.waiting != 0 and U::canRelease(s.undo, now) and not(s.notice) and s.sending == 0 and not(s.paused)
 
-pure def windowEnded(s: Deletions, now: int): Held =
+pure def windowEnded(s: Deletions, now: int): Stepped =
   { state: { ...s, waiting: 0, undo: U::release(s.undo), sending: s.waiting }, out: List(Release({ id: s.waiting, reach: s.reach, revision: s.revision })) }
 ```
 
@@ -158,7 +158,7 @@ pure def windowEnded(s: Deletions, now: int): Held =
 ```quint
 pure def canLeave(s: Deletions): bool = s.asked != 0 or (s.waiting != 0 and s.sending == 0 and not(s.paused))
 
-pure def leave(s: Deletions): Held =
+pure def leave(s: Deletions): Stepped =
   if (s.waiting != 0 and s.sending == 0 and not(s.paused))
     { state: { ...s, asked: 0, waiting: 0, undo: U::release(s.undo), notice: false, sending: s.waiting }, out: List(Release({ id: s.waiting, reach: s.reach, revision: s.revision })) }
   else { state: { ...s, asked: 0 }, out: List() }
@@ -176,7 +176,7 @@ pure def restart(s: Deletions): Deletions =
 
 pure def canSendPaused(s: Deletions): bool = s.paused and s.sending == 0
 
-pure def sendPaused(s: Deletions): Held =
+pure def sendPaused(s: Deletions): Stepped =
   { state: { ...s, waiting: 0, undo: U::release(s.undo), notice: false, paused: false, sending: s.waiting },
     out: List(Release({ id: s.waiting, reach: s.reach, revision: s.revision })) }
 ```

@@ -1,5 +1,5 @@
 // spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
-import { Button, Dialog, DialogContent, DialogTitle, SearchField, Skeleton, cn } from "@repo/ui";
+import { Button, Dialog, DialogContent, DialogTitle, Input, SearchField, Skeleton, cn } from "@repo/ui";
 import { Check, ChevronLeft, ChevronRight, File as FileIcon, Folder, Image, X } from "lucide-react";
 import { useRef } from "react";
 import type { Tab } from "../../gen/app__assistant__attachments.ts";
@@ -124,7 +124,7 @@ export function AttachmentSources({
             aria-pressed={volume.selected} disabled={reading || !volume.onPress} onClick={volume.onPress}>{volume.name}</Button>)}
         </div>}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4" aria-busy={reading || loading || undefined}>
-          {onImport && <input ref={inputRef} type="file" aria-label={`Select ${source}`} accept={accept} multiple hidden onChange={(event) => {
+          {onImport && <Input ref={inputRef} type="file" aria-label={`Select ${source}`} accept={accept} multiple hidden className="hidden" onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
             if (files.length > 0) onImport(files);

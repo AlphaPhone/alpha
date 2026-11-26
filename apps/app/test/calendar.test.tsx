@@ -81,12 +81,13 @@ async function onCalendar(world: ReturnType<typeof morning>) {
   const { alpha } = await open(world, only("view:Calendar"));
   const runtime = calendar.runtime(alpha);
   await openCalendar(alpha);
+  await until(alpha, runtime, View, (s) => s.front);
   return { alpha, runtime, world };
 }
 
 async function onBrowserCalendar() {
   const running = await onCalendar(morning(false));
-  await until(running.alpha, running.runtime, View, (s) => s.googleRows === 2);
+  await until(running.alpha, running.runtime, View, (s) => s.front && s.googleRows === 2);
   return running;
 }
 
@@ -101,7 +102,7 @@ describe("Calendar without a connected account", () => {
     const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
-    await until(alpha, runtime, View, (state) => state.owner === 0 && !state.connected);
+    await until(alpha, runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
     const timeline = document.querySelector('[aria-label="Calendar timeline"]');
     expect(timeline?.textContent).toContain("Not connected");
     expect(button("Open Calendar settings")).toBeDefined();
@@ -357,6 +358,9 @@ describe("Calendar without a connected account", () => {
     }
     expect(world.reminders.items.find((item) => item.id === selected.id)?.completed).toBe(true);
 
+    await until(alpha, runtime, View, (state) => state.front && state.reminders === 1);
+    await press(/^Bring the blue notebook,/);
+    await until(alpha, runtime, View, (state) => state.reminder > 0);
     await press("Reopen reminder");
     await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
     await press("Reopen");
@@ -618,6 +622,7 @@ describe("on a phone", () => {
     expect(button("Save event")?.getAttribute("aria-disabled")).toBe("true");
     await press("Check if events were saved");
     await until(alpha, runtime, Editor, (e) => !e.unknownCreate && e.form === "NoForm");
+    await until(alpha, runtime, View, (s) => s.form === "NoFormShown");
     expect(world.calendar.phoneEvents.filter((event) => event.title === "Walk").length).toBe(1);
 
     // spec/app/calendar/editor.md, "A delete names which occurrences, and only a repeating event offers more than this one"
@@ -640,6 +645,7 @@ describe("on a phone", () => {
     expect(titles()).not.toContain("Gym");
     await press("Undo");
     await until(alpha, runtime, Held, (d) => d.waiting === 0 && d.undo.holding === "Undone");
+    await until(alpha, runtime, View, (s) => s.open === 0 && !s.review);
     expect([titles().includes("Gym"), world.calendar.phoneEvents.map((event) => event.title).includes("Gym")]).toEqual([true, true]);
 
     // spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged"
@@ -670,6 +676,7 @@ describe("on a phone", () => {
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
     await until(alpha, runtime, Link, (l) => l.owner > 0);
+    await until(alpha, runtime, View, (s) => s.front && s.owner > 0);
     await fromMonth("Calendars");
     await until(alpha, runtime, View, (s) => s.overlay === "CalendarsSheet");
 
@@ -690,6 +697,7 @@ describe("on a phone", () => {
     // spec/app/calendar/link.md, "A write is sent only while the owner and the reviewed revision still hold, and its answer starts another review"; spec/app/calendar/link.md, "Synced needs a clean read back of the linked events; held or many conflicts are named"
     world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.basic_identity", "google.calendar.read", "google.calendar.write"] };
     await openCalendar(alpha);
+    await until(alpha, runtime, View, (s) => s.front);
     if ((await runtime.runPromise(View.use((view) => view.get()))).overlay !== "CalendarsSheet") await fromMonth("Calendars");
     await press("Check again");
     await until(alpha, runtime, Link, (l) => l.phase === "Done" && l.ending === "Synced" && l.writes === 1 && l.linkReads === 1);
@@ -824,7 +832,9 @@ describe("in a browser", () => {
     await press("Decline invite");
     await until(alpha, runtime, Held, (d) => d.asked !== 0 && d.waiting === 0);
     await until(alpha, runtime, View, (s) => s.open !== 0);
-    expect(document.querySelector("[role=alertdialog]")?.getAttribute("aria-label")).toBe("Decline invitation?");
+    const declineDialog = document.querySelector("[role=alertdialog]");
+    const declineTitleId = declineDialog?.getAttribute("aria-labelledby");
+    expect(declineTitleId ? document.getElementById(declineTitleId)?.textContent : declineDialog?.getAttribute("aria-label")).toBe("Decline invitation?");
     // spec/app/calendar/deletions.md, "Confirming the review holds the deletion; a deletion still waiting is sent first, so the only Undo shown is the newest"
     await press("Decline");
     await until(alpha, runtime, Held, (d) => d.asked === 0 && d.waiting !== 0);

@@ -43,7 +43,7 @@ function makeFakeRuntime(initialTasks: readonly {
             const at = tasks.findIndex((task) => task.taskId === taskId);
             if (at < 0) return Promise.resolve({ kind: "notFound" });
             const verb = request.kind === "edit" ? "edit" : request.verb?.tag ?? "";
-            const next = refusing.has(verb) ? undefined : answers[verb]?.(tasks[at]!, request);
+            const next = refusing.has(verb) ? undefined : answers[verb]?.(tasks[at], request);
             if (next === undefined) return Promise.resolve({ kind: "refused", reason: { tag: "NotApplicable" } });
             tasks[at] = next;
             return Promise.resolve({ kind: "applied", task: next });
@@ -505,7 +505,7 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     await action.handler(runtime, emptyMessage("rename it"), emptyState, { parameters: { op: "update", title: "keys", notes: "From the front desk" } });
     expect((await named("Pick up keys"))?.notes).toBe("From the front desk");
     const keysTask = tasks.findIndex((task) => task.metadata.alphaReminderId === keys.id && task.status !== "Dismissed");
-    tasks[keysTask] = { ...tasks[keysTask]!, status: "Dismissed" };
+    tasks[keysTask] = { ...tasks[keysTask], status: "Dismissed" };
     expect(await named("Pick up keys")).toBeUndefined();
 
     const gate = defineRoutes(routes.map(({ method, path, query }) => (query === undefined ? { method, path } : { method, path, query })));

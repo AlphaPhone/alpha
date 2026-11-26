@@ -105,7 +105,9 @@ pure def stepTheOpenDocumentKeepsItsAccess(before: Recent, via: str, after: Rece
 ### Access given up never comes back
 
 Whatever names access after a step either named it before or was given it
-in that step, under a number above every number given before.
+in that step, under a number above every number given before. Discovered by
+the proof: each access number belongs to one file's key, so forgetting that
+file leaves no other row or open viewer holding its access.
 
 ```quint
 pure def stepAccessGivenUpNeverReturns(before: Recent, after: Recent): bool =
@@ -115,6 +117,8 @@ pure def stepAccessGivenUpNeverReturns(before: Recent, after: Recent): bool =
 
 pure def alwaysHeldAccessWasGiven(s: Recent): bool =
   s.issued >= 0 and s.rows.every(r => r.grant >= 0 and r.grant <= s.issued) and s.shown.grant >= 0 and s.shown.grant <= s.issued
+    and s.rows.every(a => s.rows.every(b => (a.grant != 0 and a.grant == b.grant) implies a.key == b.key))
+    and s.rows.every(r => (r.grant != 0 and r.grant == s.shown.grant) implies r.key == s.shown.key)
 ```
 
 ### A file opened from a folder is given access, listed first in place of its older row, and is the document open; the oldest row leaves a full list

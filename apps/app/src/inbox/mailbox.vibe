@@ -101,8 +101,10 @@ effect function recheck(): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.K
   const generation = ledger.generation()
   const phone = native()
   const { cloud, device } = try all({
-    cloud: effect { return try asked((signal) => client.account({ signal })) }
-      catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? null : undefined),
+    cloud: effect {
+      return effect { return try asked((signal) => client.account({ signal })) }
+        catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? null : undefined)
+    },
     device: phone ? deviceOwner() : succeed(undefined),
   }, { concurrency: "unbounded" })
   if (ledger.generation() !== generation) return

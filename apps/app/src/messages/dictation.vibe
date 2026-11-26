@@ -12,7 +12,7 @@ import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
 import { type VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
 import { Drafts, editNewMessage, newDraftHeld, writeMessageDraft } from "./composer.vibe"
-import { Conversations } from "./messages.vibe"
+import type { Conversations } from "./messages.vibe"
 
 /** The open thread or exact New visit owns the recorder. Across a pane change it must retire. */
 function messageField(where: Messages.Messages): string {

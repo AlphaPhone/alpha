@@ -1,11 +1,10 @@
 // spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
 import type { CapacitorConfig } from "@capacitor/cli";
-import { elizaCloudRoutes } from "@repo/cloud";
-import table from "../../packages/deployment/deployments.json" with { type: "json" };
+import { elizaCloudRoutes, hostedDeployments } from "@repo/cloud";
 
 interface Hosted { readonly kind: "hosted"; readonly cloud: string; readonly appLinkHost: string }
 
-const deployments: Record<"production" | "staging", Hosted> = { production: { ...table.production, kind: "hosted" }, staging: { ...table.staging, kind: "hosted" } };
+const deployments: Record<"production" | "staging", Hosted> = hostedDeployments;
 
 export const identity = { appId: "ai.alphacompute.alphaphone", appName: "Alpha Phone" } as const;
 export const androidPaths = { project: "android", web: "dist" } as const;

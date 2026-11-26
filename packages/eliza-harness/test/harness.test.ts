@@ -201,7 +201,7 @@ describe("the eliza harness", () => {
       const seen: string[] = [];
       const work = (name: string) => async () => {
         seen.push(`${name} in`);
-        await new Promise((done) => setTimeout(done, 200));
+        await Effect.runPromise(Effect.sleep("200 millis"));
         seen.push(`${name} out`);
         return name;
       };

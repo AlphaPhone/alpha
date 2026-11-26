@@ -284,7 +284,7 @@ const anonymousRead = (url: string, bound: number) => Effect.tryPromise({
   catch: refused,
 });
 
-const gh = (...args: string[]) => attempt(() => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+const gh = (...args: string[]) => Effect.try({ try: () => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), catch: refused });
 const repository = `--repo=${channelRepository}`;
 
 /** The channel on GitHub: its stable release through `gh`, and what anyone downloads from it. */

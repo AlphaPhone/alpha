@@ -103,14 +103,19 @@ export service Mail {
   shown(state: Mailbox): ReadonlyArray<Letter>
   /** The first page of the unsearched Inbox read for the currently authorized credential. */
   incoming(state: Mailbox): ReadonlyArray<Letter>
-  read(ticket: number, body: MailMessage): void
+  read(ticket: number, body: MailMessage, authoritative?: boolean): void
   body(ticket: number): MailMessage | undefined
+  authoritative(ticket: number): boolean
   /** Unlock saved text only for a Cloud owner proven by the current platform. */
   savedOwner(owner: string | undefined): void!!
   /** Keep the plain text once the reader accepted an authoritative body. */
   keepBody(mailbox: Mailbox, body: MailMessage): void!!
   /** The exact text associated with a row in the owner's saved list. */
   savedBody(mailbox: Mailbox, message: number): string | undefined
+  /** Notify when saved message bodies load or change. */
+  subscribeSavedBodies(listener: () => void): () => void
+  /** Monotonic version of the saved message body cache. */
+  savedBodiesVersion(): number
   /** Forget every account, message and list of the session before. */
   forget(): void!!
 }
@@ -120,6 +125,27 @@ export type SearchPage = Omit<MailSearch, "messages"> & { readonly messages: Rea
 type Page = Kept & { readonly ticket: number; readonly credential: number; readonly history: string; readonly names: ReadonlyMap<number, string> }
 
 const sameSelection = (a: Selection, b: Selection): boolean => a.account === b.account && a.folder === b.folder && a.query === b.query
+
+function savedBodyLookup(ledger: Ledger, mailbox: Mailbox, message: number) {
+  const kept = ledger.kept
+  if (!mailbox.signedIn || !mailbox.saved || mailbox.failure === "Revoked" ||
+    (mailbox.accounts.status !== "Loading" && mailbox.accounts.status !== "Failed") ||
+    !kept || !kept.credential || kept.credential !== mailbox.keptCredential || !sameSelection(kept.selection, mailbox.selected)) return undefined
+  const account = mailbox.selected.account
+  const row = kept.letters.find((letter) => letter.message === message)
+  const id = row?.card.id
+  const history = row?.card.metadata.historyId
+  const grantEntry = Object.entries(ledger.credentials).find(([grant, credential]) => credential === kept.credential && ledger.accounts[`grant:${grant}`] === account)
+  return !id || !history || !grantEntry ? undefined : { account, credential: kept.credential, grant: grantEntry[0], message: id, history }
+}
+
+function incomingLetters(ledger: Ledger, state: Mailbox, credential: number | undefined, live: Page | undefined): ReadonlyArray<Letter> {
+  const kept = live ?? ledger.kept
+  if (kept === undefined || credential === undefined || credential !== state.keptCredential ||
+    kept.credential !== credential || kept.selection.account !== state.selected.account ||
+    kept.selection.folder !== "Incoming" || kept.selection.query !== "") return []
+  return kept.letters.slice(0, pageSize)
+}
 
 export const mail = Layer.effect(Mail, effect {
   const store = try KeyValueStore.KeyValueStore
@@ -137,7 +163,7 @@ export const mail = Layer.effect(Mail, effect {
   const messages = new Map<number, string>(Object.entries(ledger.messages).map(([name, id]) => [id, name]))
   const cursors = new Map<string, number>()
   const tokens = new Map<number, string>()
-  const bodies = new Map<number, MailMessage>()
+  const bodies = new Map<number, { readonly body: MailMessage; readonly authoritative: boolean }>()
   effect function keep(): void!! {
     try ignore(store.set(key, JSON.stringify({ ...ledger, next: nextId })))
   }
@@ -319,22 +345,16 @@ export const mail = Layer.effect(Mail, effect {
       const live = currentPage(state)
       return live !== undefined && sameSelection(live.selection, state.selected) && live.credential === credentialOf(state) ? live.letters : []
     },
-    incoming(state: Mailbox) {
-      const credential = credentialOf(state)
-      const kept = currentPage(state) ?? ledger.kept
-      if (kept === undefined || credential === undefined || credential !== state.keptCredential ||
-        kept.credential !== credential || kept.selection.account !== state.selected.account ||
-        kept.selection.folder !== "Incoming" || kept.selection.query !== "") return []
-      return kept.letters.slice(0, pageSize)
-    },
-    read(ticket: number, body: MailMessage) {
-      bodies.set(ticket, body)
+    incoming: (state: Mailbox) => incomingLetters(ledger, state, credentialOf(state), currentPage(state)),
+    read(ticket: number, body: MailMessage, authoritative = true) {
+      bodies.set(ticket, { body, authoritative })
       if (bodies.size > 8) {
         const oldest = bodies.keys().next().value
         if (oldest !== undefined) bodies.delete(oldest)
       }
     },
-    body: (ticket: number) => bodies.get(ticket),
+    body: (ticket: number) => bodies.get(ticket)?.body,
+    authoritative: (ticket: number) => bodies.get(ticket)?.authoritative === true,
     effect savedOwner(owner: string | undefined) {
       if (owner === undefined) saved.conceal()
       else try saved.confirm(owner)
@@ -349,18 +369,11 @@ export const mail = Layer.effect(Mail, effect {
       try saved.remember({ account, credential, grant, message, history }, body.bodyText)
     },
     savedBody(mailbox: Mailbox, message: number) {
-      const kept = ledger.kept
-      if (!mailbox.signedIn || !mailbox.saved || mailbox.failure === "Revoked" ||
-        (mailbox.accounts.status !== "Loading" && mailbox.accounts.status !== "Failed") ||
-        !kept || !kept.credential || kept.credential !== mailbox.keptCredential || !sameSelection(kept.selection, mailbox.selected)) return undefined
-      const account = mailbox.selected.account
-      const row = kept.letters.find((letter) => letter.message === message)
-      const id = row?.card.id
-      const history = row?.card.metadata.historyId
-      const grantEntry = Object.entries(ledger.credentials).find(([grant, id]) => id === kept.credential && ledger.accounts[`grant:${grant}`] === account)
-      if (!id || !history || !grantEntry) return undefined
-      return saved.read({ account, credential: kept.credential, grant: grantEntry[0], message: id, history })
+      const target = savedBodyLookup(ledger, mailbox, message)
+      return target === undefined ? undefined : saved.read(target)
     },
+    subscribeSavedBodies: (listener: () => void) => saved.subscribe(listener),
+    savedBodiesVersion: () => saved.version(),
     effect forget() {
       ownerGeneration = ++sequence
       accountGenerations.clear()

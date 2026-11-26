@@ -171,7 +171,7 @@ pure def copyrightAnswered(s: Credits, token: int, success: bool, text: str): Cr
     { ...s, pending: 0, shownView: if (success) s.requestedView else -1, copyrightShown: success, copyrightFailed: not(success), copyright: if (success) text else "" }
   else s
 
-pure def alwaysAPendingRequestIsForTheView(s: Credits): bool = s.pending > 0 implies (s.requestedView == s.view and s.raster and s.pending < s.nextToken)
+pure def alwaysAPendingRequestIsForTheView(s: Credits): bool = s.pending > 0 implies (s.plane > 0 and s.requestedView == s.view and s.raster and s.pending < s.nextToken)
 
 pure def alwaysTheShownCopyrightMatchesTheView(s: Credits): bool =
   s.copyrightShown implies (s.plane > 0 and not(s.copyrightFailed) and s.pending == 0 and s.shownView == s.view)

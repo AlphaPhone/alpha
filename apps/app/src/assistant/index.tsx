@@ -68,7 +68,7 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
     const destination = emailDestination(inbox, drafts);
     return {
       copy: (selection) => void runtime.runPromise(copyMessage(selection)),
-      useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
+      addToEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
       reading: speaker?.text === "Message" && reading(speaker)
         ? { message: speaker.item, stop: () => void runtime.runPromise(stopMessage(speaker.ticket)) } : undefined,
       openLink: registered("AlphaBrowser") ? (href) => void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])

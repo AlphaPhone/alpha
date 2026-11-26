@@ -70,13 +70,21 @@ export function WorkflowDeviceApproval({ runtime, run, owner }: ApprovalProps) {
   const allow = { type: "decideDevice", number: shown.number, runNumber: run, approved: true, now: untimed } as const;
   const deny = { ...allow, approved: false };
   const pill = cn(focusRing, "min-h-11 rounded-full px-4.5");
+  const detailKeys = (() => {
+    const seen = new Map<string, number>();
+    return shown.detail.map((line) => {
+      const count = (seen.get(line) ?? 0) + 1;
+      seen.set(line, count);
+      return { key: `${line}\0${count}`, line };
+    });
+  })();
   return (
     <section aria-label="Review device action" className="mt-5.5 flex flex-col gap-3 rounded-panel bg-secondary px-5 py-4.5 text-base leading-transcript">
       <strong className="font-semibold">{operations[shown.offer.operation.type]}</strong>
       <details className="text-sm leading-chat wrap-anywhere">
         <summary className={cn(focusRing, "min-h-11 cursor-pointer py-3 font-semibold")}>Details</summary>
-        {shown.detail.map((line, index) => (
-          <p key={`${index}/${line.length}`} className="whitespace-pre-wrap">{line}</p>
+        {detailKeys.map(({ key, line }) => (
+          <p key={key} className="whitespace-pre-wrap">{line}</p>
         ))}
       </details>
       {(machine.can(allow) || machine.can(deny)) && (

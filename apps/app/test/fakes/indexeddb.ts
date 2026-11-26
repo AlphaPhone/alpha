@@ -13,7 +13,7 @@ class Request<T> {
   onupgradeneeded: Listener = null;
 }
 
-const later = (work: () => void) => void setTimeout(work, 0);
+const later = (work: () => void) => { void Promise.resolve().then(work); };
 
 export function memoryIndexedDB() {
   const databases = new Map<string, Map<string, Map<IDBValidKey, unknown>>>();

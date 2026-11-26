@@ -41,7 +41,7 @@ import {
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { MailBackgroundStatus } from "@elizaos/plugin-inbox-client";
-import { type ReactNode, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useState, useSyncExternalStore } from "react";
 import * as Records from "../../gen/app__account__records.ts";
 import { useMachine as useRecords } from "../../gen/app__account__records.react.ts";
 import type { Machine as RecordsMachine } from "../../gen/app__account__records.effect.vibe";
@@ -86,12 +86,13 @@ import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 import { PasswordEntries } from "./PasswordEntries.tsx";
 import { ProtonPass } from "./ProtonPass.tsx";
+import type { VaultTurn } from "./passwords.vibe";
 import { InboxNotices } from "../inbox/notices.vibe";
 import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effect.vibe";
 import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine | VaultTurn, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -407,7 +408,6 @@ const inboxWatchPhases: Record<MailBackgroundStatus["status"], NonNullable<Setti
 };
 const inboxCheckedAt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const noInboxWatch = () => undefined;
-const noInboxChanges = () => noInboxWatch;
 
 function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
   const facts = useFacts(runtime).state;
@@ -416,7 +416,8 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
   const calendar = runtime.runSync(CalendarAccount);
   const status = useSyncExternalStore(calendar.subscribe, calendar.snapshot, calendar.snapshot);
   const notices = app === "inbox" ? runtime.runSync(InboxNotices) : undefined;
-  const watching = useSyncExternalStore(notices?.subscribe ?? noInboxChanges, notices?.snapshot ?? noInboxWatch, noInboxWatch);
+  const subscribeNotices = useCallback((listener: () => void) => notices ? notices.subscribe(listener) : noInboxWatch, [notices]);
+  const watching = useSyncExternalStore(subscribeNotices, () => notices?.snapshot(), noInboxWatch);
   const delivery = watching?.delivery;
   return (
     <>
@@ -584,7 +585,11 @@ const drawn: Partial<Record<Page, Drawn>> = {
  * screens read.
  * @model spec/app/settings/index.md
  */
-export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime; alpha: Alpha; further: Partial<Record<Page, Drawn>> }) {
+export function Settings<R extends SettingsRuntime>({ runtime, alpha, further }: {
+  runtime: R;
+  alpha: Alpha;
+  further: Partial<Record<Page, (props: { runtime: R; alpha: Alpha; common: Common }) => ReactNode>>;
+}) {
   const { state, cause, can, send } = usePages(runtime);
   const android = useTimed(runtime, useAndroid);
   const facts = useTimed(runtime, useFacts);

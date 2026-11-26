@@ -135,6 +135,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Composer, "Two SIMs loaded", (state) => state.thread > 0 && state.sims === 2 && state.simInfo.grant === "Granted");
     await fill("Text Maya", "Use the reviewed line");
     await press("Travel");
+    await ready(alpha.runtime, Composer, "Draft saved with Travel SIM", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept" && state.sim === 2);
 
     const replacement = { ...second, id: 9 };
     world.telephony.subscriptions = [replacement, first];
@@ -350,7 +351,6 @@ describe("Messages on an Alpha image", () => {
     const first = { token: "first-android-text", recipients: ["+14155550122"], body: "Draft from Android" };
     const second = { token: "second-android-text", recipients: ["+14155550100"], body: "A different Android draft" };
     const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
-    // The first acknowledgment is in flight when Android publishes a newer request.
     const acknowledgment = Promise.withResolvers<void>();
     world.telephony.holdSmsDraftAcknowledgment = acknowledgment.promise;
     try {

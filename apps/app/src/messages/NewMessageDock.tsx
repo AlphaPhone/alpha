@@ -39,9 +39,9 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
   const phone = usePhone(runtime);
   const voice = useVoice(runtime);
   const [selected, setSelected] = useState<TelephonySubscription>();
-  const pictures = useRef<HTMLInputElement>(null);
-  const camera = useRef<HTMLInputElement>(null);
-  const chooserRevision = useRef<number | undefined>(undefined);
+  const picturesRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const chooserRevisionRef = useRef<number | undefined>(undefined);
   const state = composer.state;
   if (!state || !phone.state) return <CommsBar runtime={runtime} />;
 
@@ -72,7 +72,7 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
   const retry = { type: "transcribeAgain", now: untimed } as const;
   const chooseFile = (input: HTMLInputElement | null) => {
     if (!textIsSaved()) return;
-    chooserRevision.current = revision;
+    chooserRevisionRef.current = revision;
     input?.click();
   };
   return <>
@@ -117,26 +117,26 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
         {canPicture && <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message attachments"><Plus /></Button></MenuTrigger>
           <MenuContent aria-label="Message actions" side="top" sideOffset={8}>
-            <MenuItem onSelect={() => chooseFile(camera.current)}><Camera />Camera</MenuItem>
-            <MenuItem onSelect={() => chooseFile(pictures.current)}><ImagePlus />Add media</MenuItem>
+            <MenuItem onSelect={() => chooseFile(cameraRef.current)}><Camera />Camera</MenuItem>
+            <MenuItem onSelect={() => chooseFile(picturesRef.current)}><ImagePlus />Add media</MenuItem>
           </MenuContent>
         </Menu>}
         <Textarea ref={textarea} rows={1} aria-label={label} placeholder={label} value={body} maxLength={MMS_MAX_BODY} readOnly={!editable}
           onChange={(event) => onBody(event.currentTarget.value)} style={minHeight === undefined ? undefined : { minHeight }}
           className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 text-body leading-field shadow-none focus-visible:outline-none" />
-        {([["Attach a picture", pictures, false], ["Take a picture", camera, true]] as const).map(([name, input, capture]) => <Input
+        {([["Attach a picture", picturesRef, false], ["Take a picture", cameraRef, true]] as const).map(([name, input, capture]) => <Input
           key={name} ref={input} type="file" hidden className="hidden" aria-label={name} multiple={!capture} capture={capture ? "environment" : undefined}
           accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!canPicture} onChange={(event) => {
             const files = [...(event.currentTarget.files ?? [])];
             event.currentTarget.value = "";
-            const picked = chooserRevision.current;
-            chooserRevision.current = undefined;
+            const picked = chooserRevisionRef.current;
+            chooserRevisionRef.current = undefined;
             if (picked !== undefined && files.length > 0) void runtime.runPromise(attachNewPictures(visit, picked, files));
           }} />)}
         {hasContent && <Button size="icon" className="disabled:opacity-100" aria-label={checking ? "Check send status" : "Send"} data-alpha-bar-send disabled={!canSend}
           onClick={(event) => { if (textIsSaved()) void runtime.runPromise(sendNewMessage(visit, revision, selected, event.nativeEvent.isTrusted)); }}>{checking ? <RefreshCw /> : <ArrowUp />}</Button>}
         {editable && phone.state.telecom === "NoCall" && voice.can({ type: "openRecorder", target: "MessagesBar" }) && <Button variant="ghost" size="icon"
-          aria-label={`Dictate a text to ${first || "them"}`} disabled={picking || !saved} onClick={() => { if (textIsSaved()) void runtime.runPromise(dictateNewMessage(visit, revision)); }}><Mic /></Button>}
+          aria-label={`Dictate a text to ${first || "them"}`} disabled={!saved} onClick={() => { if (textIsSaved()) void runtime.runPromise(dictateNewMessage(visit, revision)); }}><Mic /></Button>}
       </div>
     )} />
   </>;

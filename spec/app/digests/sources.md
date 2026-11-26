@@ -177,6 +177,17 @@ pure def alwaysConsentIsBounded(s: Sources): bool = and {
 }
 ```
 
+### The scope under review stays within what its source kind may cover
+
+```quint
+pure def alwaysReviewedScopeFitsItsKind(s: Sources): bool = and {
+  s.scope >= 0,
+  s.reviewing == PhoneCalendars implies s.scope <= maxCalendars,
+  s.reviewing == Snapshot implies s.scope <= maxSnapshot,
+  (s.reviewing == PhoneReminders or s.reviewing == Google) implies s.scope == 0,
+}
+```
+
 ### A source can be read with consent, a read refused once its hour passed before the phone woke, a consent expire soon, a snapshot be shared, and a source be revoked
 
 ```quint

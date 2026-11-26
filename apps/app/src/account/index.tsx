@@ -4,7 +4,7 @@ import { ChevronDown, RotateCw, Ticket, X } from "lucide-react";
 import { normalizeSubscriptionCode } from "@elizaos/cloud";
 import { Layer } from "effect";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
-import * as Billing from "../../gen/app__account__billing.effect.vibe";
+import type * as Billing from "../../gen/app__account__billing.effect.vibe";
 import { useMachine as useCodes } from "../../gen/app__account__codes.react.ts";
 import { useMachine as useBilling } from "../../gen/app__account__billing.react.ts";
 import { useMachine as useSettings } from "../../gen/app__settings.react.ts";
@@ -13,7 +13,7 @@ import { listed, top } from "../../gen/app__shell__layers.ts";
 import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
 import { checkout, choosePurchase, recheckPlan, tierOf } from "./billing.vibe";
 import { accountAccess, checkCodePlan, codes, readReferral, referralCode, submitCode } from "./codes.vibe";
-import { AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, profileLive, profileShelf } from "./profile.vibe";
+import { type AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, profileLive, profileShelf } from "./profile.vibe";
 
 const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
 const planDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -159,7 +159,7 @@ export function AccountStatus({ alpha }: { alpha: Alpha }) {
   const label = current.tag === "Read" ? current.contact || "Signed in"
     : current.tag === "SignInRequired" ? "Signed out" : "Account unavailable";
   return <StatusDot status={current.tag === "Read" ? "ok" : "off"} label={label} showLabel
-    className={cn("flex gap-3 text-caption leading-normal text-[#6b6b6b] dark:text-[#8f8f8f] [&_circle]:r-[6px] [&_circle]:fill-current [&_circle]:stroke-none [&_svg]:size-2 [&_svg]:text-current", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
+    className={cn("flex gap-3 text-caption leading-normal text-muted-foreground [&_circle]:[r:6px] [&_circle]:fill-current [&_circle]:stroke-none [&_svg]:size-2 [&_svg]:text-current", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
 }
 
 /** The browser's account recovery page is contained in Alpha's phone canvas. */
@@ -186,13 +186,13 @@ function BrowserAccount({ open, reading, retry, close }: { open: boolean; readin
           }}
           className="absolute inset-x-0 top-auto bottom-0 max-h-full max-w-120 translate-y-0 gap-0 overflow-auto rounded-t-sheet rounded-b-none bg-background px-5.5 pt-5 pb-7 text-foreground">
           <AuthMark className="mb-6" />
-          <DialogTitle className="mb-7 font-sans text-[1.375rem]/[1.2] font-semibold">Alpha</DialogTitle>
+          <DialogTitle className="mb-7 font-sans text-panel-title font-semibold">Alpha</DialogTitle>
           {reading
             ? <Spinner label="Reading account" className="mb-3 text-muted-foreground" />
-            : <p role="alert" className="mb-3 rounded-[12px] bg-[color-mix(in_srgb,#e03131_12%,var(--color-background))] p-3 text-sm leading-[1.45] text-[color-mix(in_srgb,#e03131_72%,var(--color-foreground))]">Unavailable</p>}
-          <Button variant="ghost" className="h-11.5 w-full gap-3 rounded-lg px-3 py-2.5 text-base leading-[1.25] font-medium text-primary hover:bg-transparent"
+            : <p role="alert" className="mb-3 rounded-sm border border-destructive/30 bg-destructive/12 p-3 text-sm leading-status text-foreground">Unavailable</p>}
+          <Button variant="ghost" className="h-11.5 w-full gap-3 rounded-lg px-3 py-2.5 text-base leading-snug font-medium text-primary hover:bg-transparent"
             onClick={retry} disabled={reading}><RotateCw aria-hidden className="size-5.5" />Try again</Button>
-          <Button variant="ghost" className="mt-5 h-11 w-full rounded-full text-base leading-[1.25] font-medium text-muted-foreground hover:bg-transparent" onClick={close}>Back</Button>
+          <Button variant="ghost" className="mt-5 h-11 w-full rounded-full text-base leading-snug font-medium text-muted-foreground hover:bg-transparent" onClick={close}>Back</Button>
         </DialogContent>
       </Dialog>}
     </div>

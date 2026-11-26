@@ -28,7 +28,7 @@ const troubles: Record<StartupTrouble, string> = {
  */
 export function StartupAllSet({ trouble, notSaved = false, children, onDone }: StartupAllSetProps) {
   const attention = trouble !== undefined || notSaved;
-  const heading = useRef<HTMLHeadingElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   return (
     <Dialog open>
       <DialogContent
@@ -36,7 +36,7 @@ export function StartupAllSet({ trouble, notSaved = false, children, onDone }: S
         aria-describedby={undefined}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          heading.current?.focus({ preventScroll: true });
+          headingRef.current?.focus({ preventScroll: true });
         }}
         onInteractOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {
@@ -49,7 +49,7 @@ export function StartupAllSet({ trouble, notSaved = false, children, onDone }: S
             <Check className="size-9 [@media(max-height:500px)]:size-7" />
             {attention ? <span className="absolute top-1.5 right-1.5 size-3.5 rounded-full border-2 border-background bg-warn" /> : null}
           </span>
-          <DialogTitle ref={heading} tabIndex={-1} className={startupHeading}>All set</DialogTitle>
+          <DialogTitle ref={headingRef} tabIndex={-1} className={startupHeading}>All set</DialogTitle>
           <div className="flex flex-col items-center gap-2 text-sm">
             {trouble ? <p role="alert">{troubles[trouble]}</p> : null}
             {notSaved ? <p role="alert">Not saved</p> : null}

@@ -1,5 +1,5 @@
 // spec/app/startup/access.md, "Story: Look at access again"; spec/app/settings/index.md, "Story: Reach what another area owns"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Access from "../../gen/app__startup__access.effect.vibe"
 import type { Actor } from "../../gen/app__startup__actor.ts"
 import * as Steps from "../../gen/app__startup__steps.effect.vibe"
@@ -15,7 +15,6 @@ import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { accessVersion, legacyAccessAsked, legacyAccessSteps, savedAccess } from "./accessProgress.vibe"
-import { StartupSignIn } from "./signIn.vibe"
 
 const reviewKeys: Record<Permission, Steps.Key> = {
   CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
@@ -79,7 +78,7 @@ function carry(result: Access.Effect): Job<Access.Event, AccessWorld, [Actor]> {
 
 /** Automatic access follows a confirmed, unblocked native startup account. */
 export const openStartupAccess = (covered: boolean) => effect {
-  if (!native() || !(try (try StartupSignIn).confirmedAccount())) return
+  if (!native()) return
   const access = try Access.Machine
   if (!(try access.get()).begun) try ignore(access.send(try opening(), "Owner"))
   const model = try access.get()

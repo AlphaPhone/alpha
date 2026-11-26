@@ -150,7 +150,7 @@ describe("Settings", () => {
   });
 
   it("Answer for what the agent did on the phone (spec/app/settings/activity.md, \"Story: Answer for what the agent did on the phone\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = { ...scene(), phone: true, image: true };
     const review = textReview(world.notes.owner, "draft-for-maya", { type: "sms_compose", query: "Maya", body: "Meet at the front door" });
     world.telephony.textReview = review;
     const { alpha, machines } = await settingsOpen(world);
@@ -239,7 +239,7 @@ describe("Settings", () => {
     const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
     const world = { ...scene(), phone: true, checkout };
     await settingsOpen(world);
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("No plan"));
     await drawn(() => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
     await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
@@ -257,7 +257,8 @@ describe("Settings", () => {
     await press("Continue to Stripe");
     await vi.waitFor(() => expect(checkout.opened).toEqual([checkoutUrl]));
     expect(checkout.starts).toHaveLength(1);
-    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile", key: expect.any(String) });
+    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile" });
+    expect(typeof checkout.starts[0]?.key).toBe("string");
     await seen(false);
     checkout.returned = "cs_test_other";
     await seen(true);
@@ -276,7 +277,7 @@ describe("Settings", () => {
   it('Redeems the owner’s code once and refreshes the plan (spec/app/account/codes.md, "Story: Redeem a code")', async () => {
     const redemption: RedemptionScene = { calls: [] };
     await settingsOpen({ ...scene(), phone: true, redemption });
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => {
       const form = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Redeem code");
       if (!form) throw new Error("No redemption control");
@@ -286,7 +287,9 @@ describe("Settings", () => {
     await press("Redeem");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Code redeemed"));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
-    expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key: expect.any(String) }]);
+    expect(redemption.calls).toHaveLength(1);
+    expect(redemption.calls[0]?.code).toBe("ABCD2345EFGH6789");
+    expect(typeof redemption.calls[0]?.key).toBe("string");
   });
 
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {

@@ -210,7 +210,7 @@ pure def begin(network: bool, v: Voice): Change =
   else if (P::canAsk(v.permission))
     { state: { ...v, network: network, mic: Asking, prompting: true, permission: P::ask(v.permission) }, out: List(AskMicrophone) }
   else
-    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0 },
+    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0, speaker: SpeakerUnknown },
       out: releaseOut(v) }
 
 pure def canStartTalking(v: Voice, now: int): bool =
@@ -266,7 +266,7 @@ pure def answerPrompt(v: Voice, granted: bool): Change =
       { state: { ...base, mic: Opening, engineHeld: true },
         out: holdOut(v).concat(List(Listen({ session: v.session, network: v.network }))) }
      else
-      { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false },
+      { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
         out: releaseOut(v) })
   else if (v.recorder.stage == D::Starting)
     (if (granted) { state: base, out: List(Record({ ticket: v.recorder.ticket })) }
@@ -315,7 +315,7 @@ pure def canMicFailed(v: Voice, session: int): bool = v.mic == Opening and sessi
 
 pure def micFailed(v: Voice, session: int): Change =
   if (v.phase == Starting)
-    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, engineHeld: false, reviewPending: false },
+    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
       out: releaseOut(v) }
   else shutDown(D::NoMicrophone, false, v)
 ```
@@ -900,7 +900,18 @@ pure def alwaysAClaimBelongsToAnActiveConversation(v: Voice): bool =
 
 pure def sometimesFollowedItsNavigation(v: Voice): bool = v.followed != 0 and talking(v)
 
+pure val eval_witness_sometimesFollowedItsNavigation = (
+  ("startTalking", 0), ("answerPrompt", true), ("micOpened", 1), ("speechHeard", 1),
+  ("turnEnded", 1), ("micClosed", 1), ("agentNavigates", 1, 1, 1, 0), ("navigated", 1, 1, true)
+)
+
 pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phase == Listening and v.followed != 0 and v.mic == On
+
+pure val eval_witness_sometimesFollowedAgentNavigationWhileListening = (
+  ("startTalking", 0), ("answerPrompt", true), ("micOpened", 1), ("speechHeard", 1),
+  ("turnEnded", 1), ("micClosed", 1), ("agentNavigates", 1, 1, 1, 0), ("navigated", 1, 1, true),
+  ("replyEnds", 1, 1, false), ("micOpened", 1)
+)
 ```
 
 ## Story: Choose where my speech goes

@@ -402,7 +402,7 @@ pure def canSaveAnswered(b: Builder, id: int): bool = Q::canAnswer(b.save, id)
 
 pure def committed(save: Q::Request, b: Builder): Builder =
   { ...b, save: save, steps: List(), name: 0, workflow: 0, version: 0, when: { ...b.when, preset: S::Manual, days: Set() },
-    draft: D::edit(b.draft), saved: b.saved + 1, open: false, review: V::dismiss(b.review) }
+    draft: D::edit(b.draft), saved: b.saved + 1, open: false, choices: { ...b.choices, status: R::Idle }, review: V::dismiss(b.review) }
 
 pure def saveAnswered(b: Builder, id: int, applied: bool): Builder =
   val answered = Q::answer(b.save, applied)
@@ -453,7 +453,8 @@ pure def confirmResend(b: Builder): Moved =
 ### The draft is never edited while its save is kept, and a save is kept honestly
 
 Discovered by the proof: every save after the first has its own number;
-without it, one save could be counted twice.
+without it, one save could be counted twice, and a review shown is always
+of a named draft.
 
 ```quint
 pure def alwaysAKeptSaveLocksTheDraft(b: Builder): bool = and {
@@ -461,7 +462,7 @@ pure def alwaysAKeptSaveLocksTheDraft(b: Builder): bool = and {
   (b.save.attempt.outcome == A::Planned) == (b.save.attempt.id == 0),
   (b.save.attempt.outcome != A::Confirmed and b.save.attempt.id >= 1) implies b.saved < b.save.attempt.id,
   Q::kept(b.save) implies (b.steps.length() >= 1 and b.name >= 1),
-  b.review.showing implies (b.open and b.steps.length() >= 1 and b.shown == b.draft.edits and b.save.attempt.outcome != A::Sent),
+  b.review.showing implies (b.open and b.steps.length() >= 1 and b.name >= 1 and b.shown == b.draft.edits and b.save.attempt.outcome != A::Sent),
 }
 
 pure def stepAKeptSaveFreezesTheDraft(before: Builder, via: str, after: Builder): bool =
@@ -507,6 +508,60 @@ pure def sometimesASaveIsRefused(b: Builder): bool = b.save.attempt.outcome == A
 pure def sometimesASavedWorkflowIsEdited(b: Builder): bool = b.workflow >= 1 and b.save.live and b.version >= 1
 
 pure def sometimesASaveIsLetGo(b: Builder): bool = b.save.attempt.outcome == A::Unknown and b.steps.length() >= 1
+
+pure val eval_witness_sometimesASaveIsApplied = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), ("saveAnswered", 1, true)
+)
+
+pure val eval_witness_sometimesALostSaveIsFound = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, true, false)
+)
+
+pure val eval_witness_sometimesASaveIsOfferedAgain = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, false, false)
+)
+
+pure val eval_witness_sometimesASaveIsRefused = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), ("saveAnswered", 1, false)
+)
+
+pure val eval_witness_sometimesASavedWorkflowIsEdited = (
+  ("ownerChanged", 1), ("openBuilder", 1, 1, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false)
+)
+
+pure val eval_witness_sometimesASaveIsLetGo = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, false, false, false), "letGo"
+)
+
+pure val eval_witness_canCancelSave = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), "cancelSave"
+)
+
+pure val eval_witness_canReviewResend = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, false, false), "reviewResend"
+)
+
+pure val eval_witness_canConfirmResend = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, false, false), "reviewResend", "confirmResend"
+)
 ```
 
 ## Story: Keep the builder to its owner and through a restart

@@ -1,11 +1,18 @@
 // spec/cloud/index.md, "Story: Know which cloud the app talks to"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/local.md, "The local cloud starts only for a profile whose database, mail, text messages and providers are all on this computer, and stops with every part together"
 import { parseProfile, type CloudProfile, type EnvironmentProfile } from "@elizaos/cloud"
 import { nativeAssetLinks } from "@elizaos/cloud-worker"
+import deploymentsTable from "@repo/deployment/deployments.json" with { type: "json" }
 import { registrationOf, type Environment, type Registration, type Statement } from "../gen/cloud.effect.vibe"
 import candidate from "../profile/candidate.example.json" with { type: "json" }
 import production from "../profile/production.example.json" with { type: "json" }
 import staging from "../profile/staging.json" with { type: "json" }
 import seed from "../seed/staging.json" with { type: "json" }
+
+/** Hosted cloud environments from `@repo/deployment`: production and staging origins and App Link hosts. */
+export const hostedDeployments = {
+  production: { kind: "hosted" as const, cloud: deploymentsTable.production.cloud, appLinkHost: deploymentsTable.production.appLinkHost },
+  staging: { kind: "hosted" as const, cloud: deploymentsTable.staging.cloud, appLinkHost: deploymentsTable.staging.appLinkHost },
+}
 
 /** Alpha's profiles by the name `@repo/deployment` gives each: `staging` runs locally and is the hosted staging's reference, `production` is the example an operator completes, and `candidate` the example of Alpha's own cloud at the cut-over candidates. */
 export const profiles = {
@@ -33,7 +40,6 @@ const onThisComputer = /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost|\[::1\])(
 export function loopbackOnly(settings: EnvironmentProfile): boolean {
   const providers = [
     settings.billing?.apiUrl,
-    // A Workers AI provider is a Cloudflare binding, never on this computer.
     ...(settings.inference?.providers.map((provider) => provider.kind === "workers-ai" ? `workers-ai:${provider.binding}` : provider.baseUrl) ?? []),
     settings.speech?.baseUrl, settings.speech?.realtimeUrl,
     settings.maps !== undefined && settings.maps.provider !== "none" ? settings.maps.baseUrl : undefined,

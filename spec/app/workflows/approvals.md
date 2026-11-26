@@ -140,11 +140,17 @@ pure def expire(a: Approvals, now: int): Moved =
 
 ### A notice is wanted only while its approval waits, and only the owner's approvals are held
 
+Discovered by the proof: a waiting approval is either newer than any decided
+asking or unsettled with an unknown decision, and an in-flight notice check
+always names a positive owner, run and digest.
+
 ```quint
 pure def alwaysANoticeIsForAWaitingApproval(a: Approvals): bool = and {
   a.noticed implies a.approval == Waiting,
   a.approval != NoApproval implies (a.owner >= 1 and a.runId >= 1 and a.digest >= 1),
   a.asking.showing implies (a.sheet and a.approval == Waiting),
+  a.approval == Waiting implies (a.decided < a.digest or a.decision.outcome == A::Unknown),
+  a.check.status == R::Loading implies (a.owner >= 1 and a.tapRun >= 1 and a.tapDigest >= 1),
   (a.approval == Deciding) iff (a.decision.outcome == A::Sent),
   a.approval == Unsettled implies a.decision.outcome == A::Unknown,
   a.decision.outcome != A::Recorded, a.decision.id >= 0, a.decided <= a.digest, a.digest >= 0,
@@ -222,7 +228,7 @@ pure def noticeOpened(a: Approvals, runId: int, digest: int): Moved =
 pure def opening(a: Approvals, ok: bool, owner: int, waiting: bool, expires: int, now: int): Opening =
   if (not(ok)) Unreadable
   else if (owner != a.owner) OtherAgent
-  else if (not(waiting) or a.tapDigest < a.digest or a.decision.outcome == A::Sent) Gone
+  else if (not(waiting) or a.tapDigest < a.digest or (a.decided >= 1 and a.tapDigest == a.decided and a.decision.outcome != A::Unknown) or a.decision.outcome == A::Sent) Gone
   else if (expires <= now) Lapsed
   else Ready
 
@@ -263,6 +269,11 @@ pure def stepATapOpensOnlyAWaitingApproval(before: Approvals, via: str, after: A
 ```quint
 pure def sometimesATapAnswersItsApproval(a: Approvals): bool = a.opened == Ready and a.approval == Approved
 
+pure val eval_witness_sometimesATapAnswersItsApproval = (
+  ("ownerChanged", 1), ("noticeOpened", 1, 1),
+  ("approvalRead", 1, true, 1, true, Unanswered, 9, 0),
+  ("decide", true, 0), ("decisionAnswered", 1, true))
+
 pure def sometimesATapFindsItGone(a: Approvals): bool = a.opened == Gone
 
 pure def sometimesATapFindsAnotherAgent(a: Approvals): bool = a.opened == OtherAgent
@@ -272,6 +283,11 @@ pure def sometimesATapIsTooLate(a: Approvals): bool = a.opened == Lapsed
 pure def sometimesATapCannotBeChecked(a: Approvals): bool = a.opened == Unreadable
 
 pure def sometimesALostDecisionIsSettled(a: Approvals): bool = a.decision.outcome == A::Unknown and a.approval == Denied
+
+pure val eval_witness_sometimesALostDecisionIsSettled = (
+  ("ownerChanged", 1), ("approvalAsked", 1, 1, 9, 1, 0, true), ("openApproval", 0),
+  ("decide", false, 0), "restart", "checkDecision",
+  ("approvalRead", 1, true, 1, false, WasDenied, 9, 0))
 ```
 
 ## Story: Keep approvals to their owner and through a restart
@@ -359,7 +375,7 @@ pure def expireDevice(a: Approvals, number: int, now: int): Approvals =
   { ...retireDevice(a, number), now: now }
 
 pure def alwaysDeviceReviewNamesItsRun(a: Approvals): bool =
-  a.device.phase != DeviceIdle implies (a.device.number > 0 and a.device.runNumber > 0 and a.owner > 0)
+  a.device.number >= 0 and (a.device.phase != DeviceIdle implies (a.device.number > 0 and a.device.runNumber > 0 and a.owner > 0))
 
 pure def stepDeviceSendUsesTheExactReview(before: Approvals, via: str, after: Approvals): bool =
   (after.device.phase == DeviceSending and before.device.phase != DeviceSending) implies

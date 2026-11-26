@@ -1,6 +1,6 @@
 // spec/app/voice/index.md, "What the owner says is shown as it is heard"
 import type { ManagedRuntime } from "effect";
-import { useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { Machine } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
 import { VoiceWords } from "./voice.vibe";
@@ -9,7 +9,9 @@ import { VoiceWords } from "./voice.vibe";
 export function VoiceInterim({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<Machine | VoiceWords, unknown> }) {
   const { state } = useMachine(runtime);
   const memory = useMemo(() => runtime.runSync(VoiceWords).memory, [runtime]);
-  const interim = useSyncExternalStore(memory.subscribeInterim, memory.interimSnapshot);
+  const subscribe = useCallback((listener: () => void) => memory.subscribeInterim(listener), [memory]);
+  const snapshot = useCallback(() => memory.interimSnapshot(), [memory]);
+  const interim = useSyncExternalStore(subscribe, snapshot);
   if (interim === undefined || state?.phase !== "Listening" || state.mic !== "On" || state.muted
     || interim.session !== state.session || interim.turn !== state.turn) return null;
   return (

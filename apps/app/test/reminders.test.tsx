@@ -5,7 +5,7 @@ import type { ReminderItemRecord, ReminderListRecord, RemindersSnapshot } from "
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -41,6 +41,7 @@ import {
 } from "../src/reminders/store.ts";
 import workflows from "../src/workflows/index.tsx";
 import { button, closeAll, drawn, fill, later, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -173,10 +174,15 @@ function makePlatform(nowMs: number, agentHttp: Layer.Layer<HttpClient.HttpClien
   return Layer.provideMerge(base, clock);
 }
 
+beforeEach(() => {
+  vi.stubGlobal("indexedDB", memoryIndexedDB());
+});
+
 afterEach(async () => {
   setNativeRemindersPort(undefined);
   resetReminderStores();
   await closeAll();
+  vi.unstubAllGlobals();
 });
 
 describe("Reminders recurrence laws", () => {
@@ -207,8 +213,7 @@ describe("Reminders full journeys", () => {
     return { world, recorder, platform, ...opened, runtime };
   }
 
-  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
-  // Reminders left the default Home tiles; Workflows' More options still opens a phone reminder (#1592)
+  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists": Reminders left the default Home tiles; Workflows' More options still opens a phone reminder (#1592)
   it("opens a phone reminder from Workflows' More options", async () => {
     const world = { ...scene(), now: baseNow };
     const { layer: agentHttp } = makeFakeAgentReminders(world.now);
@@ -515,7 +520,7 @@ describe("Reminders full journeys", () => {
       schedule: unused,
       cancel: (input: AndroidReminderCancelInput) => Effect.sync(() => {
         cancelled.push(input);
-        return { id: input.id, cancelled: true };
+        return { id: input.id, status: "cancelled" as const, mode: "inexact" as const, message: "Cancelled" };
       }),
       list: () => Effect.succeed({
         notificationsEnabled: true,
@@ -552,7 +557,6 @@ describe("Reminders full journeys", () => {
       bindingHash: expectedHash,
     }]);
 
-    // When phone.list() has no matching live alarm, cancel is not called.
     cancelled.length = 0;
     await runtime.runPromise(Effect.provideService(
       syncAlertsWithSnapshot(snapshot, baseNow),

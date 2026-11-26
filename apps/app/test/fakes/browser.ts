@@ -380,7 +380,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.shared.push(options);
         return Promise.resolve(tab);
       },
-      // AlphaBrowserPlugin.pageContext: the text the owner can see of the guarded page, for one chat turn (spec/app/browser/reading.md).
+      /** AlphaBrowserPlugin.pageContext: the text the owner can see of the guarded page, for one chat turn (spec/app/browser/reading.md). */
       pageContext: (options: BrowserPageGuard) => {
         const tab = stateOf(held(options));
         if (!tab.committed || tab.loading || tab.url !== options.url || tab.navigation !== options.navigation) {

@@ -31,7 +31,7 @@ const maximumBytes = 256 * 1024
 const maximumBodies = 16
 const retentionMs = 30 * 24 * 60 * 60 * 1000
 
-const Body = Schema.Struct({
+const BodySchema = Schema.Struct({
   account: Schema.Number,
   credential: Schema.Number,
   grant: Schema.NonEmptyString,
@@ -40,9 +40,9 @@ const Body = Schema.Struct({
   at: Schema.Number,
   text: Schema.String,
 })
-const Envelope = Schema.Struct({ version: Schema.Literal(1), owner: Schema.NonEmptyString, bodies: Schema.Array(Body) })
-type Envelope = typeof Envelope.Type
-type Body = typeof Body.Type
+const EnvelopeSchema = Schema.Struct({ version: Schema.Literal(1), owner: Schema.NonEmptyString, bodies: Schema.Array(BodySchema) })
+type Envelope = typeof EnvelopeSchema.Type
+type Body = typeof BodySchema.Type
 export type SavedRead = Pick<Body, "account" | "credential" | "grant" | "message" | "history">
 export type SavedGrant = Pick<Body, "account" | "credential" | "grant">
 
@@ -70,6 +70,8 @@ export service SavedBodies {
   conceal(): void
   remember(read: SavedRead, text: string): void!!
   read(read: SavedRead): string | undefined
+  subscribe(listener: () => void): () => void
+  version(): number
   retain(grants: ReadonlyArray<SavedGrant>): void!!
   revoke(account: number): void!!
   clear(): void!!
@@ -78,28 +80,34 @@ export service SavedBodies {
 export const savedBodies = Layer.effect(SavedBodies, effect {
   const vault = try Vault
   const gate = try Semaphore.make(1)
+  const listeners = new Set<() => void>()
+  let revision = 0
   let active: string | undefined
   let wanted: string | undefined
   let kept: Envelope | undefined
   let grants: ReadonlyArray<SavedGrant> = []
+  const notify = () => {
+    revision += 1
+    for (const listener of listeners) listener()
+  }
 
   effect function load(): (Envelope | undefined)!! {
     const raw = native()
-      ? Option.map((vault.read(slot) catch () => Option.none()), Redacted.value)
+      ? Option.map((vault.read(slot) catch () => Option.none<Redacted.Redacted<string>>()), Redacted.value)
       : Option.fromNullishOr(tryPromise(readSavedMail) catch () => undefined)
     if (Option.isNone(raw) || typeof raw.value !== "string") return undefined
     if (raw.value.length > maximumBytes) return undefined
-    return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Envelope))(raw.value))
+    return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(EnvelopeSchema))(raw.value))
   }
 
   effect function store(value: Envelope | undefined): void!! {
     const raw = value === undefined || value.bodies.length === 0 ? undefined : JSON.stringify(value)
     if (!native()) {
-      try ignore(tryPromise(() => writeSavedMail(raw)) catch () => undefined)
+      tryPromise(() => writeSavedMail(raw)) catch () => undefined
     } else if (raw === undefined) {
-      try ignore(vault.remove(slot) catch () => undefined)
+      vault.remove(slot) catch () => undefined
     } else {
-      try ignore(vault.write(slot, Redacted.make(raw)) catch () => undefined)
+      vault.write(slot, Redacted.make(raw)) catch () => undefined
     }
   }
 
@@ -108,6 +116,7 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
   effect function keep(rows: ReadonlyArray<Body>, owner: string, now: number): void!! {
     const envelope = bounded(owner, rows, now)
     kept = envelope
+    notify()
     try store(envelope)
   }
 
@@ -129,6 +138,7 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
         if (wanted !== owner) return
         if (kept?.owner === owner) {
           active = owner
+          notify()
           return
         }
         const existing = try load()
@@ -136,10 +146,11 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
         const restored = existing?.owner === owner ? bounded(owner, existing.bodies, wallTime()) : undefined
         kept = restored ?? { version: 1, owner, bodies: [] }
         active = owner
+        notify()
         if (existing !== undefined && (restored === undefined || restored.bodies.length !== existing.bodies.length)) try store(restored)
       })
     },
-    conceal() { active = undefined; wanted = undefined },
+    conceal() { active = undefined; wanted = undefined; notify() },
     remember: (read: SavedRead, text: string) => {
       const owner = active
       return locked(effect {
@@ -156,6 +167,11 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
       const now = wallTime()
       return kept.bodies.find((row) => sameMessage(row, read) && row.history === read.history && fresh(row.at, now))?.text
     },
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    version: () => revision,
     effect retain(readable: ReadonlyArray<SavedGrant>) {
       grants = readable
       try remove((row) => !readable.some((grant) => hasGrant(row, grant)))
@@ -171,6 +187,7 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
       try locked(effect {
         active = undefined
         kept = undefined
+        notify()
         try store(undefined)
       })
     },

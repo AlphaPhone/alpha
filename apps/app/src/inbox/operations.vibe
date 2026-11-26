@@ -7,7 +7,7 @@ import type { Effect as Out, Event, Kind } from "../../gen/app__inbox__sending.e
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import type { MailOperation } from "@elizaos/cloud"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { type Cloud } from "../platform/cloud.vibe"
+import { Cloud } from "../platform/cloud.vibe"
 import { earlierSlot } from "../platform/adoption.vibe"
 import { type Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"

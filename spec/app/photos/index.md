@@ -704,9 +704,21 @@ pure def canUndoTrash(s: Photos, by: Actor): bool =
 
 pure def undoTrash(s: Photos, by: Actor): Photos = { ...s, job: C::undoTrash(s.job, s.revision, by) }
 
+pure val eval_witness_canUndoTrash = (
+  ("accessIs", P::Granted, true, Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("requested", C::Trash, 1, 1, Owner), ("sendNext", Set(1), Phone),
+  ("changed", 1, Set(1), Set(), false, true, Phone), ("undoTrash", Owner))
+
 pure def canUndoLapsed(s: Photos, by: Actor): bool = C::canLapse(s.job, by)
 
 pure def undoLapsed(s: Photos, by: Actor): Photos = { ...s, job: C::lapse(s.job, by) }
+
+pure val eval_witness_canUndoLapsed = (
+  ("accessIs", P::Granted, true, Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("requested", C::Trash, 1, 1, Owner), ("sendNext", Set(1), Phone),
+  ("changed", 1, Set(1), Set(), false, true, Phone), ("undoLapsed", Phone))
 ```
 
 ### Every change is the owner's, of exactly what they chose or confirmed, at the revision they were shown, and nothing is tried again before an unknown outcome is read back
@@ -818,12 +830,14 @@ pure def sometimesCameraAlbum(s: Photos): bool = s.cameraAlbum > 0 and s.shelf.d
 
 ### A dialog about an album is about the album showing, and "Add to album" has a subject
 
+A Camera capture's album chooser stays on the unfiltered Library.
+
 ```quint
 pure def alwaysDialogNamesItsSubject(s: Photos): bool =
   ((s.shelf.dialog == AL::RenameAlbum or s.shelf.dialog == AL::DeleteAlbum) implies (s.shelf.target == s.album and s.album != 0))
     and (s.shelf.dialog == AL::ChooseAlbum implies ((s.selecting and s.selected.size() > 0) or s.cameraAlbum != 0))
     and (s.cameraAlbum != 0 implies (s.cameraAlbum == s.cameraItem and not(s.selecting) and unlocked(s)
-      and s.library.status == R::Loaded
+      and cameraVisit(s) and s.library.status == R::Loaded
       and (s.shelf.dialog == AL::ChooseAlbum or s.shelf.dialog == AL::NewAlbum)))
     and AL::alwaysDialogNamesItsSubject(s.shelf)
 ```
@@ -865,6 +879,12 @@ pure def canRemoveSelected(s: Photos, by: Actor): bool =
     and AL::canWrite(s.shelf, AL::Remove, s.album, "", 0, s.selected.size() > 0, false, s.albums.size())
 
 pure def removeSelected(s: Photos, by: Actor): Done = writing(AL::Remove, s.album, "", 0, s.selected, false, by, s)
+
+pure val eval_witness_canRemoveSelected = (
+  ("accessIs", P::Granted, true, Phone), ("showTab", Albums, Owner),
+  ("listed", 2, true, Set(1), Set(), Set(), 0, 1, false, Phone),
+  ("openAlbum", 1, Owner), ("listed", 3, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("startSelect", Owner), ("toggle", 1, Owner), ("removeSelected", Owner))
 ```
 
 ### An album change is the owner's, carries exactly the selection or the items confirmed, to an album listed or the album showing
@@ -905,8 +925,20 @@ pure def albumWritten(s: Photos, attempt: int, confirmed: bool, known: bool, by:
 ```quint
 pure def sometimesAddingToAlbum(s: Photos): bool = s.shelf.write.outcome == A::Sent and s.shelf.change == AL::Add and s.tab == Library
 
+pure val eval_witness_sometimesAddingToAlbum = (
+  ("accessIs", P::Granted, true, Phone), ("showTab", Albums, Owner),
+  ("listed", 2, true, Set(1), Set(), Set(), 0, 1, false, Phone),
+  ("showTab", Library, Owner), ("listed", 3, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("startSelect", Owner), ("toggle", 1, Owner), ("chooseAlbum", Owner), ("addTo", 1, Owner))
+
 pure def sometimesAlbumDeleted(s: Photos): bool =
   s.shelf.change == AL::Delete and s.shelf.write.outcome == A::Confirmed and s.tab == Albums and s.album == 0
+
+pure val eval_witness_sometimesAlbumDeleted = (
+  ("accessIs", P::Granted, true, Phone), ("showTab", Albums, Owner),
+  ("listed", 2, true, Set(1), Set(), Set(), 0, 1, false, Phone),
+  ("openAlbum", 1, Owner), ("deleteAlbum", Owner), ("confirmDelete", Owner),
+  ("albumWritten", 1, true, true, Phone))
 ```
 
 ## Story: Carry out what I confirmed for Alpha
@@ -944,6 +976,11 @@ pure def confirmAlbum(s: Photos, name: str, letters: int, items: Set[int], basis
 ```quint
 pure def sometimesProposalRunning(s: Photos): bool = C::running(s.job) and s.job.change == C::Share and s.job.requests >= 1
 
+pure val eval_witness_sometimesProposalRunning = (
+  ("accessIs", P::Granted, true, Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("confirmProposal", C::Share, Set(1), 1, Owner), ("sendNext", Set(1), Phone))
+
 pure def sometimesProposedAlbum(s: Photos): bool = s.shelf.proposed and s.shelf.write.outcome == A::Confirmed
 ```
 
@@ -961,9 +998,9 @@ receipts in its library, so it leaves the phone record alone.
 ```quint
 type PendingOutcome = PendingUnknown | PendingSaved | PendingGone
 
-pure def previousCopyCleared(hasRecord: bool, outcome: PendingOutcome): bool =
-  hasRecord and outcome != PendingUnknown
+pure def previousCopyCleared(hasRecord: bool, receipt: PendingOutcome): bool =
+  hasRecord and receipt != PendingUnknown
 
-pure def lawAnUnsettledPreviousCopyIsNeverForgotten(hasRecord: bool, outcome: PendingOutcome): bool =
-  (hasRecord and outcome == PendingUnknown) implies not(previousCopyCleared(hasRecord, outcome))
+pure def lawAnUnsettledPreviousCopyIsNeverForgotten(hasRecord: bool, receipt: PendingOutcome): bool =
+  (hasRecord and receipt == PendingUnknown) implies not(previousCopyCleared(hasRecord, receipt))
 ```

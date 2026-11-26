@@ -16,7 +16,7 @@ import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
 import { HistoryWordsPort, type RunVisibility, workflowsVisible } from "./history.vibe"
 import { Rows } from "./list.vibe"
-import { ApprovalPresentation, ApprovalTaps, approvalNoticesAvailable, approvalPresentation, currentTap, offerApprovalNotice, sameApprovalTap, settleApprovalTap, withdrawApprovalNotice } from "./native-approval.vibe"
+import { type ApprovalPresentation, ApprovalTaps, approvalNoticesAvailable, approvalPresentation, currentTap, offerApprovalNotice, sameApprovalTap, settleApprovalTap, withdrawApprovalNotice } from "./native-approval.vibe"
 
 interface Pending {
   readonly number: number

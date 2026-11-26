@@ -35,9 +35,19 @@ function NoticeCard({ kind, asked, onSettings, onSendAgain }: { kind: StoredNoti
 
 export interface MessageActions {
   copy: (selection: MessageSelection) => void;
-  useInEmail?: (selection: MessageSelection) => void;
+  addToEmail?: (selection: MessageSelection) => void;
   openLink?: (href: string) => void;
   reading?: { readonly message: number; readonly stop: () => void };
+}
+
+function mapCardSignature(card: MapsCard): string {
+  switch (card.kind) {
+    case "place": return `place:${card.place.name}:${card.place.formattedAddress ?? ""}`;
+    case "places": return `places:${card.query}:${card.near?.name ?? ""}`;
+    case "route": return `route:${card.origin.name}:${card.destination.name}:${card.travelMode}`;
+    case "handoff": return `handoff:${card.handoffKind}:${card.place.name}:${card.webUri}`;
+    case "locate": return `locate:${card.intent}:${card.query ?? ""}:${card.destination?.name ?? ""}`;
+  }
 }
 
 export function chip(file: Attached): AssistantAttachment {
@@ -71,11 +81,20 @@ interface HistoryProps {
 
 /** Recorded rows and their controls are rebuilt only when their data or available actions change. */
 export function useMessageRows({ runtime, board, lines, chats, writing, replying, holding, settled, canReadAloud, actions, onSettings, onPreview, onOpenMaps, opened, onChoose }: HistoryProps): readonly HistoryRow[] {
-  const prepared = useMemo(() => lines.map((line) => ({
-    line,
-    cards: line.mine ? [] : mapsCardsOf(line.text).cards,
-    reply: line.mine ? { words: line.text, choices: [] } : replyBlocks(line.text),
-  })), [lines]);
+  const prepared = useMemo(() => lines.map((line) => {
+    const seenCards = new Map<string, number>();
+    const cards = (line.mine ? [] : mapsCardsOf(line.text).cards).map((card) => {
+      const base = mapCardSignature(card);
+      const count = (seenCards.get(base) ?? 0) + 1;
+      seenCards.set(base, count);
+      return { key: `${base}#${count}`, card };
+    });
+    return {
+      line,
+      cards,
+      reply: line.mine ? { words: line.text, choices: [] } : replyBlocks(line.text),
+    };
+  }), [lines]);
   return useMemo(() => {
     if (!chats || !writing || prepared.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
@@ -95,13 +114,14 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
       const selection = { conversation: chats.chosen, page: chats.page.ticket, message };
       const blank = text.trim() === "";
       const copy = actions?.copy;
-      const addToEmail = actions?.useInEmail;
+      const addToEmail = actions?.addToEmail;
       const fork = { type: "fork", message, replying, holding } as const;
       const quote = { type: "quote", message, recorded } as const;
       const editAgain = { type: "editAgain", message, mine: line.mine, recorded } as const;
       const readAloud = { type: "readAloud", message, mine: line.mine } as const;
       const reading = actions?.reading;
       const stopReading = reading !== undefined && reading.message === message && Chats.enabled(chats, readAloud) ? reading.stop : undefined;
+      const previous = prepared[at - 1]?.line;
       return [{
         id: line.id,
         author: line.mine ? "owner" : "alpha",
@@ -109,9 +129,9 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         attachments: line.attachments?.map(chip),
         quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
         children: line.notice !== undefined
-          ? <NoticeCard kind={line.notice} asked={lines[at - 1]?.mine ? lines[at - 1]?.text : undefined} onSettings={onSettings} onSendAgain={sendAgain} />
+          ? <NoticeCard kind={line.notice} asked={previous?.mine ? previous.text : undefined} onSettings={onSettings} onSendAgain={sendAgain} />
           : cards.length === 0 && choices.length === 0 && line.failure === undefined ? undefined : <>
-          {cards.map((card, index) => <MapsCardView key={index} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
+          {cards.map(({ key, card }) => <MapsCardView key={key} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
           {live && onChoose !== undefined ? choices.map((choice) => (
             <div key={choice.id} className="flex flex-wrap gap-2">
               {choice.options.map((option) => <Button key={option.value} variant="secondary" size="sm" onClick={() => onChoose(choice.id, option.value)}>{option.label}</Button>)}

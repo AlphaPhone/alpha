@@ -119,7 +119,7 @@ lemma schedule_ensures(s: Alerts, id: int, dueAt: int, revision: int, now: int)
 {
   if inv(s) && canSchedule(s, id, dueAt, revision, now) {
     UniqueFromCounts(s.entries);
-    var entry := AlertEntry(id, dueAt, revision, AlertPhase.Scheduled, 0, 0, false, kit__attempt_plan(0));
+    var entry := AlertEntry(id, dueAt, revision, AlertPhase.Scheduled, 0, 0, 0, false, kit__attempt_plan(0));
     PutEntryPreserves(s.entries, entry);
     var ys := putEntry(s.entries, entry);
     CountsFromUnique(ys);
@@ -218,6 +218,65 @@ lemma snoozeFromBanner_ensures(s: Alerts, id: int, expectedRevision: int, until:
     }
     var out := snoozeFromBanner(s, id, expectedRevision, until, now).out;
     assert out[0] in out && out[0].ClearBanner?;
+  }
+}
+
+lemma EntryOfMissing(xs: seq<AlertEntry>, id: int)
+  requires !hasEntry(xs, id)
+  ensures entryOf(xs, id) == blankEntry
+{
+  ProofLib.FilterNone((e: AlertEntry) => (e.id == id), xs);
+}
+
+lemma snoozeFromCalendar_ensures(s: Alerts, id: int, itemRevision: int, until: int, now: int)
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> alwaysAlertsWellFormed(snoozeFromCalendar(s, id, itemRevision, until, now).state))
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> alwaysBannerIsRinging(snoozeFromCalendar(s, id, itemRevision, until, now).state))
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> stepBannerActionClearsBanner(s, "snoozeFromCalendar", snoozeFromCalendar(s, id, itemRevision, until, now).state, snoozeFromCalendar(s, id, itemRevision, until, now).out))
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> stepReopenRearmsScheduled(s, "snoozeFromCalendar", snoozeFromCalendar(s, id, itemRevision, until, now).state, snoozeFromCalendar(s, id, itemRevision, until, now).out))
+{
+  if inv(s) && canSnoozeFromCalendar(s, id, itemRevision, until, now) {
+    UniqueFromCounts(s.entries);
+    if hasEntry(s.entries, id) {
+      EntryOfMember(s.entries, id);
+    } else {
+      EntryOfMissing(s.entries, id);
+    }
+    var cur := entryOf(s.entries, id);
+    var pending := cur.(id := id, revision := (if cur.revision > 0 then cur.revision else 1), requestedSnooze := until, attempt := kit__attempt_dispatch(kit__attempt_record(kit__attempt_plan(s.nextAttempt))));
+    PutEntryPreserves(s.entries, pending);
+    var ys := putEntry(s.entries, pending);
+    CountsFromUnique(ys);
+    if s.bannerId == id {
+      EntryOfUnique(ys, pending);
+    } else if s.bannerId != 0 {
+      BannerKeptAfterPut(s.entries, pending, s.bannerId);
+    }
+  }
+}
+
+lemma calendarSnoozeSaved_ensures(s: Alerts, id: int, attemptId: int, itemRevision: int, stored: bool, confirmed: bool, known: bool)
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> alwaysAlertsWellFormed(calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state))
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> alwaysBannerIsRinging(calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state))
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> stepBannerActionClearsBanner(s, "calendarSnoozeSaved", calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state, calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).out))
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> stepReopenRearmsScheduled(s, "calendarSnoozeSaved", calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state, calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).out))
+{
+  if inv(s) && canCalendarSnoozeSaved(s, id, attemptId) {
+    UniqueFromCounts(s.entries);
+    EntryOfMember(s.entries, id);
+    var cur := entryOf(s.entries, id);
+    var afterReceipt := cur.(requestedSnooze := 0, attempt := kit__attempt_conclude(cur.attempt, confirmed, known));
+    var snoozed := afterReceipt.(phase := AlertPhase.Snoozed, dueAt := cur.requestedSnooze, snoozedUntil := cur.requestedSnooze, revision := cur.revision + 1, completed := false);
+    var entry := if stored then snoozed else afterReceipt;
+    PutEntryPreserves(s.entries, entry);
+    var ys := putEntry(s.entries, entry);
+    CountsFromUnique(ys);
+    if stored && s.bannerId == id {
+      FirstRingingValid(ys);
+    } else if s.bannerId == id {
+      EntryOfUnique(ys, entry);
+    } else if s.bannerId != 0 {
+      BannerKeptAfterPut(s.entries, entry, s.bannerId);
+    }
   }
 }
 

@@ -153,6 +153,12 @@ pure def sometimesTheListFailed(a: Automations): bool = a.list.status == R::Fail
 pure def sometimesAPartialListKeepsAChangeLocked(a: Automations): bool =
   a.list.status == R::Loaded and not(a.complete) and Q::unsettled(a.change) and a.changing == Remove and not(a.present)
 
+pure val eval_witness_sometimesAPartialListKeepsAChangeLocked = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Remove), "confirmChange", "sendChange", "changeUnanswered",
+  "readAutomations", ("automationsRead", 2, true, false, 0, 0, false, false, Scheduled, false, PromptTask))
+
 pure def sometimesARowHasAnIssue(a: Automations): bool = a.list.status == R::Loaded and a.issue and a.issues >= 1
 ```
 
@@ -276,14 +282,29 @@ pure def changeChecked(a: Automations, ticket: int, ok: bool, found: bool): Auto
 
 pure def canResendChange(a: Automations): bool = Q::canResend(a.change) and not(a.review.showing)
 
+pure val eval_witness_canResendChange = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", "changeUnanswered",
+  "checkChange", ("changeChecked", 1, true, false), "resendChange")
+
 pure def resendChange(a: Automations): Moved = { state: { ...a, change: Q::resend(a.change) }, out: List(ask(a)) }
 
 pure def canLetGo(a: Automations): bool = Q::canRelease(a.change)
+
+pure val eval_witness_canLetGo = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", "changeUnanswered",
+  "checkChange", ("changeChecked", 1, false, false), "letGo")
 
 pure def letGo(a: Automations): Automations = { ...a, change: Q::release(a.change), recovering: false }
 ```
 
 ### One change is kept at a time, kept honestly, and a row holds only what the list said
+
+Discovered by the proof: a loaded list, open review or open editor belongs to
+the signed-in owner.
 
 ```quint
 pure def alwaysOneChangeIsKeptHonestly(a: Automations): bool = and {
@@ -292,6 +313,7 @@ pure def alwaysOneChangeIsKeptHonestly(a: Automations): bool = and {
   a.recovering implies Q::unsettled(a.change),
   a.fired != NotFired implies a.changing == Fire,
   Q::kept(a.change) implies a.owner >= 1,
+  (a.list.status != R::Idle or a.review.showing or a.editing) implies a.owner >= 1,
   a.list.status == R::Loading implies a.owner >= 1,
 }
 ```
@@ -329,13 +351,30 @@ pure def stepTheAgentIsAskedForTheRecordedChange(before: Automations, via: str, 
 pure def sometimesARemovalIsSettledByTheList(a: Automations): bool =
   a.changing == Remove and a.change.attempt.outcome == A::Confirmed and not(a.present) and a.change.record.status == R::Idle
 
+pure val eval_witness_sometimesARemovalIsSettledByTheList = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Remove), "confirmChange", "sendChange", "changeUnanswered",
+  "readAutomations", ("automationsRead", 2, true, true, 0, 0, false, false, Scheduled, false, PromptTask))
+
 pure def sometimesAnEndedRowIsReopened(a: Automations): bool = a.changing == Reopen and a.change.attempt.outcome == A::Confirmed
 
 pure def sometimesASnoozeIsAsked(a: Automations): bool = a.changing == Snooze and a.change.live and a.asked.minutes >= 1
 
 pure def sometimesARunIsRaced(a: Automations): bool = a.fired == Raced and a.change.attempt.outcome == A::Refused
 
+pure val eval_witness_sometimesARunIsRaced = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", ("changeAnswered", 1, false, Raced))
+
 pure def sometimesALostRunIsLetGo(a: Automations): bool = a.changing == Fire and a.change.attempt.outcome == A::Unknown
+
+pure val eval_witness_sometimesALostRunIsLetGo = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", "changeUnanswered",
+  "checkChange", ("changeChecked", 1, false, false), "letGo")
 ```
 
 ## Story: Create or edit an automation on a schedule
@@ -404,11 +443,14 @@ pure def setZone(a: Automations, zone: int): Automations = { ...a, when: S::setZ
 
 ### What is asked is always one the agent can be asked for
 
+Discovered by the proof: an open editor is always proposing a Create or Edit.
+
 ```quint
 pure def alwaysTheScheduleIsWellFormed(a: Automations): bool = and {
   S::wellFormed(a.when), S::wellFormed(a.asked.when),
   0 <= a.text, a.text <= maxText, a.target >= 0, (a.kind == WorkflowTask and a.editing and a.proposed == Edit) implies a.target >= 1,
   0 <= a.asked.text, a.asked.text <= maxText, 0 <= a.asked.minutes, a.asked.minutes <= maxSnooze,
+  a.editing implies (a.proposed == Create or a.proposed == Edit),
   a.review.showing implies ((a.proposed == Create or a.proposed == Edit) iff a.editing),
 }
 ```
@@ -431,8 +473,19 @@ pure def reviewCreate(a: Automations): Automations = { ...a, review: V::present(
 pure def sometimesACustomScheduleIsCreated(a: Automations): bool =
   a.changing == Create and a.change.live and a.asked.when.preset == S::Custom and a.asked.when.days.size() >= 2 and not(a.editing)
 
+pure val eval_witness_sometimesACustomScheduleIsCreated = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 0, 0, false, false, Scheduled, false, PromptTask),
+  ("openEditor", PromptTask, 0), ("setText", 12), ("pickPreset", S::Custom), ("toggleDay", 0),
+  "reviewCreate", "confirmChange", "sendChange")
+
 pure def sometimesAWorkflowAutomationIsEdited(a: Automations): bool =
   a.changing == Edit and a.change.live and a.asked.kind == WorkflowTask and a.asked.target >= 1
+
+pure val eval_witness_sometimesAWorkflowAutomationIsEdited = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, WorkflowTask),
+  ("editRow", 12, S::daily(0), true, 1), "reviewCreate", "confirmChange", "sendChange")
 
 pure def sometimesTheZoneIsNoted(a: Automations): bool = a.review.showing and S::zoneNote(a.when, 0)
 ```
@@ -452,6 +505,11 @@ pure def restart(a: Automations): Automations = {
 }
 
 pure def canDismissRecovery(a: Automations): bool = a.recovering
+
+pure val eval_witness_canDismissRecovery = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", "restart", "dismissRecovery")
 
 pure def dismissRecovery(a: Automations): Automations = { ...a, recovering: false }
 ```
@@ -479,4 +537,10 @@ pure def stepAKeptChangeIsLetGoOnlyWhenSettled(before: Automations, via: str, af
 ```quint
 pure def sometimesAChangeIsRecovered(a: Automations): bool =
   a.change.attempt.outcome == A::Confirmed and a.change.record.status == R::Loaded and a.change.attempt.id >= 1 and not(a.recovering)
+
+pure val eval_witness_sometimesAChangeIsRecovered = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", "restart",
+  "checkChange", ("changeChecked", 1, true, true))
 ```

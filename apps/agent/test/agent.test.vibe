@@ -2,6 +2,7 @@
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
 import { ConversationRecord, TurnController, createRuntimeJsonClient, defineRoutes } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports -- CleanupReceipt is the schema `schema CleanupQueue` decodes with, a value the projection ESLint reads does not show
 import { CleanupReceipt } from "@elizaos/plugin-notes-client"
 import {
   calendarEdits, configurationExit, coreActions, entryCarried, gmailChanges, googleAdmitted, launchViews, loadList, packedPlugins, productPluginName, proposalsAdmitted, refusedActions,

@@ -160,7 +160,7 @@ export function elizaFiles(scene: FilesScene): Faked {
       storageReviewedIdentities({ volume, paths }) {
         called("reviewed");
         const found = paths.map((path) => find(on(volume), path));
-        return Promise.resolve(found.every((one) => one !== undefined) ? { status: "ready", reviewed: found.map((one) => identity(one as Stored)) } : { status: "missing" });
+        return Promise.resolve(found.every((one) => one !== undefined) ? { status: "ready", reviewed: found.map((one) => identity(one)) } : { status: "missing" });
       },
       storageTransfer({ volume, paths, dest, copy, reviewed }) {
         called(copy ? "copy" : "move");
@@ -176,7 +176,6 @@ export function elizaFiles(scene: FilesScene): Faked {
         for (const one of inside(on(volume), path)) {
           const was = one.path;
           one.path = `${to}${was.slice(path.length)}`;
-          // A renamed file keeps what it holds.
           if (scene.texts[was] !== undefined) {
             scene.texts[one.path] = scene.texts[was];
             delete scene.texts[was];
@@ -295,22 +294,22 @@ export function selectedDocuments(scene: FilesScene): Faked {
         if (!found) return Promise.reject(new Error("Access ended"));
         return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64: btoa(scene.texts[found.path] ?? `The words of ${leaf(found.path)}`) });
       },
-      async reviewStorageAttachment(input) {
+      reviewStorageAttachment(input) {
         const file = storedAttachment(input);
         if (!file || leaf(file.path) !== input.name || file.mimeType !== input.mimeType || file.size !== input.size || file.modified !== input.modified) {
-          throw new Error("The listed file changed");
+          return Promise.reject(new Error("The listed file changed"));
         }
         const receipt = crypto.randomUUID().padEnd(43, "_");
         reviewed.set(receipt, { file, revision: file.modified });
-        return { reviewed: receipt };
+        return Promise.resolve({ reviewed: receipt });
       },
-      async readStorageAttachment(input) {
+      readStorageAttachment(input) {
         const review = reviewed.get(input.reviewed);
         const file = storedAttachment(input);
-        if (!file || !review || review.file !== file || review.revision !== file.modified) throw new Error("The reviewed file changed");
+        if (!file || !review || review.file !== file || review.revision !== file.modified) return Promise.reject(new Error("The reviewed file changed"));
         const text = scene.texts[file.path];
-        if (text === undefined || text.length !== file.size) throw new Error("Fixture attachment bytes unavailable");
-        return { name: leaf(file.path), mimeType: file.mimeType, dataBase64: btoa(text) };
+        if (text === undefined || text.length !== file.size) return Promise.reject(new Error("Fixture attachment bytes unavailable"));
+        return Promise.resolve({ name: leaf(file.path), mimeType: file.mimeType, dataBase64: btoa(text) });
       },
       describeSelected({ selectionId }) {
         const found = held(selectionId);

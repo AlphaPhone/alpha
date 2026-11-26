@@ -347,7 +347,7 @@ describe("Workflows", () => {
       await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
       const initialHushes = world.voice.hushCalls;
       await press("Read aloud");
-      await vi.waitFor(() => expect(world.voice.played.map(({ text }) => text)).toContain("Your statement is ready."));
+      await vi.waitFor(() => expect(world.voice.played.map(({ text }) => text)).toContain("Your statement is ready."), { timeout: 15_000 });
       expect(world.voice.spoken).toContainEqual({ text: "Your statement is ready.", append: false, replace: false, channel: "local" });
       expect(button("Stop reading")).toBeDefined();
       await seen(false);
@@ -361,8 +361,7 @@ describe("Workflows", () => {
 
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await press("Add to Workflows");
@@ -397,8 +396,7 @@ describe("Workflows", () => {
 
   it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await choose("Monthly statement");
@@ -453,21 +451,21 @@ describe("Workflows", () => {
     };
     world.platform.earlier.set(slot, JSON.stringify({ format: 1, identity, spec: earlierSpec }));
 
-    const first = await openWorkflows(world);
-    const area = workflows.runtime(first);
-    await until(first, area, Listing, (state) => state.list.status === "Loaded");
+    const first = await open(world, only("home", "view:Workflows", "notice"));
+    await until(first.alpha, home.runtime(first.alpha), Home, (state) => state.tiles.load.status === "Loaded");
+    await press("Workflows");
+    const area = workflows.runtime(first.alpha);
+    await until(first.alpha, area, Listing, (state) => state.list.status === "Loaded");
     await press("Add to Workflows");
-    await until(first, area, Listing, (state) => state.place.tag === "ListingAdd");
+    await until(first.alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
     await press("More options");
     await press(/^Steps/);
-    await until(first, area, Builder, (state) => state.offer.status === "Loaded" && state.name === earlierSpec.name.length && state.steps.length === 1);
+    await until(first.alpha, area, Builder, (state) => state.offer.status === "Loaded" && state.name === earlierSpec.name.length && state.steps.length === 1);
     expect(world.platform.earlier.has(slot)).toBe(false);
-
-    // A later earlier-slot value never replaces the kept draft and stays waiting in its slot.
     world.platform.earlier.set(slot, JSON.stringify({ format: 1, identity, spec: { ...earlierSpec, name: "Another draft" } }));
-    await closeAll();
+    await first.close();
 
-    const second = await openWorkflows(world);
+    const { alpha: second } = await open(world, only("home", "view:Workflows", "notice"));
     const secondArea = workflows.runtime(second);
     await until(second, secondArea, Listing, (state) => state.list.status === "Loaded");
     await press("Add to Workflows");

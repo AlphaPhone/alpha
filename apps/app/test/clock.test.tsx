@@ -222,8 +222,7 @@ describe("Clock journeys", () => {
     await press("Dismiss");
     await waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Idle" && s.items[0]?.enabled === true);
 
-    // spec/app/clock/alarms.md, "A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed"
-    // The ten-minute snooze ends at 7:10, so this one-off alarm is set for 7:11, a minute ahead.
+    // spec/app/clock/alarms.md, "A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed": The ten-minute snooze ends at 7:10, so this one-off alarm is set for 7:11, a minute ahead.
     await press("Add alarm");
     for (let step = 0; step < 11; step++) await pressOnTop("Increase minute");
     await fill("Alarm label", "One-off tea");

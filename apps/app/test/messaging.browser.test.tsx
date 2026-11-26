@@ -2,6 +2,7 @@ import { Effect, Layer, Queue, Stream } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { afterEach, describe, expect, inject, it } from "vitest";
 import { page } from "vitest/browser";
+import * as Home from "../gen/app__home.effect.vibe";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as SlackWorkspaces from "../gen/app__slack.effect.vibe";
 import * as SlackAuth from "../gen/app__slack__auth.effect.vibe";
@@ -11,6 +12,7 @@ import * as TelegramList from "../gen/app__telegram.effect.vibe";
 import * as TelegramAuth from "../gen/app__telegram__auth.effect.vibe";
 import * as TelegramConversation from "../gen/app__telegram__conversation.effect.vibe";
 import * as TelegramNotices from "../gen/app__telegram__notices.effect.vibe";
+import home from "../src/home/index.tsx";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { messagingSessions } from "../src/platform/messaging.vibe";
 import { slackAt } from "../src/platform/slack.vibe";
@@ -38,12 +40,29 @@ async function controlJson(origin: string, route: string, body?: unknown): Promi
 }
 
 async function openMessagingAlpha() {
-  const platform = fakeWorld(scene(), {
+  const platform = fakeWorld({ ...scene(), phone: true }, {
     slack: Layer.provide(slackAt(slackOrigin), FetchHttpClient.layer),
     telegram: Layer.provide(telegramAt(telegramOrigin), FetchHttpClient.layer),
     sessions: messagingSessions,
   });
-  return openOver(platform, messagingMounts);
+  const opened = await openOver(platform, messagingMounts);
+  await until(opened.alpha, home.runtime(opened.alpha), Home.Machine, (s) => s.tiles.load.status === "Loaded");
+  return opened;
+}
+
+async function pinCatalogApp(
+  alpha: Awaited<ReturnType<typeof openMessagingAlpha>>["alpha"],
+  view: "Telegram" | "Slack",
+) {
+  const homes = home.runtime(alpha);
+  const shell = await alpha.runtime.runPromise(Shell.Machine.use((m) => m.get()));
+  await homes.runPromise(Home.Machine.use((m) => m.send({ type: "beginEditing", shell }, "Owner")));
+  await until(alpha, homes, Home.Machine, (s) => s.editing);
+  await page.getByRole("button", { name: "Add to Home" }).click();
+  await page.getByRole("button", { name: view, exact: true }).click();
+  await until(alpha, homes, Home.Machine, (s) => s.tiles.save.outcome === "Confirmed" && s.tiles.favourites.some((t) => t.tag === "Own" && t.view === view));
+  await homes.runPromise(Home.Machine.use((m) => m.send({ type: "done" }, "Owner")));
+  await until(alpha, homes, Home.Machine, (s) => !s.editing);
 }
 
 async function waitForSlackOAuth(
@@ -120,8 +139,12 @@ describe("Messaging E2E", () => {
   it("Home tiles and Privacy switches", async () => {
     await controlJson(telegramOrigin, "/__control/reset", {});
     await controlJson(slackOrigin, "/__control/reset", {});
-    await openMessagingAlpha();
+    const { alpha } = await openMessagingAlpha();
 
+    await expect.element(page.getByRole("button", { name: "Telegram" })).not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Slack" })).not.toBeInTheDocument();
+    await pinCatalogApp(alpha, "Telegram");
+    await pinCatalogApp(alpha, "Slack");
     await expect.element(page.getByRole("button", { name: "Telegram" })).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Slack" })).toBeVisible();
 
@@ -143,6 +166,7 @@ describe("Messaging E2E", () => {
   it("Telegram full UI E2E", async () => {
     await controlJson(telegramOrigin, "/__control/reset", {});
     const { alpha } = await openMessagingAlpha();
+    await pinCatalogApp(alpha, "Telegram");
 
     await page.getByRole("button", { name: /^Telegram/ }).first().click();
     await expect.element(page.getByText("Sign in to Telegram")).toBeVisible();
@@ -232,6 +256,7 @@ describe("Messaging E2E", () => {
   it("Slack full UI E2E", async () => {
     await controlJson(slackOrigin, "/__control/reset", {});
     const { alpha } = await openMessagingAlpha();
+    await pinCatalogApp(alpha, "Slack");
 
     await page.getByRole("button", { name: /^Slack/ }).first().click();
     await expect.element(page.getByText("Connect Slack")).toBeVisible();

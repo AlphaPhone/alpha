@@ -6,28 +6,30 @@ import "../src/main.css";
 
 afterEach(closeAll);
 
-it('Keep a message and its list on a wide phone canvas (spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"; spec/app/inbox/message.md, "Story: Read a message")', async () => {
+// spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"; spec/app/inbox/message.md, "Story: Read a message"
+it("Keep a message and its list on a wide phone canvas", async () => {
   await page.viewport(1280, 800);
   const world = { ...scene(), phone: true };
   await open(world, only("home", "view:Inbox", "assistant"));
-  await page.getByRole("button", { name: "Inbox", exact: true }).click();
-  const list = page.locator('[data-alpha-subview="inbox-list"]');
-  const reader = page.locator('[data-alpha-subview="inbox-detail"]');
-  const row = list.getByRole("button", { name: /Standup notes/ });
+  await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
+  const listEl = () => document.querySelector<HTMLElement>('[data-alpha-subview="inbox-list"]');
+  const readerEl = () => document.querySelector<HTMLElement>('[data-alpha-subview="inbox-detail"]');
+  const row = page.getByRole("button", { name: /Standup notes/ });
   await row.click();
+  const reader = page.getByRole("main", { name: "Standup notes" });
   await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
   await expect.element(row).toHaveAttribute("aria-current", "true");
   await expect.poll(() => {
-    const columns = [list.element(), reader.element()].map((pane) => pane.getBoundingClientRect());
-    const [left, right] = columns;
+    const left = listEl()?.getBoundingClientRect();
+    const right = readerEl()?.getBoundingClientRect();
     return Boolean(left && right && left.width >= 300 && left.right <= right.left && right.width > 400);
   }).toBe(true);
 
   await page.viewport(412, 915);
-  await expect.element(list).toHaveAttribute("inert", "");
+  await expect.poll(() => listEl()?.hasAttribute("inert")).toBe(true);
   await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
-  await expect.poll(() => reader.element().contains(document.activeElement)).toBe(true);
-  await reader.getByRole("button", { name: "Back to the list", exact: true }).click();
+  await expect.poll(() => Boolean(readerEl()?.contains(document.activeElement))).toBe(true);
+  await page.getByRole("button", { name: "Back to the list", exact: true }).click();
   await expect.element(row).toHaveFocus();
   expect(world.inbox.changes).toEqual([]);
 });

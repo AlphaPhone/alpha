@@ -194,14 +194,27 @@ function nextWake(state: Updates.Updates): Option.Option<number> {
   return Option.some(state.deferrals > 0 && state.retryAt < check ? state.retryAt : check)
 }
 
+const offerKey = (state: Updates.Updates) =>
+  `${state.checkedAt}:${state.offer.release.version}:${state.offer.release.digest}:${state.offer.manifest}`
+
 // spec/app/update/index.md, "Alpha checks on its own only while on screen, when a check is due, and never during another check or an install"; spec/app/update/index.md, "An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded"
 const schedule = started(effect {
   const updates = try Updates.Machine
   const time = try Time
+  let inAutomatic: string | undefined
+  let accepted: string | undefined
   for (;;) {
     const state = try updates.get()
+    const key = offerKey(state)
+    if (state.installing && state.automatic) {
+      inAutomatic = key
+    } else if (!state.installing && inAutomatic !== undefined) {
+      if (inAutomatic === key && state.deferrals === 0 && state.permission === "Supported" && state.offer.manifest > 0) accepted = key
+      inAutomatic = undefined
+    }
+    if (accepted !== undefined && accepted !== key) accepted = undefined
     const now = try time.now()
-    const due: Event | undefined = Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
+    const due: Event | undefined = accepted !== key && Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
       : Updates.canPoll(state, now) ? { type: "poll", now: untimed } : undefined
     const taken = due !== undefined && (effect { try updates.send(due); return true } catch () => false)
     if (taken) continue
