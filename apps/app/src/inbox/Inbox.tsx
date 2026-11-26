@@ -286,6 +286,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
     const event = { type: "reviewAttachment", attachment, handling } as const;
     return can(event) ? () => void send(event) : undefined;
   };
+  // spec/app/inbox/message.md, "An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail"
+  const unsupported = (attachment: number) => {
+    const event = { type: "unsupportedAttachment", attachment } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const outcomeOf = (attempt: typeof state.file) => attempt.outcome === "Planned" ? undefined
@@ -354,12 +359,13 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         fromPhone={state.fromPhone}
         imagesHidden={!imagesLoad(state) && (contents?.formatted?.remoteImages ?? 0) > 0}
         onShowImages={can({ type: "showImages" }) ? () => void send({ type: "showImages" }) : undefined}
-        notice={notice}
+        notice={notice ?? (state.unsupported > 0 ? "openInGmail" : undefined)}
         onNoticeAction={told === "Unconfirmed" && onRefresh ? onRefresh : undefined}
         attachments={files.map((one, at) => ({
           id: `${one.partId}:${at}`, name: one.name, size: sizeOf(one.size),
           onOpen: state.revision > 0 && canPreviewAttachment(one) ? reviewing(at + 1, "Opening") : undefined,
           onSave: state.revision > 0 && destination !== "unavailable" && !canPreviewAttachment(one) && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
+          onUnsupported: !canPreviewAttachment(one) && (destination === "unavailable" || !canSaveAttachment(one)) ? unsupported(at + 1) : undefined,
           saveUnconfirmed: unsure(at + 1),
           browserDownload: destination === "download",
           picker: destination === "picker",

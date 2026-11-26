@@ -24,6 +24,7 @@ export interface NotesScene {
   deleteRequests?: Array<{ readonly id: string; readonly expectedRevision: number | undefined }>;
   /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
   target?: string;
+  interactGate?: Promise<void>;
   viewClaimGate?: Promise<void>;
   /** Each claim and result a renderer sent eliza's views routes, in order. */
   readonly views: { readonly path: "claim" | "result"; readonly body: Record<string, unknown> }[];
@@ -223,7 +224,9 @@ export function notesRoutes(scene: NotesScene, now: () => number): Route[] {
         return scene.failing ? refused(503) : Response.json({ success: true, data: { ...snapshot(scene), ...advertised } });
       }
       if (request.method === "GET" && url.pathname === "/api/notes/trash/recordings") return Response.json({ success: true, data: [] });
-      if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body, now));
+      if (request.method === "POST" && url.pathname === "/api/notes/interact") {
+        return request.json().then((body: unknown) => scene.interactGate === undefined ? interact(scene, body, now) : scene.interactGate.then(() => interact(scene, body, now)));
+      }
       if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
         return request.json().then(async (body: Record<string, unknown>) => {
           const gate = scene.viewClaimGate;

@@ -21,6 +21,7 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
       payload: { installationId: agentId, enrollmentId, operation, requestMessageId },
     },
     cameraLibraryId: false,
+    extraCapabilities: [] as string[],
     attemptId,
     workflow: undefined as { binding: WorkflowDeviceBinding; offered(): boolean; answered?(): void } | undefined,
     pendingReads: 0,
@@ -72,7 +73,7 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
   const { agentId, proposal } = review;
   const operation = proposal.payload.operation;
   const files = ["files.browser.v1", "files.shown-target.v1"];
-  const capabilities = {
+  const baseCapabilities = {
     sms_send: ["sms.send.v1"],
     sms_compose: ["sms.compose.v1", "sms.compose.v2"],
     sms_latest_sender: ["includeAddress" in operation ? "sms.latest-sender.v2" : "sms.latest-sender.v1"],
@@ -91,6 +92,7 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     post_notification: files,
     speak_text: files,
   }[operation.type];
+  const capabilities = [...new Set([...baseCapabilities, ...review.extraCapabilities])];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
   return (request, url) => {
@@ -100,8 +102,9 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     if (request.method === "GET" && resource === "capabilities") {
       return Response.json({ protocol: 1, agentId, identityId: subjectUserId, deviceActions: { protocol: 1, capabilities } });
     }
+    const declared = new Set(request.headers.get("x-eliza-device-capabilities")?.split(",").filter((name) => name !== "") ?? []);
     if (request.headers.get("x-eliza-device-id") !== agentId || request.headers.get("x-eliza-device-key") !== key
-      || request.headers.get("x-eliza-device-capabilities") !== capabilities.join(",")) return reject(401);
+      || declared.size !== capabilities.length || capabilities.some((name) => !declared.has(name))) return reject(401);
     if (request.method === "GET" && resource === "context") {
       return Response.json({ agentId, installationId: agentId, enrollmentId, subjectUserId });
     }

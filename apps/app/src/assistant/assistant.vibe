@@ -808,6 +808,9 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     show(ending)
     const pendingShow = shown
     if (pendingShow !== undefined) try promise(() => pendingShow)
+    // spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays"
+    const stoppedAt = try reply.get()
+    if (result?.kind === "StoppedByOwner" && stoppedAt.turn === ticket && stoppedAt.stopped) board.ownerStops.set(result.clientMessageId, !Reply.stoppedBeforeSettled(stoppedAt))
     if (request !== undefined && (heard || event.type === "finish")) {
       const comms = try Comms.Machine
       const current = (try comms.get()).requests.find((one) => one.about === request.about)
@@ -1218,16 +1221,20 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       { conversation, message: Chats.making(reading) ? reading.forkAt : 0 },
       { conversation, message: speaker.text === "Message" && (speaker.stage === "Waiting" || speaker.stage === "Preparing") ? speaker.item : 0 },
     ].filter(({ conversation, message }) => conversation > 0 && message > 0)
-    const recorded = messages.map((one): Line => {
-      // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": eliza stores a reply stopped before any of its text settled as aborted, with the provisional text it had, which is never shown.
-      if (one.role === "assistant" && one.failureKind === "aborted" && (one.abortCause === "stop" || one.abortCause === "client_left")) return { id: one.id, mine: false, text: "" }
+    const recorded = messages.map((one, at): Line => {
+      // spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays"
+      const aborted = one.role === "assistant" && one.failureKind === "aborted"
+      const asked = aborted ? messages.slice(0, at).findLast((row) => row.role === "user")?.clientMessageId : undefined
+      const settledHere = asked === undefined ? undefined : board.ownerStops.get(asked)
+      const line = aborted ? Reply.readAgainAborted(one.abortCause ?? "", settledHere !== undefined, settledHere === true) : "TextAndNotice"
+      if (line === "NoBubble") return { id: one.id, mine: false, text: "" }
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
         Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", redacted.has(one.id), key) ? saved?.get(key) : undefined
       const failure = one.role !== "assistant" || one.failureKind === undefined ? undefined
         : Reply.readAgain(failures[one.failureKind] ?? "OtherFailure", one.cloudCode !== undefined)
       return {
-        id: one.id, mine: one.role === "user", text: one.text,
+        id: one.id, mine: one.role === "user", text: line === "NoticeOnly" ? "" : one.text,
         ...(failure === undefined ? {} : { failure }),
         ...(attachments === undefined ? {} : { attachments }),
       }
