@@ -87,19 +87,28 @@ effect function changeContext() {
   const definition = try DefinitionWords
   const rows = try Rows
   const store = try KeyValueStore.KeyValueStore
-  const { workflow } = try WorkflowsApi
+  const { workflow, request } = try WorkflowsApi
   const state = try machine.get()
-  return { definition, rows, store, workflow, state, machine }
+  return { definition, rows, store, workflow, request, state, machine }
 }
 
 effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
-  const { definition, rows, store, workflow, state } = try changeContext()
+  const { definition, rows, store, workflow, request, state } = try changeContext()
   const scope = ownerAt() catch () => ""
   const exact = try definition.read(state.target)
   if (exact?.version !== version || !(try rows.sameOwner(scope, state.owner))) return { type: "changeAnswered", id, applied: false }
   const current = exact.workflow
   const key = changeKey(scope, current.id)
-  if ((store.get(key) catch () => "unreachable") !== undefined) return { type: "changeUnanswered" }
+  const previous = store.get(key) catch () => "unreachable"
+  const kept = previous === undefined || previous === "unreachable" ? undefined : (Schema.decodeUnknownEffect(HeldChange)(previous) catch () => undefined)
+  if (previous === "unreachable") return { type: "changeUnanswered" }
+  if (state.change.again) {
+    if (change !== "TurnOn" && change !== "TurnOff" && (kept === undefined || kept.id !== id || kept.workflowId !== current.id || kept.version !== current.versionId || kept.change !== change)) {
+      return { type: "changeUnanswered" }
+    }
+  } else if (previous !== undefined && (kept === undefined || kept.id >= id)) {
+    return { type: "changeUnanswered" }
+  }
   const outcome = effect {
     if (change === "TurnOn") try workflow.activate(current.id, current.versionId)
     else if (change === "TurnOff") try workflow.pause(current.id, current.versionId)
@@ -111,16 +120,31 @@ effect function changed(id: number, change: Change, version: number, name: numbe
       if (change === "Rename") {
         const text = try definition.name(state.target)
         if (text.length !== name) return "refused"
-        try workflow.changeMetadata(current.id, current.versionId, text, current.description, keep)
+        if (state.change.again && kept !== undefined) {
+          const trimmed = text.trim()
+          if (trimmed === "" || trimmed.length > 200 || current.description.length > 4000) return "refused"
+          try request(`/api/workflow/workflows/${encodeURIComponent(current.id)}/metadata`, { mutationId: kept.mutation, expectedVersionId: current.versionId, name: trimmed, description: current.description })
+          const confirmed = try workflow.reconcileMetadata(current.id, current.versionId, kept.mutation)
+          if (confirmed === null || confirmed.name !== trimmed || confirmed.description !== current.description) return "unknown"
+        } else {
+          try workflow.changeMetadata(current.id, current.versionId, text, current.description, keep)
+        }
       } else {
-        try workflow.lifecycle(current.id, current.versionId, change === "Remove" ? "remove" : "restore", keep)
+        const operation = change === "Remove" ? "remove" as const : "restore" as const
+        if (state.change.again && kept !== undefined) {
+          try request(`/api/workflow/workflows/${encodeURIComponent(current.id)}/lifecycle`, { mutationId: kept.mutation, expectedVersionId: current.versionId, operation })
+          const confirmed = try workflow.reconcileLifecycle(current.id, current.versionId, kept.mutation, operation)
+          if (confirmed === null) return "unknown"
+        } else {
+          try workflow.lifecycle(current.id, current.versionId, operation, keep)
+        }
       }
       try ignore(store.remove(key))
     }
     return "applied"
   } catch (failure) => declined(failure) ? "refused" : "unknown"
   if ((ownerAt() catch () => "") !== scope || outcome === "unknown") return { type: "changeUnanswered" }
-  if (outcome === "refused") try ignore(store.remove(key))
+  if (outcome === "refused" && !state.change.again) try ignore(store.remove(key))
   try refresh()
   return { type: "changeAnswered", id, applied: outcome === "applied" }
 }
@@ -198,4 +222,18 @@ export effect function backLifecycle(): boolean!!Model.Machine {
   return true
 }
 
-export const lifecycle = together(reacting(Model, { carry }), words, focus, sending)
+const released = applying(Model.Machine,
+  (state) => ({ owner: state.owner, target: state.target, id: state.change.attempt.id, free: !state.change.offered && (state.change.attempt.outcome === "Unknown" || state.change.attempt.outcome === "Refused") }),
+  effect ({ owner, target, id, free }: { owner: number; target: number; id: number; free: boolean }) => {
+    if (!free || id <= 0) return
+    const exact = try (try DefinitionWords).read(target)
+    const scope = ownerAt() catch () => ""
+    if (exact === undefined || !(try (try Rows).sameOwner(scope, owner))) return
+    const key = changeKey(scope, exact.workflow.id)
+    const store = try KeyValueStore.KeyValueStore
+    const raw = store.get(key) catch () => undefined
+    const kept = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldChange)(raw) catch () => undefined)
+    if (kept?.id === id) try ignore(store.remove(key))
+  })
+
+export const lifecycle = together(reacting(Model, { carry }), words, focus, sending, released)

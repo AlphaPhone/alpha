@@ -74,6 +74,9 @@ pure def answers(by: Sender): bool = by == Phone
 
 ### Alpha is light or dark as chosen, and follows the phone when the choice is System
 
+The page starts light, whatever the phone's look, and turns dark only once
+the appearance kept, or the phone under System, says so.
+
 ```quint
 pure def shown(s: Preferences): Look =
   if (s.theme == System) s.phoneLook else if (s.theme == Dark) DarkLook else LightLook

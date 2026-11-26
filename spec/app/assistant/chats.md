@@ -173,6 +173,12 @@ own move to its end never stops it. Only the owner scrolling up from the
 end stops it, until they scroll back to it. A page of history or a search
 hit opens where it was read, not at the end.
 
+Each change to what the conversation shows is followed as it is drawn, as
+v119 did after every update (model.js:5561-5576), not only when its size is
+next measured: a finished reply put in place of its streamed words leaves
+the conversation shorter for a moment, and that moment neither stops the
+following nor moves the owner from where they were reading.
+
 ```quint
 pure val followReach = 80
 

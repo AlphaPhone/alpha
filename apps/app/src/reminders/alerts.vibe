@@ -10,7 +10,7 @@ import { Agent } from "../platform/agent.vibe"
 import { PhoneReminders } from "../platform/reminders.vibe"
 import { attemptedWith, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
 import { alertInstantMs, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
@@ -127,29 +127,34 @@ effect function syncBannerAction(
   attemptId: number,
   mutate: (row: ReminderItemRecord, now: number) => ReminderItemRecord | undefined,
   build: (item: ReminderItemRecord, now: number, key: string) => HttpClientRequest.HttpClientRequest,
-): Event!!(Agent | Time | Attempts) {
+): Event!!(Agent | Time | Attempts | KeyValueStore.KeyValueStore) {
   const item = remindersStore.findItemBySpecId(id)
   if (item === undefined) return { type: "syncAnswered", id, attemptId, confirmed: false, known: true }
   const now = try (try Time).now()
   const changed = mutate(item, now)
   if (changed === undefined) return { type: "syncAnswered", id, attemptId, confirmed: false, known: true }
   const snap = remindersStore.snapshot().snapshot
-  const updated = snap.items.map((row) => (row.id === item.id ? changed : row))
-  remindersStore.replace({ ...snap, updatedAtMs: now, items: updated })
-  const outcome = try attemptedWith(Agent, (key) => build(item, now, key), attemptId)
+  const nextSnap: RemindersSnapshot = {
+    ...snap,
+    version: snap.version + 1,
+    updatedAtMs: now,
+    items: snap.items.map((row) => (row.id === item.id ? changed : row)),
+  }
+  try persistReminderSnapshot(nextSnap, now)
+  const outcome = try attemptedWith(Agent, (key) => build(changed, now, key), attemptId)
   return { type: "syncAnswered", id, attemptId, confirmed: outcome.confirmed, known: outcome.known }
 }
 
-effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Time | Attempts) {
+effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Time | Attempts | KeyValueStore.KeyValueStore) {
   return try syncBannerAction(
     id,
     attemptId,
     completeReminderOccurrence,
-    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/complete`), { idempotencyKey: key }),
+    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/complete`), { item, idempotencyKey: key }),
   )
 }
 
-effect function syncSnooze(id: number, until: number, attemptId: number): Event!!(Agent | Time | Attempts) {
+effect function syncSnooze(id: number, until: number, attemptId: number): Event!!(Agent | Time | Attempts | KeyValueStore.KeyValueStore) {
   return try syncBannerAction(
     id,
     attemptId,
@@ -211,7 +216,7 @@ effect function storeCalendarSnooze(id: number, itemRevision: number, until: num
   return { type: "calendarSnoozeSaved", id, attemptId, itemRevision: item.revision + 1, stored: true, confirmed, known }
 }
 
-effect function syncDismiss(id: number, attemptId: number): Event!!(Agent | Time | Attempts) {
+effect function syncDismiss(id: number, attemptId: number): Event!!(Agent | Time | Attempts | KeyValueStore.KeyValueStore) {
   return try syncBannerAction(
     id,
     attemptId,
@@ -274,7 +279,21 @@ export effect function syncAlertsWithSnapshot(snapshot: RemindersSnapshot, nowMs
   try syncBannerFromMachine()
 }
 
+const rescheduleRecurring = started(effect {
+  const alerts = try Alerts.Machine
+  const time = try Time
+  try Stream.runForEach(alerts.changes, effect (state) => {
+    const needsNext = state.entries.some((entry) => {
+      if (entry.phase !== "Completed" || entry.attempt.outcome === "Sent") return false
+      const item = remindersStore.findItemBySpecId(entry.id)
+      return item !== undefined && !item.completed && item.recurrence !== "none"
+    })
+    if (needsNext) try syncAlertsWithSnapshot(remindersStore.snapshot().snapshot, try time.now())
+  })
+}, "rescheduling recurring reminder alerts after banner completion")
+
 /** Resident due-time alerting layer, kept across restarts and armed via `Time.until`. */
 export const reminderAlerts = together(
   reacting(Alerts, { keep: 2, open: [{ type: "reopen" }], carry, timers }),
+  rescheduleRecurring,
 )

@@ -90,35 +90,47 @@ function ghostOf(section: HTMLElement) {
   return ghost;
 }
 
+/** Whether the owner asked for reduced motion, matching AssistantComposer's dock entrance check. */
+const reducedMotion = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+/** Clears inline styles applied while dragging the resting bar downward. */
+function clearBarDismiss(bar: HTMLElement) {
+  bar.style.removeProperty("transition");
+  bar.style.removeProperty("animation");
+  bar.style.removeProperty("transform");
+  bar.style.removeProperty("opacity");
+}
+
 /** COA:339-346 direct paint for pulling the resting bar down toward the pill: follows the finger downward and fades out. */
-function paintBarDismiss(d: ChatDrag) {
+function paintBarDismiss(paintedBar: RefObject<HTMLElement | null>, d: ChatDrag) {
   const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+  if (paintedBar.current && paintedBar.current !== bar) {
+    clearBarDismiss(paintedBar.current);
+    paintedBar.current = null;
+  }
   if (!bar) return;
   const dismiss = barDismissPaint(d);
   if (!dismiss) {
-    bar.style.removeProperty("transition");
-    bar.style.removeProperty("animation");
-    bar.style.removeProperty("transform");
-    bar.style.removeProperty("opacity");
+    clearBarDismiss(bar);
+    paintedBar.current = null;
     return;
   }
+  paintedBar.current = bar;
   bar.style.transition = "none";
   bar.style.animation = "none";
   bar.style.transform = `translateY(${dismiss.translateY}px)`;
   bar.style.opacity = String(dismiss.opacity);
 }
 
-/** Clears downward bar-drag styling; if `spring` is true, eases the bar smoothly back to rest. */
-function unpaintBar(spring = false) {
-  const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+/** Clears downward bar-drag styling on the exact element painted; if `spring` is true, eases the bar smoothly back to rest. */
+function unpaintBar(paintedBar: RefObject<HTMLElement | null>, spring = false) {
+  const bar = paintedBar.current ?? document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+  paintedBar.current = null;
   if (!bar) return;
   const fromTransform = bar.style.transform;
   const fromOpacity = bar.style.opacity;
-  bar.style.removeProperty("transition");
-  bar.style.removeProperty("animation");
-  bar.style.removeProperty("transform");
-  bar.style.removeProperty("opacity");
-  if (spring && (fromTransform || fromOpacity) && animates()) {
+  clearBarDismiss(bar);
+  if (spring && (fromTransform || fromOpacity) && animates() && !reducedMotion()) {
     const motion = bar.animate(
       [{ transform: fromTransform || "none", opacity: fromOpacity ? Number(fromOpacity) : 1 }, { transform: "none", opacity: 1 }],
       { duration: 240, easing: SHEET_EASE },
@@ -131,10 +143,10 @@ function unpaintBar(spring = false) {
  * v119 retire (:613-651): the header and the bar or pill under the sheet shown in place again. The sheet's own height,
  * opacity and corners go back with the render that ends the drag, which drew them too.
  */
-function unpaint(section: HTMLElement | null, springBar = false) {
+function unpaint(section: HTMLElement | null, paintedBar: RefObject<HTMLElement | null>, springBar = false) {
   document.querySelector<HTMLElement>("[data-alpha-underlay]")?.style.removeProperty("opacity");
   section?.querySelector<HTMLElement>("[data-alpha-chat-header]")?.style.removeProperty("opacity");
-  unpaintBar(springBar);
+  unpaintBar(paintedBar, springBar);
 }
 
 /**
@@ -160,6 +172,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const motionsRef = useRef<Animation[]>([]);
   const ghostRef = useRef<HTMLElement | undefined>(undefined);
   const barRef = useRef(0);
+  const paintedBarRef = useRef<HTMLElement | null>(null);
   if (seen.detent !== detent) {
     const tap = live === undefined && !voice && !comms && animates();
     const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: sectionRef.current?.getBoundingClientRect().height || undefined } : undefined);
@@ -177,7 +190,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const viewport = () => (comms ? window.innerHeight - 52 : window.innerHeight);
   const done = (springBar = false) => {
     heldRef.current = undefined;
-    unpaint(sectionRef.current, springBar);
+    unpaint(sectionRef.current, paintedBarRef, springBar);
     setLive(undefined);
   };
   const drop = () => {
@@ -192,6 +205,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   };
   const gesture: AssistantPull = {
     onPress: ({ y }) => {
+      if (paintedBarRef.current) unpaintBar(paintedBarRef, false);
       const form: Form = isOpen(detent) ? "open" : pill ? "pill" : "bar";
       const floor = floorOf();
       const shown = sectionRef.current?.getBoundingClientRect().height ?? 0;
@@ -206,18 +220,15 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       const first = !held.drag.moved;
       if (first && voice) return;
       if (!moveDrag(held.drag, y - held.y)) return;
-      if (first) {
-        if (held.form === "bar" && document.activeElement instanceof HTMLTextAreaElement) document.activeElement.blur();
-        void dock.send({ type: "drag" });
-      }
+      if (first) void dock.send({ type: "drag" });
       const drawn = held.form === "open" || held.drag.height > 0;
       // eslint-disable-next-line @eslint-react/dom-no-flush-sync -- v119 drew the sheet for the first move before the next frame (chat-overlay-motion-adapter.ts:836), so the bar never shows under the finger's first paint
       if (first || drawn !== live?.drawn) flushSync(() => setLive({ form: held.form, start: held.start, drawn, painted: dragPaint(held.drag) }));
       if (drawn) {
-        unpaintBar(false);
+        unpaintBar(paintedBarRef, false);
         paint(sectionRef.current, held.drag);
       } else if (held.form === "bar") {
-        paintBarDismiss(held.drag);
+        paintBarDismiss(paintedBarRef, held.drag);
       }
     },
     onRelease: ({ direction, flick, quick, travel, y }: AssistantRelease) => {
@@ -235,8 +246,11 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
         setSeen((s) => ({ ...s, leaving: undefined }));
         drop();
       });
+      if (held.form === "bar" && !isOpen(landed.detent) && document.activeElement instanceof HTMLTextAreaElement && document.activeElement.matches("[data-alpha-composer]")) {
+        document.activeElement.blur();
+      }
       const painted = dragPaint(d);
-      unpaint(sectionRef.current);
+      unpaint(sectionRef.current, paintedBarRef);
       if (held.form === "open" && !isOpen(landed.detent) && !comms && animates()) {
         setSeen((s) => ({ ...s, growing: undefined, leaving: { tap: false, height: painted.height, opacity: painted.opacity } }));
         setLive(undefined);

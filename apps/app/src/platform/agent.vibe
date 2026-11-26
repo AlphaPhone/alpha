@@ -269,10 +269,10 @@ function streamed(plugin: ElizaAgentPlugin, route: AgentRoute): Stream.Stream<Ag
       ]),
       catch: undelivered,
     })
-    try addFinalizer(() => ignore(tryPromise(async () => {
-      await plugin.abort({ id })
-      await Promise.all(heard.map((handle) => handle.remove()))
-    })))
+    try addFinalizer(() => effect {
+      try ignore(tryPromise(() => plugin.abort({ id })))
+      try ignore(tryPromise(() => Promise.allSettled(heard.map((handle) => handle.remove()))))
+    })
     try tryPromise({ try: () => plugin.requestStream({ ...route, id }), catch: undelivered })
   })
 }

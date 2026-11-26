@@ -39,6 +39,7 @@ export interface VoiceScene {
   startLiveCaptureCalls: number;
   stopLiveCaptureCalls: number;
   startCloudSpeechCalls: number;
+  cloudStartGate?: () => Promise<void>;
   readonly cloudStarts: { readonly environment: string; readonly credentialId: string }[];
   readonly relayWarmups: string[];
   relayWarmupHangs: boolean;
@@ -50,8 +51,6 @@ export interface VoiceScene {
   hushCalls: number;
   speakerMuted: boolean;
   speakerGainGate?: (muted: boolean) => Promise<void>;
-  /** While set, the relay's start waits on it, so Talk stays connecting. */
-  cloudStartGate?: () => Promise<void>;
   synthesisGate?: () => Promise<void>;
   /** While set, a local playback is reported ended only once this settles, as a long line plays out. */
   playbackHold?: () => Promise<void>;
@@ -267,9 +266,9 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
       startCloudSpeech: async ({ sessionId, environment, credentialId }) => {
         voice.cloudStarts.push({ environment, credentialId });
         if (credentialId !== voice.credentialId) throw rejection("Voice is already active or unavailable");
-        await voice.cloudStartGate?.();
         voice.startCloudSpeechCalls += 1;
         voice.activeMicSession = sessionId;
+        if (voice.cloudStartGate) await voice.cloudStartGate();
         return { sessionId, sampleRate: 16000, echoCancelled: true };
       },
       stopCloudSpeech: ({ sessionId }) => {

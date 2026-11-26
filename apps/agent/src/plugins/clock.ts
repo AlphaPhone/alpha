@@ -2,7 +2,7 @@
 import type { ClockAlarmRecord, ClockTimerRecord, WorldCityRecord } from "@repo/launcher-records";
 import { showsApp } from "@elizaos/agent-host";
 import {
-  type AlphaAppsStore, DEFAULT_SNOOZE_MINUTES, isValidTimeZone, normalizeSound,
+  type AlphaAppsStore, DEFAULT_SNOOZE_MINUTES, isValidTimeZone, normalizeSound, parseSound,
 } from "./store.ts";
 import {
   type AgentAction, type AgentProvider, type AgentRoute, asRecord, readBoolean, readNumber, readRawString, readString,
@@ -120,8 +120,12 @@ const dayBits: Readonly<Record<string, number>> = {
 /** The repeat days the model named, as a mask; any day it named that is not a weekday is returned for it to correct. */
 function parseDaysMask(input: unknown): { readonly mask: number } | { readonly unknown: readonly string[] } {
   if (typeof input === "number" && Number.isFinite(input)) return { mask: Math.max(0, Math.min(127, Math.trunc(input))) };
-  const values: readonly unknown[] = Array.isArray(input) ? input : input === undefined || input === null ? [] : [input];
-  const days = values.map((value) => typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : typeof value);
+  const text = (value: unknown): string => {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean" || value === null || value === undefined) return String(value);
+    return JSON.stringify(value) ?? "unknown";
+  };
+  const days = Array.isArray(input) ? input.map(text) : input === undefined || input === null ? [] : [text(input)];
   const unknown = days.filter((day) => dayBits[day.trim().toLowerCase()] === undefined);
   return unknown.length > 0 ? { unknown } : { mask: days.reduce((mask, day) => mask | (dayBits[day.trim().toLowerCase()] ?? 0), 0) };
 }
@@ -504,7 +508,7 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
           minute: readNumber(body, "minute"),
           daysMask: readNumber(body, "daysMask"),
           label: readRawString(body, "label"),
-          sound: body.sound === undefined ? undefined : normalizeSound(body.sound),
+          sound: parseSound(body.sound),
           vibrate: readBoolean(body, "vibrate"),
           enabled: readBoolean(body, "enabled"),
           snoozeMinutes: readNumber(body, "snoozeMinutes"),

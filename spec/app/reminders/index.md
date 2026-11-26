@@ -180,6 +180,16 @@ pure val specValues: Set[ItemSpec] = Set(
   { listId: 2, hasDue: true, dueDay: 11, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: HighPriority, flagged: true },
 )
 pure val criteriaValues = Set(defaultFilter, { showCompleted: true, flaggedOnly: false, priority: NoPriority }, { showCompleted: false, flaggedOnly: true, priority: HighPriority })
+pure val listsValues: Set[List[ListEntry]] = Set(
+  List(defaultList),
+  List(defaultList, { id: 2, isDefault: false, revision: 1 }),
+)
+pure val nextListIdValues = Set(2, 3)
+pure val itemsValues: Set[List[ItemEntry]] = Set(
+  List(),
+  List({ id: 1, listId: 1, hasDue: true, dueDay: 10, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: MediumPriority, flagged: false, completed: false, snoozedUntil: 0, revision: 1 }),
+)
+pure val nextItemIdValues = Set(1, 2)
 ```
 
 ### Switching smart views, custom lists, sort, filter, search and item selection keeps every reference valid
@@ -593,6 +603,28 @@ pure def reopen(s: Reminders): Moved =
   val fetchOut = if (s.sync.status == R::Loading) List(SyncFetch({ ticket: s.sync.ticket })) else List()
   val wakeOut = if (undoHeld(s)) List(WakeUndo({ at: s.undo.until })) else List()
   { state: { ...s, front: false, view: Overview, searchOpen: false, selectedId: 0, write: settledWrite }, out: fetchOut.concat(wakeOut) }
+```
+
+### Applying a synced snapshot admits only valid lists and items while preserving active view and selection invariants
+
+```quint
+pure def canApplySync(s: Reminders, lists: List[ListEntry], nextListId: int, items: List[ItemEntry], nextItemId: int): bool =
+  not(writing(s)) and not(undoHeld(s))
+    and hasList(lists, defaultListId) and listOf(lists, defaultListId).isDefault
+    and nextListId > defaultListId
+    and lists.every(l => l.id >= 1 and l.id < nextListId and lists.select(m => m.id == l.id).length() == 1)
+    and nextItemId >= 1
+    and items.every(it => itemWellFormed(it, lists, nextItemId) and items.select(o => o.id == it.id).length() == 1)
+
+pure def applySync(s: Reminders, lists: List[ListEntry], nextListId: int, items: List[ItemEntry], nextItemId: int): Reminders =
+  val curView = s.view
+  val nextView = match curView {
+    | CustomList(c) => if (hasList(lists, c.listId)) s.view else Smart({ view: TodayView })
+    | _ => s.view
+  }
+  val nextSelected = if (s.selectedId != 0 and hasItem(items, s.selectedId)) s.selectedId else 0
+  { ...s, lists: lists, nextListId: nextListId, items: items, nextItemId: nextItemId,
+    view: nextView, selectedId: nextSelected }
 ```
 
 ### The default list always exists, every item belongs to a valid list, timing rules hold, and ids remain unique and below the next id

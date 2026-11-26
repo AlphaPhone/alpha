@@ -474,6 +474,11 @@ removed and its prompts that are on, as Workflows read them from the
 routes the agent serves (`GET /api/workflow/workflows` and
 `GET /api/triggers`); a list only one of them answered is partly
 unavailable.
+While Workflows reads its list again, as on every return to Home, the
+card keeps what the last answer said: up to date after a read that
+succeeded, stale after one that failed. It is not current only before
+any answer, so a return to Home never flashes a freshness mark (the v119
+card had none, 45f6bed30 apps/app/src/prototype/automations-adapter.ts:202).
 
 ```quint
 pure def flowRows(f: Flows): List[Row] = f.rows.foldl(List(), (l, r) => if (l.length() < 2) l.append(r) else l)

@@ -1153,11 +1153,13 @@ const STACK_IMPORT_PATTERNS = [
 
 const CITATION_RE = String.raw`spec\/\S+\.md, "(?:[^"\\]|\\["\\])+"`
 const SUPPRESSIBLE_RE = String.raw`(?!code\/|barrel\/|no-console\b)[\w@/-]+`
-const CITED_RE = new RegExp(String.raw`^\s*${CITATION_RE}(?:; ${CITATION_RE})*\s*$`)
+const CITED_RE = new RegExp(String.raw`^\s*${CITATION_RE}(?:; ${CITATION_RE})*(?:: \S.*)?\s*$`)
 const SUPPRESSION_RE = new RegExp(String.raw`^ eslint-disable(?:-next-line|-line)? ${SUPPRESSIBLE_RE}(?:, ${SUPPRESSIBLE_RE})* -- \S`)
 const ALLOWED_INLINE_CONFIGS = [SUPPRESSION_RE, /^ eslint-enable\b/]
 const THROWS_TYPE_RE = String.raw`[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`
+const THROWS_TAG_RE = new RegExp(String.raw`^@throws \{[ \t]*${THROWS_TYPE_RE}(?:[ \t]*\|[ \t]*${THROWS_TYPE_RE})*[ \t]*\}`)
 const THROWS_DIRECTIVE_RE = new RegExp(String.raw`^\*(?:[\s*]*@throws \{[ \t]*${THROWS_TYPE_RE}(?:[ \t]*\|[ \t]*${THROWS_TYPE_RE})*[ \t]*\})+[\s*]*$`)
+const hasValidThrows = (value: string) => [...value.matchAll(/@throws\b/g)].every((match) => THROWS_TAG_RE.test(value.slice(match.index)))
 const CODE_DIRECTIVES: Record<string, RegExp[]> = {
   Line: [CITED_RE, SUPPRESSION_RE, /^@ (?:backend|requires|ensures|invariant|decreases|assert|pure|type|ghost)(?: |$)/, /^\/ <reference /, /^ @vitest-environment [\w-]+$/],
   Block: [CITED_RE, ...ALLOWED_INLINE_CONFIGS, /^\*(?:[\s*]*@(?:model|design) \S+)+[\s*]*$/, THROWS_DIRECTIVE_RE],
@@ -1188,6 +1190,7 @@ function createCodePlugin(root: string) {
     Boolean(node) && (/Function/.test(String(node?.type ?? "")) || withinFunction(node?.parent as AstNode | undefined))
   const isDocComment = (context: any, comment: any) =>
     Boolean(context.options[0]?.jsdoc) && comment.type === "Block" && String(comment.value).startsWith("*")
+    && hasValidThrows(String(comment.value))
     && !withinFunction(context.sourceCode.getNodeByRangeIndex(comment.range[0]))
   const leftSchema = { type: "object", additionalProperties: { type: "integer", minimum: 1 } }
   const reportIfExcess = (context: any, found: any[]) => {
@@ -1375,10 +1378,7 @@ export function vibestackConfig(options: VibestackConfigOptions): FlatConfig[] {
     if (vibeParser) {
       entries.push({ files: own.map((pattern) => pattern.replace(/\/\*\*$/, "/**/*.{vibe,vibex}")), languageOptions: { parser: createGuardedParser(vibeParser) } })
     }
-    entries.push({ files: own, plugins: { code: codePlugin }, rules: { "no-console": "error", "code/comments": ["error", { left: commented }], "code/effects": ["error", { left: scheduled }] } })
-    if (uiPackage) {
-      entries.push({ files: [`${uiPackage}/src/components/**`], ignores: ["**/*.meta.tsx"], rules: { "code/comments": ["error", { jsdoc: true, left: commented }] } })
-    }
+    entries.push({ files: own, plugins: { code: codePlugin }, rules: { "no-console": "error", "code/comments": ["error", { jsdoc: true, left: commented }], "code/effects": ["error", { left: scheduled }] } })
   }
 
   entries.push(...extra)

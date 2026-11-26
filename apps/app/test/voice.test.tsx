@@ -1009,12 +1009,21 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });
 
-  // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-  it("a spoken turn tells the agent the same screen as typing and follows the current prepared view with Talk still open", async () => {
+  const openPhoneTalk = async (talking: boolean) => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    if (talking) {
+      await press("Talk");
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    }
+    return { world, alpha, area };
+  };
+
+  // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
+  it("a spoken turn tells the agent the same screen a typed turn sent at that moment does, location and view claim included", async () => {
+    const { world, alpha, area } = await openPhoneTalk(false);
     world.ask.metadata = [];
 
     await fill("Message Alpha", "What is on my screen?");
@@ -1568,5 +1577,50 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("Original draft\nTyped transcript");
     expect(world.voice.dictationClips).toHaveLength(1);
     expect(world.ask.said).toEqual([]);
+  });
+
+  // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
+  it("opens a spoken reply's prepared view through voice without ending the active conversation", async () => {
+    const { world, alpha, area } = await openPhoneTalk(true);
+
+    world.ask.nextReplyChunks = ["Opening Calendar."];
+    world.ask.nextActions = (metadata) => {
+      const clientId = typeof metadata === "object" && metadata !== null && "viewClientId" in metadata && typeof metadata.viewClientId === "string"
+        ? metadata.viewClientId : "";
+      return [{ action: "VIEWS", data: { values: { navigationBinding: { requestId: "req-cal", clientId, viewId: "Calendar", viewType: "gui", installationId: "inst-1" } } } }];
+    };
+    speakUtterance(world, "Open Calendar");
+    await drawnUntil(alpha, alpha.runtime, Shell.Machine, (s) => s.trail.at(-1) === "Calendar");
+    for (let turn = 0; turn < 40; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+
+    const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    expect([after.phase, after.followed]).toEqual(["Listening", placeOf("Calendar")]);
+    expect(world.notes.views.some((entry) => entry.path === "result" && entry.body.success === true)).toBe(true);
+  });
+
+  // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Alpha is speaking exactly while sentences of the current turn are queued"; spec/app/voice/index.md, "Interrupt stops Alpha speaking and listens for the next turn"
+  it("ignores stale transcripts outside listening and prevents an interrupted turn from corrupting the next turn", async () => {
+    const { world, alpha, area } = await openPhoneTalk(true);
+
+    world.ask.acknowledgment = "Checking.";
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["Late turn one sentence."];
+    speakUtterance(world, "First question");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Speaking" && s.mic === "On");
+    expect(world.ask.turns.size).toBe(1);
+
+    world.voice.emitLocal?.("liveCaptureTranscript", { captureId: world.voice.activeMicSession, final: { text: "STALE SPEAKING ECHO" } });
+    for (let turn = 0; turn < 15; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    const { memory } = area.runSync(VoiceWords);
+    expect(memory.heardText).toBeUndefined();
+
+    await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.send({ type: "interrupt" })));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.turn === 2);
+    for (let turn = 0; turn < 25; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    expect(world.ask.turns.size).toBe(0);
+
+    memory.enqueueSentence(2, "Turn two sentence.");
+    memory.enqueueSentence(1, "Late turn one sentence.");
+    expect(memory.dequeueSentence(2)?.text).toBe("Turn two sentence.");
   });
 });

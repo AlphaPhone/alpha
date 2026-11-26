@@ -135,12 +135,25 @@ module web {
         let revision = 0
         read.onsuccess = () => {
           const current: unknown = read.result
+          if (pages === undefined) {
+            if (current !== undefined && !valid(current)) {
+              revision = base
+              landed = true
+              place.delete(key)
+              return
+            }
+            revision = current === undefined ? 0 : current.revision
+            if (revision !== base) return
+            landed = true
+            place.put({ revision, pages: [] }, key)
+            return
+          }
           if (current !== undefined && !valid(current)) { tx.abort(); return }
           revision = current === undefined ? 0 : current.revision
           if (revision !== base) return
           revision += 1
           landed = true
-          place.put({ revision, pages: pages ?? [] }, key)
+          place.put({ revision, pages }, key)
         }
         tx.oncomplete = () => resolve({ landed, revision })
         tx.onabort = () => reject(tx.error)
