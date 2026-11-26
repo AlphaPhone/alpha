@@ -346,6 +346,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         outcome={outcomeOf(state.file) ?? "review"}
         preview={preview}
         browserDownload={destination === "download"}
+        picker={destination === "picker"}
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
         onSave={file && destination !== "unavailable" && canSaveAttachment(file) && can(saveReviewed) ? () => void send(saveReviewed) : undefined}
         saveOutcome={state.handling === "Opening" ? outcomeOf(state.keep) : undefined}
