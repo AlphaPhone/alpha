@@ -431,7 +431,7 @@ export effect function upPickerFolder(visitId: number): boolean!!PickerShell {
   })
 }
 
-export effect function usePickerVolume(id: string, visitId: number): boolean!!PickerShell {
+export effect function selectPickerVolume(id: string, visitId: number): boolean!!PickerShell {
   const { board, writer } = try AttachmentPicker
   const machine = try Picker.Machine
   return try writer.withPermits(1)(effect {

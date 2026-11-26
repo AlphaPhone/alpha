@@ -1,10 +1,10 @@
-// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
 // spec/app/camera/agent.md, "A capture is taken only when the phone saved a photo it names; any other answer, or the camera released first, is uncertain"
-import { DeviceExecution, NOT_DISPATCHED, type ConversationRecord, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
+import { DeviceExecution, NOT_DISPATCHED, RuntimeRequestError, type ConversationRecord, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
 import { mayRunDirectly, readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
 import type { PhoneNumber } from "@elizaos/os-bridges"
 import { filterLabel } from "@elizaos/plugin-files-client"
-import { type PhoneDeviceTarget, type WorkflowDeviceBinding, parseWorkflowBinding } from "@elizaos/plugin-workflow-client"
+import { PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL, type PhoneDeviceTarget, type WorkflowDeviceBinding, parseWorkflowBinding } from "@elizaos/plugin-workflow-client"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
@@ -25,6 +25,7 @@ import { displayNumber } from "../phone/words.ts"
 import { Agent, type Runtime } from "../platform/agent.vibe"
 import type { SmsApproval } from "../platform/composerPort.vibe"
 import { Device, registered } from "../platform/device.vibe"
+import { nativeReadingAvailable } from "../platform/voice.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Telephony } from "../platform/telephony.vibe"
 import { Talk } from "./talk.vibe"
@@ -49,6 +50,7 @@ interface ReviewDetails {
   readonly files?: FileReview
   readonly reportFiles?: (outcome: FileActionReport) => void
   readonly phone?: ReviewedPhoneContact
+  readonly workflow?: Pick<WorkflowDeviceOffer, "binding" | "digest" | "expiresAt">
 }
 
 export interface ReviewAuthority extends ReviewDetails {
@@ -399,13 +401,15 @@ interface Session {
   readonly identity: JournalIdentity
   readonly headers: RuntimeRequestHeaders
   readonly capabilities: ReadonlySet<string>
-  readonly workflowPhone: boolean
+  readonly workflowProtocol: number
   readonly execute: DeviceExecution<DeviceOperation>
   readonly decide: DeviceAgent["decide"]
 }
 
+export type WorkflowPhone = PhoneDeviceTarget & { readonly protocol: number }
+
 type WorkflowOperation = Extract<DeviceOperation, {
-  readonly type: "read_selected_notes" | "read_calendar_range" | "create_note"
+  readonly type: "read_selected_notes" | "read_calendar_range" | "read_selected_reminders" | "create_note" | "post_notification" | "speak_text"
 }>
 
 export interface WorkflowDeviceOffer {
@@ -419,7 +423,9 @@ export interface WorkflowDeviceOffer {
 
 function workflowOperation(raw: unknown): WorkflowOperation | undefined {
   const checked = readOperation(raw)?.operation
-  if (checked?.type === "read_selected_notes" || checked?.type === "read_calendar_range" || checked?.type === "create_note") return checked
+  if (checked?.type === "read_selected_notes" || checked?.type === "read_calendar_range" ||
+      checked?.type === "read_selected_reminders" || checked?.type === "create_note" ||
+      checked?.type === "post_notification" || checked?.type === "speak_text") return checked
   return undefined
 }
 
@@ -525,7 +531,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 /** Enrollment and the proposal protocol share the same live resident identity. */
 export service MediaReview {
   session(): (Session | undefined)!!
-  workflowDevice(): (PhoneDeviceTarget | undefined)!!
+  workflowDevice(): (WorkflowPhone | undefined)!!
   workflowOffers(runId: string, current: Effect.Effect<boolean>): readonly WorkflowDeviceOffer[]!!
   decideWorkflow(offer: WorkflowDeviceOffer, approve: boolean, current: Effect.Effect<boolean>, authorized: Effect.Effect<boolean>): boolean!!
   filesOrigin(spoken?: boolean): (FilesOrigin | undefined)!!
@@ -603,17 +609,27 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
   if (capabilities.length === 0) throw new EnrollmentRefused({ reason: "Media operations are unavailable" })
   const headers = { "x-eliza-device-id": offer.agentId, "x-eliza-device-key": key, "x-eliza-device-capabilities": capabilities.join(",") }
   let raw = tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers)) catch () => undefined
-  const wantsWorkflow = registered("ElizaCalendar") && registered("AlphaNotes")
-  let workflowPhone = false
-  if (raw === undefined || wantsWorkflow) {
-    const answer = (tryPromise(() => runtime.request(
-      `${prefix}/register`, { label: "Alpha Phone", capabilities, ...(wantsWorkflow ? { workflowProtocol: 1 } : {}) }, headers,
-    )) |> flatMap(%, Schema.decodeUnknownEffect(registration))) catch () => undefined
-    if (answer?.installationId === offer.agentId) {
-      raw = try tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers))
-      workflowPhone = wantsWorkflow
-    } else if (raw === undefined || answer !== undefined) {
-      throw new EnrollmentRefused({ reason: "The device could not enroll" })
+  const canReadRecords = registered("ElizaCalendar") && registered("AlphaNotes")
+  const canPresent = registered("ElizaNotifications") && nativeReadingAvailable()
+  const maximum = !canReadRecords ? 0 : !canPresent ? 1 : registered("ElizaReminders") ? PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL : 2
+  let workflowProtocol = 0
+  if (raw === undefined || maximum > 0) {
+    const offers = maximum > 0
+      ? [PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL, 3, 2, 1].filter((version) => version <= maximum)
+      : [0]
+    for (const version of offers) {
+      const reply = tryPromise(() => runtime.request(
+        `${prefix}/register`, { label: "Alpha Phone", capabilities, ...(version > 0 ? { workflowProtocol: version } : {}) }, headers,
+      )) catch (failure) => failure.cause instanceof RuntimeRequestError ? failure.cause : undefined
+      if (reply instanceof RuntimeRequestError && reply.status === 409 && reply.code === "unsupported_workflow_protocol") continue
+      const answer = Schema.decodeUnknownEffect(registration)(reply) catch () => undefined
+      if (answer?.installationId === offer.agentId) {
+        raw = try tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers))
+        workflowProtocol = version
+      } else if (raw === undefined || answer !== undefined) {
+        throw new EnrollmentRefused({ reason: "The device could not enroll" })
+      }
+      break
     }
   }
   const confirmed = try Schema.decodeUnknownEffect(context)(raw)
@@ -625,7 +641,7 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
     execute: executeAction,
     readBack,
   })
-  return { epoch, identity, headers, capabilities: new Set(capabilities), workflowPhone, execute, decide: agent.decide }
+  return { epoch, identity, headers, capabilities: new Set(capabilities), workflowProtocol, execute, decide: agent.decide }
 }
 
 function filesCompletion(outcome: FileActionReport, synced: boolean): string {
@@ -993,7 +1009,8 @@ const mediaReviewContext = effect {
       ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(files === undefined ? {} : { files }),
       ...(scope.approvedText === undefined ? {} : { approvedText: scope.approvedText }),
       ...(scope.composeLine === undefined ? {} : { composeLine: scope.composeLine }),
-      ...(scope.reportFiles === undefined ? {} : { reportFiles: scope.reportFiles }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
+      ...(scope.reportFiles === undefined ? {} : { reportFiles: scope.reportFiles }), ...(scope.phone === undefined ? {} : { phone: scope.phone }),
+      ...(scope.workflow === undefined ? {} : { workflow: scope.workflow }) })
   })
   const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
     ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
@@ -1031,7 +1048,7 @@ const mediaReviewContext = effect {
   effect function workflowOffers(runId: string, current: Effect.Effect<boolean>): readonly WorkflowDeviceOffer[]!! {
     if (!(try current)) return []
     const opened = try session()
-    if (opened === undefined || !opened.workflowPhone || !(try enrollmentIsCurrent(opened))) return []
+    if (opened === undefined || opened.workflowProtocol === 0 || !(try enrollmentIsCurrent(opened))) return []
     const found = try proposals(opened)
     if (found === undefined || !(try enrollmentIsCurrent(opened)) || !(try current)) return []
     const { installationId, enrollmentId } = opened.identity
@@ -1044,7 +1061,9 @@ const mediaReviewContext = effect {
         !Number.isFinite(expiresAt) || expiresAt <= now || proposal.payload.workflow === undefined) continue
       const binding = parseWorkflowBinding(proposal.payload.workflow) catch () => undefined
       const operation = workflowOperation(proposal.payload.operation)
-      if (binding?.runId === runId && operation !== undefined) {
+      const needed = operation?.type === "read_selected_reminders" ? 3
+        : operation?.type === "post_notification" || operation?.type === "speak_text" ? 2 : 1
+      if (binding?.runId === runId && operation !== undefined && opened.workflowProtocol >= needed) {
         candidates.push({ id: proposal.id, digest: proposal.digest, expiresAt, binding, operation, target })
       }
     }
@@ -1065,7 +1084,7 @@ const mediaReviewContext = effect {
         return answer !== undefined
       }
       const beforeDispatch = effect { return (try active) && (try authorized) && (try active) }
-      scopes.set(found.id, { active, beforeDispatch })
+      scopes.set(found.id, { active, beforeDispatch, workflow: { binding: found.binding, digest: found.digest, expiresAt: found.expiresAt } })
       const result = (tryPromise(() => opened.execute.approve(found, {
         live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true,
       })) |> ensuring(%, sync(() => { scopes.delete(found.id) }))) catch () => undefined
@@ -1213,9 +1232,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     },
     effect workflowDevice() {
       const opened = try session()
-      if (opened === undefined || !opened.workflowPhone || !(try enrollmentIsCurrent(opened))) return undefined
+      if (opened === undefined || opened.workflowProtocol === 0 || !(try enrollmentIsCurrent(opened))) return undefined
       const { installationId, enrollmentId } = opened.identity
-      return { installationId, enrollmentId }
+      return { installationId, enrollmentId, protocol: opened.workflowProtocol }
     },
     workflowOffers,
     decideWorkflow,

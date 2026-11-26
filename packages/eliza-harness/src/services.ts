@@ -471,7 +471,9 @@ export const characterOf = (email: string) => ({ name: "Alpha", system: `You are
  * worker it pins, the phone's host context revision, so an enrolled device is offered and shown its proposals as on
  * the phone, and the views the phone declares, so the agent can show its apps; `persist` keeps its conversations in `state`.
  */
-export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string }, persist: boolean): Promise<Agent> {
+export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string },
+  persist: boolean, browserNotesSpeech?: string,
+): Promise<Agent> {
   const pack = await builtPack();
   const launch = path.join(owned(state), "launch.json");
   fs.writeFileSync(launch, JSON.stringify({
@@ -482,6 +484,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
     model: { backend: "cloud", cloudBaseUrl: cloud.api, smallModel: cloud.model, largeModel: cloud.model, imageModel: cloud.model },
     account: { userId: key.accountId, organizationId: key.organizationId },
     embeddings: "none", persistMemory: persist, callerRole: "owner",
+    ...(browserNotesSpeech === undefined ? {} : { environment: { ALPHA_BROWSER_NOTES_SPEECH_SOCKET: browserNotesSpeech } }),
     ...(pack.hostContextRevision === undefined ? {} : { hostContextRevision: pack.hostContextRevision }),
     ...(pack.views === undefined ? {} : { views: pack.views }),
   }), { mode: 0o600 });
@@ -515,6 +518,8 @@ export async function startEliza(keep?: string, real?: RealModel) {
   const state = scratch();
   const cloud = await startCloud(state, [owner.email], owner.credits, real);
   const key = cloud.owners.get(owner.email)!;
-  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined);
+  const speech = process.env.ALPHA_LOCAL_SPEECH_SOCKET;
+  const browserNotesSpeech = speech === undefined || !path.isAbsolute(speech) ? undefined : speech;
+  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, browserNotesSpeech);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
 }

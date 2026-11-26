@@ -73,6 +73,22 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const result = await alpha.runtime.runPromise(readWorkflowCalendar(operation, current));
     return result === undefined ? refused : { kind: "applied", result };
   }
+  if (operation.type === "read_selected_reminders") {
+    const { readWorkflowReminders } = await import("../reminders/workflow-device.vibe");
+    const current = Effect.tryPromise(authority.current).pipe(Effect.orElseSucceed(() => false));
+    const result = await alpha.runtime.runPromise(readWorkflowReminders(operation, current));
+    return result === undefined ? refused : { kind: "applied", result };
+  }
+  if (operation.type === "post_notification" || operation.type === "speak_text") {
+    const scope = authority.workflow;
+    if (scope === undefined) return refused;
+    if (operation.type === "post_notification") {
+      const { postWorkflowStepNotice } = await import("../workflows/native-approval.vibe");
+      return alpha.runtime.runPromise(postWorkflowStepNotice(operation, call, scope, authority.current));
+    }
+    const { speakWorkflowStep } = await import("../workflows/presentation.vibe");
+    return alpha.runtime.runPromise(speakWorkflowStep(operation.text, scope, authority.current));
+  }
   if (operation.type === "browser_navigate") {
     const [{ default: browser }, { openApproved }] = await Promise.all([import("../browser/index.tsx"), import("../browser/agent.vibe")]);
     return (await browser.runtime(alpha).runPromise(openApproved(operation.url, authority.current))) ? { kind: "applied" } : refused;

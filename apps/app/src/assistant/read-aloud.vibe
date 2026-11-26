@@ -84,7 +84,7 @@ export effect function stopPage(item: number, source?: PageSpeech["source"]): vo
   if (reading.text === "Page" && reading.item === item && Speaker.canStop(reading)) {
     try contained(speaker.send({ type: "stop" }, (state) => state.ticket === reading.ticket), "stopping the selected text")
   }
-  try page.retire()
+  try page.retire("Stopped")
 }
 
 type Inputs = Speaker.Machine | Chats.Machine | Talk | VoiceBridge | Voice.Machine | VoiceWords | Shell | Device
@@ -98,6 +98,7 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
     let words: string | NativePageSpeech | undefined
     let stillCurrent: (() => boolean!!) | undefined
     let retire: (() => void!!) | undefined
+    let completed = false
     if (text === "Transcript") {
       const { memory } = try VoiceWords
       const held = memory.transcriptReading
@@ -123,7 +124,7 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
         retire = effect () => {
           if (memory.pageReading !== page) return
           memory.pageReading = undefined
-          try page.retire()
+          try page.retire(completed ? "Finished" : "Stopped")
         }
         stillCurrent = effect () => memory.pageReading === page && (try page.current())
         if (try stillCurrent()) words = page.words
@@ -135,7 +136,10 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
     }
     const bridge = try VoiceBridge
     const audio = words === undefined ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
-      : Stream.map(bridge.readAloud(ticket, words, stillCurrent), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
+      : Stream.map(bridge.readAloud(ticket, words, stillCurrent), (event): Speaker.Event => {
+        if (event.kind === "ended" && event.ok) completed = true
+        return { type: event.kind, ticket, ok: event.ok }
+      })
     return Stream.concat(audio, Stream.fromEffect(effect {
       const confirmed = try bridge.silenceReading(ticket)
       if (retire !== undefined) try retire()

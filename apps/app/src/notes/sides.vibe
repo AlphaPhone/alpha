@@ -88,7 +88,7 @@ effect function recognised(request: Extract<Voice.Effect, { readonly tag: "Trans
   const work = effect {
     const lines: TranscriptLine[] = []
     for (let offsetMs = 0; offsetMs < audio.durationMs; offsetMs += transcriptWindowMs) {
-      if (!listening(try voice.get(), request)) return failed
+      if (!listening(try voice.get(), request) || (ownerAt() catch () => "") !== owner) return failed
       const text = (try device.transcribe({ recordingId, noteId: note.id, offsetMs, durationMs: audio.durationMs })).trim()
       if (text !== "") {
         lines.push({ s: "me", at: offsetMs / 1000, t: text })
@@ -101,7 +101,7 @@ effect function recognised(request: Extract<Voice.Effect, { readonly tag: "Trans
     return { ...failed, ok: true }
   }
   const retired = Stream.runHead(Stream.filter(voice.changes, (state) => !listening(state, request)))
-  return Effect.raceFirst(work, Effect.as(retired, failed)) catch () => failed
+  return ensuring(Effect.raceFirst(work, Effect.as(retired, failed)), device.clearTranscriptAudio()) catch () => failed
 }
 
 effect function writtenVoice(fx: Extract<Voice.Effect, { readonly tag: "Writes" }>): Voice.Event!!(Agent | Notes | NoteContent | NoteStore | Voice.Machine | VoiceReview) {

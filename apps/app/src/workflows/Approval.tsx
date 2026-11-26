@@ -1,13 +1,14 @@
 // spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"
 import type { WorkflowApproval } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
+import { useState } from "react";
 import { Alert, cn, focusRing } from "@repo/ui";
 import { useMachine } from "../../gen/app__workflows__approvals.react.ts";
 import type { Machine } from "../../gen/app__workflows__approvals.effect.vibe";
 import { type Resident, type Shown } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { ApprovalWords, sameAsking } from "./approvals.vibe";
+import { ApprovalWords, sameAsking, stopReviewedWorkflowSpeech } from "./approvals.vibe";
 
 interface ApprovalProps extends Pick<Shown<Resident | Machine | ApprovalWords>, "runtime"> {
   readonly run: number;
@@ -57,12 +58,16 @@ export function Approval({ runtime, run, owner, approvals }: ApprovalProps) {
 const operations = {
   read_selected_notes: "Read selected notes",
   read_calendar_range: "Read calendar range",
+  read_selected_reminders: "Read reminders for the reviewed day",
   create_note: "Save in Notes",
+  post_notification: "Post an Alpha notification",
+  speak_text: "Read text aloud",
 } as const;
 
 /** The phone's own proposal, after the agent has recorded its workflow approval. */
 export function WorkflowDeviceApproval({ runtime, run, owner }: ApprovalProps) {
   const machine = useTimed(runtime, useMachine);
+  const [approvedSpeech, setApprovedSpeech] = useState<number>();
   const state = machine.state?.device;
   if (!state || state.runNumber !== run || state.phase === "DeviceIdle") return null;
   const shown = runtime.runSync(Effect.flatMap(ApprovalWords, (words) => words.device()));
@@ -82,10 +87,19 @@ export function WorkflowDeviceApproval({ runtime, run, owner }: ApprovalProps) {
       {(machine.can(allow) || machine.can(deny)) && (
         <div className="flex flex-wrap gap-3">
           {machine.can(deny) && <button type="button" className={cn(pill, "bg-background")} onClick={() => void machine.send(deny)}>Deny</button>}
-          {machine.can(allow) && <button type="button" className={cn(pill, "bg-primary text-primary-foreground")} onClick={() => void machine.send(allow)}>Approve device action</button>}
+          {machine.can(allow) && <button type="button" className={cn(pill, "bg-primary text-primary-foreground")} onClick={() => {
+            if (shown.offer.operation.type === "speak_text") setApprovedSpeech(shown.number);
+            void machine.send(allow);
+          }}>Approve device action</button>}
         </div>
       )}
       {state.phase === "DeviceSending" && <p role="status">Waiting for your phone…</p>}
+      {state.phase === "DeviceSending" && approvedSpeech === shown.number && (
+        <button type="button" className={cn(pill, "self-start bg-background")} onClick={() => {
+          setApprovedSpeech(undefined);
+          runtime.runFork(stopReviewedWorkflowSpeech(shown.number, owner, run));
+        }}>Stop reading</button>
+      )}
       {state.phase === "DeviceUnconfirmed" && <Alert variant="warn" role="status">The outcome couldn’t be confirmed. Check the run before trying again.</Alert>}
     </section>
   );
