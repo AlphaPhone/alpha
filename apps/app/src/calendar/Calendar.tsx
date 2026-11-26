@@ -725,6 +725,7 @@ function Drafts({ runtime, day }: CalendarProps & { day: number }) {
 // spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Hand Android Calendar what Alpha cannot write"; spec/app/calendar/editor.md, "Story: Never create an event twice"
 function Form({ runtime, day, today, connected }: CalendarProps & { day: number; today: number; connected: boolean }) {
   const editor = useEditor(runtime);
+  const view = useView(runtime);
   const [fields, setFields] = useState<Fields>(() => runtime.runSync(kept(day, editor.state?.owner ?? 0)));
   const [picking, setPicking] = useState<string | undefined>(undefined);
   const saveButtonRef = useRef<HTMLElement | null>(null);
@@ -796,7 +797,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const onAgent = destination === "Agent";
   // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on this phone's calendar; its live adapter left them off the agent's (prototype/agent-calendar-adapter.ts:312, :328).
-  const choosesOptions = !reminder && e.form === "NewEvent";
+  const choosesOptions = !reminder && e.form === "NewEvent" && destinations.some(({ value }) => value === destination);
+  const phoneShut = !reminder && destination === "Phone" && shown.present() && view.state !== undefined && !allows(view.state.access) && view.can({ type: "openSettings" });
   const offersVideo = choosesOptions && (fields.video === true || offeredOn(onAgent, false, false, true));
   const offeredRepeats = repeats.filter(({ repeat }) => offeredOn(onAgent, repeat !== "NoRepeat", false, false));
   const offeredAlerts = alerts.filter(({ minutes }) => offeredOn(onAgent, false, minutes !== undefined, false));
@@ -812,7 +814,12 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   };
   return (
     <CalendarFormPage className={reminder ? "[&>[data-host-chrome]]:pr-2" : undefined} onBack={close} saving={saving}
-      onSave={(reminder || !e.extras) && (editor.can(save) || reviewingReschedule) ? submit : undefined}>
+      onSave={(reminder || !e.extras) && !phoneShut && (editor.can(save) || reviewingReschedule) ? submit : undefined}>
+      {phoneShut ? (
+        <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction aria-label="Open Calendar settings" onClick={() => void view.send({ type: "openSettings" })}><Settings aria-hidden />Settings</CalendarNoticeAction>}>
+          Calendar can't read your phone's calendar.
+        </CalendarNotice>
+      ) : null}
       {fields.noteOrigin !== undefined && e.extras && !reminder && (
         <CalendarNotice>Android Calendar will save this event without a link to the source note.</CalendarNotice>
       )}
