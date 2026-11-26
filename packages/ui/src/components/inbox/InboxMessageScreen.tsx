@@ -72,10 +72,14 @@ export function InboxMessageScreen({
       titleControl={<span className="flex-1" />}
       leading={<Button variant="ghost" size="icon" aria-label="Back to the list" onClick={onClose}><ChevronLeft /></Button>}
       actions={reading || fault ? null : <InboxMessageActions {...actions} compact />}
-      className="motion-safe:animate-rise [&_main>div]:gap-0"
+      className={cn(
+        "motion-safe:animate-rise [&_main>div]:gap-0",
+        "in-data-[alpha-wide]:[&>header]:max-w-none in-data-[alpha-wide]:[&_main>div]:max-w-none",
+        "in-data-[alpha-wide]:[&_main>div]:px-[max(--spacing(4),calc((100%_-_720px)/2))]",
+      )}
     >
       {fromPhone ? <p role="status" className="-mt-1 px-2 pb-2 text-xs text-muted-foreground">Saved copy · Links and attachments are off</p> : null}
-      <div className="flex flex-col px-2">
+      <div className="flex flex-col px-2 in-data-[alpha-wide]:px-0">
         {fromPhone ? null : <InboxThreadNav place={place} count={count} threadRows={threadRows} onOlder={onOlder} onNewer={onNewer} />}
         <InboxMessageHeader sender={sender} address={address} to={to} cc={cc} replyTo={replyTo} date={date} fullDate={fullDate} />
         <p aria-hidden="true" className="mt-5 font-display text-3xl font-light [overflow-wrap:anywhere]">{subject}</p>

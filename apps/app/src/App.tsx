@@ -184,6 +184,8 @@ export function App({ alpha }: AppProps) {
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
   const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarsePointer;
+  const inboxLandscapeBar = showing === "Inbox" && state.assistant === "Bar" && state.textAsk.tag === "NoTextAsk"
+    && canvas?.landscape === true && coarsePointer;
   const fullScreen = state.assistant === "Full" && !side;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
@@ -243,7 +245,12 @@ export function App({ alpha }: AppProps) {
           "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
           "in-[body:has([data-alpha-covers-assistant])]:invisible",
           comms && "shrink-0",
-          !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
+          !comms && [
+            "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
+            inboxLandscapeBar
+              ? "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:inset-x-0 [&>[data-alpha-detent=bar]]:right-0 [&>[data-alpha-detent=bar]]:w-[min(400px,46%)]"
+              : "[&>[data-alpha-detent]]:inset-x-0",
+          ],
           side && [
             "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
             "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",

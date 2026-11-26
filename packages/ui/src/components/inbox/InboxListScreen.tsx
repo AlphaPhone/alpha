@@ -143,7 +143,7 @@ export function InboxListScreen({
       leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5.5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className="[&_main>div]:gap-0 [&_main>div]:pt-1"
+      className="@container [&_main>div]:gap-0 [&_main>div]:pt-1 in-data-[alpha-wide]:[&>header]:max-w-none"
     >
       {!searching && state !== "signedOut" ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
       {!searching && (aside.length > 0 || accounts.length > 1) ? (
