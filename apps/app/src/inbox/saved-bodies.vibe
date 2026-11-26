@@ -33,7 +33,7 @@ const maximumBytes = 2 * 1024 * 1024
 const maximumBodies = 16
 const retentionMs = 30 * 24 * 60 * 60 * 1000
 
-const Body = Schema.Struct({
+const BodySchema = Schema.Struct({
   account: Schema.Number,
   credential: Schema.Number,
   grant: Schema.NonEmptyString,
@@ -42,9 +42,9 @@ const Body = Schema.Struct({
   at: Schema.Number,
   text: Schema.String,
 })
-const Envelope = Schema.Struct({ version: Schema.Literal(1), owner: Schema.NonEmptyString, bodies: Schema.Array(Body) })
-type Envelope = typeof Envelope.Type
-type Body = typeof Body.Type
+const EnvelopeSchema = Schema.Struct({ version: Schema.Literal(1), owner: Schema.NonEmptyString, bodies: Schema.Array(BodySchema) })
+type Envelope = typeof EnvelopeSchema.Type
+type Body = typeof BodySchema.Type
 export type SavedRead = Pick<Body, "account" | "credential" | "grant" | "message" | "history">
 export type SavedGrant = Pick<Body, "account" | "credential" | "grant">
 
@@ -100,7 +100,7 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
       raw = Redacted.value(found.value)
     } else raw = tryPromise(readSavedMail) catch () => undefined
     if (typeof raw !== "string" || raw.length > maximumBytes) return undefined
-    return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Envelope))(raw))
+    return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(EnvelopeSchema))(raw))
   }
 
   effect function store(value: Envelope | undefined): void!! {

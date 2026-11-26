@@ -9,7 +9,7 @@ import { Cloud, type CloudClient } from "../platform/cloud.vibe"
 import { Attempts, type Install } from "../runtime/attempts.vibe"
 import { keptAttempts } from "../runtime/reactor.vibe"
 import { provider } from "./provider.vibe"
-import { SavedBodies } from "./saved-bodies.vibe"
+import { SavedBodies, type SavedRead } from "./saved-bodies.vibe"
 
 module pure {
   import type { MailCard } from "@elizaos/cloud"
@@ -123,12 +123,29 @@ type Page = Kept & { readonly ticket: number; readonly credential: number; reado
 
 const sameSelection = (a: Selection, b: Selection): boolean => a.account === b.account && a.folder === b.folder && a.query === b.query
 
+function restoredLedger(text: string | undefined): Ledger {
+  const restored = readLedger(text) ?? blank()
+  const labels = restored.labels ?? Object.fromEntries(Object.entries(restored.accounts).map(([label, id]) => [id, label]))
+  return { accounts: restored.accounts, credentials: restored.credentials, labels, messages: restored.messages,
+    cards: restored.cards, next: restored.next, kept: restored.kept }
+}
+
+function savedRead(ledger: Ledger, mailbox: Mailbox, number: number): SavedRead | undefined {
+  const kept = ledger.kept
+  if (!mailbox.signedIn || !mailbox.saved || mailbox.failure === "Revoked" ||
+    (mailbox.accounts.status !== "Loading" && mailbox.accounts.status !== "Failed") ||
+    !kept || !kept.credential || kept.credential !== mailbox.keptCredential || !sameSelection(kept.selection, mailbox.selected)) return undefined
+  const account = mailbox.selected.account
+  const card = kept.letters.find((letter) => letter.message === number)?.card
+  const grant = Object.entries(ledger.credentials).find(([id, value]) => value === kept.credential && ledger.accounts[`grant:${id}`] === account)?.[0]
+  if (!card?.id || !card.metadata.historyId || !grant) return undefined
+  return { account, credential: kept.credential, grant, message: card.id, history: card.metadata.historyId }
+}
+
 export const mail = Layer.effect(Mail, effect {
   const store = try KeyValueStore.KeyValueStore
   const saved = try SavedBodies
-  const restored = readLedger(store.get(key) catch () => undefined) ?? blank()
-  const storedLabels = restored.labels ?? Object.fromEntries(Object.entries(restored.accounts).map(([label, id]) => [id, label]))
-  let ledger: Ledger = { accounts: restored.accounts, credentials: restored.credentials, labels: storedLabels, messages: restored.messages, cards: restored.cards, next: restored.next, kept: restored.kept }
+  let ledger = restoredLedger(store.get(key) catch () => undefined)
   let sequence = 0
   let ownerGeneration = 0
   let ownerConfirmed = false
@@ -356,30 +373,15 @@ export const mail = Layer.effect(Mail, effect {
       try saved.remember({ account, credential, grant, message, history }, body.bodyText)
     },
     savedBody(mailbox: Mailbox, message: number) {
-      const kept = ledger.kept
-      if (!ownerConfirmed || !mailbox.signedIn || !mailbox.saved || mailbox.failure === "Revoked" ||
-        (mailbox.accounts.status !== "Loading" && mailbox.accounts.status !== "Failed") ||
-        !kept || !kept.credential || kept.credential !== mailbox.keptCredential || !sameSelection(kept.selection, mailbox.selected)) return undefined
-      const account = mailbox.selected.account
-      const row = kept.letters.find((letter) => letter.message === message)
-      const id = row?.card.id
-      const history = row?.card.metadata.historyId
-      const grantEntry = Object.entries(ledger.credentials).find(([grant, id]) => id === kept.credential && ledger.accounts[`grant:${grant}`] === account)
-      if (!id || !history || !grantEntry) return undefined
-      return saved.read({ account, credential: kept.credential, grant: grantEntry[0], message: id, history })
+      const read = ownerConfirmed ? savedRead(ledger, mailbox, message) : undefined
+      return read === undefined ? undefined : saved.read(read)
     },
     effect forget() {
       const retired = ++sequence
       ownerGeneration = retired
       ownerConfirmed = false
-      accountGenerations.clear()
       current = undefined
-      staged.clear()
-      grants.clear()
-      messages.clear()
-      cursors.clear()
-      tokens.clear()
-      bodies.clear()
+      for (const records of [accountGenerations, staged, grants, messages, cursors, tokens, bodies]) records.clear()
       ledger = blank()
       try saved.clear()
       try keep()
