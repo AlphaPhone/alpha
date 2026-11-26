@@ -1441,10 +1441,11 @@ Recenter or "Use my location", tapped while Android has not allowed
 location and the disclosure is unread, shows the disclosure and nothing
 else. A search needs no location, so the disclosure never holds one back,
 nor a query another app hands to Maps. Recenter stays on the map whenever
-Maps is not guiding; while Maps is locating or Android's prompt is open,
-tapping it does nothing. The disclosure belongs to the tap that showed it:
-it closes unread when the owner leaves Maps or presses Back, and once
-Android allows location, so Maps never opens on it.
+Maps is neither guiding nor showing directions, where v119 left "Use my
+location" on the directions card instead; while Maps is locating or
+Android's prompt is open, tapping it does nothing. The disclosure belongs
+to the tap that showed it: it closes unread when the owner leaves Maps or
+presses Back, and once Android allows location, so Maps never opens on it.
 
 ```quint
 pure def alwaysExplainingOnlyBeforeTheDisclosure(m: Maps): bool = m.explaining implies not(m.link.disclosed)

@@ -87,11 +87,15 @@ describe("Maps on a phone", () => {
     // spec/app/maps/index.md, "A result opens its place"
     await press("Harbour Cafe");
     await until(alpha, runtime, Screen, (s) => s.place !== 0 && s.sheet === "Half");
+    // spec/app/maps/index.md, "Story: Look at a place": the field keeps the query, as v119 live did, not the place's name
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value).toBe("harbour");
 
     // spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
     await press("Directions");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.origin === "MyLocation" && s.link.locator === "Nobody");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
+    // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": no Recenter floats over directions, as v119 live hid it; "Use my location" on the card stays
+    expect([button("Recenter"), Boolean(button("Use my location"))]).toEqual([undefined, true]);
 
     // spec/app/maps/index.md, "Directions are asked for a way of travelling the provider offers, and another way asks again from the same start"
     expect(button("Transit")?.getAttribute("aria-disabled")).toBe("true");
@@ -121,6 +125,7 @@ describe("Maps on a phone", () => {
     // spec/app/maps/index.md, "Back leaves one mode: navigation to its directions, directions to the place, the place to the search, the search to the map"
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.directions && s.place !== 0);
+    expect(Boolean(button("Recenter"))).toBe(true);
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => s.place === 0 && s.searching && s.trip.route === 0);
     await hardware("back");
@@ -320,6 +325,14 @@ describe("Maps in a browser", () => {
     const { runtime: again } = second;
     await until(second.alpha, again, Screen, (s) => s.saved.length === 2 && s.link.google);
     expect([Boolean(button("Quay")), Boolean(button("Office"))]).toEqual([true, true]);
+
+    // spec/app/maps/index.md, "Saved places open from the map or the search"; spec/app/maps/index.md, "Story: Look at a place": a saved place opens with its name on the card and the field empty under "Search", as v119 live
+    await press("Quay");
+    await until(second.alpha, again, Screen, (s) => s.place !== 0);
+    const field = document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']");
+    expect([document.querySelector("h2")?.textContent, field?.value, field?.placeholder]).toEqual(["Quay", "", "Search"]);
+    await hardware("back");
+    await until(second.alpha, again, Screen, (s) => s.place === 0);
 
     // spec/app/maps/connection.md, "Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge"; spec/app/maps/places.md, "At most 200 places are saved: a full list only renames"
     await typeMapSearch("gallery");
