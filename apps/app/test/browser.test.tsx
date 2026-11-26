@@ -102,6 +102,21 @@ function layOutNativePage(rectangle: DOMRect): void {
   onTestFinished(() => laidOut.mockRestore());
 }
 
+/** The time range history clears over, picked as a person does: React hears the change event. */
+const historyRange = (range: string) => drawn(() => {
+  const select = document.querySelector<HTMLSelectElement>("#alpha-history-range");
+  if (!select) throw new Error("no time range for clearing history");
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, range);
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
+/** The Clear history button under the time range, not the trash button that opens it. */
+const clearHistoryOver = () => drawn(() => {
+  const found = [...document.querySelectorAll("[role=group][aria-label='Clear history options'] button")].find((one) => one.textContent === "Clear history");
+  if (!(found instanceof HTMLButtonElement)) throw new Error("no Clear history under the time range");
+  found.click();
+});
+
 const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   const tab = button(name);
   if (!tab) throw new Error(`no Library tab ${name}`);
@@ -167,7 +182,10 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.history === 2);
     expect(world.browser.saved.history).toEqual([kept, other]);
 
+    // v119 (Alpha 45f6bed30 template.html:1808-1820): the trash button opens the time range; Clear history under it asks.
     await press("Clear history");
+    await historyRange("all");
+    await clearHistoryOver();
     await until(alpha, runtime, Library, (s) => s.confirming);
     await hardware("back");
     await until(alpha, runtime, Library, (s) => !s.confirming);
@@ -181,8 +199,8 @@ describe("The Browser on a phone", () => {
       await release.promise;
     };
     try {
-      await press("Clear history");
-      await pressOnTop("Clear");
+      await clearHistoryOver();
+      await pressOnTop("Clear history");
       await later(alpha, 2000);
       await entered.promise;
       await press("Back to page");
@@ -500,8 +518,12 @@ describe("The Browser on a phone", () => {
     expect(world.browser.tabs.size).toBe(1);
     // spec/app/browser/index.md, "Cleared data takes every normal tab and the saved session with it, and keeps the private tabs"
     await hardware("back");
+    // v119 (Alpha 45f6bed30 template.html:1820): Reset browser data, under Library > History > Clear history.
     await press("Menu");
-    await press("Clear all browsing data");
+    await press("Library, bookmarks and history");
+    await libraryTab("History");
+    await press("Clear history");
+    await press("Reset browser data");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
     await press("Clear data");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
