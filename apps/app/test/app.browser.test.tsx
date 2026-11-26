@@ -15,7 +15,7 @@ import "../src/main.css";
 afterEach(closeAll);
 
 const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx"))];
-const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@4") ?? "null") as { trail: unknown } | null)?.trail;
+const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@5") ?? "null") as { trail: unknown } | null)?.trail;
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps, and find the same place after the page is opened again (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
@@ -107,8 +107,9 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
 
     await page.getByRole("button", { name: "Menu", exact: true }).click();
     await page.getByRole("button", { name: "Downloads", exact: true }).click();
-    await expect.element(page.getByRole("heading", { name: /^Downloads?$/ })).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: "Files", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
     await expect.element(link).toBeVisible();
     expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
 
