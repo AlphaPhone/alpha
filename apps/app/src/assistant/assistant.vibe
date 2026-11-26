@@ -1500,14 +1500,20 @@ const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
 }, "asking what was typed on the communications dock")
 
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a closed keyboard, a field left for elsewhere, and a downward drag release lower Ask Alpha one at a time, so a second step never leaves the app behind the bar
+const resting = Semaphore.makeUnsafe(1)
+
 // spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen"
 function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   return match (fx) {
     when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
-    when { tag: "Lower", let steps }: run("lower", effect {
+    when { tag: "Lower", let steps }: run("lower", resting.withPermits(1)(effect {
       const shell = try Shell
-      for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
-    });
+      for (const _ of Array.from({ length: steps })) {
+        if ((try shell.get()).assistant === "Bar") break
+        try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
+      }
+    }));
     when { tag: "Tap" }: run("tap", effect {
       const shell = try Shell
       const current = try shell.get()
@@ -1519,10 +1525,20 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
 }
 
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
-const rested = following(Shell, (shown) => shown.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
+const rested = started(effect {
+  const shell = try Shell
+  const dock = try Dock.Machine
+  let last = try shell.get()
+  try Stream.runForEach(shell.changes, effect (shown) => {
+    const wasOpen = last.assistant === "Sheet" || last.assistant === "Full"
+    const viewChanged = last.trail.join("/") !== shown.trail.join("/")
+    last = shown
+    if (shown.assistant === "Bar" && (wasOpen || viewChanged)) {
+      try ignore(dock.send({ type: "putAway", now: untimed }))
+    }
+  })
+}, "resting the Ask Alpha dock")
 
-// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a closed keyboard and a field left for elsewhere rest it one at a time, so the second finds the bar and never takes a second step Back
-const resting = Semaphore.makeUnsafe(1)
 export const restTyping = resting.withPermits(1)(effect {
   const shell = try Shell
   const current = try shell.get()
