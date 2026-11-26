@@ -1,4 +1,4 @@
-import { type ComponentProps, type PointerEvent, type ReactNode, type Ref } from "react";
+import { type ComponentProps, type PointerEvent, type ReactNode, type Ref, useCallback, useRef, useState } from "react";
 import { ArrowUp, Keyboard, Mic } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
@@ -116,6 +116,24 @@ export function AssistantComposer({
   const pickedFiles = attachments.every(({ kind }) => kind === "image" || kind === "file");
   const frame = bar ? "mx-4 [--alpha-composer-rest:1.75rem]" : "mx-3 [--alpha-composer-rest:1.875rem]";
   const pull = useAssistantPull<HTMLTextAreaElement>(fieldPull, true);
+  const [seen, setSeen] = useState({ bar, compact, enter: 0 });
+  if (seen.bar !== bar || seen.compact !== compact) {
+    const toggledAtBar = seen.bar && bar && seen.compact !== compact;
+    setSeen({ bar, compact, enter: toggledAtBar && !voice ? seen.enter + 1 : seen.enter });
+  }
+  const enter = seen.enter;
+  const playedRef = useRef(0);
+  const dockRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node || enter === 0 || playedRef.current === enter || typeof node.animate !== "function") return;
+    playedRef.current = enter;
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const motion = node.animate(
+      [{ opacity: 0, transform: "translateY(28px)" }, { opacity: 1, transform: "none" }],
+      { duration: 460, easing: "cubic-bezier(0.19, 1, 0.22, 1)" },
+    );
+    motion.finished.catch(() => undefined);
+    return () => { motion.cancel(); };
+  }, [enter]);
   return (
     <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
@@ -129,7 +147,7 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div data-alpha-input-bar={bar && !compact ? "" : undefined} data-alpha-pill={compact ? "" : undefined} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
+      <div ref={dockRef} data-alpha-input-bar={bar && !compact ? "" : undefined} data-alpha-pill={compact ? "" : undefined} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
