@@ -92,7 +92,7 @@ const launcherHeader = cn(
 );
 
 /** v119 45f6bed30 prototype/template.html:887-893: the launcher's search header is 56px tall and 16px in on both sides, its pill full width with a 40px Clear. */
-const launcherSearchHeader = "[&>header]:min-h-14 [&>header]:px-4 [&>header_button[aria-label='Clear search']]:size-10 [&>header_button[aria-label='Clear search']]:min-w-10";
+const launcherSearchHeader = "[&>header]:min-h-14 [&>header]:px-4 [&>header_button[aria-label^=Clear]]:size-10 [&>header_button[aria-label^=Clear]]:min-w-10";
 
 /**
  * The Inbox screen: the folder's messages for one account and search, with its folders, search, what is chosen, the

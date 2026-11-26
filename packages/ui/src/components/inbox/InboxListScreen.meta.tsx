@@ -45,6 +45,9 @@ export const meta: ComponentMeta<InboxListScreenProps> = {
     "Searching on the launcher": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
       await expect([canvas.queryByRole("button", { name: /^Back/ }), Boolean(canvas.getByRole("search", { name: "Search Gmail" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([null, true, true]);
+      const header = canvasElement.querySelector("header")?.getBoundingClientRect();
+      const pill = canvas.getByRole("search", { name: "Search Gmail" }).getBoundingClientRect();
+      await expect([canvas.getByRole("button", { name: "Clear search" }).getBoundingClientRect().width, pill.left - (header?.left ?? 0), (header?.right ?? 0) - pill.right]).toEqual([40, 16, 16]);
     },
     "Loading first page": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "true");
