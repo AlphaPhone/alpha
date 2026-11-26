@@ -13,10 +13,11 @@ import * as TelegramAuth from "../gen/app__telegram__auth.effect.vibe";
 import * as TelegramConversation from "../gen/app__telegram__conversation.effect.vibe";
 import * as TelegramNotices from "../gen/app__telegram__notices.effect.vibe";
 import { savedKey, written } from "../src/home/saved.vibe";
-import { MessagingBridge } from "../src/messaging/bridge.vibe";
+import { MessagingBridge, type MessagingDraftProposal } from "../src/messaging/bridge.vibe";
 import { messagingSessions } from "../src/platform/messaging.vibe";
 import { slackAt } from "../src/platform/slack.vibe";
 import { telegramAt } from "../src/platform/telegram.vibe";
+import type { Alpha } from "../src/runtime/area.tsx";
 import { completeSlackOAuthCallback } from "../src/slack/auth.vibe";
 import { SlackLedger } from "../src/slack/ledger.vibe";
 import { closeAll, later, only, openOver, until } from "./alpha.tsx";
@@ -43,6 +44,16 @@ async function controlJson(origin: string, route: string, body?: unknown): Promi
  * Alpha with Telegram and Slack kept on Home after its default tiles, as the owner adds them from Add to Home:
  * they are in Home's catalog, not its defaults (spec/app/home/tiles.md, "Home's defaults use the product's Home order").
  */
+/** Stage `draft` as the agent does, raise Ask Alpha in full, and send it from there once it shows. */
+async function sendStagedDraft(alpha: Alpha, draft: MessagingDraftProposal) {
+  await alpha.runtime.runPromise(Effect.flatMap(MessagingBridge, (bridge) => Effect.sync(() => bridge.stageDraft(draft))));
+  await alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send({ type: "raise", detent: "Full" })));
+  const askAlphaRegion = page.getByRole("region", { name: "Ask Alpha" });
+  await expect.element(askAlphaRegion.getByText(draft.body)).toBeVisible();
+  await askAlphaRegion.getByRole("button", { name: "Send" }).click();
+  await expect.element(askAlphaRegion.getByText("Sent", { exact: true })).toBeVisible();
+}
+
 async function openMessagingAlpha() {
   localStorage.setItem(savedKey, written([
     ...homeOrder.map((view) => ({ tag: "Own" as const, view })),
@@ -187,28 +198,15 @@ describe("Messaging E2E", () => {
     const sentCalls = (tgRequests.requests ?? []) as ReadonlyArray<unknown>;
     expect(sentCalls.length).toBeGreaterThanOrEqual(1);
 
-    await alpha.runtime.runPromise(
-      Effect.flatMap(MessagingBridge, (bridge) =>
-        Effect.sync(() => {
-          bridge.stageDraft({
-            id: "tg-browser-draft-1",
-            platform: "Telegram",
-            target: "Maya Chen",
-            targetId: "user:2001",
-            body: "Alpha Chromium Telegram draft",
-            revision: 1,
-            status: "draft",
-          });
-        }),
-      ),
-    );
-    await alpha.runtime.runPromise(
-      Effect.flatMap(Shell.Machine, (m) => m.send({ type: "raise", detent: "Full" })),
-    );
-    const askAlphaRegion = page.getByRole("region", { name: "Ask Alpha" });
-    await expect.element(askAlphaRegion.getByText("Alpha Chromium Telegram draft")).toBeVisible();
-    await askAlphaRegion.getByRole("button", { name: "Send" }).click();
-    await expect.element(askAlphaRegion.getByText("Sent", { exact: true })).toBeVisible();
+    await sendStagedDraft(alpha, {
+      id: "tg-browser-draft-1",
+      platform: "Telegram",
+      target: "Maya Chen",
+      targetId: "user:2001",
+      body: "Alpha Chromium Telegram draft",
+      revision: 1,
+      status: "draft",
+    });
 
     await alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send({ type: "goHome" })));
     await expect.element(page.getByText(/Telegram/i).first()).toBeVisible();
@@ -274,29 +272,16 @@ describe("Messaging E2E", () => {
     await page.getByText("general", { exact: true }).click();
     await until(alpha, alpha.runtime, SlackConversation.Machine, (s) => s.channel > 0 && s.channelRead.status === "Loaded");
 
-    await alpha.runtime.runPromise(
-      Effect.flatMap(MessagingBridge, (bridge) =>
-        Effect.sync(() => {
-          bridge.stageDraft({
-            id: "sl-browser-draft-1",
-            platform: "Slack",
-            target: "Alpha Team · #general",
-            targetId: "C01GENERAL",
-            workspaceId: "T01ALPHA",
-            body: "Alpha Chromium Slack draft",
-            revision: 1,
-            status: "draft",
-          });
-        }),
-      ),
-    );
-    await alpha.runtime.runPromise(
-      Effect.flatMap(Shell.Machine, (m) => m.send({ type: "raise", detent: "Full" })),
-    );
-    const askAlphaRegion = page.getByRole("region", { name: "Ask Alpha" });
-    await expect.element(askAlphaRegion.getByText("Alpha Chromium Slack draft")).toBeVisible();
-    await askAlphaRegion.getByRole("button", { name: "Send" }).click();
-    await expect.element(askAlphaRegion.getByText("Sent", { exact: true })).toBeVisible();
+    await sendStagedDraft(alpha, {
+      id: "sl-browser-draft-1",
+      platform: "Slack",
+      target: "Alpha Team · #general",
+      targetId: "C01GENERAL",
+      workspaceId: "T01ALPHA",
+      body: "Alpha Chromium Slack draft",
+      revision: 1,
+      status: "draft",
+    });
 
     const slackPosts = await controlJson(slackOrigin, "/__control/requests?path=/api/chat.postMessage");
     expect(((slackPosts.requests ?? []) as ReadonlyArray<unknown>).length).toBeGreaterThanOrEqual(1);
