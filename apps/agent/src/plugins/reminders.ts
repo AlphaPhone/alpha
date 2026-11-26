@@ -214,6 +214,13 @@ function taskAnswer(store: AlphaAppsStore, { item, followed }: Followed) {
   return followed ? { status: 200, body: { item, snapshot: store.getReminders() } } : { status: 409, body: { error: "scheduled_task_kept" } };
 }
 
+/** The revision a request says it reviewed: undefined when it names none, null when what it names is no revision. */
+function expectedRevisionOf(body: Record<string, unknown>): number | null | undefined {
+  if (body.expectedRevision === undefined) return undefined;
+  const revision = readNumber(body, "expectedRevision");
+  return revision !== undefined && Number.isSafeInteger(revision) && revision >= 1 ? revision : null;
+}
+
 function itemNamed(store: AlphaAppsStore, id: string | undefined): ReminderItemRecord | undefined {
   return store.getReminders().items.find((item) => item.id === id);
 }
@@ -629,10 +636,8 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
         const body = asRecord(input.body);
         const id = input.parameters.get("id") ?? "";
         let before = itemNamed(store, id);
-        const expectedRevision = readNumber(body, "expectedRevision");
-        if (body.expectedRevision !== undefined && (expectedRevision === undefined || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) {
-          return { status: 400, body: { error: "invalid_reminder_revision" } };
-        }
+        const expectedRevision = expectedRevisionOf(body);
+        if (expectedRevision === null) return { status: 400, body: { error: "invalid_reminder_revision" } };
         if (expectedRevision !== undefined) {
           if (before === undefined) return { status: 404, body: { error: "reminder_not_found" } };
           if (before.revision !== expectedRevision) return { status: 409, body: { error: "reminder_revision_changed" } };
@@ -749,10 +754,8 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       handler: async (input) => {
         const body = asRecord(input.body);
         const id = input.parameters.get("id") ?? "";
-        const expectedRevision = readNumber(body, "expectedRevision");
-        if (body.expectedRevision !== undefined && (expectedRevision === undefined || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) {
-          return { status: 400, body: { error: "invalid_reminder_revision" } };
-        }
+        const expectedRevision = expectedRevisionOf(body);
+        if (expectedRevision === null) return { status: 400, body: { error: "invalid_reminder_revision" } };
         if (expectedRevision !== undefined) {
           const reviewed = store.getReminders().items.find((item) => item.id === id);
           if (!reviewed) return { status: 404, body: { error: "reminder_not_found" } };

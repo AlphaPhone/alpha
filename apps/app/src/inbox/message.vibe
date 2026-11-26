@@ -1,6 +1,5 @@
 // spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { accessOf } from "../../gen/app__inbox.effect.vibe"
 import * as Message from "../../gen/app__inbox__message.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__inbox__message.effect.vibe"
@@ -20,7 +19,7 @@ import { say, type Said } from "../notices/toasts.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together, migratedStore } from "../runtime/reactor.vibe"
 import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
 import { backFromDraft } from "./composer.vibe"
 import { InboxAhead, aheadKey, bodyPart } from "./ahead.vibe"
@@ -284,14 +283,7 @@ effect function readerRecord(raw: string | undefined): (string | undefined)!! {
 }
 
 function stored(key: string, start = Message.initial) {
-  return Layer.unwrap(effect {
-    const store = try KeyValueStore.KeyValueStore
-    const compatible = KeyValueStore.make({
-      ...store,
-      get: (name: string) => name === key ? Effect.flatMap(store.get(name), readerRecord) : store.get(name),
-    })
-    return Layer.provide(Message.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, compatible))
-  })
+  return Layer.provide(Message.stored(key, start), migratedStore(key, readerRecord))
 }
 
 const viewing = reacting({ ...Message, stored }, { keep: 1, open: [{ type: "restart" }], carry })
@@ -329,7 +321,7 @@ export effect function prepareInboxCardEntry() {
     let closed = false
     if (Message.canClose(previous)) {
       closed = try contained(reader.send({ type: "close" }, (state) => current() && matchesReader(state)
-        && matchesList(Effect.runSync(list.get())), "closing the previous Inbox message")
+        && matchesList(Effect.runSync(list.get()))), "closing the previous Inbox message")
       if (!closed) return
     }
     if (Inbox.canClearSearch(try list.get())) {

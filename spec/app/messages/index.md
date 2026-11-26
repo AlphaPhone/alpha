@@ -627,6 +627,13 @@ pure def startNewDraft(s: Messages, revision: int, thread: int): Moved =
 pure def holdsNewDraft(s: Messages, visit: int): bool = showingPane(s, New) and s.newDraft.visit == visit
 ```
 
+### The current New address names the Messages stage beside Ask Alpha
+
+The stage and its Full strip name the recipients of the open New draft. The
+name is read only for its current validated numbers and while Contacts
+access permits it. The phone shows the numbers themselves when it cannot
+name them. Editing To keeps the same New draft and Ask Alpha history.
+
 ### A current Android text request opens New only when its saved draft is empty
 
 Opening Messages from Android can fill To and the text of the next New

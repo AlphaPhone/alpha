@@ -29,6 +29,7 @@ final class AlphaWelcome {
     }
 
     static void show(Activity activity, Runnable completed) {
+        AlphaFreshPresets.defaultToGestureNavigation(activity);
         activity.getWindow().setStatusBarColor(BACKGROUND);
         activity.getWindow().setNavigationBarColor(BACKGROUND);
         ScrollView scroll = new ScrollView(activity);
