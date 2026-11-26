@@ -173,6 +173,25 @@ pure def goBack(s: Shell): Shell =
   else recordRoute({ before: s, after: { ...s, trail: s.trail.removeAt(s.trail.length() - 1) } })
 ```
 
+### On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it
+
+As in Sunday's v119, which drew an app's Back only when Alpha was not the
+phone's launcher, the first page of Settings and of Workflows has no Back
+control in its header while Alpha is the launcher. A page inside either
+keeps its Back, and away from the launcher the first page keeps it too.
+The control is only how Back is drawn: Android's own Back gesture still
+closes the app as the rule above says.
+
+```quint
+type AppPage = FirstPage | InnerPage
+
+pure def drawsAppBack(s: Shell, launcher: bool, page: AppPage): bool =
+  canGoBack(s) and not(launcher and page == FirstPage)
+
+pure def lawAFirstPageOnTheLauncherDrawsNoBack(s: Shell): bool =
+  not(drawsAppBack(s, true, FirstPage)) and drawsAppBack(s, false, FirstPage) == canGoBack(s) and drawsAppBack(s, true, InnerPage) == canGoBack(s)
+```
+
 ### Returning to the prior communications app keeps Ask Alpha open at its current height
 
 The communications stage asks for this step only when its history names

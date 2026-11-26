@@ -242,6 +242,19 @@ pure def stepEngineHoldIsBalanced(before: Voice, via: str, after: Voice, out: Li
 pure def sometimesEngineHeldWhileListening(v: Voice): bool = v.phase == Listening and v.engineHeld and v.mic == On
 ```
 
+### Talk started from the bar or the pill stays there with speech on the phone; with Cloud speech or while typing it brings up the sheet
+
+As in Alpha's Sunday demo build, the bar and the pill draw Talk's small
+controls while speech runs on the phone. An open sheet or full view stays
+as it is. A hold on a communications bar brings up the sheet before Talk
+starts.
+
+```quint
+pure def talkRaisesTheSheet(typing: bool, resting: bool, network: bool): bool = typing or (resting and network)
+
+pure def lawSpeechOnThePhoneKeepsTheBar(typing: bool): bool = talkRaisesTheSheet(typing, true, false) == typing
+```
+
 ### Before audio first leaves the phone, the owner is shown what is sent and where, and decides
 
 Agreeing uses the network service; declining keeps this conversation, and
@@ -611,7 +624,7 @@ pure def alwaysPlaybackIsTheCurrentTurns(v: Voice): bool =
 ## Story: Mute, interrupt and stop
 
 > As the owner, I want to mute the microphone, cut Alpha off when it is
-> talking, and end the conversation or switch to the keyboard at any time.
+> talking, and end the conversation at any time.
 
 ### Mute turns the microphone off, and unmuting opens it again only where Alpha listens
 
@@ -694,9 +707,10 @@ pure def interrupt(v: Voice): Change =
   { state: n.state, out: List(Hush({ turn: v.turn })).concat(n.out) }
 ```
 
-### Stop and switch to keyboard shut the conversation down; the keyboard then takes over
+### Stop shuts the conversation down, and a stop asked for the keyboard then hands it over
 
-A stop is settled once the microphone and speech are confirmed off.
+A stop is settled once the microphone and speech are confirmed off. Talk's
+controls offer Stop and no keyboard switch, as in Alpha's Sunday demo build.
 
 ```quint
 pure def shutDown(failure: D::Failure, keyboard: bool, v: Voice): Change =
@@ -739,7 +753,8 @@ pure def sometimesStopUnconfirmed(v: Voice): bool = v.latched
 
 As in the existing app, a conversation that could not start or went on
 failing shows no words: voice returns to idle at once, and Talk is offered
-again.
+again. Talk asked for while speech is unavailable does nothing, and speech
+that cannot be played ends the turn the same way, with no words.
 
 ```quint
 pure def alwaysAFailureIsKeptOnlyOnceStopped(v: Voice): bool =
@@ -965,6 +980,21 @@ pure def alwaysANetworkConversationHasConsent(v: Voice): bool =
 pure def sometimesTalkingOverTheNetwork(v: Voice): bool = v.phase == Listening and v.network and v.mic == On
 
 pure def sometimesDisclosureShown(v: Voice): bool = v.disclosing
+```
+
+### A page served by Alpha's development server talks through that server's own Cloud speech relay, and a page that names none offers no Talk
+
+Talk in such a page uses the browser's microphone and the relay at the
+server's own /cloud path, whose server holds the account's key: the page
+never holds one. A page that names no relay, or any path but /cloud, offers
+no Talk.
+
+```quint
+pure val pageSpeechPath = "/cloud"
+
+pure def relaysPageSpeech(named: str): bool = named == pageSpeechPath
+
+pure def lawOnlyTheOwnRelayCarriesPageSpeech(named: str): bool = relaysPageSpeech(named) iff named == "/cloud"
 ```
 
 ### After a restart only the account and the owner's answer to the disclosure remain

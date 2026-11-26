@@ -18,12 +18,14 @@ import { Machine as Preferences } from "../gen/app__settings__preferences.effect
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import type { Shell as ShellState } from "../gen/app__shell.ts";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
 import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import photos from "../src/photos/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
+import type { Alpha } from "../src/runtime/area.tsx";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { askExample, askExampleLines, button, chatAction, closeAll, drawn, fill, hardware, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { owned } from "@repo/eliza-harness";
@@ -41,6 +43,29 @@ beforeAll(async () => {
   mine = await owned("ask");
 }, 600_000);
 afterEach(closeAll);
+
+/** Hold `check` against the drawn screen until it passes, for at most `timeout` ms. */
+const onScreen = (check: () => void | Promise<void>, timeout = 30_000) => vi.waitFor(async () => {
+  await drawn(() => undefined);
+  await check();
+}, { timeout });
+
+type Chat = ReturnType<typeof assistant.runtime>;
+
+/** Raise the conversation from Home once it is ready, until the shell shows it as `sheet` says. */
+async function raiseConversation(alpha: Alpha, chat: Chat, sheet: (state: ShellState) => boolean = (state) => state.assistant === "Sheet") {
+  await until(alpha, chat, Conversation, (state) => state.ready);
+  await press("Open conversation");
+  await until(alpha, alpha.runtime, Shell, sheet);
+}
+
+/** Send the draft as written, and wait for the finished turn's `reply` in the transcript, looking with `screen`. */
+async function sendAndHear(alpha: Alpha, chat: Chat, reply: string, screen: typeof onScreen = onScreen) {
+  await screen(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
+  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
+  await screen(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply));
+}
 
 // spec/app/ask/index.md, "Story: Talk to my agent"
 it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {
@@ -104,10 +129,7 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   const rooms = async () => roomList(await mine.agentSays<unknown>("/api/conversations")).conversations;
   const balance = async () => (await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
   const rendered = () => Array.from(document.querySelectorAll("[role=log] [data-alpha-message-text]"), (row) => row.textContent);
-  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
-    await drawn(() => undefined);
-    assertScreen();
-  }, { timeout: 20_000 });
+  const waitForScreen = (check: () => void | Promise<void>) => onScreen(check, 20_000);
   const send = async (text: string) => {
     await until(alpha, runtime, Composer, (state) => state.slot === "Open" && state.away === "Free" && !state.marked && !state.unsettled);
     await fill("Message Alpha", text);
@@ -117,9 +139,7 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   const before = await rooms();
   const beforeBalance = await balance();
 
-  await until(alpha, runtime, Conversation, (state) => state.ready);
-  await press("Open conversation");
-  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await raiseConversation(alpha, runtime);
   await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open");
 
   await drawn(() => {
@@ -223,10 +243,7 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   const mail = inbox.runtime(alpha);
   const chat = assistant.runtime(alpha);
   const inboxTile = () => document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
-  const waitForScreen = (check: () => void | Promise<void>) => vi.waitFor(async () => {
-    await drawn(() => undefined);
-    await check();
-  }, { timeout: 120_000 });
+  const waitForScreen = (check: () => void | Promise<void>) => onScreen(check, 120_000);
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   await waitForScreen(async () => {
     const state = await home.runtime(alpha).runPromise(Home.use((machine) => machine.get()));
@@ -263,10 +280,7 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
 
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] }, heard);
   await fill("Message Alpha", prompt);
-  await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
-  await press("Send");
-  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
-  await waitForScreen(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply));
+  await sendAndHear(alpha, chat, reply, waitForScreen);
   expect([(await carrying()).length, world.inbox.changes]).toEqual([1, []]);
 }, 300_000);
 
@@ -304,10 +318,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   const readViewer = () => library.runPromise(Viewer.use((machine) => machine.get()));
   const readDraft = () => chat.runPromise(Composer.use((machine) => machine.get()));
   const readShell = () => alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
-  const waitForScreen = (check: () => void | Promise<void>) => vi.waitFor(async () => {
-    await drawn(() => undefined);
-    await check();
-  }, { timeout: 30_000 });
+  const waitForScreen = onScreen;
   await until(alpha, chat, Conversation, (state) => state.ready);
   await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
   await press("Photos");
@@ -393,10 +404,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
     .toEqual([undefined, true, 2, prompt, []]);
 
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] }, prompt);
-  await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
-  await press("Send");
-  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
-  await waitForScreen(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply));
+  await sendAndHear(alpha, chat, reply);
   expect(received).toEqual([expect.objectContaining({
     text: expect.stringContaining(prompt),
     images: [
@@ -420,14 +428,9 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
     cloud: forward(mine.cloud.local, mine.key.token),
   }), only("home", "assistant", "view:Camera", "view:Photos", "notice"));
   const runtime = assistant.runtime(alpha);
-  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
-    await drawn(() => undefined);
-    assertScreen();
-  }, { timeout: 30_000 });
+  const waitForScreen = onScreen;
 
-  await until(alpha, runtime, Conversation, (state) => state.ready);
-  await press("Open conversation");
-  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await raiseConversation(alpha, runtime);
   await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
   const prompt = "Take a photo with the back camera.";
   await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation: { type: "camera_capture_photo", lens: "back" } } }, prompt);
@@ -494,10 +497,6 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
     cloud: forward(mine.cloud.local, mine.key.token),
   }), only("home", "assistant", "view:Messages", "notice"));
   const runtime = assistant.runtime(alpha);
-  const onScreen = (check: () => void) => vi.waitFor(async () => {
-    await drawn(() => undefined);
-    check();
-  }, { timeout: 30_000 });
 
   await until(alpha, alpha.runtime, Shell, (state) => state.image);
   await until(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
@@ -576,10 +575,7 @@ it('Filter Files from Home and open the named file with the resident agent (spec
     cloud: forward(mine.cloud.local, mine.key.token),
   }), only("home", "assistant", "view:Files", "notice"));
   const runtime = assistant.runtime(alpha);
-  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
-    await drawn(() => undefined);
-    assertScreen();
-  }, { timeout: 30_000 });
+  const waitForScreen = onScreen;
   const receipts = () => [...(world.telephony.enrollment?.journal.values() ?? [])].filter((entry) => entry.acknowledged);
   const send = async (prompt: string, operation: DeviceOperation) => {
     await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
@@ -591,9 +587,7 @@ it('Filter Files from Home and open the named file with the resident agent (spec
   };
 
   await until(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded" && !state.askFirst);
-  await until(alpha, runtime, Conversation, (state) => state.ready);
-  await press("Open conversation");
-  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0 && state.assistant === "Sheet");
+  await raiseConversation(alpha, runtime, (state) => state.trail.length === 0 && state.assistant === "Sheet");
 
   const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
   await send("Show PDFs in Download", filter);

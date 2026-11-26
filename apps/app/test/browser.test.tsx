@@ -145,13 +145,23 @@ function layOutNativePage(rectangle: DOMRect): void {
   onTestFinished(() => laidOut.mockRestore());
 }
 
-/** The time range history clears over, picked as a person does: React hears the change event. */
-const historyRange = (range: string) => drawn(() => {
-  const select = document.querySelector<HTMLSelectElement>("#alpha-history-range");
-  if (!select) throw new Error("no time range for clearing history");
-  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, range);
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-});
+/** The time range history clears over, picked from the Select's list by the keyboard, as a person can. */
+const historyRange = async (label: string) => {
+  const trigger = document.querySelector<HTMLButtonElement>("#alpha-history-range");
+  if (!trigger) throw new Error("no time range for clearing history");
+  await drawn(() => {
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  });
+  await vi.waitFor(() => expect(document.querySelector("[role=listbox]")).not.toBeNull());
+  const option = [...document.querySelectorAll<HTMLElement>("[role=option]")].find((one) => one.textContent === label);
+  if (!option) throw new Error(`no time range ${label}`);
+  await drawn(() => {
+    option.focus();
+    option.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  });
+  await vi.waitFor(() => expect([document.querySelector("[role=listbox]"), trigger.textContent]).toEqual([null, label]));
+};
 
 /** The Clear history button under the time range, not the trash button that opens it. */
 const clearHistoryOver = () => drawn(() => {
@@ -171,6 +181,8 @@ describe("The Browser on a phone", () => {
     const world = { ...scene(), phone: true, image: true };
     const { alpha, runtime } = await onBrowser(world);
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    // spec/app/browser/address.md, "A tab with no page says \"Search or address\" in its bar, a private tab as a normal one, and only the private mark tells them apart"
+    expect(button(/^Edit address/)?.textContent).toBe("Edit addressSearch or address");
     await press("Search or type address");
     await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
     const suggestions = () => document.querySelector("[aria-label='Address suggestions']");
@@ -188,6 +200,10 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
     await libraryTab("History");
     expect([...document.querySelectorAll("button")].some((row) => row.textContent?.includes("news.example/on-device-agents"))).toBe(true);
+    // spec/app/browser/library.md, "The Library lists every bookmark and every page of history, one plain list each, with no search and no day headings"
+    const listed = () => document.querySelector("[role=tabpanel][data-state=active]");
+    expect([listed()?.querySelectorAll("input, [role=search], h2, h3").length, listed()?.querySelectorAll("li").length])
+      .toEqual([0, runtime.runSync(Library.use((machine) => machine.get())).history]);
     await libraryTab("Bookmarks");
     const bookmark = [...document.querySelectorAll("button")].find((row) => row.textContent?.includes("Keys in the chip"));
     if (!bookmark) throw new Error("saved bookmark is missing");
@@ -226,7 +242,7 @@ describe("The Browser on a phone", () => {
 
     // spec/app/browser/library.md, "Clearing history asks first, and can be cancelled"
     await press("Clear history");
-    await historyRange("all");
+    await historyRange("All time");
     await clearHistoryOver();
     await until(alpha, runtime, Library, (s) => s.confirming);
     await hardware("back");
@@ -268,7 +284,7 @@ describe("The Browser on a phone", () => {
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Remove the username or password from this address.");
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual(history);
     await press("Cancel editing");
-    // spec/app/browser/address.md, "Only the latest load of the page commits it or fails it"; spec/app/browser/address.md, "The secure mark shows only on a page that committed over HTTPS"
+    // spec/app/browser/address.md, "Only the latest load of the page commits it or fails it"; spec/app/browser/address.md, "The secure mark shows only on a page that committed over HTTPS"; spec/app/browser/address.md, "The secure mark is drawn only in the phone's own Browser, beside a page that committed over HTTPS"
     const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
@@ -522,6 +538,12 @@ describe("The Browser on a phone", () => {
     await press("New private tab");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 2 && s.privates.length === 1 && s.layer === "Address");
     expect(document.querySelector("[aria-label='Address suggestions']")?.textContent).not.toContain("/on-device-agents");
+    // spec/app/browser/address.md, "A tab with no page says \"Search or address\" in its bar, a private tab as a normal one, and only the private mark tells them apart"
+    await press("Cancel editing");
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+    expect([button(/^Edit address/)?.textContent, Boolean(button(/^Edit address/)?.querySelector("[aria-label='Private tab']"))]).toEqual(["Edit addressSearch or address", true]);
+    await press(/^Edit address/);
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Address");
     await drawn(async () => {
       await fill("Address", "enclave.example/keys-in-hardware");
       document.querySelector<HTMLFormElement>("form[role=search]")?.requestSubmit();

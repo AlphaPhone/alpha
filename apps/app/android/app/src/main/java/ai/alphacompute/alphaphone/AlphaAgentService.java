@@ -30,6 +30,10 @@ public final class AlphaAgentService extends AgentService {
   @Override protected void configureLaunch(Map<String, String> variables) {
     synchronized (speechLock) {
       if (retiring) return;
+    }
+    AlphaLegacyAgentArchive.prepareLaunch(this, variables);
+    synchronized (speechLock) {
+      if (retiring) return;
       if (speech != null) {
         variables.put(SPEECH_SOCKET, speech.name());
         return;

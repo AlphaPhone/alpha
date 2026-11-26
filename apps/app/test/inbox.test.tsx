@@ -896,8 +896,16 @@ it("says Open to retry on Home's mail card only after a failed read, and recover
 
   // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
   world.inbox.offline = false;
-  await seen(false);
-  await seen(true);
+  const pageReply = Promise.withResolvers<void>();
+  world.inbox.pageReply = pageReply.promise;
+  try {
+    await seen(false);
+    await seen(true);
+    await afterDraw(() => expect(status()).toBe("Updating email…"));
+  } finally {
+    pageReply.resolve();
+    delete world.inbox.pageReply;
+  }
   await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.failure === "Fine");
   await afterDraw(() => expect(status()).toMatch(/^you@gmail\.example( · Updated .+)?$/u));
 });

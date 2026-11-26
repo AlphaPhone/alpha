@@ -1,4 +1,4 @@
-// spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/index.md, "Story: Open a workflow"
+// spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/index.md, "Story: Open a workflow"; spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it"
 import { Effect } from "effect";
 import { Button, EmptyState, ListRow, Screen, Spinner, WorkflowChoice, WorkflowRow as WorkflowRowView, cn, focusRing } from "@repo/ui";
 import { Bell, Calendar, ChevronDown, ChevronRight, Clock as ClockIcon, Info, Phone, Plus, Repeat, Sparkles, Sun, Workflow } from "lucide-react";
@@ -132,9 +132,10 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   const openDigests: Event = { type: "openDigests" };
   const filter = { type: "openFilters" } as const;
   const add = { type: "openAdd" } as const;
+  const listing = place?.tag === "ListingRows" || place === undefined;
   const screen = (
-    <Screen title={title} inert={clock.state?.open === true} leading={<AppBack alpha={alpha} />}
-      className={place?.tag === "ListingRows" || place === undefined ? launcherHeader.list : selected?.kind === "Routine" ? launcherHeader.routine : launcherHeader.page}
+    <Screen title={title} inert={clock.state?.open === true} leading={<AppBack alpha={alpha} firstPage={listing} />}
+      className={listing ? launcherHeader.list : selected?.kind === "Routine" ? launcherHeader.routine : launcherHeader.page}
       actions={<>
       {place?.tag === "ListingRows" && <Button variant="ghost" size="icon" aria-label="Add to Workflows" className="in-data-[alpha-launcher]:size-11! in-data-[alpha-launcher]:min-w-11!" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
       {selected?.kind === "Prompt" && state && <AutomationPower runtime={runtime} row={selected} owner={state.owner} />}

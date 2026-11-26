@@ -7,7 +7,7 @@ import { canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__brow
 import type { Browser as State } from "../../gen/app__browser.ts";
 import { useMachine } from "../../gen/app__browser.react.ts";
 import type { Machine } from "../../gen/app__browser.effect.vibe";
-import { verdict } from "../../gen/app__browser__address.ts";
+import { addressHint, showsTheLock, verdict } from "../../gen/app__browser__address.ts";
 import { useMachine as usePage } from "../../gen/app__browser__address.react.ts";
 import { Machine as LibraryMachine } from "../../gen/app__browser__library.effect.vibe";
 import { useMachine as useLibrary } from "../../gen/app__browser__library.react.ts";
@@ -198,7 +198,8 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             leading={leading}
             host={host}
             path={path}
-            secure={native && state.secure}
+            hint={addressHint(state)}
+            secure={showsTheLock(state, native)}
             private={privateTab}
             tabs={tabs.open.length}
             onEdit={cover("Address") && edit}
