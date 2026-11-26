@@ -303,7 +303,7 @@ describe("Calendar without a connected account", () => {
       const { owner } = yield* Effect.flatMap(Editor, (editor) => editor.get());
       const store = yield* KeyValueStore.KeyValueStore;
       const key = `alpha.calendar.form.${owner}`;
-      const { calendar: _calendar, ...draft } = JSON.parse((yield* store.get(key)) ?? "{}");
+      const { calendar: _calendar, ...draft } = JSON.parse((yield* store.get(key)) ?? "{}") as Record<string, unknown>;
       yield* store.set(key, JSON.stringify(draft));
     }));
 

@@ -89,6 +89,18 @@ describe("Settings", () => {
     await until(alpha, machines, Pages.Machine, (s) => s.page === "General");
   });
 
+  it("A page opened from a row takes focus on its Back, off the row left under it (spec/app/shell/focus.md, \"A new screen is given focus within twelve frames, unless the owner has already moved it there\")", async () => {
+    const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
+    await drawn(() => button("Privacy")?.focus());
+    await press("Privacy");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Privacy");
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Back to Settings")));
+    await drawn(() => button("Permissions")?.focus());
+    await press("Permissions");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Permissions");
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Back to Privacy")));
+  });
+
   it("Recovers an unavailable browser account only after Try again", async () => {
     const world = { ...scene(), signedIn: false };
     const { alpha } = await settingsOpen(world);
