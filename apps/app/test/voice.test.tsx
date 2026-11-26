@@ -1208,17 +1208,10 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(shellState()).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Bar" });
   });
 
-  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
-  it.each([
-    { answer: "Send this text.", by: "voice", again: true, outcome: "send" },
-    { answer: "I think I want to send it.", by: "voice", again: true, outcome: "shown" },
-    { answer: "Yep, go ahead and send the message to +1 (415) 555-0100.", by: "voice", again: true, outcome: "shown" },
-    { answer: "No, don't send it.", by: "voice", again: false, outcome: "withdrawn" },
-    { answer: "Send this text", by: "touch", again: false, outcome: "send" },
-    { answer: "Decline Keep things as they are.", by: "touch", again: false, outcome: "decline" },
-  ] as const)("decides the displayed text review only by touch, never by matching what I say: $by $answer", async ({ answer, by, again, outcome }) => {
+  /** Talk listening over a Messages chat with SIM 1 chosen, and the agent's text proposal from `sim` waiting to be named. */
+  async function talkOnMessages(sim = 1) {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
-    const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: 1 } as const;
+    const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: sim } as const;
     const review = textReview(world.notes.owner, "spoken-reviewed-sms", operation);
     world.telephony.textReview = review;
     world.ask.metadata = [];
@@ -1230,7 +1223,6 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
     const room = [...world.ask.kept.values()].find((one) => one.messages.some((line) => line.text === "Start this chat"));
     if (room === undefined) throw new Error("The visible chat was not saved");
-
     await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Messages" }))));
     await drawnUntil(alpha, alpha.runtime, Messages, (state) => state.front && state.sms.grant === "Granted" && state.list.status === "Loaded");
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
@@ -1239,7 +1231,41 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    return { world, operation, review, alpha, area, room };
+  }
 
+  const proposeText = (review: ReturnType<typeof textReview>) => () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+    proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+  } }];
+
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+  it.each([
+    { utterance: "Could you let +1 415 555 0100 know to meet upstairs and bring the keys?", sim: 1, shown: true },
+    { utterance: "Text +14155550100 saying Meet upstairs. Bring the keys.", sim: 2, shown: false },
+  ])("takes a text review from what the agent proposed, never from my words, and says nothing of its own when it cannot show one: $utterance", async ({ utterance, sim, shown }) => {
+    const { world, operation, review, alpha, area } = await talkOnMessages(sim);
+    world.ask.nextReplyChunks = ["Review the text on your phone."];
+    world.ask.nextActions = proposeText(review);
+    const from = world.voice.spoken.length;
+    await drawn(() => speakUtterance(world, utterance));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending === shown && state.phase === "Listening" && state.mic === "On");
+    expect(world.ask.said.at(-1)).toBe(utterance);
+    expect(button("Send this text") !== undefined).toBe(shown);
+    if (shown) expect(document.body.textContent).toContain(operation.body);
+    expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual([]);
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
+  });
+
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
+  it.each([
+    { answer: "Send this text.", by: "voice", again: true, outcome: "send" },
+    { answer: "I think I want to send it.", by: "voice", again: true, outcome: "shown" },
+    { answer: "Yep, go ahead and send the message to +1 (415) 555-0100.", by: "voice", again: true, outcome: "shown" },
+    { answer: "No, don't send it.", by: "voice", again: false, outcome: "withdrawn" },
+    { answer: "Send this text", by: "touch", again: false, outcome: "send" },
+    { answer: "Decline Keep things as they are.", by: "touch", again: false, outcome: "decline" },
+  ] as const)("decides the displayed text review only by touch, never by matching what I say: $by $answer", async ({ answer, by, again, outcome }) => {
+    const { world, operation, review, alpha, area, room } = await talkOnMessages();
     world.ask.nextReplyChunks = ["Review the text on your phone."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
       proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
@@ -1248,7 +1274,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => speakUtterance(world, text));
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
     expect(room.messages.some((line) => line.role === "user" && line.text === text)).toBe(true);
-    expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
+    expect(world.ask.metadata?.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
     expect(button("Send this text")).toBeDefined();
     expect(document.body.textContent).toContain(operation.body);
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
