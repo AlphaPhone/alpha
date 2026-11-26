@@ -126,7 +126,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
   const shown = browse(state);
   const label = (handle: number) => labelOf(runtime, handle);
-  if (shown === "Closed") return <section aria-label="Files" aria-busy className="relative flex min-h-0 flex-1 flex-col">{header("Files")}</section>;
+  if (shown === "Closed") return <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">{header("Files")}</section>;
   if (shown === "Unsupported") return <>{header("Files")}<StorageStatus title="Storage unavailable" />{scanner}</>;
   if (shown === "NotAsked" || shown === "NoAccess") {
     const allow = owner({ type: "allow" }) ? () => tell({ type: "allow" }) : undefined;

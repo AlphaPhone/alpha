@@ -508,7 +508,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
         onRetry={() => void runtime.runPromise(enter())}
       />
       {!selecting && hasDocuments && transfer.can(importText, "Owner") && <Button size="sm" aria-label="Import text note" className="mb-5 ml-4 h-12 self-start px-3.5 text-sm font-normal" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><Download /> Import</Button>}
-      <ConfirmDialog open={state.selection === "Reviewing"} title={selected === 1 ? "Delete this note?" : `Delete ${selected} notes?`}
+      <ConfirmDialog open={over === undefined && state.selection === "Reviewing"} title={selected === 1 ? "Delete this note?" : `Delete ${selected} notes?`}
         destructive confirmLabel="Delete" onCancel={closeSelection} onConfirm={() => void runtime.runPromise(deleteSelection())}>
         The selected {selected === 1 ? "note will" : "notes will"} move to Recently deleted.
       </ConfirmDialog>

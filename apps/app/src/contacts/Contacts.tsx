@@ -73,7 +73,8 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     void send({ type: "openContact", contact: id });
   };
   const canBack = shell.can({ type: "goBack" });
-  const phoneTabs = !state.opened && shell.state?.trail.at(-2) === "Phone";
+  const fromPhone = shell.state?.trail.at(-2) === "Phone";
+  const phoneTabs = !state.opened && fromPhone;
   const back = canBack ? () => void alpha.back() : undefined;
   const select = (tab: string) => {
     if (tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") return;
@@ -164,11 +165,11 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
         filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />}
     </section>
   );
-  if (!phoneTabs) return content;
+  if (!fromPhone) return content;
   if (editing) return <Layers><Over><Editor runtime={runtime} /></Over></Layers>;
   return (
     <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
-      {header}
+      {phoneTabs && header}
       <TabsContent value="Contacts" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</TabsContent>
     </Tabs>
   );

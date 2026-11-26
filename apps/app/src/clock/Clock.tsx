@@ -1,6 +1,7 @@
 // spec/app/clock/index.md, "Story: Move between Clock tabs and sheets"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
+import { initial } from "../../gen/app__clock.ts";
 import type { Machine as ClockViewMachine, Tab } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
@@ -32,7 +33,7 @@ const TABS: ReadonlyArray<{ readonly value: Tab; readonly label: string }> = [
 export function Clock({ runtime }: ClockProps) {
   const view = useClockView(runtime);
   const state = view.state;
-  if (!state) return <div aria-busy className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28"><Tabs><ClockTabs /></Tabs></div>;
+  if (!state) return <div aria-busy className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28"><Tabs value={initial.tab}><ClockTabs /></Tabs></div>;
 
   const closeSheet = () => void view.send({ type: "closeSheet" });
 

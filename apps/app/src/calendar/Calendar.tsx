@@ -256,9 +256,9 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const reminders = datedReminders(local);
   const openedReminder = reminders.find((row) => row.id === s?.reminder);
   const dayReminders = reminders.filter((row) => onDay(row, s?.anchor ?? 0)).length;
-  if (!s) return <div aria-busy className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
+  if (!s) return <section aria-label="Calendar" aria-busy className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
     <CalendarHeader title="" className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null} />
-  </div>;
+  </section>;
   const send = (event: View.Event) => () => void view.send(event);
   const visible = shown.visible(s.hidden, allows(s.access), s.connected).filter((row) => !deletedNow(deleting, row));
   const schedule = [...visible, ...reminders];
