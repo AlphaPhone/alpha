@@ -306,6 +306,48 @@ describe("Notes", () => {
     } finally { copy.mockRestore(); }
   });
 
+  it("Reviews the saved editor note before handing its text off (spec/app/notes/actions.md, \"Share reviews the saved note before an explicit destination receives its text\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    const menu = () => document.querySelector('[role=menu][aria-label="Note actions"]');
+    const options = () => [...menu()?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []];
+    const share = async (pinned: boolean) => {
+      await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      await rendered(() => expect(options().map((item) => item.textContent?.trim())).toEqual(["Share", pinned ? "Unpin" : "Pin", "Delete"]));
+      await drawn(() => options()[0]?.click());
+      await control("Close share");
+    };
+    try {
+      await press("Open Enclave launch");
+      await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
+      await share(true);
+      await press("Close share");
+      await rendered(() => expect(button("Close share")).toBeUndefined());
+      expect(copy).not.toHaveBeenCalled();
+      await rendered(() => expect(options()[0]?.textContent?.trim()).toBe("Share"));
+      await drawn(() => options()[0]?.click());
+      await pressOnTop("Copy text");
+      await rendered(() => expect(copy).toHaveBeenCalledWith("Enclave launch\n\nConfirm attestation flow\nShip the keys-on-device doc\nDry run Friday"));
+      await rendered(() => {
+        expect(document.body.textContent).toContain("Note text copied.");
+        expect(options().map((item) => item.textContent?.trim())).toEqual(["Share", "Unpin", "Delete"]);
+      });
+      await hardware("back");
+      await rendered(() => expect(menu()).toBeNull());
+      await press("Done");
+      await until(alpha, runtime, Editor, (state) => !state.showing);
+      await press("Open Groceries");
+      await until(alpha, runtime, Editor, (state) => state.showing && state.kind === "Checklist" && state.draft.sync === "Kept");
+      await share(false);
+      world.notes.revision++;
+      await pressOnTop("Copy text");
+      await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
+      expect(copy).toHaveBeenCalledTimes(1);
+    } finally { copy.mockRestore(); }
+  });
+
   it("Selects notes and only moves the reviewed notes after confirmation (spec/app/notes/index.md, \"Story: Select and delete notes\")", async () => {
     const world = scene();
     world.now = Date.now();

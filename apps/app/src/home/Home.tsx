@@ -6,16 +6,19 @@ import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
 import { useMachine as useDrawer } from "../../gen/app__home__drawer.react.ts";
 import { type Tile, badged, ready, saving } from "../../gen/app__home__tiles.ts";
-import type { View } from "../../gen/app__shell.ts";
+import { adjacentAskSheet, type View } from "../../gen/app__shell.ts";
+import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
+import { pageInert } from "../../gen/app__shell__layers.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
+import { coarsePointer, landscapeHomeInput, watchPrimaryPointer } from "../shell/canvas.vibe";
 import { feel } from "../shell/haptics.vibe";
-import { back } from "../shell/shell.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
-import { chooseApp, told } from "./home.vibe";
+import { type AppsInput, actInApps, chooseApp, closeApps, openApps, openHomeFavorite, openOwnTile, told } from "./home.vibe";
 import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
@@ -52,6 +55,9 @@ function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>, said?: s
 export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const home = useHome(runtime);
   const shell = useShell(alpha.runtime);
+  const canvas = useCanvas(alpha.runtime).state;
+  const layers = useLayers(alpha.runtime).state;
+  const coarse = useSyncExternalStore(watchPrimaryPointer, coarsePointer, () => false);
   const drawer = useDrawer(runtime);
   const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
   const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
@@ -74,26 +80,34 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const notice = inline && inline.place === Home.noticeAt(h, s) ? inline.notice : undefined;
   const beginEditing = { type: "beginEditing", shell: s } as const;
   const mayEdit = !saving(h.tiles);
-  const openDrawer = { type: "openDrawer", phone: Home.onPhone(h) } as const;
-  const closeDrawer = { type: "closeDrawer" } as const;
+  const landscapePhone = landscapeHomeInput(canvas, coarse);
+  const alongside = Home.besideHomeSheet(s, landscapePhone);
   const showingApps = s.drawer && Home.onPhone(h);
+  const paired = showingApps && adjacentAskSheet(s, landscapePhone);
+  const drawerActive = showingApps && layers !== undefined && !pageInert(layers) && s.textAsk.tag === "NoTextAsk"
+    && (s.assistant === "Bar" || paired);
   const catalogApps = showingApps ? h.installed.apps.flatMap((id) => {
     const app = known.apps.get(id);
     return app && app.packageName !== "ai.alphacompute.alphaphone" ? [drawerApp(id, app)] : [];
   }) : [];
-  const openInstalled = (app: string) => offered({ type: "openApp", app, now: untimed })?.();
   const opening = h.handoff.ask.tag !== "Shade" && h.handoff.attempt.outcome === "Sent" ? h.handoff.ask.app : undefined;
   const selected = drawer.state;
   const menuApp = selected?.menu;
-  const menu: AppsDrawerProps["menu"] = selected && menuApp && catalogApps.some(({ id }) => id === menuApp) ? {
+  const act = (event: AppsInput) => {
+    if (!drawerActive) return;
+    void runtime.runPromise(actInApps(s.route, paired, event)).then((accepted) => {
+      if (accepted && event.type === "openMenu") void alpha.runtime.runPromise(feel("LongPress"));
+    });
+  };
+  const menu: AppsDrawerProps["menu"] = drawerActive && selected && menuApp && catalogApps.some(({ id }) => id === menuApp) ? {
     app: menuApp,
     actions: {
       onHome: h.tiles.favourites.some((tile) => tile.tag === "Installed" && tile.app === menuApp),
       add: home.can({ type: "pinInstalled", app: menuApp, shell: s, drawer: selected }, owner)
-        ? () => { void runtime.runPromise(chooseApp(menuApp, "Pin")); } : undefined,
+        ? () => { void runtime.runPromise(chooseApp(menuApp, "Pin", s.route, paired)); } : undefined,
       info: home.can({ type: "showAppInfo", app: menuApp, shell: s, drawer: selected, now: untimed }, owner)
-        ? () => { void runtime.runPromise(chooseApp(menuApp, "Info")); } : undefined,
-      close: () => { if (drawer.can({ type: "closeMenu" })) void drawer.send({ type: "closeMenu" }); },
+        ? () => { void runtime.runPromise(chooseApp(menuApp, "Info", s.route, paired)); } : undefined,
+      close: () => { if (drawer.can({ type: "closeMenu" })) act({ type: "closeMenu" }); },
     },
   } : undefined;
   const deck = (
@@ -101,16 +115,19 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
       appCards={Home.showsCards(h) && alpha.slot("home/cards")}
-      tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
+      tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => ({
+        ...tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing),
+        inert: tile.tag === "Installed" && !h.editing && !Home.favoriteAt(h, tile.app, s, alongside),
+      })) : undefined}
+      cardsInert={alongside}
+      drawerInert={s.assistant !== "Bar" && !alongside}
       editing={h.editing}
       onOpenTile={(id) => {
         const tile = tileOf(id);
-        const event: Home.Event = tile.tag === "Own" ? { type: "openTile", view: tile.view, shell: s } : { type: "openApp", app: tile.app, now: untimed };
-        if (can(event)) send(event);
+        if (tile.tag === "Own") void runtime.runPromise(openOwnTile(tile.view, s.route, alongside));
+        else void runtime.runPromise(openHomeFavorite(tile.app, s.route, alongside));
       }}
-      onOpenDrawer={Home.offersDrawer(h) ? () => {
-        if (shell.can(openDrawer)) void shell.send(openDrawer);
-      } : undefined}
+      onOpenDrawer={Home.offersDrawer(h) ? () => { void runtime.runPromise(openApps(s.route, alongside)); } : undefined}
       onBeginEditing={can(beginEditing) ? () => {
         send(beginEditing);
         void alpha.runtime.runPromise(feel("LongPress"));
@@ -136,22 +153,18 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       {showingApps && (
         <AppsDrawer apps={catalogApps} query={drawer.state?.query ?? ""}
           catalog={h.installed.read.status === "Failed" ? "unavailable" : h.installed.read.status === "Loaded" ? "ready" : "reading"}
-          opening={opening} notice={notice} hold={hold} menu={menu}
+          opening={opening} notice={notice} hold={hold} menu={menu} modal={!paired} inactive={!drawerActive}
           onSearch={(query) => {
             const event = { type: "search", query, open: showingApps } as const;
-            if (drawer.can(event)) void drawer.send(event);
+            if (drawer.can(event)) act(event);
           }}
-          onClose={() => { if (shell.can(closeDrawer)) void shell.send(closeDrawer); }}
-          onBack={() => { void alpha.runtime.runPromise(back()); }}
-          onOpen={openInstalled}
-          onOpenMenu={(app) => {
+          onClose={() => { if (drawerActive) void runtime.runPromise(closeApps(s.route, paired)); }}
+          onOpen={(app) => act({ type: "openApp", app, now: untimed })}
+          onOpenMenu={drawerActive ? (app) => {
             const event = { type: "openMenu", app, open: showingApps, listed: catalogApps.map(({ id }) => id) } as const;
-            if (drawer.can(event)) {
-              void drawer.send(event);
-              void alpha.runtime.runPromise(feel("LongPress"));
-            }
-          }}
-          onRetry={offered({ type: "tryAgain", shell: s })} />
+            if (drawer.can(event)) act(event);
+          } : undefined}
+          onRetry={drawerActive && can({ type: "tryAgain", shell: s }) ? () => act({ type: "tryAgain", shell: s }) : undefined} />
       )}
     </>
   );

@@ -1,9 +1,9 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
-import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Sparkles, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -101,7 +101,7 @@ export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
 function Threads({ runtime, messages: { state, can, send }, onBack, handoff, discardHandoff }: MessagesProps & HandoffProps & { messages: MessagesUI }) {
   const [searching, setSearching] = useState(false);
   const [draftOpening, setDraftOpening] = useState<"Opening" | "Failed">();
-  const opening = useRef(false);
+  const openingRef = useRef(false);
   if (!state) return null;
   const { threads, sought, names } = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
@@ -127,15 +127,15 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
   const handoffOpening = handoff?.phase === "Opening";
   const handoffFailed = handoff?.phase === "OpenFailed";
   const openNew = async () => {
-    if (opening.current || handoffOpening || !can(newMessage)) return;
+    if (openingRef.current || handoffOpening || !can(newMessage)) return;
     if (handoff?.phase === "OpenFailed") {
       await runtime.runPromise(retryMessageHandoff(handoff)).catch(() => false);
       return;
     }
-    opening.current = true;
+    openingRef.current = true;
     setDraftOpening("Opening");
     const opened = await runtime.runPromise(startNewMessage()).catch(() => false);
-    opening.current = false;
+    openingRef.current = false;
     setDraftOpening(opened ? undefined : "Failed");
   };
   return (
@@ -257,7 +257,7 @@ interface BubbleActions {
 // spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
 function BubbleMenu({ actions, close }: { actions: BubbleActions; close: () => void }) {
   const [copy, setCopy] = useState<Parameters<CopyReport>[0] | "pending">();
-  const newest = useRef(0);
+  const copyAttemptRef = useRef(0);
   return (
     <div data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={(event) => {
       if (event.key !== "Escape") return;
@@ -265,9 +265,9 @@ function BubbleMenu({ actions, close }: { actions: BubbleActions; close: () => v
       close();
     }}>
       {actions.copy && <button type="button" role="menuitem" autoFocus className={`${actionItem} min-w-25`} disabled={copy === "pending"} onClick={() => {
-        const attempt = ++newest.current;
+        const attempt = ++copyAttemptRef.current;
         setCopy("pending");
-        actions.copy?.((outcome) => { if (attempt === newest.current) setCopy(outcome); });
+        actions.copy?.((outcome) => { if (attempt === copyAttemptRef.current) setCopy(outcome); });
       }}>{copy === "copied" ? "Copied!" : <><Copy aria-hidden className="size-4" />Copy</>}</button>}
       {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
       <span role="status" className={copy === "failed" ? "basis-full px-2 pb-1 text-caption text-destructive" : "sr-only"}>{copy === "copied" ? "Copied." : copy === "failed" ? "Copy failed" : ""}</span>
@@ -279,7 +279,7 @@ function BubbleMenu({ actions, close }: { actions: BubbleActions; close: () => v
 const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLink }: { row: MessageRow; now: number; choose: (id: string, toggle?: boolean) => void; actions?: BubbleActions | undefined; hold: (held: () => void) => () => void; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const triggerRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<{ id: number; x: number; y: number; cancel: () => void } | undefined>(undefined);
-  const skipTap = useRef(false);
+  const skipTapRef = useRef(false);
   const release = useCallback(() => {
     pointerRef.current?.cancel();
     pointerRef.current = undefined;
@@ -297,19 +297,19 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
   const begin = (event: PointerEvent) => {
     if (!event.isPrimary || event.button !== 0) return;
     release();
-    skipTap.current = false;
+    skipTapRef.current = false;
     if (!selectable(event)) return;
     const { pointerId: id, clientX: x, clientY: y } = event;
     const cancel = hold(() => {
       if (pointerRef.current?.id !== id || document.getSelection()?.isCollapsed === false) return;
-      skipTap.current = true;
+      skipTapRef.current = true;
       choose(row.id);
     });
     pointerRef.current = { id, x, y, cancel };
   };
   const cancel = (event: PointerEvent) => {
     if (pointerRef.current?.id !== event.pointerId) return;
-    skipTap.current = true;
+    skipTapRef.current = true;
     release();
   };
   const moved = (event: PointerEvent) => {
@@ -322,15 +322,15 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
       <div ref={trigger} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
         className={`flex max-w-full flex-col gap-0.5 rounded-tile focus-visible:outline-2 focus-visible:outline-ring ${outgoing ? "items-end" : "items-start"}`}
         onClick={(event) => {
-          const suppressed = event.detail !== 0 && skipTap.current;
-          skipTap.current = false;
+          const suppressed = event.detail !== 0 && skipTapRef.current;
+          skipTapRef.current = false;
           if (!suppressed && selectable(event)) choose(row.id, true);
         }}
         onContextMenu={(event) => {
           if (!selectable(event)) return;
           event.preventDefault();
           release();
-          skipTap.current = true;
+          skipTapRef.current = true;
           choose(row.id);
         }}
         onPointerDown={begin}
@@ -533,16 +533,10 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     </div>
   ) : (
     <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-center gap-1">
-      {(canPicture || canSuggest) && <Menu>
-        <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message attachments"><Plus /></Button></MenuTrigger>
-        <MenuContent aria-label="Message actions" side="top" sideOffset={8}>
-          {canPicture && <>
-            <MenuItem onSelect={() => cameraInputRef.current?.click()}><Camera />Camera</MenuItem>
-            <MenuItem onSelect={() => picturesInputRef.current?.click()}><ImagePlus />Add media</MenuItem>
-          </>}
-          {canSuggest && <MenuItem onSelect={() => void send({ type: "suggest" })}><Sparkles />Let Alpha suggest a reply</MenuItem>}
-        </MenuContent>
-      </Menu>}
+      <MessageAttachmentsMenu media={canPicture ? {
+        camera: () => cameraInputRef.current?.click(),
+        files: () => picturesInputRef.current?.click(),
+      } : undefined} onSuggest={canSuggest ? () => void send({ type: "suggest" }) : undefined} />
       <Textarea className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 leading-field shadow-none focus-visible:outline-none" aria-label={`Text ${firstName(title)}`} placeholder={`Text ${firstName(title)}`} rows={1} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
         ref={(element) => {
           fieldRef.current = element;
@@ -577,7 +571,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           </div>
         </div>
       )}
-      <div ref={simControls} data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-y-auto px-3 text-caption text-muted-foreground empty:hidden">
+      <div ref={simControls} data-alpha-messages-accessories className={cn("flex max-h-[34%] shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-y-auto px-3 text-caption text-muted-foreground empty:hidden", pictures.length > 0 && "pb-1.5")}>
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
             {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
@@ -592,10 +586,10 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {here && (outgoing.denied || outgoing.op.outcome === "Refused" && outgoing.failed > 0) && <CircleAlert className="mx-2 size-4 text-destructive" role="img" aria-label="Message failed" />}
         {here && sentAll(outgoing) && <p role="status" data-alpha-messages-notice className={notice}>{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
         {pictures.map((picture, at) => (
-          <button type="button" key={picture.name} aria-label={`Remove ${picture.name}`} disabled={!can({ type: "detach" })} className={`${accessoryChip} gap-1.5 bg-secondary px-3 font-normal text-foreground`} onClick={() => {
+          <MessagePictureChip key={picture.name} name={picture.name} disabled={!can({ type: "detach" })} onRemove={() => {
             if (!can({ type: "detach" })) return;
             void runtime.runPromise(removeMessagePicture(thread, at));
-          }}>{picture.name}<X aria-hidden className="size-3.5" /></button>
+          }} />
         ))}
         {(subscriptions.length > 1 || selectedSim !== undefined && subscriptions.length === 1) && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="SIM">
@@ -642,24 +636,24 @@ function Picker({ runtime, messages: { state, can, send }, handoff, discardHando
   const [typed, setTyped] = useState("");
   const [browsing, setBrowsing] = useState(false);
   const [textSave, setTextSave] = useState<NewTextSave>();
-  const latestTextSave = useRef<NewTextSave | undefined>(undefined);
+  const latestTextSaveRef = useRef<NewTextSave | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const [composingHeight, setComposingHeight] = useState<number>();
   const prefill = state?.pane === "New" && handoff !== undefined && "visit" in handoff && handoff.visit === state.newDraft.visit ? handoff : undefined;
-  const textIsSaved = useCallback(() => latestTextSave.current === undefined && prefill === undefined, [prefill]);
+  const textIsSaved = useCallback(() => latestTextSaveRef.current === undefined && prefill === undefined, [prefill]);
   const showSave = (next: NewTextSave | undefined) => {
-    latestTextSave.current = next;
+    latestTextSaveRef.current = next;
     setTextSave(next);
   };
   // spec/app/messages/index.md, "The owner can write before choosing To, then adjust To without moving or losing the message"
   const flushText = async (visit: number) => {
-    let saving = latestTextSave.current;
+    let saving = latestTextSaveRef.current;
     while (saving?.status === "Saving") {
       const { body, to } = saving.edit;
       const edit = { ...(body === undefined ? {} : { body }), ...(to === undefined ? {} : { recipients: to.value }) };
       const saved = await runtime.runPromise(editNewMessage(visit, edit, to?.closePicker ?? false)).catch(() => false);
-      const latest = latestTextSave.current;
+      const latest = latestTextSaveRef.current;
       if (latest === undefined) return;
       if (!saved) {
         showSave({ ...latest, status: "Failed" });
@@ -672,7 +666,7 @@ function Picker({ runtime, messages: { state, can, send }, handoff, discardHando
     }
   };
   const saveText = (visit: number, edit: NewTextEdit) => {
-    const previous = latestTextSave.current;
+    const previous = latestTextSaveRef.current;
     showSave({ status: "Saving", edit: { ...previous?.edit, ...edit } });
     if (previous?.status !== "Saving") void flushText(visit);
   };
@@ -700,7 +694,7 @@ function Picker({ runtime, messages: { state, can, send }, handoff, discardHando
   };
   const open = (addresses: ReadonlyArray<string>, typedIn: boolean) => {
     if (fresh) {
-      if (!editable || (latestTextSave.current?.status === "Saving" && latestTextSave.current.edit.to?.closePicker)) return;
+      if (!editable || (latestTextSaveRef.current?.status === "Saving" && latestTextSaveRef.current.edit.to?.closePicker)) return;
       const previous = selecting ? before : messageRecipients(typedTo.split(",").slice(0, -1).join(","));
       const recipients = [...new Set([...previous, ...addresses])].join(", ");
       if (prefill !== undefined) discardHandoff();

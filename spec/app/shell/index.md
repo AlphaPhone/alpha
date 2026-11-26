@@ -97,6 +97,33 @@ pure def canCloseDrawer(s: Shell): bool = s.drawer
 pure def closeDrawer(s: Shell): Shell = recordRoute({ before: s, after: { ...s, drawer: false } })
 ```
 
+### Apps can open beside the landscape Ask sheet and Close leaves Ask open
+
+On a landscape phone with a coarse primary pointer, the quiet Ask sheet
+can sit beside Home and its Apps drawer. Apps opens in the left pane
+without moving Ask. Close apps closes only the drawer. Escape does the
+same with focus inside Apps after its menu is closed. Back keeps its
+usual order. After a rotation the drawer remains on the same route, and
+a sheet over it takes input before the drawer until they are beside each
+other again or the owner lowers Ask.
+
+```quint
+pure def adjacentAskSheet(s: Shell, landscapePhone: bool): bool =
+  landscapePhone and s.textAsk == NoTextAsk and s.trail.length() == 0 and s.assistant == Sheet
+
+pure def canOpenDrawerBeside(s: Shell, phone: bool, landscapePhone: bool): bool =
+  phone and not(s.drawer) and adjacentAskSheet(s, landscapePhone)
+
+pure def openDrawerBeside(s: Shell, phone: bool, landscapePhone: bool): Shell = openDrawer(s, phone)
+
+pure def lawOpeningAppsBesideKeepsAsk(s: Shell, phone: bool, landscapePhone: bool): bool =
+  val opened = openDrawerBeside(s, phone, landscapePhone)
+  canOpenDrawerBeside(s, phone, landscapePhone)
+    implies (opened.drawer and opened.assistant == s.assistant and opened.route == s.route + 1)
+
+pure val eval_witness_canOpenDrawerBeside = (("raise", Sheet), ("openDrawerBeside", true, true))
+```
+
 ### Ask Alpha rises to typing, a sheet or the full screen
 
 ```quint
