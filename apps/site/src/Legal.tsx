@@ -1,6 +1,7 @@
 // spec/site/index.md, "Each policy has its own public address and is linked from Home"
 import documents from "@repo/deployment/alpha-legal.json" with { type: "json" };
 import { Mark } from "@repo/ui";
+import type { ReactNode } from "react";
 import { privacyPath, termsPath } from "../gen/site.ts";
 
 export const policyPages = [
@@ -14,12 +15,17 @@ export function policyAt(pathname: string): PolicyPage | undefined {
   return policyPages.find(({ path }) => path === pathname || `${path}/` === pathname);
 }
 
-function policyParagraph(paragraph: string) {
-  return paragraph.split(/(https:\/\/[^\s<>)]+?)(?=[.,;!?]?(?:\s|\)|$))/g).map((part, index) =>
-    part.startsWith("https://")
-      ? <a className="break-all text-primary underline underline-offset-4" href={part} key={`${part}-${index}`}>{part}</a>
-      : part,
-  );
+function policyParagraph(paragraph: string): ReactNode[] {
+  const fragments: ReactNode[] = [];
+  let from = 0;
+  for (const match of paragraph.matchAll(/https:\/\/[^\s<>)]+?(?=[.,;!?]?(?:\s|\)|$))/g)) {
+    const [url] = match;
+    const offset = match.index;
+    fragments.push(paragraph.slice(from, offset), <a className="break-all text-primary underline underline-offset-4" href={url} key={offset}>{url}</a>);
+    from = offset + url.length;
+  }
+  fragments.push(paragraph.slice(from));
+  return fragments;
 }
 
 export function LegalPage({ page }: { readonly page: PolicyPage }) {

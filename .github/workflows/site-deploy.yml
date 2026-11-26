@@ -10,7 +10,8 @@ on:
     paths:
       - apps/site/**
       - spec/site/**
-      - packages/deployment/**
+      - packages/deployment/alpha-legal.json
+      - packages/deployment/package.json
       - packages/design-system/**
       - packages/ui/**
       - vibestack/**

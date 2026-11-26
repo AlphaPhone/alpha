@@ -25,7 +25,7 @@ vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(func
 });
 
 describe(`Read Alpha Cloud policies (spec/site/index.md, "Story: Read Alpha Cloud's policies")`, () => {
-  it("links both public documents from Home and reads their full text and links without JavaScript", async () => {
+  it("links both public documents from Home and reads their full text and links without JavaScript", () => {
     const runtime = ManagedRuntime.make(Layer.provide(demo, browserPage));
     const home = document.createElement("div");
     home.innerHTML = renderToString(<Site runtime={runtime} />);
