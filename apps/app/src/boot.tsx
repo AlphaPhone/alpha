@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
 import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
 import { readPage, stopPage } from "./assistant/read-aloud.vibe";
@@ -114,7 +114,29 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       await files.runtime(alpha).runPromise(retainScanExport(selection));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const startup = Layer.provideMerge(startupAccessLifecycle(requireNativeSignIn), Layer.provideMerge(startupSignIn(requireNativeSignIn), resident));
+  // The resident's Settings pages read StartupSignIn, and StartupSignIn is built over the resident's own machines
+  // (Page, Device, …). The resident gets a late-bound StartupSignIn that forwards each call to the one built over it;
+  // nothing in the resident calls it while the root is being built.
+  let builtSignIn: Context.Service.Shape<typeof StartupSignIn> | undefined;
+  const signedIn = () => {
+    if (builtSignIn === undefined) throw new Error("StartupSignIn was read before the root was built");
+    return builtSignIn;
+  };
+  const lateSignIn = Layer.succeed(StartupSignIn, {
+    changes: Stream.unwrap(Effect.sync(() => signedIn().changes)),
+    active: () => Effect.suspend(() => signedIn().active()),
+    confirmedAccount: () => Effect.suspend(() => signedIn().confirmedAccount()),
+    check: () => Effect.suspend(() => signedIn().check()),
+    touch: () => Effect.suspend(() => signedIn().touch()),
+    openNetwork: () => Effect.suspend(() => signedIn().openNetwork()),
+    send: (method, address) => Effect.suspend(() => signedIn().send(method, address)),
+    chooseGoogle: () => Effect.suspend(() => signedIn().chooseGoogle()),
+    verify: (code) => Effect.suspend(() => signedIn().verify(code)),
+    resend: () => Effect.suspend(() => signedIn().resend()),
+    back: () => Effect.suspend(() => signedIn().back()),
+  });
+  const signIn = Layer.tap(startupSignIn(requireNativeSignIn), (context) => Effect.sync(() => { builtSignIn = Context.get(context, StartupSignIn); }));
+  const startup = Layer.provideMerge(startupAccessLifecycle(requireNativeSignIn), Layer.provideMerge(signIn, Layer.provideMerge(resident, lateSignIn)));
   const root = rooted(Layer.provideMerge(startup, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, inboxCard, scans)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {

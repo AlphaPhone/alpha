@@ -27,8 +27,9 @@ with loopback delivery only on PGlite"), and a deployment registers Alpha by
 Check runs Alpha's own check of its profiles, registration and asset links.
 Migrate applies eliza's migrations to the environment's own database, which
 eliza refuses for another environment's identity. Register applies Alpha's
-registration file and keeps eliza's receipt. Prices checks the payment
-provider's catalog against eliza's plans. Serve starts the cloud with the
+registration file and keeps eliza's receipt. Prices checks the environment's
+database for its model prices and the payment provider's catalog against
+eliza's plans. Serve starts the cloud with the
 profile, the secrets it names in the operator's environment and the
 environment's database. Smoke reads, without a credential, what a phone
 needs before it signs in: health, the service document naming Alpha, the
@@ -49,7 +50,7 @@ pure def commandOf(task: Step): str =
   if (task == Check) "node apps/cloud/dist/src/main.js check"
   else if (task == Migrate) "elizaos-cloud migrate --profile <profile> --environment <environment> --store <database>"
   else if (task == Register) "elizaos-cloud client apply --file <registration> --profile <profile> --environment <environment> --store <database>"
-  else if (task == Prices) "elizaos-cloud prices check --profile <profile> --environment <environment>"
+  else if (task == Prices) "elizaos-cloud prices check --profile <profile> --environment <environment> --store <database>"
   else if (task == Serve) "elizaos-cloud serve --profile <profile> --environment <environment> --store <database>"
   else "GET /api/health, /api/public/service, /api/v1/auth/methods and /.well-known/assetlinks.json at the environment's cloud"
 ```
