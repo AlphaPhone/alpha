@@ -581,6 +581,21 @@ pure val persistMemory: bool = true
 pure val localEmbeddings: bool = false
 ```
 
+### The agent brings in the earlier agent's store when it starts, before it is ready, only as the adoption rules allow
+
+Alpha's product plugin does it in its `init`, from the store and owner the
+phone passes in the launch's environment, `ALPHA_LEGACY_STORE_DIR` and
+`ALPHA_LEGACY_OWNER`, and only when that owner is the account the launch
+names (`spec/app/platform/adoption.md`, "Story: Keep what the earlier
+on-device agent stored").
+
+```quint
+import adoption as Adoption from "../app/platform/adoption"
+
+pure def bringsInEarlierStore(ownerUser: str, ownerOrganization: str, user: str, organization: str): bool =
+  Adoption::isEarlierOwner(ownerUser, ownerOrganization, user, organization)
+```
+
 ### The agent swaps the owner's secrets and personal details out of what it sends the cloud
 
 The old agent was launched with eliza's secret swap and personal-detail

@@ -19,7 +19,7 @@ public final class AlphaApplication extends Application {
  @Override public void onCreate() {
   super.onCreate();
   boolean main = getPackageName().equals(getProcessName());
-  if (main) AlphaLegacyAgentArchive.moveAside(this);
+  if (main) AlphaLegacyAgentArchive.putBack(this);
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(credentials);
   if (main) AgentService.useGoogleBroker(DeviceCustody.googleBroker(this, BuildConfig.CLOUD_API_ORIGIN));

@@ -1,5 +1,5 @@
 // spec/app/account/signIn.md, "Story: Sign in when Alpha needs it"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
-import { StartupMark, StartupSignIn as SignInScreen } from "@repo/ui";
+import { StartupSignIn as SignInScreen } from "@repo/ui";
 import { Effect, Stream } from "effect";
 import { useEffect, useState } from "react";
 import { useMachine } from "../../gen/app__account__signIn.react.ts";
@@ -67,7 +67,7 @@ export function SignIn({ alpha, read, state }: { alpha: Alpha; read?: FirstRun; 
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [alpha, deadline]);
-  if (!read || read.stage === "Checking" || !state) return <StartupMark />;
+  if (!read || read.stage === "Checking" || !state) return null;
   const work = (take: (signIn: StartupSignIn.Shape) => Effect.Effect<unknown>) => {
     alpha.runtime.runFork(StartupSignIn.use(take));
   };
