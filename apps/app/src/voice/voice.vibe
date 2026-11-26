@@ -732,7 +732,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const admittedScreen = direct === undefined ? sameScreen : try atSource
   const sent = effect (files: typeof direct) => {
     output.beginAttempt(files !== undefined)
-    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, files === undefined ? undefined : "direct-files-only-v1")) } : {}
+    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, try views.shown(), files === undefined ? undefined : "direct-files-only-v1")) } : {}
     const headers = sms !== undefined ? { ...sms.opened.headers, "x-eliza-device-capabilities": "sms.send.v1" }
       : review === undefined ? undefined
       : files !== undefined ? try review.turnHeaders(files, true)
