@@ -227,6 +227,7 @@ export function Authoring({ runtime, owner, offered = true }: AuthoringProps) {
         <Button variant="secondary" onClick={() => tell({ type: "checkSave" })}>Check save</Button>
       </Alert>}
       {builder.can({ type: "reviewResend" }) && <Button variant="secondary" onClick={() => tell({ type: "reviewResend" })}>Review the same save</Button>}
+      {builder.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow a different save</Button>}
       {state.save.attempt.outcome === "Refused" && !state.save.offered && <Alert variant="warn" role="status">Your agent didn’t save this workflow.</Alert>}
       <ConfirmDialog open={state.review.showing} title={`Save “${draft.name.trim()}”?`}
         confirmLabel={state.save.offered ? "Send again" : "Save workflow"} onConfirm={() => tell(confirm)} onCancel={() => tell({ type: "cancelSave" })}>

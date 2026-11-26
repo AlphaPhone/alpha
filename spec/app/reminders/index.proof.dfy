@@ -741,3 +741,23 @@ lemma forgetItem_ensures(s: Reminders, itemId: int)
     SmartCountsHold(after);
   }
 }
+
+lemma applySync_ensures(s: Reminders, lists: seq<ListEntry>, nextListId: int, items: seq<ItemEntry>, nextItemId: int)
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysDefaultListExists(applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysEveryItemWellFormed(applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysSelectedItemExists(applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysHiddenExactlyWhileDeleteHeld(applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysActiveCustomListExists(applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysSmartCountsConsistent(applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepBackShowsLists(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepLeavesOverview(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepDeleteOnlyOnExpire(s, "applySync", applySync(s, lists, nextListId, items, nextItemId), []))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepUndoRestoresExactState(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepDeleteListKeepsItemsValid(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepNoSentWriteAfterRestart(s, "applySync", applySync(s, lists, nextListId, items, nextItemId), []))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepRecurringCompleteAdvancesDue(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
+{
+  if inv(s) && canApplySync(s, lists, nextListId, items, nextItemId) {
+    SmartCountsHold(applySync(s, lists, nextListId, items, nextItemId));
+  }
+}

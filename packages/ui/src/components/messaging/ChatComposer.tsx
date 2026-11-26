@@ -130,7 +130,7 @@ export function ChatComposer({
     <div className={cn("flex flex-col gap-2 border-t border-border bg-background px-3 py-2", className)} {...props}>
       {stagedDraft ? (
         <div role="region" aria-label="Alpha draft review" className="flex flex-col gap-2 rounded-tile border border-dashed border-alpha bg-card p-3 text-card-foreground">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-alpha">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
             <Mark aria-hidden className="size-4 shrink-0" />
             <span>Alpha&apos;s draft · not sent</span>
           </div>

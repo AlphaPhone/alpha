@@ -332,3 +332,19 @@ lemma reopen_ensures(s: Alarms, now: int)
     MapPreservesUnique(s.items, reopen(s, now).items);
   }
 }
+
+lemma reschedule_ensures(s: Alarms, id: int, fireAt: int)
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> alwaysValidAlarmTimes(reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> alwaysUniqueIds(reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> alwaysBoundedCount(reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> alwaysDisabledAlarmNeverRings(reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> alwaysRingingOnlyWhenEnabled(reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> alwaysSnoozedHasFutureTarget(reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> stepUndoRestoresDeleted(s, "reschedule", reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> stepTriggerOnlyAtOrAfterDue(s, "reschedule", reschedule(s, id, fireAt)))
+  ensures (inv(s) ==> canReschedule(s, id, fireAt) ==> stepDismissOneOffDisables(s, "reschedule", reschedule(s, id, fireAt)))
+{
+  if inv(s) && canReschedule(s, id, fireAt) {
+    MapPreservesUnique(s.items, reschedule(s, id, fireAt).items);
+  }
+}
