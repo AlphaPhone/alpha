@@ -116,6 +116,39 @@ it("Rechecks Calendar access on return from Android Settings", async () => {
   expect(world.calendar.asked).toBe(0);
 });
 
+it("Offers Search, the layouts and the Calendars sheet only on a wide screen (spec/app/calendar/index.md, \"Search and the Calendars sheet open over the days, never over an open event\")", async () => {
+  const size = { width: Object.getOwnPropertyDescriptor(window, "innerWidth"), height: Object.getOwnPropertyDescriptor(window, "innerHeight") };
+  const resize = async (width: number, height: number) => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+    await drawn(() => window.dispatchEvent(new Event("resize")));
+  };
+  try {
+    const { alpha, runtime } = await onBrowserCalendar();
+    await resize(412, 915);
+    await until(alpha, runtime, View, (state) => !state.wide);
+    expect(button("Search events")).toBeUndefined();
+    expect(button("New event")).toBeDefined();
+    await chooseDate();
+    await until(alpha, runtime, View, (state) => state.overlay === "MonthDialog");
+    expect(document.querySelector('[role="group"][aria-label="Calendar view"]')).toBeNull();
+    expect(button("Schedule")).toBeUndefined();
+    expect(button("Calendars")).toBeUndefined();
+    await hardware("back");
+    await until(alpha, runtime, View, (state) => state.overlay === "NoOverlay");
+
+    await resize(1024, 768);
+    await until(alpha, runtime, View, (state) => state.wide);
+    expect(button("Search events")).toBeDefined();
+    await chooseDate();
+    expect(button("Schedule")).toBeDefined();
+    expect(button("Calendars")).toBeDefined();
+  } finally {
+    if (size.width) Object.defineProperty(window, "innerWidth", size.width);
+    if (size.height) Object.defineProperty(window, "innerHeight", size.height);
+  }
+});
+
 const calendarSettings = () => document.querySelector('[data-settings-page="Calendar"]');
 
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;

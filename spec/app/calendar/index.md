@@ -588,7 +588,10 @@ day found whose title, place or notes hold every word typed, case-folded,
 and names the window from the first of last month through the end of next
 month. Empty standalone Search without a connected calendar says Not connected
 with or without a query. The Calendars sheet lists the agent's calendar and the
-phone's, each with its switch.
+phone's, each with its switch. Only a wide screen offers Search, the layouts and
+the Calendars sheet: on a phone, Calendar's header holds the month, Today and New
+event, and the month dialog only its days, as Alpha's build of 22 November drew
+them.
 
 ```quint
 pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
