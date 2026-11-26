@@ -70,7 +70,7 @@ effect function readLog(ticket: number, device: boolean): Event!!(Telephony | Di
     }
   }
   const current = try machine.get()
-  const query = (try store.get()).sought
+  const query = current.sought ? (try store.get()).sought : ""
   const rows = grant === "Granted" ? (source ?? []).filter((entry) =>
     (current.chip === "AllCalls" || missedTypes.has(entry.type)) && matches(query, entry.cachedName ?? "", entry.number)) : []
   if (Phone.canRecentsRead(current, ticket, rows.length)) try store.set({ source: ok && grant === "Granted" ? source : undefined, rows })

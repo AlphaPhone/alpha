@@ -14,6 +14,8 @@ import { type AssistantPull, useAssistantPull } from "./assistant-pull.ts";
 export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "onChange"> & {
   /** Where the composer sits: in the Ask Alpha bar, raised on its own, or at the foot of the conversation sheet. */
   variant?: "bar" | "sheet";
+  /** The bar or pill is already in place, as after a drag: it changes between the two without an entrance (v119 45f6bed30 chat-overlay-motion-adapter.ts:637-646). */
+  still?: boolean;
   /** The text being written. */
   value: string;
   /** Called with the text as it is typed. */
@@ -44,12 +46,6 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onAttach?: () => void;
   /** Opens search across every conversation, from the chat actions. */
   onSearch?: () => void;
-  /** Starts a new conversation, from the chat actions; offered only while the turn and the composer are free. */
-  onNew?: () => void;
-  /** A new conversation is being made. */
-  making?: boolean;
-  /** Opens the list of conversations, from the chat actions. */
-  onHistory?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
   /** Shows the Talk control at rest when the current host has no speech bridge. */
@@ -98,8 +94,8 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  * @model spec/app/assistant/composer.md
  */
 export function AssistantComposer({
-  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  variant = "sheet", still = false, value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
+  onSend, onStop, stopping = false, onAttach, onSearch, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
@@ -119,7 +115,7 @@ export function AssistantComposer({
   const [seen, setSeen] = useState({ bar, compact, enter: 0 });
   if (seen.bar !== bar || seen.compact !== compact) {
     const toggledAtBar = seen.bar && bar && seen.compact !== compact;
-    setSeen({ bar, compact, enter: toggledAtBar && !voice ? seen.enter + 1 : seen.enter });
+    setSeen({ bar, compact, enter: toggledAtBar && !voice && !still ? seen.enter + 1 : seen.enter });
   }
   const enter = seen.enter;
   const playedRef = useRef(0);
@@ -153,7 +149,7 @@ export function AssistantComposer({
           <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
         ) : null) : null}
         {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard /></Button> : (
-          <AssistantChatActions placement={bar ? "bar" : "sheet"} disabled={closed} onAttach={onAttach} onSearch={onSearch} onNew={onNew} making={making} onHistory={onHistory} />
+          <AssistantChatActions placement={bar ? "bar" : "sheet"} disabled={closed} onAttach={onAttach} onSearch={onSearch} />
         )}
         <Textarea
           ref={fieldRef}

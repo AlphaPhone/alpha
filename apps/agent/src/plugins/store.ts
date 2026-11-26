@@ -114,11 +114,17 @@ export function civilToEpochMs(dueDate: string, dueMinute: number | null, timeZo
     const formatter = new Intl.DateTimeFormat("en-US", {
       timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
     });
-    const parts = formatter.formatToParts(new Date(targetUtc));
-    const read = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-    const asLocal = Date.UTC(read("year"), read("month") - 1, read("day"), read("hour"), read("minute"), read("second"));
-    const offset = asLocal - targetUtc;
-    return targetUtc - offset;
+    const offsetAt = (instantMs: number): number => {
+      const parts = formatter.formatToParts(new Date(instantMs));
+      const read = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+      const asLocal = Date.UTC(read("year"), read("month") - 1, read("day"), read("hour"), read("minute"), read("second"));
+      return asLocal - instantMs;
+    };
+    const first = targetUtc - offsetAt(targetUtc);
+    const secondOffset = offsetAt(first);
+    const second = targetUtc - secondOffset;
+    if (second === first) return first;
+    return offsetAt(second) === secondOffset ? second : first;
   } catch {
     return targetUtc;
   }
@@ -171,9 +177,14 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.trunc(value)));
 }
 
+/** Parse a supported ClockSound or return undefined when unrecognized. */
+export function parseSound(value: unknown): ClockSound | undefined {
+  return typeof value === "string" && VALID_SOUNDS.has(value as ClockSound) ? (value as ClockSound) : undefined;
+}
+
 /** Normalize a sound identifier to a supported ClockSound. */
 export function normalizeSound(value: unknown, fallback: ClockSound = "radar"): ClockSound {
-  return typeof value === "string" && VALID_SOUNDS.has(value as ClockSound) ? (value as ClockSound) : fallback;
+  return parseSound(value) ?? fallback;
 }
 
 /** Normalize an alarm phase value. */
@@ -186,24 +197,152 @@ export function normalizeTimerStatus(value: unknown, fallback: ClockTimerStatus 
   return typeof value === "string" && VALID_TIMER_STATUSES.has(value as ClockTimerStatus) ? (value as ClockTimerStatus) : fallback;
 }
 
+/** Parse a reminder list color or return undefined when unrecognized. */
+export function parseListColor(value: unknown): ReminderListColor | undefined {
+  return typeof value === "string" && VALID_LIST_COLORS.has(value as ReminderListColor) ? (value as ReminderListColor) : undefined;
+}
+
 /** Normalize a reminder list color value. */
 export function normalizeListColor(value: unknown, fallback: ReminderListColor = "accent"): ReminderListColor {
-  return typeof value === "string" && VALID_LIST_COLORS.has(value as ReminderListColor) ? (value as ReminderListColor) : fallback;
+  return parseListColor(value) ?? fallback;
+}
+
+/** Parse a reminder list icon or return undefined when unrecognized. */
+export function parseListIcon(value: unknown): ReminderListIcon | undefined {
+  return typeof value === "string" && VALID_LIST_ICONS.has(value as ReminderListIcon) ? (value as ReminderListIcon) : undefined;
 }
 
 /** Normalize a reminder list icon value. */
 export function normalizeListIcon(value: unknown, fallback: ReminderListIcon = "list"): ReminderListIcon {
-  return typeof value === "string" && VALID_LIST_ICONS.has(value as ReminderListIcon) ? (value as ReminderListIcon) : fallback;
+  return parseListIcon(value) ?? fallback;
+}
+
+/** Parse a recurrence value or return undefined when unrecognized. */
+export function parseRecurrence(value: unknown): ReminderRecurrence | undefined {
+  return typeof value === "string" && VALID_RECURRENCES.has(value as ReminderRecurrence) ? (value as ReminderRecurrence) : undefined;
 }
 
 /** Normalize a recurrence value. */
 export function normalizeRecurrence(value: unknown, fallback: ReminderRecurrence = "none"): ReminderRecurrence {
-  return typeof value === "string" && VALID_RECURRENCES.has(value as ReminderRecurrence) ? (value as ReminderRecurrence) : fallback;
+  return parseRecurrence(value) ?? fallback;
+}
+
+/** Parse a priority value or return undefined when unrecognized. */
+export function parsePriority(value: unknown): ReminderPriority | undefined {
+  return typeof value === "string" && VALID_PRIORITIES.has(value as ReminderPriority) ? (value as ReminderPriority) : undefined;
 }
 
 /** Normalize a priority value. */
 export function normalizePriority(value: unknown, fallback: ReminderPriority = "none"): ReminderPriority {
-  return typeof value === "string" && VALID_PRIORITIES.has(value as ReminderPriority) ? (value as ReminderPriority) : fallback;
+  return parsePriority(value) ?? fallback;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseAlarmRecord(value: unknown): ClockAlarmRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id !== "string" || value.id.trim() === "") return undefined;
+  if (typeof value.hour !== "number" || !Number.isFinite(value.hour)) return undefined;
+  if (typeof value.minute !== "number" || !Number.isFinite(value.minute)) return undefined;
+  if (typeof value.revision !== "number" || !Number.isFinite(value.revision)) return undefined;
+  if (typeof value.updatedAtMs !== "number" || !Number.isFinite(value.updatedAtMs)) return undefined;
+  return {
+    id: value.id.trim(),
+    hour: clampInt(value.hour, 0, 23),
+    minute: clampInt(value.minute, 0, 59),
+    daysMask: typeof value.daysMask === "number" && Number.isFinite(value.daysMask) ? clampInt(value.daysMask, 0, 127) : 0,
+    label: typeof value.label === "string" ? value.label.trim().slice(0, 200) : "",
+    sound: normalizeSound(value.sound),
+    vibrate: typeof value.vibrate === "boolean" ? value.vibrate : true,
+    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
+    snoozeMinutes: typeof value.snoozeMinutes === "number" && Number.isFinite(value.snoozeMinutes) ? clampInt(value.snoozeMinutes, 1, 60) : 9,
+    phase: normalizeAlarmPhase(value.phase),
+    fireAtMs: finiteOrNull(value.fireAtMs),
+    snoozeUntilMs: finiteOrNull(value.snoozeUntilMs),
+    missed: typeof value.missed === "boolean" ? value.missed : false,
+    revision: value.revision,
+    updatedAtMs: value.updatedAtMs,
+  };
+}
+
+function parseTimerRecord(value: unknown): ClockTimerRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id !== "string" || value.id.trim() === "") return undefined;
+  if (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs)) return undefined;
+  if (typeof value.revision !== "number" || !Number.isFinite(value.revision)) return undefined;
+  if (typeof value.updatedAtMs !== "number" || !Number.isFinite(value.updatedAtMs)) return undefined;
+  const durationMs = clampInt(value.durationMs, 1000, 86_400_000);
+  return {
+    id: value.id.trim(),
+    label: typeof value.label === "string" ? value.label.trim().slice(0, 200) : "",
+    durationMs,
+    remainingMs: typeof value.remainingMs === "number" && Number.isFinite(value.remainingMs) ? clampInt(value.remainingMs, 0, 86_400_000) : durationMs,
+    status: normalizeTimerStatus(value.status),
+    startedAtMs: finiteOrNull(value.startedAtMs),
+    endAtMs: finiteOrNull(value.endAtMs),
+    ringStartedAtMs: finiteOrNull(value.ringStartedAtMs),
+    revision: value.revision,
+    updatedAtMs: value.updatedAtMs,
+  };
+}
+
+function parseWorldCityRecord(value: unknown, order: number): WorldCityRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id !== "string" || value.id.trim() === "") return undefined;
+  if (typeof value.city !== "string" || value.city.trim() === "") return undefined;
+  if (typeof value.timeZone !== "string" || value.timeZone.trim() === "") return undefined;
+  return {
+    id: value.id.trim(),
+    city: value.city.trim(),
+    region: typeof value.region === "string" ? value.region.trim() : "",
+    timeZone: value.timeZone.trim(),
+    order,
+  };
+}
+
+function parseReminderFallback(id: string, value: unknown, lists: readonly ReminderListRecord[], nowMs: number): ReminderItemRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id === "string" && value.id !== id) return undefined;
+  if (typeof value.title !== "string" || value.title.trim() === "") return undefined;
+  if (typeof value.revision !== "number" || !Number.isFinite(value.revision)) return undefined;
+  const requestedList = typeof value.listId === "string" ? value.listId : DEFAULT_LIST_ID;
+  const listId = lists.some((list) => list.id === requestedList) ? requestedList : DEFAULT_LIST_ID;
+  const dueDate = typeof value.dueDate === "string" && parseCivilDate(value.dueDate) !== undefined ? value.dueDate.trim() : null;
+  const dueMinute = dueDate === null || typeof value.dueMinute !== "number" || !Number.isFinite(value.dueMinute) ? null : clampInt(value.dueMinute, 0, 1439);
+  const alertMinutes = dueDate === null || typeof value.alertMinutes !== "number" || !Number.isFinite(value.alertMinutes) ? null : clampInt(value.alertMinutes, 0, 1440);
+  const subtasks: ReminderSubtaskRecord[] = Array.isArray(value.subtasks)
+    ? value.subtasks.flatMap((entry, idx) =>
+      isPlainRecord(entry) && typeof entry.title === "string" && entry.title.trim() !== ""
+        ? [{ id: typeof entry.id === "string" && entry.id.trim() !== "" ? entry.id.trim() : `sub-${idx + 1}`, title: entry.title.trim(), done: Boolean(entry.done) }]
+        : [])
+    : [];
+  return {
+    id,
+    listId,
+    title: value.title.trim().slice(0, 240),
+    notes: typeof value.notes === "string" ? value.notes.trim().slice(0, 2000) : "",
+    dueDate,
+    dueMinute,
+    alertMinutes,
+    recurrence: dueDate === null ? "none" : normalizeRecurrence(value.recurrence),
+    priority: normalizePriority(value.priority),
+    flagged: typeof value.flagged === "boolean" ? value.flagged : false,
+    subtasks,
+    completed: typeof value.completed === "boolean" ? value.completed : false,
+    completedAtMs: finiteOrNull(value.completedAtMs),
+    snoozedUntilMs: finiteOrNull(value.snoozedUntilMs),
+    notifiedAtMs: finiteOrNull(value.notifiedAtMs),
+    agentTaskId: typeof value.agentTaskId === "string" && value.agentTaskId.trim() !== "" ? value.agentTaskId : null,
+    revision: value.revision,
+    createdAtMs: typeof value.createdAtMs === "number" && Number.isFinite(value.createdAtMs) ? value.createdAtMs : nowMs,
+    updatedAtMs: nowMs,
+  };
 }
 
 function writeAtomic(file: string, data: unknown): void {
@@ -309,12 +448,15 @@ export class AlphaAppsStore {
   /** Merge an incoming Clock snapshot using per-entity revision / updatedAt LWW and tombstones. */
   syncClock(incoming: Partial<ClockSnapshot>): ClockSnapshot {
     const nowMs = this.now();
-    const deletedAlarms = new Set([...this.clock.deletedAlarmIds, ...(incoming.deletedAlarmIds ?? [])]);
-    const deletedTimers = new Set([...this.clock.deletedTimerIds, ...(incoming.deletedTimerIds ?? [])]);
+    const incomingDeletedAlarms = (incoming.deletedAlarmIds ?? []).filter((id): id is string => typeof id === "string" && id.trim() !== "");
+    const incomingDeletedTimers = (incoming.deletedTimerIds ?? []).filter((id): id is string => typeof id === "string" && id.trim() !== "");
+    const deletedAlarms = new Set([...this.clock.deletedAlarmIds, ...incomingDeletedAlarms]);
+    const deletedTimers = new Set([...this.clock.deletedTimerIds, ...incomingDeletedTimers]);
     const alarmsById = new Map<string, ClockAlarmRecord>();
     for (const alarm of this.clock.alarms) if (!deletedAlarms.has(alarm.id)) alarmsById.set(alarm.id, alarm);
-    for (const alarm of incoming.alarms ?? []) {
-      if (deletedAlarms.has(alarm.id)) continue;
+    for (const entry of incoming.alarms ?? []) {
+      const alarm = parseAlarmRecord(entry);
+      if (alarm === undefined || deletedAlarms.has(alarm.id)) continue;
       const current = alarmsById.get(alarm.id);
       if (current === undefined || alarm.revision > current.revision || (alarm.revision === current.revision && alarm.updatedAtMs >= current.updatedAtMs)) {
         alarmsById.set(alarm.id, alarm);
@@ -322,16 +464,25 @@ export class AlphaAppsStore {
     }
     const timersById = new Map<string, ClockTimerRecord>();
     for (const timer of this.clock.timers) if (!deletedTimers.has(timer.id)) timersById.set(timer.id, timer);
-    for (const timer of incoming.timers ?? []) {
-      if (deletedTimers.has(timer.id)) continue;
+    for (const entry of incoming.timers ?? []) {
+      const timer = parseTimerRecord(entry);
+      if (timer === undefined || deletedTimers.has(timer.id)) continue;
       const current = timersById.get(timer.id);
       if (current === undefined || timer.revision > current.revision || (timer.revision === current.revision && timer.updatedAtMs >= current.updatedAtMs)) {
         timersById.set(timer.id, timer);
       }
     }
-    const world = incoming.world !== undefined ? [...incoming.world].slice(0, MAX_WORLD_CITIES).map((c, idx) => ({ ...c, order: idx })) : this.clock.world;
+    const world = incoming.world !== undefined
+      ? incoming.world.reduce<WorldCityRecord[]>((acc, entry) => {
+        if (acc.length >= MAX_WORLD_CITIES) return acc;
+        const parsed = parseWorldCityRecord(entry, acc.length);
+        if (parsed !== undefined) acc.push(parsed);
+        return acc;
+      }, [])
+      : this.clock.world;
+    const incomingVersion = typeof incoming.version === "number" && Number.isFinite(incoming.version) ? incoming.version : 0;
     return this.saveClock({
-      version: Math.max(this.clock.version, incoming.version ?? 0) + 1,
+      version: Math.max(this.clock.version, incomingVersion) + 1,
       updatedAtMs: nowMs,
       alarms: [...alarmsById.values()].slice(0, MAX_ALARMS),
       timers: [...timersById.values()].slice(0, MAX_TIMERS),
@@ -758,6 +909,7 @@ export class AlphaAppsStore {
         ...history,
         snoozedUntilMs: null,
         notifiedAtMs: null,
+        agentTaskId: null,
         revision: existing.revision + 1,
         updatedAtMs: nowMs,
       };
@@ -795,12 +947,14 @@ export class AlphaAppsStore {
     return existing;
   }
 
-  restoreItem(id: string, fallback?: ReminderItemRecord): ReminderItemRecord | undefined {
-    const prior = this.deletedItems.get(id) ?? fallback;
-    if (prior === undefined) return undefined;
+  restoreItem(id: string, fallback?: unknown): ReminderItemRecord | undefined {
     const nowMs = this.now();
+    const stashed = this.deletedItems.get(id);
+    const prior = stashed ?? parseReminderFallback(id, fallback, this.reminders.lists, nowMs);
+    if (prior === undefined) return undefined;
     this.deletedItems.delete(id);
-    const restored: ReminderItemRecord = { ...prior, revision: prior.revision + 1, updatedAtMs: nowMs };
+    const listId = this.reminders.lists.some((list) => list.id === prior.listId) ? prior.listId : DEFAULT_LIST_ID;
+    const restored: ReminderItemRecord = { ...prior, id, listId, revision: prior.revision + 1, updatedAtMs: nowMs };
     const exists = this.reminders.items.some((entry) => entry.id === id);
     const items = exists
       ? this.reminders.items.map((entry) => (entry.id === id ? restored : entry))
@@ -854,9 +1008,9 @@ export class AlphaAppsStore {
       }
       const title = (typeof task.metadata["title"] === "string" && task.metadata["title"].trim() !== "" ? task.metadata["title"] : task.promptInstructions).trim().slice(0, 240);
       const notes = typeof task.metadata["body"] === "string" ? task.metadata["body"].trim().slice(0, 2000) : "";
-      const priority = task.metadata["priority"] === "high" ? "high" : "none";
+      const priority = normalizePriority(task.metadata["priority"]);
       items.push({
-        id: `rem-task-${task.taskId.slice(0, 8)}`,
+        id: `rem-task-${task.taskId}`,
         listId: DEFAULT_LIST_ID,
         title: title || "Reminder",
         notes,

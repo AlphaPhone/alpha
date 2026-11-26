@@ -161,7 +161,7 @@ export function CalendarChip({ label, chosen = false, dot, className, ...props }
     <button type="button" aria-pressed={chosen}
       className={cn(focusRing, "box-border flex min-h-13 max-w-full items-center gap-2 rounded-chip px-3 py-1.5 text-left text-snippet leading-plain font-semibold wrap-anywhere disabled:opacity-50",
         dot && "px-3.5", chosen ? "bg-foreground text-background" : "bg-background", className)} {...props}>
-      {dot ? <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : "bg-foreground")} /> : null}
+      {dot ? <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : chosen ? "bg-background" : "bg-foreground")} /> : null}
       <span className="min-w-0">{label}</span>
     </button>
   );
