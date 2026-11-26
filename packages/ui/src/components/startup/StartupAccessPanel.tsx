@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { type ComponentProps, useRef } from "react";
 import { Button } from "../Button.tsx";
 import { Dialog, DialogContent, DialogTitle } from "../Dialog.tsx";
 import { StartupAccessRow, type StartupAccessRowProps } from "./StartupAccessRow.tsx";
@@ -38,9 +38,31 @@ const notices: Record<StartupAccessNotice, string> = {
   NotSaved: "Not saved",
 };
 
-export const startupPanel = "inset-0 grid max-h-none max-w-none translate-y-0 overflow-y-auto overscroll-contain rounded-none bg-background pr-[max(--spacing(6),env(safe-area-inset-right))] pl-[max(--spacing(6),env(safe-area-inset-left))] pt-[max(--spacing(8),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] pb-[max(--spacing(8),var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))] text-foreground shadow-none motion-safe:animate-none [@media(max-height:500px)]:p-5";
+const startupPanel = "inset-0 grid max-h-none max-w-none translate-y-0 overflow-y-auto overscroll-contain rounded-none bg-background pr-[max(--spacing(6),env(safe-area-inset-right))] pl-[max(--spacing(6),env(safe-area-inset-left))] pt-[max(--spacing(8),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] pb-[max(--spacing(8),var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))] text-foreground shadow-none motion-safe:animate-none [@media(max-height:500px)]:p-5";
 export const startupHeading = "mb-5 text-center font-display text-[clamp(40px,7vw,56px)] leading-[1.05] font-light tracking-[-.025em] text-balance outline-none [@media(max-height:500px)]:mb-3 [@media(max-height:500px)]:text-[36px]";
 export const startupMainAction = "h-13 w-full rounded-md bg-primary text-base leading-tight font-medium text-primary-foreground hover:bg-primary hover:brightness-[.94] active:bg-primary disabled:opacity-45";
+
+/**
+ * What a startup panel gives its dialog: the panel's place on screen, its heading taking focus as it opens, a press
+ * outside it ignored, and Escape doing `onEscape`.
+ */
+export function useStartupPanel(onEscape: () => void) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const content: ComponentProps<typeof DialogContent> = {
+    className: startupPanel,
+    "aria-describedby": undefined,
+    onOpenAutoFocus: (event) => {
+      event.preventDefault();
+      heading.current?.focus({ preventScroll: true });
+    },
+    onInteractOutside: (event) => event.preventDefault(),
+    onEscapeKeyDown: (event) => {
+      event.preventDefault();
+      onEscape();
+    },
+  };
+  return { heading, content };
+}
 
 /**
  * The walkthrough that asks for each access in order, or a review of them from Settings: one list, the step being
@@ -49,22 +71,12 @@ export const startupMainAction = "h-13 w-full rounded-md bg-primary text-base le
  */
 export function StartupAccessPanel({ rows, current, review = false, place, continueReady = true, native, notice, onAct, onContinue, onSkip, onDone }: StartupAccessPanelProps) {
   const said = notice ? notices[notice] : undefined;
-  const heading = useRef<HTMLHeadingElement>(null);
+  const { heading, content } = useStartupPanel(() => {
+    if (review) onDone?.();
+  });
   return (
     <Dialog open>
-      <DialogContent
-        className={startupPanel}
-        aria-describedby={undefined}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          heading.current?.focus({ preventScroll: true });
-        }}
-        onInteractOutside={(event) => event.preventDefault()}
-        onEscapeKeyDown={(event) => {
-          event.preventDefault();
-          if (review) onDone?.();
-        }}
-      >
+      <DialogContent {...content}>
         <div className="m-auto flex w-full max-w-90 flex-col">
           <DialogTitle ref={heading} tabIndex={-1} className={startupHeading}>Access</DialogTitle>
           {place ? <p role="status" className="mb-2 text-center text-sm leading-[1.5] text-muted-foreground">Step {place.step} of {place.count}</p> : null}
