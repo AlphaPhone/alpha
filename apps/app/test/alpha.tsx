@@ -134,12 +134,17 @@ export const pressOnTop = (name: string) => drawn(() => {
   found.click();
 });
 
+/** Set `field` to `text` as typing does, so React hears the input event. */
+export function typeInto(field: HTMLInputElement | HTMLTextAreaElement, text: string) {
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field) as object, "value")?.set?.call(field, text);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 /** Type `text` into the field whose accessible name is `name`, as a person does: React hears the input event. */
 export const fill = (name: string, text: string) => drawn(() => {
   const found = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")].find((field) => field.getAttribute("aria-label") === name);
   if (!found) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
+  typeInto(found, text);
 });
 
 /** The page is hidden, as when the owner leaves Alpha, or shown again: what `Device.visible` tells. */
