@@ -1230,7 +1230,7 @@ export function Proposal({ runtime, className = "mx-4 mb-2", request: bound }: C
           {f.attendees.length > 0 ? <><dt className="sr-only">People</dt><dd>{f.attendees.join(", ")}</dd></> : null}
         </dl>
       ) : null}
-      {request ? <p className="text-meta text-muted-foreground">{request.calendarId === "" || request.calendarId === "primary" ? "Your agent's calendar" : `Calendar ${request.calendarId}`}</p> : null}
+      {request ? <p className="text-meta text-muted-foreground">{request.calendarId === "" || request.calendarId === "primary" ? "Eliza Calendar" : `Calendar ${request.calendarId}`}</p> : null}
       {request && occurrences[request.occurrences] ? <p className="text-meta">{occurrences[request.occurrences]}</p> : null}
       {request && a.change !== "Create" ? <p className="text-meta text-muted-foreground">{request.notify ? "Guests are told of this change." : "No invitations are sent."}</p> : null}
       {a.complete ? null : <p className="text-meta text-muted-foreground">Alpha can't check this whole change, so it can't be approved.</p>}
