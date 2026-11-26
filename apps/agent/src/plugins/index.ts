@@ -56,3 +56,6 @@ export const alphaAppsModule: ModuleFactory<never> = (context: ModuleContext) =>
 export { AlphaAppsStore } from "./store.ts";
 /** @public main.vibe imports it by name in the generated host entry. */
 export { makeNativeNotesCleanup } from "./notes-cleanup.vibe";
+
+/** @public Used by the generated host entry with the local inference engine. */
+export { notesTranscriptionRoutes } from "./notes-transcription.ts";

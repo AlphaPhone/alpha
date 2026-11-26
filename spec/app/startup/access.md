@@ -725,7 +725,7 @@ pure def sometimesTheWalkthroughWaitsUnderAPanel(s: Access): bool = setUp(s) and
 > change what I like, and leave whenever I like without disturbing my
 > setup.
 
-### Settings opens one access of this walkthrough in review, also from the list of all, and the agent may ask to show one
+### Settings opens one access of this walkthrough from its list, and the agent may ask to show one
 
 ```quint
 pure def canReview(s: Access, key: S::Key): bool = setUp(s) and offered(s, key) and s.look != AtOne and not(s.finish.allSet)

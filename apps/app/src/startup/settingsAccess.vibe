@@ -17,11 +17,6 @@ import { type Job, answer, contained, due, reacting, run, started, together, unt
 import { accessVersion, legacyAccessAsked, legacyAccessSteps, savedAccess } from "./accessProgress.vibe"
 import { StartupSignIn } from "./signIn.vibe"
 
-const reviewKeys: Record<Permission, Steps.Key> = {
-  CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
-  PhotosAccess: "Photos", FilesAccess: "Files", NotificationsAccess: "Notifications",
-}
-
 const reviewed: Record<Steps.Key, { access: Permission; target: Target }> = {
   Camera: { access: "CameraAccess", target: "AppPermissions" },
   Microphone: { access: "MicrophoneAccess", target: "AppPermissions" },
@@ -99,13 +94,12 @@ effect function refreshed(): void!!Access.Machine {
   }
 }
 
-/** Open a reviewed permission or the list, only once the phone has confirmed the Cloud account exists. */
-export const openReview = (permission: Permission | undefined) => effect {
+/** Open the reviewed permissions after the phone confirms the Cloud account. */
+export const openReview = effect {
   const shell = try Shell
   const device = try Device
   const settings = try Settings
-  const expected = permission === undefined ? "Privacy" : "Permissions"
-  const here = effect { return showing(try shell.get(), "Settings") && (try settings.get()).page === expected && (try device.showing()) }
+  const here = effect { return showing(try shell.get(), "Settings") && (try settings.get()).page === "Privacy" && (try device.showing()) }
   if (!(try here)) return
   const cloud = (try Cloud).client
   const signedIn = try Effect.option(tryPromise((signal) => cloud.account({ signal })))
@@ -118,8 +112,7 @@ export const openReview = (permission: Permission | undefined) => effect {
   }
   if (!(try access.get()).begun) try ignore(access.send(try opening(), "Owner"))
   if (!Access.setUp(try access.get())) try ignore(access.send({ type: "welcome", created: false, now: untimed }, "Owner"))
-  const event: Access.Event = permission === undefined ? { type: "reopen", now: untimed } : { type: "review", key: reviewKeys[permission], now: untimed }
-  if (try contained(access.send(event, "Owner"), "opening the access review")) try refreshed()
+  if (try contained(access.send({ type: "reopen", now: untimed }, "Owner"), "opening the access review")) try refreshed()
 }
 
 const revisiting = started(effect {

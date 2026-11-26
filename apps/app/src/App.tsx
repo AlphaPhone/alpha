@@ -244,6 +244,11 @@ export function App({ alpha }: AppProps) {
           "in-[body:has([data-alpha-covers-assistant])]:invisible",
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
+          phone && canvas?.landscape && showing !== undefined && !comms && [
+            "[&&>[data-alpha-detent]]:start-auto [&>[data-alpha-detent]]:w-[min(400px,46%)]",
+            "[&&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:max-h-full",
+            "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
+          ],
           side && [
             "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
             "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",

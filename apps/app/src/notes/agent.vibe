@@ -10,8 +10,9 @@ import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
 import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
 import * as Trash from "../../gen/app__notes__trash.effect.vibe"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { numberOf } from "./content.vibe"
+import { NoteContent, numberOf } from "./content.vibe"
 import { Opens } from "./opens.vibe"
 
 /** The owner's request an open is for: its number, the number of the owner's request that is current, and whether the screen it was asked from is sensitive. */
@@ -109,4 +110,25 @@ export effect function agentOpen(noteId: string, asked: Asked) {
   if (!(try contained(list.send({ type: "agentOpen", id, covered, req }, "Agent"), "the agent opening a note"))) try opens.settle(asked.turn, false)
   const shown = try Effect.timeoutOption(Deferred.await(waiting), "10 seconds")
   return Option.getOrElse(shown, () => false)
+}
+
+/** Follow an owner's Calendar link using the ordinary note-opening rules. */
+export effect function openNoteLink(noteId: string, owner: string, route: number) {
+  const id = numberOf("note", noteId)
+  const list = try Notes.Machine
+  const first = try listedWith(id)
+  const current = try (try NoteContent).collection()
+  const where = try (try Shell).get()
+  if (current.owner !== owner || where.route !== route || !showing(where, "Notes") ||
+      !Notes.hasNote(first.rows, id) || current.noteByNumber.get(id)?.id !== noteId) return false
+  if (try alreadyOpen(id)) return true
+  const voice = Notes.rowOf(first, id).kind === "Voice"
+  if ((try covering(voice)) || Editor.waiting(try (try Editor.Machine).get()) ||
+      (try (try Editor.Machine).get()).showing) return false
+  if (!Notes.shown(first).some((row) => row.id === id) && Notes.canClearFilter(first)) {
+    try ignore(list.send({ type: "clearFilter" }, "Owner"))
+  }
+  const again = try (try Shell).get()
+  if (again.route !== route || !showing(again, "Notes") || (try covering(voice))) return false
+  return try contained(list.send({ type: "openRow", id, covered: false }, "Owner"), "opening the Calendar item’s source note")
 }

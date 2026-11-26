@@ -1,5 +1,5 @@
 import { useState, type Ref } from "react";
-import { Ellipsis, Pin, Share2, Trash2 } from "lucide-react";
+import { AlarmClock, CalendarPlus, Ellipsis, Pin, Share2, Trash2 } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 
@@ -18,6 +18,8 @@ export interface NoteMenuProps {
   onPin?: () => void;
   /** Moves the note to Recently deleted; offered only with it. */
   onDelete?: () => void;
+  onReviewReminder?: () => void;
+  onReviewEvent?: () => void;
   /** The size of the More button: 44px in the editor's busy header, whose menu reaches past Done to the screen's edge, 52px elsewhere. */
   size?: "sm" | "md";
   /** Returns focus to More after a destination panel closes. */
@@ -25,7 +27,7 @@ export interface NoteMenuProps {
 }
 
 /** The actions of an open note, behind its More button: Share, Pin or Unpin, and Delete. */
-export function NoteMenu({ pinned = false, onShare, onPin, onDelete, size = "md", triggerRef }: NoteMenuProps) {
+export function NoteMenu({ pinned = false, onShare, onPin, onDelete, onReviewReminder, onReviewEvent, size = "md", triggerRef }: NoteMenuProps) {
   const [open, setOpen] = useState(false);
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -39,6 +41,8 @@ export function NoteMenu({ pinned = false, onShare, onPin, onDelete, size = "md"
         className={noteMenuPanel}>
         <MenuItem disabled={!onShare} onSelect={onShare} className={noteMenuItem}><Share2 aria-hidden className="size-4.5" />Share</MenuItem>
         <MenuItem disabled={!onPin} onSelect={onPin} className={noteMenuItem}><Pin aria-hidden className="size-4.5" />{pinned ? "Unpin" : "Pin"}</MenuItem>
+        {onReviewReminder && <MenuItem onSelect={onReviewReminder} className={noteMenuItem}><AlarmClock aria-hidden />Review reminder</MenuItem>}
+        {onReviewEvent && <MenuItem onSelect={onReviewEvent} className={noteMenuItem}><CalendarPlus aria-hidden />Review event</MenuItem>}
         <div role="separator" className="my-1 border-t border-border" />
         <MenuItem disabled={!onDelete} onSelect={onDelete} className={noteMenuItem}><Trash2 aria-hidden className="size-4.5" />Delete</MenuItem>
       </MenuContent>

@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
-import { useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
+import { AlarmClock, CalendarPlus, Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
@@ -23,6 +23,7 @@ import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
+import { reviewNoteSchedule } from "./calendar.vibe";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { deleteSelection, enter } from "./notes.vibe";
@@ -99,12 +100,16 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
   const sharing = { type: "openMenu", note: current.note, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
   const shared = sharing.saved && current.link.tie === "NoLink" && (actions.can(sharing, "Owner") || actions.state?.open === true);
+  const canSchedule = current.note > 0 && current.draft.sync === "Kept" && !current.deleting && !Editor.waiting(current);
+  const schedule = (kind: "event" | "reminder") => void runtime.runPromise(reviewNoteSchedule({
+    number: current.note, revision: current.draft.base, view: "editor",
+  }, kind));
   const exportable = hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const editable = owner({ type: "edit", kept: true });
   const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
-  const menu = (deletable || exportable || shared || organised.pin !== undefined || organised.moves.length > 0) && <Menu onOpenChange={(open) => {
+  const menu = (deletable || canSchedule || exportable || shared || organised.pin !== undefined || organised.moves.length > 0) && <Menu onOpenChange={(open) => {
     if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
     if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
   }}>
@@ -116,8 +121,12 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
       </>}
       {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
       {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
+      {canSchedule && <>
+        <MenuItem className={noteMenuItem} onSelect={() => schedule("reminder")}><AlarmClock /> Review reminder</MenuItem>
+        <MenuItem className={noteMenuItem} onSelect={() => schedule("event")}><CalendarPlus /> Review event</MenuItem>
+      </>}
       {exportable && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-      {deletable && (shared && actions.state?.open || exportable || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
+      {deletable && (shared && actions.state?.open || canSchedule || exportable || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
       {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
     </MenuContent>
   </Menu>;
@@ -253,8 +262,20 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const review = runtime.runSync(VoiceReview);
   const moreRef = useRef<HTMLButtonElement>(null);
   const state = voice.state;
+  const note = state?.showing ? collection.noteByNumber.get(state.note) : undefined;
+  const audioId = note === undefined ? "" : audioIdOf(note);
+  const noteId = note?.id;
+  const [recognition, setRecognition] = useState<{ audioId: string; noteId: string }>();
+  const localProbe = !native() && device.canTranscribe && state?.added === 0 && state.revision === collection.version;
+  useEffect(() => {
+    if (!localProbe || audioId === "" || noteId === undefined) return;
+    const controller = new AbortController();
+    void runtime.runPromise(device.transcriptionReady(audioId, noteId), { signal: controller.signal }).then((ready) => {
+      if (!controller.signal.aborted) setRecognition(ready ? { audioId, noteId } : undefined);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [audioId, device, localProbe, noteId, runtime]);
   if (!state?.showing) return null;
-  const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
   const saved = note === undefined ? undefined : savedVoice(note);
   const lines = saved?.lines.map((line) => ({ ...speaker(line.who), at: clock(line.at), text: line.text })) ?? [];
@@ -269,7 +290,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const showTranscript = { type: "showTranscript" } as const;
   const addTranscript = { type: "addTranscript" } as const;
   const back = { type: "back" } as const;
-  const audio = note !== undefined && audioIdOf(note) !== "";
+  const audio = audioId !== "";
   const current = state.revision === collection.version;
   const pending = current && state.heard > state.added ? runtime.runSync(review.get(state)) : undefined;
   const pinned = note?.format?.data.pinned === true;
@@ -282,8 +303,9 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   };
   const canPin = current && note !== undefined && voice.can(pin, "Owner");
   const pinWrite = state.part === "Pin" || state.part === "Unpin";
-  const canTranscribe = device.canTranscribe && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
-  const canRetry = device.canTranscribe && audio && current && voice.can(retry, "Owner");
+  const canRecognize = device.canTranscribe && (native() || (recognition?.audioId === audioId && recognition.noteId === noteId));
+  const canTranscribe = canRecognize && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
+  const canRetry = canRecognize && audio && current && voice.can(retry, "Owner");
   const generate = (again = false) => void runtime.runPromise(generateTranscript(state.note, state.revision, again));
   const canUseTranscript = current && note !== undefined && lines.length > 0 && voice.can(ask, "Owner");
   const copy = canUseTranscript ? () => void runtime.runPromise(copyTranscript({
@@ -292,6 +314,9 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   })) : undefined;
   const player = device.canPlay && audio;
   const canPlay = player && current && voice.can(play, "Owner");
+  const schedule = (kind: "event" | "reminder") => void runtime.runPromise(reviewNoteSchedule({
+    number: state.note, revision: state.revision, view: "voice",
+  }, kind));
   const toggle = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
   const seek = canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from: number) => {
     const event = { type: "play", from } as const;
@@ -307,6 +332,8 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
     lines={lines}
     menu={note !== undefined && <NoteMenu pinned={pinned} triggerRef={moreRef}
       onPin={canPin ? () => void voice.send(pin, "Owner") : undefined}
+      onReviewReminder={current ? () => schedule("reminder") : undefined}
+      onReviewEvent={current ? () => schedule("event") : undefined}
       onShare={current && voice.can(share, "Owner") ? () => void voice.send(share, "Owner") : undefined} />}
     onAskTranscript={canUseTranscript ? () => void voice.send(ask, "Owner") : undefined}
     onCopyTranscript={copy}
@@ -321,7 +348,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
         restore={() => moreRef.current?.focus({ preventScroll: true })} />
       {canTranscribe && <Button className="mt-4" variant="secondary" onClick={() => generate()}>Generate transcript</Button>}
       {state.listen.status === "Loading" && <div className="mt-4 flex items-center gap-2">
-        <Spinner label="Transcribing on this phone" />
+        <Spinner label={native() ? "Transcribing on this phone" : "Transcribing on this computer"} />
         <span className="text-sm text-muted-foreground">Transcribing…</span>
         {voice.can(cancel, "Owner") && <Button variant="ghost" size="sm" aria-label="Cancel transcription" onClick={() => void voice.send(cancel, "Owner")}>Cancel</Button>}
       </div>}
