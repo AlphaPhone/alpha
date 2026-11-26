@@ -11,7 +11,6 @@ import type { Machine as PhoneMachine, Tab } from "../../gen/app__phone.effect.v
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
-import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { contactChatActionsId } from "../assistant/contact-chat-id.ts";
 import { attachFromContact, searchFromContact } from "../assistant/contact-search.ts";
@@ -30,7 +29,8 @@ export interface ContactsProps {
 }
 
 /**
- * Contacts: the list with favourites and search, one contact as the phone holds it, and the form. Call and Message
+ * Contacts: the list with search and the favourites filter, with no favourites strip above it as on v119 (45f6bed30,
+ * prototype/template.html:2843-2862), one contact as the phone holds it, and the form. Call and Message
  * open Phone or Messages with the number filled in; nothing is dialled or sent here.
  * @model spec/app/contacts/index.md
  */
@@ -38,7 +38,6 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const contacts = useContacts(runtime);
   const phone = usePhone(runtime).state;
   const returningRef = useRef<{ tab: Tab } | undefined>(undefined);
-  const voicemail = useVoicemail(runtime).state;
   const shell = useShell(runtime);
   const held = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const groups = useMemo(() => {
@@ -50,7 +49,6 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       .sort(([left], [right]) => Number(left === "#") - Number(right === "#") || left.localeCompare(right))
       .map(([letter, rows]) => [letter, rows?.toSorted((left, right) => left.name.localeCompare(right.name))] as const);
   }, [held.rows]);
-  const favourites = useMemo(() => held.rows.filter((row) => row.starred), [held.rows]);
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
   if (!state || !phone) return null;
@@ -103,7 +101,8 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     </form>
   ) : undefined;
   const header = phoneTabs ? (
-    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
+    // v119 (45f6bed30) prototype/phone-adapter.ts:276-277: the pill on Contacts shows no unheard voicemail dot.
+    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={false} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
   ) : searchHeader ?? (
     <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
   );
@@ -129,14 +128,6 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
           {(listedEmpty(state) || noMatches(state)) && <p role="status" className="flex min-h-45 items-center justify-center p-6 text-center text-base leading-normal text-muted-foreground">{noMatches(state) ? "No contacts found" : "No contacts yet"}</p>}
           {state.rows > 0 && (
             <ListGroup aria-label="Contacts" surface="plain">
-              {!searching && !state.sought && favourites.length > 0 && <div className="flex touch-pan-x gap-1.5 overflow-x-auto px-3.5 pt-2 pb-2.5" role="group" aria-label="Favourites">
-                {favourites.map((row) => (
-                  <Button key={row.id} variant="ghost" aria-label={`Open favourite ${row.name}`} className="h-auto w-18 flex-col gap-1.75 rounded-tile p-0" disabled={!can({ type: "openContact", contact: row.id })} onClick={() => open(row.id)}>
-                    <Avatar name={row.name} className="size-15 text-lg font-bold" />
-                    <span className="w-full truncate text-caption font-normal">{row.name.trim().split(/\s+/, 1)[0]}</span>
-                  </Button>
-                ))}
-              </div>}
               {groups.map(([letter, rows]) => (
                 <div key={letter}>
                   {state.rows >= 20 && <h2 className="px-6 pt-3 pb-0.5 text-caption font-semibold text-muted-foreground">{letter}</h2>}
