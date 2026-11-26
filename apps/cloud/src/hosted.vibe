@@ -30,6 +30,9 @@ export function hostedProfileProblems(profile: CloudProfile, hosts: Record<Cloud
       problems.push(`${environment}: the profile answers at ${settings.api} for ${settings.web}, and @repo/deployment names ${cloud.cloud} for ${cloud.appLinkHost}`)
     if (!offersAlphasServices(settings.name, settings.entitlementAudience, [...settings.capabilities]))
       problems.push(`${environment}: the profile is not Alpha's own cloud, with its name, its services and Alpha's package as the audience`)
+    const realtime = settings.speech?.realtimeUrl
+    if (realtime === undefined || !realtime.startsWith("wss://") || URL.parse(realtime)?.origin !== realtime)
+      problems.push(`${environment}: speech realtimeUrl must be a wss origin without an endpoint path`)
     if (settings.mail.kind !== "binding" || !mailsAsAlpha(settings.mailSender, settings.mail.binding))
       problems.push(`${environment}: the profile must use Alpha's own Cloudflare email binding and sender`)
     if (!returnsOffApi(registrationAt(environment === "production" ? "Production" : "Staging", cloud.appLinkHost), settings.api))

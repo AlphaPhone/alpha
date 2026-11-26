@@ -285,6 +285,11 @@ describe(`Alpha Cloud at its hosted origins (spec/cloud/index.md, "Story: Operat
     } } }
     try holds(() => assert.deepStrictEqual(hostedProfileProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production", "production"]))
     const staging = profile.environments.staging
+    try holds(() => assert.deepStrictEqual(hostedProfileProblems({
+      ...profile, environments: { ...profile.environments, staging: {
+        ...staging, speech: { ...staging.speech!, realtimeUrl: "wss://api.cartesia.ai/stt/websocket" },
+      } },
+    }, hosts), ["staging: speech realtimeUrl must be a wss origin without an endpoint path"]))
     const alternatives: ReadonlyArray<typeof staging.mail> = [{ kind: "binding", binding: "OTHER_EMAIL" }, { kind: "https", url: "https://email.example.com/messages", apiKeyEnv: "OTHER_EMAIL_KEY" }]
     try holds(() => assert.deepStrictEqual(alternatives.map((mail) => hostedProfileProblems({
       ...profile, environments: { ...profile.environments, staging: { ...staging, mail } },
