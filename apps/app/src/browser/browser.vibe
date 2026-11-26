@@ -3,6 +3,7 @@ import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { browsingSnapshot, DEFAULT_BROWSING_LIMITS, restoreBrowsing, savedBrowserUrl } from "@elizaos/os-bridges"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
+import type { Kind } from "../../gen/app__browser__shared.ts"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
 import * as Share from "../../gen/app__browser__share.effect.vibe"
@@ -188,7 +189,7 @@ export effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
 }
 
 // spec/app/browser/index.md, "A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one"
-effect function made(tab: number, kind: Tabs.Kind): void!!(TabHost | Tabs.Machine) {
+effect function made(tab: number, kind: Kind): void!!(TabHost | Tabs.Machine) {
   const host = try TabHost
   const id = idOf(tab)
   if (host.web !== undefined) {
@@ -271,7 +272,6 @@ function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, 
     });
     when { tag: "Save", let write }: answer("save", written(write), { type: "saved", ticket: write, ok: false, now: untimed });
     when { tag: "Erase" }: answer("erase", erased(), { type: "erased", ok: false });
-    when { tag: "Halt" }: run("halt", Effect.void);
   }
 }
 
@@ -688,7 +688,7 @@ export effect function presentForAction(id: string): boolean!!(TabHost | Tabs.Ma
   return try contained(hosted("present", (plugin, session) => plugin.present({ session, id, ...position })), "showing the Browser page")
 }
 
-// spec/app/browser/downloads.md, "Story: Download a file"
+// spec/app/files/index.md, "Story: Browse my storage"
 /** Open the phone's Browser downloads, or enter Files from the enclosing browser. */
 export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
   const shell = try Shell

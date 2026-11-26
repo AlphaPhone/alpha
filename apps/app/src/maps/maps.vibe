@@ -172,13 +172,6 @@ effect function foundOrigins(ticket: number, query: string): Ev!!(Cloud | Time |
   } catch () => ({ type: "answerOrigins", ticket, ok: false, found: 0 })
 }
 
-// spec/app/maps/index.md, "The agent's search shows its cards in the conversation and leaves the screen alone"
-effect function foundForAgent(query: string): void!!(Cloud | Time | Screen.Machine | Atlas) {
-  const store = try Atlas
-  try ignore(asked((client, signal) => client.mapsPlacesSearch({ query, limit: 5, ...near(store) }, { signal }))
-    |> Effect.map(%, (found) => store.numberAll(found.places.map(spotOf))))
-}
-
 // spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
 effect function detailed(ticket: number, place: number): Ev!!(Cloud | Time | Screen.Machine | Atlas) {
   const store = try Atlas
@@ -449,9 +442,7 @@ effect function handed(place: number, kind: HandOff): void!!(Screen.Machine | Ti
 function carry(fx: Out): Job<Ev, Cloud | Time | Location | Navigation | Screen.Machine | KeyValueStore.KeyValueStore | Shell | Device | Atlas, []> {
   return match (fx) {
     when { tag: "ReadCoverage", let ticket }: answer("coverage", covered(ticket), { type: "answerCoverage", ticket, ok: false, covered: false, google: false, offer: noOffer });
-    when { tag: "DrawMap" }: run("draw", Effect.void);
     when { tag: "FindPlaces", let ticket, let query }: answer("search", searched(ticket, query), { type: "answerSearch", ticket, ok: false, found: 0 });
-    when { tag: "FindForAgent", let query }: run("agentSearch", foundForAgent(query));
     when { tag: "FindOrigins", let ticket, let query }: answer("origins", foundOrigins(ticket, query), { type: "answerOrigins", ticket, ok: false, found: 0 });
     when { tag: "ReadDetails", let ticket, let place }: answer("details", detailed(ticket, place), { type: "answerDetails", ticket, ok: false });
     when { tag: "MakePin", let lat, let lng }: answer("pin", pinned({ lat, lng }), { type: "dropPin", place: 0 });
@@ -467,7 +458,6 @@ function carry(fx: Out): Job<Ev, Cloud | Time | Location | Navigation | Screen.M
     when { tag: "KeepSaved", let saved, let change }: answer("saved", keep(saved, change), { type: "savedKept", change, ok: false });
     when { tag: "HandedOn", let place, let kind }: run("handOn", handed(place, kind));
     when { tag: "OpenEvent" }: run("event", Effect.flatMap(Shell, (shell) => ignore(shell.send({ type: "openView", view: "Calendar" }))));
-    when { tag: "TellAgent", let ticket }: answer("tell", succeed<Ev>({ type: "answerTell", ticket, confirmed: false, known: false }), { type: "answerTell", ticket, confirmed: false, known: false });
     when { tag: "BringMapsForward" }: run("forward", Effect.flatMap(Shell, (shell) => ignore(shell.send({ type: "openView", view: "Maps" }))));
   }
 }

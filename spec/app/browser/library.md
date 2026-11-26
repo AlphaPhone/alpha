@@ -202,7 +202,7 @@ pure def visited(s: Library, count: int, remaining: int): Library =
 
 ### The Library lists every bookmark and every page of history, one plain list each, with no search and no day headings
 
-As in Sunday's v119, the Library shows Bookmarks or History as one list
+The Library shows Bookmarks or History as one list
 of pages, each a row with its initial, title and address: there is no field
 to search them and history is not grouped under day headings. Every page
 the library holds is listed; the time range only chooses what Clear

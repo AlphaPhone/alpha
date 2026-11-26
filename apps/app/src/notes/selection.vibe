@@ -1,4 +1,4 @@
-// spec/app/notes/agent.md, "The agent reads one note, or the note the owner has open in Notes in front, and is told the revision it read"; spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
+// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
 import type { StickyNote } from "@elizaos/plugin-notes-client"
 import { Machine as Notes, type Notes as List } from "../../gen/app__notes.effect.vibe"
 import { Machine as Editor, type Editor as Writing } from "../../gen/app__notes__editor.effect.vibe"

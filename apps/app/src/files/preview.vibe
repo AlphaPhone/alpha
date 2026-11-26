@@ -24,7 +24,7 @@ import { type Said, say } from "../notices/toasts.vibe"
 import { adopt, keptAt } from "../platform/adoption.vibe"
 import { Documents, previewUrl } from "../platform/documents.vibe"
 import { type Files, called } from "../platform/files.vibe"
-import { type Job, answer, following, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
+import { type Job, answer, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { createShelf, type Shelf } from "../runtime/shelf.vibe"
 import { Handles, type Spot } from "./handles.vibe"
 
@@ -451,7 +451,7 @@ effect function excerpt(content: Content, page: number, id: string, name: string
   return { id, name: name.slice(0, nameLimit - suffix.length) + suffix, mimeType: image.type, data: base64(new Uint8Array(bytes)) }
 }
 
-// spec/app/files/preview.md, "Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here"; spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
+// spec/app/files/preview.md, "Ask Alpha and Open elsewhere hand the file on and change nothing here"; spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
 effect function readAttachment(prior: FileSelection, allowExcerpt: boolean): (Attached | undefined)!!(FilePreview | Documents) {
   const machine = try Shown.Machine
   const shown = try machine.get()
@@ -775,7 +775,6 @@ function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | Media
     when { tag: "Lost", let item }: run("lost", toRecent({ type: "lapsed", key: item }), "Phone");
     when { tag: "SelectAgain", let item }: run("again", effect { try ignore((try Recent.Machine).send({ type: "openPicker", replacing: item }, "Owner")) }, "Phone");
     when { tag: "AskAlpha", let viewer, let item, let revision }: run("ask", askAbout(viewer, item, revision), "Phone");
-    when { tag: "Transcribe" }: stop("transcribe");
     when { tag: "OfferPicture", let viewer, let item, let revision }: run(`offer picture ${viewer}`, offerPicture(viewer, item, revision), "Phone");
     when { tag: "OfferEmail", let ticket, let viewer, let item, let revision, let account }: answer("email", offerEmail(ticket, viewer, item, revision, account), { type: "answered", ticket, confirmed: false, known: false }, "Phone");
   }

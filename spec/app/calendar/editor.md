@@ -328,7 +328,7 @@ pure def sometimesSavedAfterEdits(s: Editor): bool = s.write.outcome == A::Confi
 > As the owner, I want an event with people, a video call or alerts handed
 > to Android Calendar to finish, rather than saved without them.
 
-As in Sunday's v119, a new event shows its video link, how it repeats and
+A new event shows its video link, how it repeats and
 its alert whenever this phone's calendar is there to take it, whichever
 calendar is chosen. The form never moves an event to another calendar on
 its own: while the agent's calendar is chosen, these rows offer only what

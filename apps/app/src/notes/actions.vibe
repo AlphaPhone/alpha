@@ -1,4 +1,4 @@
-// spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Only one handoff can leave the menu for the exact note and revision reviewed"; spec/app/notes/actions.md, "The phone opens the share the owner asked for on a new note, once its first save lands"
+// spec/app/notes/actions.md, "Story: Share a note"; spec/app/notes/actions.md, "Only one handoff can leave the menu for the exact note and revision reviewed"; spec/app/notes/actions.md, "The phone opens the share the owner asked for on a new note, once its first save lands"
 import { noteShareText } from "@elizaos/plugin-notes-client"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import { Machine as Transfer } from "../../gen/app__notes__transfer.effect.vibe"
@@ -14,11 +14,10 @@ import { Letters, begin } from "../inbox/composer.vibe"
 import type { Mail } from "../inbox/gmail.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { Device, native, shareSystemText } from "../platform/device.vibe"
-import { NoteDevice } from "../platform/noteDevice.vibe"
 import { downloadText } from "../platform/noteDocuments.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { NoteStore } from "../platform/notes.vibe"
-import { launchOwnerAt, ownerAt, sameResidentOwner } from "../platform/owner.vibe"
+import { launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
 import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { type NotesSelection, savedVoiceRecord } from "./selection.vibe"
 import { NoteContent, numberOf } from "./content.vibe"
@@ -26,7 +25,7 @@ import { NoteContent, numberOf } from "./content.vibe"
 const phone: Actor = "Phone"
 
 type SharePorts = Device | Transfer | Inbox | Composer | Mail | Letters | Shell
-type Scope = Agent | NoteStore | Editor | NoteContent | NoteDevice | Layers | SharePorts
+type Scope = Agent | NoteStore | Editor | NoteContent | Layers | SharePorts
 
 effect function email(title: string, text: string): boolean!!(Inbox | Composer | Letters | Mail | Shell) {
   const mail = try (try Inbox).get()
@@ -41,22 +40,6 @@ effect function email(title: string, text: string): boolean!!(Inbox | Composer |
   if (saved === undefined) return false
   try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
   return true
-}
-
-effect function share(fx: Extract<Actions.Effect, { readonly tag: "Hands" }>): void!!Scope {
-  const editor = try (try Editor).get()
-  const current = try (try NoteContent).collection()
-  const shell = try (try Shell).get()
-  if (!showing(shell, "Notes") || !editor.showing || editor.deleting || editor.draft.sync !== "Kept" || editor.note !== fx.note) return
-  const identity = ownerAt() catch () => ""
-  if (identity === "" || identity !== current.owner || editor.owner !== numberOf("owner", identity)) return
-  const snapshot = (try NoteStore).read() catch () => undefined
-  if (snapshot === undefined || snapshot.revision + 1 !== editor.draft.base || (ownerAt() catch () => "") !== identity) return
-  const saved = snapshot.notes.find((note) => numberOf("note", note.id) === fx.note)
-  if (saved === undefined) return
-  const { title, text } = noteShareText(saved)
-  if (fx.channel === "Email" && (try email(title, text))) return
-  try ignore((try NoteDevice).share(fx.channel, title, text))
 }
 
 /** The destination receives text only from its explicit row. Email still opens a draft. */
@@ -140,8 +123,6 @@ effect function reportShare(fx: Extract<Actions.Effect, { readonly tag: "ReportS
 
 function carry(fx: Actions.Effect): Job<Actions.Event, Scope | Actions.Machine | Toasts | Said, [Actor]> {
   return match (fx) {
-    when { tag: "Hands" }: run("draft a share", share(fx), phone);
-    when { tag: "Drafts" }: run("prepare the schedule", Effect.void, phone);
     when { tag: "Presents" }: answer("share the reviewed note", shareText(fx), textShared(fx.ticket, "ShareUnavailable"), phone);
     when { tag: "ReportShare" }: run("report the note share", reportShare(fx), phone);
   }

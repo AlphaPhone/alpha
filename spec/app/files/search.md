@@ -82,7 +82,7 @@ pure def searched(s: Search, ticket: int, ok: bool, complete: bool, entries: Lis
 
 pure def canClearFilter(s: Search): bool = s.searching
 
-pure def clearFilter(s: Search): Search = { ...s, filter: everything, searching: false, query: F::drop(s.query), hits: List(), complete: false, asker: 0 }
+pure def clearFilter(s: Search): Search = { ...s, filter: everything, searching: false, query: R::drop(s.query), hits: List(), complete: false, asker: 0 }
 ```
 
 ### A filter on follows the owner to each place, and is asked again there
@@ -113,7 +113,7 @@ pure def agentLooked(s: Search, ticket: int, ok: bool): Search = { ...s, peek: R
 
 ```quint
 pure def stop(s: Search): Search =
-  { ...s, searching: false, query: F::drop(s.query), hits: List(), complete: false, asker: 0, peek: F::drop(s.peek), peeker: 0 }
+  { ...s, searching: false, query: R::drop(s.query), hits: List(), complete: false, asker: 0, peek: R::drop(s.peek), peeker: 0 }
 
 pure def stepStoppingLeavesNothingToAnswer(before: Search, via: str, after: Search): bool =
   via == "stop" implies (after.query.status != R::Loading and after.peek.status != R::Loading and after.hits.length() == 0)

@@ -159,7 +159,7 @@ describe("Clock journeys", () => {
     expect(document.body.textContent).toContain("Morning workout");
     expect(document.body.textContent).toContain("Weekdays");
     expect(document.body.textContent).toContain("7:00");
-    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did"
+    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length"
     await waitFor(Alarms.Machine, (s) => s.items[0]?.snoozeMinutes === 10);
 
     // spec/app/clock/alarms.md, "Toggling an alarm enables it for its next fire time or disables it cleanly to idle"

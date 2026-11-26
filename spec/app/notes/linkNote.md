@@ -89,12 +89,12 @@ note changed meanwhile.
 
 ```quint
 pure def canAskRemove(d: Dialog, by: Actor): bool =
-  by == Owner and d.showing and not(d.changed) and not(d.review.showing) and not(inFlight(d.removal))
+  by == Owner and d.showing and not(d.changed) and not(d.review.showing) and not(A::inFlight(d.removal))
 
 pure def askRemove(d: Dialog, by: Actor): Dialog = { ...d, review: V::present(d.review) }
 
 pure def canConfirmRemove(d: Dialog, by: Actor): bool =
-  by == Owner and d.showing and not(d.changed) and V::canConfirm(d.review) and not(inFlight(d.removal))
+  by == Owner and d.showing and not(d.changed) and V::canConfirm(d.review) and not(A::inFlight(d.removal))
 
 pure def confirmRemove(d: Dialog, by: Actor): Moved =
   val removal = A::dispatch(A::record(A::plan(d.removal.id + 1)))
@@ -144,7 +144,7 @@ pure def stepOneActionPerDialog(before: Dialog, via: str, after: Dialog, out: Li
         and not(after.showing)
     | Removes(r) => via == "confirmRemove" and before.showing and not(before.changed) and V::canConfirm(before.review)
         and r.note == before.note and r.base == before.revision and r.ticket == before.removal.id + 1
-        and not(inFlight(before.removal)) and not(after.showing) and r.owner == before.owner and isOwner(r.owner)
+        and not(A::inFlight(before.removal)) and not(after.showing) and r.owner == before.owner and isOwner(r.owner)
     | _ => true
   })
 ```
@@ -168,7 +168,7 @@ pure def alwaysTheDialogIsSound(d: Dialog): bool =
 ### A removal ends
 
 ```quint
-pure def leadsToARemovalEnds(d: Dialog, later: Dialog): bool = inFlight(d.removal) implies not(inFlight(later.removal))
+pure def leadsToARemovalEnds(d: Dialog, later: Dialog): bool = A::inFlight(d.removal) implies not(A::inFlight(later.removal))
 
 pure val fair_removed = "weak"
 ```
@@ -210,7 +210,7 @@ pure def stepLeavingKeepsTheRemoval(before: Dialog, via: str, after: Dialog): bo
 ```quint
 pure def canRestart(d: Dialog, by: Actor): bool = by == Phone
 
-pure def restart(d: Dialog, by: Actor): Dialog = { ...closed(d.note, d), removal: cutOff(d.removal) }
+pure def restart(d: Dialog, by: Actor): Dialog = { ...closed(d.note, d), removal: A::cutOff(d.removal) }
 ```
 
 ### When another owner takes the phone, the dialog closes, a removal on its way is cut off, and no answer for the owner before is taken
@@ -219,7 +219,7 @@ pure def restart(d: Dialog, by: Actor): Dialog = { ...closed(d.note, d), removal
 pure def canOwnerChanged(d: Dialog, owner: int, by: Actor): bool = by == Phone and owner != d.owner and owner >= 0
 
 pure def ownerChanged(d: Dialog, owner: int, by: Actor): Dialog =
-  { ...closed(d.note, d), owner: owner, note: 0, link: unlinked, removing: 0, removal: cutOff(d.removal) }
+  { ...closed(d.note, d), owner: owner, note: 0, link: unlinked, removing: 0, removal: A::cutOff(d.removal) }
 
 pure def stepNoAnswerForAFormerOwner(before: Dialog, via: str, after: Dialog): bool =
   (via == "ownerChanged" or via == "restart") implies not(canRemoved(after, before.removal.id, Phone))

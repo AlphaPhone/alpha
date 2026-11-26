@@ -322,8 +322,8 @@ is found again.
 pure def canRestart(r: Recovery, by: Actor): bool = by == Phone
 
 pure def restart(r: Recovery, by: Actor): Recovery =
-  { ...r, process: r.process + 1, stage: Free, row: noRow, look: dropped(r.look), findings: unclear,
-    review: V::dismiss(r.review), attempt: cutOff(r.attempt), byOwner: false }
+  { ...r, process: r.process + 1, stage: Free, row: noRow, look: R::drop(r.look), findings: unclear,
+    review: V::dismiss(r.review), attempt: A::cutOff(r.attempt), byOwner: false }
 
 pure def stepARestartTakesNoLateAnswer(before: Recovery, via: str, after: Recovery): bool =
   via == "restart" implies (after.process > before.process and not(holding(after)) and after.attempt.outcome != A::Sent)
@@ -335,8 +335,8 @@ pure def stepARestartTakesNoLateAnswer(before: Recovery, via: str, after: Recove
 pure def canOwnerChanged(r: Recovery, owner: int, by: Actor): bool = by == Phone and owner != r.owner and owner >= 0
 
 pure def ownerChanged(r: Recovery, owner: int, by: Actor): Recovery =
-  { ...r, owner: owner, stage: Free, row: noRow, look: dropped(r.look), findings: unclear, review: V::dismiss(r.review),
-    attempt: cutOff(r.attempt), byOwner: false }
+  { ...r, owner: owner, stage: Free, row: noRow, look: R::drop(r.look), findings: unclear, review: V::dismiss(r.review),
+    attempt: A::cutOff(r.attempt), byOwner: false }
 ```
 
 ### A review is shown only for the row in hand, and a plan is on its way exactly while the phone acts on a row

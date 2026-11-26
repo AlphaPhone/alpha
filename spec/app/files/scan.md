@@ -1,7 +1,7 @@
 # Scan a document
 
 Pages made into a PDF in [Files](./index.md). The scan opens from Files,
-or from a picture chosen in Photos; each page comes from the [capture dialog](./capture.md) and its
+or from a picture chosen in Photos; each page comes from the capture dialog and its
 edges from the [correction dialog](./correction.md). Text read from a page
 on the phone stays with that page, and the owner sees and corrects it;
 what is done with it is [Text on a scanned page](./scanText.md). The pages
@@ -606,7 +606,7 @@ pure def canPrepared(s: Scan, ticket: int, by: Actor): bool =
 
 pure def prepared(s: Scan, ticket: int, ok: bool, problem: Problem, by: Actor): Moved =
   if (ok) { state: { ...s, pdf: A::dispatch(s.pdf) }, out: List(Export({ ticket: ticket })) }
-  else { state: { ...s, pdf: F::withdraw(s.pdf), search: retrySearch(s), problem: if (problem == NoProblem) NotDrawn else problem }, out: List() }
+  else { state: { ...s, pdf: A::withdraw(s.pdf), search: retrySearch(s), problem: if (problem == NoProblem) NotDrawn else problem }, out: List() }
 ```
 
 ### The saved PDF ends as the phone says; a confirmed one is listed in Recent, and pages confirmed or unsure are written
@@ -720,7 +720,7 @@ exported again; once the phone was asked, its answer still counts.
 pure def closed(by: Actor, s: Scan): Scan =
   val keep = s.origin == Document or s.pdf.outcome == A::Sent
   { ...s, open: false, origin: if (keep) s.origin else Document, pages: if (keep) s.pages else List(),
-    text: T::close(s.text), keeping: K::close(s.keeping), pdf: F::withdraw(s.pdf), search: closeSearch(s.search.ticket) }
+    text: T::close(s.text), keeping: K::close(s.keeping), pdf: A::withdraw(s.pdf), search: closeSearch(s.search.ticket) }
 
 pure def canClose(s: Scan, by: Actor): bool = by == Owner and s.open
 
@@ -755,7 +755,7 @@ pure def lawAPagePickedBehindItsPickerIsAdded(frame: int, camera: bool): bool =
 pure def canRestart(s: Scan, by: Actor): bool = by == Phone
 
 pure def restart(s: Scan, by: Actor): Scan =
-  val cut = { ...closed(by, s), origin: Document, pages: if (s.origin == Document) s.pages else List(), pdf: F::cut(s.pdf), keep: F::cut(s.keep), keeping: K::restart(s.keeping), text: T::restart(s.text) }
+  val cut = { ...closed(by, s), origin: Document, pages: if (s.origin == Document) s.pages else List(), pdf: A::cutOff(s.pdf), keep: A::cutOff(s.keep), keeping: K::restart(s.keeping), text: T::restart(s.text) }
   { ...cut, written: if (s.pdf.outcome == A::Sent) writing(s) else s.written, kept: if (s.keep.outcome == A::Sent) keptAfter(cut) else s.kept }
 
 pure def stepARestartLeavesNothingUnderWay(before: Scan, via: str, after: Scan): bool =

@@ -3,7 +3,7 @@
 The agent's Calendar linked to one of the owner's Google calendars, set up
 from Calendar's Google row. The two-way sync runs on the agent, under
 eliza's linked sync control and its links; the Google account and its
-grants are the [accounts area](../account/google.md)'s. The phone never
+grants are the [accounts area](../account/index.md)'s. The phone never
 copies its own calendar to Google: that client-side sync is retired, and
 this is the agent-side link it left. Alpha reviews the agent's sync
 control, writes it only inside the fence of the revision it reviewed, and

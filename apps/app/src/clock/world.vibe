@@ -5,5 +5,5 @@ import { reacting } from "../runtime/reactor.vibe"
 /** Resident world clock machine holding pinned city ids across restarts. */
 export const worldClock = reacting(World, {
   keep: 1,
-  open: [{ type: "reopen" }],
+  open: [{ type: "removeCity", cityId: 0 }],
 })

@@ -1,4 +1,4 @@
-// spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places, the Calendar event it came from, the agent's question and the agent's last read"
+// spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places and the Calendar event it came from"
 import type { CloudClient } from "../platform/cloud.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { createShelf } from "../runtime/shelf.vibe"

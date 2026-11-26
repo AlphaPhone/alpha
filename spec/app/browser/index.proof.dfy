@@ -117,9 +117,6 @@ lemma closeTab_ensures(s: Browser, tab: int, instead: int)
     if tab in s.native {
       assert Close(tab) in r.out;
     }
-    if s.agent == tab {
-      assert Halt(tab) in r.out;
-    }
     if |s.open| == 1 {
       assert forall y :: y in s.open ==> y == tab;
     } else {
@@ -175,10 +172,6 @@ lemma nativeLost_ensures(s: Browser, tab: int)
 {
   if inv(s) && canNativeLost(s, tab) {
     Members((set_x: int) => !((set_x in [tab])), s.native);
-    var r := nativeLost(s, tab);
-    if s.agent == tab {
-      assert Halt(tab) in r.out;
-    }
   }
 }
 

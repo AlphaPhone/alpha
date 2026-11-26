@@ -223,10 +223,9 @@ pure def lawTheAgentCalendarTakesNoRepeat(hasAlert: bool, hasVideo: bool): bool 
 
 While the agent's calendar is chosen, a repeat, an alert or a video link
 is offered only where that calendar would take the event with it. One it
-would not take is left off the form, not drawn dimmed, as the live v119
-phone left it off; a draft that still holds one there shows only the way
-to clear it, a single No repeat chip for a repeat, as the live v119 agent
-calendar drew it. The phone's calendar names that choice Once. The options
+would not take is left off the form, not drawn dimmed; a draft that still
+holds one there shows only the way to clear it, a single No repeat chip for
+a repeat. The phone's calendar names that choice Once. The options
 are drawn only for a calendar the form offers, so a browser with no
 calendar of its own and no agent's calendar shows none. Picking one never switches the event to another calendar, and
 Save stays in reach.
@@ -273,7 +272,7 @@ pure def agentAllDayUpdateAllowed(allDay: bool, startWholeDay: bool, endWholeDay
 pure def lawAPartDayIsNeverSentAsAllDay(endWholeDay: bool): bool = not(agentAllDayUpdateAllowed(true, false, endWholeDay))
 ```
 
-### A new event repeats once, daily, on weekdays or weekly, as in v119, and can be created with one
+### A new event repeats once, daily, on weekdays or weekly, and can be created with one
 
 ```quint
 type Repeat = NoRepeat | Daily | Weekdays | Weekly
@@ -291,10 +290,9 @@ pure def lawEveryRuleRepeats(repeat: Repeat): bool = repeating(repeat) iff repea
 
 A new event's calendar is a real one: the agent's while it is connected,
 or the phone's on a phone. With neither, as in a browser without an
-account, Save says Calendar unavailable, v119's words when it had no
-calendar to write to, and a save is never refused unsaid. Once Android
-said no to the phone's calendar, Save is off and the form says No access,
-as v119 did after asking at Save, beside the way to Calendar's settings.
+account, Save says Calendar unavailable, and a save is never refused unsaid.
+Once Android said no to the phone's calendar, Save is off and the form says
+No access, beside the way to Calendar's settings.
 
 ```quint
 type SaveBlock = SaveAllowed | WaitLoading | WaitSaving | OtherAccount | CheckEvent | AddTitle | NoCalendar | NoAccess

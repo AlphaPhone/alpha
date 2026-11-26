@@ -75,7 +75,7 @@ pure def canListed(p: Previous, ticket: int, by: Actor): bool = by == Phone and 
 pure def listed(p: Previous, ticket: int, ok: bool, olds: List[Old], binned: List[Old], by: Actor): Previous =
   { ...p, read: R::answer(p.read, ok), olds: if (ok) olds else List(), binned: if (ok) binned else List() }
 
-pure def shut(owner: int, p: Previous): Previous = { ...p, owner: owner, showing: false, read: dropped(p.read), olds: List(), binned: List(), old: 0 }
+pure def shut(owner: int, p: Previous): Previous = { ...p, owner: owner, showing: false, read: R::drop(p.read), olds: List(), binned: List(), old: 0 }
 
 pure def canBackToNotes(p: Previous): bool = p.showing and p.old == 0
 

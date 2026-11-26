@@ -6,7 +6,7 @@ import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vi
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
-import { answer, contained, reacting, run } from "../runtime/reactor.vibe"
+import { answer, contained, reacting } from "../runtime/reactor.vibe"
 import { browserInFront, idOf } from "./browser.vibe"
 
 export type SitePage = BrowserPageBinding & { readonly host: string }
@@ -91,9 +91,5 @@ effect function clearing(ticket: number): Site.Event!!(SiteRows | TabHost | Tabs
 export const site = Layer.provideMerge(reacting(Site, {
   carry: (fx: Site.Effect) => match (fx) {
     when { tag: "Clear", let ticket }: answer("clear site", clearing(ticket), { type: "cleared", ticket, ok: false } as Site.Event);
-    when { tag: "AskAndroid" }: run("ask android", Effect.void);
-    when { tag: "Grant" }: run("grant", Effect.void);
-    when { tag: "Refuse" }: run("refuse", Effect.void);
-    when { tag: "Authenticate" }: run("authenticate", Effect.void);
   },
 }), rows)

@@ -223,7 +223,7 @@ describe("Files on a phone", () => {
     expect(button("beach.jpg")?.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
+  it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
     const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true }, "view:Browser");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");

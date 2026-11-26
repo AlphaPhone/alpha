@@ -22,8 +22,8 @@ reach it.
 
 ```quint
 import review as V from "../../kit/review"
+import shared.* from "./shared"
 
-type Kind = Normal | Private
 type Dest = System | Copy | Email
 type Delivery = NoDelivery | Sending({ panel: int, dest: Dest })
 type Notice = Quiet | NoPage | Changed | Copied | ClipboardRefused | Passkeys | NoBrowser | NotOpened
