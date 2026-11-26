@@ -477,11 +477,18 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
+    // v119 live rows read size · date with no leading type word (files-browser-adapter.ts:1315-1324); the kind stays for screen readers.
+    const notesRow = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === "notes.txt");
+    const notesDetail = notesRow?.querySelector("span.text-muted-foreground")?.textContent ?? "";
+    expect([notesDetail.startsWith("Document"), notesDetail.split(" · ").length, notesRow?.getAttribute("aria-description")]).toEqual([false, 2, `Document · ${notesDetail}`]);
     // spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it"
     // spec/app/files/preview.md, "What was read of a file is shown only in its own viewer, while it can be read"
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
+    // v119 live left the 18px slot before the facts empty (selection-adapter.ts:282 `d: ''`): no kind icon, the words keep their place.
+    const facts = document.querySelector("[data-facts-slot]")?.parentElement;
+    expect([facts?.querySelector("svg"), facts?.querySelector("[data-facts-slot]")?.childNodes.length, facts?.textContent?.startsWith("Text · ")]).toEqual([null, 0, true]);
 
     // spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
     await choose("Details", "File actions");
@@ -510,6 +517,7 @@ describe("Files on a phone", () => {
     world.files.texts[updated.path] = "These are the revised notes";
     await choose("Ask Alpha", "File actions");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    expect([document.querySelector("[data-alpha-subview=files-preview]") !== null, document.querySelector("pre")?.textContent]).toEqual([true, "These are the revised notes"]);
     await press("Remove notes.txt");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
@@ -530,7 +538,7 @@ describe("Files on a phone", () => {
     // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
     const [leaseSelection] = [...world.files.selections].find(([, selection]) => selection.path === "Download/lease.pdf") ?? [];
     if (!leaseSelection) throw new Error("the phone did not authorize the PDF preview");
-    await choose("Open elsewhere", "File actions");
+    await choose("Open in Android", "File actions");
     await vi.waitFor(() => expect(world.files.opened).toContain(leaseSelection));
     // spec/app/files/preview.md, "Forget removes the file from Recent, with or without access, and closes the viewer"
     await choose("Forget", "File actions");
@@ -546,7 +554,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
     await openMenu("File actions");
     expect(menuItem("Ask Alpha")).toBeUndefined();
-    await drawn(() => menuItem("Open elsewhere")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await drawn(() => menuItem("Open in Android")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     await press("Close");
 
     // spec/app/files/recent.md, "Opening a row again asks the phone first: it opens, moves to the front and is the document open, or its access has ended and it must be selected again, or its provider cannot be reached and it stays"

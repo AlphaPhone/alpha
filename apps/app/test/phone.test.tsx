@@ -260,6 +260,25 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   });
 
+  it("Editing a contact opened from Phone's Contacts tab keeps the card and the list under the form (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
+    const { alpha } = await openPhoneWorld();
+    await until(alpha, alpha.runtime, Shell, (state) => state.image && state.contacts);
+    await openPhone(alpha);
+    await tab("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.list.status === "Loaded" && state.rows === 2);
+    const row = button("Ben Ortiz");
+    await press("Maya Chen");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.opened && state.card.status === "Loaded");
+    const card = document.querySelector("[data-alpha-contact-detail]");
+    await press("Edit contact");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.form === "Changing");
+    await vi.waitFor(() => expect(button("Cancel")).toBeDefined());
+    expect([card?.isConnected, row?.isConnected]).toEqual([true, true]);
+    await press("Cancel");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.form === "Shut" && state.opened);
+    expect([document.querySelector("[data-alpha-contact-detail]") === card, row?.isConnected]).toEqual([true, true]);
+  });
+
   it(`Opens the reviewed keypad without dialing (spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials")`, async () => {
     const world = image();
     const alpha = await mountedImage(world);

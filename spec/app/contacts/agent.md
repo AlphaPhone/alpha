@@ -480,7 +480,10 @@ pure def lawOnlyWhatIsOpenAndReadIsShared(opened: Opened): bool = (readOf(opened
 The phone reads the newest incoming text's address, never its words: the
 last four digits, or the whole number and its conversation when the agent
 asked for it, so a reply can be drafted to that sender. No text, a sender
-that is not a number, and a failed read are each said as such.
+that is not a number, and a failed read are each said as such. Its review
+card says in plain words what it reads, the last four digits or the phone
+number of the latest incoming text, and never names the conversation's
+internal identifier.
 
 ```quint
 type SenderSaid = WholeNumber | LastFour | NoText | NotANumber | ReadFailed

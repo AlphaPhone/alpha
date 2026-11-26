@@ -1007,6 +1007,11 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(button("Approve")).toBeDefined());
     expect([review.senderReads, review.receipts, review.completions]).toEqual([[], [], []]);
     if (!selected) {
+      const card = document.body.textContent ?? "";
+      expect([card.includes("Read latest text sender"), card.includes(scope === "whole number"
+        ? "Read the phone number of your latest incoming text." : "Share the last four digits of the newest incoming SMS sender."), card.includes("thread ID")]).toEqual([true, true, false]);
+    }
+    if (!selected) {
       world.telephony.texts.push({ id: 2, thread: 12, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Keep this out of the receipt", read: false });
     }
     await press("Approve");
