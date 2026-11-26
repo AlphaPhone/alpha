@@ -137,7 +137,7 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
   const discarding = owner({ type: "discardDraft" });
-  const pinningNew = isFresh && editable && current.draft.sync !== "Saving";
+  const pinningNew = owner({ type: "pinNew", kept: true });
   const sharingNew = owner({ type: "shareNew", kept: true });
   const menu = (isFresh || deletable || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
     <Menu open={menuBound && actionsState.open || unboundMenu} onOpenChange={(open) => {

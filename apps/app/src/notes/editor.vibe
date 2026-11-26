@@ -183,9 +183,13 @@ const typing = Layer.effect(NoteEditor, effect {
     discard: () => turn.withPermit(effect { try letGo(try editor.get()) }),
     pinNew: (pinned: boolean) => turn.withPermit(effect {
       const current = try editor.get()
-      if (!current.fresh || current.draft.sync === "Saving") return
-      try typed({ pinned })
-      try saveDraft("Owner")
+      const draft = try read.draft()
+      if (draft === undefined || !Editor.canPinNew(current, "Owner")) return
+      const next = { ...draft, pinned }
+      try read.showDraft(next)
+      const kept = try read.keepDraft(next)
+      const moved = editor.send({ type: "pinNew", kept }, "Owner") catch () => undefined
+      if (moved !== undefined) try saveDraft("Owner")
     }),
     shareNew: () => turn.withPermit(effect {
       const current = try editor.get()

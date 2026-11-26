@@ -199,9 +199,11 @@ removes its bubble. Stop keeps what was shown, which is only settled text:
 a reply stopped before any of its text settled keeps no bubble. The
 conversation's check of a stopped reply owns the only notice. Read again
 from history it keeps no bubble either: eliza stores such a reply as
-aborted, with the provisional text it had and the cause `stop`, or
-`client_left` when Alpha's own Stop closed the reply's stream first, and
-neither that text nor a failure notice is drawn for it. A reply the
+aborted, with the provisional text it had and the cause `stop`, and
+neither that text nor a failure notice is drawn for it. A reply whose
+stream Alpha closed before it was stored (the cause `client_left`: a
+limit on the stream, a reload, or a Stop whose stream closed first) says
+only that it did not finish, never its provisional text. A reply the
 runtime ended or a restart cut reads as before.
 
 ```quint
