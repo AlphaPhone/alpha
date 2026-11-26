@@ -357,6 +357,10 @@ describe("Calendar without a connected account", () => {
     await press("Reopen reminder");
     await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
     await press("Reopen");
+    // spec/app/reminders/index.md: the completion still holds its five-second Undo, and the reopen write waits for it to end
+    expect(await alpha.runtime.runPromise(Reminders.use((reminders) => reminders.get()))).toMatchObject({ undo: { holding: "Held" } });
+    await later(alpha, 5_100);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.undo.holding !== "Held" && state.write.outcome === "Confirmed");
     await vi.waitFor(() => expect(detail()).toContain("No alert · saved on this device"));
     expect(world.reminders.items.find((item) => item.id === selected.id)).toMatchObject({ completed: false, alertMinutes: null, dueMinute: 570 });
     expect(world.reminders.items.find((item) => item.id === other.id)).toMatchObject({ completed: false, alertMinutes: 0, revision: other.revision });
