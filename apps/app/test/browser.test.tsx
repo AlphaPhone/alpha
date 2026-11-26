@@ -357,6 +357,37 @@ describe("The Browser on a phone", () => {
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
   });
 
+  it("Draws the find bar over the full-size page (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    // Laid out as on the phone: the page's place (lower by the find bar's 50px if it moved under the bar) and the floating find bar.
+    const measure: unknown = Reflect.get(HTMLElement.prototype, "getBoundingClientRect");
+    if (typeof measure !== "function") throw new Error("The DOM fixture cannot measure elements");
+    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute("data-alpha-browser-page")) return this.classList.contains("top-12.5") ? new DOMRect(0, 154, 390, 600) : new DOMRect(0, 104, 390, 650);
+      if (this.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
+      const measured: unknown = Reflect.apply(measure, this, []);
+      if (!(measured instanceof DOMRect)) throw new Error("The DOM fixture measured an invalid rectangle");
+      return measured;
+    });
+    onTestFinished(() => laidOut.mockRestore());
+    const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
+    const full = { id: `tab${tab}`, x: 0, y: 104, width: 390, height: 650 };
+    await drawn(() => vi.waitFor(() => expect(world.browser.shown).toEqual(full)));
+    expect(world.browser.hostRects).toEqual([]);
+
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([{ x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 }])));
+    expect(world.browser.shown).toEqual(full);
+
+    await press("Close find in page");
+    await until(alpha, page, Page, (p) => !p.finding);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([])));
+    expect(world.browser.shown).toEqual(full);
+  });
+
   it("Explains unavailable Android page reading (spec/app/browser/reading.md, \"An explicit reading starts from the current committed HTTPS page\")", async () => {
     const world = { ...scene(), phone: true, image: true };
     world.browser.readingAvailable = false;
