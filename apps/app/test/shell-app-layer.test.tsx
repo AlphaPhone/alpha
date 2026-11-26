@@ -38,14 +38,10 @@ async function windowSize(width: number, height: number) {
 }
 
 /** Where each slide of the app layer started, in order: v119's stage slide is 18% in from the side it comes from. */
-function watchSlides(): string[] {
-  const slides: string[] = [];
-  const animate = Element.prototype.animate;
-  vi.spyOn(Element.prototype, "animate").mockImplementation(function (this: Element, keyframes, options) {
-    if (this === appLayer() && Array.isArray(keyframes)) slides.push(String(keyframes[0]?.transform));
-    return animate.call(this, keyframes, options);
-  });
-  return slides;
+function watchSlides(): () => string[] {
+  const animate = vi.spyOn(Element.prototype, "animate");
+  return () => animate.mock.calls.flatMap(([keyframes], at) =>
+    animate.mock.contexts[at] === appLayer() && Array.isArray(keyframes) ? [String(keyframes[0]?.transform)] : []);
 }
 
 describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", () => {
@@ -94,30 +90,30 @@ describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and
     await trail("Phone,Contacts");
     await tab("Recents");
     await trail("Phone");
-    expect(slides).toEqual([]);
+    expect(slides()).toEqual([]);
 
     await press("Open Alpha");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": opening Contacts over Phone slides it in from the right (45f6bed30 prototype/model.js:5766, phone.css:414,416).
     await tab("Contacts");
     await trail("Phone,Contacts");
-    expect(slides).toEqual(["translateX(18%)"]);
+    expect(slides()).toEqual(["translateX(18%)"]);
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": returning to Phone slides it in from the left (45f6bed30 prototype/model.js:5775, phone.css:415,417).
     await press("Return to Phone");
     await trail("Phone");
-    expect(slides).toEqual(["translateX(18%)", "translateX(-18%)"]);
+    expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)"]);
     await tab("Contacts");
     await trail("Phone,Contacts");
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Phone's own tabs on its Contacts tab swap at once, as v119's did (45f6bed30 prototype/phone-adapter.ts:263-270).
     await tab("Recents");
     await trail("Phone");
-    expect(slides).toEqual(["translateX(18%)", "translateX(-18%)", "translateX(18%)"]);
+    expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)", "translateX(18%)"]);
 
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": in landscape the app sits beside the sheet, and swaps at once, as v119's stage did (45f6bed30 prototype/model.js:6286).
     await windowSize(915, 412);
     await until(alpha, alpha.runtime, Canvas, (s) => s.landscape);
     await tab("Contacts");
     await trail("Phone,Contacts");
-    expect(slides).toEqual(["translateX(18%)", "translateX(-18%)", "translateX(18%)"]);
+    expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)", "translateX(18%)"]);
   });
 });

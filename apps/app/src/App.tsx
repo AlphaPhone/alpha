@@ -2,7 +2,7 @@
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
 import { type PointerEvent, type SyntheticEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
-import { type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
+import { type Shell, type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
@@ -62,8 +62,44 @@ function slideStage(layer: HTMLElement, side: StageSide) {
   );
 }
 
-/** How long after the owner chooses one of Phone's tabs a return from Contacts counts as that choice. */
-const TAB_RETURN_MS = 2_000;
+/**
+ * The one layer the apps share, over `shell`: whether Home still shows under an app rising from it, the callback that holds the layer,
+ * which slides a switch of communications apps in while Ask Alpha rests at its sheet in portrait and ends the rise when
+ * it is cancelled, what ends the rise, and the capture handler that notes a choice among Phone's tabs.
+ */
+function useAppLayer(shell: Shell | undefined, landscape: boolean) {
+  const [risen, setRisen] = useState<Risen>({ view: undefined, depth: 0, overHome: false });
+  const phoneTabChosenRef = useRef(false);
+  const slidRef = useRef<Risen["slide"]>(undefined);
+  const slide = risen.slide;
+  const risenOver = useCallback(() => setRisen((was) => ({ ...was, overHome: false })), []);
+  // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Phone's own tabs on its Contacts tab swap at once (45f6bed30 prototype/phone-adapter.ts:256-270).
+  const holdLayer = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    if (slide !== undefined && slidRef.current !== slide) {
+      slidRef.current = slide;
+      const fromTabs = slide.side === "right" && phoneTabChosenRef.current;
+      phoneTabChosenRef.current = false;
+      if (!fromTabs) slideStage(node, slide.side);
+    }
+    // spec/app/shell/index.md, "The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits": Home shows under a rising app until the rise is over, ended or stopped early.
+    const stopped = (event: Event) => { if (event.target === node) risenOver(); };
+    node.addEventListener("animationcancel", stopped);
+    return () => node.removeEventListener("animationcancel", stopped);
+  }, [slide, risenOver]);
+  const showing = shell?.trail.at(-1);
+  if (shell !== undefined && risen.view !== showing) {
+    const staged = shell.assistant === "Sheet" && !landscape && isCommsView(risen.view) && isCommsView(showing);
+    const depth = shell.trail.length;
+    setRisen({ view: showing, depth, overHome: risen.view === undefined || risen.overHome, slide: staged ? { side: depth < risen.depth ? "right" : "left" } : undefined });
+  }
+  const choosing = (event: SyntheticEvent<HTMLElement>, keep: boolean) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-alpha-phone-tab]")) phoneTabChosenRef.current = true;
+    else if (!keep) phoneTabChosenRef.current = false;
+  };
+  return { overHome: risen.view === showing && risen.overHome, holdLayer, risenOver, choosing };
+}
 
 /** A swipe can belong to the shell only while the touched surface has not panned. */
 function touchScroll(target: Element, shell: HTMLElement) {
@@ -124,24 +160,7 @@ export function App({ alpha }: AppProps) {
     void alpha.runtime.runPromise(firstFrame(main), { signal: stop.signal }).then(() => setHomeShown(true), () => undefined);
     return () => stop.abort();
   }, [alpha, homeShown]);
-  const [risen, setRisen] = useState<Risen>({ view: undefined, depth: 0, overHome: false });
-  const phoneTabChosen = useRef(-Infinity);
-  const slid = useRef<Risen["slide"]>(undefined);
-  // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Phone's own tabs on its Contacts tab swap at once (45f6bed30 prototype/phone-adapter.ts:256-270).
-  const slide = risen.slide;
-  const appLayer = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return;
-    if (slide !== undefined && slid.current !== slide) {
-      slid.current = slide;
-      const fromTabs = slide.side === "right" && performance.now() - phoneTabChosen.current < TAB_RETURN_MS;
-      phoneTabChosen.current = -Infinity;
-      if (!fromTabs) slideStage(node, slide.side);
-    }
-    // spec/app/shell/index.md, "The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits": Home shows under a rising app until the rise is over, ended or stopped early.
-    const stopped = (event: Event) => { if (event.target === node) setRisen((was) => ({ ...was, overHome: false })); };
-    node.addEventListener("animationcancel", stopped);
-    return () => node.removeEventListener("animationcancel", stopped);
-  }, [slide]);
+  const { overHome, holdLayer, risenOver, choosing } = useAppLayer(state, canvas?.landscape === true);
   const pageReady = state !== undefined && cause === undefined && page !== undefined && editorsMounted(page) && !updating;
   const signInWaits = signingIn && (!signedIn || signedIn.stage === "Checking" || !signInFlow);
   const cover = !updating && cause === undefined
@@ -155,18 +174,7 @@ export function App({ alpha }: AppProps) {
   }
   const shellFailed = cause !== undefined;
   const showing = state.trail.at(-1);
-  if (risen.view !== showing) {
-    const staged = state.assistant === "Sheet" && canvas?.landscape !== true && isCommsView(risen.view) && isCommsView(showing);
-    const depth = state.trail.length;
-    setRisen({ view: showing, depth, overHome: risen.view === undefined || risen.overHome, slide: staged ? { side: depth < risen.depth ? "right" : "left" } : undefined });
-  }
-  const overHome = risen.view === showing && risen.overHome;
   const owner = `${showing ?? "home"}:${state.assistant}:${launcher}:${state.textAskThrough}`;
-  const choosing = (event: SyntheticEvent<HTMLElement>, keep: boolean) => {
-    const target = event.target;
-    if (target instanceof Element && target.closest("[data-alpha-phone-tab]")) phoneTabChosen.current = performance.now();
-    else if (!keep) phoneTabChosen.current = -Infinity;
-  };
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
     if (shellFailed || signingIn || accessHolding || state.textAsk.tag === "TextAskVisit" || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
     startedRef.current = undefined;
@@ -305,8 +313,8 @@ export function App({ alpha }: AppProps) {
               </div>
               {showing !== undefined && (
                 <div
-                  ref={appLayer}
-                  onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen((was) => ({ ...was, overHome: false })); }}
+                  ref={holdLayer}
+                  onAnimationEnd={(event) => { if (event.target === event.currentTarget) risenOver(); }}
                   className={cn("relative flex min-h-0 flex-1 flex-col motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent", showing === "Camera" ? "bg-black" : "bg-background")}
                 >
                   {!viewHasHeader(showing) && <AppHeader
