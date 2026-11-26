@@ -108,6 +108,8 @@ export service Drafts {
   adoptNewSettlement(held: HeldDraft): void!!
   readonly newVisits: Semaphore.Semaphore
   readonly messageHandoff: MessageHandoff
+  /** Owner interaction can take over the Messages surface while a native read is pending. */
+  readonly messageTouches: { readonly version: () => number; readonly touch: () => void }
   subscriptions(): ReadonlyArray<TelephonySubscription>!!
   setSubscriptions(subscriptions: ReadonlyArray<TelephonySubscription>): void!!
   readonly subscriptionChoice: SubscriptionChoice
@@ -243,6 +245,8 @@ const drafts = Layer.effect(Drafts, effect {
   const conversations = makeConversationDrafts()
   const edits = try Semaphore.make(1)
   const newVisits = try Semaphore.make(1)
+  let touches = 0
+  const messageTouches = { version: () => touches, touch: () => { touches += 1 } }
   let handing: NewMessageHandoff | undefined
   const handoffListeners = new Set<() => void>()
   const messageHandoff: MessageHandoff = {
@@ -310,6 +314,7 @@ const drafts = Layer.effect(Drafts, effect {
     edits,
     newVisits,
     messageHandoff,
+    messageTouches,
     newDraft: () => sync(() => fresh),
     effect openNewDraft(current: boolean!!): boolean!!Telephony {
       const initial = Effect.provideService(openDraftRecord(newSource), Vault, vault) catch () => undefined
@@ -1028,6 +1033,7 @@ const incomingSmsDraft = Schema.Struct({
 const androidDraft = Schema.decodeUnknownOption(incomingSmsDraft)
 type AndroidDraftPort = ReturnType<typeof noticeTransport>
 type IncomingSmsDraft = typeof incomingSmsDraft.Type
+type AndroidDraftVisit = { readonly visit: number; readonly revision: number }
 
 effect function pendingDraft(port: AndroidDraftPort): (IncomingSmsDraft | undefined)!! {
   const pending = try Effect.timeoutOption(Effect.option(tryPromise(() => port.smsDraftPending())), "2 seconds")
@@ -1055,6 +1061,8 @@ effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft
   const parsed = messageRecipients(recipients)
   if (parsed.length !== offer.recipients.length || !parsed.every((number, index) => number === offer.recipients[index]) || offer.body.includes("\0")) return false
   const starting = try shell.get()
+  const beforeTouches = store.messageTouches.version()
+  const untouched = () => store.messageTouches.version() === beforeTouches
   const uncovered = effect {
     const where = try shell.get()
     return where.image && where.assistant === "Bar" && !where.drawer && !pageInert(try layers.get()) && (try device.showing())
@@ -1080,9 +1088,10 @@ effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft
   }
   const shown = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (state) => state.front)), "3 seconds")
   if (Option.isSome(shown) && (try storedForOffer)) return try acknowledge
+  let openedNew = false
   const accepted = Option.isSome(shown) && (try Semaphore.withPermit(store.newVisits, effect {
     const listed = try messages.get()
-    const sameList = (page: MessagesState) => canNewMessage(page) && page.newDraft.visit === listed.newDraft.visit
+    const sameList = (page: MessagesState) => untouched() && canNewMessage(page) && page.newDraft.visit === listed.newDraft.visit
       && page.list.ticket === listed.list.ticket
     const onList = effect {
       return (try current) && sameList(try messages.get())
@@ -1098,19 +1107,29 @@ effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft
     const event = { type: "openAndroidDraft", requestCurrent: true, empty: true, revision: before.revision } as const
     const moved = messages.send(event, (page) => sameList(page) && canOpenAndroidDraft(page, true, true, before.revision)) catch () => undefined
     if (moved === undefined) return false
-    const visit = moved.state.newDraft.visit
-    const sameVisit = (page: MessagesState) => holdsNewDraft(page, visit) && page.newDraft.revision === before.revision && page.newDraft.recipient === 0
-    if (!sameAndroidDraft(try pendingDraft(port), offer) || !(try current)) return false
-    const admitted = try messages.get()
-    if (!sameVisit(admitted) || admitted.newDraft.picking || (try store.newDraft()) !== before
-      || newDraftHeld(try composer.get(), before.revision) || !(try store.saveNewDraft(draft))) return false
+    openedNew = true
+    const opening: AndroidDraftVisit = { visit: moved.state.newDraft.visit, revision: before.revision }
+    const sameVisit = (page: MessagesState) => holdsNewDraft(page, opening.visit) && page.newDraft.revision === opening.revision && page.newDraft.recipient === 0
+    const vacant = (page: MessagesState) => sameVisit(page) && !page.newDraft.picking && untouched()
+    const exactOpening = effect {
+      return (try current) && vacant(try messages.get()) && (try store.newDraft()) === before &&
+        !newDraftHeld(try composer.get(), opening.revision)
+    }
+    if (!sameAndroidDraft(try pendingDraft(port), offer)) {
+      if (try exactOpening) {
+        const abandon = { type: "abandonAndroidDraft", ...opening, untouched: true } as const
+        try contained(messages.send(abandon, vacant), "closing the replaced Android text draft")
+      }
+      return false
+    }
+    if (!(try exactOpening) || !(try store.saveNewDraft(draft))) return false
     if (try onRoute) {
-      const landed = { type: "editNewDraft", visit, revision: draft.revision, thread, closePicker: false } as const
+      const landed = { type: "editNewDraft", visit: opening.visit, revision: draft.revision, thread, closePicker: false } as const
       try contained(messages.send(landed, sameVisit), "showing the saved Android text draft")
     }
     return true
   }))
-  if (!accepted && !already && (try current) && canNewMessage(try messages.get())) {
+  if (!accepted && !already && !openedNew && untouched() && (try current) && canNewMessage(try messages.get())) {
     try contained(shell.send({ type: "goBack" }, (where) => where.route === route), "closing the unused Android text opening")
   }
   return accepted && (try storedForOffer) && (try acknowledge)

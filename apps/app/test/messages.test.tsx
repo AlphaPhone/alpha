@@ -414,6 +414,59 @@ describe("Messages on an Alpha image", () => {
     }
   });
 
+  it.each(["unused", "owner-touched"] as const)("Keeps the right New message when Android replaces a request and the opening is %s (spec/app/messages/index.md, \"A current Android text request opens New only when its saved draft is empty\")", async (opening) => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Messages list", (state) => state.front && state.pane === "Threads");
+    const first = { token: "android-old", recipients: ["+14155550122"], body: "Older Android request" };
+    const second = { token: "android-new", recipients: ["+14155550100"], body: "Current Android request" };
+    const ownerBody = "Keep the message I am writing";
+    const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
+    const message = () => document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea");
+    const bridge = (globalThis as { Capacitor?: { nativePromise(name: string, method: string, input: unknown): Promise<unknown> } }).Capacitor;
+    if (!bridge) throw new Error("The phone fixture has no native bridge");
+    const nativePromise = bridge.nativePromise;
+    const check = Promise.withResolvers<void>();
+    let pendingReads = 0;
+    const watched = vi.spyOn(bridge, "nativePromise").mockImplementation((name, method, input) => {
+      if (name === "ElizaTelephony" && method === "smsDraftPending" && world.telephony.smsDraft === first && ++pendingReads === 3) {
+        return check.promise.then(() => nativePromise.call(bridge, name, method, input));
+      }
+      return nativePromise.call(bridge, name, method, input);
+    });
+    try {
+      world.telephony.smsDraft = first;
+      await drawn(world.telephony.wakeSmsDraft);
+      await ready(alpha.runtime, Messages, "First empty New visit", (state) => state.pane === "New" && state.newDraft.recipient === 0);
+      await vi.waitFor(() => expect(pendingReads).toBe(3));
+      expect([to(), message()?.value]).toEqual(["", ""]);
+      if (opening === "owner-touched") {
+        await drawn(() => message()?.focus());
+        await fill("Message", ownerBody);
+        expect(message()?.value).toBe(ownerBody);
+      }
+
+      world.telephony.smsDraft = second;
+      await drawn(world.telephony.wakeSmsDraft);
+      check.resolve();
+      if (opening === "unused") {
+        await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([second.token]));
+        await drawn(() => undefined);
+        expect([to(), message()?.value]).toEqual([second.recipients[0], second.body]);
+      } else {
+        await vi.waitFor(() => expect(world.telephony.smsDraftReads.filter((token) => token === second.token).length).toBeGreaterThan(1));
+        await ready(alpha.runtime, Messages, "Owner kept the same New visit", (state) => state.pane === "New" && state.newDraft.revision > 0);
+        expect([to(), message()?.value, document.activeElement]).toEqual(["", ownerBody, message()]);
+        expect([world.telephony.smsDraft, world.telephony.smsDraftAcknowledgments]).toEqual([second, []]);
+      }
+      expect(world.telephony.sent).toEqual([]);
+    } finally {
+      check.resolve();
+      watched.mockRestore();
+    }
+  });
+
   it("Sends New without replacing a saved draft for the same recipient (spec/app/messages/composer.md, \"The owner's New message uses the same send and never takes another draft's place\")", async () => {
     const world = image();
     const { alpha } = await openImage(world);

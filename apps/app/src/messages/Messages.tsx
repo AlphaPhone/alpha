@@ -78,7 +78,7 @@ export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const route = useShell(runtime).state?.route;
   const dock = useCommsDock(runtime);
   const [view, setView] = useState<HTMLElement | null>(null);
-  const handoffs = runtime.runSync(Effect.map(Drafts, (drafts) => drafts.messageHandoff));
+  const { handoffs, touch } = runtime.runSync(Effect.map(Drafts, (drafts) => ({ handoffs: drafts.messageHandoff, touch: drafts.messageTouches.touch })));
   const pending = useSyncExternalStore(handoffs.subscribe, handoffs.get, handoffs.get);
   const handoff = pending !== undefined && pending.route === route ? pending : undefined;
   const discardHandoff = () => { if (handoff !== undefined) handoffs.replace(handoff, undefined); };
@@ -86,7 +86,10 @@ export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const { state } = messages;
   if (!state) return null;
   return (
-    <section ref={setView} data-alpha-messages data-sheet={dock.open ? "open" : "closed"} aria-label="Messages" className="group/messages relative flex h-full min-h-0 flex-col overflow-hidden data-[sheet=closed]:pt-2">
+    <section ref={setView} data-alpha-messages data-sheet={dock.open ? "open" : "closed"} aria-label="Messages"
+      onPointerDownCapture={touch} onKeyDownCapture={touch} onFocusCapture={touch}
+      onClickCapture={touch} onInputCapture={touch} onWheelCapture={touch}
+      className="group/messages relative flex h-full min-h-0 flex-col overflow-hidden data-[sheet=closed]:pt-2">
       {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} handoff={handoff} discardHandoff={discardHandoff} />}
       {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} view={view} />}
       {state.pane === "Picker" && <Picker key="handoff" runtime={runtime} messages={messages} discardHandoff={discardHandoff} />}
