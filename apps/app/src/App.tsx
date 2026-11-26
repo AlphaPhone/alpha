@@ -1,6 +1,7 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { type MouseEvent, type PointerEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { Effect } from "effect";
+import { type MouseEvent, type PointerEvent, type SyntheticEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
@@ -16,6 +17,7 @@ import { addLayerAt } from "./home/addHome.vibe";
 import { coarsePointer, desktopPreview, landscapeHomeInput, watchPrimaryPointer } from "./shell/canvas.vibe";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
+import { Time } from "./runtime/time.vibe";
 import { versions } from "./settings/build.ts";
 import { AppBack } from "./shell/AppBack.tsx";
 import { measureChrome, watchChrome } from "./shell/chrome.vibe";
@@ -48,6 +50,24 @@ type StartedSwipe = {
     scrolled: () => boolean;
   };
 };
+
+/** Where the staged app slides in from when Alpha's sheet stays open across a switch of communications apps. */
+type StageSide = "left" | "right";
+
+/** The app layer as the apps share it: the view on top, its trail's length, and whether it is still rising over Home. */
+type Risen = { view: View | undefined; depth: number; overHome: boolean; slide?: { side: StageSide } };
+
+/** v119's stage slide (45f6bed30 prototype/phone.css:412-416): 18% in from the side at 0.4 opacity, 0.42 s on its curve. */
+function slideStage(layer: HTMLElement, side: StageSide) {
+  if (typeof layer.animate !== "function" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true) return;
+  layer.animate(
+    [{ transform: `translateX(${side === "left" ? "18%" : "-18%"})`, opacity: 0.4 }, { transform: "none", opacity: 1 }],
+    { duration: 420, easing: "cubic-bezier(.22,1,.36,1)" },
+  );
+}
+
+/** How long after the owner chooses one of Phone's tabs a return from Contacts counts as that choice. */
+const TAB_RETURN_MS = 2_000;
 
 /** A swipe can belong to the shell only while the touched surface has not panned. */
 function touchScroll(target: Element, shell: HTMLElement) {
@@ -155,7 +175,9 @@ function useShellSwipe(alpha: Alpha, blocked: boolean, launcher: boolean, owner:
  * One startup cover, the white page with the Alpha mark, stays over it until what shows under it is ready, kept at one
  * place so its fade never starts over: v119 drew one cover for the whole start (45f6bed30 apps/app/src/main.tsx:357).
  * The apps share one layer, as v119's did (45f6bed30 prototype/template.html:130): it rises over Home when an app opens
- * from Home, with Home showing under it until the rise ends; an app opened from another, and Back, swap in it at once.
+ * from Home, with Home showing under it until the rise ends or is cancelled; an app opened from another, and Back, swap
+ * in it at once, except that while Ask Alpha rests at its sheet a switch of communications apps slides in, as v119's
+ * stage did (45f6bed30 prototype/model.js:5759-5785).
  * @model spec/app/shell/index.md
  */
 export function App({ alpha }: AppProps) {
@@ -192,7 +214,25 @@ export function App({ alpha }: AppProps) {
     void alpha.runtime.runPromise(firstFrame(main), { signal: stop.signal }).then(() => setHomeShown(true), () => undefined);
     return () => stop.abort();
   }, [alpha, homeShown]);
-  const [risen, setRisen] = useState<{ view: View | undefined; overHome: boolean }>({ view: undefined, overHome: false });
+  const [risen, setRisen] = useState<Risen>({ view: undefined, depth: 0, overHome: false });
+  const phoneTabChosenRef = useRef(-Infinity);
+  const slidRef = useRef<Risen["slide"]>(undefined);
+  const nowMs = useCallback(() => alpha.runtime.runSync(Effect.flatMap(Time, (time) => time.latest())), [alpha]);
+  // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Phone's own tabs on its Contacts tab swap at once (45f6bed30 prototype/phone-adapter.ts:256-270).
+  const slide = risen.slide;
+  const appLayer = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    if (slide !== undefined && slidRef.current !== slide) {
+      slidRef.current = slide;
+      const fromTabs = slide.side === "right" && nowMs() - phoneTabChosenRef.current < TAB_RETURN_MS;
+      phoneTabChosenRef.current = -Infinity;
+      if (!fromTabs) slideStage(node, slide.side);
+    }
+    // spec/app/shell/index.md, "The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits": Home shows under a rising app until the rise is over, ended or stopped early.
+    const stopped = (event: Event) => { if (event.target === node) setRisen((was) => ({ ...was, overHome: false })); };
+    node.addEventListener("animationcancel", stopped);
+    return () => node.removeEventListener("animationcancel", stopped);
+  }, [nowMs, slide]);
   const shellFailed = cause !== undefined;
   const showing = state?.trail.at(-1);
   const swipeBlocked = !state || shellFailed || signingIn || accessHolding || state.textAsk.tag === "TextAskVisit";
@@ -220,8 +260,17 @@ export function App({ alpha }: AppProps) {
         />
       : <ShellLayerHost alpha={alpha} portalContainer={portalNode}>{null}{cover}</ShellLayerHost>;
   }
-  if (risen.view !== showing) setRisen({ view: showing, overHome: risen.view === undefined || risen.overHome });
+  if (risen.view !== showing) {
+    const staged = state.assistant === "Sheet" && canvas?.landscape !== true && isCommsView(risen.view) && isCommsView(showing);
+    const depth = state.trail.length;
+    setRisen({ view: showing, depth, overHome: risen.view === undefined || risen.overHome, slide: staged ? { side: depth < risen.depth ? "right" : "left" } : undefined });
+  }
   const overHome = risen.view === showing && risen.overHome;
+  const choosing = (event: SyntheticEvent<HTMLElement>, keep: boolean) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-alpha-phone-tab]")) phoneTabChosenRef.current = nowMs();
+    else if (!keep) phoneTabChosenRef.current = -Infinity;
+  };
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
   const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && (phone || coarse);
@@ -247,6 +296,9 @@ export function App({ alpha }: AppProps) {
         data-alpha-desktop-preview={preview ? "" : undefined}
         ref={frame}
         {...swipeHandlers}
+        onMouseDownCapture={(event) => choosing(event, false)}
+        onKeyDownCapture={(event) => choosing(event, false)}
+        onFocusCapture={(event) => choosing(event, true)}
         style={frameStyle}
         className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", showing === "Camera" && "bg-camera-panel", !phone && "sm:pointer-fine:max-w-103 sm:pointer-fine:border-x sm:pointer-fine:border-border/60", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
       >
@@ -284,6 +336,7 @@ export function App({ alpha }: AppProps) {
               </div>
               {showing !== undefined && (
                 <div
+                  ref={appLayer}
                   onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen((was) => ({ ...was, overHome: false })); }}
                   className={cn("relative flex min-h-0 flex-1 flex-col motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent", showing === "Camera" ? "bg-camera-panel" : "bg-background")}
                 >

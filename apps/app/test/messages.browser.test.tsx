@@ -3,7 +3,7 @@ import { page, userEvent } from "vitest/browser";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
-import { closeAll, later, only, open, until } from "./alpha.tsx";
+import { closeAll, coverLifted, later, only, open, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
@@ -15,6 +15,7 @@ afterEach(async () => {
 /** Open Messages from Home's tile on the phone image, once its one thread is listed. */
 async function messagesFromHome(world: ReturnType<typeof scene>) {
   const { alpha } = await open(world, only("home", "view:Messages"));
+  await coverLifted(alpha);
   await until(alpha, alpha.runtime, Shell, (state) => state.image);
   // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited": the tile's name is its app's, with what waits there said after it
   await page.getByRole("button", { name: /^Messages(?![A-Za-z])/ }).click();

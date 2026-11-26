@@ -7,7 +7,7 @@ import { at, first as firstScreen, mounts } from "../src/areas.ts";
 import files from "../src/files/index.tsx";
 import { single } from "../src/runtime/single.ts";
 import { home } from "../src/shell/shell.vibe";
-import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
+import { button, closeAll, coverLifted, later, only, open, seen, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
 import "../src/main.css";
@@ -20,13 +20,15 @@ const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/i
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps, and find the same place after the page is opened again (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
   const world = scene();
-  const { close } = await open(world, withSample);
+  const { alpha, close } = await open(world, withSample);
+  await coverLifted(alpha);
   // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
   await expect.element(page.getByRole("button", { name: "Phone" })).not.toBeInTheDocument();
   await page.getByRole("button", { name: "Notes" }).click();
   await expect.element(page.getByRole("heading", { level: 1, name: "Notes" })).toBeVisible();
   await close();
-  await open(world, withSample);
+  const reopened = await open(world, withSample);
+  await coverLifted(reopened.alpha);
   await expect.element(page.getByRole("heading", { level: 1, name: "Notes" })).toBeVisible();
   // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"
   await page.getByRole("button", { name: "Back" }).click();
@@ -68,6 +70,7 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
   await savedBrowserRecords([first, second], [bookmark]);
   try {
     const { alpha } = await open(scene(), [...only("home", "view:Browser", "assistant"), firstScreen("view:Files", files)]);
+    await coverLifted(alpha);
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
@@ -124,7 +127,8 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
 
 // spec/app/sample/index.md, "Story: See and dismiss reminders"
 it("Moves reminder dismissal focus to Undo", async () => {
-  await open(scene(), [...only("home"), firstScreen("view:Notes", sample)]);
+  const { alpha } = await open(scene(), [...only("home"), firstScreen("view:Notes", sample)]);
+  await coverLifted(alpha);
   await page.getByRole("button", { name: "Notes" }).click();
   // spec/app/sample/index.md, "Undo within the five seconds puts the reminder back"
   await page.getByRole("button", { name: "Dismiss Water the plants" }).click();
@@ -139,7 +143,8 @@ it("Full Ask Alpha keeps focus off the Home it covers (spec/app/shell/index.md, 
   const pointer = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(pointer: coarse)" ? emulatedPointer : nativeMatch(query));
 
   try {
-    await open(scene(), only("home", "assistant"));
+    const { alpha } = await open(scene(), only("home", "assistant"));
+    await coverLifted(alpha);
     await expect.element(page.getByRole("button", { name: "Notes" })).toBeVisible();
     const note = button("Notes");
     expect(note).toBeDefined();

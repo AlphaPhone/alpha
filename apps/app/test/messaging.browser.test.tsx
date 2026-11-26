@@ -20,7 +20,7 @@ import { telegramAt } from "../src/platform/telegram.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { completeSlackOAuthCallback } from "../src/slack/auth.vibe";
 import { SlackLedger } from "../src/slack/ledger.vibe";
-import { closeAll, later, only, openOver, until } from "./alpha.tsx";
+import { closeAll, coverLifted, later, only, openOver, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 import "../src/main.css";
@@ -65,7 +65,9 @@ async function openMessagingAlpha() {
     telegram: Layer.provide(telegramAt(telegramOrigin), FetchHttpClient.layer),
     sessions: messagingSessions,
   });
-  return openOver(platform, messagingMounts);
+  const opened = await openOver(platform, messagingMounts);
+  await coverLifted(opened.alpha);
+  return opened;
 }
 
 async function waitForSlackOAuth(

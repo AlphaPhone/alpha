@@ -26,7 +26,8 @@ interface ChatActionsMenuProps {
 
 /**
  * The + and its menu. Opened by a touch or a click, it gives the + its focus back without a ring when it closes, as
- * v119's + showed none (45f6bed30 template.html:59-67); opened from the keyboard, the ring returns with the focus.
+ * v119's + showed none (45f6bed30 template.html:59-67); opened from the keyboard, or closed by Escape, the ring returns
+ * with the focus, as v119's did.
  */
 function ChatActionsMenu({ placement, label, triggerId, disabled, children }: ChatActionsMenuProps) {
   const comms = placement === "comms";
@@ -40,6 +41,7 @@ function ChatActionsMenu({ placement, label, triggerId, disabled, children }: Ch
           onPointerDown={() => { pointerRef.current = true; }} onKeyDown={() => { pointerRef.current = false; }}><Plus aria-hidden /></Button>
       </MenuTrigger>
       <MenuContent side="top" align="start" alignOffset={placement === "sheet" ? -16 : -57} sideOffset={sideOffset}
+        onEscapeKeyDown={() => { pointerRef.current = false; }}
         onCloseAutoFocus={(event) => {
           if (!pointerRef.current) return;
           event.preventDefault();

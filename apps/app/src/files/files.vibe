@@ -17,7 +17,7 @@ import { scan, scanBack } from "./scan.vibe"
 import type { Machine as ScanMachine } from "../../gen/app__files__scan.effect.vibe"
 import type { Machine as CorrectionMachine } from "../../gen/app__files__correction.effect.vibe"
 import { Handles, type Spot, handles } from "./handles.vibe"
-import { kindOf, parentPath } from "./entries.vibe"
+import { childrenOf, kindOf, parentPath } from "./entries.vibe"
 import { TrashFacts, type TrashItemFacts, trashFacts } from "./trashFacts.vibe"
 import { type CategoryGroups, categoryGroups, groupsFor } from "./category.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
@@ -100,6 +100,7 @@ effect function itemsOf(volume: string, entries: ReadonlyArray<StorageEntry>, ki
       kind: entry.directory ? "Folder" : (kind ?? kindOf(entry)),
       volume: root,
       bytes: entry.directory ? 0 : Math.max(0, Math.trunc(entry.size)),
+      children: childrenOf(entry),
     })
   }
   return rows

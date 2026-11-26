@@ -123,7 +123,8 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const linkedExport = current.link.tie !== "NoLink" && hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const sharing = { type: "openMenu", note: current.note, revision: current.draft.base, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
   const actionsState = actions.state;
-  const menuBound = sharing.saved && actionsState?.owner === current.owner && actionsState.note === current.note && actionsState.revision === current.draft.base;
+  const isFresh = current.fresh;
+  const menuBound = !isFresh && sharing.saved && actionsState?.owner === current.owner && actionsState.note === current.note && actionsState.revision === current.draft.base;
   const reviewed = menuBound && actionsState.sharing;
   const reviewShare = { type: "reviewShare" } as const;
   const closeShare = { type: "closeShare" } as const;
@@ -135,7 +136,10 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
-  const menu = (deletable || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
+  const discarding = owner({ type: "discardDraft" });
+  const pinningNew = isFresh && editable && current.draft.sync !== "Saving";
+  const sharingNew = owner({ type: "shareNew", kept: true });
+  const menu = (isFresh || deletable || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
     <Menu open={menuBound && actionsState.open || unboundMenu} onOpenChange={(open) => {
       if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
       else setUnboundMenu(open);
@@ -143,6 +147,12 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     }}>
       <MenuTrigger ref={moreRef} aria-label="More" className={cn(focusRing, "flex h-13 w-11 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
       <MenuContent aria-label="Note actions" aria-labelledby={undefined} align="end" alignOffset={-61} sideOffset={4} className={noteMenuPanel}>
+        {isFresh && <>
+          <MenuItem aria-label="Share note" className={noteMenuItem} disabled={!sharingNew} onSelect={() => void runtime.runPromise(writer.shareNew())}><Share2 /> Share</MenuItem>
+          <MenuItem className={noteMenuItem} disabled={!pinningNew} onSelect={() => void runtime.runPromise(writer.pinNew(saved.pinned !== true))}><Pin /> {saved.pinned === true ? "Unpin" : "Pin"}</MenuItem>
+          <div role="separator" className="my-1 border-t border-border" />
+          <MenuItem className={noteMenuItem} disabled={!discarding} onSelect={() => void runtime.runPromise(writer.discard())}><Trash2 /> Delete</MenuItem>
+        </>}
         {menuBound && current.link.tie === "NoLink" && <MenuItem ref={shareRef} aria-label="Share note" className={noteMenuItem}
           onSelect={(event) => { event.preventDefault(); if (actions.can(reviewShare, "Owner")) void actions.send(reviewShare, "Owner"); }}><Share2 /> Share</MenuItem>}
         {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}

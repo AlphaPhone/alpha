@@ -86,7 +86,7 @@ export function Review({ runtime }: ReviewProps) {
   if (!state || !phone || (state.stage !== "Shown" && state.stage !== "Choosing")) return null;
   const held = runtime.runSync(Effect.flatMap(Requested, (requested) => requested.get()));
   const safe = clear(phone);
-  const approve = { type: "approve", clear: safe, spoken: false } as const;
+  const approve = { type: "approve", clear: safe } as const;
   const decline = { type: "decline" } as const;
   const approved = () => void send(approve, "Owner");
   const target = held.matches.find((one) => one.id === state.contact);

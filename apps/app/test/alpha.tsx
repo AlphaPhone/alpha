@@ -124,6 +124,12 @@ export const later = (alpha: Alpha, ms: number) => drawn(() => {
   return alpha.runtime.runPromise(TestClock.adjust(ms));
 });
 
+/** Let the startup cover lift, as it does at the latest 2.5 s after start when Home is mounted over TestClock. */
+export async function coverLifted(alpha: Alpha) {
+  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
+  for (let waited = 0; waited < 2500 && cover(); waited += 500) await later(alpha, 500);
+}
+
 /** Let `ms` pass in the world while no Alpha is open: the next one opens that much later. */
 export function asleep(world: Scene, ms: number) {
   world.now += ms;

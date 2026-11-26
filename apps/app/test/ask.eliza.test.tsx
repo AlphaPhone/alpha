@@ -380,7 +380,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   try {
     await askAbout();
     await waitForScreen(() => expect(world.photos.readCount).toBe(priorReads + 1));
-    await press("Back to photos");
+    await press("Back from photo");
     await until(alpha, library, Viewer, (state) => state.open === 0);
   } finally {
     delete world.photos.readGate;
@@ -409,7 +409,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await fill("Message Alpha", prompt);
   await hardware("back");
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
-  await press("Back to photos");
+  await press("Back from photo");
   await until(alpha, library, Viewer, (state) => state.open === 0);
   await openPhoto(replacement.name);
   await offerPhoto(replacement.name, 2);

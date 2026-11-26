@@ -164,16 +164,15 @@ module web {
           const okay = current !== undefined && valid(current, client.admittedTextLayer, client.scannedLinks)
           if (pages === undefined) {
             if (current !== undefined && !okay) {
+              revision = base
               landed = true
-              revision = 0
               place.delete(key)
               return
             }
             revision = current === undefined ? 0 : (current as ScanSaved).revision
             if (revision !== base) return
             landed = true
-            revision = 0
-            place.delete(key)
+            place.put({ revision, pages: [] }, key)
             return
           }
           if (current !== undefined && !okay) { tx.abort(); return }

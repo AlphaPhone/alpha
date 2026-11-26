@@ -39,7 +39,7 @@ import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mai
 import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
 import { type Backs, home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
+import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
 import { native, type Device } from "../platform/device.vibe";
 import type { NoteStore } from "../platform/notes.vibe";
@@ -167,7 +167,6 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
           to={card.phone?.tag === "Exact" ? card.phone.selected.name : text.recipients.map(displayNumber).join(", ")}
           number={card.phone?.tag === "Exact" ? displayNumber(card.phone.selected.number) : undefined}
           note={line === undefined ? undefined : `SIM ${line.slot + 1} · ${line.displayName}`}
-          hint={spokenText(card) === undefined ? undefined : "Say “Send this text”"}
           sendDisabled={deciding || unavailable} declineDisabled={deciding}
           onSend={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)} onDecline={unavailable ? undefined : () => decide(false)} />
       ) : (

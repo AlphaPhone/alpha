@@ -37,6 +37,8 @@ export interface VoiceScene {
   releaseEngineHoldCalls: number;
   engineHeld: boolean;
   startLiveCaptureCalls: number;
+  /** Whether each live capture asked the phone's recognizer to hear the owner over Alpha's own voice. */
+  readonly liveCaptureBargeIn: boolean[];
   stopLiveCaptureCalls: number;
   startCloudSpeechCalls: number;
   cloudStartGate?: () => Promise<void>;
@@ -91,6 +93,7 @@ export function voiceScene(): VoiceScene {
     releaseEngineHoldCalls: 0,
     engineHeld: false,
     startLiveCaptureCalls: 0,
+    liveCaptureBargeIn: [],
     stopLiveCaptureCalls: 0,
     startCloudSpeechCalls: 0,
     cloudStarts: [],
@@ -160,8 +163,9 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         if (voice.probeGate !== undefined) await voice.probeGate();
         return { available: voice.liveCaptureAvailable, nativeTransport: voice.nativeTransport };
       },
-      startLiveCapture: ({ captureId, nativeAsr }: { captureId: string; nativeAsr: boolean }) => {
+      startLiveCapture: ({ captureId, nativeAsr, bargeIn }: { captureId: string; nativeAsr: boolean; bargeIn?: boolean }) => {
         voice.startLiveCaptureCalls += 1;
+        voice.liveCaptureBargeIn.push(bargeIn === true);
         voice.activeMicSession = captureId;
         return Promise.resolve({ captureId, nativeAsr, echoCancelled: true });
       },

@@ -153,6 +153,13 @@ pure val weight_saved = 20
 > could not, zoom and pan in a photo, show or hide the controls, play or mute
 > a video from where I choose, swipe to the next one, and see its details.
 
+As Sunday's v119 drew it, the item is centred in a 3:4 frame as wide as the
+screen, above Ask Alpha, and shown whole inside it; the header and the
+controls float over it, and on the launcher the header sits below the
+phone's status bar. The editor keeps its own layout. Its controls carry
+v119's names: Back from photo, Edit photo or Edit video, and a viewer that
+says how to zoom, pan and browse.
+
 ### An item opens from what Photos lists, and is read from the phone; from the lock screen only one of that session's captures opens
 
 The owner opens an item Photos lists. The agent opens only an item listed

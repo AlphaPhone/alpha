@@ -32,7 +32,7 @@ import {
   type ReplyWord, dayEmptiness, firstColumnDay, monthCells, replyWord, rowShown, showsOffsets, statusAction, timelineFirstHour, timelineLastHour,
 } from "../../gen/app__calendar__presentation.ts";
 import {
-  type Occurrences as WritingOccurrences, type SaveBlock, goingOffered, managedDeleteOffered, managedScopeAllowed, maybeOffered, offeredOn, saveBlock, wallTimeSavable,
+  type Occurrences as WritingOccurrences, type SaveBlock, goingOffered, managedDeleteOffered, managedScopeAllowed, maybeOffered, newEventTarget, offeredOn, saveBlock, wallTimeSavable,
 } from "../../gen/app__calendar__writing.ts";
 import { type Deletions, type Reach, rowHidden } from "../../gen/app__calendar__deletions.ts";
 import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agent.ts";
@@ -116,7 +116,7 @@ const alerts: ReadonlyArray<{ minutes: number | undefined; label: string }> = [
 
 const saveOff: Readonly<Record<SaveBlock, string>> = {
   SaveAllowed: "", WaitLoading: "Loading…", WaitSaving: "Saving…", OtherAccount: "This draft belongs to another account.",
-  CheckEvent: "This event changed. Check it before saving.", AddTitle: "",
+  CheckEvent: "This event changed. Check it before saving.", AddTitle: "", NoCalendar: "Calendar unavailable", NoAccess: "",
 };
 
 const scopeWriting: Readonly<Record<Exclude<Editor.Scope, "Unchosen">, WritingOccurrences>> = {
@@ -951,6 +951,7 @@ function FormPeopleCard({ people, picking, canEdit, typedEmail, addable, setPick
 function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { day: number; today: number; connected: boolean; viewOwner: number }) {
   const editor = useEditor(runtime);
   const shown = useShown(runtime);
+  const view = useView(runtime);
   const [fields, setFields] = useState<Fields>(() => runtime.runSync(kept(day, editor.state?.owner ?? 0)));
   const [picking, setPicking] = useState<string | undefined>(undefined);
   const [wallError, setWallError] = useState("");
@@ -1035,7 +1036,12 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
     { scope: "WholeSeries", label: "All events" },
   ];
   const otherAccount = viewOwner !== e.owner;
-  const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, otherAccount, Editor.canKeepMyChanges(e), !e.titled)] : "";
+  const toPhone = !reminder && e.form === "NewEvent" && newEventTarget(connected, fields.calendar === "Phone") === "PhoneOwnCalendar";
+  const noCalendar = toPhone && !shown.present();
+  const noAccess = toPhone && shown.present() && view.state !== undefined && !View.phoneTakesASave(view.state);
+  // spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, without a title, with no calendar to take a new event, and for the phone's calendar once Android said no, in that order"
+  const off_ = !reminder && !e.extras && (!editor.can(save) || noCalendar || noAccess)
+    ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, otherAccount, Editor.canKeepMyChanges(e), !e.titled, noCalendar, noAccess)] : "";
   const choosesCalendar = reminder || e.form === "NewEvent";
   const editingPhone = e.form === "EditEvent" && editingRow?.source === "Phone";
   const destinations: { name: string; value: NonNullable<Fields["calendar"]> }[] = [{ name: "Reminders", value: "Reminders" }];
@@ -1045,7 +1051,7 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
   const toggleAllDayEvent: Editor.Event = editor.can({ type: "setAllDay", allDay: !fields.allDay }) ? { type: "setAllDay", allDay: !fields.allDay } : plain;
   const onAgent = destination === "Agent";
   // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on this phone's calendar; its live adapter left them off the agent's (prototype/agent-calendar-adapter.ts:312, :328).
-  const choosesOptions = !reminder && e.form === "NewEvent";
+  const choosesOptions = !reminder && e.form === "NewEvent" && destinations.some(({ value }) => value === destination);
   const offersVideo = choosesOptions && (fields.video === true || offeredOn(onAgent, false, false, true));
   const offeredRepeats = repeats.filter(({ repeat }) => offeredOn(onAgent, repeat !== "NoRepeat", false, false));
   const offeredAlerts = alerts.filter(({ minutes }) => offeredOn(onAgent, false, minutes !== undefined, false));
@@ -1054,7 +1060,7 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
   const picked = (next: Fields, fallback?: Editor.Event) => withExtras({ ...next, calendar: destination }, fallback);
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   const submit = () => {
-    if (!reminder) { void runtime.runPromise(saveEvent(destination === "Phone")); return; }
+    if (!reminder) { void runtime.runPromise(saveEvent(toPhone)); return; }
     saveButtonRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void runtime.runPromise(saveCalendarReminder());
   };
@@ -1077,7 +1083,12 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
   };
   return (
     <CalendarFormPage className={reminder ? "[&>[data-host-chrome]]:pr-2" : undefined} onBack={close} saving={saving}
-      onSave={(reminder || !e.extras) && !wallError && (editor.can(save) || reviewingReschedule) ? submit : undefined}>
+      onSave={(reminder || !e.extras) && !wallError && !noCalendar && !noAccess && (editor.can(save) || reviewingReschedule) ? submit : undefined}>
+      {noAccess ? (
+        <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction aria-label="Open Calendar settings" onClick={() => void view.send({ type: "openSettings" })}><Settings aria-hidden />Settings</CalendarNoticeAction>}>
+          No access
+        </CalendarNotice>
+      ) : null}
       {fields.noteOrigin !== undefined && e.extras && !reminder && (
         <CalendarNotice>Android Calendar will save this event without a link to the source note.</CalendarNotice>
       )}

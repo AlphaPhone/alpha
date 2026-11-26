@@ -21,7 +21,7 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowInside, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
@@ -90,7 +90,7 @@ const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({
   messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, role: Schema.Literals(["user", "assistant"]), text: Schema.String,
     timestamp: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))), clientMessageId: Schema.optionalKey(Schema.String),
-    failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
+    failureKind: Schema.optionalKey(Schema.String), abortCause: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
   hasMore: Schema.optionalKey(Schema.Boolean), hasEarlier: Schema.optionalKey(Schema.Boolean), hasLater: Schema.optionalKey(Schema.Boolean),
 })
 const pageEdge = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) })
@@ -1008,11 +1008,11 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
     when { tag: "Arrived", let recorded }: run("arrived", arrived(recorded));
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
-    when { tag: "Navigate", let turn, let view, let keep }: answer("navigate", effect {
+    when { tag: "Navigate", let turn, let view, let inside }: answer("navigate", effect {
       const shell = try Shell
       const before = try shell.get()
-      const shown = keep
-        ? showing(before, view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view the agent named"))
+      const shown = inside
+        ? (showing(before, view) && !canAgentShowInside(before, view)) || (try contained(shell.send({ type: "agentShowInside", view }), "opening the page the agent named"))
         : (showing(before, view) && !canAgentShowView(before, view)) || (try contained(shell.send({ type: "agentShowView", view }), "opening the view the agent named"))
       return { type: "navigated", ticket: turn, opened: shown } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });
@@ -1184,6 +1184,8 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       { conversation, message: speaker.text === "Message" && (speaker.stage === "Waiting" || speaker.stage === "Preparing") ? speaker.item : 0 },
     ].filter(({ conversation, message }) => conversation > 0 && message > 0)
     const recorded = messages.map((one): Line => {
+      // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": eliza stores a reply stopped before any of its text settled as aborted, with the provisional text it had, which is never shown.
+      if (one.role === "assistant" && one.failureKind === "aborted" && (one.abortCause === "stop" || one.abortCause === "client_left")) return { id: one.id, mine: false, text: "" }
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
         Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", redacted.has(one.id), key) ? saved?.get(key) : undefined
@@ -1519,17 +1521,6 @@ const looked = started(effect {
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(page, messaging), selection), effect ([[[shown, pages], [msgSnap, prefState]], [[subject], contact]]) => {
     const view = shown.trail.at(-1)
     const viewKey = view ?? ""
-    if (previousView !== undefined && viewKey !== previousView) {
-      const comp = try composer.get()
-      const nextRev = Math.max(comp.offeredAt + 1, (try conversation.get()).context.revision + 1)
-      if (Composer.canMoveOn(comp, nextRev)) {
-        if (try contained(composer.send({ type: "moveOn", revision: nextRev }), "dropping view offers on view change")) {
-          if (comp.editor.mail) mail.clear()
-          if (comp.editor.transcript) board.change({ transcript: undefined })
-        }
-      }
-    }
-    previousView = viewKey
     const offer = board.snapshot().transcript
     const transcript = offer?.offered
     if (transcript !== undefined && (view !== "Notes" || transcript.owner !== subject.owner ||
@@ -1547,9 +1538,23 @@ const looked = started(effect {
     const selected = (view === "Notes" && !sensitive && note > 0) || msgSelected || contactSelected
     const selectionKey = contactSelected ? `${contact.contact} ${contact.card.ticket}` : view === "Notes" ? note : msgCtx?.conversation?.id ?? "msg"
     const seen = `${viewKey} ${section} ${sensitive} ${currentZone} ${selected ? selectionKey : ""}`
-    if (seen === taken) return
-    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: currentZone, day: 0, selected, sensitive, section }
-    if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
+    if (seen !== taken) {
+      const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: currentZone, day: 0, selected, sensitive, section }
+      if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
+    }
+    if (previousView !== undefined && viewKey !== previousView) {
+      const comp = try composer.get()
+      if (comp.editor.mail || comp.editor.transcript) {
+        const nextRev = Math.max(comp.offeredAt + 1, (try conversation.get()).context.revision + 1)
+        if (Composer.canMoveOn(comp, nextRev)) {
+          if (try contained(composer.send({ type: "moveOn", revision: nextRev }), "dropping view offers on view change")) {
+            if (comp.editor.mail) mail.clear()
+            if (comp.editor.transcript) board.change({ transcript: undefined })
+          }
+        }
+      }
+    }
+    previousView = viewKey
   })
 }, "telling the screen")
 

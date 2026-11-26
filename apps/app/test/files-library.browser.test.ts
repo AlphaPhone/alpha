@@ -6,7 +6,7 @@ import { changeDraft, readDraft, type StoredPage } from "../src/files/scanStore.
 import { Documents } from "../src/platform/documents.vibe";
 import { Files } from "../src/platform/files.vibe";
 import { browserLibrary } from "../src/platform/library.vibe";
-import { closeAll, later, only, open } from "./alpha.tsx";
+import { closeAll, coverLifted, later, only, open } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
@@ -98,6 +98,7 @@ it("draws the selected PDF one page at a time", async () => {
 
 it('Reorder pages after the clock advances (spec/app/files/scan.md, "Story: Arrange the pages")', async () => {
   const { alpha } = await open(scene(), only("home", "view:Files"));
+  await coverLifted(alpha);
   try {
     await page.getByRole("button", { name: "Files", exact: true }).click();
     const tools = page.getByRole("button", { name: "Files tools", exact: true });

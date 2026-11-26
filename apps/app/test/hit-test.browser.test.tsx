@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { say } from "../src/notices/toasts.vibe";
-import { closeAll, only, open } from "./alpha.tsx";
+import { closeAll, coverLifted, only, open } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
@@ -31,6 +31,7 @@ describe("Browser hit-test", () => {
   it("layers Home, Ask Alpha, Attach sheet, and Toast", async () => {
     await page.viewport(390, 844);
     const { alpha } = await open(scene(), only("home", "assistant", "notice", "view:Browser", "view:Settings"));
+    await coverLifted(alpha);
 
     const notesTile = page.getByRole("button", { name: "Notes" });
     await expect.element(notesTile).toBeVisible();
@@ -83,7 +84,8 @@ describe("Browser hit-test", () => {
   // spec/app/shell/index.md, "Story: Move between Home and the apps"
   it("moves Tab focus across Home and Ask Alpha", async () => {
     await page.viewport(390, 844);
-    await open(scene(), only("home", "assistant"));
+    const { alpha } = await open(scene(), only("home", "assistant"));
+    await coverLifted(alpha);
 
     await expect.element(page.getByRole("button", { name: "Open conversation" })).toBeVisible();
     const visited = new Set<Element>();
@@ -103,6 +105,7 @@ describe("Browser hit-test", () => {
   it("expands Ask Alpha via real pointer drag", async () => {
     await page.viewport(390, 844);
     const { alpha } = await open(scene(), only("home", "assistant"));
+    await coverLifted(alpha);
 
     const openConv = page.getByRole("button", { name: "Open conversation" });
     await expect.element(openConv).toBeVisible();
@@ -131,7 +134,8 @@ describe("Browser hit-test", () => {
     window.addEventListener("error", onError);
     try {
       const world = scene();
-      await open(world, only("home", "assistant", "view:Maps"));
+      const { alpha } = await open(world, only("home", "assistant", "view:Maps"));
+      await coverLifted(alpha);
       await page.getByRole("button", { name: "Maps" }).click();
       await expect.element(page.getByRole("button", { name: "Back" })).toBeVisible();
 

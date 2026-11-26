@@ -1,4 +1,5 @@
 import { Effect, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { createRoot } from "react-dom/client";
 import { vi } from "vitest";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -49,5 +50,8 @@ export async function mountDock({ view = "Browser", withToast = false, flush, sp
     const hasToast = !withToast || document.querySelectorAll("[data-host-chrome]").length >= 3;
     if (!hasAssistant || !hasHeader || !hasToast) throw new Error("dock not painted");
   }, { timeout: 10_000 });
+  for (let waited = 0; waited < 2500 && document.querySelector('[role="status"][aria-label="Loading Alpha"]'); waited += 500) {
+    await run(() => alpha.runtime.runPromise(TestClock.adjust(500)));
+  }
   return { runtime, host };
 }

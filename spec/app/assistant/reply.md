@@ -192,7 +192,12 @@ without that code keep their own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
 removes its bubble. Stop keeps what was shown, which is only settled text:
 a reply stopped before any of its text settled keeps no bubble. The
-conversation's check of a stopped reply owns the only notice.
+conversation's check of a stopped reply owns the only notice. Read again
+from history it keeps no bubble either: eliza stores such a reply as
+aborted, with the provisional text it had and the cause `stop`, or
+`client_left` when Alpha's own Stop closed the reply's stream first, and
+neither that text nor a failure notice is drawn for it. A reply the
+runtime ended or a restart cut reads as before.
 
 ```quint
 type Failure = CredentialInvalid | InsufficientCredits | LimitReached | ProviderIssue | TimedOut

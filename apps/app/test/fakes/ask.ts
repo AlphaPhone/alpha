@@ -69,7 +69,7 @@ export interface AskScene {
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; cloudCode?: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; abortCause?: string; cloudCode?: string }[];
 }
 
 export function askScene(): AskScene {

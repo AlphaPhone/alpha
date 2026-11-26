@@ -21,7 +21,7 @@ import { type Job, answer, due, following, reacting, run, started, stream, toget
 import { Time } from "../runtime/time.vibe"
 import { Atlas, type AtlasStore, type Coverage, type Spot, type View, type Way, atlasLayer, withoutDetails } from "./atlas.vibe"
 import { type Point, coordinateOf, measured, normalizeLng, pointOf } from "./geometry.ts"
-import { handedQuery, takeHandedQuery, watchHandoff } from "./handoff.ts"
+import { dropHandedQuery, handedQuery, offerHandedQuery, watchHandoff } from "./handoff.ts"
 
 type CloudPlace = Awaited<ReturnType<CloudClient["mapsPlacesSearch"]>>["places"][number]
 
@@ -608,7 +608,7 @@ const opening = started(effect {
   })
 }, "opening Maps")
 
-// spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"; spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
+// spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end"; spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation"; spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"; spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
 const presence = started(effect {
   const shell = try Shell
   const device = try Device
@@ -644,6 +644,7 @@ const presence = started(effect {
       if ((try screen.get()).link.known) try ignore(screen.send({ type: "quietFix" }))
       return
     }
+    dropHandedQuery()
     try ignore(screen.send({ type: "leaveMaps" }))
     store.forgetDetails()
   })
@@ -693,7 +694,7 @@ const handoffs = started(effect {
   try Stream.runForEach(ticks, effect () => {
     const mapsShown = showing(try shell.get(), "Maps")
     if (!mapsShown) {
-      if (wasShown) try sync(() => takeHandedQuery())
+      if (wasShown) try sync(() => dropHandedQuery())
       wasShown = false
       return
     }
@@ -702,8 +703,11 @@ const handoffs = started(effect {
     if (query === undefined) return
     const current = try screen.get()
     if (!Screen.canHandOver(current, query, query.length)) return
-    try sync(() => takeHandedQuery())
-    try ignore(screen.send({ type: "handOver", query, chars: query.length }))
+    const took = try promise(() => offerHandedQuery((q) => {
+      if (!Screen.canHandOver(current, q, q.length)) return undefined
+      return runPromise(screen.send({ type: "handOver", query: q, chars: q.length }) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+    }))
+    void took
   })
 }, "Maps search handoff")
 

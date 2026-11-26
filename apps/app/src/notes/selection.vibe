@@ -29,7 +29,7 @@ type NoteSubjects = { readonly note: number; readonly owner: number; readonly re
 
 function chosen(list: List, editor: Writing, link: Dialog, voice: VoiceNote): number {
   if (list.read.status !== "Loaded" || list.owner === 0) return 0
-  if (editor.showing && editor.owner === list.owner && editor.draft.sync === "Kept" && editor.draft.base === list.version && !editor.deleting) return editor.note
+  if (editor.showing && editor.owner === list.owner && editor.draft.sync === "Kept" && !editor.deleting) return editor.note
   if (link.showing && link.owner === list.owner && link.revision === list.version && !link.changed) return link.note
   if (voice.showing && voice.owner === list.owner && voice.revision === list.version) return voice.note
   return 0

@@ -327,7 +327,7 @@ describe("Camera on a phone", () => {
     await until(alpha, library, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
     await press("Camera.jpg");
     await until(alpha, library, Viewer, (state) => state.read.status === "Loaded" && state.origin === "LibraryItem");
-    await press("Back to photos");
+    await press("Back from photo");
     await until(alpha, library, Viewer, (state) => state.open === 0);
     expect(button("Camera.jpg")).toBeDefined();
   });

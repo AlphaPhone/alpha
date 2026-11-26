@@ -708,7 +708,7 @@ effect function actOnViewed(viewer: number, item: number, revision: number, oper
     if (listed === undefined || listed.name !== described.name || Math.trunc(listed.modified) !== revision || !Browser.allowed(try files.get()) || !(try samePreview(viewer, item, revision, grant))) return false
     if (described.size !== undefined && described.size !== listed.size) return false
     const root = try handle.of({ volume, path: "" })
-    const exact: Item = { id: item, volume: root, name: listed.name, revision, bytes: Math.max(0, Math.trunc(listed.size)), kind: storageKind(listed) }
+    const exact: Item = { id: item, volume: root, name: listed.name, revision, bytes: Math.max(0, Math.trunc(listed.size)), children: 0, kind: storageKind(listed) }
     if (operation === "RenameFile") {
       const ticket = (try files.get()).change.attempt.id + 1
       const siblings = (reply.entries ?? []).map((one) => one.name)

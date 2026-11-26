@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { page } from "vitest/browser";
-import { closeAll, only, open } from "./alpha.tsx";
+import { closeAll, coverLifted, only, open } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
@@ -10,7 +10,8 @@ afterEach(closeAll);
 it("Keep a message and its list on a wide phone canvas", async () => {
   await page.viewport(1280, 800);
   const world = { ...scene(), phone: true };
-  await open(world, only("home", "view:Inbox", "assistant"));
+  const { alpha } = await open(world, only("home", "view:Inbox", "assistant"));
+  await coverLifted(alpha);
   await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
   const subviewElement = async (name: string) => {
     const selector = `[data-alpha-subview="${name}"]`;
@@ -72,7 +73,8 @@ it("Review an attachment and save the copy in Files", async () => {
   ];
   message.attachmentData = { "1": bytes, "2": pdf };
 
-  await open(world, only("home", "view:Inbox", "view:Files", "assistant"));
+  const { alpha } = await open(world, only("home", "view:Inbox", "view:Files", "assistant"));
+  await coverLifted(alpha);
   // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited": the tile's name is its app's, with what waits there said after it
   await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
   await page.getByRole("button", { name: /Revised term sheet/ }).click();

@@ -67,9 +67,10 @@ function paint(section: HTMLElement | null, d: ChatDrag) {
  * (resizeForTap, :530-546; retire, :613-651): a copy that takes no input, scrolled and filled as the sheet was, so the
  * bar under it is Ask Alpha at once and keeps its own controls, never the sheet's. v119 had one field, which a tap or a
  * released drag moved to the bar at once (retire clears the drag before the state, :864-877; the one editor, :1346), so a
- * sheet put away shrinks or fades with its field empty over the bar's own words.
+ * sheet a tap put away shrinks with its field empty over the bar's own words, and one a drag put away falls with no
+ * composer at all, as v119's panel lost its composer once the drag let go (retire, :613-651; panelComposer, :969-986, model.js:6444).
  */
-function ghostOf(section: HTMLElement) {
+function ghostOf(section: HTMLElement, composer: boolean) {
   const ghost = section.cloneNode(true) as HTMLElement;
   for (const named of [ghost, ...ghost.querySelectorAll("[id], [aria-label]")]) {
     named.removeAttribute("id");
@@ -90,6 +91,7 @@ function ghostOf(section: HTMLElement) {
     if (element instanceof HTMLTextAreaElement && copy instanceof HTMLTextAreaElement) copy.value = "";
   });
   for (const field of ghost.querySelectorAll("textarea")) field.placeholder = "";
+  if (!composer) ghost.lastElementChild?.remove();
   return ghost;
 }
 
@@ -174,7 +176,6 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const shownRef = useRef(0);
   const motionsRef = useRef<Animation[]>([]);
   const ghostRef = useRef<HTMLElement | undefined>(undefined);
-  const barRef = useRef(0);
   const paintedBarRef = useRef<HTMLElement | null>(null);
   /**
    * A bar pulled down to tuck keeps the finger's paint until the commit that draws it as something else, the pill, clears
@@ -215,12 +216,8 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     done(true);
     void dock.send({ type: "shift", now: untimed });
   };
-  /** v119's floor (chat-overlay-motion-adapter.ts:1037-1039): the input bar's height, measured where it was last drawn, plus 28. */
-  const floorOf = () => {
-    const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]")?.clientHeight ?? 0;
-    if (bar > 0) barRef.current = bar;
-    return (barRef.current || FALLBACK_BAR) + FLOOR_GAP;
-  };
+  /** v119's floor (chat-overlay-motion-adapter.ts:1037-1039): the input bar's height where one is drawn at the press, else 62, plus 28. */
+  const floorOf = () => (document.querySelector<HTMLElement>("[data-alpha-input-bar]")?.clientHeight || FALLBACK_BAR) + FLOOR_GAP;
   const gesture: AssistantPull = {
     onPress: ({ y }) => {
       if (paintedBarRef.current) handOver();
@@ -309,7 +306,6 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     }
     if (!growing && !handing) {
       shownRef.current = element.getBoundingClientRect().height;
-      floorOf();
       return;
     }
     const header = element.querySelector<HTMLElement>("[data-alpha-chat-header]");
@@ -329,14 +325,14 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       return;
     }
     if (!handing) return;
-    const from = handing.height ?? (handing.tap && shownRef.current > 0 ? shownRef.current : drawnHeight);
+    const from = handing.height ?? drawnHeight;
     const to = handing.tap ? block : 0;
-    const ghost = ghostOf(element);
+    const ghost = ghostOf(element, handing.tap);
     ghostRef.current?.remove();
     ghostRef.current = ghost;
     const ghostHeader = ghost.querySelector<HTMLElement>("[data-alpha-chat-header]");
     ghost.animate([{ height: `${from}px`, minHeight: "0px", maxHeight: "none" }, { height: `${to}px`, minHeight: "0px", maxHeight: "none" }], { ...resize, fill: "forwards" });
-    ghostHeader?.animate(revealFrames(from, to, fit), { duration: resize.duration, easing: "linear", fill: "forwards" });
+    ghostHeader?.animate(revealFrames(from, to, handing.tap ? fit : headerFit(element, 0)), { duration: resize.duration, easing: "linear", fill: "forwards" });
     const fade = handing.tap
       ? ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: CLOSE_FADE_MS, delay: CLOSE_MS - CLOSE_FADE_MS, easing: "linear", fill: "forwards" })
       : ghost.animate([{ opacity: handing.opacity ?? 1 }, { opacity: 0 }], { duration: 200, easing: "ease", fill: "forwards" });
