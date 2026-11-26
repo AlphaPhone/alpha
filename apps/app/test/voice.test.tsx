@@ -955,7 +955,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
-  it("draws a Talk turn as the Sunday demo build did: the speaker dimmed while connecting, what was said with working dots at once, and the microphone paused while Alpha answers", async () => {
+  it("draws a Talk turn as the Sunday demo build did: the speaker dimmed while connecting, what was said with working dots at once, the microphone paused only while it is really closed, and shown open once the relay opens it", async () => {
     const world = { ...scene(), phone: true };
     world.voice.onDevice = false;
     world.voice.credentialId = "cred-owner-9";
@@ -989,15 +989,23 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       world.voice.emitCloud?.({ type: "speech-start", sessionId });
       world.voice.emitCloud?.({ type: "speech-end", sessionId, text: asked });
     });
+    const mic = async () => {
+      const control = button(/^(Mute microphone|Microphone paused while Alpha responds)$/);
+      return { closed: (await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()))).mic !== "On", pressed: control?.getAttribute("aria-pressed") };
+    };
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Thinking" && s.sent === 1);
     await settleComposer(alpha, () => world.ask.turns.size === 1);
     expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
     expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
 
+    expect(await mic()).toEqual({ closed: true, pressed: "true" });
+
+    // The relay opens the microphone again at the first sentence, so it is shown open and can be muted, never paused.
     await drawn(() => [...world.ask.turns.values()][0]?.());
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Speaking");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Speaking" && s.network && s.mic === "On");
     expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
-    expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
+    expect(row()).toEqual(["Mute speaker", "Mute microphone", "Stop voice conversation"]);
+    expect(await mic()).toEqual({ closed: false, pressed: "false" });
 
     done.resolve();
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.turn === 2 && s.mic === "On");
@@ -1005,6 +1013,45 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([said(), dots(), world.ask.said]).toEqual([undefined, null, [asked]]);
     expect(row()).toEqual(["Mute speaker", "Mute microphone", "Stop voice conversation"]);
 
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
+  // spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"
+  it("lets the owner shut the relay microphone it opened while Alpha speaks, without ending Talk or the reply", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.voice.credentialId = "cred-owner-9";
+    const { alpha, area } = await onComposer(world);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.revision > 0);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await raiseSheet(alpha);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.speaker === "SpeakerOn");
+
+    const done = Promise.withResolvers<void>();
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["Nothing is on your calendar today."];
+    world.ask.holdDoneAfterReady = done.promise;
+    const sessionId = world.voice.activeMicSession;
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "speech-start", sessionId });
+      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: "What is on my calendar?" });
+    });
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Thinking" && s.sent === 1);
+    await settleComposer(alpha, () => world.ask.turns.size === 1);
+    await drawn(() => [...world.ask.turns.values()][0]?.());
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Speaking" && s.network && s.mic === "On");
+
+    await press("Mute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic !== "On" && s.mic !== "Opening");
+    const state = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    expect([state.phase, button("Unmute microphone")?.getAttribute("aria-pressed")]).toEqual(["Speaking", "true"]);
+
+    done.resolve();
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.turn === 2);
+    expect(await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()))).toMatchObject({ muted: true, mic: "Off" });
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });

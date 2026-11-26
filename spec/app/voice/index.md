@@ -645,16 +645,26 @@ pure def alwaysPlaybackIsTheCurrentTurns(v: Voice): bool =
 
 ### Mute turns the microphone off, and unmuting opens it again only where Alpha listens
 
-The microphone control acts only while Alpha listens. While Talk connects
-it waits, dimmed and unconfirmed, and while Alpha answers a turn
-(transcribing, thinking or speaking) it waits, dimmed, as the Sunday demo
-build held it ("Microphone paused while Alpha responds", v119
+The microphone control acts while Alpha listens, and whenever the
+microphone is open while Alpha answers. While Talk connects it waits,
+dimmed and unconfirmed. While Alpha answers a turn (transcribing, thinking
+or speaking) with the microphone really closed, it waits, dimmed, and shows
+the microphone paused, as the Sunday demo build held it ("Microphone paused
+while Alpha responds" only while its input was held closed, v119
 apps/app/src/prototype/voice-adapter.ts:1116-1118 and 1631-1633,
-phone.css:920; demo frames v89-064, v89-072, v89-076). Stop and the
-speaker stay available.
+phone.css:920; demo frames v89-064, v89-072, v89-076). Once the microphone
+opens again while Alpha speaks, so that speaking over Alpha interrupts it,
+the control shows it open and mutes it, as v119 kept the phone's microphone
+open through the reply and offered Mute there (voice-adapter.ts:885-889,
+1117 and 1631). The control never shows the microphone paused or off while
+it is open, and an open microphone can always be shut without ending Talk.
+Stop and the speaker stay available.
 
 ```quint
-pure def canMute(v: Voice): bool = talking(v) and not(v.muted) and v.mic != Asking and v.phase == Listening
+pure def canMute(v: Voice): bool =
+  talking(v) and not(v.muted) and v.mic != Asking and (v.phase == Listening or (alphaResponds(v) and opened(v.mic)))
+
+pure def micHeld(v: Voice): bool = alphaResponds(v) and not(v.muted) and (v.mic == Off or v.mic == Closing)
 
 pure def mute(v: Voice): Change = { state: { ...v, muted: true, mic: closedMic(v.mic) }, out: closeOut(v) }
 
@@ -668,6 +678,9 @@ pure def unmute(v: Voice): Change =
 pure def alwaysMutedMeansTheMicrophoneIsOff(v: Voice): bool = v.muted implies (v.mic == Off or v.mic == Closing)
 
 pure def sometimesMutedWhileListening(v: Voice): bool = v.muted and v.phase == Listening
+
+pure def alwaysAnOpenMicrophoneCanBeShut(v: Voice): bool =
+  (alphaResponds(v) and not(v.muted) and opened(v.mic)) implies (canMute(v) and not(micHeld(v)))
 ```
 
 ### Speaker mute is offered after the current speech bridge confirms gain control
