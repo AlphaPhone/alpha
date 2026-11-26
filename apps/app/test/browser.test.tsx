@@ -5,6 +5,7 @@ import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
+import { verdict } from "../gen/app__browser__address.ts";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
 import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Reader } from "../gen/app__browser__reading.effect.vibe";
@@ -15,12 +16,13 @@ import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import { Machine as Speaker } from "../gen/app__voice__output.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
-import { Pages } from "../src/browser/browser.vibe";
+import { Pages, inputOf } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
+import { TabHost } from "../src/platform/browser.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, readInboxFirst, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
@@ -176,11 +178,29 @@ const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
 });
 
+const askClearAll = async (alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"], runtime: ReturnType<typeof browser.runtime>, choice: "Cancel" | "Clear data") => {
+  if (!button("Reset browser data")) {
+    await press("Menu");
+    await press("Library, bookmarks and history");
+    await libraryTab("History");
+    await press("Clear history");
+  }
+  await press("Reset browser data");
+  await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
+  await press(choice);
+  await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept");
+};
+
+async function openHydratedPhoneBrowser() {
+  const world = { ...scene(), phone: true, image: true };
+  const opened = await onBrowser(world);
+  await until(opened.alpha, opened.runtime, Tabs, (s) => s.hydrated);
+  return { ...opened, world };
+}
+
 describe("The Browser on a phone", () => {
   it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/address.md, \"Story: Go where I typed\")", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const { alpha, runtime, world } = await openHydratedPhoneBrowser();
     // spec/app/browser/address.md, "A tab with no page says \"Search or address\" in its bar, a private tab as a normal one, and only the private mark tells them apart"
     expect(button(/^Edit address/)?.textContent).toBe("Edit addressSearch or address");
     await press("Search or type address");
@@ -355,6 +375,37 @@ describe("The Browser on a phone", () => {
     await press("Clear data");
     expect(world.browser.calls).not.toContain("clearSiteData");
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
+  });
+
+  it("Draws the find bar over the full-size page (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    // Laid out as on the phone: the page's place (lower by the find bar's 50px if it moved under the bar) and the floating find bar.
+    const measure: unknown = Reflect.get(HTMLElement.prototype, "getBoundingClientRect");
+    if (typeof measure !== "function") throw new Error("The DOM fixture cannot measure elements");
+    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute("data-alpha-browser-page")) return this.classList.contains("top-12.5") ? new DOMRect(0, 154, 390, 600) : new DOMRect(0, 104, 390, 650);
+      if (this.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
+      const measured: unknown = Reflect.apply(measure, this, []);
+      if (!(measured instanceof DOMRect)) throw new Error("The DOM fixture measured an invalid rectangle");
+      return measured;
+    });
+    onTestFinished(() => laidOut.mockRestore());
+    const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
+    const full = { id: `tab${tab}`, x: 0, y: 104, width: 390, height: 650 };
+    await drawn(() => vi.waitFor(() => expect(world.browser.shown).toEqual(full)));
+    expect(world.browser.hostRects).toEqual([]);
+
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([{ x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 }])));
+    expect(world.browser.shown).toEqual(full);
+
+    await press("Close find in page");
+    await until(alpha, page, Page, (p) => !p.finding);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([])));
+    expect(world.browser.shown).toEqual(full);
   });
 
   it("Explains unavailable Android page reading (spec/app/browser/reading.md, \"An explicit reading starts from the current committed HTTPS page\")", async () => {
@@ -790,9 +841,7 @@ describe("The Browser on a phone", () => {
   });
 
   it("Toggles desktop site per native tab from the Browser menu", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const { world, runtime } = await openHydratedPhoneBrowser();
     await go("example.com");
     await vi.waitFor(async () => expect(await committedAddress(runtime, world.browser.tabs)).toBe("https://example.com"));
     const firstTab = (await runtime.runPromise(Effect.flatMap(Tabs, (model) => model.get()))).selected;
@@ -809,5 +858,72 @@ describe("The Browser on a phone", () => {
     await pressOnTop("Request mobile site");
     await vi.waitFor(() => expect(world.browser.tabs.get(firstId)?.desktop).toBe(false));
     expect(world.browser.calls.filter((call) => call === "setDesktopSite")).toHaveLength(2);
+  });
+
+  it("Opens explicit IPv4 web addresses and refuses invalid ports (spec/app/browser/address.md, \"Text that is too long, or names a user or a password, is refused; an http or https address opens when it has a host; anything else is a search unless it reads as a host\")", async () => {
+    expect([
+      verdict(inputOf("http://127.0.0.1")),
+      verdict(inputOf("https://1.1.1.1")),
+      verdict(inputOf("http://192.168.1.1:8080/status")),
+      verdict(inputOf("127.0.0.1")),
+      verdict(inputOf("https://example.com:99999")),
+      verdict(inputOf("https://[::::]")),
+    ]).toEqual(["Open", "Open", "Open", "Search", "Refuse", "Refuse"]);
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("http://127.0.0.1");
+    const page = selectedPage(runtime);
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["http://127.0.0.1"]);
+  });
+
+  it("Advances the find-in-page match indicator on Next match (spec/app/browser/address.md, \"Story: Find in page\")", async () => {
+    const { alpha, runtime } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const page = selectedPage(runtime);
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await fill("Find in page", "the");
+    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+    const total = page.runSync(Page.use((m) => m.get())).matches;
+    expect(document.body.textContent).toContain(`1 of ${total}`);
+    await press("Next match");
+    await expect.poll(() => document.body.textContent).toContain(`2 of ${total}`);
+  });
+
+  it("Does not create a native tab when load is refused on a non-selected tab (spec/app/browser/index.md, \"A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const first = selectedTab(runtime);
+    await press("Menu");
+    await press("New tab");
+    await until(alpha, runtime, Tabs, (s) => s.open.length === 2 && s.selected !== first);
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(first)));
+    await runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.aim(first, "https://news.example/on-device-agents")));
+    await page.runPromise(Page.use((m) => m.send({ type: "submit", i: inputOf("https://news.example/on-device-agents") })));
+    await until(alpha, page, Page, (p) => p.phase !== "Loading");
+    expect([page.runSync(Page.use((m) => m.get())).phase, world.browser.tabs.has(`tab${first}`)]).toEqual(["Failed", false]);
+  });
+
+  it("Keeps Library history in sync with normal visits and Clear all browsing data (spec/app/browser/library.md, \"Clearing all browsing data empties history at once\"; spec/app/browser/library.md, \"A page that commits in a normal tab is counted in history, which keeps the newest hundred\")", async () => {
+    const { alpha, runtime } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await press("Menu");
+    await press("Library, bookmarks and history");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded" && s.history === 3);
+    await hardware("back");
+    await go("https://alpha.example/fresh-visit");
+    const tab = selectedTab(runtime);
+    const page = selectedPage(runtime, tab);
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    await until(alpha, runtime, Library, (s) => s.history === 4);
+    await askClearAll(alpha, runtime, "Cancel");
+    expect(runtime.runSync(Library.use((m) => m.get())).history).toBe(4);
+    await askClearAll(alpha, runtime, "Clear data");
+    await until(alpha, runtime, Library, (s) => s.history === 0);
+    expect(runtime.runSync(Effect.map(TabHost, (host) => host.session.info(`tab${tab}`)))).toBeUndefined();
   });
 });

@@ -104,7 +104,7 @@ export function HomeScreen({
             if (id) onPressTile(id);
           } : undefined}>
           <HomeTileGrid
-            key={tileGestureScope}
+            tileGestureScope={tileGestureScope}
             tiles={tiles}
             editing={editing}
             onOpen={onOpenTile}

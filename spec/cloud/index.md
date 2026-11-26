@@ -252,6 +252,7 @@ pure val cloudTable: List[TableRoute] = List(
   { verb: Get, path: "/api/v1/billing/invoices", query: List() },
   { verb: Get, path: "/api/v1/billing/invoices/{invoiceId}", query: List() },
   { verb: Get, path: "/api/v1/maps/capabilities", query: List() },
+  { verb: Post, path: "/api/v1/maps/geocode", query: List() },
   { verb: Post, path: "/api/v1/maps/places/search", query: List() },
   { verb: Post, path: "/api/v1/maps/places/details", query: List() },
   { verb: Post, path: "/api/v1/maps/routes", query: List() },

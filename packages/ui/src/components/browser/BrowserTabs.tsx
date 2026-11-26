@@ -34,7 +34,7 @@ export type BrowserTabsProps = {
 /** Every open tab as a card, the one shown outlined, with a new tab and a new private tab. */
 export function BrowserTabs({ leading, tabs, onPick, onClose, onNew, onNewPrivate }: BrowserTabsProps) {
   return (
-    <div className="absolute inset-0 z-50 flex animate-rise flex-col bg-background">
+    <div className="absolute inset-0 z-50 flex flex-col bg-background motion-safe:animate-rise">
       <header data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:mt-11 in-data-[alpha-launcher]:h-14 [&>div:first-child>button]:size-13 [&>div:first-child>button]:rounded-lg">
         <div className="flex shrink-0">{leading}</div>
         <h1 className="min-w-0 flex-1 truncate text-xl font-semibold in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-home-display in-data-[alpha-launcher]:font-light">{tabs.length === 1 ? "1 tab" : `${tabs.length} tabs`}</h1>

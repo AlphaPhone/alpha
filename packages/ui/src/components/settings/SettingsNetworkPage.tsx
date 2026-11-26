@@ -62,8 +62,12 @@ const unsecured = (security: SettingsNetworkSecurity) => security === "open" || 
  * @model spec/app/settings/network.md
  */
 export function SettingsNetworkPage({ online, reading = false, scan, scanning = false, networks, joined, joining = false, fits, onJoin, onRescan, told, onBack, starting, onAndroid }: SettingsNetworkPageProps) {
-  const [chosen, setChosen] = useState<SettingsNearbyNetwork | undefined>(undefined);
-  const [passphrase, setPassphrase] = useState("");
+  const [selection, setSelection] = useState<{ name: string; security: SettingsNetworkSecurity; passphrase: string } | undefined>(undefined);
+  const chosen = selection === undefined ? undefined : networks.find((network) => network.name === selection.name);
+  if (selection !== undefined && (chosen === undefined || chosen.security !== selection.security)) {
+    setSelection(chosen === undefined ? undefined : { name: chosen.name, security: chosen.security, passphrase: "" });
+  }
+  const passphrase = chosen !== undefined && !unsecured(chosen.security) && selection?.security === chosen.security ? selection.passphrase : "";
   const said = scans[scan];
   const android = { starting, onAndroid };
   const ready = chosen !== undefined && onJoin !== undefined && !joining && (fits?.(chosen, passphrase) ?? false);
@@ -84,8 +88,7 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
             detail={securities[network.security]}
             selected={chosen?.name === network.name}
             onClick={() => {
-              setChosen(network);
-              setPassphrase("");
+              setSelection({ name: network.name, security: network.security, passphrase: "" });
             }}
           />
         ))}
@@ -97,12 +100,14 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
             event.preventDefault();
             if (!ready) return;
             onJoin(chosen, passphrase);
-            setPassphrase("");
-            setChosen(undefined);
+            setSelection(undefined);
           }}
         >
           {unsecured(chosen.security) ? null : (
-            <Input type="password" autoComplete="off" aria-label={`Password for ${chosen.name}`} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+            <Input type="password" autoComplete="off" aria-label={`Password for ${chosen.name}`} value={passphrase} onChange={(event) => {
+              const next = event.target.value;
+              setSelection((current) => current && { ...current, passphrase: next });
+            }} />
           )}
           <Button type="submit" disabled={!ready} loading={joining}>{`Join ${chosen.name}`}</Button>
         </form>

@@ -405,11 +405,27 @@ function cloudCommand(secrets: string, args: readonly string[], keys: Readonly<R
   return { child, exited, output: () => output };
 }
 
+/** Wait for a spawned child service to answer 200 at `url`, or fail promptly if it exits or is killed by a signal. */
+export async function awaitChildService(
+  child: ChildProcess,
+  url: string,
+  label: string,
+  output: () => string,
+): Promise<void> {
+  let stopped: string | undefined;
+  child.once("close", (code, signal) => {
+    children.delete(child);
+    stopped = `${label} stopped with ${signal ?? code}: ${output()}`;
+  });
+  await answering(
+    url,
+    () => stopped ?? (child.exitCode !== null || child.signalCode !== null ? `${label} stopped with ${child.signalCode ?? child.exitCode}: ${output()}` : undefined),
+  );
+}
+
 async function served(secrets: string, args: readonly string[], origin: string, keys: Readonly<Record<string, string>> = {}) {
   const running = cloudCommand(secrets, ["serve", ...args], keys);
-  let over = false;
-  void running.exited.then(() => { over = true; });
-  await answering(`${origin}/api/public/service`, () => (over ? `the cloud stopped before it served: ${running.output()}` : undefined));
+  await awaitChildService(running.child, `${origin}/api/public/service`, "the cloud", running.output);
   return running.child;
 }
 
@@ -471,6 +487,7 @@ export async function startCloud(state: string, emails: readonly string[], credi
   const at = [...deployment, "--port", String(port), "--host", "127.0.0.1"];
   const owners = new Map<string, DeviceKey>();
   const keys: Readonly<Record<string, string>> = speech === undefined ? {} : { [speechSettings.apiKeyEnv]: speech.key };
+  let running: ChildProcess | undefined;
   try {
     const first = await served(secrets, [...at, "--seed", file("seed.json", JSON.stringify(seed))], local, keys);
     try {
@@ -482,10 +499,12 @@ export async function startCloud(state: string, emails: readonly string[], credi
       const funded = cloudCommand(secrets, ["credits", "add", "--organization", key.organizationId, "--amount", String(credits), "--request", `grant-${email}`, ...deployment], keys);
       if (await funded.exited !== 0) throw new Error(`the operator could not fund ${email}: ${funded.output()}`);
     }
-    const running = await served(secrets, at, local, keys);
+    running = await served(secrets, at, local, keys);
+    const active = running;
     const front = await startFront(home, new URL(local));
-    return { api: front.api, caFile: front.caFile, local, model, provider: provider.origin, owners, stop: async () => { await front.stop(); await ended(running); await provider.stop(); } };
+    return { api: front.api, caFile: front.caFile, local, model, provider: provider.origin, owners, stop: async () => { await front.stop(); await ended(active); await provider.stop(); } };
   } catch (cause) {
+    if (running !== undefined) await ended(running);
     await provider.stop();
     throw cause;
   }
@@ -530,7 +549,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
   child.stderr.setEncoding("utf8").on("data", (text: string) => { errors += text; });
   child.stdin.end(`${JSON.stringify({ version: 1, token, epoch: Date.now(), credential: { version: 1, value: key.token }, storageKey: base64url(randomBytes(32)) })}\n`);
   const origin = `http://127.0.0.1:${port}`;
-  await answering(`${origin}/api/health`, () => (child.exitCode === null ? undefined : `the agent stopped with ${child.exitCode}: ${errors}`));
+  await awaitChildService(child, `${origin}/api/health`, "the agent", () => errors);
   return { origin, token, stop: () => ended(child) };
 }
 
