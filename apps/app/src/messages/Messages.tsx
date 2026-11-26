@@ -41,9 +41,10 @@ const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
 /**
  * The top of the Messages list as the Pixel drew it on Sunday's v119 (Alpha 45f6bed30): 8px under the status bar
  * (`prototype/phone.css:45`; the 8px is the list's own `pt-2`), then the serif "Messages" title with Search and the pencil New message at its end
- * (`prototype/template.html:566-571`, `phone.css:304,311-317`). Search keeps the same top, 56px tall (`template.html:581`).
+ * (`prototype/template.html:566-571`, `phone.css:304,311-317`). The title row is at least 56px (`.alpha-stage-header`, `phone.css:304`), so
+ * above 150% text it grows with its wrapped title; only Search keeps the same top at a fixed 56px (`template.html:581`).
  */
-const messagesTop = "mt-[max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] in-[main:has([data-alpha-call-strip=over])]:mt-0 in-data-[alpha-launcher]:h-14";
+const messagesTop = "mt-[max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] in-[main:has([data-alpha-call-strip=over])]:mt-0";
 const messagesHeader = cn(messagesTop, "shrink-0 in-data-[alpha-launcher]:min-h-14 in-data-[alpha-launcher]:gap-1 in-data-[alpha-launcher]:[&>button[aria-label]:not([aria-label^=Back])]:size-11 in-data-[alpha-launcher]:[&>button[aria-label]:not([aria-label^=Back])]:min-w-11");
 const accessPill = "min-h-13 rounded-group bg-foreground px-7 text-lg font-semibold text-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
 const draftAction = "min-h-11 rounded-tile text-base focus-visible:outline-2 focus-visible:outline-ring";
@@ -148,7 +149,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
   return (
     <>
       {searching ? (
-        <header className={cn("flex h-13 shrink-0 items-center gap-0.5 px-2", messagesTop)} data-alpha-messages-search-header>
+        <header className={cn("flex h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:h-14", messagesTop)} data-alpha-messages-search-header>
           <Button variant="ghost" size="icon" className="size-13 rounded-lg" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
           <div role="search" aria-label="Search messages" className="min-w-0 flex-1">
             <SearchField autoFocus keepClear aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" className="[&_button]:size-13 [&_button]:min-w-13 [&_button]:rounded-tile [&_input:focus-visible]:outline-none" />
