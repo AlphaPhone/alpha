@@ -190,8 +190,8 @@ async function startProvider(key: string, real: RealModel | undefined) {
   const replies = new Map<string, Reply[]>();
   const asked = new Map<string, Message[][]>();
   const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
-  const scripted = (system: string) => [...replies.keys()].filter((character) => system.startsWith(character)).sort((a, b) => b.length - a.length)[0] ?? system;
-  const heard = (character: string) => [...asked].filter(([system]) => system.startsWith(character)).flatMap(([, calls]) => calls);
+  const scripted = (system: string) => [...replies.keys()].filter((character) => system.includes(character)).sort((a, b) => b.length - a.length)[0] ?? system;
+  const heard = (character: string) => [...asked].filter(([system]) => system.includes(character)).flatMap(([, calls]) => calls);
   const frame = (data: unknown) => `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
   const usage = (messages: readonly Message[], text: string) => ({ prompt_tokens: JSON.stringify(messages).length, completion_tokens: text.length, total_tokens: JSON.stringify(messages).length + text.length });
   const json = (outgoing: ServerResponse, status: number, data: unknown) => void outgoing.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(data));
@@ -215,7 +215,11 @@ async function startProvider(key: string, real: RealModel | undefined) {
     };
     const last = messages.findLast((message) => message.role === "user" && personText(message.content) !== undefined)?.content;
     const echoed = last === undefined ? "" : (personText(last) ?? "");
-    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", echoed] };
+    const rawReply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", echoed] };
+    const needsAnswerTag = system.includes("[answer]") && !/^\s*\[(?:answer|promise)\]/i.test(rawReply.kind === "text" ? rawReply.parts.join("") : rawReply.first);
+    const reply: Reply = !needsAnswerTag ? rawReply
+      : rawReply.kind === "text" ? { kind: "text", parts: ["[answer] ", ...rawReply.parts] }
+      : { kind: "stall", first: `[answer] ${rawReply.first}` };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {

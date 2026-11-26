@@ -19,12 +19,12 @@ beforeAll(async () => {
 }, 600_000);
 afterEach(closeAll);
 
-const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((line) => line.textContent);
+const transcript = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((item) => item.textContent);
 
 // spec/app/ask/index.md, "Story: Talk to my agent"
 it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {
   expect([mine.key.mailed, mine.key.accountId === "", mine.agent.token === ""]).toEqual([expect.stringMatching(/^\d{6}$/), false, false]);
-  const { alpha } = await openOver(elizaWorld(mine));
+  const { alpha } = await openOver(elizaWorld(mine), [{ at: "assistant", load: () => import("../src/ask/index.tsx") }]);
   const asking = ask.runtime(alpha);
   const balance = async () => (await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
   expect(await balance()).toBe(mine.granted);
@@ -38,11 +38,11 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   await press("Send");
   // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Confirmed");
-  expect(lines()).toEqual(["Say hello.", "Hello from the cloud."]);
-  const [system, owner, ...more] = (await mine.asked()).at(-1) ?? [];
-  expect([system?.role, owner?.role, more.length]).toEqual(["system", "user", 0]);
-  expect(system?.content).toContain(mine.system);
-  expect(owner?.content).toMatch(/^Say hello\.(\n|$)/);
+  expect(transcript()).toEqual(["Say hello.", "Hello from the cloud."]);
+  const textOf = (value: unknown) => (typeof value === "string" ? value : "");
+  const last = (await mine.asked()).at(-1);
+  expect([last?.length, last?.[0]?.role, textOf(last?.[0]?.content).includes(mine.system), last?.[1]?.role, /^Say hello\.(\n|$)/.test(textOf(last?.[1]?.content))])
+    .toEqual([2, "system", true, "user", true]);
   expect(await balance()).toBeLessThan(mine.granted);
 
   // spec/app/ask/index.md, "The owner stops the reply under way once, and the agent is asked to stop that conversation's turn"
@@ -53,7 +53,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   expect(Boolean(button("Send"))).toBe(false);
   await press("Stop");
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Refused");
-  expect([lines(), document.querySelector("section[aria-label='Ask Alpha'] [role=alert]")?.textContent]).toEqual([["Say hello.", "Hello from the cloud.", "Take your time.", "Thinking"], "The reply stopped"]);
+  expect([transcript(), document.querySelector("section[aria-label='Ask Alpha'] [role=alert]")?.textContent]).toEqual([["Say hello.", "Hello from the cloud.", "Take your time.", "Thinking"], "The reply stopped"]);
 }, 300_000);
 
 // spec/kit/read.md, "Story: Read from outside"
@@ -62,8 +62,8 @@ it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/k
   const read = (route: string) => alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) => agent.call(HttpClientRequest.get(route))));
   // spec/kit/read.md, "Only the newest ticket's answer is taken, once": each route an area reads answers at the pinned commit, through Alpha's own Agent service.
   expect(await read("/api/approvals")).toMatchObject({ approvals: [] });
-  expect(await read("/api/notifications")).toMatchObject({ notifications: [], unreadCount: 0 });
-  expect(await read("/api/scheduled-tasks?ownerVisibleOnly=1")).toEqual({ tasks: [] });
+  expect(await read("/api/notifications?nativeTransport=true")).toMatchObject({ notifications: [], unreadCount: 0 });
+  expect(await read("/api/scheduled-tasks?ownerVisibleOnly=1")).toEqual({ tasks: [expect.objectContaining({ kind: "personal-assistant.checkin", state: { status: "scheduled" } })] });
   expect(await read("/api/triggers")).toEqual({ triggers: [] });
   expect(await read("/api/tasks/current")).toEqual({ task: null });
   expect(await read("/api/client-devices/capabilities")).toMatchObject({ protocol: 1 });
