@@ -635,8 +635,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Stop reply");
     // spec/app/assistant/index.md, "The agent's answer to the abort starts the one read of the conversation"; spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
-    const { check } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
-    expect([world.ask.turns.size, lines()[0], check === "StoppedForSure" || check === "LookLater"]).toEqual([0, "Take your time", true]);
+    const first = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+    expect([world.ask.turns.size, lines()[0], first.check]).toEqual([0, "Take your time", "StoppedForSure"]);
+
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+    write("Take your time");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
+    world.ask.afterStop = [{ id: "scheduled-reminder", role: "assistant", text: "Your review starts now." }];
+    await press("Stop reply");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.recheck.ticket > first.recheck.ticket && s.recheck.status !== "Loading");
+    const second = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+    expect([world.ask.turns.size, world.ask.said, second.check]).toEqual([0, ["Take your time", "Take your time"], "LookLater"]);
   });
 
   // spec/app/assistant/context.md, "Story: Let my agent see the Telegram or Slack chat I have open"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"

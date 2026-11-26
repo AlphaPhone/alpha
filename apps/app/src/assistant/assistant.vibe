@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
+import { ConversationRecord, TurnController, encodeTurnContext, findStoppedUserTurn, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
@@ -45,7 +45,7 @@ import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voi
 import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
-import { type Attached, type Board, type DraftSeat, type HistoryBounds, type Line, Talk, talk } from "./talk.vibe"
+import { type Attached, type Board, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
@@ -429,7 +429,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const history = try Chats.Machine
     const conversation = try Conversation.Machine
     const seat = board.draftSeat
-    if (!(try ownsSeat(board, seat))) {
+    if (seat === undefined || !(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
@@ -509,8 +509,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     board.append(pageTicket, chats.chosen, mine)
     board.lastSent = text
-    board.lastSentWire = outgoing
-    board.lastSentId = ""
+    const previousStop = controller.stopped
+    if (previousStop !== null) controller.releaseStopped(previousStop.clientMessageId)
+    const post: PostedMessage = { turn: ticket, seat, record: known.record }
+    board.lastPost = post
     let heard = false
     board.change({ reply: "", label: "", failure: undefined })
     const preview = (written: string, provisional: boolean) => {
@@ -564,6 +566,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       return
     }
     const event = ended(ticket, heard, result)
+    const messageId = result?.kind === "AgentFailed" || result?.kind === "Replied" ? result.reply?.messageId : undefined
+    if (result !== undefined && "clientMessageId" in result) {
+      post.receipt = { clientMessageId: result.clientMessageId, ...(messageId ? { replyId: messageId } : {}) }
+    }
     if (authority !== undefined && event.type !== "refuse" && result !== undefined && "clientMessageId" in result) {
       const currentOwner = try attachmentAuthority()
       if (currentOwner !== undefined && Attachments.sameArchiveAuthority(authority, currentOwner)) {
@@ -571,10 +577,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (!(try rememberFiles(archive, result.clientMessageId, files))) board.change({ attachmentNotice: "Could not keep the sent attachments on this phone." })
       } else try bindArchiveAuthority(board, currentOwner)
     }
-    board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
-    const messageId = result?.kind === "AgentFailed" || result?.kind === "Replied" ? result.reply?.messageId : undefined
     board.change({
       ...(keepStreamed ? {} : { reply: "" }), label: "",
       ...(ending.type === "failed" ? { failure: {
@@ -671,18 +675,41 @@ effect function aborted(turn: number): Conversation.Event!!Turns {
 }
 
 // spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
-/** The message is found by the id its turn was posted under, or by its text where the post never said which. */
-effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Chats.Machine) {
+effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Turns | Chats.Machine | Conversation.Machine) {
+  const unread = { type: "reconcile", ticket: recheck, found: "Unread" } as const
   return effect {
     const { board } = try Talk
-    const chats = try (try Chats.Machine).get()
-    const known = board.known(chats.chosen)
-    if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
-    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
-    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSentWire : one.clientMessageId === board.lastSentId))
-    const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
+    const post = board.lastPost
+    if (post === undefined || !(try ownsSeat(board, post.seat))) return unread
+    const conversation = try Conversation.Machine
+    const chats = try Chats.Machine
+    const current = effect {
+      const state = try conversation.get()
+      const shown = board.known((try chats.get()).chosen)?.record
+      return board.lastPost === post && board.draftSeat === post.seat && Conversation.canReconcile(state, recheck)
+        && state.turn.send.id === post.turn && shown?.id === post.record.id && shown.roomId === post.record.roomId
+    }
+    if (!(try current)) return unread
+    const { controller } = try Turns
+    const stopped = controller.stopped
+    const stoppingThisPost = stopped?.conversation.id === post.record.id && stopped.conversation.roomId === post.record.roomId
+    const id = post.receipt?.clientMessageId ?? (stoppingThisPost ? stopped.clientMessageId : undefined)
+    if (id === undefined) return unread
+    const { messages, hasMore } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(post.record.id)}/messages`), page())
+    if (!(try ownsSeat(board, post.seat)) || !(try current)) return unread
+    const receipt = post.receipt
+    if (receipt !== undefined && receipt.clientMessageId !== id) return unread
+    const asked = findStoppedUserTurn(messages, id)
+    const exact = receipt?.replyId === undefined ? undefined : messages.find((one) => one.id === receipt.replyId && one.role === "assistant")
+    const following = asked === undefined ? undefined : messages[messages.lastIndexOf(asked) + 1]
+    const history: Conversation.HistoryEvidence = asked === undefined
+      ? { tag: "MissingMessage", complete: hasMore === false && receipt?.replyId === undefined }
+      : { tag: "RecordedMessage", answer: exact !== undefined ? (exact.failureKind === "aborted" ? "MatchedAbort" : "MatchedReply")
+        : receipt?.replyId !== undefined || following?.role === "assistant" ? "UnknownReply" : "MissingReply" }
+    const found = Conversation.observedHistory(history)
+    if (found !== "Unread" && stoppingThisPost && stopped.clientMessageId === id) controller.releaseStopped(id)
     return { type: "reconcile", ticket: recheck, found }
-  } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
+  } catch () => unread
 }
 
 // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"

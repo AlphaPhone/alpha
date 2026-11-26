@@ -591,13 +591,29 @@ pure def checkForReply(c: Conversation): Moved =
 
 ### The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later
 
-A reply still unfinished counts as stopped only when the agent confirmed
-the abort. A read that fails says to look later. A reply that finished
-anyway is read again into the conversation showing, and the composer is
-told whether the message was recorded.
+The read finds the exact owner's message by the send key in its original
+conversation. Only the reply named in that turn's receipt shows that the
+reply finished anyway. An adjacent reply without that evidence may belong
+to another turn, such as a scheduled trigger. A missing reply or an exact
+aborted reply counts as stopped only when the agent confirmed the abort.
+A read that fails, an unmatched reply, or a bounded page that cannot settle
+the check says to look later. A reply that finished anyway is read again
+into the conversation showing, and the composer is told whether the message
+was recorded.
 
 ```quint
 type Found = Ended | Unended | Unrecorded | Unread
+type HistoryAnswer = MissingReply | MatchedReply | MatchedAbort | UnknownReply
+type HistoryEvidence = MissingMessage({ complete: bool }) | RecordedMessage({ answer: HistoryAnswer })
+pure def observedHistory(evidence: HistoryEvidence): Found = match evidence {
+  | MissingMessage(row) => if (row.complete) Unrecorded else Unread
+  | RecordedMessage(row) =>
+      if (row.answer == MatchedReply) Ended
+      else if (row.answer == UnknownReply) Unread
+      else Unended
+}
+pure def lawOnlyTheExactHistoryReplyFinishes(evidence: HistoryEvidence): bool =
+  observedHistory(evidence) == Ended iff evidence == RecordedMessage({ answer: MatchedReply })
 
 pure def canReconcile(c: Conversation, ticket: int): bool = R::canAnswer(c.recheck, ticket)
 

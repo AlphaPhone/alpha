@@ -1,5 +1,5 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
-import type { ConversationRecord } from "@elizaos/agent"
+import type { ClientMessageId, ConversationRecord } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
 import { sameArchiveAuthority, type ArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
@@ -114,6 +114,13 @@ export interface Seen {
  */
 export interface DraftSeat { readonly number: number; readonly authority: ArchiveAuthority }
 
+export interface PostedMessage {
+  readonly turn: number
+  readonly seat: DraftSeat
+  readonly record: ConversationRecord
+  receipt?: { readonly clientMessageId: ClientMessageId; readonly replyId?: string }
+}
+
 export interface Board {
   draftSeat: DraftSeat | undefined
   phoneDrafts: { kind: "encrypted" } | { kind: "temporary"; values: Map<string, string> } | undefined
@@ -128,10 +135,9 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
-  /** The exact wire text, used only to reconcile a turn without a message ID. */
-  lastSentWire: string
+  lastPost: PostedMessage | undefined
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
-  lastSentId: string
+  readonly lastSentId: string
   sendWhenMade: boolean
   staged: StagedFiles | undefined
   lastTranscriptOffer: number
@@ -228,8 +234,8 @@ export const talk = Layer.effect(Talk, effect {
     queueSend: () => { board.sendWhenMade = true },
     outgoing: "",
     lastSent: "",
-    lastSentWire: "",
-    lastSentId: "",
+    lastPost: undefined,
+    get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? "" },
     sendWhenMade: false,
     staged: undefined,
     lastTranscriptOffer: 0,
@@ -356,8 +362,7 @@ export const talk = Layer.effect(Talk, effect {
     board.phoneDrafts = undefined
     board.outgoing = ""
     board.lastSent = ""
-    board.lastSentWire = ""
-    board.lastSentId = ""
+    board.lastPost = undefined
     board.sendWhenMade = false
     board.waitingRequest = undefined
     board.postingRequest = undefined
