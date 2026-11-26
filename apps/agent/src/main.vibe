@@ -99,7 +99,7 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     `const notesCleanup = makeNativeNotesCleanup(${JSON.stringify(nativeNotesCleanup)})`,
     'const earlierVectorPath = join(dirname(fileURLToPath(import.meta.url)), "vector.tar.gz")',
     'const earlierVectorExtension = { name: "pgvector", setup: async (_pg, emscriptenOpts) => ({ emscriptenOpts, bundlePath: pathToFileURL(earlierVectorPath) }) }',
-    'const openEarlierStore = (dataDir) => openEarlierPGlite({ dataDir, ...(existsSync(earlierVectorPath) ? { extensions: { vector: earlierVectorExtension } } : {}) })',
+    'const openEarlierStore = (image) => openEarlierPGlite({ loadDataDir: image, ...(existsSync(earlierVectorPath) ? { extensions: { vector: earlierVectorExtension } } : {}) })',
     "",
     ...(includesSpeech ? [
       'const speechEngine = (context) => {',

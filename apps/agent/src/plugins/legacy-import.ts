@@ -1,11 +1,31 @@
-// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"
+// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"; spec/app/platform/adoption.md, "The earlier store is brought in only for the account that signed in to the earlier Alpha"; spec/app/platform/adoption.md, "The earlier store is brought in once, into an empty store, in at most three launches"; spec/app/platform/adoption.md, "Within a launch, a failed bringing-in is tried three times, one and then four seconds apart"; spec/app/platform/adoption.md, "No copy of the earlier store is written to disk: it is read into memory, and an earlier build's copies are removed at start"; spec/app/platform/adoption.md, "What is brought in never acts on its own: every task is paused, a task past its time is marked missed, and earlier grants are left out"
+import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import {
+  type Bringing,
+  bringingOf,
+  broughtTaskOf,
+  isEarlierOwner,
+  maxEarlierStoreBytes,
+  retryDelayMs,
+  triesPerLaunch,
+} from "../../gen/app__platform__adoption.ts";
 
 /** Cache key written atomically inside the target store once import succeeds. */
 export const LEGACY_IMPORT_MARKER_KEY = "legacy-v121-import:v1";
+
+/** File in the account's state directory that counts attempts and records the last outcome. */
+export const LEGACY_IMPORT_RECORD_FILE = "earlier-import.json";
+
+/** Name prefix of the plaintext store copies a build of 89bfcc1a8 left in the state directory. */
+export const EARLIER_SCRATCH_PREFIX = ".earlier-import-";
+
+/** Tag of every task brought in; no scheduler of eliza's reads it. */
+export const BROUGHT_TASK_TAG = "earlier-import";
+
+const BROUGHT_TASK_NAME_PREFIX = "earlier-import:";
 
 const BATCH_SIZE = 200;
 const EMBEDDING_COLUMNS = [
@@ -58,8 +78,14 @@ export interface EarlierSqlClient extends SqlQueryable {
   close(): Promise<void>;
 }
 
-/** Opens a copied earlier PGlite directory for read-only inspection. */
-export type LegacyStoreOpener = (dataDir: string) => Promise<EarlierSqlClient>;
+/** Opens an in-memory image of the earlier PGlite directory, never the directory itself. */
+export type LegacyStoreOpener = (image: Blob) => Promise<EarlierSqlClient>;
+
+/** An account named by a user and an organization. */
+export interface CloudAccount {
+  readonly userId: string;
+  readonly organizationId: string;
+}
 
 interface TargetStoreAdapter {
   getConnection(): Promise<unknown>;
@@ -82,14 +108,25 @@ interface LegacyImportCounts {
   readonly cache: number;
 }
 
+type SkipReason =
+  | "not_the_owner"
+  | "no_earlier_store"
+  | "already_imported"
+  | "store_in_use"
+  | "gave_up"
+  | "no_adapter"
+  | "multi_agent_ambiguous";
+
 type LegacyImportResult =
-  | { readonly status: "skipped"; readonly reason: "no_source_dir" | "source_missing" | "no_adapter" | "already_imported" | "target_not_empty" | "multi_agent_ambiguous" }
+  | { readonly status: "skipped"; readonly reason: SkipReason }
   | { readonly status: "imported"; readonly sourceAgentId: string | null; readonly targetAgentId: string; readonly counts: LegacyImportCounts }
   | { readonly status: "failed"; readonly error: string };
 
 interface LegacyImportOptions {
   readonly legacyStoreDir: string | undefined;
-  readonly stateDirectory?: string;
+  readonly owner: CloudAccount | undefined;
+  readonly account: CloudAccount | undefined;
+  readonly stateDirectory: string;
   readonly agentId: string;
   readonly conversationWorldId?: string;
   readonly embeddingDimensions?: number;
@@ -97,7 +134,22 @@ interface LegacyImportOptions {
   readonly openLegacyStore: LegacyStoreOpener;
   readonly logger?: ImportLogger;
   readonly now?: () => number;
+  readonly wait?: (ms: number) => Promise<void>;
 }
+
+interface ImportRecord {
+  readonly attempts: number;
+  readonly outcome: LegacyImportResult | { readonly status: "started" };
+  readonly at: number;
+}
+
+const skipOf: Record<Exclude<Bringing, "BringIn">, SkipReason> = {
+  NotTheOwner: "not_the_owner",
+  NoEarlierStore: "no_earlier_store",
+  AlreadyBroughtIn: "already_imported",
+  StoreInUse: "store_in_use",
+  GaveUp: "gave_up",
+};
 
 interface DeviceRecordWrite {
   readonly key: string;
@@ -334,31 +386,117 @@ function isTargetAdapter(value: unknown): value is TargetStoreAdapter {
     && typeof (value as TargetStoreAdapter).transaction === "function";
 }
 
-async function copyDirectoryWithoutMutatingSource(sourceDir: string, destDir: string, isRoot: boolean): Promise<void> {
-  await fs.mkdir(destDir, { recursive: true, mode: 0o700 });
-  await fs.chmod(destDir, 0o700);
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (isRoot && entry.name === "postmaster.pid") continue;
-    if (entry.isSymbolicLink()) continue;
-    const srcPath = path.join(sourceDir, entry.name);
-    const dstPath = path.join(destDir, entry.name);
-    if (entry.isDirectory()) {
-      await copyDirectoryWithoutMutatingSource(srcPath, dstPath, false);
-    } else if (entry.isFile()) {
-      await fs.copyFile(srcPath, dstPath);
-      await fs.chmod(dstPath, 0o600);
-    } else {
-      const stat = await fs.lstat(srcPath);
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) {
-        await copyDirectoryWithoutMutatingSource(srcPath, dstPath, false);
-      } else if (stat.isFile()) {
-        await fs.copyFile(srcPath, dstPath);
-        await fs.chmod(dstPath, 0o600);
+const encoder = new TextEncoder();
+
+function tarHeader(name: string, size: number, type: "0" | "5"): Uint8Array<ArrayBuffer> {
+  const header = new Uint8Array(512);
+  const put = (offset: number, length: number, text: string) => {
+    header.set(encoder.encode(text).subarray(0, length), offset);
+  };
+  const cut = encoder.encode(name).length > 100 ? name.lastIndexOf("/", 155) : -1;
+  if (cut > 0 && encoder.encode(name.slice(cut + 1)).length > 100) throw new Error("An earlier store path is too long to read");
+  put(0, 100, cut > 0 ? name.slice(cut + 1) : name);
+  put(100, 8, type === "5" ? "0000755\0" : "0000644\0");
+  put(108, 8, "0000000\0");
+  put(116, 8, "0000000\0");
+  put(124, 12, `${size.toString(8).padStart(11, "0")}\0`);
+  put(136, 12, "00000000000\0");
+  put(148, 8, "        ");
+  put(156, 1, type);
+  put(257, 6, "ustar\0");
+  put(263, 2, "00");
+  if (cut > 0) put(345, 155, name.slice(0, cut));
+  const sum = header.reduce((total, byte) => total + byte, 0);
+  put(148, 8, `${sum.toString(8).padStart(6, "0")}\0 `);
+  return header;
+}
+
+/** Reads the earlier store's files, never opening or writing them, into a PGlite image held in memory. */
+async function readStoreImage(sourceDir: string): Promise<{ readonly kind: "image"; readonly image: Blob } | { readonly kind: "too_large" }> {
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let bytes = 0;
+  const walk = async (directory: string, relative: string): Promise<boolean> => {
+    const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      const name = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      if (name === "postmaster.pid") continue;
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        chunks.push(tarHeader(`/${name}`, 0, "5"));
+        if (!await walk(full, name)) return false;
+      } else if (entry.isFile()) {
+        const data = await fs.readFile(full);
+        bytes += data.byteLength;
+        if (bytes > maxEarlierStoreBytes) return false;
+        chunks.push(tarHeader(`/${name}`, data.byteLength, "0"), new Uint8Array(data));
+        const padding = (512 - (data.byteLength % 512)) % 512;
+        if (padding > 0) chunks.push(new Uint8Array(padding));
       }
     }
+    return true;
+  };
+  if (!await walk(sourceDir, "")) return { kind: "too_large" };
+  chunks.push(new Uint8Array(1024));
+  return { kind: "image", image: new Blob(chunks) };
+}
+
+/** True only for `<files>/.eliza/workspace/.elizadb` whose every directory is a real one: never the vault. */
+async function isEarlierWorkspaceStore(sourceDir: string | undefined): Promise<boolean> {
+  const dir = sourceDir?.trim();
+  if (!dir || !path.isAbsolute(dir) || dir.includes("\0")) return false;
+  const workspace = path.dirname(dir);
+  const eliza = path.dirname(workspace);
+  if (path.basename(dir) !== ".elizadb" || path.basename(workspace) !== "workspace" || path.basename(eliza) !== ".eliza") return false;
+  for (const step of [eliza, workspace, dir]) {
+    const stat = await fs.lstat(step).catch(() => undefined);
+    if (stat === undefined || !stat.isDirectory()) return false;
   }
+  return true;
+}
+
+/** Removes the plaintext copies a build of 89bfcc1a8 left in the state directory; safe to run on every start. */
+export async function sweepEarlierScratch(stateDirectory: string): Promise<void> {
+  const entries = await fs.readdir(stateDirectory).catch(() => [] as string[]);
+  for (const name of entries) {
+    if (name.startsWith(EARLIER_SCRATCH_PREFIX)) {
+      await fs.rm(path.join(stateDirectory, name), { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+}
+
+async function readImportRecord(stateDirectory: string): Promise<ImportRecord> {
+  const text = await fs.readFile(path.join(stateDirectory, LEGACY_IMPORT_RECORD_FILE), "utf8").catch(() => undefined);
+  const parsed = asPlainObject(text === undefined ? {} : parseJsonColumn(text));
+  const attempts = typeof parsed.attempts === "number" && Number.isSafeInteger(parsed.attempts) && parsed.attempts >= 0 ? parsed.attempts : 0;
+  return { attempts, outcome: { status: "started" }, at: 0 };
+}
+
+async function writeImportRecord(stateDirectory: string, record: ImportRecord): Promise<void> {
+  await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  const target = path.join(stateDirectory, LEGACY_IMPORT_RECORD_FILE);
+  const staged = `${target}.${randomUUID()}`;
+  await fs.writeFile(staged, JSON.stringify(record), { mode: 0o600 });
+  await fs.rename(staged, target);
+}
+
+function sameAccount(owner: CloudAccount | undefined, account: CloudAccount | undefined): boolean {
+  if (owner === undefined || account === undefined) return false;
+  return isEarlierOwner(
+    owner.userId.toLowerCase(),
+    owner.organizationId.toLowerCase(),
+    account.userId.toLowerCase(),
+    account.organizationId.toLowerCase(),
+  );
+}
+
+/** Parses the phone's `ALPHA_LEGACY_OWNER` value: a user and an organization, or nothing. */
+export function parseEarlierOwner(value: string | undefined): CloudAccount | undefined {
+  if (value === undefined) return undefined;
+  const parsed = asPlainObject(parseJsonColumn(value));
+  const { userId, organizationId } = parsed;
+  return typeof userId === "string" && userId.trim() !== "" && typeof organizationId === "string" && organizationId.trim() !== ""
+    ? { userId, organizationId }
+    : undefined;
 }
 
 async function tableColumns(db: SqlQueryable, tableName: string): Promise<Set<string>> {
@@ -470,7 +608,10 @@ function worldRecordFromRow(row: EarlierWorldRow, targetAgentId: string, nowMs: 
     name: sanitizeKeepableString(row.name ?? ""),
   };
   if (row.message_server_id) data.messageServerId = row.message_server_id;
-  if (row.metadata !== null && row.metadata !== undefined) data.metadata = sanitizeJsonValue(parseJsonColumn(row.metadata));
+  if (row.metadata !== null && row.metadata !== undefined) {
+    const { roles: _roles, ownership: _ownership, ...kept } = asPlainObject(sanitizeJsonValue(parseJsonColumn(row.metadata)));
+    data.metadata = kept;
+  }
   return { key: row.id, data, createdAt, tableName: null };
 }
 
@@ -650,6 +791,20 @@ async function readEarlierParticipants(
   return participants;
 }
 
+function earlierTaskTime(tags: readonly string[], metadata: Record<string, unknown>, lastAt: number): number | undefined {
+  const trigger = asPlainObject(metadata.trigger);
+  for (const candidate of [metadata.dueAt, metadata.scheduledAt, metadata.nextRunAt, trigger.atIso]) {
+    if (candidate === undefined || candidate === null) continue;
+    const at = toEpochMs(candidate, Number.NaN);
+    if (Number.isFinite(at)) return at;
+  }
+  const interval = metadata.updateInterval;
+  if (tags.includes("repeat") && typeof interval === "number" && Number.isFinite(interval) && interval > 0) {
+    return toEpochMs(metadata.lastRunAt ?? metadata.updatedAt, lastAt) + interval;
+  }
+  return undefined;
+}
+
 async function readEarlierTasks(
   db: SqlQueryable,
   targetAgentId: string,
@@ -673,19 +828,33 @@ async function readEarlierTasks(
   for (const row of rows.rows) {
     if (!row.id) continue;
     const createdAt = toEpochMs(row.created_at, nowMs);
+    const name = sanitizeKeepableString(row.name ?? "");
+    const tags = toStringArray(row.tags);
+    const metadata = asPlainObject(sanitizeJsonValue(parseJsonColumn(row.metadata ?? {})));
+    const updatedAt = row.updated_at !== null && row.updated_at !== undefined ? toEpochMs(row.updated_at, createdAt) : undefined;
+    const dueAt = earlierTaskTime(tags, metadata, updatedAt ?? createdAt);
     const data: Record<string, unknown> = {
       id: row.id,
-      name: sanitizeKeepableString(row.name ?? ""),
+      name: `${BROUGHT_TASK_NAME_PREFIX}${name}`,
       agentId: targetAgentId,
-      tags: toStringArray(row.tags),
-      metadata: asPlainObject(sanitizeJsonValue(parseJsonColumn(row.metadata ?? {}))),
+      tags: [BROUGHT_TASK_TAG],
+      metadata: {
+        paused: true,
+        earlierImport: {
+          name,
+          tags,
+          metadata,
+          ...(dueAt === undefined ? {} : { dueAt }),
+          state: broughtTaskOf(dueAt !== undefined, dueAt ?? 0, nowMs),
+        },
+      },
       createdAt,
     };
     if (row.description !== null && row.description !== undefined) data.description = sanitizeKeepableString(row.description);
     if (row.room_id) data.roomId = row.room_id;
     if (row.world_id) data.worldId = row.world_id;
     if (row.entity_id) data.entityId = remapEntity(row.entity_id) ?? row.entity_id;
-    if (row.updated_at !== null && row.updated_at !== undefined) data.updatedAt = toEpochMs(row.updated_at, createdAt);
+    if (updatedAt !== undefined) data.updatedAt = updatedAt;
     tasks.push({ key: row.id, data, createdAt, tableName: null });
   }
   return tasks;
@@ -880,47 +1049,61 @@ async function writeBatch(conn: SqlQueryable, collection: string, rows: readonly
  * and logs a warning without failing boot on any unreadable or corrupt earlier database.
  */
 export async function importLegacyStore(options: LegacyImportOptions): Promise<LegacyImportResult> {
-  const sourceDir = options.legacyStoreDir?.trim();
-  if (!sourceDir || !path.isAbsolute(sourceDir) || sourceDir.includes("\0")) {
-    return { status: "skipped", reason: "no_source_dir" };
-  }
-  if (!isTargetAdapter(options.adapter)) {
-    return { status: "skipped", reason: "no_adapter" };
-  }
+  await sweepEarlierScratch(options.stateDirectory);
+  if (options.legacyStoreDir === undefined) return { status: "skipped", reason: skipOf.NoEarlierStore };
   const nowMs = (options.now ?? Date.now)();
-  let tempRoot: string | undefined;
-  let sourceClient: EarlierSqlClient | undefined;
+  const result: LegacyImportResult = sameAccount(options.owner, options.account)
+    ? await decideAndBringIn(options, nowMs)
+    : { status: "skipped", reason: skipOf.NotTheOwner };
+  const record = await readImportRecord(options.stateDirectory);
+  await writeImportRecord(options.stateDirectory, { attempts: record.attempts, outcome: result, at: nowMs }).catch(() => undefined);
+  if (result.status !== "imported") {
+    options.logger?.warn({ src: "alpha:earlier-import", outcome: result }, "The earlier store was not brought in");
+  }
+  return result;
+}
+
+async function decideAndBringIn(options: LegacyImportOptions, nowMs: number): Promise<LegacyImportResult> {
+  const storeHeld = await isEarlierWorkspaceStore(options.legacyStoreDir);
+  if (!storeHeld) return { status: "skipped", reason: skipOf.NoEarlierStore };
+  if (!isTargetAdapter(options.adapter)) return { status: "skipped", reason: "no_adapter" };
+  const adapter = options.adapter;
+  const sourceDir = options.legacyStoreDir?.trim() ?? "";
   try {
-    const sourceStat = await fs.lstat(sourceDir).catch(() => undefined);
-    if (sourceStat === undefined || sourceStat.isSymbolicLink() || !sourceStat.isDirectory()) {
-      return { status: "skipped", reason: "source_missing" };
-    }
-    const rawConn = await options.adapter.getConnection();
+    const rawConn = await adapter.getConnection();
     if (!isSqlQueryable(rawConn)) return { status: "skipped", reason: "no_adapter" };
     const preflight = await readTargetEligibility(rawConn, options.embeddingDimensions ?? 0);
-    if (preflight.marked) return { status: "skipped", reason: "already_imported" };
-    if (preflight.populated) return { status: "skipped", reason: "target_not_empty" };
-
-    const tempBase = options.stateDirectory && path.isAbsolute(options.stateDirectory) ? options.stateDirectory : os.tmpdir();
-    await fs.mkdir(tempBase, { recursive: true, mode: 0o700 });
-    tempRoot = await fs.mkdtemp(path.join(tempBase, ".earlier-import-"));
-    await fs.chmod(tempRoot, 0o700);
-    const tempDbDir = path.join(tempRoot, "db");
-    await copyDirectoryWithoutMutatingSource(sourceDir, tempDbDir, true);
-    await fs.rm(path.join(tempDbDir, "postmaster.pid"), { force: true });
-
-    sourceClient = await options.openLegacyStore(tempDbDir);
-    const extracted = await readEarlierRows(
-      sourceClient,
-      options.agentId,
-      options.conversationWorldId,
-      preflight.embeddingDimensions,
-      nowMs,
-    );
-    if (extracted.kind === "ambiguous") {
-      options.logger?.warn({ src: "alpha:earlier-import" }, "Skipped earlier store import because multiple agent records were present");
-      return { status: "skipped", reason: "multi_agent_ambiguous" };
+    const record = await readImportRecord(options.stateDirectory);
+    const bringing = bringingOf(true, storeHeld, preflight.marked, preflight.populated, record.attempts);
+    if (bringing !== "BringIn") return { status: "skipped", reason: skipOf[bringing] };
+    await writeImportRecord(options.stateDirectory, { attempts: record.attempts + 1, outcome: { status: "started" }, at: nowMs });
+    const wait = options.wait ?? ((ms: number) => Effect.runPromise(Effect.sleep(ms)));
+    for (let failures = 1; ; failures += 1) {
+      try {
+        return await bringIn(options, adapter, sourceDir, preflight.embeddingDimensions, nowMs);
+      } catch (error) {
+        if (failures >= triesPerLaunch) return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+        await wait(retryDelayMs(failures));
+      }
     }
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function bringIn(
+  options: LegacyImportOptions,
+  adapter: TargetStoreAdapter,
+  sourceDir: string,
+  embeddingDimensions: number,
+  nowMs: number,
+): Promise<LegacyImportResult> {
+  const read = await readStoreImage(sourceDir);
+  if (read.kind === "too_large") return { status: "failed", error: "The earlier store is larger than 512 MiB" };
+  const sourceClient = await options.openLegacyStore(read.image);
+  try {
+    const extracted = await readEarlierRows(sourceClient, options.agentId, options.conversationWorldId, embeddingDimensions, nowMs);
+    if (extracted.kind === "ambiguous") return { status: "skipped", reason: "multi_agent_ambiguous" };
     const { prepared } = extracted;
     const counts: LegacyImportCounts = {
       worlds: prepared.worlds.length,
@@ -933,28 +1116,18 @@ export async function importLegacyStore(options: LegacyImportOptions): Promise<L
       components: prepared.components.length,
       cache: prepared.cache.length,
     };
-
     const marker: DeviceRecordWrite = {
       key: LEGACY_IMPORT_MARKER_KEY,
-      data: {
-        value: {
-          version: 1,
-          importedAt: nowMs,
-          sourceAgentId: prepared.sourceAgentId,
-          targetAgentId: options.agentId,
-          counts,
-        },
-      },
+      data: { value: { version: 1, importedAt: nowMs, sourceAgentId: prepared.sourceAgentId, targetAgentId: options.agentId, counts } },
       createdAt: nowMs,
       tableName: null,
     };
-
-    const outcome = await options.adapter.transaction(async (tx): Promise<LegacyImportResult> => {
+    return await adapter.transaction(async (tx): Promise<LegacyImportResult> => {
       const txConn = await tx.getConnection();
       if (!isSqlQueryable(txConn)) return { status: "skipped", reason: "no_adapter" };
-      const inside = await readTargetEligibility(txConn, preflight.embeddingDimensions);
+      const inside = await readTargetEligibility(txConn, embeddingDimensions);
       if (inside.marked) return { status: "skipped", reason: "already_imported" };
-      if (inside.populated) return { status: "skipped", reason: "target_not_empty" };
+      if (inside.populated) return { status: "skipped", reason: "store_in_use" };
       await writeBatch(txConn, "worlds", prepared.worlds);
       await writeBatch(txConn, "rooms", prepared.rooms);
       await writeBatch(txConn, "entities", prepared.entities);
@@ -966,30 +1139,23 @@ export async function importLegacyStore(options: LegacyImportOptions): Promise<L
       await writeBatch(txConn, "cache", [...prepared.cache, marker]);
       return { status: "imported", sourceAgentId: prepared.sourceAgentId, targetAgentId: options.agentId, counts };
     });
-    return outcome;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    options.logger?.warn({ src: "alpha:earlier-import", error: message }, "Earlier store import failed; continuing with fresh device store");
-    return { status: "failed", error: message };
   } finally {
-    if (sourceClient !== undefined) {
-      await sourceClient.close().catch(() => undefined);
-    }
-    if (tempRoot !== undefined) {
-      await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
-    }
+    await sourceClient.close().catch(() => undefined);
   }
 }
 
 /** Runs the one-shot importer against an AgentRuntime during Alpha product plugin init. */
 export async function importLegacyStoreForRuntime(options: {
   readonly legacyStoreDir: string | undefined;
-  readonly stateDirectory?: string;
+  readonly owner: CloudAccount | undefined;
+  readonly account: CloudAccount | undefined;
+  readonly stateDirectory: string | undefined;
   readonly runtime: unknown;
   readonly conversationWorldId?: string;
   readonly embeddingDimensions?: number;
   readonly openLegacyStore: LegacyStoreOpener;
 }): Promise<LegacyImportResult> {
+  if (options.stateDirectory === undefined || !path.isAbsolute(options.stateDirectory)) return { status: "skipped", reason: "no_adapter" };
   const runtimeRecord = asPlainObject(options.runtime);
   const agentId = typeof runtimeRecord.agentId === "string" ? runtimeRecord.agentId : "";
   if (!agentId) return { status: "skipped", reason: "no_adapter" };
@@ -1000,6 +1166,8 @@ export async function importLegacyStoreForRuntime(options: {
     : undefined;
   return importLegacyStore({
     legacyStoreDir: options.legacyStoreDir,
+    owner: options.owner,
+    account: options.account,
     stateDirectory: options.stateDirectory,
     agentId,
     conversationWorldId: options.conversationWorldId,
