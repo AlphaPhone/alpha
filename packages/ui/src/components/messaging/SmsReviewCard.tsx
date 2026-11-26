@@ -30,7 +30,7 @@ export type SmsReviewCardProps = {
  * grey review with two rows. The first says Review SMS, who it goes to, the text as it will go in its own white box and
  * the quieter note, with a blue Send at its end; the second is "Keep things as they are." with a grey Decline
  * (`prototype/template.html:4577-4590`; `prototype/agent-adapter.ts:493-496,1992-1994`;
- * `ui/device-actions/client-coordinator.ts:3559-3568`; `prototype/phone.css:926-930,943-946,956`).
+ * `ui/device-actions/client-coordinator.ts:3559-3568`; `prototype/phone.css:926-930,943-946,956`). Send is filled Alpha blue in both themes: v119 fills it with `--acc`, #0000FF, which has no dark value (`prototype/prototype.css:3`).
  * Nothing is sent until the owner presses Send.
  *
  * @model spec/app/contacts/agent.md
@@ -53,7 +53,7 @@ export function SmsReviewCard({ to, number, body, note, hint, review, onSend, on
       {onSend ? (
         <button type="button" aria-label="Send this text" data-alpha-review-send="" disabled={sendDisabled} className={row} onClick={onSend}>
           {details}
-          <strong className={cn(label, "bg-primary text-primary-foreground")}>Send</strong>
+          <strong className={cn(label, "bg-alpha text-alpha-foreground")}>Send</strong>
         </button>
       ) : <div className={row}>{details}</div>}
       {onDecline ? (
