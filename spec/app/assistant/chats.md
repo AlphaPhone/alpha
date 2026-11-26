@@ -23,7 +23,6 @@ to hold nothing until its first page answers.
 ```quint
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
-import extend as X from "./extend"
 
 type Chats = {
   list: R::Read, ids: List[int], chosen: int, origin: int,
@@ -123,7 +122,7 @@ pure def listed(c: Chats, ticket: int, ok: bool, ids: List[int]): Chats =
   val stays = chosen == c.chosen
   { ...c, list: R::answer(c.list, ok), ids: listing, chosen: chosen,
     origin: if (chosen > 0 and listing.includes(c.origin) and c.origin != chosen) c.origin else 0,
-    page: if (stays) c.page else X::dropped(c.page), around: if (stays) c.around else 0,
+    page: if (stays) c.page else R::drop(c.page), around: if (stays) c.around else 0,
     messages: if (stays) c.messages else 0, fresh: stays and c.fresh }
 ```
 
@@ -222,7 +221,7 @@ another is asked for.
 
 ```quint
 pure def restart(c: Chats): Moved =
-  val rest = { ...c, list: X::dropped(c.list), page: X::dropped(c.page), forkAt: 0,
+  val rest = { ...c, list: R::drop(c.list), page: R::drop(c.page), forkAt: 0,
     make: if (making(c)) A::conclude(c.make, false, false) else c.make }
   val listing = if (making(c)) browse(rest) else { state: rest, out: List() }
   val paging = shown(c.chosen, 0, c.origin, listing.state)
@@ -268,7 +267,7 @@ pure def canLatest(c: Chats, page: int, ids: List[int], conversation: int): bool
 
 pure def latest(c: Chats, page: int, ok: bool, ids: List[int], conversation: int, replying: bool, holding: bool): Moved =
   val read = { ...listed(c, c.list.ticket, ok, ids), list: c.list }
-  val left = { ...read, page: X::dropped(c.page), around: 0, messages: 0 }
+  val left = { ...read, page: R::drop(c.page), around: 0, messages: 0 }
   if (not(ok) or ids.includes(conversation)) { state: { ...read, page: R::answer(c.page, false) }, out: List() }
   else if (ids.length() > 0 and not(making(c)) and not(replying) and not(holding)) shown(ids.head(), 0, 0, left)
   else { state: left, out: List() }
@@ -290,7 +289,7 @@ conversation being made for the last owner is never shown to the next.
 
 ```quint
 pure def switchSession(c: Chats): Chats =
-  { ...initial, list: X::dropped(c.list), page: X::dropped(c.page),
+  { ...initial, list: R::drop(c.list), page: R::drop(c.page),
     make: if (making(c)) A::conclude(c.make, false, false) else c.make }
 
 pure def stepAnotherSessionLeavesEverythingBehind(before: Chats, via: str, after: Chats): bool =

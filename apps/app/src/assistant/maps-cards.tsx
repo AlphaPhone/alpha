@@ -1,4 +1,4 @@
-// spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"; spec/app/maps/cards.md, "Only the newest agent message offers its choice and its card, in the session and conversation that showed them"
+// spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"; spec/app/maps/index.md, "The agent's search shows its cards in the conversation and leaves the screen alone"
 import { recognizedMapsCards, withoutMapsCards, type MapsCard } from "@elizaos/plugin-maps-client";
 import { AssistantPlaceCard } from "@repo/ui";
 

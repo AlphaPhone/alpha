@@ -23,7 +23,6 @@ a [permission](../../kit/permission.md); a page of files is a
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
 import permission as P from "../../kit/permission"
-import extend as X from "./extend"
 
 type Tab = Photos | Documents
 type Attachments = {
@@ -64,7 +63,7 @@ pure def browse(more: bool, a: Attachments): Moved =
   })) }
 
 pure def requestObservation(tab: Tab, a: Attachments): Moved =
-  { state: { ...a, tab: tab, rows: X::dropped(a.rows), more: false }, out: List(Access({ tab: tab, mode: Probe, visit: a.visit })) }
+  { state: { ...a, tab: tab, rows: R::drop(a.rows), more: false }, out: List(Access({ tab: tab, mode: Probe, visit: a.visit })) }
 
 pure def shown(tab: Tab, a: Attachments): Moved = requestObservation(tab, { ...a, query: "", refused: 0 })
 ```
@@ -167,7 +166,7 @@ pure def canGranted(a: Attachments, tab: Tab, grant: P::Grant, visit: int): bool
 pure def granted(a: Attachments, tab: Tab, grant: P::Grant, visit: int): Moved =
   val seen = if (tab == Photos) { ...a, photos: P::observe(a.photos, grant) } else { ...a, documents: P::observe(a.documents, grant) }
   if (P::allows(access(tab, seen))) browse(false, seen)
-  else { state: { ...seen, rows: X::dropped(a.rows), more: false }, out: List() }
+  else { state: { ...seen, rows: R::drop(a.rows), more: false }, out: List() }
 ```
 
 On a Contact, Chat actions opens the same picker over the current card. Cancel returns focus
@@ -255,7 +254,7 @@ pure def canFilesRead(a: Attachments, attempt: int, accepted: int): bool =
 pure def filesRead(a: Attachments, attempt: int, accepted: int): Moved =
   val refused = a.selected - accepted
   val done = { ...a, reading: A::conclude(a.reading, true, true), selected: 0, refused: refused, room: a.room - accepted }
-  { state: if (refused == 0) { ...done, open: false, query: "", folder: 0, rows: X::dropped(a.rows), more: false } else done,
+  { state: if (refused == 0) { ...done, open: false, query: "", folder: 0, rows: R::drop(a.rows), more: false } else done,
     out: List() }
 ```
 
@@ -317,7 +316,7 @@ pure def stepARefusedFileIsNeverAttached(before: Attachments, via: str, after: A
 pure def canCancel(a: Attachments): bool = a.open
 
 pure def cancel(a: Attachments): Attachments =
-  { ...a, open: false, selected: 0, refused: 0, query: "", folder: 0, rows: X::dropped(a.rows), more: false,
+  { ...a, open: false, selected: 0, refused: 0, query: "", folder: 0, rows: R::drop(a.rows), more: false,
     reading: if (a.reading.outcome == A::Sent) A::conclude(a.reading, false, false) else a.reading }
 ```
 

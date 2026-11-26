@@ -31,7 +31,7 @@ const binding = applying(Listing, (state) => ({ owner: state.owner, open: state.
     const verified = identity !== undefined && (try (try Rows).sameDigestOwner(identity, owner))
     const backgroundOn = identity !== undefined && verified && (store.get(preference(identity)) catch () => undefined) === "on"
     if ((try (try Listing).get()).owner !== owner) return
-    try ignore(model.send({ type: "ownerChanged", owner: verified ? owner : 0, backgroundOn, noticesOn: false }))
+    try ignore(model.send({ type: "ownerChanged", owner: verified ? owner : 0, backgroundOn }))
   }
   try ignore(model.send(open ? { type: "openPanel", checks: "ResultChecks" } : { type: "closePanel" }))
 })

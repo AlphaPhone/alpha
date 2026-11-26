@@ -13,9 +13,6 @@ for its reply. The rest of the area:
 - [Dock](./dock.md): how a drag of Ask Alpha chooses a height, and the keyboard
 - [Reply](./reply.md): a reply as it is written: its label, acknowledgment, cards, notices and failures
 - [Turn context](./context.md): what a turn tells the agent besides the screen: location, Browser's page, Maps, the clock and capabilities
-- [Question](./question.md): Ask Alpha on a file, reviewed before it joins the draft
-- [Email card](./email.md): an email the agent drafted, sent from the chat once per version
-- [Kit extensions](./extend.md): what the area needs of the kit that it lacks
 
 Alpha shows the turn's status as pulsing dots or a shape at the foot of the
 conversation, with the status as its accessible name. The agent's own label
@@ -48,7 +45,6 @@ import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
 import shell as S from "../shell"
 import settings as P from "../settings"
-import extend as X from "./extend"
 
 type Reply = Silent | Streaming | Complete | Stopped | Broken
 type Turn = { send: A::Attempt, hold: int, attachments: int, reply: Reply, stopping: bool, revision: int }
@@ -183,8 +179,8 @@ pure def reach(c: Conversation, ready: bool): Moved =
   if (ready)
     { state: { ...c, ready: true, support: support, observing: false }, out: List(CheckSupport({ support: support.ticket })) }
   else
-    { state: { ...c, ready: false, support: X::dropped(c.support), observing: false, turn: turn,
-        check: if (pending(c) or c.turn.stopping) LookLater else c.check, recheck: X::dropped(c.recheck) },
+    { state: { ...c, ready: false, support: R::drop(c.support), observing: false, turn: turn,
+        check: if (pending(c) or c.turn.stopping) LookLater else c.check, recheck: R::drop(c.recheck) },
       out: settles(c.turn, turn) }
 ```
 
@@ -197,8 +193,8 @@ never opened again.
 
 ```quint
 pure def restart(c: Conversation): Conversation =
-  { ...c, ready: false, support: X::dropped(c.support), observing: false, turn: lost(c.turn),
-    check: if (pending(c) or c.turn.stopping) LookLater else c.check, recheck: X::dropped(c.recheck),
+  { ...c, ready: false, support: R::drop(c.support), observing: false, turn: lost(c.turn),
+    check: if (pending(c) or c.turn.stopping) LookLater else c.check, recheck: R::drop(c.recheck),
     opening: if (c.opening.outcome == A::Sent) A::conclude(c.opening, false, false) else c.opening }
 
 pure def stepARestartNeverPostsAgain(before: Conversation, via: str, after: Conversation): bool =
@@ -246,7 +242,7 @@ pure def ask(c: Conversation, hold: int, prompt: int, attachments: int): Moved =
   val recorded = A::record(A::plan(ticket))
   val turn = { send: if (attachments > 0) recorded else A::dispatch(recorded), hold: hold, attachments: attachments,
     reply: Silent, stopping: false, revision: c.context.revision }
-  val asked = { ...c, turn: turn, check: if (pending(c)) LookLater else Unchecked, recheck: X::dropped(c.recheck) }
+  val asked = { ...c, turn: turn, check: if (pending(c)) LookLater else Unchecked, recheck: R::drop(c.recheck) }
   { state: asked,
     out: (if (attachments > 0) List(Upload({ ticket: ticket, attachments: attachments })) else List(post(ticket, asked)))
       .concat(if (prompt > 0) List(Prompted({ prompt: prompt, taken: true })) else List()) }
@@ -727,7 +723,7 @@ pure def alwaysStoppedForSureIsTheAgentsWord(c: Conversation): bool =
 pure def canLeave(c: Conversation): bool = not(inFlight(c.turn))
 
 pure def leave(c: Conversation): Conversation =
-  { ...c, turn: quiet(c.turn.send.id), check: Unchecked, recheck: X::dropped(c.recheck) }
+  { ...c, turn: quiet(c.turn.send.id), check: Unchecked, recheck: R::drop(c.recheck) }
 ```
 
 ### A stop can be waiting on the bridge

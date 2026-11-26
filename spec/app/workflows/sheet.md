@@ -13,17 +13,6 @@ the account area. Run again is the Run now review of [Runs](./runs.md).
 The agent keeps the runs (eliza's `workflow/execution`); the phone only
 reads them.
 
-## Story: Open a finished workflow from its notification
-
-> As the owner, I want a result notice to open the exact finished run it names.
-> When I choose Ask Alpha from the notice, I want to start with that run attached.
-
-The phone reads the named workflow and run again before opening the sheet.
-The result belongs to the same owner, run and version as the notification.
-The phone consumes the tap after the exact finished run has been shown.
-An Ask Alpha tap uses the sheet’s existing handoff. It opens a draft the
-owner can review.
-
 ## Story: See a workflow's history
 
 > As the owner, I want to see the runs a workflow made, newest first, page
@@ -139,7 +128,7 @@ pure def canOutputRead(s: Sheet, ticket: int, text: Output): bool = R::canAnswer
 
 pure def outputRead(s: Sheet, ticket: int, ok: bool, text: Output, status: U::Status): Sheet =
   { ...s, output: R::answer(s.output, ok), text: if (ok) text else s.text,
-    status: if (ok and canRunChanged(s, s.runId, status)) status else s.status }
+    status: if (ok and s.status == U::Running and U::ended(status)) status else s.status }
 ```
 
 ### The run's status and the workflow's version are followed while the run is open
@@ -156,11 +145,6 @@ pure def canRefreshRun(s: Sheet): bool =
 pure def refreshRun(s: Sheet): Moved =
   val asked = R::ask(s.output)
   { state: { ...s, output: asked }, out: List(ReadOutput({ ticket: asked.ticket, runId: s.runId })) }
-
-pure def canRunChanged(s: Sheet, runId: int, status: U::Status): bool =
-  runId == s.runId and runId >= 1 and s.status == U::Running and U::ended(status)
-
-pure def runChanged(s: Sheet, runId: int, status: U::Status): Sheet = { ...s, status: status }
 
 pure def canWorkflowChanged(s: Sheet, newest: int): bool = s.runId >= 1 and newest > s.newest
 
@@ -271,4 +255,22 @@ pure def ownerChanged(s: Sheet, owner: int): Moved =
   { state: { ...initial, owner: owner, history: { ...s.history, status: R::Idle }, output: { ...s.output, status: R::Idle },
       speech: if (s.speech.outcome == A::Sent) A::conclude(s.speech, false, true) else s.speech },
     out: if (s.speech.outcome == A::Sent) List(Silence({ id: s.speech.id })) else List() }
+```
+
+## Story: Open a finished workflow from its notification
+
+> As the owner, I want a result notice to open the exact finished run it names.
+> When I choose Ask Alpha from the notice, I want to start with that run attached.
+
+### A finished run opened from its notification belongs to the signed-in owner and reads its output afresh
+
+The phone reads the named workflow and run again before opening the sheet.
+The result belongs to the same owner, run and version as the notification.
+The phone consumes the tap after the exact finished run has been shown.
+An Ask Alpha tap uses the sheet’s existing handoff. It opens a draft the
+owner can review.
+
+```quint
+pure def alwaysOpenedRunBelongsToOwner(s: Sheet): bool =
+  s.runId >= 1 implies (s.owner >= 1 and s.version >= 1 and s.newest >= s.version)
 ```

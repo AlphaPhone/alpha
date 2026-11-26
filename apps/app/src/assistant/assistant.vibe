@@ -231,13 +231,6 @@ const wireChatHeight: Record<Locator.ChatHeight, ChatHeight> = {
   ChatFull: "full",
 }
 
-const overlayDetent: Record<"Bar" | "Typing" | "Sheet" | "Full", Locator.OverlayDetent> = {
-  Bar: "DetentBar",
-  Typing: "DetentTyping",
-  Sheet: "DetentSheet",
-  Full: "DetentFull",
-}
-
 // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"; spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"; spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
 function observed(
   told: boolean,
@@ -316,7 +309,7 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
   const shellState = try (try Shell).get()
   const dockState = try (try Dock.Machine).get()
   const chatHeight = wireChatHeight[Locator.chatHeightOf(
-    overlayDetent[shellState.assistant],
+    shellState.assistant,
     askAlphaDrawn(shellState),
     Dock.pill(shellState, dockState.tucked),
   )]
