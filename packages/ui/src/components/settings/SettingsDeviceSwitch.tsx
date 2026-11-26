@@ -25,7 +25,7 @@ export type SettingsDeviceSwitchProps = {
 
 const tags = (words: string[]) => (
   <span className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
-    {words.map((word) => <span key={word} className="rounded-full bg-background px-2.5 py-0.75 text-fine leading-[1.4] text-muted-foreground">{word}</span>)}
+    {words.map((word) => <span key={word} className="rounded-full bg-background px-2.5 py-0.75 text-fine leading-normal text-muted-foreground">{word}</span>)}
   </span>
 );
 
@@ -33,8 +33,8 @@ const tags = (words: string[]) => (
 const settings: Record<SettingsDeviceSwitchProps["setting"], { title: string; detail: ReactNode }> = {
   "ask-first": { title: "Ask before Alpha acts", detail: tags(["Web", "Camera", "Photos", "Texter’s number", "Text drafts"]) },
   images: { title: "Load images", detail: undefined },
-  "agent-location": { title: "Location for Alpha", detail: <span className="block leading-[normal] whitespace-normal">Alpha uses your last known location in chats. Hosted models can receive it.</span> },
-  "browser-page": { title: "Browser page for Alpha", detail: <span className="block leading-[normal] whitespace-normal">When you chat with Browser open, Alpha gets the page’s address, title, visible text and links. Never private tabs or sign-in pages. Hosted models can receive it.</span> },
+  "agent-location": { title: "Location for Alpha", detail: <span className="block leading-plain whitespace-normal">Alpha uses your last known location in chats. Hosted models can receive it.</span> },
+  "browser-page": { title: "Browser page for Alpha", detail: <span className="block leading-plain whitespace-normal">When you chat with Browser open, Alpha gets the page’s address, title, visible text and links. Never private tabs or sign-in pages. Hosted models can receive it.</span> },
   "gmail-changes": { title: "Gmail changes", detail: "Drafts, labels and sending" },
   "calendar-edits": { title: "Calendar changes", detail: "Events Alpha adds or edits" },
   "telegram-context": { title: "Telegram screen", detail: "The open Telegram chat, when signed in" },
