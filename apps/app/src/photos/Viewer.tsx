@@ -302,6 +302,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
       </div>}
       <Sheet open={state.info && loadedRow !== undefined} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
         <SheetContent aria-label={infoLabel} aria-labelledby={undefined} title={day} description={date && formatTime.format(date)}
+          className="inset-x-2 -translate-y-2 gap-1 rounded-sheet px-6 pt-6 pb-[max(--spacing(8),env(safe-area-inset-bottom))]"
+          overlayClassName="bg-black/35 dark:bg-black/35"
           onCloseAutoFocus={(event) => {
             if (infoButton.current === null) return;
             event.preventDefault();
