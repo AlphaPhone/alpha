@@ -83,61 +83,91 @@ const has = (mark: string) => phone().querySelector(`[data-${mark}]`) !== null;
 
 const sheet = () => phone().querySelector("[data-sheet]")?.getAttribute("data-sheet");
 
+const on = () => phone().getAttribute("data-screen");
+
+const typed = () => phone().querySelector("[data-draft]")?.textContent ?? "";
+
 const at = (demo: Demo) => [demo.scene, demo.beat];
 
 describe('Walk through what Alpha does (spec/site/index.md, "Story: Walk through what Alpha does")', () => {
-  it('opens on Home, types the first question in the Ask Alpha bar and opens the conversation on its answer (spec/site/index.md, "The phone plays Home, the calendar, a text, a map, the inbox and a spoken note, each staged in beats")', async () => {
+  it('opens on Home, types a question in the Ask Alpha bar and opens the conversation on the day (spec/site/index.md, "The phone plays nine scenes, each staged in beats")', async () => {
     const { state, through } = await open();
     // spec/site/index.md, "When the page opens the phone is on Home and starts to play"
-    expect([at(await state()), says("Ask Alpha"), sheet()]).toEqual([["Home", 0], true, "closed"]);
-    expect(await through("Home", () => phone().querySelector("[data-question]")?.textContent)).toEqual([undefined, "What’s on my calendar today?"]);
-    const calendar = () => [sheet(), says("What’s on my calendar today?"), has("typing"), says("Two things this afternoon."), says("Lunch · Priya"), says("Video call")];
-    expect(await through("Calendar", calendar)).toEqual([
-      ["open", false, false, false, false, false],
-      ["open", true, false, false, false, false],
-      ["open", true, true, false, false, false],
-      ["open", true, false, true, false, false],
-      ["open", true, false, true, true, false],
-      ["open", true, false, true, true, true],
+    expect([at(await state()), on(), says("Ask Alpha"), sheet()]).toEqual([["Home", 0], "Home", true, "closed"]);
+    expect(await through("Home", typed)).toEqual(["", "What’s on today?"]);
+    const day = () => [sheet(), typed(), says("What’s on today?"), has("typing"), says("Two things this afternoon."), says("Lunch · Priya"), says("Video call")];
+    expect(await through("Day", day)).toEqual([
+      ["open", "", true, false, false, false, false],
+      ["open", "", true, true, false, false, false],
+      ["open", "", true, false, true, false, false],
+      ["open", "", true, false, true, true, false],
+      ["open", "", true, false, true, true, true],
     ]);
     // spec/site/index.md, "A beat moves on once its time has come, and a scene's last beat leads to the next scene, the spoken note back to Home"
-    expect(at(await state())).toEqual(["Text", 0]);
+    expect(at(await state())).toEqual(["Coffee", 0]);
   });
 
-  it('types the text in the message box, asks, and sends it only after the touch on Send, keeping the calendar above (spec/site/index.md, "The conversation is open for the four questions and keeps what was said, a part showing from its beat on and what passes only during its beats")', async () => {
+  it('finds coffee under the day, opens the place in Maps as the conversation closes, and opens its menu in the Browser from the bar (spec/site/index.md, "Each scene plays on Home, in Maps, in the Browser or in the Inbox")', async () => {
     const { through } = await open();
     await through("Home");
-    await through("Calendar");
-    const text = () => [phone().querySelector("[data-draft]")?.textContent ?? "", has("typing"), says("Running about 10 minutes late."), says("Cancel"), has("touch"), says("Sent"), says("I’ll tell you when she replies."), says("Two things this afternoon.")];
-    expect(await through("Text", text)).toEqual([
-      ["Text Priya I’m running 10 minutes late", false, false, false, false, false, false, true],
-      ["", false, false, false, false, false, false, true],
-      ["", true, false, false, false, false, false, true],
-      ["", false, true, true, false, false, false, true],
-      ["", false, true, true, true, false, false, true],
-      ["", false, true, false, false, true, false, true],
-      ["", false, true, false, false, true, true, true],
+    await through("Day");
+    // spec/site/index.md, "The conversation is open for the day, the coffee and the mail, and keeps what was said while it is open and as it closes"
+    const coffee = () => [on(), sheet(), typed(), has("typing"), says("Three within a five-minute walk."), says("Second Sun"), has("touch"), says("Two things this afternoon.")];
+    expect(await through("Coffee", coffee)).toEqual([
+      ["Home", "open", "Coffee near lunch?", false, false, false, false, true],
+      ["Home", "open", "", false, false, false, false, true],
+      ["Home", "open", "", true, false, false, false, true],
+      ["Home", "open", "", false, true, false, false, true],
+      ["Home", "open", "", false, true, false, false, true],
+      ["Home", "open", "", false, true, false, false, true],
+      ["Home", "open", "", false, true, true, false, true],
+      ["Home", "open", "", false, true, true, true, true],
+    ]);
+    const maps = () => [on(), sheet(), says("Directions"), typed(), says("Opening their menu"), says("Three within a five-minute walk.")];
+    expect(await through("Maps", maps)).toEqual([
+      ["Maps", "closed", false, "", false, true],
+      ["Maps", "closed", true, "", false, true],
+      ["Maps", "closed", true, "Show me their menu", false, true],
+      ["Maps", "closed", true, "", true, true],
+    ]);
+    const menu = () => [on(), sheet(), says("Opening their menu"), says("Flat white"), says("Opened their menu"), says("Three within a five-minute walk.")];
+    expect(await through("Menu", menu)).toEqual([
+      ["Menu", "closed", true, false, false, false],
+      ["Menu", "closed", false, true, true, false],
     ]);
   });
 
-  it('finds coffee, sums up the inbox, saves a spoken note and comes round to Home with the conversation empty (spec/site/index.md, "A beat moves on once its time has come, and a scene\'s last beat leads to the next scene, the spoken note back to Home")', async () => {
-    const { state, through } = await open();
-    for (const scene of ["Home", "Calendar", "Text"] as const) await through(scene);
-    const played: unknown[] = [];
-    for (const [scene, shown] of [
-      ["Maps", ["Three within a five-minute walk.", "Fog & Filter", "Second Sun"]],
-      ["Inbox", ["Three need you. The other 41 can wait.", "Dana Okafor", "Three drafts are ready for you to check."]],
-      ["Voice", ["Listening", "is 4417.", "Saved to Notes"]],
-    ] as const) {
-      const seen = await through(scene, () => [sheet(), shown.map(says)]);
-      played.push([scene, seen[0], seen.at(-1)]);
-    }
-    expect(played).toEqual([
-      ["Maps", ["open", [false, false, false]], ["open", [true, true, true]]],
-      ["Inbox", ["open", [false, false, false]], ["open", [true, true, true]]],
-      ["Voice", ["closed", [false, false, false]], ["closed", [true, true, true]]],
+  it('opens the Inbox from Home, sums it up there, and sends the reply only after the touch on Send (spec/site/index.md, "A part of a scene shows from its beat on, a part of a kept scene whole, and what passes only during its beats")', async () => {
+    const { through } = await open();
+    for (const scene of ["Home", "Day", "Coffee", "Maps", "Menu"] as const) await through(scene);
+    expect(await through("Apps", () => [on(), has("touch")])).toEqual([["Home", false], ["Home", true]]);
+    expect(await through("Inbox", () => [on(), sheet(), typed()])).toEqual([["Inbox", "closed", ""], ["Inbox", "closed", ""], ["Inbox", "closed", "What needs me?"]]);
+    const mail = () => [sheet(), has("typing"), says("Three need you. The other 41 can wait."), says("Draft replies"), says("Both changes work for me."), says("Cancel"), has("touch"), has("sent")];
+    expect(await through("Mail", mail)).toEqual([
+      ["open", false, false, false, false, false, false, false],
+      ["open", true, false, false, false, false, false, false],
+      ["open", false, true, false, false, false, false, false],
+      ["open", false, true, false, false, false, false, false],
+      ["open", false, true, false, false, false, false, false],
+      ["open", false, true, true, false, false, false, false],
+      ["open", false, true, true, false, false, true, false],
+      ["open", true, true, true, false, false, false, false],
+      ["open", false, true, true, true, true, false, false],
+      ["open", false, true, true, true, true, true, false],
+      ["open", false, true, true, true, false, false, true],
     ]);
-    expect([at(await state()), sheet(), says("Ask Alpha"), says("Two things this afternoon."), says("Saved to Notes")]).toEqual([["Home", 0], "closed", true, false, false]);
+  });
+
+  it('saves a spoken note as the conversation closes and comes round to Home with the conversation empty (spec/site/index.md, "A beat moves on once its time has come, and a scene\'s last beat leads to the next scene, the spoken note back to Home")', async () => {
+    const { state, through } = await open();
+    for (const scene of ["Home", "Day", "Coffee", "Maps", "Menu", "Apps", "Inbox", "Mail"] as const) await through(scene);
+    const note = await through("Note", () => [on(), sheet(), has("touch"), says("Listening"), says("is 4417."), says("Saved to Notes"), says("Three need you.")]);
+    expect([note[0], note[1], note.at(-1)]).toEqual([
+      ["Inbox", "closed", true, false, false, false, true],
+      ["Inbox", "closed", false, true, false, false, true],
+      ["Inbox", "closed", false, true, true, true, true],
+    ]);
+    expect([at(await state()), on(), sheet(), says("Ask Alpha"), says("Three need you."), says("Saved to Notes")]).toEqual([["Home", 0], "Home", "closed", true, false, false]);
   });
 
   it('draws the page whole in its HTML, with Home on the phone and the way to GitHub, so it reads without its script (spec/site/index.md, "Before the page has opened the phone rests on Home")', async () => {
@@ -164,11 +194,11 @@ describe('Walk through what Alpha does (spec/site/index.md, "Story: Walk through
     const [paced, stalled] = await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
       const told = yield* Machine;
       yield* told.send({ type: "start", now: 0 });
-      yield* told.send({ type: "tick", now: 1_700 });
+      yield* told.send({ type: "tick", now: 1_500 });
       const first = (yield* told.get()).due;
       yield* told.send({ type: "tick", now: 100_000 });
       return [first, yield* told.get()] as const;
     }).pipe(Effect.provide(machine()))));
-    expect([paced, stalled.scene, stalled.beat, stalled.due]).toEqual([3_100, "Calendar", 0, 100_500]);
+    expect([paced, stalled.scene, stalled.beat, stalled.due]).toEqual([2_700, "Day", 0, 100_600]);
   });
 });
