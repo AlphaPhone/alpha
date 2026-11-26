@@ -15,7 +15,6 @@ import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import { directOpenCapability } from "../../gen/app__browser.effect.vibe"
 import type { FileActionReport, FileReview, FilesReadContext } from "../files/agent.vibe"
 import { latestSenderResult, sameVoicemail, selectedVoicemail, type VoicemailReadContext, type VoicemailTarget } from "../contacts/reads.vibe"
-import { sendShowing } from "../contacts/requests.vibe"
 import { composeDraftOnly, composeRecipient, reviewedCompose, type MessageDraftTarget } from "../messages/agent.vibe"
 import { composeLine, readAgentSms, type ComposeLine } from "../messages/agent-send.vibe"
 import { activeSmsSelection, currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
@@ -389,13 +388,6 @@ export interface MediaCard {
   readonly notice?: string
 }
 
-/** Only a spoken text with its exact, chosen recipient has a spoken confirmation. */
-export function spokenText(card: MediaCard): SpokenReview | undefined {
-  if (card.decision !== undefined) return undefined
-  if (card.spokenSms !== undefined) return card.spokenSms
-  return card.composeLine !== undefined && (namedReviewQuery(card.operation) === undefined || card.phone?.tag === "Exact") ? card.spoken : undefined
-}
-
 const openFilesNotice = "Open Files to review this action."
 
 function sameReviewRequest(card: MediaCard, lastTyped: string): Effect.Effect<boolean> {
@@ -571,7 +563,7 @@ export service MediaReview {
   voicemailTarget(): (VoicemailTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
   choosePhone(card: MediaCard, choice: number): void!!(Talk | Conversation | Chats)
-  decide(card: MediaCard, approve: boolean, confirmation?: "Tap" | "Speech"): void!!(Talk | Conversation | Chats)
+  decide(card: MediaCard, approve: boolean, confirmation?: "Tap"): void!!(Talk | Conversation | Chats)
   /** Builds, for Files as it now shows, the card of each Files change that waited for Files to be opened. */
   reviewInFiles(): void!!(Talk | Conversation | Chats)
   /** Same enrollment and custody as the cards, without exposing its tokens or action payloads. */
@@ -1442,7 +1434,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
         const held = try session()
         const live = held !== undefined && (try current(held))
-        if (!board.snapshot().media.includes(card) || (confirmation === "Speech" && !sendShowing(card.id))) return
+        if (!board.snapshot().media.includes(card)) return
         const deciding: MediaCard | undefined = spoken === undefined ? undefined : { ...card, decision: "Deciding" }
         if (deciding !== undefined) board.change({ media: board.snapshot().media.map((one) => one === card ? deciding : one) })
         const replace = (before: MediaCard, after?: MediaCard) => {
