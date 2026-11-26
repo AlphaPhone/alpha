@@ -106,10 +106,10 @@ function Manoeuvre({ maneuver, className }: { maneuver: string | undefined; clas
   );
 }
 
-/** How far down the status card stands under the search field in each mode, as develop places it; the launcher's status bar adds its height. */
+/** The status card clears the search field or the route controls above it. */
 const statusTop: Record<string, string> = {
   Browse: "top-32.5 in-data-[alpha-launcher]:top-43.5", Search: "top-21.5 in-data-[alpha-launcher]:top-32.5",
-  Place: "top-21 in-data-[alpha-launcher]:top-32", Directions: "top-47 in-data-[alpha-launcher]:top-58", Navigating: "top-47 in-data-[alpha-launcher]:top-58",
+  Place: "top-21 in-data-[alpha-launcher]:top-32", Directions: "top-58", Navigating: "top-47 in-data-[alpha-launcher]:top-58",
 };
 
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
@@ -281,7 +281,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         />
       )}
       {(now === "Directions" || now === "Navigating") && (
-        <div data-host-chrome="" className={cn("absolute top-0 left-3 z-10 in-data-[alpha-launcher]:top-11 [&_button]:size-11", now === "Navigating" && "[&_button]:rounded-full [&_button]:bg-background")}><AppBack alpha={alpha} /></div>
+        <div data-host-chrome="" className={cn("absolute top-0 left-3 z-10 in-data-[alpha-launcher]:hidden [&_button]:size-11", now === "Navigating" && "[&_button]:rounded-full [&_button]:bg-background")}><AppBack alpha={alpha} /></div>
       )}
 
       {now === "Browse" && saved.length > 0 && (
@@ -491,7 +491,7 @@ function DirectionsCard({ screen, state, seen, spot, kept, saved, back }: { scre
   const from = state.startPlace === 0 ? undefined : atlas.spot(state.startPlace);
   const swappable = can({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng });
   return (
-    <div data-host-chrome="" className="absolute inset-x-3 top-13 z-10 rounded-group bg-background pt-1.5 pr-3 pb-3 pl-1 shadow-float ring-1 ring-border motion-safe:animate-drop dark:shadow-float-dark in-data-[alpha-launcher]:top-24">
+    <div data-host-chrome="" className="absolute inset-x-3 top-13 z-10 rounded-group bg-background pt-1.5 pr-3 pb-3 pl-1 shadow-float ring-1 ring-border motion-safe:animate-drop dark:shadow-float-dark">
       <div className="flex items-center gap-1">
         <MapsRoundButton tone="plain" size="sm" aria-label="Back to place" disabled={!back} onClick={back}><ChevronLeft /></MapsRoundButton>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -499,11 +499,11 @@ function DirectionsCard({ screen, state, seen, spot, kept, saved, back }: { scre
             <form className="flex items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); startFrom(); }}>
               <Input aria-label="Starting point" maxLength={300} value={start} onChange={(event) => setStart(event.target.value)}
                 placeholder={from === undefined ? "My location" : shown(from.name)}
-                className="h-11 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-md placeholder:text-foreground focus-visible:outline-none" />
+                className="h-11.5 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0.5 text-body placeholder:text-foreground focus-visible:outline-none" />
               {can({ type: "useMyLocation" }) && <MapsRoundButton tone="plain" size="sm" aria-label="Use my location" onClick={() => void send({ type: "useMyLocation" })}><LocateFixed /></MapsRoundButton>}
             </form>
           )}
-          <div className="flex h-8 items-center gap-3 text-base font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{shown(kept?.name ?? spot.name)}</span></div>
+          <div className="flex h-8 items-center gap-3 text-md font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{shown(kept?.name ?? spot.name)}</span></div>
         </div>
         <MapsRoundButton tone="plain" aria-label="Swap starting point and destination" aria-disabled={!swappable} className="size-12 aria-disabled:pointer-events-auto aria-disabled:opacity-40"
           onClick={swappable ? () => void send({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng }) : undefined}><ArrowUpDown /></MapsRoundButton>

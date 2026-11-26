@@ -83,7 +83,7 @@ lemma lawTheFollowingItemIsNotOverdue_ensures(items: seq<Item>, now: int)
 }
 
 lemma TapView(before: Cards, via: string, after: Cards, out: seq<Effect>)
-  ensures stepATapOpensOneApp(before, via, after, out) == (((|ProofLib.Filter((e: Effect) => e.Go?, out)| == 1) == (via == "openCard")) && (!(((via == "openCard") && (exists e :: e in out && e.ReadCalendar?))) || failed(before.calendar)))
+  ensures stepATapOpensOneApp(before, via, after, out) == (((|ProofLib.Filter((e: Effect) => e.Go?, out)| == 1) == isCardTap(via)) && (!(((via == "openCard") && (exists e :: e in out && e.ReadCalendar?))) || failed(before.calendar)))
 {
 }
 
@@ -142,22 +142,60 @@ lemma dayBegins_ensures(c: Cards, now: int, day: int)
 }
 
 lemma openCard_ensures(c: Cards, kind: Kind, now: int)
-  ensures (inv(c) ==> alwaysEachCalendarHoldsOnlyWhatItAnswered(openCard(c, kind, now).state))
-  ensures (inv(c) ==> alwaysNoReadIsFromALaterDay(openCard(c, kind, now).state))
-  ensures (inv(c) ==> alwaysAnAnswerIsRemembered(openCard(c, kind, now).state))
-  ensures (inv(c) ==> stepALookLeavesNoCalendarUnread(c, "openCard", openCard(c, kind, now).state))
-  ensures (inv(c) ==> stepANewDayIsReadForItself(c, "openCard", openCard(c, kind, now).state))
-  ensures (inv(c) ==> stepReadsAreTicketed(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
-  ensures (inv(c) ==> stepTicketsOnlyRise(c, "openCard", openCard(c, kind, now).state))
-  ensures (inv(c) ==> stepATapOpensOneApp(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> alwaysEachCalendarHoldsOnlyWhatItAnswered(openCard(c, kind, now).state))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> alwaysNoReadIsFromALaterDay(openCard(c, kind, now).state))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> alwaysAnAnswerIsRemembered(openCard(c, kind, now).state))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> stepALookLeavesNoCalendarUnread(c, "openCard", openCard(c, kind, now).state))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> stepANewDayIsReadForItself(c, "openCard", openCard(c, kind, now).state))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> stepReadsAreTicketed(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> stepTicketsOnlyRise(c, "openCard", openCard(c, kind, now).state))
+  ensures (inv(c) ==> canOpenCard(c, kind) ==> stepATapOpensOneApp(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
 {
-  if inv(c) {
+  if inv(c) && canOpenCard(c, kind) {
     var after := openCard(c, kind, now);
     TapView(c, "openCard", after.state, after.out);
     var rest := after.out[1..];
     assert forall i :: 0 <= i < |rest| ==> !rest[i].Go?;
     ProofLib.FilterCons((e: Effect) => e.Go?, after.out);
     ProofLib.FilterNone((e: Effect) => e.Go?, rest);
+  }
+}
+
+lemma openCardBeside_ensures(c: Cards, kind: Kind, shell: app__shell_Shell, landscapePhone: bool, shown: bool)
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> alwaysEachCalendarHoldsOnlyWhatItAnswered(openCardBeside(c, kind, shell, landscapePhone, shown).state))
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> alwaysNoReadIsFromALaterDay(openCardBeside(c, kind, shell, landscapePhone, shown).state))
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> alwaysAnAnswerIsRemembered(openCardBeside(c, kind, shell, landscapePhone, shown).state))
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> stepALookLeavesNoCalendarUnread(c, "openCardBeside", openCardBeside(c, kind, shell, landscapePhone, shown).state))
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> stepANewDayIsReadForItself(c, "openCardBeside", openCardBeside(c, kind, shell, landscapePhone, shown).state))
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> stepReadsAreTicketed(c, "openCardBeside", openCardBeside(c, kind, shell, landscapePhone, shown).state, openCardBeside(c, kind, shell, landscapePhone, shown).out))
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> stepTicketsOnlyRise(c, "openCardBeside", openCardBeside(c, kind, shell, landscapePhone, shown).state))
+  ensures (inv(c) ==> canOpenCardBeside(c, kind, shell, landscapePhone, shown) ==> stepATapOpensOneApp(c, "openCardBeside", openCardBeside(c, kind, shell, landscapePhone, shown).state, openCardBeside(c, kind, shell, landscapePhone, shown).out))
+{
+  if inv(c) && canOpenCardBeside(c, kind, shell, landscapePhone, shown) {
+    var after := openCardBeside(c, kind, shell, landscapePhone, shown);
+    TapView(c, "openCardBeside", after.state, after.out);
+    assert |after.out| == 1 && after.out[0].Go?;
+    ProofLib.FilterCons((e: Effect) => e.Go?, after.out);
+    ProofLib.FilterNil((e: Effect) => e.Go?, after.out[1..]);
+  }
+}
+
+lemma openMailCard_ensures(c: Cards, shell: app__shell_Shell, beside: bool, shown: bool)
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> alwaysEachCalendarHoldsOnlyWhatItAnswered(openMailCard(c, shell, beside, shown).state))
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> alwaysNoReadIsFromALaterDay(openMailCard(c, shell, beside, shown).state))
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> alwaysAnAnswerIsRemembered(openMailCard(c, shell, beside, shown).state))
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> stepALookLeavesNoCalendarUnread(c, "openMailCard", openMailCard(c, shell, beside, shown).state))
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> stepANewDayIsReadForItself(c, "openMailCard", openMailCard(c, shell, beside, shown).state))
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> stepReadsAreTicketed(c, "openMailCard", openMailCard(c, shell, beside, shown).state, openMailCard(c, shell, beside, shown).out))
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> stepTicketsOnlyRise(c, "openMailCard", openMailCard(c, shell, beside, shown).state))
+  ensures (inv(c) ==> canOpenMailCard(c, shell, beside, shown) ==> stepATapOpensOneApp(c, "openMailCard", openMailCard(c, shell, beside, shown).state, openMailCard(c, shell, beside, shown).out))
+{
+  if inv(c) && canOpenMailCard(c, shell, beside, shown) {
+    var after := openMailCard(c, shell, beside, shown);
+    TapView(c, "openMailCard", after.state, after.out);
+    assert |after.out| == 1 && after.out[0].Go?;
+    ProofLib.FilterCons((e: Effect) => e.Go?, after.out);
+    ProofLib.FilterNil((e: Effect) => e.Go?, after.out[1..]);
   }
 }
 

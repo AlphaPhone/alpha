@@ -6,13 +6,14 @@ import type { Effect as Out, Event } from "../../gen/app__inbox__message.effect.
 import * as Marking from "../../gen/app__inbox__marking.effect.vibe"
 import type { Effect as MarkOut, Event as MarkEvent } from "../../gen/app__inbox__marking.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-client"
 import { Agent } from "../platform/agent.vibe"
 import { InboxBrowserLinks } from "../platform/browser.vibe"
-import { native, registered } from "../platform/device.vibe"
+import { Device, native, registered } from "../platform/device.vibe"
 import type { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
@@ -290,6 +291,48 @@ const marking = reacting(Marking, { keep: 1, open: [{ type: "restart" }, "World"
 
 /** A message opened from the list, and its marks: kept across restarts, read through the owner's cloud, and told what the list knows of access. */
 export const reading = together(viewing, marking, access, sessions, afresh, openedUnread, threadPosition, threadPages, attachmentPreviews, forgetPreview)
+
+// spec/app/home/cards.md, "The unread mail card opens Inbox without a search or message open"
+/** The previous Inbox reader and search, to put away only when their Home card opens a new Inbox visit. */
+export effect function prepareInboxCardEntry() {
+  const list = try Inbox.Machine
+  const reader = try Message.Machine
+  const shell = try Shell
+  const device = try Device
+  const layers = try Layers
+  const mail = try Mail
+  const { selected } = try list.get()
+  const previous = try reader.get()
+  const owner = mail.generation()
+  const grant = mail.generation(selected.account)
+  const matchesList = (state: Inbox.Mailbox) => state.selected.account === selected.account
+    && state.selected.folder === selected.folder && state.selected.query === selected.query
+  const matchesReader = (state: Message.MessageView) => state.account === previous.account && state.message === previous.message
+    && state.body.ticket === previous.body.ticket && state.position === previous.position
+    && state.link === previous.link && state.attachment === previous.attachment
+  return (route: number) => effect {
+    const current = () => {
+      const where = Effect.runSync(shell.get())
+      return where.route === route && showing(where, "Inbox") && where.assistant === "Bar" && where.textAsk.tag === "NoTextAsk"
+        && Effect.runSync(device.showing()) && !pageInert(Effect.runSync(layers.get()))
+        && mail.ownerConfirmed() && mail.generation() === owner && mail.generation(selected.account) === grant
+    }
+    if (!current() || !matchesList(try list.get()) || !matchesReader(try reader.get())) return
+    let closed = false
+    if (Message.canClose(previous)) {
+      closed = try contained(reader.send({ type: "close" }, (state) => current() && matchesReader(state)
+        && matchesList(Effect.runSync(list.get()))), "closing the previous Inbox message")
+      if (!closed) return
+    }
+    if (Inbox.canClearSearch(try list.get())) {
+      try contained(list.send({ type: "clearSearch" }, (state) => {
+        if (!current() || !matchesList(state)) return false
+        const showing = Effect.runSync(reader.get())
+        return closed ? showing.message === 0 && showing.body.ticket === previous.body.ticket : matchesReader(showing)
+      }), "clearing the previous Inbox search")
+    }
+  }
+}
 
 // spec/app/inbox/message.md, "Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer"
 /** Back from a message: a review open closes first, then the message, and the list is Inbox's own last step. */

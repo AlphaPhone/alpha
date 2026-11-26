@@ -5,11 +5,20 @@ import type { Machine as CardsMachine } from "../../gen/app__home__cards.effect.
 import { area } from "../runtime/area.tsx";
 import { together } from "../runtime/reactor.vibe";
 import { HomePage } from "./Home.tsx";
+import type { HomeAdd } from "./addHome.vibe";
 import { cards } from "./cards.vibe";
-import { backHome, home } from "./home.vibe";
+import { backHome, finishHomeEditing, home } from "./home.vibe";
 
 /** The machines of Home's area: Home itself and the cards. */
-export type HomeMachines = HomeMachine | CardsMachine | DrawerMachine;
+export type HomeMachines = HomeMachine | CardsMachine | DrawerMachine | HomeAdd;
+
+const launcher = area(together(home, cards), HomePage, { back: backHome() });
 
 /** Home, the launcher: drawn with the first paint. */
-export default area(together(home, cards), HomePage, { back: backHome() });
+export default {
+  ...launcher,
+  open(...[alpha, place]: Parameters<typeof launcher.open>) {
+    alpha.taking("home/finished", () => launcher.runtime(alpha).runPromise(finishHomeEditing()));
+    return launcher.open(alpha, place);
+  },
+};

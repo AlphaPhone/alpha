@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
     <bool name="config_alpha_home_back_only">false</bool>
+    <bool name="config_alpha_hide_taskbar_handle">true</bool>
     <string name="app_name">Alpha Navigation</string>
 </resources>
