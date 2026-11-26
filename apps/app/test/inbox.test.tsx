@@ -12,6 +12,7 @@ import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
+import assistant from "../src/assistant/index.tsx";
 import { useInEmail } from "../src/inbox/suggestion.vibe";
 import inbox from "../src/inbox/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
@@ -97,7 +98,7 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   world.inbox.notices = notices;
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
-  await until(alpha, alpha.runtime, Conversation, ({ ready, support }) => ready && support.status === "Loaded");
+  await until(alpha, assistant.runtime(alpha), Conversation, ({ ready, support }) => ready && support.status === "Loaded");
   await afterDraw(() => expect(notices.selection?.grantId).toBe(world.inbox.google?.connection));
   const selection = notices.selection;
   if (!selection || !notices.enter) throw new Error("No native mail watch");
@@ -573,6 +574,27 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages >= 1);
   const shown = rows();
   expect(shown.length).toBeGreaterThan(0);
+
+  // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on opens Google authorization"
+  world.inbox.google.capabilities = ["google.basic_identity", "google.gmail.triage", "google.calendar.read"];
+  await seen(false);
+  await seen(true);
+  await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected[0]?.grant.send === false);
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open);
+  await fill("Subject", "Kept while authorizing sending");
+  await press("Turn on");
+  await afterDraw(() => expect([consent.requests.at(-1), consent.opened.length, world.inbox.changes])
+    .toEqual([["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.calendar.read"], 3, []]));
+  world.inbox.google.capabilities = [...mailScopes, "google.calendar.read"];
+  await seen(false);
+  await seen(true);
+  await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected[0]?.grant.send === true);
+  await afterDraw(() => expect([Boolean(button("Turn on")), document.querySelector<HTMLInputElement>('input[aria-label="Subject"]')?.value])
+    .toEqual([false, "Kept while authorizing sending"]));
+  await press("Back from draft");
+  await until(alpha, runtime, Writing, (s) => !s.open);
+
   world.mailLease.held = false;
   await hardware("home");
   await openInboxFromHome(alpha);

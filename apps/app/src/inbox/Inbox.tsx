@@ -424,7 +424,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const route = shell.state?.route;
   const connectGmail = route === undefined ? undefined : () => {
     const popup = gmailAuthorizationWindow();
-    void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.connect(route, popup)));
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.consent({ kind: "Connect", route }, popup)));
   };
   const hidden = new Set(changes.state ? aside(changes.state) : []);
   const letters = mail.shown(state).filter(({ message: number }) => !hidden.has(number));
