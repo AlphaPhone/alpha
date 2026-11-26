@@ -62,8 +62,7 @@ describe("Camera on a phone", () => {
     const cameraSession = await onCamera();
     const { alpha, runtime, world } = cameraSession;
 
-    // v119's Camera header has no grid, ratio or timer control (legacy template.html at 45f6bed30, lines 1861-1868),
-    // so these turn on through the machine and the header shows only back, flip and flash.
+    // spec/app/camera/index.md, "The grid turns on and off without restarting the preview": v119's Camera header has no grid, ratio or timer control (template.html at 45f6bed30, lines 1861-1868), so these turn on through the machine and the header shows only back, flip and flash.
     expect(button("Framing grid")).toBeUndefined();
     expect(button("Aspect ratio 4:3")).toBeUndefined();
     expect(button("Timer off")).toBeUndefined();

@@ -55,11 +55,11 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     Layer.succeed(MediaExecutors, { reviewFiles: () => Effect.succeed(undefined), filesContext: () => Effect.succeed(undefined), readyFiles: () => Effect.succeed(undefined), execute: () => Effect.succeed(undefined) }),
   );
   const no = () => Effect.succeed(false);
+  /** The resident reads StartupSignIn; the dock journeys run signed-in-free, as a page without native sign-in does. */
   const signedOut = Layer.succeed(StartupSignIn, {
     changes: Stream.empty, active: no, confirmedAccount: no, check: () => Effect.void, touch: () => Effect.void,
     openNetwork: no, send: no, chooseGoogle: no, verify: no, resend: no, back: no,
   });
-  // The resident reads StartupSignIn; the dock journeys run signed-in-free, as a page without native sign-in does.
   const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, Layer.merge(signedOut, platform))));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);

@@ -381,7 +381,8 @@ describe("The Browser on a phone", () => {
     await until(alpha, speaking, Speaker, (state) => state.stage === "Silent" && !state.retiring);
     if (kind === "private") expect(world.browser.saved.history).not.toContain("https://example.test/article");
     expect(world.voice.spoken).toEqual([]);
-    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession, requestId: expect.any(String) }]);
+    const requestId: unknown = expect.any(String);
+    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession, requestId }]);
     expect(cancellations()).toBe(1);
 
     world.voice.holdPagePlayback = true;
@@ -445,7 +446,6 @@ describe("The Browser on a phone", () => {
   });
 
   it.each([false, true])("Opens Password manager and returns through Settings (spec/app/settings/index.md, \"The owner can open Password manager from the Browser menu\") on phone %s", async (phone) => {
-    // The web host keeps the Browser's session in the WebView's IndexedDB, which happy-dom does not draw.
     vi.stubGlobal("indexedDB", memoryIndexedDB());
     onTestFinished(() => { vi.unstubAllGlobals(); });
     const world = { ...scene(), phone, image: phone };
@@ -616,7 +616,7 @@ describe("The Browser on a phone", () => {
     // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
     const shown = await ask(running, "Summarize this page");
     expect(shown?.observation?.view).toBe("browser");
-    // eliza binds the page to the tab the observation selects: the same session-qualified tab id and revision.
+    /** eliza binds the page to the tab the observation selects: the same session-qualified tab id and revision. */
     const selected = shown?.observation?.selectedObject;
     expect(selected?.kind).toBe("browser-tab");
     expect(selected?.id).toMatch(new RegExp(`:tab${tab}$`));
@@ -682,7 +682,7 @@ describe("The Browser on a phone", () => {
     await asked("open the Wikipedia article about the Eiffel Tower", eiffel);
     await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
     await asked("open example.org", "https://example.org/");
-    // The owner's own words name example.org too: wait for the card itself to name the newer page.
+    /** The operation cards' text: the owner's own words name example.org too, so the test waits for a card itself to name the newer page. */
     const card = () => [...document.querySelectorAll("[aria-label='Operation details']")].map((details) => details.textContent ?? "");
     await drawn(() => vi.waitFor(() => expect(card().some((text) => text.includes("example.org"))).toBe(true)));
     expect(document.body.textContent).not.toContain("en.wikipedia.org/wiki/Eiffel_Tower");

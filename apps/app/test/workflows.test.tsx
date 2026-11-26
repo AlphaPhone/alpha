@@ -429,8 +429,9 @@ describe("Workflows", () => {
     if (kind === "speak_text") {
       expect(world.voice.played).toHaveLength(1);
     } else {
+      const operationId: unknown = expect.stringMatching(/^step-[a-f0-9]{64}$/);
       expect(notices.results).toMatchObject([{
-        operationId: expect.stringMatching(/^step-[a-f0-9]{64}$/),
+        operationId,
         title: "A reviewed notification", body: "A reviewed note.",
         route: { workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" },
       }]);

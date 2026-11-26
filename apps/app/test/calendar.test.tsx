@@ -178,7 +178,7 @@ it("Offers Search, the layouts and the Calendars sheet only on a wide screen (sp
     Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
     await drawn(() => window.dispatchEvent(new Event("resize")));
   };
-  // A phone measures its own window: 412 points is Alpha's portrait phone, 1024 a tablet's width.
+  // spec/app/calendar/index.md, "Several days side by side only on a wide screen": a phone measures its own window; 412 points is Alpha's portrait phone, 1024 a tablet's width.
   const { alpha, runtime } = await onCalendar(morning(true));
   await resize(412, 915);
   await until(alpha, runtime, View, (state) => state.front && !state.wide);
@@ -424,7 +424,7 @@ describe("Calendar without a connected account", () => {
     await press("Reopen reminder");
     await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
     await press("Reopen");
-    // spec/app/reminders/index.md: the completion still holds its five-second Undo, and the reopen write waits for it to end
+    // spec/app/reminders/index.md, "The reviewed reopen from Calendar restores the same reminder without an alert": the completion still holds its five-second Undo, and the reopen write waits for it to end
     expect(await alpha.runtime.runPromise(Reminders.use((reminders) => reminders.get()))).toMatchObject({ undo: { holding: "Held" } });
     await later(alpha, 5_100);
     await until(alpha, alpha.runtime, Reminders, (state) => state.undo.holding !== "Held" && state.write.outcome === "Confirmed");

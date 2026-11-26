@@ -133,7 +133,7 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     const page = document.querySelector("main");
     if (!page) throw new Error("no Alpha shell");
-    // Happy DOM does not lay out the shell. Give the gesture the phone's canvas.
+    /** Happy DOM does not lay out the shell, so the gesture is given the phone's canvas. */
     const width = 390;
     const height = 844;
     Object.defineProperties(page, {
