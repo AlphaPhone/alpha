@@ -28,7 +28,7 @@ function KeyboardIcon({ className }: { className?: string }) {
 export function DictationControls({ runtime, onKeyboard, playback }: {
   runtime: ManagedRuntime.ManagedRuntime<Voice | VoiceWords | DictationClock | VoiceBridge | Speaker, unknown>;
   onKeyboard: DictationKeyboard;
-  playback?: { readonly playing: boolean; readonly failed: boolean; toggle(ticket: number): void };
+  playback?: { readonly playing: boolean; toggle(ticket: number): void };
 }) {
   const { state, can, send } = useMachine(runtime);
   const clock = runtime.runSync(DictationClock);
@@ -96,14 +96,12 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
           {recording && <div role="img" aria-label="Recording activity" className="flex min-h-10 shrink-0 items-center gap-0.75">
             {recordingMarks.map((mark) => <span key={mark} aria-hidden className="h-1 flex-1 rounded-full bg-primary" />)}
           </div>}
-          {recorder.stage === "Recorded" && <p role="status" className="text-sm leading-transcript text-muted-foreground">Voice stopped</p>}
           {can(type) && <Button variant="secondary" aria-label="Type transcript instead" disabled={pending}
             className="h-11 justify-start gap-1.5 rounded-dictation-type px-3 font-normal" onClick={() => void send(type)}>
             <KeyboardIcon className="size-4.5" />Type
           </Button>}
         </div>
       )}
-      {playback?.failed && <p role="status" className="text-sm leading-voice-status text-muted-foreground">Playback failed</p>}
       <Button className={cn("min-h-14 gap-2.5 rounded-sheet px-4", waitingForRecognition && "disabled:opacity-100")}
         disabled={pending || !primary.enabled} onClick={() => void send(primary.event)}>
         <PrimaryIcon aria-hidden="true" className="size-6" />{primary.label}

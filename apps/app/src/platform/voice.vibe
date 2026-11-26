@@ -4,6 +4,7 @@ import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialI
 import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
+import { pageMicrophone, pageSpeechBase, pageSpeechRelay } from "./pageSpeech.ts"
 
 export type VoiceGrant = "granted" | "denied" | "prompt"
 
@@ -239,6 +240,8 @@ const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
 export const CLOUD_ENVIRONMENT = "production" as EnvironmentName
 /** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
+/** The key a page names to its own Cloud, whose server holds the account's real key: the page never holds one. */
+const PAGE_CREDENTIAL = "page" as CredentialId
 const RELAY_WARMUP_BOUND = "5 seconds"
 const LOCAL_OUTPUT_WARMUP_BOUND = "10 seconds"
 
@@ -1063,31 +1066,160 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   }
 })
 
+/**
+ * A page that is no phone: Talk over the Cloud speech relay of the page's own server, where it offers one, with the
+ * browser's microphone, by the same Cloud path and the same eliza client as the phone's relay (spec/app/voice/index.md,
+ * "What voice asks the phone and the voice service to do"); no voice where it offers none. A page has no on-phone speech,
+ * reading aloud or dictation.
+ */
 export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
+  const base = pageSpeechBase()
+  const relay = base === undefined ? undefined : pageSpeechRelay(base)
+  let activeSession = 0
+  let cloudSpeech: CloudVoiceSession | undefined
+  let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
+  let cloudSpeechAbort: AbortController | undefined
+  let cueStop: Deferred.Deferred<void> | undefined
+  const eventSubscribers = new Set<(event: VoiceEvent) => void>()
+  const publish = (event: VoiceEvent) => {
+    for (const emit of eventSubscribers) emit(event)
+  }
+
+  function clearCloudPreview(session: number): void {
+    if (cloudPreview?.session !== session) return
+    const closing = cloudPreview
+    cloudPreview = undefined
+    closing.outlet?.retire()
+  }
+
+  effect function openMic(session: number, network: boolean, preview?: VoicePreview): boolean!VoiceBridgeFailed {
+    if (relay === undefined || !network) throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "browser-no-speech-relay" })
+    activeSession = session
+    const owner: CloudVoiceSession = cloudSpeech?.session === session ? cloudSpeech : {
+      session,
+      signal: makeAbort().signal,
+      capture: undefined,
+      stream: createCloudStreamingSpeech({
+        environment: CLOUD_ENVIRONMENT,
+        credentialId: PAGE_CREDENTIAL,
+        assertCurrent: makeSessionGuard(() => activeSession, session),
+        onInterim: (text) => {
+          const current = cloudPreview
+          if (activeSession !== session || current?.session !== session) return
+          current.outlet?.show(text)
+        },
+      }, relay),
+    }
+    cloudSpeech = owner
+    clearCloudPreview(session)
+    const previewOwner = { session, outlet: preview }
+    cloudPreview = previewOwner
+    const capture = tryPromise({
+      try: () => owner.stream.listen({
+        signal: owner.signal,
+        onSpeechStart: () => publish({ kind: "speechStart", session }),
+        onSpeechEnd: () => undefined,
+        onSegment: (text) => {
+          if (cloudPreview === previewOwner) preview?.clear()
+          if (text !== null && text !== "") publish({ kind: "speechEnd", session, text })
+        },
+        onEnd: (cause) => {
+          if (cloudPreview === previewOwner) clearCloudPreview(session)
+          publish({ kind: "ended", session, reason: cause === undefined ? "ended" : "error" })
+        },
+      }),
+      catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
+    }) catch effect (failure) => {
+      if (cloudPreview === previewOwner) clearCloudPreview(session)
+      if (cloudSpeech === owner) cloudSpeech = undefined
+      throw failure
+    }
+    if (cloudSpeech !== owner || activeSession !== session) {
+      try ignore(tryPromise(() => capture.cancel()))
+      throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
+    }
+    owner.capture = capture
+    return capture.fullDuplex
+  }
+
+  effect function closeMic(session: number): void!VoiceBridgeFailed {
+    clearCloudPreview(session)
+    const owner = cloudSpeech
+    if (owner?.session !== session || owner.capture === undefined) return
+    const capture = owner.capture
+    owner.capture = undefined
+    try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
+  }
+
+  effect function speak(session: number, text: string, started: () => void): void!VoiceBridgeFailed {
+    const cloud = cloudSpeech
+    if (activeSession !== session || cloud?.session !== session) return
+    const abort = makeAbort()
+    cloudSpeechAbort = abort
+    try tryPromise({
+      try: () => cloud.stream.speak(text, abort.signal, started),
+      catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
+    })
+  }
+
+  effect function setSpeakerMuted(session: number, muted: boolean): boolean!! {
+    const cloud = cloudSpeech
+    if (session !== activeSession || cloud?.session !== session) return false
+    const set = effect {
+      try tryPromise(() => cloud.stream.setOutputMuted(muted))
+      return activeSession === session && cloudSpeech === cloud
+    } catch () => false
+    return set
+  }
+
+  effect function hush(_turn: number): void!! {
+    cloudSpeechAbort?.abort()
+    cloudSpeechAbort = undefined
+    if (cueStop !== undefined) try Deferred.succeed(cueStop, undefined)
+  }
+
+  effect function shut(session: number): boolean!! {
+    clearCloudPreview(session)
+    if (activeSession === session) {
+      activeSession = 0
+      try hush(0)
+    }
+    const owner = cloudSpeech
+    if (owner?.session !== session) return true
+    cloudSpeech = undefined
+    const capture = owner.capture
+    const cancelled = capture === undefined || (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)))
+    return (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && cancelled
+  }
+
   return {
-    available: () => succeed(false),
-    checkPermission: () => succeed<VoiceGrant>("granted"),
-    requestPermission: () => succeed<VoiceGrant>("granted"),
+    available: () => succeed(relay !== undefined),
+    checkPermission: () => Effect.orElseSucceed(tryPromise(() => pageMicrophone(false)), (): VoiceGrant => "prompt"),
+    requestPermission: () => Effect.orElseSucceed(tryPromise(() => pageMicrophone(true)), (): VoiceGrant => "denied"),
     prewarm: () => Effect.void,
     streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),
     invalidateCache: () => Effect.void,
-    forgetAccount: () => Effect.void,
+    forgetAccount: () => sync(() => { if (activeSession === 0) cloudSpeech = undefined }),
     holdEngine: () => succeed(false),
     releaseEngineHold: () => Effect.void,
-    openMic: () => Effect.fail(new VoiceBridgeFailed({ method: "openMic", cause: "browser-no-native-voice" })),
-    closeMic: () => Effect.void,
+    openMic,
+    closeMic,
     awaitSpeechOutputWarmup: () => Effect.void,
-    playSentence: () => Effect.void,
-    playCue: () => Effect.void,
-    setSpeakerMuted: () => succeed(false),
-    hush: () => Effect.void,
+    playSentence: (session, _turn, text) => speak(session, text, () => undefined),
+    playCue: (session, _turn, text, started) => effect {
+      const stop = try Deferred.make<void>()
+      cueStop = stop
+      try ensuring(Effect.raceFirst(speak(session, text, started), Deferred.await(stop)), sync(() => { if (cueStop === stop) cueStop = undefined }))
+    },
+    setSpeakerMuted,
+    hush,
     canRead: () => succeed(false),
     readAloud: () => Stream.succeed<ReadingEvent>({ kind: "ready", ok: false }),
     silenceReading: () => succeed(true),
-    shut: () => succeed(true),
-    events: Stream.empty,
-    account: () => succeed<CloudSignIn>({ kind: "unknown" }),
+    shut,
+    events: makeNativeEvents(eventSubscribers, () => undefined, () => undefined),
+    account: () => succeed<CloudSignIn>(relay === undefined ? { kind: "unknown" } : { kind: "signedIn", credential: PAGE_CREDENTIAL }),
     signIns: Stream.empty,
     startRecording: () => Effect.fail(new VoiceBridgeFailed({ method: "startRecording", cause: "browser-no-native-voice" })),
     dictationForeground: () => succeed(false),

@@ -16,10 +16,14 @@ export type BrowserFindBarProps = {
   onClose: () => void;
 };
 
-/** Find in page: a floating field under the Browser's bar, where the matches stand, and a step to each. */
+/**
+ * Find in page: a floating field under the Browser's bar, where the matches stand, and a step to each.
+ * As v119 (Alpha 45f6bed30 apps/app/src/prototype/template.html:1727-1734): 98px down, 10px sides, 52px tall,
+ * 26px corners, 44px controls with 18px icons.
+ */
 export function BrowserFindBar({ value, onValueChange, status, onPrevious, onNext, onClose }: BrowserFindBarProps) {
   return (
-    <div role="search" aria-label="Find in page" className="absolute top-24.5 right-2.5 left-2.5 z-20 flex min-h-15 items-center gap-1 rounded-group bg-card py-1 pr-1 pl-3.5 shadow-dock-compact ring-1 ring-border dark:shadow-dock-compact-dark">
+    <div role="search" aria-label="Find in page" className="absolute top-24.5 right-2.5 left-2.5 z-20 flex min-h-13 items-center gap-1 rounded-group bg-card py-1 pr-1 pl-3.5 shadow-dock-compact ring-1 ring-border dark:shadow-dock-compact-dark">
       <input
         ref={(input) => { if (input && input.dataset.focused === undefined) { input.dataset.focused = ""; input.focus({ preventScroll: true }); } }}
         type="search" aria-label="Find in page" placeholder="Find in page" value={value}

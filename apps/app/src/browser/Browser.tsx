@@ -1,9 +1,9 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserQuestion, BrowserReadAloud, BrowserReview, BrowserTabs, ConfirmDialog, Mark, PrivateMark } from "@repo/ui";
-import { ArrowUpRight, AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star, Trash2 } from "lucide-react";
+import { ArrowUpRight, AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
-import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
+import { canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
 import type { Browser as State } from "../../gen/app__browser.ts";
 import { useMachine } from "../../gen/app__browser.react.ts";
 import type { Machine } from "../../gen/app__browser.effect.vibe";
@@ -19,14 +19,13 @@ import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
-import { headingOf } from "../runtime/dateHeading.ts";
 import { Time } from "../runtime/time.vibe";
 import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openFindFromMenu, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";
-import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
+import { LibraryRows, cancelHistory, editHistory, markPage, setMark } from "./library.vibe";
 import { reviewPage, cancelReading, confirmQuestion, editPageExcerpt, editQuestion, PageReading, readPageExcerpt, sensitiveReadingText, READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE } from "./reading.vibe";
 import { SharePages, cancelExternal, confirmExternal, mailTarget, offerNativeHandoff, offerShare } from "./share.vibe";
 import { type SitePage, type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
@@ -163,19 +162,18 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
     hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
     hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <Clock />, onSelect: openLibrary },
-    hasLibrary && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System", binding)) },
     canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy", binding)) },
     native && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => {
       void runtime.runPromise(openFindFromMenu(tab)).then((opened) => { if (opened) setFinding(""); });
     } },
-    (native || binding !== undefined) && reader.can({ type: "request", purpose: "Ask", secure: state.secure, supported: true }) && { label: "Ask", name: "Ask about page", icon: <Mark aria-hidden />, onSelect: () => void runtime.runPromise(reviewPage(tab, "Ask")) },
-    (native || binding !== undefined) && reader.can({ type: "request", purpose: speechPurpose, secure: state.secure, supported: true }) && { label: "Read aloud", icon: <AudioLines />, onSelect: () => void runtime.runPromise(reviewPage(tab, speechPurpose)) },
-    native && cannotRead && { label: "Read aloud", name: "Page reading unavailable", icon: <AudioLines />, reason: READING_UNSUPPORTED_MESSAGE },
     { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
     native && canShare && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ArrowUpRight />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
     clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable); void browser.send({ type: "uncover" }); } },
-    canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
+    hasLibrary && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
+    (native || binding !== undefined) && reader.can({ type: "request", purpose: "Ask", secure: state.secure, supported: true }) && { label: "Ask", name: "Ask about page", icon: <Mark aria-hidden />, onSelect: () => void runtime.runPromise(reviewPage(tab, "Ask")) },
+    (native || binding !== undefined) && reader.can({ type: "request", purpose: speechPurpose, secure: state.secure, supported: true }) && { label: "Read aloud", icon: <AudioLines />, onSelect: () => void runtime.runPromise(reviewPage(tab, speechPurpose)) },
+    native && cannotRead && { label: "Read aloud", name: "Page reading unavailable", icon: <AudioLines />, reason: READING_UNSUPPORTED_MESSAGE },
     canMail && { label: "Email", name: "Email this page", icon: <Mail />, onSelect: () => void runtime.runPromise(offerShare("Email", binding)) },
     native && tabs.native.includes(tab) && { label: desktopSite ? "Mobile site" : "Desktop site", name: desktopSite ? "Request mobile site" : "Request desktop site", icon: desktopSite ? <Smartphone /> : <Monitor />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => runtime.runPromise(toggleDesktopSite(tab))); } },
   ];
@@ -199,9 +197,8 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         : <BrowserBar
             leading={leading}
             host={host}
-            hint={shown === undefined ? undefined : "Search or address"}
             path={path}
-            secure={state.secure}
+            secure={native && state.secure}
             private={privateTab}
             tabs={tabs.open.length}
             onEdit={cover("Address") && edit}
@@ -222,6 +219,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={cover("Address") && edit} />
           : <BrowserPagePlace runtime={runtime} />}
       </div>
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-32.5 bg-linear-to-b from-transparent to-background to-70%" />
       {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} privateNotice={privateNotice} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
       {state.finding && tabs.layer === "Uncovered" && (
         <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
@@ -230,7 +228,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           onClose={() => void send({ type: "closeFind" })} />
       )}
       {tabs.layer === "Menu" && <BrowserMenu items={offered.filter((item) => item !== false)} onClose={() => void browser.send({ type: "uncover" })} />}
-      {tabs.layer === "Library" && <Library runtime={runtime} onBack={() => void browser.send({ type: "uncover" })} onOpen={submit} />}
+      {tabs.layer === "Library" && <Library runtime={runtime} onBack={() => void browser.send({ type: "uncover" })} onOpen={submit} onResetData={tell({ type: "askErase" })} />}
       {libraryNotice && <p role="status" className="pointer-events-none absolute top-16 right-4 left-4 z-50 rounded-full bg-card px-5 py-3 text-center text-base shadow-menu">{libraryNotice}</p>}
       {readingNotice && <p role="status" className="pointer-events-none absolute top-16 right-4 left-4 z-50 rounded-full bg-card px-5 py-3 text-center text-base shadow-menu">{readingNotice}</p>}
       {tabs.layer === "Switcher" && (
@@ -316,16 +314,34 @@ function AddressChoices({ runtime, query, privateTab, privateNotice, refusal, on
   return <BrowserAddressChoices choices={choices} privateTab={privateTab} privateNotice={privateNotice} refusal={refusal} onOpen={onOpen} />;
 }
 
-function Library({ runtime, onBack, onOpen }: Pick<BrowserProps, "runtime"> & { onBack: () => void; onOpen: (url: string) => void }) {
+const minute = 60_000;
+
+/** The time ranges history clears over, the shortest first. */
+const historyRanges = [
+  { id: "15-minutes", label: "Last 15 minutes", duration: 15 * minute },
+  { id: "hour", label: "Last hour", duration: 60 * minute },
+  { id: "day", label: "Last day", duration: 24 * 60 * minute },
+  { id: "week", label: "Last week", duration: 7 * 24 * 60 * minute },
+  { id: "year", label: "Last year", duration: 365 * 24 * 60 * minute },
+  { id: "all", label: "All time", duration: undefined },
+] as const;
+
+type HistoryRange = typeof historyRanges[number];
+
+function Library({ runtime, onBack, onOpen, onResetData }: Pick<BrowserProps, "runtime"> & { onBack: () => void; onOpen: (url: string) => void; onResetData?: () => void }) {
   const { state, can, send } = useLibrary(runtime);
+  const [clearing, setClearing] = useState<HistoryRange>(historyRanges[0]);
   const bookmarks = runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks()));
   const history = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.history()));
   const titles = new Map(bookmarks.map((entry) => [entry.url, entry.title]));
-  const now = runtime.runSync(Time.use((time) => time.latest()));
+  // spec/app/browser/library.md, "Clearing history asks first, and can be cancelled"
+  const clearHistory = Effect.gen(function* () {
+    const since = clearing.duration === undefined ? undefined : (yield* (yield* Time).now()) - clearing.duration;
+    const sent = yield* editHistory(since === undefined ? "all" : { since });
+    if (!sent) yield* cancelHistory();
+  });
   return <>
-    <BrowserLibrary bookmarks={bookmarks} history={history.map(({ url, title, at }) => ({
-      url, title: title ?? titles.get(url), section: at === undefined ? "Earlier" : headingOf(at, now),
-    }))}
+    <BrowserLibrary bookmarks={bookmarks} history={history.map(({ url, title }) => ({ url, title: title ?? titles.get(url) }))}
       loading={state === undefined || state.read.status === "Loading" || state.read.status === "Idle"}
       failed={state?.read.status === "Failed"} onBack={onBack} onOpen={onOpen}
       onRemoveBookmark={can({ type: "unmark" }) ? (entry) => void runtime.runPromise(setMark(entry, false)) : undefined}
@@ -333,12 +349,17 @@ function Library({ runtime, onBack, onOpen }: Pick<BrowserProps, "runtime"> & { 
         const exact = history.find((row) => row.url === url);
         if (exact) void runtime.runPromise(editHistory(exact.stamp));
       } : undefined}
-      onClearHistory={can({ type: "askClear" }) ? () => void send({ type: "askClear" }) : undefined}
+      historyRanges={historyRanges}
+      onClearHistory={can({ type: "askClear" }) ? (id) => {
+        setClearing(historyRanges.find((range) => range.id === id) ?? historyRanges[0]);
+        void send({ type: "askClear" });
+      } : undefined}
+      onResetData={onResetData}
       onRetry={can({ type: "askRead" }) ? () => void send({ type: "askRead" }) : undefined} />
-    <ConfirmDialog open={state?.confirming === true} title="Clear history?" confirmLabel="Clear" destructive
-      onConfirm={() => { if (can({ type: "confirmClear" })) void runtime.runPromise(editHistory("all")); }}
+    <ConfirmDialog open={state?.confirming === true} title="Clear history?" confirmLabel="Clear history" destructive
+      onConfirm={() => void runtime.runPromise(clearHistory)}
       onCancel={() => { if (can({ type: "cancelClear" })) void send({ type: "cancelClear" }); }}>
-      Clears visited pages from this Browser. Bookmarks and tabs are kept.
+      {clearing.duration === undefined ? "Clear your entire browsing history." : `Clear browsing history from the ${clearing.label.toLowerCase()}.`}
     </ConfirmDialog>
   </>;
 }

@@ -363,6 +363,7 @@ const REQUIRED_CLASSES = [
     "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
   "Lai/eliza/plugins/camera/CameraPlugin;",
   "Lai/eliza/plugins/filesystem/FilesPlugin;",
+  "Lai/eliza/plugins/signin/SignInCallbackActivity;",
   ...["PermittedPhotosPlugin", "PermittedMediaCatalog", "OwnedPhotoEdits", "OwnedVideoPlayback", "OwnedCaptures",
     "SelectedDocuments", "DocumentDestinations"].map((name) => `Lai/eliza/plugins/media/${name};`),
 ];
@@ -467,6 +468,13 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const capacitor = record(JSON.parse(read("assets/capacitor.config.json").toString("utf8")));
   const signIn = record(record(capacitor.plugins).ElizaSignIn);
   if (signIn.testEnvironments !== false) throw new Error(`${name} registers test cloud environments`);
+  const environments: unknown = signIn.environments;
+  const registration = Array.isArray(environments) && environments.length === 1 ? record(environments[0]) : {};
+  if (signIn.clientId !== identity.appId || signIn.googleMode !== "browser" || registration.name !== "production"
+      || registration.apiOrigin !== production.cloud || registration.appLinkHost !== production.appLinkHost
+      || registration.redirectPath !== signInCallbackPath) {
+    throw new Error(`${name} lacks the production Alpha Cloud sign-in registration`);
+  }
   const page = mkdtempSync(join(tmpdir(), "alpha-apk-page-"));
   try {
     execFileSync("unzip", ["-q", file, "assets/public/*", "-d", page]);

@@ -105,7 +105,7 @@ jobs:
       - name: Review, sign, deliver, qualify and publish
         working-directory: apps/app
         env:
-          ALPHA_APP_RELEASE_KEYSTORE: ${{ secrets.ALPHA_APP_RELEASE_KEYSTORE }}
+          ALPHA_APP_RELEASE_KEYSTORE_B64: ${{ secrets.ALPHA_APP_RELEASE_KEYSTORE_B64 }}
           ALPHA_APP_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ALPHA_APP_RELEASE_KEYSTORE_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
           PLAN_SHA256: ${{ inputs.plan-sha256 }}
@@ -117,7 +117,7 @@ jobs:
           [[ ${#unsigned[@]} == 1 && -f ${unsigned[0]} ]] || { echo 'Expected one unsigned launcher APK'; exit 1; }
           keys="$RUNNER_TEMP/keys"
           install -d -m 700 "$keys"
-          printf '%s' "$ALPHA_APP_RELEASE_KEYSTORE" | base64 -d > "$keys/release.p12"
+          printf '%s' "$ALPHA_APP_RELEASE_KEYSTORE_B64" | base64 -d > "$keys/release.p12"
           chmod 600 "$keys/release.p12"
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           pnpm -s release review --run "$run" --plan "$private/plan.json" --plan-sha256 "$PLAN_SHA256"
