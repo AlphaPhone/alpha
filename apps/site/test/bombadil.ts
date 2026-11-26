@@ -4,7 +4,7 @@ import { extract } from "@antithesishq/bombadil/browser";
 export * from "@antithesishq/bombadil/browser/defaults";
 
 const phone = extract(({ document, window }) => {
-  if (!["localhost", "127.0.0.1", "alphaphone.dev"].includes(window.location.hostname)) return null;
+  if (!["localhost", "127.0.0.1", "alphaphone.dev"].includes(window.location.hostname) || window.location.pathname !== "/") return null;
   const shown = document.querySelector('[role="img"][aria-label^="An Alpha phone"]');
   const text = shown?.textContent ?? "";
   return {

@@ -45,6 +45,8 @@ export interface InboxScene {
   offline: boolean;
   /** Google refuses every Gmail request: the owner withdrew access. */
   revoked: boolean;
+  /** A reply the journey holds at the Gmail search boundary. */
+  pageReply?: Promise<void>;
   /** A reply the journey holds at the Gmail thread boundary. */
   threadReply?: Promise<void>;
   threadPageSize?: number;
@@ -61,6 +63,7 @@ export interface InboxScene {
   loseDraftReply?: boolean;
   readonly receiptReads: string[];
   notices?: InboxNoticeScene;
+  consent?: { authUrl: string; readonly requests: string[][]; readonly opened: string[] };
 }
 
 export interface InboxNoticeScene {
@@ -223,6 +226,15 @@ export function inboxRoutes(scene: InboxScene): Route[] {
   let revokedSeen = false;
   return [
     (request, url) => {
+      const consent = scene.consent;
+      if (request.method !== "POST" || url.pathname !== `${google}/connect/initiate` || consent === undefined) return;
+      if (request.headers.get("authorization") !== "Bearer signed-session") return refused(403, "session_required");
+      return request.json().then(({ capabilities }: { capabilities: string[] }) => {
+        consent.requests.push(capabilities);
+        return Response.json({ authUrl: consent.authUrl });
+      });
+    },
+    (request, url) => {
       if (!url.pathname.startsWith(`${google}/`)) return;
       if (scene.offline) return lost();
       if (!scene.revoked) revokedSeen = false;
@@ -246,7 +258,8 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         messages: found.slice(from, from + size).map((stored) => ({ ...stored.card, hasAttachments: stored.files.length > 0 })), nextPageToken: from + size < found.length ? `p${from + size}` : null,
         syncedAt: "2026-11-01T00:00:00Z", mailboxHistoryId: String(scene.history), supportsSpamTrash: true,
       };
-      return Response.json(page);
+      const answer = Response.json(page);
+      return scene.pageReply?.then(() => answer) ?? answer;
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${google}/gmail/read`) return;

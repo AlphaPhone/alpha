@@ -1,9 +1,8 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import readline from "node:readline";
 import { type Browser, type Page, chromium } from "playwright";
+import { pnpmDev } from "./dev.ts";
 
 interface Case {
   readonly id: string;
@@ -30,25 +29,18 @@ const seeds = [
 interface Saved { readonly id: string; readonly title: string; readonly updatedAt: string }
 interface Call { readonly startedAt: number; readonly ms: number; readonly firstMs?: number; readonly called: readonly string[] }
 
-const root = path.join(import.meta.dirname, "../..");
 if ((process.env.ALPHA_DEV_MODEL ?? "") === "" && process.env.ALPHA_NOTES_ORIGIN === undefined) throw new Error("test/eliza/notes.ts asks a real model: set ALPHA_DEV_MODEL (cerebras or cloud)");
 const timings = process.env.ALPHA_MODEL_TIMING_LOG ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "alpha-notes-")), "model-timing.jsonl");
 const shots = process.env.ALPHA_NOTES_SHOTS;
 const only = (process.env.ALPHA_NOTES_ONLY ?? "").split(",").filter((one) => one !== "");
-const routes = (process.env.ALPHA_NOTES_HOW ?? "typed,spoken").split(",");
+const routes = (process.env.ALPHA_NOTES_HOW ?? "typed,spoken").split(",").filter((one) => one !== "");
+const wrongRoutes = routes.filter((one) => one !== "typed" && one !== "spoken");
+if (routes.length === 0 || wrongRoutes.length > 0) throw new Error(`ALPHA_NOTES_HOW must name typed, spoken or both, not "${process.env.ALPHA_NOTES_HOW ?? ""}"`);
 
 async function served(): Promise<{ origin: string; stop: () => void }> {
   const given = process.env.ALPHA_NOTES_ORIGIN;
   if (given !== undefined) return { origin: given, stop: () => undefined };
-  const dev = spawn("pnpm", ["run", "dev"], { cwd: root, env: { ...process.env, ALPHA_MODEL_TIMING_LOG: timings, FORCE_COLOR: "0", NO_COLOR: "1", BROWSER: "none" }, stdio: ["ignore", "pipe", "inherit"], detached: true });
-  const origin = await new Promise<string>((done, fail) => {
-    readline.createInterface({ input: dev.stdout }).on("line", (line) => {
-      const at = /https?:\/\/localhost:\d+/.exec(line)?.[0];
-      if (at) done(at);
-    });
-    dev.once("close", (code) => fail(new Error(`pnpm dev ended with ${code}`)));
-  });
-  return { origin, stop: () => process.kill(-dev.pid!, "SIGTERM") };
+  return pnpmDev({ ALPHA_MODEL_TIMING_LOG: timings });
 }
 
 async function notes(page: Page, origin: string): Promise<Saved[]> {
@@ -141,6 +133,7 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
   let shownId: string | undefined;
   let view: string | undefined;
   let streamFailed: string | undefined;
+  let sent = Date.now();
   page.on("requestfinished", (request) => { if (request.url().includes("/messages/stream")) ended = Date.now(); });
   page.on("requestfailed", (request) => { if (request.url().includes("/messages/stream")) streamFailed = `${request.failure()?.errorText ?? "failed"} after ${Date.now() - sent} ms`; });
   page.on("request", (request) => {
@@ -153,7 +146,7 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
     await page.getByRole("button", { name: "Talk", exact: true }).click();
     await page.waitForFunction(() => (globalThis as unknown as { alphaPhone: { voice: { activeMicSession?: string } } }).alphaPhone.voice.activeMicSession !== undefined);
   } else await typed(page, one.words);
-  const sent = Date.now();
+  sent = Date.now();
   const trace: string[] = [];
   const traced = async () => {
     if (!spoken || process.env.ALPHA_NOTES_TRACE !== "1") return;
@@ -201,7 +194,8 @@ try {
   const rows = [];
   for (const spoken of [false, true].filter((voiced) => routes.includes(voiced ? "spoken" : "typed"))) for (const one of cases) if (only.length === 0 || only.includes(one.id)) rows.push(await turn(browser, origin, one, spoken));
   for (const row of rows) process.stdout.write(`${JSON.stringify(row)}\n`);
-  if (rows.some((row) => !row.opened)) process.exitCode = 1;
+  if (rows.length === 0) process.stderr.write(`no case ran: ALPHA_NOTES_ONLY="${only.join(",")}" names none of ${cases.map((one) => one.id).join(", ")}\n`);
+  if (rows.length === 0 || rows.some((row) => !row.opened)) process.exitCode = 1;
 } finally {
   await browser.close();
   stop();

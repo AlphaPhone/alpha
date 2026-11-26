@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { createContext, type ReactNode } from "react";
 import { Bell, Radio, SlidersHorizontal } from "lucide-react";
 import { Banner } from "../Banner.tsx";
 import { ListGroup } from "../ListGroup.tsx";
@@ -41,6 +41,13 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
 };
 
 /**
+ * The row that opens Android's notification access, given to the collection drawn in `collectionPolicy` so it sits
+ * second in that one card, after Other apps, as the Sunday v119 demo build drew it (Alpha 45f6bed30,
+ * prototype/settings-adapter.ts:1150-1155).
+ */
+export const NotificationAccessRow = createContext<ReactNode>(null);
+
+/**
  * Notifications: whether Alpha's notifications are on, Do Not Disturb, Android's page for them, each channel on its own
  * card, notification access, and the collection of other apps' notifications. The web shows its own saved Alerts choice.
  * @model spec/app/settings/facts.md
@@ -70,12 +77,16 @@ export function SettingsNotificationsPage({ browserAlerts, alerts, doNotDisturb,
           <SettingsAndroidRow target="alert-channel" channel={id} title={name} icon={<SlidersHorizontal />} {...android} />
         </ListGroup>
       ))}
-      {collectionPolicy}
-      <ListGroup>
-        {collectionPolicy ? null : collection ? <SettingsFactRow title="Other apps' notifications" icon={<Radio />} reading={collection} />
+      {collectionPolicy ? (
+        <NotificationAccessRow.Provider value={<SettingsAndroidRow target="notification-access" title="Android access"
+          aria-label="Manage notification access in Android" icon={<SlidersHorizontal />} {...android} />}>{collectionPolicy}</NotificationAccessRow.Provider>
+      ) : (
+        <ListGroup>
+          {collection ? <SettingsFactRow title="Other apps' notifications" icon={<Radio />} reading={collection} />
             : <SettingsNavRow title="Other apps' notifications" icon={<Radio />} onOpen={onHandOver && (() => onHandOver("notification-collection"))} />}
-        <SettingsAndroidRow target="notification-access" title="Notification access" icon={<Bell />} {...android} />
-      </ListGroup>
+          <SettingsAndroidRow target="notification-access" title="Notification access" icon={<Bell />} {...android} />
+        </ListGroup>
+      )}
     </SettingsPage>
   );
 }

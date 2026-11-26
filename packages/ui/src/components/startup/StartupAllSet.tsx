@@ -1,8 +1,8 @@
-import { type ReactNode, useRef } from "react";
+import type { ReactNode } from "react";
 import { Check } from "lucide-react";
 import { Button } from "../Button.tsx";
 import { Dialog, DialogContent, DialogTitle } from "../Dialog.tsx";
-import { startupHeading, startupMainAction, startupPanel } from "./StartupAccessPanel.tsx";
+import { startupHeading, startupMainAction, useStartupPanel } from "./StartupAccessPanel.tsx";
 import type { StartupTrouble } from "./vocabulary.ts";
 
 export type StartupAllSetProps = {
@@ -28,22 +28,10 @@ const troubles: Record<StartupTrouble, string> = {
  */
 export function StartupAllSet({ trouble, notSaved = false, children, onDone }: StartupAllSetProps) {
   const attention = trouble !== undefined || notSaved;
-  const heading = useRef<HTMLHeadingElement>(null);
+  const { heading, content } = useStartupPanel(() => onDone?.());
   return (
     <Dialog open>
-      <DialogContent
-        className={startupPanel}
-        aria-describedby={undefined}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          heading.current?.focus({ preventScroll: true });
-        }}
-        onInteractOutside={(event) => event.preventDefault()}
-        onEscapeKeyDown={(event) => {
-          event.preventDefault();
-          onDone?.();
-        }}
-      >
+      <DialogContent {...content}>
         <div className="m-auto flex w-full max-w-90 flex-col items-center text-center">
           <span aria-hidden className="relative mb-7 grid size-20 place-items-center rounded-full bg-secondary [@media(max-height:500px)]:mb-4 [@media(max-height:500px)]:size-14">
             <Check className="size-9 [@media(max-height:500px)]:size-7" />

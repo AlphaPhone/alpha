@@ -124,6 +124,29 @@ async function waitForPendingOAuth(app: MountedSlack, nonce: number): Promise<Pe
   });
 }
 
+/** The ledger's number for the channel Slack calls `channel` in workspace `ws`. */
+const channelNum = (app: MountedSlack, ws: number, channel: string) =>
+  app.runtime.runPromise(Effect.flatMap(SlackLedger, (l) => Effect.sync(() => l.channelNum(ws, channel))));
+
+/** Open public channel `channel` of workspace `ws` in front. */
+const openChannel = (app: MountedSlack, ws: number, channel: number) => underAct(async () => {
+  await app.runtime.runPromise(Effect.flatMap(ConversationMachine, (m) => m.send({ type: "openChannel", workspace: ws, channel, kind: "PublicChannel", front: true })));
+});
+
+/** Open public channel `channel` of workspace `ws` in front with the composer aimed at it, and wait for its newest messages. */
+async function composeIn(app: MountedSlack, ws: number, channel: number) {
+  await underAct(async () => {
+    await app.runtime.runPromise(Effect.flatMap(ConversationMachine, (m) => m.send({ type: "openChannel", workspace: ws, channel, kind: "PublicChannel", front: true })));
+    await app.runtime.runPromise(Effect.flatMap(ComposerMachine, (m) => m.send({ type: "openTarget", workspace: ws, channel, threadTs: 0 }, "Owner")));
+  });
+  await waitFor(app.runtime, Effect.map(ConversationMachine, (m) => m.changes), (s) => s.channel === channel && s.newestLoaded);
+}
+
+/** Mute `channel`. */
+const muteChannel = (app: MountedSlack, channel: number) => underAct(async () => {
+  await app.runtime.runPromise(Effect.flatMap(WorkspacesMachine, (m) => m.send({ type: "toggleMute", channel, muted: true })));
+});
+
 async function connectWorkspaceViaPkce(app: MountedSlack, teamId: string): Promise<number> {
   await underAct(async () => {
     await app.runtime.runPromise(Effect.flatMap(SlackLedger, (ledger) => Effect.sync(() => ledger.setPendingTeam(teamId))));
@@ -274,14 +297,10 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
     });
     await waitFor(app.runtime, Effect.map(WorkspacesMachine, (m) => m.changes), (s) => s.selected.query === "" && s.list.status === "Loaded");
 
-    const generalNum = await app.runtime.runPromise(Effect.flatMap(SlackLedger, (l) => Effect.sync(() => l.channelNum(alphaWs, "C01GENERAL"))));
-    const engNum = await app.runtime.runPromise(Effect.flatMap(SlackLedger, (l) => Effect.sync(() => l.channelNum(alphaWs, "C02ENG"))));
+    const generalNum = await channelNum(app, alphaWs, "C01GENERAL");
+    const engNum = await channelNum(app, alphaWs, "C02ENG");
 
-    await underAct(async () => {
-      await app.runtime.runPromise(Effect.flatMap(ConversationMachine, (m) => m.send({ type: "openChannel", workspace: alphaWs, channel: generalNum, kind: "PublicChannel", front: true })));
-      await app.runtime.runPromise(Effect.flatMap(ComposerMachine, (m) => m.send({ type: "openTarget", workspace: alphaWs, channel: generalNum, threadTs: 0 }, "Owner")));
-    });
-    await waitFor(app.runtime, Effect.map(ConversationMachine, (m) => m.changes), (s) => s.channel === generalNum && s.newestLoaded);
+    await composeIn(app, alphaWs, generalNum);
     expect(app.host.textContent).toContain("Sprint review kicks off at 2pm today.");
     expect(app.host.textContent).toContain("2 replies");
 
@@ -313,9 +332,7 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
     });
     await waitFor(app.runtime, Effect.map(ConversationMachine, (m) => m.changes), (s) => s.channel === 0 && s.threadTs === 0);
 
-    await underAct(async () => {
-      await app.runtime.runPromise(Effect.flatMap(ConversationMachine, (m) => m.send({ type: "openChannel", workspace: alphaWs, channel: engNum, kind: "PublicChannel", front: true })));
-    });
+    await openChannel(app, alphaWs, engNum);
     await waitFor(app.runtime, Effect.map(ConversationMachine, (m) => m.changes), (s) => s.channel === engNum && s.newestLoaded);
     const markReqs = await controlRequests("/api/conversations.mark");
     expect(markReqs.some((r) => (r.body as { readonly channel?: string } | undefined)?.channel === "C02ENG")).toBe(true);
@@ -347,9 +364,7 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
     expect((await controlRequests("/api/chat.delete")).length).toBe(1);
     expect(app.host.textContent).not.toContain("Shipping the new HTTP client layer today (updated).");
 
-    await underAct(async () => {
-      await app.runtime.runPromise(Effect.flatMap(WorkspacesMachine, (m) => m.send({ type: "toggleMute", channel: engNum, muted: true })));
-    });
+    await muteChannel(app, engNum);
     await waitFor(app.runtime, Effect.map(WorkspacesMachine, (m) => m.changes), (s) => s.mutedChannels.includes(engNum));
     expect((await controlRequests("/api/conversations.setMute")).length).toBe(1);
   });
@@ -360,14 +375,10 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
     expect(await app.runtime.runPromise(slackAmbientSnapshot)).toBeUndefined();
 
     const alphaWs = await connectWorkspaceViaPkce(app, "T01ALPHA");
-    const generalNum = await app.runtime.runPromise(Effect.flatMap(SlackLedger, (l) => Effect.sync(() => l.channelNum(alphaWs, "C01GENERAL"))));
-    const engNum = await app.runtime.runPromise(Effect.flatMap(SlackLedger, (l) => Effect.sync(() => l.channelNum(alphaWs, "C02ENG"))));
+    const generalNum = await channelNum(app, alphaWs, "C01GENERAL");
+    const engNum = await channelNum(app, alphaWs, "C02ENG");
 
-    await underAct(async () => {
-      await app.runtime.runPromise(Effect.flatMap(ConversationMachine, (m) => m.send({ type: "openChannel", workspace: alphaWs, channel: generalNum, kind: "PublicChannel", front: true })));
-      await app.runtime.runPromise(Effect.flatMap(ComposerMachine, (m) => m.send({ type: "openTarget", workspace: alphaWs, channel: generalNum, threadTs: 0 }, "Owner")));
-    });
-    await waitFor(app.runtime, Effect.map(ConversationMachine, (m) => m.changes), (s) => s.channel === generalNum && s.newestLoaded);
+    await composeIn(app, alphaWs, generalNum);
 
     await waitFor(app.runtime, Effect.map(AgentMachine, (m) => m.changes), (s) => s.pane === "ChannelPane" && !s.shareAllowed);
     expect(await app.runtime.runPromise(slackAmbientSnapshot)).toBeUndefined();
@@ -421,15 +432,11 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
     expect(postReqs.at(-1)?.headers["idempotency-key"]).toBeTruthy();
 
     await controlPost("/__control/fault", { path: "/api/conversations.history", status: 429, retryAfter: 7, remaining: 1 });
-    await underAct(async () => {
-      await app.runtime.runPromise(Effect.flatMap(ConversationMachine, (m) => m.send({ type: "openChannel", workspace: alphaWs, channel: engNum, kind: "PublicChannel", front: true })));
-    });
+    await openChannel(app, alphaWs, engNum);
     await waitFor(app.runtime, Effect.map(ConversationMachine, (m) => m.changes), (s) => s.channel === engNum && s.channelRead.status === "Failed");
     expect(app.host.textContent).toContain("Rate limited — retry after 7s");
 
-    await underAct(async () => {
-      await app.runtime.runPromise(Effect.flatMap(WorkspacesMachine, (m) => m.send({ type: "toggleMute", channel: engNum, muted: true })));
-    });
+    await muteChannel(app, engNum);
     await waitFor(app.runtime, Effect.map(NoticesMachine, (m) => m.changes), (s) => s.mutedChannels.includes(engNum) && (s.watermarks[alphaWs] ?? 0) > 0);
 
     await controlPost("/__control/inject", {
@@ -468,7 +475,7 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
       (s) => s.connected.includes(alphaWs) && s.connected.includes(designWs) && (s.watermarks[alphaWs] ?? 0) > 0,
     );
 
-    const generalNum = await app.runtime.runPromise(Effect.flatMap(SlackLedger, (l) => Effect.sync(() => l.channelNum(alphaWs, "C01GENERAL"))));
+    const generalNum = await channelNum(app, alphaWs, "C01GENERAL");
     await underAct(async () => {
       await app.runtime.runPromise(Effect.flatMap(SlackLedger, (l) => Effect.sync(() => l.setDraftText({ workspace: alphaWs, channel: generalNum, threadTs: 0 }, "alpha secret draft"))));
     });

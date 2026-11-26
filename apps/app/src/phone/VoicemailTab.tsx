@@ -76,9 +76,9 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
       {live && <p role="status" className="text-sm text-muted-foreground">Voicemail does not play during a call</p>}
       {state.confirming ? (
         <div role="group" aria-label="Delete voicemail" className="flex gap-2">
-          <Button variant="ghost" size="icon" className={cn(action, "w-auto")} disabled={!can({ type: "keep" }) || busy}
+          <Button variant="ghost" size="icon" className={cn(action, "w-auto basis-0")} disabled={!can({ type: "keep" }) || busy}
             aria-label="Keep" onClick={() => void send({ type: "keep" })}><Close className="size-5" /></Button>
-          <Button variant="destructive" className="h-11 flex-2 justify-start px-0 text-md" disabled={!can({ type: "confirmDelete" }) || busy}
+          <Button className="h-11 flex-2 basis-0 bg-hangup px-0 text-md font-semibold text-alpha-foreground hover:bg-hangup/90 active:bg-hangup/80" disabled={!can({ type: "confirmDelete" }) || busy}
             data-alpha-phone-voicemail-confirm="" onClick={() => void send({ type: "confirmDelete" })}>Delete</Button>
         </div>
       ) : (

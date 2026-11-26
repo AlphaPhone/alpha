@@ -47,6 +47,13 @@ const tap = (title: string) => drawn(() => {
 
 const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime.runPromise(Pages.Machine.use((pages) => pages.get())).then((state) => state.page);
 
+/** Back closes the Account sheet onto the top of Settings. */
+async function backFromAccount(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
+  await hardware("back");
+  await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+  expect(await page(alpha)).toBe("Top");
+}
+
 /** Alpha on a phone, its Settings open at the first page with the phone's facts read. */
 async function settingsOpen(world = { ...scene(), phone: true }) {
   const running = await open(world);
@@ -92,9 +99,7 @@ describe("Settings", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     await press("Try again");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
-    await hardware("back");
-    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    expect(await page(alpha)).toBe("Top");
+    await backFromAccount(alpha);
 
     world.signedIn = false;
     await drawn(() => titled("Account")?.focus());
@@ -143,9 +148,7 @@ describe("Settings", () => {
       expect(plus).toContain(roundUsd.format(16));
       expect(pro).toContain(roundUsd.format(49));
     });
-    await hardware("back");
-    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    expect(await page(alpha)).toBe("Top");
+    await backFromAccount(alpha);
 
     world.signedIn = false;
     await tap("Account");
@@ -373,26 +376,26 @@ describe("Settings", () => {
     const { world } = await settingsOpen();
     await press("General");
     await tap("Notifications");
-    await vi.waitFor(() => expect(titled("Other apps’ notifications")).toBeDefined());
-    await tap("Other apps’ notifications");
+    await vi.waitFor(() => expect(titled("Other apps")).toBeDefined());
+    await tap("Other apps");
     expect(world.settings.mirror.enabled).toBe(false);
     await press("Turn on");
     await vi.waitFor(() => expect(world.settings.mirror.enabled).toBe(true));
-    await vi.waitFor(() => expect(titled("Choose notification apps")?.hasAttribute("disabled")).toBe(false));
-    await tap("Choose notification apps");
+    await vi.waitFor(() => expect(titled("Choose apps")?.hasAttribute("disabled")).toBe(false));
+    await tap("Choose apps");
     await press("Add News reader");
     await vi.waitFor(() => expect(world.settings.mirror.apps).toEqual([{
       packageName: "example.reader", label: "News reader", preview: false, available: true,
     }]));
-    await vi.waitFor(() => expect(titled("Keep notification history")).toBeDefined());
-    await tap("Keep notification history");
+    await vi.waitFor(() => expect(titled("History")).toBeDefined());
+    await tap("History");
     await press("Turn on");
     await vi.waitFor(() => expect(world.settings.mirror.history).toBe(true));
     world.settings.mirrorHistory.push({ id: "old", appLabel: "Reading archive", at: 1000, state: "Posted" });
-    await vi.waitFor(() => expect(titled("View history")).toBeDefined());
-    await tap("View history");
+    await vi.waitFor(() => expect(titled("View")?.hasAttribute("disabled")).toBe(false));
+    await tap("View");
     await vi.waitFor(() => expect(document.body.textContent).toContain("Reading archive"));
-    await tap("Clear history");
+    await tap("Clear");
     await press("Clear");
     await vi.waitFor(() => expect(document.body.textContent).not.toContain("Reading archive"));
     expect(world.settings.mirrorHistory).toEqual([]);
@@ -570,7 +573,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("Notifications")?.hasAttribute("disabled")).toBe(false));
     await tap("Notifications");
     await until(alpha, machines, Pages.Machine, (s) => s.page === "PrivacyNotifications");
-    await vi.waitFor(() => expect(titled("Other apps’ notifications")?.hasAttribute("disabled")).toBe(false));
+    await vi.waitFor(() => expect(titled("Other apps")?.hasAttribute("disabled")).toBe(false));
     await tap("Notifications");
     await vi.waitFor(() => expect(world.settings.opened.at(-1)).toBe("notifications"));
     await press("Back to Privacy");

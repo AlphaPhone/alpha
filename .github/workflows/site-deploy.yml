@@ -1,6 +1,6 @@
 name: Alpha site
 # Builds apps/site (spec/site/) through turbo and uploads it to the Cloudflare Pages project alphaphone.
-# The GitHub environment alpha-site-production admits main and vibestack-develop and holds the CLOUDFLARE_ACCOUNT_ID variable and the
+# The GitHub environment alpha-site-production admits, by its deployment branch policy, the branches pushed to here, and holds the CLOUDFLARE_ACCOUNT_ID variable and the
 # CLOUDFLARE_PAGES_API_TOKEN secret (Cloudflare Pages Edit on that account). The upload names the project's production
 # branch, vibestack, which is a label of the Pages project and not a GitHub branch; the deploy refuses if the project's
 # production branch is anything else, since the upload would then be a preview.
@@ -10,6 +10,8 @@ on:
     paths:
       - apps/site/**
       - spec/site/**
+      - packages/deployment/alpha-legal.json
+      - packages/deployment/package.json
       - packages/design-system/**
       - packages/ui/**
       - vibestack/**
@@ -29,7 +31,7 @@ env:
   TURBO_TELEMETRY_DISABLED: "1"
 jobs:
   deploy:
-    if: github.repository_id == '1396333361' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/vibestack-develop')
+    if: github.repository_id == '1396333361'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment:

@@ -21,7 +21,7 @@ import { type DatedReminderFields, createReminderItem, editDatedReminder, needsR
 import { DEFAULT_LIST_ID, remindersStore } from "../reminders/store.ts"
 import { answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { NoteOrigin, type Target, eventKey, storeOrigin } from "./noteOrigin.vibe"
+import { NoteOrigin, type Target, eventKey, originOwner, storeOrigin } from "./noteOrigin.vibe"
 import { type Row, androidWindowOf, shown } from "./shown.ts"
 import { civilDay, dayStart, feedParams, utcStart, zone } from "./time.ts"
 
@@ -204,6 +204,13 @@ export effect function confirmCalendarReschedule() {
     return
   }
   try contained(editor.send({ type: "reschedule" }), "rescheduling the completed reminder")
+}
+
+effect function sourceStillOwned(fields: Fields) {
+  const origin = fields.noteOrigin
+  if (origin === undefined) return true
+  const owner = launchOwnerAt() catch () => undefined
+  return sameResidentOwner(originOwner(origin), owner)
 }
 
 effect function linkSource(fields: Fields, owning: number, target: Target, id?: string) {
@@ -425,7 +432,9 @@ effect function receipts(ticket: number) {
 
 // spec/app/calendar/editor.md, "Such a form is handed to Android Calendar and closes; Alpha writes nothing of it"
 effect function handOff() {
-  const fields = try kept(0, try owner())
+  const owning = try owner()
+  const fields = try kept(0, owning)
+  if (!(try sourceStillOwned(fields)) || (try owner()) !== owning) return
   const people = fields.people.split(",").map((person) => person.trim()).filter((person) => person !== "")
   const rrule = rules[fields.repeat ?? "NoRepeat"]
   const alerts = fields.alert === undefined ? [] : [fields.alert]
@@ -437,6 +446,10 @@ effect function handOff() {
 effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean) {
   const owning = try owner()
   const fields = try kept(0, owning)
+  if ((kind === "Create" || kind === "CreateReminder") &&
+      (!(try sourceStillOwned(fields)) || (try owner()) !== owning)) {
+    return { type: "written", attempt, confirmed: false, known: true, filed: false } satisfies Event
+  }
   const changingReminder = kind === "UpdateReminder" || kind === "RescheduleReminder"
   const outcome: Written = kind === "CreateReminder" ? try createCalendarReminder(fields, owning)
     : changingReminder ? try updateCalendarReminder(fields, owning, id, attempt, kind === "RescheduleReminder")

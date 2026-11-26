@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only admission unless --apply; never changes visibility, gestures or user settings."""
 from pathlib import Path
-import argparse, hashlib, json, subprocess, xml.etree.ElementTree as ET
+import argparse, hashlib, json, subprocess
 
 ROOT = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -14,14 +14,6 @@ digest = lambda value: hashlib.sha256(value).hexdigest()
 assert subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip() == manifest['revision']
 patch = ROOT / manifest['patch']
 assert digest(patch.read_bytes()) == manifest['patchSha256']
-dependency = manifest['requiredExistingResource']
-dependency_path = source / dependency['path']
-for candidate in [dependency_path, *dependency_path.parents]:
-    if candidate == source.parent: break
-    assert not candidate.is_symlink(), 'Symlink in required resource path'
-flags = [node for node in ET.fromstring(dependency_path.read_text()).findall('bool')
-         if node.attrib.get('name') == dependency['name']]
-assert len(flags) == 1 and flags[0].text.strip() == dependency['defaultValue'], 'Existing Alpha product flag missing or changed'
 states=[]
 for row in manifest['files']:
     relative=Path(row['path'])
@@ -30,7 +22,7 @@ for row in manifest['files']:
     for candidate in [target,*target.parents]:
         if candidate == source.parent: break
         assert not candidate.is_symlink(), 'Symlink in patch target'
-    actual=digest(target.read_bytes())
+    actual=digest(target.read_bytes()) if target.exists() else None
     assert actual in [row['beforeSha256'],row['afterSha256']], 'Unreviewed source drift'
     states.append(actual == row['afterSha256'])
 assert len(set(states))==1, 'Partial application requires recovery'

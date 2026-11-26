@@ -13,7 +13,7 @@ it("Uses Home defaults to complete older launcher records while preserving the o
     { tag: "Own", view: "Settings" },
     { tag: "Installed", app: "com.example.reader" },
     { tag: "Own", view: "Notes" },
-    ...["Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Contacts", "Files", "Workflows"]
+    ...["Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Contacts", "Files", "Wallet", "Workflows"]
       .map((view) => ({ tag: "Own", view })),
   ]);
 
@@ -27,4 +27,7 @@ it("Uses Home defaults to complete older launcher records while preserving the o
     { tag: "Own", view: "Notes" },
   ]);
   expect(selected.tiles.filter((tile) => tile.tag === "Own" && tile.view === "Wallet")).toHaveLength(1);
+
+  const sunday = await legacy(["alpha:files", "alpha:inventory", "alpha:automations"]);
+  expect(sunday.tiles.slice(0, 3)).toEqual([{ tag: "Own", view: "Files" }, { tag: "Own", view: "Wallet" }, { tag: "Own", view: "Workflows" }]);
 });

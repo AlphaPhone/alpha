@@ -1,6 +1,6 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
+import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
@@ -85,6 +85,9 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const hasDocuments = runtime.runSync(NoteDocuments).available;
   const writer = runtime.runSync(NoteEditor);
   const [next, setNext] = useState("");
+  const [unboundMenu, setUnboundMenu] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const shareRef = useRef<HTMLDivElement>(null);
   const current = writing.state;
   if (!current?.showing) return null;
   const owner = (event: Editor.Event) => writing.can(event, "Owner");
@@ -97,30 +100,38 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
   const deletable = owner(deletion);
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
-  const sharing = { type: "openMenu", note: current.note, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
-  const shared = sharing.saved && current.link.tie === "NoLink" && (actions.can(sharing, "Owner") || actions.state?.open === true);
-  const exportable = hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
+  const linkedExport = current.link.tie !== "NoLink" && hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
+  const sharing = { type: "openMenu", note: current.note, revision: current.draft.base, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
+  const actionsState = actions.state;
+  const menuBound = sharing.saved && actionsState?.owner === current.owner && actionsState.note === current.note && actionsState.revision === current.draft.base;
+  const reviewed = menuBound && actionsState.sharing;
+  const reviewShare = { type: "reviewShare" } as const;
+  const closeShare = { type: "closeShare" } as const;
+  const chooseDestination = (destination: Destination) => {
+    const event = { type: "shareText", destination } as const;
+    if (reviewed && actions.can(event, "Owner")) void actions.send(event, "Owner");
+  };
   const editable = owner({ type: "edit", kept: true });
   const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
-  const menu = (deletable || exportable || shared || organised.pin !== undefined || organised.moves.length > 0) && <Menu onOpenChange={(open) => {
-    if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
-    if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
-  }}>
-    <MenuTrigger aria-label="More" className={cn(focusRing, "flex h-13 w-11 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
-    <MenuContent align="end" alignOffset={-59} sideOffset={4} className={noteMenuPanel}>
-      {shared && actions.state?.open && <>
-        <MenuItem className={noteMenuItem} onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
-        <MenuItem className={noteMenuItem} onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
-      </>}
-      {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
-      {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
-      {exportable && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-      {deletable && (shared && actions.state?.open || exportable || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
-      {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
-    </MenuContent>
-  </Menu>;
+  const menu = (deletable || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
+    <Menu open={menuBound && actionsState.open || unboundMenu} onOpenChange={(open) => {
+      if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
+      else setUnboundMenu(open);
+      if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
+    }}>
+      <MenuTrigger ref={moreRef} aria-label="More" className={cn(focusRing, "flex h-13 w-11 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
+      <MenuContent aria-label="Note actions" aria-labelledby={undefined} align="end" alignOffset={-61} sideOffset={4} className={noteMenuPanel}>
+        {menuBound && current.link.tie === "NoLink" && <MenuItem ref={shareRef} aria-label="Share note" className={noteMenuItem}
+          onSelect={(event) => { event.preventDefault(); if (actions.can(reviewShare, "Owner")) void actions.send(reviewShare, "Owner"); }}><Share2 /> Share</MenuItem>}
+        {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
+        {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
+        {linkedExport && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
+        {deletable && (menuBound || linkedExport || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
+        {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+      </MenuContent>
+    </Menu>;
   return (
     <NoteForm
       className="relative inset-auto min-h-0 flex-1"
@@ -145,6 +156,10 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
       onDone={close}
       feedback={<>
         <TransferNotice runtime={runtime} />
+        <NoteSharePanel open={reviewed}
+          close={() => { if (actions.can(closeShare, "Owner")) void actions.send(closeShare, "Owner"); }}
+          choose={chooseDestination} canSave={!native() || hasDocuments}
+          restore={() => (shareRef.current ?? moreRef.current)?.focus({ preventScroll: true })} />
         {current.draft.sync === "Conflicted" && <Alert variant="warn">This note changed while you were writing.
           <div className="mt-2 flex flex-wrap gap-2">
             {owner({ type: "keepMine" }) && <Button size="sm" onClick={() => action("keepMine")}>Keep mine</Button>}
@@ -211,7 +226,7 @@ const destinations = [
   { destination: "SaveText", label: "Save file", Icon: Download },
 ] as const;
 
-function VoiceSharePanel({ open, close, choose, canSave, restore }: {
+function NoteSharePanel({ open, close, choose, canSave, restore }: {
   readonly open: boolean;
   readonly close: () => void;
   readonly choose: (destination: Destination) => void;
@@ -328,7 +343,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
       <TransferNotice runtime={runtime} />
       {state.shareNotice === "Copied" && <Alert variant="info" className="mt-4">Note text copied.</Alert>}
       {state.shareNotice === "ShareUnavailable" && <Alert variant="warn" className="mt-4">Sharing is unavailable.</Alert>}
-      <VoiceSharePanel open={state.sharing && current}
+      <NoteSharePanel open={state.sharing && current}
         close={() => { if (voice.can(closeShare, "Owner")) void voice.send(closeShare, "Owner"); }}
         choose={chooseDestination} canSave={!native() || runtime.runSync(NoteDocuments).available}
         restore={() => moreRef.current?.focus({ preventScroll: true })} />
