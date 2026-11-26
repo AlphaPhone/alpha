@@ -1,8 +1,7 @@
 // spec/app/voice/index.md, "Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation"; spec/app/voice/route.md, "Story: Choose where speech is processed"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { type CloudSignIn, VoiceBridge } from "../platform/voice.vibe"
-import { contained, started } from "../runtime/reactor.vibe"
+import { Device, type CloudSignIn, VoiceBridge } from "../platform/index.vibe"
+import { contained, started } from "../runtime/index.vibe"
 
 module pure {
   /** The number the route tells a Cloud key by: the same for the same key on every launch, and never 0, which is no key. @throws {never} */

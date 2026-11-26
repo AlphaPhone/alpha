@@ -2,9 +2,8 @@
 import type { BrowserPageBinding } from "@elizaos/os-bridges"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import * as Reading from "../../gen/app__browser__reading.effect.vibe"
-import { TabHost } from "../platform/browser.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { TabHost, Device } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
 import { idOf } from "./browser.vibe"
 
 module pure {

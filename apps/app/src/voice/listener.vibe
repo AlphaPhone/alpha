@@ -2,8 +2,8 @@
 import * as Listener from "../../gen/app__voice__listener.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Device } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 
 /** The phone's always-on wake listener, available only on an Alpha image. */
 export service ListenerPort {

@@ -4,7 +4,7 @@ import { BridgeUnavailable } from "@elizaos/os-bridges"
 import type { AgentEvent, AgentMethod, AgentRecoveryArchive, AgentRecoveryReview, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os-bridges"
 import { chunkTaken, deliveryOf, replied } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
-import { fresh } from "../runtime/attempts.vibe"
+import { fresh } from "../runtime/index.vibe"
 import { type Failure, type Listening, type Opened, type Remote, type Wired, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
 
 /** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
@@ -79,8 +79,8 @@ const waits = { startupTimeoutMs: 30_000, pollMs: 250, requestTimeoutMs: 10_000 
 
 schema Health { readonly ready: boolean }
 
+/** Path and query string for `request`; the native agent gate preserves literal plus signs and expects spaces percent-encoded. */
 function located(request: HttpClientRequest.HttpClientRequest): string {
-  // The native agent gate preserves literal plus signs and expects spaces percent-encoded.
   const query = UrlParams.toString(request.urlParams).replaceAll("+", "%20")
   return query === "" ? request.url : `${request.url}?${query}`
 }

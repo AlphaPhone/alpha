@@ -6,12 +6,11 @@ import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.t
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
 import { allows } from "../../gen/kit__permission.ts";
-import { CameraPort, type LensFacts, type Point } from "../platform/camera.vibe";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import { CameraPort, type LensFacts, type Point } from "../platform/index.vibe";
+import { type Resident, type Shown, useTimed } from "../runtime/ui.tsx";
 import { Scan } from "../files/Scan.tsx";
 import type { cameraScan } from "../files/scan.vibe";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { untimed } from "../runtime/index.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { approveCapture, CameraAssets, focus, shutter, type camera } from "./camera.vibe";
 import { Effect, type Layer } from "effect";

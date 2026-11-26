@@ -12,7 +12,7 @@ import { type Filter, everything } from "../../gen/app__files__search.ts";
 import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
 import type { Alpha, Resident } from "../runtime/ui.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack } from "../shell/ui.tsx";
 import { Time } from "../runtime/index.vibe";
 import { Handles } from "./handles.vibe";
 import { CategoryGroups } from "./category.vibe";

@@ -1,6 +1,6 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
 import { Layer } from "effect";
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { ApprovalsOverlay } from "./Approvals.tsx";
 
 export { ApprovalCard, ApprovalsOverlay } from "./Approvals.tsx";

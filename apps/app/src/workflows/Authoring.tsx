@@ -10,7 +10,7 @@ import type { Machine as GenerateMachine } from "../../gen/app__workflows__gener
 import { useMachine as useGenerate } from "../../gen/app__workflows__generate.react.ts";
 import { maxDescription } from "../../gen/app__workflows__generate.ts";
 import type { Preset } from "../../gen/app__workflows__schedule.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { type DraftOperation, DraftWords, appendDraft, available, describeDraft, discardDraft, removeDraftStep, renameDraft, adoptGeneratedDraft } from "./authoring.vibe";
 
 interface AuthoringProps extends Pick<Shown<Resident | BuilderMachine | GenerateMachine | DraftWords>, "runtime"> {

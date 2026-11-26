@@ -5,7 +5,7 @@ import { ChevronLeft, ExternalLink } from "lucide-react";
 import { useMachine } from "../../gen/app__workflows__clock.react.ts";
 import { type Event, type Handoff, type Receipt, busy, maxLabel, maxSnooze } from "../../gen/app__workflows__clock.ts";
 import type { Machine } from "../../gen/app__workflows__clock.effect.vibe";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { AlarmLabel, reviewAlarm, setAlarmLabel } from "./clock.vibe";
 
 type ClockProps = Pick<Shown<Resident | Machine | AlarmLabel>, "runtime"> & {

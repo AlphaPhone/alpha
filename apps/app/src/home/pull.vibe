@@ -1,7 +1,7 @@
 // spec/app/shell/gestures.md, "A pull opens the shade only when it is clearly downward, one and a half times its sideways travel, starts below the 44-point status band, on Home itself and not in a field, with no keyboard up and nothing under the finger scrolled from its top"
 import * as Home from "../../gen/app__home.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { contained, untimed } from "../runtime/reactor.vibe"
+import { contained, untimed } from "../runtime/index.vibe"
 
 module page {
   import { overflowPull, pullOpensShade, travel } from "../../gen/app__shell__gestures.ts"

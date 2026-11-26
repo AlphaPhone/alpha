@@ -4,9 +4,8 @@ import { type RemoteWorkflow, WorkflowActivationRejected, WorkflowHttpError, Wor
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Model from "../../gen/app__workflows.effect.vibe"
 import type { Change, Effect as Out, Event } from "../../gen/app__workflows.effect.vibe"
-import type { Agent } from "../platform/agent.vibe"
-import { ownerAt } from "../platform/owner.vibe"
-import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
+import { type Agent, ownerAt } from "../platform/index.vibe"
+import { type Job, answer, applying, following, reacting, together } from "../runtime/index.vibe"
 import { WorkflowsApi } from "./api.vibe"
 import { Rows, refresh } from "./list.vibe"
 

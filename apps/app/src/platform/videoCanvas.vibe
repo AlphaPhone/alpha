@@ -87,9 +87,10 @@ module clips {
       const chunks: Blob[] = []
       let bytes = 0, frame = 0, stopped = false, finished = false
       let reached = edit.start
+      const hasVideoFrameCallback = typeof video.requestVideoFrameCallback === "function"
       const cleanup = () => {
-        if (typeof video.cancelVideoFrameCallback === "function") video.cancelVideoFrameCallback(frame)
-        else cancelAnimationFrame(frame)
+        if (hasVideoFrameCallback && typeof video.cancelVideoFrameCallback === "function") video.cancelVideoFrameCallback(frame)
+        else video.removeEventListener("timeupdate", paint)
         video.pause()
         video.onended = null
         video.onerror = null
@@ -117,7 +118,7 @@ module clips {
         if (recorder.state !== "inactive") recorder.stop()
       }
       const next = () => {
-        frame = typeof video.requestVideoFrameCallback === "function" ? video.requestVideoFrameCallback(paint) : requestAnimationFrame(paint)
+        if (hasVideoFrameCallback) frame = video.requestVideoFrameCallback(paint)
       }
       const paint = () => {
         if (stopped || finished) return
@@ -140,7 +141,8 @@ module clips {
       signal.addEventListener("abort", aborted, { once: true })
       try {
         recorder.start(200)
-        next()
+        if (hasVideoFrameCallback) next()
+        else video.addEventListener("timeupdate", paint)
         void video.play().catch(finish)
       } catch (error) { finish(error) }
     })

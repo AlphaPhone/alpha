@@ -15,7 +15,7 @@ const underAct = async (work: () => Promise<void> | void) => {
 };
 
 describe("Ask Alpha dock and shell navigation", () => {
-  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
+  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
     await mountDock({ view: "Home", flush: underAct });
     const file = new File(["notes for the appointment"], "appointment.txt", { type: "text/plain" });
@@ -151,24 +151,24 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     const background = document.querySelector<HTMLElement>("[data-alpha-bar-drag]");
     expect(background).not.toBeNull();
-    await at("pointerdown", 700, background ?? window);
+    at("pointerdown", 700, background ?? window);
     await act(pressed);
-    await at("pointermove", 650);
-    await at("pointermove", 500);
+    at("pointermove", 650);
+    at("pointermove", 500);
     expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "302px"]);
     expect((await shell()).assistant).toBe("Bar");
-    await at("pointerup", 500);
+    at("pointerup", 500);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet")))); });
 
     // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled to the floor by its handle, the open sheet follows and rests on the bar
     const handle = document.querySelector<HTMLElement>("button[aria-label='Resize chat']");
     expect(handle).not.toBeNull();
-    await at("pointerdown", 400, handle ?? window);
+    at("pointerdown", 400, handle ?? window);
     await act(pressed);
-    await at("pointermove", 500);
-    await at("pointermove", 740);
+    at("pointermove", 500);
+    at("pointermove", 740);
     expect(section()?.style.height).toBe("102px");
-    await at("pointerup", 740);
+    at("pointerup", 740);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
     expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
   });

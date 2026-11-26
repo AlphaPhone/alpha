@@ -7,7 +7,7 @@ import { type Event, type Change, maxText } from "../../gen/app__workflows__auto
 import { useMachine } from "../../gen/app__workflows__automations.react.ts";
 import type { Machine } from "../../gen/app__workflows__automations.effect.vibe";
 import type { Preset, When } from "../../gen/app__workflows__schedule.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, rowOffers } from "./automations.vibe";
 import type { Prompt } from "./api.vibe";
 import type { WorkflowRow } from "./list.vibe";

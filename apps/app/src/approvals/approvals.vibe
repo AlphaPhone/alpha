@@ -7,11 +7,8 @@ import { emergency } from "../../gen/app__approvals__operation.effect.vibe"
 import type { Claim, Journal, Result } from "../../gen/app__approvals__proposal.ts"
 import { decided } from "../../gen/app__approvals__proposal.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { type Device, registered } from "../platform/device.vibe"
-import { ask } from "../platform/remote.vibe"
-import { type Job, answer, contained, due, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { Agent, type Device, registered, ask } from "../platform/index.vibe"
+import { type Job, answer, contained, due, reacting, run, started, stop, together, Time } from "../runtime/index.vibe"
 import type { ProposalDetail } from "./operation.ts"
 
 /** The approvals overlay sheet's layer id in the shell's stack. */

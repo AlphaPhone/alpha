@@ -3,9 +3,8 @@ import type { Actor } from "../../gen/app__approvals__operation.ts"
 import type * as Reminder from "../../gen/app__notices__reminder.effect.vibe"
 import * as NoticeReminders from "../../gen/app__notices__reminders.effect.vibe"
 import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
-import { PhoneReminders } from "../platform/reminders.vibe"
-import { Whole, contained } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { PhoneReminders } from "../platform/index.vibe"
+import { Whole, contained, Time } from "../runtime/index.vibe"
 import { type Said, say } from "./toasts.vibe"
 
 /** Metadata for a notice-side scheduled reminder. */

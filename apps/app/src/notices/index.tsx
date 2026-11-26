@@ -1,7 +1,7 @@
 // spec/app/notices/index.md, "Story: Open what I tapped"; spec/app/notices/collection.md, "Story: Let Alpha see my notifications"; spec/app/notices/deletions.md, "Story: Delete several things, each with its own Undo"; spec/app/notices/posting.md, "Story: Be told by Alpha's own notices"; spec/app/notices/reminders.md, "Story: See my reminders as they are"
 import { Layer } from "effect";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
-import { together } from "../runtime/reactor.vibe";
+import { type Resident, type Shown, area } from "../runtime/ui.tsx";
+import { together } from "../runtime/index.vibe";
 import { ShadeView } from "./Shade.tsx";
 import { UndoBarView } from "./UndoBar.tsx";
 import { collection } from "./collection.vibe";

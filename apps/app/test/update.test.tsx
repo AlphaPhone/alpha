@@ -155,7 +155,6 @@ describe("Updates", () => {
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
     await general(alpha);
-    /** Asks for a check from Settings while the channel serves `manifest`, and waits for what Settings says. */
     const checking = async (manifest: unknown) => {
       world.update.manifest = JSON.stringify(manifest);
       const before = world.update.checks.length;

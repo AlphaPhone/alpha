@@ -4,8 +4,8 @@ import type { ClockRequest, ClockStatus } from "@elizaos/os-bridges"
 import * as Model from "../../gen/app__workflows__clock.effect.vibe"
 import type { Effect as Out, Event, Handoff, Receipt } from "../../gen/app__workflows__clock.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import { Device, registered } from "../platform/device.vibe"
-import { type Job, answer, applying, hearing, reacting, together } from "../runtime/reactor.vibe"
+import { Device, registered } from "../platform/index.vibe"
+import { type Job, answer, applying, hearing, reacting, together } from "../runtime/index.vibe"
 
 module native {
   import type { SystemClient } from "@elizaos/os-bridges"

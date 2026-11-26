@@ -3,7 +3,7 @@ import type { Actor } from "../../gen/app__approvals__operation.ts"
 import * as Notices from "../../gen/app__notices.effect.vibe"
 import type * as Posting from "../../gen/app__notices__posting.effect.vibe"
 import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
-import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, run, together } from "../runtime/index.vibe"
 import { markNoticeSpent } from "./posting.vibe"
 import { type Said, say } from "./toasts.vibe"
 

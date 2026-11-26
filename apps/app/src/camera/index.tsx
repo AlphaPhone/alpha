@@ -1,6 +1,6 @@
 import { cameraScan, scanBack } from "../files/scan.vibe";
-import { together } from "../runtime/reactor.vibe";
-import { area } from "../runtime/area.tsx";
+import { together } from "../runtime/index.vibe";
+import { area } from "../runtime/ui.tsx";
 import { Camera } from "./Camera.tsx";
 import { camera } from "./camera.vibe";
 

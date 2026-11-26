@@ -32,11 +32,9 @@ import type { Machine as RecoveryMachine } from "../../gen/app__startup__recover
 import { useMachine as useRecovery } from "../../gen/app__startup__recovery.react.ts";
 import { type Side, risky, sideOf } from "../../gen/app__startup__recovery.ts";
 import { type Key, word } from "../../gen/app__startup__steps.ts";
-import type { Agent } from "../platform/agent.vibe";
-import { native, testMocks } from "../platform/device.vibe";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { type Agent, native, testMocks } from "../platform/index.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed, Time } from "../runtime/index.vibe";
 import { StartupDesk, retryAgentConnection } from "./boot.vibe";
 
 const ordered: readonly Key[] = ["Notifications", "Microphone", "Camera", "Location", "Calendar", "Photos", "Files"];

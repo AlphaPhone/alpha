@@ -4,7 +4,7 @@ import { Effect, Layer } from "effect";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useMachine } from "../../gen/app__notices__toasts.react.ts";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
+import { type Resident, type Shown, area } from "../runtime/ui.tsx";
 import { Said, nameOf } from "./toasts.vibe";
 
 /** The toast showing and the notices kept, over every screen: a failure is announced at once, news politely. */

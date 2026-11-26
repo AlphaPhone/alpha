@@ -5,9 +5,8 @@ import type { Machine } from "../../gen/app__startup__access.effect.vibe";
 import { useMachine } from "../../gen/app__startup__access.react.ts";
 import { busy, flow, grantOf, offered } from "../../gen/app__startup__access.ts";
 import { word, type Key } from "../../gen/app__startup__steps.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed, type Time } from "../runtime/index.vibe";
 
 const ordered: readonly Key[] = ["Notifications", "Microphone", "Camera", "Location", "Calendar", "Photos", "Files"];
 

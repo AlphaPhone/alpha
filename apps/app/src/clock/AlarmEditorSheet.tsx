@@ -6,7 +6,7 @@ import { useState, useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useAlarms } from "../../gen/app__clock__alarms.react.ts";
 import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.effect.vibe";
-import type { Said } from "../notices/toasts.vibe";
+import type { Said } from "../notices/index.vibe";
 import { createAlarm, deleteAlarmWithUndo, updateAlarm } from "./alarms.vibe";
 import { playChimePulse } from "./chime.ts";
 import { ALARM_SOUNDS, type AlarmSound, SNOOZE_OPTIONS, clockRecords } from "./records.ts";

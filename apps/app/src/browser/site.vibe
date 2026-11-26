@@ -1,7 +1,7 @@
 // spec/app/browser/site.md, "Story: Let a site use the camera, microphone or location"; spec/app/browser/site.md, "Story: Sign in to a site"; spec/app/browser/site.md, "Story: Clear a site's data"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import * as Site from "../../gen/app__browser__site.effect.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
 
 /** Host callbacks for site permission prompts, HTTP authentication and per-site storage clearing. */
 export service SitePort {

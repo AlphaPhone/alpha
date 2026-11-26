@@ -17,7 +17,7 @@ import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
 import { NoteDocuments, NoteDevice } from "../platform/index.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/ui.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack } from "../shell/ui.tsx";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { enter } from "./notes.vibe";

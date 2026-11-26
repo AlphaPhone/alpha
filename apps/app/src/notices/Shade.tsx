@@ -12,10 +12,8 @@ import type { Machine as PostingMachine } from "../../gen/app__notices__posting.
 import * as Layers from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { top } from "../../gen/app__shell__layers.ts";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { contained } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { type Resident, type Shown, area, useTimed } from "../runtime/ui.tsx";
+import { contained, type Time } from "../runtime/index.vibe";
 import {
   ShadeShelf,
   askAboutShadeRow,

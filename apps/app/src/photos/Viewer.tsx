@@ -7,11 +7,10 @@ import { maxZoom, panUnits, type Event, type Look, type Pan, type Viewer as View
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import { taken, type Row } from "./catalog.vibe";
 import { OpenedPhoto, photoEmailAllowed, photoLook, photoMessageType, type MediaView } from "./viewer.vibe";
-import { photoLooks } from "../platform/photoCanvas.vibe";
+import { photoLooks, Device } from "../platform/index.vibe";
 import { CropFrame, CropHeader, editFrame, editHeader, editTool } from "./CropFrame.tsx";
 import { headingOf, trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
-import { Time } from "../runtime/time.vibe";
-import { Device } from "../platform/device.vibe";
+import { Time } from "../runtime/index.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
 const messages = {

@@ -191,7 +191,7 @@ describe("Home on a phone", () => {
     await pressCard("4 unread");
     await showing("Inbox");
 
-    // Returning to Home refreshes the brief from the current owner's retained inbox.
+    // spec/app/home/cards.md, "Story: See my day at a glance": returning to Home refreshes the brief from the current owner's retained inbox.
     await keepDigests(alpha, digestScope({ agentId: world.notes.owner, identityId: world.notes.ownerIdentity }), [digestResult(1, "failed", "The morning brief could not run.")]);
     await hardware("home");
     await showing();

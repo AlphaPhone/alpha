@@ -6,10 +6,8 @@ import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { fromAreas } from "../home/cards.vibe"
 import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
-import type { Agent } from "../platform/agent.vibe"
-import { Device } from "../platform/device.vibe"
-import { type ResidentOwner, launchOwnerOf, ownerAt, residentOwnerKey } from "../platform/owner.vibe"
-import { type Job, answer, applying, reacting, started, together } from "../runtime/reactor.vibe"
+import { type Agent, Device, type ResidentOwner, launchOwnerOf, ownerAt, residentOwnerKey } from "../platform/index.vibe"
+import { type Job, answer, applying, reacting, started, together } from "../runtime/index.vibe"
 import { WorkflowsApi, type Prompt, type ScheduledTask, readPrompts, readSchedules, workflowsApi } from "./api.vibe"
 
 type Routine = { readonly kind: "Routine"; readonly record: RemoteWorkflow }

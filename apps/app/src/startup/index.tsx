@@ -1,6 +1,6 @@
 // spec/app/startup/index.md, "Story: Come up knowing where Alpha runs"; spec/app/startup/access.md, "Story: Walk through each access in order"; spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"
 import { Layer } from "effect";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
+import { type Resident, type Shown, area } from "../runtime/ui.tsx";
 import { StartupOverlay } from "./Startup.tsx";
 
 export { AccessReview } from "./SettingsAccess.tsx";

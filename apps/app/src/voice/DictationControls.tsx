@@ -5,7 +5,7 @@ import { Mic, Square, X } from "lucide-react";
 import type { Machine as Voice } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
 import { editDictation } from "../assistant/dictation.vibe";
-import { untimed } from "../runtime/reactor.vibe";
+import { untimed } from "../runtime/index.vibe";
 import { VoiceWords } from "./voice.vibe";
 
 /** The controls the recorder admits while Ask Alpha is receiving dictation, with icons for its status and actions for a kept clip. */

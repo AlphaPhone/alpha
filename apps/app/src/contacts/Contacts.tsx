@@ -17,7 +17,7 @@ import { returnPhoneTab, callerInitials, displayNumber } from "../comms/index.vi
 import { PhoneTabs, CommsBar, type CommsServices } from "../comms/ui.tsx";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
 import type { Alpha } from "../runtime/ui.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack } from "../shell/ui.tsx";
 
 export interface ContactsProps {
   /** Provides Contacts' machine, resident, Phone's, for whether a call may be an emergency call, and what Contacts counts. */

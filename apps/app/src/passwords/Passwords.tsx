@@ -6,7 +6,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { useMachine as usePasswords } from "../../gen/app__passwords.react.ts";
 import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { EntryEditor } from "./EntryEditor.tsx";
 import { PasswordVault, matchingPasswords, passwordsLayer } from "./passwords.vibe";
 

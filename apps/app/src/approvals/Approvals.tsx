@@ -7,9 +7,8 @@ import { useMachine as useApprovals } from "../../gen/app__approvals.react.ts";
 import { entry } from "../../gen/app__approvals.ts";
 import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { type Resident, type Shown, useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import { ApprovalDesk, approvalLayer } from "./approvals.vibe";
 import { describeProposal, stageSummary } from "./operation.ts";
 

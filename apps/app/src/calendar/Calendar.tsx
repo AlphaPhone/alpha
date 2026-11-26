@@ -20,7 +20,7 @@ import { useMachine as useLink } from "../../gen/app__calendar__link.react.ts";
 import { setUp } from "./link.vibe";
 import { useTimed, type Alpha } from "../runtime/ui.tsx";
 import { untimed } from "../runtime/index.vibe";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack } from "../shell/ui.tsx";
 import { useMachine as useEditor } from "../../gen/app__calendar__editor.react.ts";
 import { useMachine as useHeld } from "../../gen/app__calendar__deletions.react.ts";
 import type { Event as DeletionEvent } from "../../gen/app__calendar__deletions.ts";

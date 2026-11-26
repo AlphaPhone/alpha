@@ -1,9 +1,10 @@
 import { Effect, ManagedRuntime, Option } from "effect";
 import { expect, it } from "vitest";
-import twoPages from "../../../legacy/android/app/src/androidTest/assets/inbox-fixtures/two-page.pdf?url";
 import { Documents } from "../src/platform/documents.vibe";
 import { Files } from "../src/platform/files.vibe";
 import { browserLibrary } from "../src/platform/library.vibe";
+
+const twoPages = new URL("./fixtures/two-page.pdf", import.meta.url).href;
 
 async function pick(file: File, runtime: ManagedRuntime.ManagedRuntime<Documents | Files, never>) {
   const pending = runtime.runPromise(Effect.flatMap(Documents, (documents) => documents.pick()));

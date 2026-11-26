@@ -2,8 +2,8 @@
 import { Effect } from "effect";
 import * as Home from "../../gen/app__home.effect.vibe";
 import type { Machine as CardsMachine } from "../../gen/app__home__cards.effect.vibe";
-import { area } from "../runtime/area.tsx";
-import { together } from "../runtime/reactor.vibe";
+import { area } from "../runtime/ui.tsx";
+import { together } from "../runtime/index.vibe";
 import { HomePage } from "./Home.tsx";
 import { cards } from "./cards.vibe";
 import { home } from "./home.vibe";

@@ -5,10 +5,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type * as ProviderGen from "../../gen/app__account__provider.ts"
 import type * as SessionGen from "../../gen/app__account__session.ts"
 import type * as SignInGen from "../../gen/app__account__signIn.ts"
-import { Cloud, cloudPlugin } from "../platform/cloud.vibe"
-import { registered } from "../platform/device.vibe"
-import { signInAccounts } from "../platform/voice.vibe"
-import { WiFi } from "../platform/wifi.vibe"
+import { Cloud, cloudPlugin, registered, signInAccounts, WiFi } from "../platform/index.vibe"
 import { accountIdNumber, toSeconds } from "./clock.vibe"
 
 module nativeBridge {

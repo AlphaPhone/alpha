@@ -3,8 +3,7 @@ import type { ComponentType, ReactNode } from "react";
 import type { Place } from "../areas.ts";
 import type { MediaHandoff } from "../assistant/attachments.vibe";
 import type { ScanExports } from "../files/scanEntry.vibe";
-import type { BrowserDownloadsHandoff } from "../platform/browser.vibe";
-import type { Platform } from "../platform/platform.vibe";
+import type { BrowserDownloadsHandoff, Platform } from "../platform/index.vibe";
 import type { resident } from "../resident.vibe";
 import type { Whole } from "./reactor.vibe";
 

@@ -7,7 +7,7 @@ import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vi
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
 import { useMachine as useAlarms } from "../../gen/app__clock__alarms.react.ts";
 import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.effect.vibe";
-import type { Said } from "../notices/toasts.vibe";
+import type { Said } from "../notices/index.vibe";
 import { ackMissedAlarm, deleteAlarmWithUndo, dismissAlarm, nextUpcomingAlarm, snoozeAlarm, toggleAlarm } from "./alarms.vibe";
 import { clockRecords, soundLabel } from "./records.ts";
 import type { ClockResident } from "./sync.vibe";

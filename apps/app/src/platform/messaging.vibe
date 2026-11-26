@@ -1,6 +1,6 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"; spec/app/platform/index.md, "Only a 2xx answer is the reply; every other status is a refusal"
 import { replied } from "../../gen/app__platform.effect.vibe"
-import { type Failure, type Listening, type Opened, Garbled, Refused, Unreachable, Unsent, parsed, patience, refusal, sse } from "./remote.vibe"
+import { type Failure, type Listening, type Opened, type Unsent, Garbled, Refused, Unreachable, parsed, patience, refusal, sse } from "./remote.vibe"
 
 module web {
   function toBase64Url(bytes: Uint8Array): string {

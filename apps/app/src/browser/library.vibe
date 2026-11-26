@@ -3,8 +3,8 @@ import { bookmarkBrowserUrl, type BrowserBookmarkList, type BrowserPageBinding }
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Library from "../../gen/app__browser__library.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { TabHost, hosted } from "../platform/browser.vibe"
-import { answer, contained, reacting } from "../runtime/reactor.vibe"
+import { TabHost, hosted } from "../platform/index.vibe"
+import { answer, contained, reacting } from "../runtime/index.vibe"
 import { Pages, idOf } from "./browser.vibe"
 
 export type Bookmark = { readonly url: string; readonly title?: string }

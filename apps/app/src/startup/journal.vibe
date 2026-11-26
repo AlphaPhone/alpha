@@ -1,8 +1,7 @@
 // spec/app/startup/journal.md, "Story: Remember what went wrong"; spec/app/startup/journal.md, "A new entry pushes out the oldest once fifty are held"; spec/app/startup/journal.md, "At each start the journal drops what is older than thirty days, or dated further ahead than that"; spec/app/startup/journal.md, "Only a development build shows the journal"
 import * as Journal from "../../gen/app__startup__journal.effect.vibe"
-import { testMocks } from "../platform/device.vibe"
-import { SystemSettings } from "../platform/systemSettings.vibe"
-import { contained, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import { testMocks, SystemSettings } from "../platform/index.vibe"
+import { contained, reacting, started, together, untimed } from "../runtime/index.vibe"
 
 // spec/app/startup/journal.md, "A failure Alpha sees itself is recorded when it happens"
 /** Record a failure observed by Alpha itself into the bounded startup journal. */

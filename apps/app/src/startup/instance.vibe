@@ -1,7 +1,7 @@
 // spec/app/startup/instance.md, "Story: Stay one Home"; spec/app/startup/instance.md, "A start reaches the page in its task, builds the first page, or hands itself to the owner"
 import * as Instance from "../../gen/app__startup__instance.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Device } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
 
 /** Observable log of single-instance delivery, page builds and hand-off requests. */
 export interface InstanceHooks {

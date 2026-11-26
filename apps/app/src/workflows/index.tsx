@@ -1,5 +1,5 @@
-import { area } from "../runtime/area.tsx";
-import { stepping } from "../shell/shell.vibe";
+import { area } from "../runtime/ui.tsx";
+import { stepping } from "../shell/index.vibe";
 import { Machine } from "../../gen/app__workflows__list.effect.vibe";
 import { Workflows } from "./Workflows.tsx";
 import { backHistory, history } from "./history.vibe";
@@ -9,7 +9,7 @@ import { backRuns, runs } from "./runs.vibe";
 import { approvals } from "./approvals.vibe";
 import { authoring, backDraft } from "./authoring.vibe";
 import { backList } from "./list.vibe";
-import { together } from "../runtime/reactor.vibe";
+import { together } from "../runtime/index.vibe";
 import { automations, backAutomations } from "./automations.vibe";
 import { backClock, clock } from "./clock.vibe";
 import { backDigests, digests } from "./digests.vibe";

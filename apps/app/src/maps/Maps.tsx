@@ -4,7 +4,7 @@ import { ArrowUp, ArrowUpDown, ArrowUpLeft, ArrowUpRight, Bike, Bus, Car, Check,
 import { createElement, useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/ui.tsx";
 import { untimed } from "../runtime/index.vibe";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack } from "../shell/ui.tsx";
 import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
 import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } from "../../gen/app__maps.ts";
 import type { CopyNotice, GuideNotice, Maps as State, SavedNotice, Sheet } from "../../gen/app__maps.ts";

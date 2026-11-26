@@ -1,5 +1,5 @@
 import type { Layer } from "effect";
-import { say } from "../notices/toasts.vibe";
+import { say } from "../notices/index.vibe";
 import { registered } from "../platform/index.vibe";
 import { messagesBack } from "../comms/index.vibe";
 import { area, type Resident, type Shown } from "../runtime/ui.tsx";

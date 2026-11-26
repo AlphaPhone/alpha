@@ -71,7 +71,7 @@ import { type Alpha, useTimed } from "../runtime/ui.tsx";
 import { untimed, type Time } from "../runtime/index.vibe";
 import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack } from "../shell/ui.tsx";
 import { AccountStatus } from "../account/index.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */

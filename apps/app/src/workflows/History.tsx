@@ -10,7 +10,7 @@ import type { Machine as RunsMachine } from "../../gen/app__workflows__runs.effe
 import type { Machine as ApprovalsMachine } from "../../gen/app__workflows__approvals.effect.vibe";
 import type { ApprovalWords } from "./approvals.vibe";
 import type { Status } from "../../gen/app__workflows__runs.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { HistoryWordsPort, canSpeak } from "./history.vibe";
 import type { WorkflowRow } from "./list.vibe";
 import type { DefinitionWords } from "./lifecycle.vibe";

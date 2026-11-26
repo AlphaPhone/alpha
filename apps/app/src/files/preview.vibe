@@ -18,7 +18,7 @@ import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Incoming, handOver } from "../inbox/adding.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { type Said, say } from "../notices/toasts.vibe"
+import { type Said, say } from "../notices/index.vibe"
 import { type Job, answer, following, reacting, run, started, stop, together } from "../runtime/index.vibe"
 import { Handles } from "./handles.vibe"
 

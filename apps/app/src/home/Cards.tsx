@@ -6,10 +6,9 @@ import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
 import { openCalls, openUnread } from "../phone/reports.vibe";
-import { shortWhen } from "../phone/words.ts";
-import type { Resident } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { shortWhen } from "../comms/index.vibe";
+import { type Resident, useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import { type MailRead, type Waiting, fromAreas, named, others } from "./cards.vibe";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };

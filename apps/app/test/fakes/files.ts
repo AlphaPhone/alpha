@@ -159,7 +159,7 @@ export function elizaFiles(scene: FilesScene): Faked {
       storageReviewedIdentities({ volume, paths }) {
         called("reviewed");
         const found = paths.map((path) => find(on(volume), path));
-        return Promise.resolve(found.every((one) => one !== undefined) ? { status: "ready", reviewed: found.map((one) => identity(one as Stored)) } : { status: "missing" });
+        return Promise.resolve(found.every((one) => one !== undefined) ? { status: "ready", reviewed: found.map((one) => identity(one)) } : { status: "missing" });
       },
       storageTransfer({ volume, paths, dest, copy, reviewed }) {
         called(copy ? "copy" : "move");

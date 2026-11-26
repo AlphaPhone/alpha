@@ -2,7 +2,7 @@
 import type { NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
 import type { Command } from "../../gen/app__notes__recording.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
-import { fresh } from "../runtime/attempts.vibe"
+import { fresh } from "../runtime/index.vibe"
 import { registered } from "./device.vibe"
 import { type SavedNoteWindow, readSavedNote } from "./voice.vibe"
 

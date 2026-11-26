@@ -8,9 +8,8 @@ import type { Machine as DeletionsMachine } from "../../gen/app__notices__deleti
 import { useMachine as useDeletions } from "../../gen/app__notices__deletions.react.ts";
 import { canDismiss, canRefresh, canResume, canUndo, held, statusUnavailable } from "../../gen/app__notices__deletions.ts";
 import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.effect.vibe";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { Time } from "../runtime/time.vibe";
+import { type Resident, type Shown, area, useTimed } from "../runtime/ui.tsx";
+import { Time } from "../runtime/index.vibe";
 import {
   DELETION_NOTICE_TEXT,
   DeletionDesk,

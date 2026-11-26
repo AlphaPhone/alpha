@@ -3,8 +3,7 @@ import { DELETION_NOTICE_TEXT, UNDO_TOO_LATE } from "@elizaos/os-bridges"
 import type * as Deletion from "../../gen/app__notices__deletion.effect.vibe"
 import * as Deletions from "../../gen/app__notices__deletions.effect.vibe"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
-import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { type Job, answer, contained, due, reacting, run, together, untimed, Time } from "../runtime/index.vibe"
 import { type Said, offer, say, withdraw } from "./toasts.vibe"
 
 export { DELETION_NOTICE_TEXT, UNDO_TOO_LATE }

@@ -5,7 +5,7 @@ import type { Machine as ClockViewMachine, Tab } from "../../gen/app__clock.effe
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
 import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.effect.vibe";
-import type { Said } from "../notices/toasts.vibe";
+import type { Said } from "../notices/index.vibe";
 import { AlarmEditorSheet } from "./AlarmEditorSheet.tsx";
 import { AlarmsTab } from "./AlarmsTab.tsx";
 import { StopwatchTab } from "./StopwatchTab.tsx";

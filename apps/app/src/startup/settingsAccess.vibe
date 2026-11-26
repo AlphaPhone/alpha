@@ -10,12 +10,10 @@ import type { Target } from "../../gen/app__settings__android.ts"
 import type * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
-import { say } from "../notices/toasts.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Device, native } from "../platform/device.vibe"
-import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { home } from "../shell/shell.vibe"
+import { say } from "../notices/index.vibe"
+import { Cloud, Device, native, SystemSettings } from "../platform/index.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { home } from "../shell/index.vibe"
 
 export const reviewKeys: Record<Permission, Steps.Key> = {
   CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",

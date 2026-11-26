@@ -1,7 +1,7 @@
 // spec/app/account/index.md, "Story: Have the agent running"; spec/app/account/session.md, "Story: Hold the account signed in"
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
-import type { Resident } from "../runtime/area.tsx";
+import type { Resident } from "../runtime/ui.tsx";
 import { stamped, Time } from "../runtime/index.vibe";
 import type { accountMachines } from "./account.vibe";
 import { type AccountDetailsSnapshot, AccountShelf } from "./bridge.vibe";

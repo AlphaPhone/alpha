@@ -1,9 +1,8 @@
 // spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import * as Share from "../../gen/app__browser__share.effect.vibe"
-import { TabHost, hosted } from "../platform/browser.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { TabHost, hosted, Device } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
 import { idOf } from "./browser.vibe"
 
 module external {
