@@ -561,17 +561,20 @@ turn from another screen such as Messages keeps the session's capabilities
 and non-Files review cards even when direct Files actions are allowed, and
 a direct Files result from Messages is still spoken aloud.
 
-What Talk says of a reply that proposed a phone step follows what that
-step did, never what the reply claims. A reply that proposed none is said
-as written. A step that ran here, a direct Files filter or open or a page
-the owner asked for, lets the reply be said, and a direct Files step says
-its own result. A review shown as a card is decided there, so the reply
-beside it is not said. A step Talk neither showed as a card nor ran, such
-as a review Talk cannot show from a Messages chat, a text proposed off
+What Talk says of a reply that claims a phone step follows what that step
+did, never what the reply says of it. A reply claims a step when it
+proposed a text to send for review or a step to run at once; any other
+reply, one with a review card Talk did not show included, is said as
+before. A step that ran here, a direct Files filter or open or a page the
+owner asked for, lets the reply be said, and a direct Files step says its
+own result. A review shown as a card is decided there, so the reply beside
+it is not said. A claimed step Talk neither showed as a card nor ran, such
+as a text whose review Talk cannot show, from a Messages chat or off
 Messages, or a step the agent marked to run at once that nothing here
 runs, means the reply speaks of something that did not happen: the turn
 ends quietly without setting the review notice, any queued speech is
-hushed, and Talk says nothing of its own about it.
+hushed, and Talk says nothing of its own about it. The chat still shows
+the reply as written.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool, says: bool): bool =
@@ -593,17 +596,17 @@ pure def lawAQuietEndingHushesWithoutAReviewNotice(session: int, played: int): b
   val ended = replyEnds({ ...initial, phase: Speaking, mic: Off, session: session, turn: 1, queued: 2, played: played }, session, 1, false, false)
   ended.out.includes(Hush({ turn: 1 })) and not(ended.state.reviewPending) and ended.state.phase == Listening
 
-pure def replySaid(proposed: bool, shown: bool, ran: bool, reported: bool): bool =
-  reported or (not(shown) and (not(proposed) or ran))
+pure def replySaid(claimed: bool, shown: bool, ran: bool, reported: bool): bool =
+  reported or (not(shown) and (not(claimed) or ran))
 
 pure def lawAStepThatNeitherShowedNorRanIsNeverClaimed(reported: bool): bool =
   replySaid(true, false, false, reported) == reported
 
-pure def lawAReplyWithNoStepOrAStepThatRanIsSaid(proposed: bool, ran: bool): bool =
-  (not(proposed) or ran) implies replySaid(proposed, false, ran, false)
+pure def lawAReplyWithNoClaimOrAStepThatRanIsSaid(claimed: bool, ran: bool): bool =
+  (not(claimed) or ran) implies replySaid(claimed, false, ran, false)
 
-pure def lawAShownReviewSaysOnlyAStepResult(proposed: bool, ran: bool, reported: bool): bool =
-  replySaid(proposed, true, ran, reported) == reported
+pure def lawAShownReviewSaysOnlyAStepResult(claimed: bool, ran: bool, reported: bool): bool =
+  replySaid(claimed, true, ran, reported) == reported
 
 pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
 
