@@ -47,7 +47,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   await until(alpha, asking, Ask, (s) => s.conversation !== "");
 
   // spec/app/ask/index.md, "The owner says something only in a conversation, one turn at a time, and it is sent once"
-  await mine.script({ kind: "text", parts: ["Hello ", "from ", "the cloud."] });
+  await mine.script({ kind: "text", parts: ["[answer] Hello ", "from ", "the cloud."] });
   await fill("Ask Alpha", "Say hello.");
   await press("Send");
   // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
@@ -76,7 +76,8 @@ it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/k
   const read = (route: string) => alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) => agent.call(HttpClientRequest.get(route))));
   // spec/kit/read.md, "Only the newest ticket's answer is taken, once": each route an area reads answers at the pinned commit, through Alpha's own Agent service.
   expect(await read("/api/approvals")).toMatchObject({ approvals: [] });
-  expect(await read("/api/notifications")).toMatchObject({ notifications: [], unreadCount: 0 });
+  // Since elizaOS/eliza#40584 the list answers only the native page; any other list query is refused.
+  expect(await read("/api/notifications?nativeTransport=true")).toMatchObject({ nativeEpoch: expect.any(String) });
   expect(await read("/api/scheduled-tasks?ownerVisibleOnly=1")).toEqual({ tasks: [expect.objectContaining({ kind: "personal-assistant.checkin", state: { status: "scheduled" } })] });
   expect(await read("/api/triggers")).toEqual({ triggers: [] });
   expect(await read("/api/tasks/current")).toEqual({ task: null });
