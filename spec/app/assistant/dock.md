@@ -41,7 +41,16 @@ closes it from the bar grows it from the bar or shrinks it onto the bar the
 same way, keeping its composer until the bar shows. A sheet put away
 shrinks and fades over the bar or pill already drawn under it, which then
 stays in place with its own controls in their own colours: no control of
-the sheet's, such as its black Talk, is carried onto the bar. A resting
+the sheet's, such as its black Talk, is carried onto the bar. As v119's
+one field did, which stayed in the sheet until the bar took it (old-line
+Alpha 45f6bed30, chat-overlay-motion-adapter.ts:1356-1360), only one field
+shows words at a time: the bar or pill drawn under a sheet being pulled
+down shows none, and a sheet put away, by a tap or by a drag, shrinks or
+fades with its field empty over the bar's own words, which show at once.
+A drag on the conversation
+that reaches its end moves nothing else: the sheet stays where it is, as
+v119's did. Alpha's mark at the start of the open sheet's header is tapped
+in v119's box, 46 points wide. A resting
 bar dragged down and let go becomes the pill where it is, with no entrance:
 as v119 left the bar or pill in place after any drag (45f6bed30
 chat-overlay-motion-adapter.ts:637-646), it does not drop and rise again.
@@ -133,11 +142,11 @@ pure def lawAFlickGoesByItsDirection(start: S::Detent, direction: Direction, hei
 Swiping down from an open sheet or full screen rests on the bar first;
 swiping down on the resting bar or while typing keeps the bar detent and
 tucks the bar into the compact pill everywhere, including on Home and the
-Browser. Allowing Home's resting bar to tuck on swipe down is an explicit
-owner product decision departing from v119's `!home` rule (old-line Alpha
-45f6bed30, chat-overlay-motion-adapter.ts:337-339, :866-869), while
-preserving v119's bar-first resting state on Home and the Browser until
-swiped down.
+Browser. Tucking Home's resting bar departs from v119's `!home` rule, under
+which Home's bar was never dismissed (old-line Alpha 45f6bed30,
+chat-overlay-motion-adapter.ts:337-339, :866-869); it is pending the
+owner's decision. Home and the Browser still rest on the whole bar until it
+is swiped down.
 
 ```quint
 pure def lawPulledDownAtRestStaysOnTheBar(start: S::Detent, flick: bool, height: int, floor: int, full: int): bool =
@@ -196,13 +205,13 @@ pure def lawAKeptShareIsBelowTheFullScreen(start: S::Detent, direction: Directio
   (0 <= floor and floor < full and l.detent == S::Sheet) implies (0 <= keptShare(l.height, full) and keptShare(l.height, full) < shareScale)
 ```
 
-### The dock holds the gesture under the finger, where it started, until when a click is ignored, the height the sheet was left at, and whether a resting bar was tucked to the pill
+### The dock holds the gesture under the finger, where it started, until when a click is ignored, the height the sheet was left at, whether a resting bar was tucked to the pill, and whether a drag left the bar or pill in place
 
 ```quint
 type Gesture = Idle | Pressed | Dragging
-type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int, voice: bool, tucked: bool }
+type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int, voice: bool, tucked: bool, placed: bool }
 
-pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0, voice: false, tucked: false }
+pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0, voice: false, tucked: false, placed: false }
 
 pure val clickWindow = 400
 
@@ -246,7 +255,7 @@ pure def canRelease(d: Dock, direction: Direction, flick: bool, height: int, flo
 pure def release(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): Moved =
   val l = landing(d.start, direction, flick, height, floor, full)
   val tucked = not(isOpen(d.start)) and direction == Down
-  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) keptShare(l.height, full) else if (l.detent == S::Full) d.kept else 0, tucked: tucked },
+  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) keptShare(l.height, full) else if (l.detent == S::Full) d.kept else 0, tucked: tucked, placed: not(isOpen(l.detent)) },
     out: asked(d.start, l.detent) }
 
 pure def lawSwipingDownAtRestTucksToThePill(d: Dock, flick: bool, height: int, floor: int, full: int, now: int): bool =
@@ -300,7 +309,29 @@ it asks for nothing, and its late click is ignored.
 pure def canShift(d: Dock, now: int): bool = now >= d.at
 
 pure def shift(d: Dock, now: int): Moved =
-  { state: { ...d, gesture: Idle, at: now, quiet: if (d.gesture == Idle) d.quiet else now + clickWindow }, out: List() }
+  { state: { ...d, gesture: Idle, at: now, quiet: if (d.gesture == Idle) d.quiet else now + clickWindow,
+      placed: d.placed or (d.gesture == Dragging and not(isOpen(d.start))) }, out: List() }
+```
+
+### A bar or pill a drag left in place changes between them without an entrance until the sheet next opens
+
+As v119 kept its dock shown after a drag (45f6bed30
+chat-overlay-motion-adapter.ts:640, :960, :978), the bar or pill a drag
+leaves at rest is already where it belongs: tapping Type on a pill that a
+drag tucked shows the bar in place at once, and the pill comes back the same
+way. The sheet opening ends it, and the bar and pill rise again after that.
+
+```quint
+pure def canOpened(d: Dock): bool = d.placed
+
+pure def opened(d: Dock): Dock = { ...d, placed: false }
+
+pure def lawADragLeftAtRestLeavesTheDockInPlace(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): bool =
+  (canRelease(d, direction, flick, height, floor, full, now) and not(isOpen(landing(d.start, direction, flick, height, floor, full).detent)))
+    implies release(d, direction, flick, height, floor, full, now).state.placed
+
+pure def stepOnlyTheSheetOpeningUndoesThePlace(before: Dock, via: str, after: Dock): bool =
+  (before.placed and not(after.placed)) implies (via == "opened" or via == "release")
 ```
 
 ### While voice owns Ask Alpha nothing drags it, a drag under way is let go, and it is dragged again once voice ends
@@ -373,6 +404,8 @@ pure def sometimesASheetKeepsItsHeight(d: Dock): bool = d.kept > 0
 pure def sometimesALateClickIsIgnored(d: Dock): bool = d.gesture == Idle and d.at < d.quiet and d.at > 0
 
 pure def sometimesTheBarIsTucked(d: Dock): bool = d.tucked
+
+pure def sometimesADragLeftTheDockInPlace(d: Dock): bool = d.placed
 ```
 
 ## Story: Type without losing the composer
@@ -453,18 +486,23 @@ pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
 > As the owner, I want Ask Alpha at rest inside an app to take as little of
 > the screen as it did before VibeStack: a small pill centred above the
 > bottom edge with Alpha's mark, Type and Talk, while Home and the Browser
-> start with the whole bar to type in and tuck into that same pill whenever
-> I swipe down on the resting bar.
+> start with the whole bar to type in.
+
+The Browser's bar tucks into that same pill when it is swiped down, as
+v119's did. Home's bar tucks too, as #1733 left it. That departs from v119's
+`!home` rule (45f6bed30 chat-overlay-motion-adapter.ts:337-339, :866-869)
+and is pending the owner's decision, so it is not part of the owner's story
+yet.
 
 ### Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet
 
 The pill is how the bar is drawn in an app other than the Browser, and also
 on Home or the Browser after the owner swipes down on the resting bar
 (`tucked = true`), not another height: Back, gestures and every guard treat
-it as the bar. Both Home and the Browser keep v119's bar-first resting state
-until swiped down; allowing Home's resting bar to tuck into the pill is an
-explicit owner product decision overriding v119's `!home` restriction.
-Tapping Type, opening the sheet or full screen, or changing views clears
+it as the bar. Both Home and the Browser rest on the whole bar until it is
+swiped down; tucking Home's bar into the pill departs from v119's `!home`
+rule (chat-overlay-motion-adapter.ts:337-339, :866-869) and is pending the
+owner's decision. Tapping Type, opening the sheet or full screen, or changing views clears
 `tucked`. Alpha's mark opens the sheet, Type focuses the
 composer, and Talk starts a spoken turn. A swipe up that starts on one of
 the pill's buttons opens the sheet, which follows the finger as it does from

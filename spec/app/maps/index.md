@@ -29,7 +29,8 @@ taken this visit, whether the owner's own locate found nothing, whether a
 locate waits for Android's answer, whether the location disclosure is
 showing, whether a search waits for a provider, whether another app
 handed the search over, whether the last fix of guidance could not guide,
-and whether this build has Phone.
+whether this build has Phone, and the pin dropped last with the name the
+owner gave it before it is saved.
 
 ```quint
 import read as R from "../../kit/read"
@@ -45,7 +46,7 @@ type Sheet = Peek | Half | Full
 type Question = NoQuestion | ReadPlace | StartTrip
 type HandOff = SharePlace | EtaShare | Website | MapsApp | Call | CopyNumber
 type Change = Added | Renamed | Removed
-type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept
+type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept | PinNamed
 type GuideNotice = Quiet | StoppedFromNotification | PausedAway | AccountChanged | RerouteKept
 type CopyNotice = Uncopied | NumberCopied | CopyFailed
 type Maps = {
@@ -60,7 +61,7 @@ type Maps = {
   startPlace: int, origins: R::Read, originsFound: int,
   following: bool, guideNotice: GuideNotice, copyNotice: CopyNotice,
   typingChars: int, copying: bool, renaming: bool, quiet: bool, quietDone: bool, missedFix: bool,
-  owedLocate: bool, waitingProvider: bool, imprecise: bool, dialer: bool, pinned: bool, explaining: bool,
+  owedLocate: bool, waitingProvider: bool, imprecise: bool, dialer: bool, pin: int, pinName: str, explaining: bool,
   handedOver: bool,
 }
 
@@ -76,7 +77,7 @@ pure val initial: Maps = {
   startPlace: 0, origins: R::unread, originsFound: 0,
   following: false, guideNotice: Quiet, copyNotice: Uncopied,
   typingChars: 0, copying: false, renaming: false, quiet: false, quietDone: false, missedFix: false,
-  owedLocate: false, waitingProvider: false, imprecise: false, dialer: false, pinned: false, explaining: false,
+  owedLocate: false, waitingProvider: false, imprecise: false, dialer: false, pin: 0, pinName: "", explaining: false,
   handedOver: false,
 }
 
@@ -222,12 +223,14 @@ pure def layers(m: Maps): int =
 ```quint
 pure def voided(r: V::Review): V::Review = V::revise(V::dismiss(r))
 
+pure def unnamed(n: SavedNotice): SavedNotice = if (n == PinNamed) NoNotice else n
+
 pure def chosen(place: int, m: Maps): Maps =
   if (place == m.place) m
   else { ...m, place: place, directions: false, sheet: Half, trip: N::forgetRoute(m.trip),
     question: NoQuestion, review: voided(m.review), details: cleared(m.details),
     startPlace: 0, origins: cleared(m.origins), originsFound: 0, copyNotice: Uncopied, guideNotice: Quiet,
-    copying: false, renaming: false, missedFix: false, waitingProvider: false, handedOver: false, pinned: false }
+    copying: false, renaming: false, missedFix: false, waitingProvider: false, handedOver: false, notice: unnamed(m.notice) }
 
 pure def cleared(r: R::Read): R::Read = { ...N::withdrawn(r), status: R::Idle }
 
@@ -254,7 +257,7 @@ pure def finderStops(c: C::Connection): List[Effect] =
 pure def canGoBack(m: Maps): bool = layers(m) > 0
 
 pure def goBack(m: Maps): Stepped =
-  val dropped = { ...m, question: NoQuestion, review: V::dismiss(m.review), explaining: false }
+  val dropped = { ...m, question: NoQuestion, review: V::dismiss(m.review), explaining: false, notice: unnamed(m.notice) }
   if (m.trip.guidance != N::Stopped) endGuidance(dropped)
   else if (m.renaming) { state: { ...dropped, renaming: false }, out: List() }
   else if (choosingStart(m)) { state: { ...dropped, origins: cleared(m.origins), originsFound: 0 }, out: List() }
@@ -455,7 +458,7 @@ pure def pinAt(m: Maps, lat: int, lng: int): Stepped =
 pure def canDropPin(m: Maps, place: int): bool =
   m.pinning and place > 0 and m.trip.guidance == N::Stopped and not(m.trip.away) and not(m.directions)
 
-pure def dropPin(m: Maps, place: int): Maps = { ...chosen(place, m), pinning: false, pinned: true }
+pure def dropPin(m: Maps, place: int): Maps = { ...chosen(place, m), pinning: false, pin: place, pinName: "", notice: unnamed(m.notice) }
 
 pure def stepAPinIsAPlaceOfTheGlobe(before: Maps, after: Maps, out: List[Effect]): bool =
   out.every(e => match e { | MakePin(p) => coordinatesValid(p.lat, p.lng) | _ => true })
@@ -510,7 +513,8 @@ pure def canHandOver(m: Maps, query: str, chars: int): bool =
 pure def handOver(m: Maps, query: str, chars: int): Stepped =
   val opened = { ...m, searching: true, query: "", search: cleared(m.search), place: 0, directions: false, sheet: Half,
       trip: N::forgetRoute(m.trip), copyNotice: Uncopied, copying: false, renaming: false, startPlace: 0,
-      origins: cleared(m.origins), originsFound: 0, question: NoQuestion, review: voided(m.review), details: cleared(m.details) }
+      origins: cleared(m.origins), originsFound: 0, question: NoQuestion, review: voided(m.review), details: cleared(m.details),
+      notice: unnamed(m.notice) }
   val searched = search(opened, query, chars)
   { ...searched, state: { ...searched.state, handedOver: true } }
 
@@ -564,10 +568,12 @@ pure def sometimesSearchFailed(m: Maps): bool = mode(m) == Search and m.search.s
 
 The [saved places](./places.md) keep one entry per place, at most 200. A
 place Google served is never saved or renamed; one already saved can be
-forgotten.
+forgotten. The pin dropped last is the owner's own coordinates, not
+Google's, so it is saved, renamed and shared on any map, as v119's live
+Maps treated a pin as a local place (prototype/maps-adapter.ts:378, 489).
 
 ```quint
-pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place))
+pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place)) and m.place != m.pin
 
 pure def canNamePlace(m: Maps, name: str): bool =
   m.place > 0 and name != "" and S::hasRoom(m.saved, m.place) and not(googleShown(m)) and m.keepable and onScreen(m)
@@ -586,14 +592,33 @@ pure def forgetPlace(m: Maps): Stepped =
 
 ### A saved place is renamed in a name field the owner opens on its card
 
-A dropped pin offers the same field, as v119 did, while there is room and
-the map is not Google's, and its name saves it.
+The pin dropped last offers the same field while it is the place on the
+card, as v119 did, while there is room, on Google's map as on any other; any
+other place not saved, such as a place found by search, offers none. Its
+name only names the pin, and the owner reads "Name updated. Tap Save to
+keep this place." on the pin's card only: choosing another place, Back,
+another search, Directions or another account clear it, as v119 cleared its
+message there (ui/maps/maps-screen.ts:600, 649, 727, 823, 838, 995). Save
+then keeps the pin under that name, as v119's applyName did
+(ui/maps/maps-screen.ts:880-893).
 
 ```quint
+pure def isThePin(m: Maps): bool = m.place > 0 and m.place == m.pin
+
 pure def canStartRenaming(m: Maps): bool =
-  mode(m) == Place and (S::isSaved(m.saved, m.place) or (m.pinned and S::hasRoom(m.saved, m.place) and not(googleShown(m)))) and not(m.renaming) and m.keepable and onScreen(m)
+  mode(m) == Place and (S::isSaved(m.saved, m.place) or (isThePin(m) and S::hasRoom(m.saved, m.place) and not(googleShown(m)))) and not(m.renaming) and m.keepable and onScreen(m)
 
 pure def startRenaming(m: Maps): Maps = { ...m, renaming: true }
+
+pure def canNamePin(m: Maps, name: str): bool =
+  m.renaming and isThePin(m) and not(S::isSaved(m.saved, m.place)) and name != "" and onScreen(m)
+
+pure def namePin(m: Maps, name: str): Maps = { ...m, pinName: name, renaming: false, notice: PinNamed }
+
+pure def alwaysThePinsNameIsToldOnItsCard(m: Maps): bool = m.notice == PinNamed implies (isThePin(m) and mode(m) == Place)
+
+pure def stepNamingThePinSavesNothing(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
+  via == "namePin" implies (after.saved == before.saved and out == List())
 
 pure def alwaysTheNameFieldIsOnAPlace(m: Maps): bool = m.renaming implies (mode(m) == Place)
 
@@ -660,7 +685,8 @@ pure def stepAnUnreadableListIsNeverWrittenOver(before: Maps, after: Maps, out: 
   not(before.keepable) implies out.every(e => match e { | KeepSaved(k) => false | _ => true })
 
 pure def stepAChangeIsToldOnlyOnceItReadsBack(before: Maps, via: str, after: Maps): bool =
-  (after.notice != before.notice and after.notice != NoNotice and after.notice != NotKept) implies via == "savedKept"
+  (after.notice != before.notice and after.notice != NoNotice and after.notice != NotKept)
+    implies (via == "savedKept" or (via == "namePin" and after.notice == PinNamed))
 
 pure def sometimesSavedUnreadable(m: Maps): bool = not(m.keepable)
 ```
@@ -785,7 +811,7 @@ pure def canOpenDirections(m: Maps): bool =
     and m.details.status != R::Loading and m.details.status != R::Failed
 
 pure def openDirections(m: Maps): Stepped =
-  val opened = { ...m, directions: true, sheet: Half, renaming: false }
+  val opened = { ...m, directions: true, sheet: Half, renaming: false, notice: unnamed(m.notice) }
   if (m.trip.route == 0 and P::allows(m.link.location) and C::canLocate(m.link, C::Finder))
     { state: { ...opened, link: C::locate(m.link, C::Finder), quiet: false, missedFix: false },
       out: List(StartLocation({ session: m.link.session + 1, once: true })) }
@@ -1318,7 +1344,7 @@ pure def changeAccount(m: Maps, account: int): Stepped =
       copyNotice: Uncopied, startPlace: 0, origins: cleared(m.origins), originsFound: 0, typing: "", pausing: false,
       following: false, guideNotice: if (guided) AccountChanged else Quiet, waitingProvider: handed, copying: false,
       renaming: false, imprecise: false, quiet: false,
-      question: NoQuestion, review: voided(m.review), pinning: false, pressing: false },
+      question: NoQuestion, review: voided(m.review), pinning: false, pressing: false, notice: unnamed(m.notice) },
     out: (if (guided) List(StopGuidance) else List())
       .concat(if (link.account != 0) List(ReadCoverage({ ticket: link.coverage.ticket })) else List())
       .concat(drawn(m.link, link)) }
@@ -1436,10 +1462,11 @@ Recenter or "Use my location", tapped while Android has not allowed
 location and the disclosure is unread, shows the disclosure and nothing
 else. A search needs no location, so the disclosure never holds one back,
 nor a query another app hands to Maps. Recenter stays on the map whenever
-Maps is not guiding; while Maps is locating or Android's prompt is open,
-tapping it does nothing. The disclosure belongs to the tap that showed it:
-it closes unread when the owner leaves Maps or presses Back, and once
-Android allows location, so Maps never opens on it.
+Maps is neither guiding nor showing directions, where v119 left "Use my
+location" on the directions card instead; while Maps is locating or
+Android's prompt is open, tapping it does nothing. The disclosure belongs
+to the tap that showed it: it closes unread when the owner leaves Maps or
+presses Back, and once Android allows location, so Maps never opens on it.
 
 ```quint
 pure def alwaysExplainingOnlyBeforeTheDisclosure(m: Maps): bool = m.explaining implies not(m.link.disclosed)
@@ -1664,7 +1691,7 @@ pure def canProposeRoute(m: Maps, place: int, origin: N::Origin, lat: int, lng: 
 pure def proposeRoute(m: Maps, place: int, origin: N::Origin, lat: int, lng: int): Stepped =
   val there = chosen(place, m)
   val trip = N::plan(there.trip, origin)
-  val proposed = { ...there, directions: true, sheet: Half, trip: trip, link: withoutFinder(m.link), renaming: false, quiet: false,
+  val proposed = { ...there, directions: true, sheet: Half, trip: trip, link: withoutFinder(m.link), renaming: false, quiet: false, notice: unnamed(there.notice),
       question: StartTrip, review: voided(there.review), startLat: lat, startLng: lng, startPlace: 0 }
   val found = C::locate(C::stopLocating(m.link), C::Finder)
   if (origin == N::MyLocation)

@@ -112,7 +112,7 @@ type Effect =
   | Kept({ messages: int, attachments: int })
   | Reread({ turn: int, recheck: int })
   | Arrived({ recorded: bool })
-  | Navigate({ turn: int, view: S::View })
+  | Navigate({ turn: int, view: S::View, keep: bool })
   | NavigateHome({ turn: int })
   | NavigateFiles({ turn: int, source: List[S::View], panel: S::Detent, route: int })
   | Navigated({ turn: int, opened: bool })
@@ -862,15 +862,19 @@ pure def sometimesTheDayIsTold(c: Conversation): bool = c.context.day > 0 and c.
 ### A complete reply may open one view, once, while the screen it was asked from still shows
 
 The phone claims the agent's request once for the turn and asks the shell
-to open the view. A request for an older turn is refused.
+to open the view. A request for an older turn is refused. A saved note the
+agent opens asks to keep Ask Alpha where it is (`keep`): the note is a new
+page in Notes, so a sheet over Notes stays, as in v119 ([Shell](../shell/index.md),
+"Agent navigation shows an admitted app or Home, lowering Ask Alpha only
+where it would hide it").
 
 ```quint
-pure def canNavigate(c: Conversation, ticket: int, view: S::View): bool =
+pure def canNavigate(c: Conversation, ticket: int, view: S::View, keep: bool): bool =
   ticket == c.turn.send.id and c.turn.reply == Complete and c.turn.revision == c.context.revision
     and not(c.context.sensitive) and c.opening.id < ticket
 
-pure def navigate(c: Conversation, ticket: int, view: S::View): Moved =
-  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view })) }
+pure def navigate(c: Conversation, ticket: int, view: S::View, keep: bool): Moved =
+  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view, keep: keep })) }
 ```
 
 ### A complete reply may take the owner Home, once, as it may open a view
@@ -889,6 +893,31 @@ pure def navigateHome(c: Conversation, ticket: int): Moved =
   { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(NavigateHome({ turn: ticket })) }
 ```
 
+### A turn tells the agent the views this screen can show, so a reply never promises one it cannot open
+
+A view the shell does not have here never opens: Phone and Messages exist
+only on an Alpha image, and Contacts only where that image admits it
+([Shell](../shell/index.md), "Phone and Messages exist only on an Alpha
+image, and Contacts only where that image admits it"). So each turn that
+carries the view claim also names, by the id the agent declares each view
+by, Home and every app this shell has now (`uiViews`, `spec/agent/views.md`
+in eliza). The agent refuses any other view before it replies, so on a
+browser preview "open my messages" is answered that Messages can't open
+here, instead of a promise that it is opening. Which view a request means
+stays the model's choice; nothing matches the owner's words.
+
+```quint
+pure val everyView: List[S::View] = List(S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Clock, S::Reminders,
+  S::Browser, S::Camera, S::Photos, S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings)
+pure def screenViews(image: bool, contacts: bool): List[S::View] =
+  everyView.select(v => S::available({ ...S::initial, image: image, contacts: contacts }, v))
+pure def lawAViewIsNamedExactlyWhenTheShellHasIt(image: bool, contacts: bool, view: S::View): bool =
+  screenViews(image, contacts).includes(view) == S::available({ ...S::initial, image: image, contacts: contacts }, view)
+pure def lawABrowserPreviewNamesNoMessages(contacts: bool): bool =
+  not(screenViews(false, contacts).includes(S::Messages)) and not(screenViews(false, contacts).includes(S::Phone))
+pure def lawAnImageNamesMessages(contacts: bool): bool = screenViews(true, contacts).includes(S::Messages)
+```
+
 ### An explicit Files continuation opens only from the same app trail and Ask Alpha panel
 
 The completed turn names its source trail and panel in the shell request.
@@ -897,7 +926,7 @@ It uses the same single opening ticket as any other completed reply.
 ```quint
 pure def canNavigateFiles(c: Conversation, ticket: int, source: List[S::View], panel: S::Detent, route: int): bool =
   val showing = c.context.showing
-  canNavigate(c, ticket, S::Files) and not(c.turn.stopping) and route >= 0
+  canNavigate(c, ticket, S::Files, true) and not(c.turn.stopping) and route >= 0
     and (panel == S::Sheet or panel == S::Full)
     and match showing {
       | Home => source.length() == 0

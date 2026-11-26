@@ -328,8 +328,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
     expect([title(), told(), world.inbox.threadReads.length]).toEqual(["Revised term sheet", expect.stringContaining("https://northpoint.test/room"), threadReads]);
     expect(told()).not.toContain(termSheet.threadBody);
-    // The divergent thread copy only proves the selected read wins above. Gmail returns one body per message and history
-    // revision, so later thread pages carry the message's own text, which the phone may then keep as its saved copy.
+    // spec/app/inbox/message.md, "A thread control selects an exact position from the message and thread currently shown": the divergent thread copy only proves the selected read wins above; Gmail returns one body per message and history revision, so later thread pages carry the message's own text, which the phone may then keep as its saved copy.
     delete termSheet.threadBody;
 
     if (!phone) {
@@ -337,6 +336,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       world.ask.metadata = [];
       const expectedEmail = {
         from: termSheet.card.from, to: [...termSheet.card.to, ...termSheet.card.cc], subject: termSheet.card.subject, bodyText: termSheet.body,
+      };
+      /** Wait for the reply to finish, then lower Ask Alpha back to the bar over Inbox. */
+      const backToInbox = async () => {
+        await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
+        await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+        await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
       };
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
@@ -356,11 +361,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       expect(sent).not.toContain(termSheet.card.from);
       expect(sent).not.toContain("Use the following user-reviewed email");
       expect(world.ask.metadata[0]).toMatchObject({ reviewedEmail: expectedEmail });
-      await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
+      await backToInbox();
 
       // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
-      await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
       await confirm("Add to chat");
@@ -371,10 +374,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await afterDraw(() => expect(world.ask.said).toHaveLength(2));
       expect(world.ask.said[1]).toBe("");
       expect(world.ask.metadata[1]).toMatchObject({ reviewedEmail: expectedEmail });
-      await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
-
-      await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
+      await backToInbox();
     }
 
     // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
@@ -404,17 +404,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
     const preview = document.querySelector("[aria-label='Attachment contents']");
     expect([world.inbox.attachmentReads, preview?.textContent, preview?.querySelector("strong")]).toEqual([["g1/2"], attachmentText, null]);
-    await confirm("Close");
-    await until(alpha, runtime, Shown, (s) => s.attachment === 0);
+    // spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"
     if (phone) {
-      await action("Save agenda.txt");
       expect(world.inbox.savedAttachments.size).toBe(0);
       await confirm("Save");
-      await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
+      await until(alpha, runtime, Shown, (s) => s.keep.outcome === "Confirmed");
       expect([world.inbox.savedAttachments.get("agenda.txt"), told()]).toEqual([attachmentText, expect.stringContaining("Saved to Files")]);
-      await confirm("Close");
-      await until(alpha, runtime, Shown, (s) => s.attachment === 0);
     }
+    await confirm("Close");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
     await menu("Mark unread");
@@ -774,10 +772,13 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await menu("Forward");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Forward");
   expect(told()).toContain("actions.txt");
+  const toPlaceholder = () => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.placeholder;
+  const emptyTo = toPlaceholder();
   await fill("To", "reader@example.test");
   await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1 && s.stored && !s.pending && s.write.status === "Loaded");
+  expect([emptyTo, toPlaceholder()]).toEqual(["Email address", "Email address"]);
   await press("Send email");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
   expect(document.querySelector("[role=dialog]")?.textContent).toContain("actions.txt");

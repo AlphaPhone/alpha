@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
+import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
@@ -10,7 +13,9 @@ import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
 import { Machine as Reminders } from "../gen/app__reminders.effect.vibe";
 import { Machine as Alerts } from "../gen/app__reminders__alerts.effect.vibe";
+import assistant from "../src/assistant/index.tsx";
 import calendar from "../src/calendar/index.tsx";
+import { relistRequests } from "../src/calendar/agent.vibe";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
 import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
@@ -77,7 +82,7 @@ async function fromMonth(pill: string) {
  * pointer is coarse, so the window is measured again with a touch pointer.
  */
 async function widen(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
-  if ((await runtime.runPromise(View.use((view) => view.get()))).wide) return;
+  if ((await runtime.runPromise(Effect.flatMap(View, (view) => view.get()))).wide) return;
   const coarse = window.matchMedia("(pointer: coarse)");
   Object.defineProperty(coarse, "matches", { configurable: true, value: true });
   const original = window.matchMedia.bind(window);
@@ -178,7 +183,7 @@ it("Offers Search, the layouts and the Calendars sheet only on a wide screen (sp
     Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
     await drawn(() => window.dispatchEvent(new Event("resize")));
   };
-  // A phone measures its own window: 412 points is Alpha's portrait phone, 1024 a tablet's width.
+  // spec/app/calendar/index.md, "Several days side by side only on a wide screen": a phone measures its own window; 412 points is Alpha's portrait phone, 1024 a tablet's width.
   const { alpha, runtime } = await onCalendar(morning(true));
   await resize(412, 915);
   await until(alpha, runtime, View, (state) => state.front && !state.wide);
@@ -266,7 +271,7 @@ describe("Calendar without a connected account", () => {
     await press("Back to calendar");
     await until(alpha, runtime, Editor, (state) => !state.shown && state.banner === "Available");
 
-    // Google connects while the draft waits; Calendar reads it when it comes forward again.
+    // spec/app/calendar/editor.md, "Story: Keep my draft through a restart": Google connects while the draft waits; Calendar reads it when it comes forward again.
     world.calendar.down = false;
     await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" })));
     await until(alpha, runtime, View, (state) => !state.front);
@@ -280,6 +285,49 @@ describe("Calendar without a connected account", () => {
     await until(alpha, runtime, Editor, (state) => state.form === "NoForm" && state.write.outcome === "Confirmed");
     expect(world.calendar.phoneEvents.find(({ title }) => title === "Piano")).toMatchObject({ recurring: true });
     expect(world.calendar.events.some(({ title }) => title === "Piano")).toBe(false);
+  });
+
+  it("Shows only the way to clear a repeat a draft holds on the agent's calendar (spec/app/calendar/writing.md, \"The form offers with the agent's calendar only what it holds, and keeps the calendar chosen\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    world.calendar.down = true;
+    const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.owner > 0 && !state.connected && state.phoneRows === 1);
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.shown && state.form === "NewEvent" && state.receipts.status === "Loaded");
+    await fill("Title", "Piano");
+    await press("Weekly");
+    await until(alpha, runtime, Editor, (state) => state.titled && state.kept);
+    await press("Back to calendar");
+    await until(alpha, runtime, Editor, (state) => !state.shown && state.banner === "Available");
+    // spec/app/calendar/editor.md, "Story: Keep my draft through a restart": a draft kept before #1742 recorded no calendar, so once Google connects it opens on the agent's calendar still holding Weekly.
+    await runtime.runPromise(Effect.gen(function* () {
+      const { owner } = yield* Effect.flatMap(Editor, (editor) => editor.get());
+      const store = yield* KeyValueStore.KeyValueStore;
+      const key = `alpha.calendar.form.${owner}`;
+      const { calendar: _calendar, ...draft } = JSON.parse((yield* store.get(key)) ?? "{}") as Record<string, unknown>;
+      yield* store.set(key, JSON.stringify(draft));
+    }));
+
+    world.calendar.down = false;
+    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" })));
+    await until(alpha, runtime, View, (state) => !state.front);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.connected);
+    await press("Resume event draft");
+    await until(alpha, runtime, Editor, (state) => state.shown && state.receipts.status === "Loaded");
+    const drawnOptions = () => ["Once", "No repeat", "Daily", "Weekdays", "Weekly", "Video link", "None", "10 min"].filter((name) => button(name) !== undefined);
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/agent-calendar-adapter.ts:328 kept only a No repeat chip that sets the repeat back.
+    expect([button("Your agent's calendar")?.getAttribute("aria-pressed"), drawnOptions(), button("No repeat")?.getAttribute("aria-pressed")]).toEqual(["true", ["No repeat"], "false"]);
+    await press("No repeat");
+    await until(alpha, runtime, Editor, (state) => state.kept);
+    expect(drawnOptions()).toEqual([]);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NoForm" && state.write.outcome === "Confirmed");
+    expect(world.calendar.events.find(({ title }) => title === "Piano")).toBeDefined();
+    expect(world.calendar.phoneEvents.some(({ title }) => title === "Piano")).toBe(false);
   });
 
   it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
@@ -466,7 +514,7 @@ describe("Calendar without a connected account", () => {
     await press("Reopen reminder");
     await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
     await press("Reopen");
-    // spec/app/reminders/index.md: the completion still holds its five-second Undo, and the reopen write waits for it to end
+    // spec/app/reminders/index.md, "The reviewed reopen from Calendar restores the same reminder without an alert": the completion still holds its five-second Undo, and the reopen write waits for it to end
     expect(await alpha.runtime.runPromise(Reminders.use((reminders) => reminders.get()))).toMatchObject({ undo: { holding: "Held" } });
     await later(alpha, 5_100);
     await until(alpha, alpha.runtime, Reminders, (state) => state.undo.holding !== "Held" && state.write.outcome === "Confirmed");
@@ -572,12 +620,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
     expect(titles()).toEqual(["Standup", "Team lunch"]);
 
-    // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": only a phone has a calendar of its own.
-    expect(Boolean(button("Allow"))).toBe(phone);
+    // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": only a phone has a calendar of its own, and New event asks for it, with no notice asking.
+    expect(Boolean(button("Allow"))).toBe(false);
     if (phone) {
-      await press("Allow");
+      await press("New event");
       await until(alpha, runtime, View, (s) => s.phoneRows === 1);
-      expect([titles(), world.calendar.asked, Boolean(button("Allow"))]).toEqual([["Standup", "Team lunch", "Gym"], 1, false]);
+      await press("Back to calendar");
+      await until(alpha, runtime, Editor, (s) => !s.shown);
+      expect([titles(), world.calendar.asked]).toEqual([["Standup", "Team lunch", "Gym"], 1]);
     }
 
     // spec/app/calendar/index.md, "Picking a day in the week strip or the month dialog shows that day's timeline"
@@ -677,29 +727,24 @@ describe("on a phone", () => {
     await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
     await fill("Title", "Office closure");
     await press("All day");
-    // v119 45f6bed30 prototype/template.html:1423-1497: Video link, Repeat and Alert show on every new event.
-    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 shows Video link, Repeat and Alert on every new event of this phone's calendar, and the live adapter left them off the agent's calendar, not dimmed (45f6bed30 prototype/agent-calendar-adapter.ts:312, :328).
     const agentChosen = () => button("Your agent's calendar")?.getAttribute("aria-pressed") === "true";
-    const offered = () => ["Once", "Weekdays", "Video link", "None", "10 min"].map((name) => button(name)?.disabled);
-    expect([agentChosen(), offered()]).toEqual([true, [false, true, true, false, true]]);
-    await press("Weekdays");
-    await press("Video link");
-    await press("10 min");
+    const options = ["Once", "Daily", "Weekdays", "Weekly", "Video link", "None", "At start", "10 min", "1 hour"];
+    const drawnOptions = () => options.filter((name) => button(name) !== undefined);
+    const offered = () => options.map((name) => button(name)?.disabled);
     await until(alpha, runtime, Editor, (e) => e.titled && e.allDay && e.kept);
-    expect([agentChosen(), button("Once")?.getAttribute("aria-pressed"), button("Video link")?.getAttribute("aria-checked"), button("None")?.getAttribute("aria-pressed")])
-      .toEqual([true, "true", "false", "true"]);
+    expect([agentChosen(), drawnOptions()]).toEqual([true, []]);
     expect([button("Save event")?.getAttribute("aria-disabled"), Boolean(button("Open in Android Calendar"))]).toEqual(["false", false]);
-    // On this phone's calendar every repeat, the video link and the alerts are offered; going back to the agent's sets them back, in view.
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": on this phone's calendar every repeat, the video link and the alerts are offered; going back to the agent's sets them back and leaves them off.
     await press("This phone's calendar");
-    expect(offered()).toEqual([false, false, false, false, false]);
+    expect(offered()).toEqual(options.map(() => false));
     await press("Weekdays");
     await press("Video link");
     await press("10 min");
     await until(alpha, runtime, Editor, (e) => e.extras);
     await press("Your agent's calendar");
     await until(alpha, runtime, Editor, (e) => !e.extras);
-    expect([agentChosen(), button("Once")?.getAttribute("aria-pressed"), button("Video link")?.getAttribute("aria-checked"), button("None")?.getAttribute("aria-pressed")])
-      .toEqual([true, "true", "false", "true"]);
+    expect([agentChosen(), drawnOptions()]).toEqual([true, []]);
     expect(button("Save event")?.getAttribute("aria-disabled")).toBe("false");
     await press("This phone's calendar");
     await press("Weekdays");
@@ -877,6 +922,124 @@ describe("on a phone", () => {
     await until(mounted.alpha, runtime, View, (s) => s.phone.status === "Loaded" && s.google.status === "Loaded");
     await drawn(() => {});
     expect((await runtime.runPromise(Held.use((d) => d.get()))).hiding).toBe(0);
+  });
+
+  it("Approve in Ask Alpha what a reply asked for (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
+    const world = morning(true);
+    const { alpha } = await open(world, only("home", "assistant", "assistant/calendar"));
+    const ask = assistant.runtime(alpha);
+    await until(alpha, ask, Composer, (s) => s.slot === "Open");
+    await until(alpha, ask, Conversation, (s) => s.ready);
+    const card = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
+    const send = async (text: string) => {
+      const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      if (document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.hidden) await press("Type");
+      await fill("Message Alpha", text);
+      await press("Send");
+      await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+    };
+    const start = new Date(world.at(1, 9)).toISOString();
+    const end = new Date(world.at(1, 9.5)).toISOString();
+    world.ask.nextReplyChunks = ["I've proposed camera setup for 9:00 tomorrow. It's waiting for your approval."];
+    world.ask.nextActions = () => {
+      world.calendar.approvals.push(agentRequest("approval-1", {
+        action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+        fields: { title: "camera setup", description: "", location: "", startAt: start, endAt: end, isAllDay: false, timeZone: "UTC" },
+      }));
+      return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: "approval-1" } }];
+    };
+    await send("Put a 30 minute event called camera setup at 9 tomorrow.");
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(["camera setup", "Waiting for you"].map((text) => card().includes(text))).toEqual([true, true]);
+    expect(world.calendar.writes).toEqual([]);
+
+    await press("Approve");
+    await until(alpha, calendar.runtime(alpha), Changes, (a) => a.result === "Done");
+    expect(world.calendar.writes).toEqual(["approve approval-1", "create ev-camera-setup"]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Done, and seen in your calendar."));
+
+    world.ask.nextReplyChunks = ["You're welcome."];
+    await send("Thanks.");
+    expect([card(), document.body.textContent?.includes("Done, and seen in your calendar.")]).toEqual(["", false]);
+  });
+
+  /** Ask Alpha alone on `world`, with Calendar's card, and a way to send a reply that files `request` titled `title` at `hours` tomorrow. */
+  async function askingCalendar(world: ReturnType<typeof morning>) {
+    const { alpha } = await open(world, only("home", "assistant", "assistant/calendar"));
+    const ask = assistant.runtime(alpha);
+    const agent = calendar.runtime(alpha);
+    await until(alpha, ask, Composer, (s) => s.slot === "Open");
+    await until(alpha, ask, Conversation, (s) => s.ready);
+    const send = async (text: string) => {
+      const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      if (document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.hidden) await press("Type");
+      await fill("Message Alpha", text);
+      await press("Send");
+      await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+    };
+    const request = (id: string, title: string, hours: number) => agentRequest(id, {
+      action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+      fields: { title, description: "", location: "", startAt: new Date(world.at(1, hours)).toISOString(), endAt: new Date(world.at(1, hours + 0.5)).toISOString(), isAllDay: false, timeZone: "UTC" },
+    });
+    const file = async (id: string, title: string, hours: number) => {
+      world.ask.nextReplyChunks = [`I've proposed ${title} for tomorrow. It's waiting for your approval.`];
+      world.ask.nextActions = () => {
+        world.calendar.approvals.push(request(id, title, hours));
+        return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: id } }];
+      };
+      await send(`Put ${title} on my calendar tomorrow.`);
+    };
+    /** The owner declines in Calendar the request it holds; Calendar reads nothing again by hand. */
+    const declineInCalendar = async () => {
+      await agent.runPromise(Effect.flatMap(Changes, (machine) => Effect.flatMap(machine.get(), (a) => machine.send({ type: "decline", filing: a.filing }, "Owner"))));
+      await until(alpha, agent, Changes, (a) => a.result === "Declined");
+    };
+    return { alpha, agent, file, request, declineInCalendar };
+  }
+
+  const askedCard = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
+
+  it("Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
+    const world = morning(true);
+    const { alpha, agent, file } = await askingCalendar(world);
+    await file("approval-earlier-reply", "camera setup", 9);
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+
+    await file("approval-newer-reply", "lens check", 11);
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await drawn(() => {});
+    expect(["camera setup", "lens check"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect(world.calendar.writes).toEqual([]);
+
+    await press("Decline");
+    await vi.waitFor(() => expect(askedCard()).toContain("lens check"));
+    expect(askedCard()).not.toContain("camera setup");
+    await press("Approve");
+    await until(alpha, agent, Changes, (a) => a.result === "Done");
+    expect(world.calendar.writes).toEqual(["reject approval-earlier-reply", "approve approval-newer-reply", "create ev-lens-check"]);
+  });
+
+  it("A request filed before a reply is never approved from that reply's card (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
+    const world = morning(true);
+    const { alpha, agent, file, request, declineInCalendar } = await askingCalendar(world);
+    world.calendar.approvals.push(request("approval-filed-before", "old booking", 14));
+    await agent.runPromise(relistRequests);
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+
+    await file("approval-this-reply", "studio call", 16);
+    await drawn(() => {});
+    expect([askedCard(), button("Approve")]).toEqual(["", undefined]);
+    const held = await agent.runPromise(Effect.flatMap(Changes, (machine) => machine.get()));
+    const other = held.filing + 1;
+    const tried = await agent.runPromise(Effect.exit(Effect.flatMap(Changes, (machine) => machine.send({ type: "approve", filing: other }, "Owner"))));
+    await drawn(() => {});
+    expect([tried._tag, (await agent.runPromise(Effect.flatMap(Changes, (machine) => machine.get()))).stage, world.calendar.writes]).toEqual(["Failure", "Awaiting", []]);
+
+    await declineInCalendar();
+    await vi.waitFor(() => expect(askedCard()).toContain("studio call"));
+    await press("Approve");
+    await until(alpha, agent, Changes, (a) => a.result === "Done");
+    expect(world.calendar.writes).toEqual(["reject approval-filed-before", "approve approval-this-reply", "create ev-studio-call"]);
   });
 });
 

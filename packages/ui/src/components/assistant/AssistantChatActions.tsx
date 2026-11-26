@@ -1,5 +1,5 @@
-import { Camera, Clock, Paperclip, Plus, Search, Sparkles } from "lucide-react";
-import type { ReactNode } from "react";
+import { Camera, Paperclip, Plus, Search, Sparkles } from "lucide-react";
+import { type ReactNode, useRef } from "react";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { cn } from "../../lib/cn.ts";
@@ -14,9 +14,6 @@ export interface AssistantChatActionsProps {
   disabled?: boolean;
   onAttach?: () => void;
   onSearch?: () => void;
-  onNew?: () => void;
-  making?: boolean;
-  onHistory?: () => void;
 }
 
 interface ChatActionsMenuProps {
@@ -27,15 +24,27 @@ interface ChatActionsMenuProps {
   children: ReactNode;
 }
 
+/**
+ * The + and its menu. Opened by a touch or a click, it gives the + its focus back without a ring when it closes, as
+ * v119's + showed none (45f6bed30 template.html:59-67); opened from the keyboard, the ring returns with the focus.
+ */
 function ChatActionsMenu({ placement, label, triggerId, disabled, children }: ChatActionsMenuProps) {
   const comms = placement === "comms";
   const sideOffset = comms ? 19 : 20;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pointerRef = useRef(false);
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button id={triggerId} variant="ghost" size="icon" aria-label={label} disabled={disabled} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
+        <Button ref={triggerRef} id={triggerId} variant="ghost" size="icon" aria-label={label} disabled={disabled} className="hover:bg-transparent disabled:opacity-40"
+          onPointerDown={() => { pointerRef.current = true; }} onKeyDown={() => { pointerRef.current = false; }}><Plus /></Button>
       </MenuTrigger>
       <MenuContent side="top" align="start" alignOffset={placement === "sheet" ? -16 : -57} sideOffset={sideOffset}
+        onCloseAutoFocus={(event) => {
+          if (!pointerRef.current) return;
+          event.preventDefault();
+          triggerRef.current?.focus({ preventScroll: true, focusVisible: false });
+        }}
         className={cn("rounded-tile border-0 bg-background p-2 shadow-chat-actions dark:shadow-chat-actions-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3 [&>[role=menuitem]_svg]:size-5.5", comms ? "min-w-59" : "min-w-55")}>
         {children}
       </MenuContent>
@@ -43,15 +52,13 @@ function ChatActionsMenu({ placement, label, triggerId, disabled, children }: Ch
   );
 }
 
-/** The available Ask Alpha actions beside a composer. */
-export function AssistantChatActions({ placement, triggerId, disabled, onAttach, onSearch, onNew, making, onHistory }: AssistantChatActionsProps) {
-  const visible = Boolean(onAttach || onSearch || onNew || making || onHistory);
+/** The available Ask Alpha actions beside a composer, as v119 offered them (45f6bed30 template.html:59-67): Attach media and Search chat. */
+export function AssistantChatActions({ placement, triggerId, disabled, onAttach, onSearch }: AssistantChatActionsProps) {
+  const visible = Boolean(onAttach || onSearch);
   return (
     <ChatActionsMenu placement={placement} label="Chat actions" triggerId={triggerId} disabled={disabled || !visible}>
       {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
       {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
-      {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
-      {onHistory ? <MenuItem onSelect={onHistory}><Clock aria-hidden />Chat history</MenuItem> : null}
     </ChatActionsMenu>
   );
 }

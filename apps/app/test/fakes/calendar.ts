@@ -59,6 +59,8 @@ export interface CalendarScene {
   readonly calendars: AndroidCalendarRow[];
   phoneEvents: AndroidCalendarEvent[];
   granted: boolean;
+  /** A read of the agent's calendar feed is taken and never answered, as by an agent still busy starting. */
+  silent: boolean;
   asked: number;
   /** The phone's journal of creations, by creation identity; a create the phone cannot confirm; how often Android Calendar was handed a form. */
   readonly creations: Map<string, string>;
@@ -74,7 +76,7 @@ export interface CalendarScene {
 export function calendarScene(): CalendarScene {
   return {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
-    calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, asked: 0,
+    calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, silent: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0, handoffs: [],
     control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [],
   };
@@ -134,7 +136,7 @@ export function agentEvent(title: string, begin: number, end: number, more: Part
   };
 }
 
-const etag = (event: FakeEvent) => (typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : "");
+const etag = (event: FakeEvent) => { const tag = event.metadata["etag"]; return typeof tag === "string" ? tag : ""; };
 const bump = (event: FakeEvent) => { event.metadata = { ...event.metadata, etag: String(Number(etag(event)) + 1) }; };
 const never = () => new Promise<Response>(() => {});
 const base = "/api/lifeops/calendar";
@@ -188,6 +190,7 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
     (request, url) => (request.method === "GET" && url.pathname === `${base}/links` ? Response.json({ links: scene.control.links.map((state, at) => ({ linkId: `l${at}`, localEventId: `e${at}`, destination: primary, providerEventId: null, handoffKey: "", localOnly: false, staged: false, state })) }) : undefined),
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${base}/feed`) return;
+      if (scene.silent) return never();
       if (scene.down) return Response.json({ error: "starting" }, { status: 503 });
       const [timeMin, timeMax] = [url.searchParams.get("timeMin") ?? "", url.searchParams.get("timeMax") ?? ""];
       const [from, to] = [Date.parse(timeMin), Date.parse(timeMax)];

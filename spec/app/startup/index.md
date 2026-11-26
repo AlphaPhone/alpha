@@ -331,11 +331,14 @@ pure def sometimesAlphaIsTheAssistantSurface(s: Boot): bool = shows(s, Chat) and
 
 This holds by how Home is drawn, and guards it. The mark is one cover,
 drawn from the first frame: Alpha's thin black mark, 56 points tall, alone
-on a white page, which waits 0.3 seconds and then fades in over 0.7
-seconds. It stays, without starting over, while the shell, sign-in and the
-walkthrough are still to answer, and until Home has drawn its first
-complete frame, its tiles, cards and Ask Alpha together; Home is laid out
-under it and takes no input, and shows whole the moment it goes.
+on a white page whatever look the owner keeps, which waits 0.3 seconds and
+then fades in over 0.7 seconds. It stays, without starting over, while the
+shell, sign-in and the walkthrough are still to answer, and until Home has
+drawn its first complete frame, its tiles, cards and Ask Alpha together;
+Home is laid out under it and takes no input, and shows whole the moment it
+goes. The assistant-only surface draws nothing of Home, so there the mark
+waits only until Home is known to draw nothing and chat has drawn, never
+for Home to settle.
 
 ```quint
 pure def marked(s: Boot): bool = s.connection == Pending

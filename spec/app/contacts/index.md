@@ -164,16 +164,25 @@ pure def pick(s: Contacts, chip: Chip): Moved = relisted(s.sought, chip, s)
 
 ### Back from the search field clears the query and returns to Contacts
 
-The search field opens from the list. Back clears its query and returns
-to All contacts. A filter that Alpha applied can be cleared from the list
-without opening the field.
+The search field opens from the list. Back, Android's or the field's own
+where one is drawn, closes the field first, even with nothing typed, clears
+its query and returns to All contacts; only the next Back leaves Contacts.
+As in Sunday's v119, while Alpha is the phone's launcher the field draws no
+Back of its own and runs the full width, in Contacts and on Phone's
+Contacts tab alike. A filter that Alpha applied can be cleared from the list
+without opening the field. As in Sunday's v119, opening the field over a
+filter that Alpha applied clears that filter first: the field opens empty
+over All contacts. Words the owner typed stay in the field. `applied` is
+whether the words on the list are a filter Alpha applied.
 
 ```quint
 pure def canBeginSearch(s: Contacts): bool =
   readable(s) and not(s.searching) and not(s.opened) and s.form == Shut
 
-pure def beginSearch(s: Contacts): Moved =
-  { state: { ...s, searching: true }, out: List() }
+pure def beginSearch(s: Contacts, applied: bool): Moved =
+  val opened = { ...s, searching: true }
+  if (applied and s.sought) relisted(false, Everyone, opened)
+  else { state: opened, out: List() }
 
 pure def canEndSearch(s: Contacts): bool =
   s.front and not(s.opened) and s.form == Shut and (s.searching or narrowed(s))

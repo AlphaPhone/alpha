@@ -17,7 +17,8 @@ it is the [composer's](./composer.md).
 A conversation is named by the agent's number for it; none showing is 0.
 Creating a conversation or a fork is an [attempt](../../kit/attempt.md)
 under its own number, and a fork starts at one of the messages of the
-conversation showing.
+conversation showing. A conversation made new here, not a fork, is known
+to hold nothing until its first page answers.
 
 ```quint
 import read as R from "../../kit/read"
@@ -27,13 +28,13 @@ import extend as X from "./extend"
 type Chats = {
   list: R::Read, ids: List[int], chosen: int, origin: int,
   page: R::Read, around: int, messages: int,
-  make: A::Attempt, forkAt: int,
+  make: A::Attempt, forkAt: int, fresh: bool,
 }
 
 pure val initial: Chats = {
   list: R::unread, ids: List(), chosen: 0, origin: 0,
   page: R::unread, around: 0, messages: 0,
-  make: A::plan(0), forkAt: 0,
+  make: A::plan(0), forkAt: 0, fresh: false,
 }
 
 pure def listedHas(conversation: int, c: Chats): bool = c.ids.includes(conversation)
@@ -61,7 +62,7 @@ pure def readPage(conversation: int, around: int, ticket: int): Effect =
 
 pure def shown(conversation: int, around: int, origin: int, c: Chats): Moved =
   val page = R::ask(c.page)
-  { state: { ...c, chosen: conversation, around: around, origin: origin, page: page, messages: 0 },
+  { state: { ...c, chosen: conversation, around: around, origin: origin, page: page, messages: 0, fresh: false },
     out: List(readPage(conversation, around, page.ticket)) }
 
 pure def making(c: Chats): bool = c.make.outcome == A::Sent
@@ -94,8 +95,12 @@ pure val weight_listed = 3
 
 ### The list of conversations is read whenever it is shown
 
-Chat history opens as a sheet over Ask Alpha. Back closes that sheet before
-it lowers Ask Alpha.
+As in Alpha's Sunday v119 build (old-line Alpha 45f6bed30,
+settings-adapter.ts:1038-1043), the owner lists the conversations, restores
+one and starts a new one from Agent activity in Settings. Ask Alpha's own
+chat actions offer only Attach media and Search chat (template.html:59-67).
+Once that menu closes, a + a touch opened keeps its focus with no ring, as
+v119's + showed none; a + opened from the keyboard keeps its ring.
 
 ```quint
 pure def browse(c: Chats): Moved =
@@ -118,7 +123,7 @@ pure def listed(c: Chats, ticket: int, ok: bool, ids: List[int]): Chats =
   { ...c, list: R::answer(c.list, ok), ids: listing, chosen: chosen,
     origin: if (chosen > 0 and listing.includes(c.origin) and c.origin != chosen) c.origin else 0,
     page: if (stays) c.page else X::dropped(c.page), around: if (stays) c.around else 0,
-    messages: if (stays) c.messages else 0 }
+    messages: if (stays) c.messages else 0, fresh: stays and c.fresh }
 ```
 
 ### A new chat holds no conversation's page
@@ -144,7 +149,7 @@ pure def choose(c: Chats, conversation: int, replying: bool, holding: bool): Mov
 pure def canPaged(c: Chats, ticket: int, messages: int): bool = R::canAnswer(c.page, ticket) and messages >= 0
 
 pure def paged(c: Chats, ticket: int, ok: bool, messages: int): Chats =
-  { ...c, page: R::answer(c.page, ok), messages: if (ok) messages else c.messages }
+  { ...c, page: R::answer(c.page, ok), messages: if (ok) messages else c.messages, fresh: false }
 ```
 
 ### Older or newer messages are read around a message of the conversation showing
@@ -375,12 +380,34 @@ pure def canMade(c: Chats, ticket: int, conversation: int): bool =
 
 pure def made(c: Chats, ticket: int, confirmed: bool, known: bool, conversation: int): Moved =
   val ended = { ...c, make: A::conclude(c.make, confirmed, known) }
-  val added = shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+  val read = shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+  val added = { ...read, state: { ...read.state, fresh: c.forkAt == 0 } }
   val again = browse(added.state)
   if (confirmed and known)
     if (c.list.status == R::Loading) { state: again.state, out: added.out.concat(again.out) } else added
   else if (not(known)) browse(ended)
   else { state: ended, out: List() }
+```
+
+### A conversation made new here shows what it holds while its page is read
+
+As in v119 (45f6bed30 template.html:4721-4726), the first turn of a new
+conversation stays in place: the message just sent, or in Talk what was
+heard and the dots after it, never give way to loading rows while the page
+of a conversation Alpha just made is read, since it holds nothing yet. A
+fork, or a conversation already there, shows as loading until its page
+answers.
+
+```quint
+pure def loading(c: Chats): bool = c.page.status == R::Loading and not(c.fresh)
+
+pure def alwaysOnlyAConversationMadeNewHereIsFresh(c: Chats): bool =
+  c.fresh implies (c.chosen > 0 and c.origin == 0)
+
+pure def stepAConversationMadeNewNeverShowsLoading(before: Chats, via: str, after: Chats): bool =
+  (via == "made" and after.chosen != before.chosen and before.forkAt == 0) implies not(loading(after))
+
+pure def sometimesAConversationMadeNewShowsWhileRead(c: Chats): bool = c.fresh and c.page.status == R::Loading
 ```
 
 ### A list asked before a conversation was made is left behind, so its answer never takes that conversation away

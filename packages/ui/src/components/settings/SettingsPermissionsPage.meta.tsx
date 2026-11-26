@@ -2,8 +2,9 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { fullHeight } from "./samples.ts";
 import type { SettingsPermissionsPageProps } from "./SettingsPermissionsPage.tsx";
+import type { AndroidStart } from "./vocabulary.ts";
 
-const onAndroid = fn();
+const onAndroid = fn<(start: AndroidStart) => void>();
 const onNotifications = fn();
 
 export const meta: ComponentMeta<SettingsPermissionsPageProps> = {
@@ -26,14 +27,14 @@ export const meta: ComponentMeta<SettingsPermissionsPageProps> = {
     Waiting: { grants: { camera: "waiting", microphone: "waiting", location: "waiting", calendar: "waiting", photos: "waiting", files: "waiting", notifications: "waiting" } },
   },
   play: {
-    Browser: async ({ canvasElement }) => {
+    Browser: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAndroid.mockClear();
       onNotifications.mockClear();
       const canvas = within(canvasElement);
-      expect(canvas.getByText("Ask")).toBeTruthy();
-      expect(canvas.getByText("Chosen files")).toBeTruthy();
-      expect(canvas.queryByText("Calendar")).toBeNull();
-      expect(canvas.queryByRole("button", { name: /Camera|Alpha’s permissions|Access to all files/ })).toBeNull();
+      await expect(canvas.getByText("Ask")).toBeTruthy();
+      await expect(canvas.getByText("Chosen files")).toBeTruthy();
+      await expect(canvas.queryByText("Calendar")).toBeNull();
+      await expect(canvas.queryByRole("button", { name: /Camera|Alpha’s permissions|Access to all files/ })).toBeNull();
       await userEvent.click(canvas.getByRole("button", { name: /Notifications.*Allowed/ }));
       await expect(onNotifications.mock.calls.length).toBe(1);
       await expect(onAndroid.mock.calls.length).toBe(0);

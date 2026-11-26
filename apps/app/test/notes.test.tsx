@@ -26,13 +26,19 @@ import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, only, open, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, notesRoutes, prepared } from "./fakes/notes.ts";
 import { answering, fetched } from "./fakes/routes.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
+
+const rowDrawn = vi.hoisted(() => vi.fn());
+vi.mock("@repo/ui", async (original) => {
+  const ui = await original<typeof import("@repo/ui")>();
+  return { ...ui, NoteRow: (props: Parameters<typeof ui.NoteRow>[0]) => { rowDrawn(); return <ui.NoteRow {...props} />; } };
+});
 
 const listed = () => [...document.querySelectorAll("[aria-label=Notes] button")].flatMap((row) => row.getAttribute("aria-label")?.startsWith("Open ") ? [row.getAttribute("aria-label")] : []);
 
@@ -133,8 +139,10 @@ describe("Notes", () => {
     await until(alpha, target, CalendarForm, (state) => state.shown && state.kept);
     const state = await target.runPromise(CalendarForm.use((form) => form.get()));
     const fields = await target.runPromise(kept(state.day, state.owner));
-    expect(fields).toMatchObject({ title: row, notes: expect.stringContaining(words), noteOrigin: {
-      agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2, revision: expect.any(String),
+    const noted: unknown = expect.stringContaining(words);
+    const revision: unknown = expect.any(String);
+    expect(fields).toMatchObject({ title: row, notes: noted, noteOrigin: {
+      agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2, revision,
     } });
     expect(fields.calendar).toBe(destination);
     expect(new Date(fields.begin).getHours()).toBe(9);
@@ -268,6 +276,25 @@ describe("Notes", () => {
     expect(world.notes.notes.filter((row) => row.title === "Studio invoice").map((row) => row.body.trim())).toEqual(["Send by Monday"]);
   });
 
+  it("A new note's editor stays as it is typed and saved, and the list under it is not drawn again (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await control("New note");
+    await press("New note");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
+    const title = document.querySelector("input[aria-label='Title']");
+    await fill("Title", "Studio invoice");
+    await until(alpha, runtime, Editor, (state) => waiting(state));
+    rowDrawn.mockClear();
+    await fill("Note", "Send by Friday");
+    await until(alpha, runtime, Editor, (state) => state.draft.edits > 1);
+    expect(rowDrawn).not.toHaveBeenCalled();
+    await later(alpha, 800);
+    await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0);
+    expect(title?.isConnected).toBe(true);
+  });
+
   it("Write a note (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
     const world = scene();
     const { alpha, runtime } = await openNotesFromHome(world);
@@ -317,7 +344,7 @@ describe("Notes", () => {
     const world = scene();
     const { alpha, runtime } = await openNotesFromHome(world);
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    // Rows carry no menu of their own, as v121's had none.
+    // spec/app/notes/index.md, "Story: Organise my notes": rows carry no menu of their own, as v121's had none.
     expect(button("Gift ideas · Priya options")).toBeUndefined();
     await press("Open Gift ideas · Priya");
     await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
@@ -331,7 +358,7 @@ describe("Notes", () => {
 
   it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openSavedVoiceNote(world);
+    await openSavedVoiceNote(world);
     const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
     try {
       const reopenShare = async () => {
@@ -488,6 +515,21 @@ describe("Notes", () => {
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe("Summarize this for me");
     expect(button("Remove Design sync")).toBeDefined();
     const question = "What did we decide about notifications in this transcript?";
+    /** Leave the open note, reopen Design sync and ask Alpha about its transcript again. */
+    const askAgainAboutSync = async () => {
+      await press("Back to notes");
+      await until(alpha, runtime, Voice, (state) => !state.showing);
+      await control("Open Design sync");
+      await press("Open Design sync");
+      await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
+      await press("Ask Alpha about this transcript");
+      await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    };
+    /** The `turn`th question went with the selected Design sync note and its transcript flag. */
+    const expectTranscriptTurn = (turn: number) => expect(world.ask.metadata?.[turn]).toMatchObject({
+      observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
+      useSelectedVoiceNoteTranscript: true,
+    });
     await fill("Message Alpha", question);
     await press("Remove Design sync");
     await until(alpha, runtime, Composer, (state) => !state.editor.transcript);
@@ -496,13 +538,7 @@ describe("Notes", () => {
     await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
     await press("Ask Alpha about this transcript");
     await drawn(async () => { expect((await runtime.runPromise(Shell.use((shell) => shell.get()))).assistant).toBe("Bar"); });
-    await press("Back to notes");
-    await until(alpha, runtime, Voice, (state) => !state.showing);
-    await control("Open Design sync");
-    await press("Open Design sync");
-    await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
-    await press("Ask Alpha about this transcript");
-    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    await askAgainAboutSync();
     expect(button("Remove Design sync")).toBeDefined();
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe(question);
     await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
@@ -510,31 +546,19 @@ describe("Notes", () => {
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question])));
     expect(world.ask.said[0]).not.toContain("Use the transcript");
     expect(world.ask.said[0]).not.toContain("Four heights");
-    expect(world.ask.metadata[0]).toMatchObject({
-      observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
-      useSelectedVoiceNoteTranscript: true,
-    });
+    expectTranscriptTurn(0);
     await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
     expect(button("Remove Design sync")).toBeUndefined();
 
     // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
     await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-    await press("Back to notes");
-    await until(alpha, runtime, Voice, (state) => !state.showing);
-    await control("Open Design sync");
-    await press("Open Design sync");
-    await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
-    await press("Ask Alpha about this transcript");
-    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    await askAgainAboutSync();
     await fill("Message Alpha", "");
     await until(alpha, runtime, Composer, (state) => state.away === "Free" && state.editor.transcript && !state.editor.text && state.draft.sync !== "Saving");
     await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected && state.observing);
     await press("Send");
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question, ""])));
-    expect(world.ask.metadata[1]).toMatchObject({
-      observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
-      useSelectedVoiceNoteTranscript: true,
-    });
+    expectTranscriptTurn(1);
     await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
   });
 
@@ -647,6 +671,12 @@ describe("Notes", () => {
     await ask("open the note titled shopping list", true);
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(1)));
     expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { viewDelivery: "completed-action", uiNotesEditor: "saved-note-v1" } });
+    // spec/app/assistant/index.md, "A turn tells the agent the views this screen can show, so a reply never promises one it cannot open": a browser preview names Home and its apps, never Phone, Messages or Contacts.
+    const shownViews = (world.ask.metadata[0] as { voiceUi: { uiViews: string[] } }).voiceUi.uiViews;
+    expect(shownViews).toEqual(expect.arrayContaining(["home", "notes", "calendar", "clock", "browser", "settings"]));
+    expect(shownViews).not.toContain("messages");
+    expect(shownViews).not.toContain("phone");
+    expect(shownViews).not.toContain("contacts");
     expect(world.notes.views[0]).toMatchObject({ path: "claim", body: { viewId: "notes", targetProtocol: "saved-note-v1" } });
     expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
     await rendered(async () => {
@@ -747,6 +777,47 @@ describe("Notes", () => {
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(6)));
     expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "browser" } });
     expect([results()[5], showing(await shell(), "Browser")]).toEqual([{ switched: true }, true]);
+  });
+
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
+  it("A note the agent opens keeps Ask Alpha's sheet or full screen, also over Notes, while asking for Notes itself under its sheet lowers it", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNamedShoppingNote(world);
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
+    await until(alpha, runtime, Conversation, (s) => s.ready);
+    const shell = () => alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
+    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "raise", detent }))));
+    const ask = async (text: string, viewId: string, saved: boolean) => {
+      world.ask.nextReplyChunks = ["Here it is."];
+      world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, saved)];
+      const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      await rendered(() => expect(composerField()?.hidden).toBe(false));
+      await fill("Message Alpha", text);
+      await press("Send");
+      await until(alpha, runtime, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+      await until(alpha, runtime, Conversation, (c) => c.opening.id === turn && c.opening.outcome !== "Sent");
+      return shell();
+    };
+
+    // From Home under the sheet: Notes opens on the named note and the sheet stays.
+    await raise("Sheet");
+    expect(await ask("open the note titled shopping list", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("shopping list"));
+
+    // Notes already showing under the sheet: the note is a new page there, so the sheet stays, as in v119.
+    world.notes.target = "enclave";
+    expect(await ask("open my enclave launch note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("Enclave launch"));
+
+    // The full screen stays for a note too, as every action of the agent's keeps Ask Alpha where it is.
+    await raise("Full");
+    world.notes.target = "groceries";
+    expect(await ask("open my groceries note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Full" });
+
+    // Asked for Notes itself, the view already showing under the sheet: Ask Alpha lowers so Notes shows.
+    await drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "goBack" }))));
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    expect(await ask("show me notes", "notes", false)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {

@@ -1,9 +1,12 @@
 // spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 import type { TurnResult } from "@elizaos/agent"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
+import { screenViews } from "../../gen/app__assistant.effect.vibe"
 import { resent } from "../../gen/app__assistant__context.effect.vibe"
 import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
-import { type Detent, type View, parseEvent } from "../../gen/app__shell.effect.vibe"
+import { type Detent, Machine as Shell, type View, parseEvent } from "../../gen/app__shell.effect.vibe"
+import { opensWithoutCard } from "../../gen/app__browser.effect.vibe"
+import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import { readOperation } from "@elizaos/agent"
 import { Agent } from "../platform/agent.vibe"
 import { AgentPages, type AgentPage } from "../platform/browser.vibe"
@@ -35,8 +38,8 @@ schema Handoff {
 }
 
 schema Prepared { readonly values: Handoff }
-/** A page eliza's BROWSER_OPEN asked the screen `clientId` to show for the owner's Open. */
-schema PageAsked { readonly actionName: "BROWSER_OPEN"; readonly mode: "open"; readonly operation: Schema.Unknown; readonly clientId: string }
+/** A page eliza's BROWSER_OPEN asked the screen `clientId` to open: at once when `atOnce`, else for the owner's Open. */
+schema PageAsked { readonly actionName: "BROWSER_OPEN"; readonly mode: "open"; readonly operation: Schema.Unknown; readonly clientId: string; readonly atOnce?: boolean }
 const pageAskedOf = Schema.decodeUnknownOption(PageAsked)
 const Claimed = Schema.Struct({ claimId: Schema.String, target: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("saved-note"), noteId: Schema.String })) })
 schema Answered { readonly ok: boolean }
@@ -54,7 +57,7 @@ export interface PageHeld {
   readonly page: AgentPage
 }
 
-type TypedHeld = Held | PageHeld | { readonly asked: number; readonly continueFiles: Effect.Effect<void> }
+type TypedHeld = Held | PageHeld | { readonly asked: number; readonly continueFiles: Effect.Effect<void> } | { readonly asked: number; readonly openAsked: Effect.Effect<void> }
 
 /** Where an agent's view goes: Home, or one of Alpha's apps. */
 type Place = View | "Home"
@@ -62,7 +65,7 @@ type Place = View | "Home"
 interface SpokenView {
   readonly held: Held | PageHeld
   readonly current: Effect.Effect<boolean>
-  readonly front: (place: Place) => Effect.Effect<boolean>
+  readonly front: (place: Place, keep: boolean) => Effect.Effect<boolean>
   readonly completed: Deferred.Deferred<void>
 }
 
@@ -74,6 +77,12 @@ function viewPlace(viewId: string): Place | undefined {
   if (viewId.toLowerCase() === homeViewId) return "Home"
   const opened = parseEvent({ type: "openView", view: `${viewId.charAt(0).toUpperCase()}${viewId.slice(1).toLowerCase()}` })
   return opened?.type === "openView" ? opened.view : undefined
+}
+
+// spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
+/** Whether a handoff opens a saved note: a new page in Notes, brought forward under Ask Alpha at its height. */
+function savedNote(handoff: Handoff): boolean {
+  return handoff.subview === "saved-note-v1"
 }
 
 /** The place a handoff names, if Alpha has it: a saved note only in Notes. */
@@ -92,12 +101,21 @@ export service Views {
   current(): number!!
   hold(ticket: number, held: TypedHeld): void!!
   take(ticket: number): Option.Option<TypedHeld>!!
-  spoken(held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>): void!!
+  spoken(held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, keep: boolean) => Effect.Effect<boolean>): void!!
+  /** The ids of the views this screen can show now: Home and every app the shell has here. */
+  shown(): readonly string[]!!
   readonly heard: Queue.Dequeue<SpokenView>
+}
+
+// spec/app/assistant/index.md, "A turn tells the agent the views this screen can show, so a reply never promises one it cannot open"
+/** The ids the agent declares the views of a shell that is or is not an image, and does or does not admit Contacts, by. */
+export function screenViewIds(image: boolean, contacts: boolean): readonly string[] {
+  return [homeViewId, ...screenViews(image, contacts).map((view) => view.toLowerCase())]
 }
 
 export const handoffs = Layer.effect(Views, effect {
   const clientId = renderer()
+  const shell = try Shell
   const heard = try Queue.unbounded<SpokenView>()
   let latest = 0
   let typed: { readonly ticket: number; readonly held: TypedHeld } | undefined
@@ -110,6 +128,10 @@ export const handoffs = Layer.effect(Views, effect {
       return latest
     }),
     current: () => sync(() => latest),
+    shown: effect () => {
+      const now = try shell.get()
+      return screenViewIds(now.image, now.contacts)
+    },
     hold: (ticket: number, held: TypedHeld) => sync(() => { if (held.asked === latest) typed = { ticket, held } }),
     take: (ticket: number) => sync(() => {
       if (typed?.ticket !== ticket) return Option.none()
@@ -117,7 +139,7 @@ export const handoffs = Layer.effect(Views, effect {
       typed = undefined
       return Option.some(found)
     }),
-    spoken: effect (held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>) => {
+    spoken: effect (held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, keep: boolean) => Effect.Effect<boolean>) => {
       const completed = try Deferred.make<void>()
       try Queue.offer(heard, { held, current, front, completed })
       try Deferred.await(completed)
@@ -134,13 +156,13 @@ export function resendWithoutMode(result: TurnResult | undefined, direct: boolea
 /** The direct Files requests a turn asks for: with the review cards a typed turn shows, or with none, as a spoken turn has. */
 export type DirectFilesMode = "direct-files-v1" | "direct-files-only-v1"
 
-// spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-/** What a turn told of the screen adds so the agent may hand back a view to open on it: views as completed actions, this screen, and its saved-note editor. */
-export function delivery(clientId: string, directFiles?: DirectFilesMode) {
+// spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"; spec/app/assistant/index.md, "A turn tells the agent the views this screen can show, so a reply never promises one it cannot open"
+/** What a turn told of the screen adds so the agent may hand back a view to open on it: views as completed actions, this screen, the views it can show, and its saved-note editor. */
+export function delivery(clientId: string, shown: readonly string[], directFiles?: DirectFilesMode) {
   return {
     viewDelivery: "completed-action" as const,
     viewClientId: clientId,
-    voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const,
+    voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const, uiViews: [...shown],
       ...(directFiles === undefined ? {} : { agentActionMode: directFiles }) },
   }
 }
@@ -151,24 +173,36 @@ export function preparedIn(results: ReadonlyArray<{ readonly action: string; rea
   return found?.navigationBinding.clientId === clientId ? found : undefined
 }
 
-/** The page this screen was asked to open: eliza's typed open of the reply's last `BROWSER_OPEN` that opened one, if any. */
+/** The page this screen was asked to open: eliza's typed open of the reply's last `BROWSER_OPEN` that opened one, and whether it opens at once, if any. */
 export function pageIn(results: ReadonlyArray<{ readonly action: string; readonly data: unknown }>, clientId: string): AgentPage | undefined {
   return results.flatMap((result): AgentPage[] => {
     const asked = result.action === "BROWSER_OPEN" ? Option.getOrUndefined(pageAskedOf(result.data)) : undefined
     const operation = asked?.clientId === clientId ? readOperation(asked.operation)?.operation : undefined
-    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation }] : []
+    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation, atOnce: asked.atOnce === true }] : []
   }).at(-1)
 }
 
-/** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
-effect function navigated(ticket: number, place: Place): boolean!!Conversation.Machine {
+// spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+/** Whether a page the owner's whole message asked for may open with no card: the phone read and settled the owner's preferences, and Ask before Alpha acts is off. */
+export function opensAtOnce(prefs: Prefs.Preferences): boolean {
+  return Prefs.free(prefs) && opensWithoutCard(true, Prefs.asksBeforeActing(prefs, "WebAction"))
+}
+
+/** `page` as it may open now: at once only while the owner lets Alpha act on the web without asking, else on the Browser's card. */
+effect function asAllowed(page: AgentPage): AgentPage!!Prefs.Machine {
+  if (!page.atOnce || opensAtOnce(try (try Prefs.Machine).get())) return page
+  return { ...page, atOnce: false }
+}
+
+/** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. `keep` leaves Ask Alpha where it is, as a saved note's opening does. */
+effect function navigated(ticket: number, place: Place, keep = false): boolean!!Conversation.Machine {
   const conversation = try Conversation.Machine
   if (place === "Home") {
     if (!Conversation.canNavigateHome(try conversation.get(), ticket)) return false
     try ignore(conversation.send({ type: "navigateHome", ticket }))
   } else {
-    if (!Conversation.canNavigate(try conversation.get(), ticket, place)) return false
-    try ignore(conversation.send({ type: "navigate", ticket, view: place }))
+    if (!Conversation.canNavigate(try conversation.get(), ticket, place, keep)) return false
+    try ignore(conversation.send({ type: "navigate", ticket, view: place, keep }))
   }
   return try navigationEnded(conversation, ticket)
 }
@@ -229,19 +263,20 @@ effect function carriedOut<R>(held: Held, front: boolean!!R) {
   try ignore(ask(Agent, HttpClientRequest.post("/api/views/interact-result") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, claimId: claim.claimId, success: done.switched, result }), Answered))
 }
 
-// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
+// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
 /** Carry out the view the complete reply of `ticket` prepared for this screen, if Alpha has that view or it is Home. */
 effect function openPrepared(ticket: number) {
   const views = try Views
   const held = try views.take(ticket)
   if (Option.isNone(held) || held.value.asked !== (try views.current())) return
   if ("continueFiles" in held.value) return try held.value.continueFiles
+  if ("openAsked" in held.value) return try held.value.openAsked
   if ("page" in held.value) {
-    if (try navigated(ticket, "Browser")) try (try AgentPages).open(held.value.page, Effect.map(views.current(), (now) => now === held.value.asked))
+    if (try navigated(ticket, "Browser")) try (try AgentPages).open(try asAllowed(held.value.page), Effect.map(views.current(), (now) => now === held.value.asked))
     return
   }
   const place = placeFor(held.value.handoff)
-  if (place !== undefined) try carriedOut(held.value, navigated(ticket, place))
+  if (place !== undefined) try carriedOut(held.value, navigated(ticket, place, savedNote(held.value.handoff)))
 }
 
 // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
@@ -260,11 +295,11 @@ export const carriedAloud = started(effect {
     const held = work.held
     if (held.asked !== (try views.current()) || !(try work.current)) return
     if ("page" in held) {
-      if (try work.front("Browser")) try (try AgentPages).open(held.page, Effect.map(views.current(), (now) => now === held.asked))
+      if (try work.front("Browser", false)) try (try AgentPages).open(try asAllowed(held.page), Effect.map(views.current(), (now) => now === held.asked))
       return
     }
     const place = placeFor(held.handoff)
     if (place === undefined) return
-    try contained(carriedOut(held, work.front(place)), "opening what a spoken reply prepared")
+    try contained(carriedOut(held, work.front(place, savedNote(held.handoff))), "opening what a spoken reply prepared")
   }, asVoid(Deferred.succeed(work.completed, undefined))))
 }, "opening what a spoken reply prepared")

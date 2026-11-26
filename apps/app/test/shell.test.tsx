@@ -186,6 +186,28 @@ describe("the shell", () => {
   });
 
   // spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"
+  it("Move from one app to another with nothing of Home between them, and back at once (spec/app/shell/index.md, \"The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits\")", async () => {
+    const { alpha } = await open({ ...scene(), phone: true });
+    const home = () => document.querySelector("[data-alpha-home-layer]");
+    let layer: Element | null | undefined;
+    const shown = () => ({ homeHidden: home()?.classList.contains("invisible"), sameLayer: home()?.nextElementSibling === layer, headings: document.querySelectorAll("h1").length });
+    await press("Notes");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
+    layer = home()?.nextElementSibling;
+    expect([shown(), layer?.classList.contains("motion-safe:animate-rise")]).toEqual([{ homeHidden: false, sameLayer: true, headings: 1 }, true]);
+    await drawn(() => alpha.runtime.runPromise(Shell.use((s) => s.send({ type: "openView", view: "Settings" }))));
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
+    expect(shown()).toEqual({ homeHidden: false, sameLayer: true, headings: 1 });
+    await drawn(() => layer?.dispatchEvent(new Event("animationend", { bubbles: true })));
+    expect(shown()).toEqual({ homeHidden: true, sameLayer: true, headings: 1 });
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes" && s.trail.length === 1);
+    expect(shown()).toEqual({ homeHidden: true, sameLayer: true, headings: 1 });
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    expect([home()?.classList.contains("contents"), document.querySelectorAll("h1").length]).toEqual([true, 1]);
+  });
+
   it("Let Phone's own bar stand in for Ask Alpha at rest (spec/app/shell/index.md, \"On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises\")", async () => {
     const { alpha } = await open({ ...scene(), phone: true, image: true });
     await until(alpha, alpha.runtime, Shell, (s) => s.image);

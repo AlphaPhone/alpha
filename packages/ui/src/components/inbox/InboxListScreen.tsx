@@ -43,6 +43,8 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     account?: string;
     /** Returns from Inbox to the apps. */
     onBack?: () => void;
+    /** Inbox is the launcher's first page: the open search then draws no Back and its pill runs the full width, as v119 did there. */
+    launcher?: boolean;
     /** Whether the list header holds its search field. */
     searching?: boolean;
     /** What is typed in the search field. */
@@ -89,6 +91,9 @@ const launcherHeader = cn(
   "in-data-[alpha-launcher]:[&>header>button[aria-label]:not([aria-label^=Back])]:size-11 in-data-[alpha-launcher]:[&>header>button[aria-label]:not([aria-label^=Back])]:min-w-11",
 );
 
+/** v119 45f6bed30 prototype/template.html:887-893: the search header is 56px tall and 16px in on both sides, with a 40px Clear; on the launcher it has no Back and its pill runs the full width. */
+const searchHeader = "[&>header]:min-h-14 [&>header]:px-4 [&>header_button[aria-label^=Clear]]:size-10 [&>header_button[aria-label^=Clear]]:min-w-10";
+
 /**
  * The Inbox screen: the folder's messages for one account and search, with its folders, search, what is chosen, the
  * saved-list and access notices, and the way to compose, refresh, choose an account and read further back.
@@ -96,7 +101,7 @@ const launcherHeader = cn(
  * @model spec/app/inbox/index.md
  */
 export function InboxListScreen({
-  account, onBack, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
+  account, onBack, launcher = false, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
   onArchive, onTrash, onRestore, labelChanges = false, onStar, onMarkRead, onMarkUnread, onDeleteDrafts, onChooseAll, onRefresh, onCompose, accounts = [], onChooseAccount, aside = [], rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
@@ -147,10 +152,10 @@ export function InboxListScreen({
   return (
     <Screen
       title={chosen > 0 || onFinishSelection ? `${chosen} selected` : inboxFolders[folder]}
-      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5.5" /></Button> : undefined}
+      leading={(searching && !launcher) || (!searching && onBack) ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5.5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className={cn("@container [&_main>div]:gap-0 [&_main>div]:pt-1 in-data-[alpha-wide]:[&>header]:max-w-none", launcherHeader)}
+      className={cn("@container [&_main>div]:gap-0 [&_main>div]:pt-1 in-data-[alpha-wide]:[&>header]:max-w-none", searching ? searchHeader : launcherHeader)}
     >
       {!searching && hasAccount && state !== "signedOut" ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
       {!searching && (aside.length > 0 || accounts.length > 1) ? (

@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode, type Ref, useLayoutEffect, useRef } from "react";
+import { isValidElement, type ReactNode, type Ref } from "react";
 import { cn } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
 import { AddToHomeSheet } from "./AddToHomeSheet.tsx";
@@ -11,8 +11,6 @@ import type { LauncherHold } from "./launcherPress.ts";
 export type HomeScreenProps = {
   /** The cards drawn above the tiles, in order, each with its key; the row is not drawn without one, keeps its place while cards come and go, and starts again at its first card when that card changes. */
   cards?: readonly ReactNode[];
-  /** Cards may still arrive: while none is drawn, the row's height is kept free above the tiles, so a card drawn moments later does not push them down. */
-  cardsAwaited?: boolean;
   /** Cards an app draws itself, such as Clock's running timer, in a row of their own under the day's cards; the row is hidden while none draws. */
   appCards?: ReactNode;
   /** The tiles shown, in Home's order; left out until what was saved has been read. */
@@ -21,6 +19,8 @@ export type HomeScreenProps = {
   editing?: boolean;
   /** Another launcher surface is over Home. */
   covered?: boolean;
+  /** Home is kept under an app that covers it, laid out for the way back: it names no page, so the app's own title is the page's only heading. */
+  held?: boolean;
   /** The card rows remain visible while their controls cannot take input. */
   cardsInert?: boolean;
   /** The separately owned app cards cannot take input while Ask is above Home. */
@@ -75,31 +75,24 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], cardsAwaited = false, appCards, tiles, editing = false, covered = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onPressTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], appCards, tiles, editing = false, covered = false, held = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onPressTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, addInFrame, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
-  const row = useRef<HTMLElement>(null);
-  const first = cards.find(isValidElement)?.key ?? null;
-  // The row stays mounted while cards come and go (its sideways scroll kept, as v119's cards slot was, 45f6bed30
-  // apps/app/src/ui/mobile-shell/MobileHomeScreen.tsx:150-153); a card drawn ahead of the one shown, such as the agenda
-  // after Messages, brings the row back to its start, so the first card is never left off screen.
-  useLayoutEffect(() => {
-    row.current?.scrollTo({ left: 0 });
-  }, [first]);
+  const first = String(cards.find(isValidElement)?.key ?? "");
+  const startAtFirstCard = (row: HTMLElement | null) => {
+    if (!row || row.dataset.homeFirstCard === first) return;
+    row.dataset.homeFirstCard = first;
+    row.scrollTo({ left: 0 });
+  };
   return (
     <div inert={covered || undefined} className={cn("@container flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
       <div ref={scrollRef} className={cn(dockClearance, homeSpacing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
         <div className={cn("shrink-0", launcher ? "min-h-[max(calc(var(--alpha-home-spacing)*16),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))]" : "min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+var(--alpha-home-spacing)*3)]")}>
-          <h1 className="sr-only">Home</h1>
+          {held ? null : <h1 className="sr-only">Home</h1>}
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
-        {cards.length > 0 ? (
-          <HomeCardRow ref={row} inert={cardsInert || undefined}>{cards}</HomeCardRow>
-        ) : cardsAwaited ? (
-          // One card's height kept free: min-h-49, 196px (45f6bed30 apps/app/src/prototype/phone.css:129 .home-card min-height:196px).
-          <div aria-hidden data-home-cards-awaited="" className="h-49 shrink-0" />
-        ) : null}
-        {appCards ? <HomeCardRow inert={appCardsInert || undefined} aria-label={undefined} className={cn((cards.length > 0 || cardsAwaited) && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
+        {cards.length > 0 ? <HomeCardRow ref={startAtFirstCard} inert={cardsInert || undefined}>{cards}</HomeCardRow> : null}
+        {appCards ? <HomeCardRow inert={appCardsInert || undefined} aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
           <div className="contents" onPointerDownCapture={onPressTile ? (event) => {

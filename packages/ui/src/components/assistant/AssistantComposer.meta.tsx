@@ -15,8 +15,6 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     onAttach,
     onTalk: fn(),
     onSearch: fn(),
-    onNew: fn(),
-    onHistory: fn(),
     onFocusField,
     onSend: undefined,
     onStop: undefined,
@@ -48,10 +46,18 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
       onFocusField.mockClear();
       await userEvent.type(within(canvasElement).getByRole("textbox", { name: "Message Alpha" }), "Hi");
       await expect([onValueChange.mock.calls.length, onFocusField.mock.calls.length]).toEqual([2, 1]);
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Chat actions" }));
-      await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat", "New chat", "Chat history"]);
+      const actions = within(canvasElement).getByRole("button", { name: "Chat actions" });
+      await userEvent.click(actions);
+      await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat"]);
       await userEvent.keyboard("{Escape}");
       await waitFor(() => expect(canvasElement.ownerDocument.querySelector("[data-aria-hidden]")).toBeNull());
+      // spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown": the + a touch opened keeps its focus without a ring once its menu closes, and one opened from the keyboard keeps its ring
+      await expect([canvasElement.ownerDocument.activeElement === actions, actions.matches(":focus-visible")]).toEqual([true, false]);
+      await userEvent.keyboard("{Enter}");
+      await within(canvasElement.ownerDocument.body).findAllByRole("menuitem");
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(canvasElement.ownerDocument.querySelector("[data-aria-hidden]")).toBeNull());
+      await expect([canvasElement.ownerDocument.activeElement === actions, actions.matches(":focus-visible")]).toEqual([true, true]);
     },
     Writing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onSend.mockClear();

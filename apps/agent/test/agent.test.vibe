@@ -3,8 +3,8 @@
 import { ConversationRecord, TurnController, createRuntimeJsonClient, defineRoutes } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
 import { CleanupReceipt } from "@elizaos/plugin-notes-client"
-import { configurationExit, coreActions, entryCarried, launchViews, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
-import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
+import { configurationExit, coreActions, entryCarried, launchViews, packedPlugins, productPluginName, refusedActions, walletKeysAllowed, workerAdmitted } from "../gen/agent.effect.vibe"
+import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun, taskStorageKey } from "./phone.ts"
 
 type Run = Awaited<ReturnType<typeof startRun>>
 
@@ -50,7 +50,8 @@ schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
 schema ResidentScope { userId: string; organizationId: string; agentId: string; epoch: Schema.Int }
-schema CleanupQueue { success: boolean; data: CleanupReceipt[] }
+const Receipts = Schema.Array(CleanupReceipt)
+schema CleanupQueue { success: boolean; data: Receipts }
 schema VoiceCreated { success: boolean; result: { data: { note: { id: string } }; state: { revision: Schema.Int } } }
 schema NoteRevision { success: boolean; data: { revision: Schema.Int } }
 schema CleanupStatus { status: string }
@@ -237,4 +238,36 @@ describe("Run Alpha's agent on the phone", () => {
     const code = try promise(() => startPhoneAgent(launch, refused, run.cloud, run.key).exited)
     try Effect.try(() => expect(code).toBe(configurationExit))
   }), 900_000)
+})
+
+schema WalletStanding { custody: string; canHold: boolean; accounts: Schema.Unknown[] }
+schema TaskStorage { taskStorage: string }
+
+describe("The wallet is given no storage key until the owner allows wallet keys", () => {
+  // spec/agent/index.md, "The wallet is given no storage key until the owner allows wallet keys"
+  it.live("With the account's task key in the launch, the task store opens under it while the wallet holds nothing, offers nothing to make and makes nothing", () => scoped(effect {
+    const run = try acquireRelease(promise(() => startRun()), (started) => promise(() => started.stop()))
+    const phone = try Effect.try(() => run.place("keyed"))
+    const keyed = try acquireRelease(
+      promise(async () => {
+        const running = startPhoneAgent(await launchFor(run.cloud, run.key, phone), phone, run.cloud, run.key, taskStorageKey())
+        await ready(running)
+        return running
+      }),
+      (running) => promise(() => running.stop()),
+    )
+    const before = try promise(() => call(keyed, "GET", "/api/wallet"))
+    const made = try promise(() => call(keyed, "POST", "/api/wallet", {}))
+    const after = try promise(() => call(keyed, "GET", "/api/wallet"))
+    const storage = try promise(() => call(keyed, "GET", "/api/tasks/storage"))
+    const standing = (body: string) => Schema.decodeUnknownEffect(Schema.fromJsonString(WalletStanding))(body)
+    const held = [try standing(before.body), try standing(after.body)]
+    const tasks = try Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStorage))(storage.body)
+    try Effect.try(() => expect({ walletKeysAllowed, statuses: [before.status, made.status, after.status, storage.status], taskStorage: tasks.taskStorage, held }).toEqual({
+      walletKeysAllowed: false,
+      statuses: [200, 409, 200, 200],
+      taskStorage: "ok",
+      held: [{ custody: "none", canHold: false, accounts: [] }, { custody: "none", canHold: false, accounts: [] }],
+    }))
+  }), 300_000)
 })

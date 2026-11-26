@@ -277,8 +277,8 @@ const threadPosition = started(effect {
 effect function readerRecord(raw: string | undefined): (string | undefined)!! {
   if (raw === undefined) return undefined
   const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
-  if (fields === undefined || "pdf" in fields) return raw
-  const migrated = Message.decodeState({ ...fields, pdf: Message.emptyPdf }) catch () => undefined
+  if (fields === undefined || ("pdf" in fields && "keep" in fields)) return raw
+  const migrated = Message.decodeState({ pdf: Message.emptyPdf, keep: Message.initial.keep, ...fields }) catch () => undefined
   return migrated === undefined ? raw : JSON.stringify(migrated)
 }
 
@@ -324,8 +324,8 @@ export effect function prepareInboxCardEntry() {
         && matchesList(Effect.runSync(list.get()))), "closing the previous Inbox message")
       if (!closed) return
     }
-    if (Inbox.canClearSearch(try list.get())) {
-      try contained(list.send({ type: "clearSearch" }, (state) => {
+    if (Inbox.canCloseSearch(try list.get())) {
+      try contained(list.send({ type: "closeSearch" }, (state) => {
         if (!current() || !matchesList(state)) return false
         const showing = Effect.runSync(reader.get())
         return closed ? showing.message === 0 && showing.body.ticket === previous.body.ticket : matchesReader(showing)
@@ -345,6 +345,6 @@ export const back = effect {
   if (state.message !== 0) return Exit.isSuccess(try exit(view.send({ type: "close" })))
   // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
   const list = try Inbox.Machine
-  if ((try list.get()).selected.query !== "") return Exit.isSuccess(try exit(list.send({ type: "clearSearch" })))
+  if (Inbox.canCloseSearch(try list.get())) return Exit.isSuccess(try exit(list.send({ type: "closeSearch" })))
   return false
 }
