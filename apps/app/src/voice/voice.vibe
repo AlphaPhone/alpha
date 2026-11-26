@@ -71,6 +71,12 @@ export interface InterimWords {
   readonly text: string
 }
 
+/** What the owner said for the turn Alpha is answering, the acknowledgment Alpha speaks first, and the reply's text once it arrives to be spoken. */
+export interface SaidWords extends InterimWords {
+  readonly cue?: string
+  readonly reply?: string
+}
+
 interface InterimCapture extends VoicePreview {
   readonly current: (state: Voice.Voice) => boolean
 }
@@ -92,9 +98,11 @@ export interface VoiceMemory {
   subscribeInterim(listener: () => void): () => void
   publishInterim(value: InterimWords | undefined): void
   /** What the owner said for the turn Alpha is answering, shown as their message until the conversation records it. */
-  readonly saidSnapshot: () => InterimWords | undefined
+  readonly saidSnapshot: () => SaidWords | undefined
   readonly subscribeSaid: (listener: () => void) => () => void
-  readonly publishSaid: (value: InterimWords | undefined) => void
+  readonly publishSaid: (value: SaidWords | undefined) => void
+  /** The acknowledgment or the reply's text for that turn, shown in the dots' place from the moment it is queued to be spoken. */
+  readonly showSpoken: (session: number, turn: number, spoken: { readonly cue: string } | { readonly reply: string }) => void
   readonly retireSaid: (session: number, turn: number) => void
   chat: SpokenChat | undefined
   activeController: TurnController | undefined
@@ -159,7 +167,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
   }
   let interim: InterimWords | undefined
   const interimListeners = new Set<() => void>()
-  let said: InterimWords | undefined
+  let said: SaidWords | undefined
   const saidListeners = new Set<() => void>()
   const memory: VoiceMemory = {
     prepareInterim: undefined,
@@ -180,9 +188,14 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
       return () => { saidListeners.delete(listener) }
     },
     publishSaid: (value) => {
-      if (said?.session === value?.session && said?.turn === value?.turn && said?.text === value?.text) return
+      if (said?.session === value?.session && said?.turn === value?.turn && said?.text === value?.text && said?.cue === value?.cue && said?.reply === value?.reply) return
       said = value
       for (const listener of saidListeners) listener()
+    },
+    showSpoken: (session, turn, spoken) => {
+      // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it"
+      if (said === undefined || said.session !== session || said.turn !== turn || Object.values(spoken).join("").trim() === "") return
+      memory.publishSaid("cue" in spoken ? { session: said.session, turn: said.turn, text: said.text, cue: spoken.cue } : { ...said, ...spoken })
     },
     retireSaid: (session, turn) => {
       if (said?.session === session && said.turn === turn) memory.publishSaid(undefined)
@@ -572,6 +585,8 @@ function voiceTurnOutput({ session, turn, queue, memory }: VoiceOutput) {
     if (clean.length <= shown.length) return
     shown = clean
     sayFrom(clean, false)
+    // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it": v119 45f6bed30 agent-adapter.ts:2253-2254 set the spoken text and the chat text in the same frame.
+    memory.showSpoken(session, turn, { reply: written })
   }
 
   // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line. Text streamed before it is the cue's own words, which the agent starts again after the acknowledgment, so the reply's text is read from its start.
@@ -584,7 +599,9 @@ function voiceTurnOutput({ session, turn, queue, memory }: VoiceOutput) {
     cued = true
     shown = ""
     said = 0
-    if (memory.enqueueCue(turn, line)) Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+    if (!memory.enqueueCue(turn, line)) return
+    Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+    memory.showSpoken(session, turn, { cue: text.trim() })
   }
   const ran = (name: string) => {
     toolRan = true
@@ -599,6 +616,7 @@ function voiceTurnOutput({ session, turn, queue, memory }: VoiceOutput) {
     const full = speakableText(replyBlocks(fullText).words)
     if (full.length > shown.length) shown = full
     sayFrom(full.length >= shown.length ? full : shown, true)
+    memory.showSpoken(session, turn, { reply: fullText })
   }
   const hooks = { onPreview: feed, onAcknowledgment: cue, onReady: ready, onTool: ran }
   return {
@@ -613,6 +631,7 @@ function voiceTurnOutput({ session, turn, queue, memory }: VoiceOutput) {
     finishSpeech(finalText: string) {
       const full = speakableText(replyBlocks(finalText).words)
       sayFrom(full.length >= shown.length ? full : shown, true)
+      memory.showSpoken(session, turn, { reply: finalText })
     },
   }
 }
@@ -1236,7 +1255,7 @@ const bridgeEvents = hearing(
         const state = try voice.get()
         if (Voice.canTurnEnded(state, event.session)) {
           memory.setHeard({ session: state.session, turn: state.turn, text: event.text })
-          // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it"
+          // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it"
           memory.publishSaid({ session: state.session, turn: state.turn, text: event.text.trim() })
         }
       }

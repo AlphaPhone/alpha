@@ -985,14 +985,14 @@ describe("on a phone", () => {
       await press("Send");
       await until(alpha, ask, Conversation, (c) => c.turn.reply === "Complete" && c.turn.send.id === turn);
     };
-    const request = (id: string, title: string, hours: number) => agentRequest(id, {
-      action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+    const request = (id: string, title: string, hours: number, calendarId = "eliza-calendar/primary") => agentRequest(id, {
+      action: "schedule_event", account: "owner", source: { calendarId }, recurrence: null,
       fields: { title, description: "", location: "", startAt: new Date(world.at(1, hours)).toISOString(), endAt: new Date(world.at(1, hours + 0.5)).toISOString(), isAllDay: false, timeZone: "UTC" },
     });
-    const file = async (id: string, title: string, hours: number) => {
+    const file = async (id: string, title: string, hours: number, calendarId?: string) => {
       world.ask.nextReplyChunks = [`I've proposed ${title} for tomorrow. It's waiting for your approval.`];
       world.ask.nextActions = () => {
-        world.calendar.approvals.push(request(id, title, hours));
+        world.calendar.approvals.push(request(id, title, hours, calendarId));
         return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: id } }];
       };
       await send(`Put ${title} on my calendar tomorrow.`);
@@ -1002,7 +1002,7 @@ describe("on a phone", () => {
       await agent.runPromise(Effect.flatMap(Changes, (machine) => Effect.flatMap(machine.get(), (a) => machine.send({ type: "decline", filing: a.filing }, "Owner"))));
       await until(alpha, agent, Changes, (a) => a.result === "Declined");
     };
-    return { alpha, agent, file, request, declineInCalendar };
+    return { alpha, agent, file, request, declineInCalendar, send };
   }
 
   const askedCard = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
@@ -1025,6 +1025,56 @@ describe("on a phone", () => {
     await press("Approve");
     await until(alpha, agent, Changes, (a) => a.result === "Done");
     expect(world.calendar.writes).toEqual(["reject approval-earlier-reply", "approve approval-newer-reply", "create ev-lens-check"]);
+  });
+
+  it("The card names the agent's own calendar as the Sunday demo build did (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    const world = morning(true);
+    const { alpha, agent, file } = await askingCalendar(world);
+    // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": eliza files the agent calendar's requests for calendar "primary", which v119 45f6bed30 named "Eliza Calendar" (prototype/calendar-approval-fields.ts:48, agent-calendar-adapter.ts:166).
+    await file("approval-primary", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect(["Eliza Calendar", "Your agent's calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect(button("Approve")).toBeDefined();
+    expect(world.calendar.writes).toEqual([]);
+  });
+
+  it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    const world = morning(true);
+    const { alpha, agent, file } = await askingCalendar(world);
+    await file("approval-earlier-reply", "camera setup", 9);
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    await file("approval-newer-reply", "lens check", 11);
+    const earlier = world.calendar.approvals.find((one) => one.id === "approval-earlier-reply")?.payload.change["fields"];
+    if (typeof earlier !== "object" || earlier === null) throw new Error("no fields");
+    Object.assign(earlier, { title: "camera setup, moved" });
+    await press("Approve");
+    await until(alpha, agent, Changes, (a) => a.result === "NotFound");
+    await drawn(() => {});
+    const rows = () => Array.from(document.querySelectorAll("[data-alpha-message-id]"), (row) => row.textContent ?? "");
+    const at = (text: string) => rows().findIndex((row) => row.includes(text));
+    const ended = "Sent, but Calendar could not find the change.";
+    expect([at(ended) - at("I've proposed camera setup"), at("I've proposed lens check") > at(ended)]).toEqual([1, true]);
+  });
+
+  it("How a request ended stays at the foot when the reply that filed it draws no row (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    const world = morning(true);
+    const { alpha, agent, request, send } = await askingCalendar(world);
+    world.ask.nextReplyChunks = [""];
+    world.ask.nextActions = () => {
+      world.calendar.approvals.push(request("approval-blank", "camera setup", 9));
+      return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: "approval-blank" } }];
+    };
+    await send("Put camera setup on my calendar tomorrow.");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    const fields = world.calendar.approvals.find((one) => one.id === "approval-blank")?.payload.change["fields"];
+    if (typeof fields !== "object" || fields === null) throw new Error("no fields");
+    Object.assign(fields, { title: "camera setup, moved" });
+    await press("Approve");
+    await until(alpha, agent, Changes, (a) => a.result === "NotFound");
+    await drawn(() => {});
+    const rows = Array.from(document.querySelectorAll("[data-alpha-message-id]"), (row) => row.textContent ?? "");
+    expect(rows.at(-1)).toContain("Sent, but Calendar could not find the change.");
   });
 
   it("A request filed before a reply is never approved from that reply's card (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
