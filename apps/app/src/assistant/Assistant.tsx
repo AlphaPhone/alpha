@@ -800,6 +800,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           opener: !open ? grabber : undefined,
           onOpen: !open && !grabber ? openSheet : undefined,
           onType: compact ? revealComposer : undefined,
+          // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a bar tucked by a drag is the pill where it is, with no entrance, as v119's
+          still: compact && dock.state?.tucked === true,
           onSend: sendable && !inFlight(talking.turn) ? () => {
             if (!open) openSheet();
             send();
