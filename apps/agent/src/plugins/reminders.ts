@@ -346,9 +346,7 @@ async function handleRemindersManage(
     const items = queryReminders(store, params, timeZone);
     const nowMs = store.now();
     const lines = items.map((item) => `- ${item.title}${formatDueSummary(item, nowMs, timeZone)}${item.flagged ? " [flagged]" : ""}${item.priority !== "none" ? ` [${item.priority}]` : ""} (${item.id})`);
-    return { success: true, text: lines.length === 0 ? "No matching reminders." : `Reminders:
-${lines.join("
-")}`, data: { op, items, lists: store.getReminders().lists, readOnlyOperation: true } };
+    return { success: true, text: lines.length === 0 ? "No matching reminders." : `Reminders:\n${lines.join("\n")}`, data: { op, items, lists: store.getReminders().lists, readOnlyOperation: true } };
   }
   if (op === "create") {
     const title = readString(params, "title");
