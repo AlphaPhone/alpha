@@ -8,7 +8,10 @@ import { AssistantContextChip, type AssistantContextChipProps } from "./Assistan
 export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | "children"> & {
   /** The conversation's name, read out with the way Home. */
   title: string;
-  /** What the agent is told of the screen showing; shown only when it is more than the view: a selection, or a private screen. */
+  /**
+   * What the agent is told of the screen showing; shown only for a private screen. A selection, such as an open note, adds
+   * no label: v119 named only the person and app of a communications sheet beside Alpha's mark (45f6bed30 model.js:6461).
+   */
   context?: AssistantContextChipProps;
   /** What the conversation is beside, under Alpha's mark, such as the person and app a communications sheet is over. */
   subtitle?: ReactNode;
@@ -34,7 +37,7 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
  * @model spec/app/assistant/chats.md
  */
 export function AssistantChatHeader({ title, context, subtitle, grabber, onHome, onClose, returnOnClose = false, expanded = false, onResize, className, ...props }: AssistantChatHeaderProps) {
-  const told = context && (context.sensitive || context.selected) ? context : undefined;
+  const told = context?.sensitive ? context : undefined;
   return (
     <header data-alpha-chat-header="" className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)_2.75rem_minmax(0,1fr)] items-center px-3 pb-1", className)} {...props}>
       <div className="flex min-w-0 items-center gap-0.5">

@@ -840,7 +840,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         style={onComms && !live && assistantDetent === "Full" ? { ...sheetStyle, height: "calc(100dvh - 52px)" } : sheetStyle}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
-          context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
+          context: { view, sensitive: talking.context.sensitive },
           subtitle: onComms ? <CommsTarget runtime={runtime} placement="context" /> : undefined,
           returnOnClose: textAsk,
           onHome: textAsk ? onBack : () => void runtime.runPromise(home()),
@@ -881,7 +881,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           } : undefined,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
+          placeholder: onComms ? "Ask Alpha" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !draftEditable,
           notice: buildDraftNotice(notice, onComms, writing, seen, board, composer, conversation),
