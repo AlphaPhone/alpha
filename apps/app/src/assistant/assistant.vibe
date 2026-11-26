@@ -902,7 +902,6 @@ effect function newest(page: number, conversation: number): Chats.Event!!(Agent 
   return read.type === "listed" ? { type: "latest", page, ok: read.ok, ids: read.ids, conversation, ...free } : read
 }
 
-// The pinned resident returns at most this many rows on either side of an around anchor.
 const historyRadius = 100
 
 /** Prove the edges of a centered window, where a full side alone cannot say anything about the row past it. */

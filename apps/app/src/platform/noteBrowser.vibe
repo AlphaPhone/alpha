@@ -4,6 +4,7 @@ module browser {
   import type { Command } from "../../gen/app__notes__recording.effect.vibe"
   import type { Tape } from "./noteDevice.vibe"
   import { browserNotePlayback } from "./notePlayback.vibe"
+  import { browserNoteTranscription } from "./noteTranscription.vibe"
 
   const audioDatabase = "alpha.browser.audio.v1"
   const journalDatabase = "alpha.browser.notes.capture.v1"
@@ -76,6 +77,7 @@ module browser {
     const listeners = new Set<(value: Tape) => void>()
     let owner: string | undefined
     const playback = browserNotePlayback(audio, () => owner)
+    const transcript = browserNoteTranscription(audio, () => owner)
     let active: Capture | undefined
     let opening = false
     let permission: PermissionState = "prompt"
@@ -118,6 +120,7 @@ module browser {
       active = undefined
       owner = undefined
       playback.halt()
+      transcript.clear()
     }
 
     async function current(ownerDigest = owner): Promise<Tape> {
@@ -153,7 +156,7 @@ module browser {
     }
 
     return {
-      ...playback, observe, retire,
+      ...playback, transcript, observe, retire,
       get available() { return typeof MediaRecorder !== "undefined" && navigator.locks !== undefined &&
         typeof navigator.mediaDevices?.getUserMedia === "function" },
       async permission() {

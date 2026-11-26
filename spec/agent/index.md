@@ -316,6 +316,8 @@ that list is this one, and eliza's route gate admits each of its routes.
 ```quint
 type Method = Get | Post | Put | Patch | Delete
 type Route = { method: Method, path: str, stream: bool }
+pure val browserNotesTranscription = "/api/alpha/notes/transcription"
+pure val browserNotesTranscriptionLimit = 1100000
 pure val pageRoutes: List[Route] = List(
   { method: Get, path: "/api/health", stream: false },
   { method: Get, path: "/api/status", stream: false },
@@ -382,6 +384,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/notes/interact", stream: false },
   { method: Post, path: "/api/notes/trash/erase", stream: false },
   { method: Get, path: "/api/notes/trash/recordings", stream: false },
+  { method: Get, path: browserNotesTranscription, stream: false },
+  { method: Post, path: browserNotesTranscription, stream: false },
   { method: Get, path: "/api/workflow/status", stream: false },
   { method: Get, path: "/api/workflow/hosted/loops", stream: false },
   { method: Post, path: "/api/workflow/hosted/loops", stream: false },
@@ -435,6 +439,13 @@ pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =
   listed.length() == pageRoutes.length() and listed.every(r => pageRoutes.includes(r)) and pageRoutes.every(r => listed.includes(r))
 ```
+
+### The local browser can request a private transcription of a reviewed note
+
+A browser on the local machine can send a window of the reviewed recording to
+a local transcription model. The agent does not offer the route when it is
+running Alpha's native speech engine. A response contains only the recognized
+text for that window. Nothing is published as a live voice event.
 
 ### Only Android's native speech transport can call the resident recognizer
 

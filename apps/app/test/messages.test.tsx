@@ -352,18 +352,17 @@ describe("Messages on an Alpha image", () => {
     const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
     const bridge = (globalThis as { Capacitor?: { nativePromise(name: string, method: string, input: unknown): Promise<unknown> } }).Capacitor;
     if (!bridge) throw new Error("The phone fixture has no native bridge");
-    const nativePromise = bridge.nativePromise;
+    const nativePromise = bridge.nativePromise.bind(bridge);
     const write = Promise.withResolvers<void>();
     let writing = false;
     const pendingWrite = vi.spyOn(bridge, "nativePromise").mockImplementation((name, method, input) => {
       if (name === "ElizaSecureStore" && method === "compareAndExchange" && typeof input === "object" && input !== null
         && "key" in input && input.key === "sms-draft:v2:new") {
         writing = true;
-        return write.promise.then(() => nativePromise.call(bridge, name, method, input));
+        return write.promise.then(() => nativePromise(name, method, input));
       }
-      return nativePromise.call(bridge, name, method, input);
+      return nativePromise(name, method, input);
     });
-    // The first acknowledgment is in flight when Android publishes a newer request.
     const acknowledgment = Promise.withResolvers<void>();
     world.telephony.holdSmsDraftAcknowledgment = acknowledgment.promise;
     try {
@@ -426,14 +425,14 @@ describe("Messages on an Alpha image", () => {
     const message = () => document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea");
     const bridge = (globalThis as { Capacitor?: { nativePromise(name: string, method: string, input: unknown): Promise<unknown> } }).Capacitor;
     if (!bridge) throw new Error("The phone fixture has no native bridge");
-    const nativePromise = bridge.nativePromise;
+    const nativePromise = bridge.nativePromise.bind(bridge);
     const check = Promise.withResolvers<void>();
     let pendingReads = 0;
     const watched = vi.spyOn(bridge, "nativePromise").mockImplementation((name, method, input) => {
       if (name === "ElizaTelephony" && method === "smsDraftPending" && world.telephony.smsDraft === first && ++pendingReads === 3) {
-        return check.promise.then(() => nativePromise.call(bridge, name, method, input));
+        return check.promise.then(() => nativePromise(name, method, input));
       }
-      return nativePromise.call(bridge, name, method, input);
+      return nativePromise(name, method, input);
     });
     try {
       world.telephony.smsDraft = first;

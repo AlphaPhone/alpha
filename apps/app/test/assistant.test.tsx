@@ -266,9 +266,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
     world.ask.refusal = undefined;
 
-    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": the
-    // transcript offers Earlier only while messages before the first one showing exist, so here, with the first message
-    // showing, the conversation is read around it directly.
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": with no Earlier, read around the first message directly.
     expect(button("Earlier")).toBeUndefined();
     await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "scroll", around: 1 })));
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
@@ -378,7 +376,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Let me look"));
     expect([document.body.textContent?.includes("Using Calendar"), document.body.textContent?.includes("Working")]).toEqual([false, false]);
-    await act(async () => { for (const release of [...world.ask.turns.values()]) release(); });
+    await drawn(() => { for (const release of [...world.ask.turns.values()]) release(); });
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: What's on today?".length);
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
