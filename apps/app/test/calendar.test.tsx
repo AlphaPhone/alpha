@@ -87,6 +87,41 @@ async function onBrowserCalendar() {
   return running;
 }
 
+/** Calendar standing alone: signed out, with no Google account. */
+async function onDisconnected() {
+  const world = { ...morning(false), signedIn: false };
+  world.inbox.google = undefined;
+  const running = await onCalendar(world);
+  await until(running.alpha, running.runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
+  return running;
+}
+
+/** Calendar on `world`, once it shows today and has read the reminders. */
+async function onReminders(world: ReturnType<typeof morning>) {
+  const running = await onCalendar(world);
+  await until(running.alpha, running.runtime, View, (state) => state.front && state.anchor === world.today);
+  await until(running.alpha, running.alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+  return running;
+}
+
+/** Save `item` as a reminder and wait until the agent confirmed it. */
+async function saveReminder(alpha: Alpha, item: Parameters<typeof createReminderItem>[0]) {
+  const created = await alpha.runtime.runPromise(createReminderItem(item));
+  await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+  if (!created) throw new Error(`Expected the saved reminder ${item.title}`);
+  return created;
+}
+
+/** Open today's only reminder, the one whose row `title` names. */
+async function openReminder({ alpha, runtime }: Awaited<ReturnType<typeof onCalendar>>, title: RegExp) {
+  await until(alpha, runtime, View, (state) => state.reminders === 1);
+  await press(title);
+  await until(alpha, runtime, View, (state) => state.reminder > 0);
+}
+
+/** What the open event or reminder's detail reads. */
+const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
+
 it("Rechecks Calendar access on return from Android Settings", async () => {
   const world = morning(true);
   const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
@@ -157,10 +192,7 @@ describe("Calendar without a connected account", () => {
   });
 
   it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
-    const world = { ...morning(false), signedIn: false };
-    world.inbox.google = undefined;
-    const { alpha, runtime } = await onCalendar(world);
-    await until(alpha, runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
+    const { alpha, runtime } = await onDisconnected();
     await fromMonth("Schedule");
     await until(alpha, runtime, View, (state) => state.layout === "Agenda" && state.overlay === "NoOverlay");
     const schedule = document.querySelector('[aria-label="Schedule"][role="region"]');
@@ -170,10 +202,7 @@ describe("Calendar without a connected account", () => {
   });
 
   it("Shows the covered window and disconnection while searching standalone Calendar (spec/app/calendar/index.md, \"Search and the Calendars sheet open over the days, never over an open event\")", async () => {
-    const world = { ...morning(false), signedIn: false };
-    world.inbox.google = undefined;
-    const { alpha, runtime } = await onCalendar(world);
-    await until(alpha, runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
+    const { alpha, runtime } = await onDisconnected();
     await press("Search events");
     await until(alpha, runtime, View, (state) => state.overlay === "Search");
     const results = document.querySelector('[aria-label="Search results"][role="region"]');
@@ -185,24 +214,14 @@ describe("Calendar without a connected account", () => {
   });
 
   it("Shows and completes the exact dated reminder in Calendar (spec/app/calendar/index.md, \"Story: See reminders among my events\")", async () => {
-    const world = { ...morning(false), signedIn: false };
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const running = await onReminders({ ...morning(false), signedIn: false });
+    const { alpha, runtime } = running;
 
     const inputs = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: null };
-    const first = await alpha.runtime.runPromise(createReminderItem({ ...inputs, notes: "The first draft is inside.", dueDate: "2026-11-24" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const tomorrow = await alpha.runtime.runPromise(createReminderItem({ ...inputs, notes: "A different notebook.", dueDate: "2026-11-25" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    if (!first || !tomorrow) throw new Error("Expected two saved reminders");
+    const first = await saveReminder(alpha, { ...inputs, notes: "The first draft is inside.", dueDate: "2026-11-24" });
+    const tomorrow = await saveReminder(alpha, { ...inputs, notes: "A different notebook.", dueDate: "2026-11-25" });
 
-    await until(alpha, runtime, View, (state) => state.reminders === 1);
-    await press(/^Bring the blue notebook,/);
-    await until(alpha, runtime, View, (state) => state.reminder > 0);
-    const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
+    await openReminder(running, /^Bring the blue notebook,/);
     expect(detail()).toContain("The first draft is inside.");
     expect(detail()).not.toContain("A different notebook.");
     await press("Complete reminder occurrence");
@@ -219,25 +238,16 @@ describe("Calendar without a connected account", () => {
   it("Snoozes only the selected alerted revision and keeps its date in Calendar (spec/app/reminders/alerts.md, \"Story: Alert on due reminders and act from the banner\")", async () => {
     const world = morning(true);
     world.reminders.mirrorDatedItems = true;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const running = await onReminders(world);
+    const { alpha } = running;
 
     const inputs = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: 0 };
-    const first = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-24" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const tomorrow = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-25" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    if (!first || !tomorrow) throw new Error("Expected two saved reminders");
+    const first = await saveReminder(alpha, { ...inputs, dueDate: "2026-11-24" });
+    const tomorrow = await saveReminder(alpha, { ...inputs, dueDate: "2026-11-25" });
     const revision = first.revision + 1;
     expect(remindersStore.findItem(first.id)).toMatchObject({ agentTaskId: `task-${first.id}`, revision });
 
-    await until(alpha, runtime, View, (state) => state.reminders === 1);
-    await press(/^Bring the blue notebook,/);
-    await until(alpha, runtime, View, (state) => state.reminder > 0);
-    const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
+    await openReminder(running, /^Bring the blue notebook,/);
     expect(detail()).toContain("Alert at start");
     await vi.waitFor(() => expect(world.reminders.scheduled.get(first.id)?.at).toBe(world.at(0, 9.5)));
     await press("Snooze reminder 10 minutes");
@@ -259,11 +269,7 @@ describe("Calendar without a connected account", () => {
   it("Saves the Calendar Reminders form once without adding a calendar event (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
     const world = { ...morning(false), signedIn: false };
     const eventCount = world.calendar.events.length;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const { alpha, runtime } = await onReminders(world);
 
     await press("New event");
     await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
@@ -286,14 +292,12 @@ describe("Calendar without a connected account", () => {
       title: "Leave through the garden", notes: "Close the gate.", dueDate: "2026-11-24", dueMinute: 615, recurrence: "weekdays", alertMinutes: null,
     });
     await press(/^Leave through the garden,/);
-    expect(document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent).toContain("Due 10:15 AM");
+    expect(detail()).toContain("Due 10:15 AM");
   });
 
   it("Reviews discarding a retained Calendar reminder draft (spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
     const world = { ...morning(false), signedIn: false };
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
+    const { alpha, runtime } = await onCalendar(world);
     await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
     await press("New event");
     await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
@@ -316,21 +320,13 @@ describe("Calendar without a connected account", () => {
 
   it("Edits a dated reminder in Calendar without changing another reminder with the same title (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const running = await onReminders(world);
+    const { alpha, runtime } = running;
     const input = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: null };
-    const selected = await alpha.runtime.runPromise(createReminderItem({ ...input, notes: "The first draft is inside.", dueDate: "2026-11-24" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const other = await alpha.runtime.runPromise(createReminderItem({ ...input, notes: "A different notebook.", dueDate: "2026-11-25" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    if (!selected || !other) throw new Error("Expected two saved reminders");
+    const selected = await saveReminder(alpha, { ...input, notes: "The first draft is inside.", dueDate: "2026-11-24" });
+    const other = await saveReminder(alpha, { ...input, notes: "A different notebook.", dueDate: "2026-11-25" });
 
-    await until(alpha, runtime, View, (state) => state.reminders === 1);
-    await press(/^Bring the blue notebook,/);
-    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    await openReminder(running, /^Bring the blue notebook,/);
     await press("Event actions");
     await press("Edit event");
     await until(alpha, runtime, Editor, (state) => state.form === "EditReminder" && state.shown);
@@ -347,24 +343,15 @@ describe("Calendar without a connected account", () => {
 
   it("Reviews reopening the exact completed reminder without an alert (spec/app/calendar/reminderReopen.md, \"Story: Review reopening the selected reminder without an alert\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const running = await onReminders(world);
+    const { alpha } = running;
     const inputs = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: 0 };
-    const selected = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-24" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const other = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-25" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    if (!selected || !other) throw new Error("Expected two saved reminders");
+    const selected = await saveReminder(alpha, { ...inputs, dueDate: "2026-11-24" });
+    const other = await saveReminder(alpha, { ...inputs, dueDate: "2026-11-25" });
 
-    await until(alpha, runtime, View, (state) => state.reminders === 1);
-    await press(/^Bring the blue notebook,/);
-    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    await openReminder(running, /^Bring the blue notebook,/);
     await press("Complete reminder occurrence");
     await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
     expect(detail()).toContain(`Completed ${new Date(world.now).toLocaleString()} · due ${new Date(world.at(0, 9.5)).toLocaleString()}`);
     await press("Reopen reminder");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("No alert"));
@@ -397,16 +384,10 @@ describe("Calendar without a connected account", () => {
 
   it("Reviews a completed reminder's new time before rescheduling it (spec/app/calendar/editor.md, \"Moving a completed reminder keeps its edited draft on screen until the owner approves rescheduling\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const { alpha, runtime } = await onReminders(world);
     const request = { listId: DEFAULT_LIST_ID, title: "Bring the same notebook", dueMinute: 570, alertMinutes: 0 };
-    const selected = await alpha.runtime.runPromise(createReminderItem({ ...request, dueDate: "2026-11-24" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const other = await alpha.runtime.runPromise(createReminderItem({ ...request, dueDate: "2026-11-25" }));
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    if (!selected || !other) throw new Error("Expected two saved reminders");
+    const selected = await saveReminder(alpha, { ...request, dueDate: "2026-11-24" });
+    const other = await saveReminder(alpha, { ...request, dueDate: "2026-11-25" });
     await until(alpha, runtime, View, (state) => state.front && state.reminders === 1);
     await press(/^Bring the same notebook,/);
     await press("Complete reminder occurrence");
@@ -432,23 +413,17 @@ describe("Calendar without a connected account", () => {
 
   it("Shows the completed occurrence below the next daily reminder (spec/app/reminders/index.md, \"Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
-    const saved = await alpha.runtime.runPromise(createReminderItem({
+    const { alpha, runtime } = await onReminders(world);
+    const saved = await saveReminder(alpha, {
       listId: DEFAULT_LIST_ID, title: "Bring a notebook", dueDate: "2026-11-24", dueMinute: 570, alertMinutes: 0, recurrence: "daily",
-    }));
-    if (saved === undefined) throw new Error("Expected the daily reminder");
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    });
     await until(alpha, runtime, View, (state) => state.front && state.reminders === 1);
     await press(/^Bring a notebook,/);
     await press("Complete reminder occurrence");
     await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const detail = document.querySelector('[data-alpha-subview="calendar-detail"]');
-    expect(detail?.textContent).toContain("Wednesday, Nov 25");
-    expect(detail?.textContent).toContain(`Completed ${new Date(world.now).toLocaleString()} · due ${new Date(world.at(0, 9.5)).toLocaleString()}`);
-    expect(detail?.textContent).toContain("Next occurrence is scheduled after Done.");
+    expect(detail()).toContain("Wednesday, Nov 25");
+    expect(detail()).toContain(`Completed ${new Date(world.now).toLocaleString()} · due ${new Date(world.at(0, 9.5)).toLocaleString()}`);
+    expect(detail()).toContain("Next occurrence is scheduled after Done.");
     expect(button("Complete reminder occurrence")).toBeDefined();
     expect(world.reminders.items.find((item) => item.id === saved.id)).toMatchObject({ completed: false, dueDate: "2026-11-25", history: [
       { revision: saved.revision, dueAtMs: world.at(0, 9.5), completedAtMs: world.now },
@@ -457,23 +432,17 @@ describe("Calendar without a connected account", () => {
 
   it("Shows the elapsed repeat date skipped by a late completion (spec/app/reminders/index.md, \"Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day\")", async () => {
     const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
-    const saved = await alpha.runtime.runPromise(createReminderItem({
+    const { alpha, runtime } = await onReminders(world);
+    const saved = await saveReminder(alpha, {
       listId: DEFAULT_LIST_ID, title: "Read the agenda", dueDate: "2026-11-23", dueMinute: 510, alertMinutes: 0, recurrence: "daily",
-    }));
-    if (saved === undefined) throw new Error("Expected the daily reminder");
-    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    });
     await press(dayButton(world.today - 1));
     await until(alpha, runtime, View, (state) => state.anchor === world.today - 1 && state.reminders === 1);
     await press(/^Read the agenda,/);
     await press("Complete reminder occurrence");
     await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
-    const detail = document.querySelector('[data-alpha-subview="calendar-detail"]');
-    expect(detail?.textContent).toContain("Wednesday, Nov 25");
-    expect(detail?.textContent).toContain("1 elapsed repeat dates skipped");
+    expect(detail()).toContain("Wednesday, Nov 25");
+    expect(detail()).toContain("1 elapsed repeat dates skipped");
     expect(world.reminders.items.find((item) => item.id === saved.id)).toMatchObject({ dueDate: "2026-11-25", history: [
       { dueAtMs: world.at(-1, 8.5), completedAtMs: world.now, skippedDates: 1 },
     ] });

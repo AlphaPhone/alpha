@@ -37,7 +37,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
 import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
-import { home } from "../shell/shell.vibe";
+import { type Backs, home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
@@ -67,7 +67,7 @@ import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | ContactMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | MessagingBridge | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | NoteStore | NotesMachine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | ContactMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | MessagingBridge | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | NoteStore | NotesMachine | Backs, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
@@ -374,14 +374,19 @@ interface DockHandleProps {
   done: () => void;
 }
 
+/** A drag of the dock ended: it settles by the drag's direction and flick and the height the finger left above it. */
+function dockRelease(dock: DockHandleProps["dock"]): NonNullable<AssistantPull["onRelease"]> {
+  return ({ direction, flick, y }) => {
+    const height = Math.max(0, Math.round(window.innerHeight - y));
+    void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+  };
+}
+
 function dockPull(dock: DockHandleProps["dock"], detent: DockHandleProps["detent"]): NonNullable<AssistantComposerProps["fieldPull"]> {
   return {
     onPress: () => { void dock.send({ type: "press", detent, now: untimed }); },
     onDrag: () => { void dock.send({ type: "drag" }); },
-    onRelease: ({ direction, flick, y }) => {
-      const height = Math.max(0, Math.round(window.innerHeight - y));
-      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-    },
+    onRelease: dockRelease(dock),
     onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
   };
 }
@@ -752,10 +757,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             void dock.send({ type: "press", detent: assistantDetent, now: untimed });
             void dock.send({ type: "drag" });
           },
-          onRelease: ({ direction, flick, y }) => {
-            const height = Math.max(0, Math.round(window.innerHeight - y));
-            void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-          },
+          onRelease: dockRelease(dock),
           onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
         } : undefined}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}

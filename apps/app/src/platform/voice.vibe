@@ -927,21 +927,30 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
 
   const awaitSpeechOutputWarmup = (session: number) => awaitWarmup(() => activeSession === session && cloudSpeech === undefined)
 
-  effect function playSentence(session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
-    if (activeSession !== session) return
+  /** Speak `text` in the session's cloud voice where it has one; false where speech is this phone's own. */
+  effect function speakCloud(session: number, text: string, started: () => void): boolean!VoiceBridgeFailed {
     const cloud = cloudSpeech
-    if (cloud?.session === session) {
-      const abort = makeAbort()
-      cloudSpeechAbort = abort
-      try tryPromise({
-        try: () => cloud.stream.speak(text, abort.signal, () => undefined),
-        catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
-      })
-      return
-    }
+    if (cloud?.session !== session) return false
+    const abort = makeAbort()
+    cloudSpeechAbort = abort
+    try tryPromise({
+      try: () => cloud.stream.speak(text, abort.signal, started),
+      catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
+    })
+    return true
+  }
+
+  /** A playback request of the local voice, which every later one supersedes. */
+  effect function localRequest(): string!VoiceBridgeFailed {
     if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "synthesizeLocal", cause: "no-voice-plugin" })
     const requestId = fresh()
     activePlaybackRequest = requestId
+    return requestId
+  }
+
+  effect function playSentence(session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
+    if (activeSession !== session || (try speakCloud(session, text, () => undefined))) return
+    const requestId = try localRequest()
     const prepared = try tryPromise({
       try: () => localPlugin().synthesizeLocal({ requestId, text, append, replace: !append }),
       catch: (cause) => new VoiceBridgeFailed({ method: "synthesizeLocal", cause }),
@@ -961,19 +970,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     const stop = try Deferred.make<void>()
     cueStop = stop
     try ensuring(effect {
-      const cloud = cloudSpeech
-      if (cloud?.session === session) {
-        const abort = makeAbort()
-        cloudSpeechAbort = abort
-        try tryPromise({
-          try: () => cloud.stream.speak(text, abort.signal, started),
-          catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
-        })
-        return
-      }
-      if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "synthesizeLocal", cause: "no-voice-plugin" })
-      const requestId = fresh()
-      activePlaybackRequest = requestId
+      if (try speakCloud(session, text, started)) return
+      const requestId = try localRequest()
       try playLocalCue(text, requestId, () => activeSession === session && activePlaybackRequest === requestId, started, stop)
     }, sync(() => { if (cueStop === stop) cueStop = undefined }))
   }

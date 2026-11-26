@@ -85,6 +85,9 @@ export function scene(): Scene {
   };
 }
 
+/** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
+export const alphaImage = () => ({ ...scene(), phone: true, image: true });
+
 const health: Route = (request, url) => (request.method === "GET" && url.pathname === "/api/health" ? Response.json({ ready: true }) : undefined);
 
 /** @throws {never} */
