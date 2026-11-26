@@ -68,6 +68,8 @@ jobs:
         run: bash scripts/ci/prepare-host-test-json.sh
       - name: Prepare reviewed Kotlin compiler for native routing checks
         run: node test/fixtures/kotlin-tools.mjs --prepare
+      - name: Build pinned upstream workspace packages
+        run: pnpm build:upstream
       - name: Compile the pinned SDK CLI before the parallel launcher tests
         working-directory: vendor/eliza/packages/os
         run: |
