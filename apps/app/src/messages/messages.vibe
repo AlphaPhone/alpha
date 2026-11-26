@@ -180,8 +180,8 @@ effect function pageRead(ticket: number, thread: number, further: boolean): Even
   const machine = try Messages.Machine
   const held = try store.get()
   const blank: Page = { rows: 0, failed: 0, partial: 0 }
-  const grant = smsGrant catch () => "Unasked" as const
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  const grant = grantOf(status?.permissions.sms)
   const role = status?.roles.sms.held ?? false
   const conversation = try (try Conversations).get(thread)
   if (grant !== "Granted" || Option.isNone(conversation)) return { type: "pageRead", ticket, ok: grant === "Granted" || grant === "Unasked", grant, seen: blank, further: false, unreadShown: false, role }
