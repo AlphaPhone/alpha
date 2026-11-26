@@ -1,0 +1,56 @@
+// spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"
+import { NOT_DISPATCHED } from "@elizaos/agent"
+import { MediaHandoff } from "../assistant/attachments.vibe"
+import type { ReviewAuthority } from "../assistant/media-review.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { VoiceBridge } from "../platform/voice.vibe"
+
+const speechSource = "workflow-step"
+
+function speechItem(digest: string): number {
+  return Number.parseInt(digest.slice(0, 13), 16) + 1
+}
+
+export effect function stopWorkflowStepSpeech(digest: string): void!!MediaHandoff {
+  const item = speechItem(digest)
+  if (Number.isSafeInteger(item)) try (try MediaHandoff).stopPageSpeech(item, speechSource)
+}
+
+/** Use the shared speaker, and report success only after playback finishes while the reviewed run is still current. */
+export effect function speakWorkflowStep(
+  text: string,
+  scope: NonNullable<ReviewAuthority["workflow"]>,
+  approved: () => Promise<boolean>,
+): unknown!!(MediaHandoff | Device | Agent | VoiceBridge | Shell.Machine | Layers.Machine) {
+  const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+  const handoff = try MediaHandoff
+  const device = try Device
+  const { life } = try Agent
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  const item = speechItem(scope.digest)
+  const acknowledged = try Deferred.make<"Finished" | "Stopped">()
+  const current = () => Effect.orElseSucceed(tryPromise(approved), () => false)
+  if (!Number.isSafeInteger(item) || !(try current()) || !(try (try VoiceBridge).canRead())) return refused
+  const admit = try handoff.offerPageSpeech({
+    item, source: speechSource, words: text, current,
+    retire: (result) => asVoid(Deferred.succeed(acknowledged, result)),
+  })
+  if (!admit) return refused
+  const moved = Stream.mergeAll([
+    Stream.as(device.visible, undefined),
+    Stream.as(shell.changes, undefined),
+    Stream.as(layers.changes, undefined),
+    Stream.as(Stream.catch(life.changes, () => Stream.empty), undefined),
+  ], { concurrency: "unbounded" })
+  const left = Stream.runHead(Stream.filterEffect(moved, () => Effect.map(current(), (active) => !active)))
+  const remaining = Math.max(0, scope.expiresAt - (try Clock.currentTimeMillis))
+  const finished = try ensuring(
+    race(Deferred.await(acknowledged), Effect.as(race(left, sleep(remaining)), "Stopped" as const)),
+    handoff.stopPageSpeech(item, speechSource),
+  )
+  return finished === "Finished" && (try current()) ? { kind: "applied" } : undefined
+}

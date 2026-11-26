@@ -52,16 +52,22 @@ const approvalDigest = "a".repeat(64);
 const executionPath = `/api/workflow/executions/${receipt.id}`;
 
 export async function workflowNoteOffer(world: WorkflowsScene, agentId: string) {
-  const operation = { type: "create_note", title: "Statement saved by Workflows", body: "A reviewed note." } as const;
-  const offer = textReview(agentId, "workflow-note-proposal", operation);
+  return workflowPhoneOffer(world, agentId, "create_note");
+}
+
+export async function workflowPhoneOffer(world: WorkflowsScene, agentId: string, kind: "create_note" | "post_notification" | "speak_text") {
+  const words = "A reviewed note.";
+  const title = kind === "post_notification" ? "A reviewed notification" : "Statement saved by Workflows";
+  const operation = kind === "speak_text" ? { type: kind, text: words } as const : { type: kind, title, body: words };
+  const offer = textReview(agentId, kind === "create_note" ? "workflow-note-proposal" : "workflow-" + kind + "-proposal", operation);
   const { installationId, enrollmentId } = offer.proposal.payload;
+  const step = kind === "post_notification" ? { id: approvalNode, kind: "Notify", operation: "app_notification", source: "source", title } as const
+    : kind === "speak_text" ? { id: approvalNode, kind: "Speak", operation: "read_aloud", source: "source" } as const
+    : { id: approvalNode, kind: "Write", operation: "save_note", source: "source", title } as const;
   const spec: WorkflowPhoneReview["spec"] = {
     device: { installationId, enrollmentId },
     version: 1, name: record.name, description: "", trigger: { kind: "manual" },
-    steps: [
-      { id: "source", kind: "Read", operation: "supplied_text", text: operation.body },
-      { id: approvalNode, kind: "Write", operation: "save_note", source: "source", title: operation.title },
-    ],
+    steps: [{ id: "source", kind: "Read", operation: "supplied_text", text: words }, step],
   };
   const specDigest = await Effect.runPromise(workflowSha(spec));
   const scope = { runId: receipt.id, workflowId: record.id, versionId: record.versionId, specDigest };
