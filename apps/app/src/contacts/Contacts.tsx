@@ -121,7 +121,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
             : can({ type: "openSettings" }) && <Button className={allow} onClick={() => void send({ type: "openSettings" })}>Open Settings</Button>}
         </div>
       )}
-      {state.opened ? <Card runtime={runtime} safe={safe} /> : (
+      {state.opened ? <Card runtime={runtime} safe={safe} route={route} /> : (
         <>
           {can({ type: "loadMore" }) && <div className="flex shrink-0 justify-center"><Button variant="secondary" size="icon" aria-label="More contacts" onClick={() => void send({ type: "loadMore" })}><ChevronDown className="size-5" /></Button></div>}
           {state.list.status === "Loading" && state.rows === 0 && <p role="status" className="sr-only">Reading contacts</p>}
@@ -170,13 +170,15 @@ const MailGlyph = createLucideIcon({ name: "ContactMail", node: [["path", { key:
 const NotesGlyph = createLucideIcon({ name: "NotesGlyph", node: [["path", { key: "page", d: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h5" }]] });
 
 /** One contact as the phone holds it now; compact while Alpha's sheet is open over it. */
-function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
+function Card({ runtime, safe, route }: ContactsProps & { safe: boolean; route: number | undefined }) {
   const { state, can, send } = useContacts(runtime);
   const compact = useCommsDock(runtime).open;
   if (!state) return null;
   const card = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get())).card;
   const reach = (how: "Call" | "Message", number: string) => {
-    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ reach: number })));
+    if (how === "Message" && route === undefined) return;
+    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set(how === "Message" && route !== undefined
+      ? { message: { route, contact: state.contact, card: state.card.ticket, number } } : { reach: number })));
     void send({ type: "reach", how });
   };
   const field = "flex min-h-13.5 items-center gap-4 px-5 py-2";

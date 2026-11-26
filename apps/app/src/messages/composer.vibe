@@ -19,8 +19,9 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Telephony, TelephonyAbsent, type TelephonyRefused, sendFromComposer, telephony, textingDefault } from "../platform/telephony.vibe"
 import { type SmsOutgoingSlot, Vault } from "../platform/vault.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
+import { Callers, type MessageSource } from "../phone/voicemail.vibe"
 import { makeConversationDrafts, type ConversationDrafts, type DraftContent } from "./conversation-drafts.vibe"
 import { canonicalDraftRecipients, sameDraftSource, type DraftReference } from "./draft-record.vibe"
 import { openDraftRecord, readLegacySmsDraft, recoverLegacySmsDraft, settleDraftRecord, writeDraftRecord, type HeldDraft } from "./draft-store.vibe"
@@ -82,6 +83,16 @@ interface SubscriptionChoice {
   readonly leave: (thread: number) => void
 }
 
+type NewMessageOpening = { readonly route: number; readonly address: string; readonly phase: "Opening" | "OpenFailed" }
+type NewMessagePrefill = { readonly route: number; readonly address: string; readonly visit: number; readonly phase: "Saving" | "SaveFailed" }
+export type NewMessageHandoff = NewMessageOpening | NewMessagePrefill
+
+interface MessageHandoff {
+  readonly get: () => NewMessageHandoff | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly replace: (expected: NewMessageHandoff | undefined, next: NewMessageHandoff | undefined) => void
+}
+
 /** The texts behind the composer: each conversation's draft, saved on the phone, the pictures of the open one, and the send in hand. */
 export service Drafts {
   text(thread: number): string!!
@@ -95,6 +106,7 @@ export service Drafts {
   saveNewDraft(draft: NewMessageDraft): boolean!!
   adoptNewSettlement(held: HeldDraft): void!!
   readonly newVisits: Semaphore.Semaphore
+  readonly messageHandoff: MessageHandoff
   subscriptions(): ReadonlyArray<TelephonySubscription>!!
   setSubscriptions(subscriptions: ReadonlyArray<TelephonySubscription>): void!!
   readonly subscriptionChoice: SubscriptionChoice
@@ -230,6 +242,20 @@ const drafts = Layer.effect(Drafts, effect {
   const conversations = makeConversationDrafts()
   const edits = try Semaphore.make(1)
   const newVisits = try Semaphore.make(1)
+  let handing: NewMessageHandoff | undefined
+  const handoffListeners = new Set<() => void>()
+  const messageHandoff: MessageHandoff = {
+    get: () => handing,
+    subscribe: (listener) => {
+      handoffListeners.add(listener)
+      return () => { handoffListeners.delete(listener) }
+    },
+    replace: (expected, next) => {
+      if (handing !== expected) return
+      handing = next
+      for (const listener of handoffListeners) listener()
+    },
+  }
   let fresh: NewMessageDraft = emptyNewDraft
   let heldNew: HeldDraft | undefined
   let subscriptions: ReadonlyArray<TelephonySubscription> = []
@@ -282,6 +308,7 @@ const drafts = Layer.effect(Drafts, effect {
     conversations,
     edits,
     newVisits,
+    messageHandoff,
     newDraft: () => sync(() => fresh),
     effect openNewDraft(current: boolean!!): boolean!!Telephony {
       const initial = Effect.provideService(openDraftRecord(newSource), Vault, vault) catch () => undefined
@@ -853,26 +880,80 @@ effect function numberForNew(draft: NewMessageDraft): number!!Conversations {
   return addresses.length === 0 ? 0 : try (try Conversations).of({ id: "", addresses })
 }
 
-/** Open the owner's separate New draft. Explicit handoffs from the other apps still name their own conversation. */
-export effect function startNewMessage(): boolean!!(Messages | Shell | Drafts | Conversations | Inbox | Telephony) {
+type NewMessageHost = Messages | Shell | Drafts | Conversations | Inbox | Composer.Machine | Telephony
+
+/** Open the owner's separate New draft on this exact Threads visit. */
+export effect function startNewMessage(handoff?: NewMessageOpening): boolean!!NewMessageHost {
   const store = try Drafts
   const messages = try Messages
   const shell = try Shell
+  const route = handoff?.route ?? (try shell.get()).route
   const before = try messages.get()
   const current = effect {
     const page = try messages.get()
-    return showing(try shell.get(), "Messages") && canStartNewDraft(page, 0, 0)
-      && before.list.ticket === page.list.ticket && before.newDraft.visit === page.newDraft.visit
+    const where = try shell.get()
+    return where.route === route && showing(where, "Messages") && canStartNewDraft(page, 0, 0)
+      && before.newDraft.visit === page.newDraft.visit && (handoff === undefined || store.messageHandoff.get() === handoff)
   }
-  return try Semaphore.withPermit(store.newVisits, effect {
-    if (!(try current) || !(try store.openNewDraft(current))) return false
-    const draft = try store.newDraft()
-    const thread = try numberForNew(draft)
-    if (!(try current)) return false
+  const opened = try Semaphore.withPermit(store.newVisits, effect {
+    if (!(try current) || !(try store.openNewDraft(current))) return undefined
+    const saved = try store.newDraft()
+    const fillTo = handoff !== undefined && saved.recipients === ""
+      && !newDraftHeld(try (try Composer.Machine).get(), saved.revision)
+    const thread = try numberForNew(saved)
+    if (!(try current)) return undefined
     try (try Inbox).set({ typed: "" })
-    return try contained(messages.send({ type: "startNewDraft", revision: draft.revision, thread }), "opening the New message draft")
+    const event = { type: "startNewDraft", revision: saved.revision, thread } as const
+    const moved = messages.send(event, (state) => state.newDraft.visit === before.newDraft.visit &&
+      (handoff === undefined || store.messageHandoff.get() === handoff)) catch () => undefined
+    return moved === undefined ? undefined : { visit: moved.state.newDraft.visit, fillTo }
   })
+  if (handoff === undefined) return opened !== undefined
+  if (opened === undefined) {
+    store.messageHandoff.replace(handoff, (try current) ? { ...handoff, phase: "OpenFailed" } : undefined)
+  } else if (opened.fillTo) {
+    const pending = { route, address: handoff.address, visit: opened.visit, phase: "Saving" } as const
+    store.messageHandoff.replace(handoff, pending)
+    try saveMessageHandoff(pending)
+  } else store.messageHandoff.replace(handoff, undefined)
+  return opened !== undefined
 }
+
+// spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it"; spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
+effect function newMessageFor(number: string, owner: MessageSource): void!!NewMessageHost {
+  const address = number.trim().slice(0, 230)
+  if (address === "") return
+  const shell = try Shell
+  const starting = try shell.get()
+  if (starting.route !== owner.route || !showing(starting, owner.view)) return
+  const event = starting.assistant === "Sheet" || starting.assistant === "Full"
+    ? { type: "openCommsView", view: "Messages" } as const : { type: "openView", view: "Messages" } as const
+  if (!(try contained(shell.send(event, (where) => where.route === owner.route), "the number handed to Messages"))) return
+  const store = (try Drafts).messageHandoff
+  const offer = { route: owner.route + 1, address, phase: "Opening" } as const
+  if ((try shell.get()).route !== offer.route) return
+  store.replace(store.get(), offer)
+  const messages = try Messages
+  const front = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (state) => state.front)), "3 seconds")
+  if (Option.isSome(front)) try ignore(startNewMessage(offer))
+  else store.replace(offer, (try shell.get()).route === offer.route ? { ...offer, phase: "OpenFailed" } : undefined)
+}
+
+const callers = Layer.effect(Callers, effect {
+  const whole = try Whole
+  return {
+    message: (number: string, owner?: MessageSource) => owner === undefined
+      ? Effect.void : flatMap(whole.context, (context) => Effect.provideContext(newMessageFor(number, owner), context as Context.Context<NewMessageHost>)),
+  }
+})
+
+const abandoningHandoff = started(effect {
+  const store = (try Drafts).messageHandoff
+  try Stream.runForEach((try Shell).changes, effect (where) => {
+    const handoff = store.get()
+    if (handoff !== undefined && where.route > handoff.route) store.replace(handoff, undefined)
+  })
+}, "discarding stale message handoffs")
 
 /** Only this exact New draft waits while its already-reviewed send is acting or being reconciled. */
 export function newDraftHeld(state: Composer.Composer, revision: number): boolean {
@@ -882,8 +963,41 @@ export function newDraftHeld(state: Composer.Composer, revision: number): boolea
 
 type NewDraftEdit = Partial<Pick<NewMessageDraft, "recipients" | "body" | "pictures">>
 
+// spec/app/messages/index.md, "New message reads the contacts that have a number and brings back the owner's unsent New draft"
+effect function saveMessageHandoff(handoff: NewMessagePrefill): boolean!!NewMessageHost {
+  const store = (try Drafts).messageHandoff
+  const current = effect {
+    const where = try (try Shell).get()
+    return where.route === handoff.route && showing(where, "Messages") && holdsNewDraft(try (try Messages).get(), handoff.visit)
+  }
+  if (!(try current) || store.get() !== handoff) {
+    store.replace(handoff, undefined)
+    return false
+  }
+  const saved = try editNewMessage(handoff.visit, { recipients: handoff.address }, false, undefined, undefined, handoff)
+  store.replace(handoff, !saved && (try current) ? { ...handoff, phase: "SaveFailed" } : undefined)
+  return saved
+}
+
+/** A retry belongs only to the Messages route and, once admitted, the same New visit. */
+export effect function retryMessageHandoff(handoff: NewMessageHandoff): boolean!!NewMessageHost {
+  const store = (try Drafts).messageHandoff
+  if (store.get() !== handoff || (try (try Shell).get()).route !== handoff.route) return false
+  if (handoff.phase === "OpenFailed") {
+    const opening = { ...handoff, phase: "Opening" } as const
+    store.replace(handoff, opening)
+    return try startNewMessage(opening)
+  }
+  if (handoff.phase === "SaveFailed") {
+    const saving = { ...handoff, phase: "Saving" } as const
+    store.replace(handoff, saving)
+    return try saveMessageHandoff(saving)
+  }
+  return false
+}
+
 /** Put a real edit in the visible New visit, preserving its other fields and retiring any replaced recipient. */
-export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePicker: boolean, expected?: number, picking?: boolean): boolean!!(Messages | Shell | Drafts | Conversations | Composer.Machine) {
+export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePicker: boolean, expected?: number, picking?: boolean, handoff?: NewMessagePrefill): boolean!!(Messages | Shell | Drafts | Conversations | Composer.Machine) {
   const store = try Drafts
   const messages = try Messages
   const shell = try Shell
@@ -891,10 +1005,12 @@ export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePi
   return try Semaphore.withPermit(store.newVisits, effect {
     const place = try messages.get()
     const before = try store.newDraft()
-    if (!showing(try shell.get(), "Messages") || !holdsNewDraft(place, visit) || before.revision !== place.newDraft.revision
+    const where = try shell.get()
+    if (!showing(where, "Messages") || !holdsNewDraft(place, visit) || before.revision !== place.newDraft.revision
       || (expected !== undefined && expected !== before.revision)
       || (picking !== undefined && picking !== place.newDraft.picking)
       || newDraftHeld(try composer.get(), before.revision)) return false
+    if (handoff !== undefined && (where.route !== handoff.route || store.messageHandoff.get() !== handoff || before.recipients !== "")) return false
     const draft = { ...before, ...edit, revision: before.revision + 1 }
     if (draft.body.length > MMS_MAX_BODY || draft.recipients.length > 230) return false
     const thread = edit.recipients === undefined ? place.newDraft.recipient : try numberForNew(draft)
@@ -1161,4 +1277,4 @@ export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Co
 const saving = following(Composer.Machine, (state) => Composer.canSaveDraft(state), Composer.Machine, (due): Event | undefined => (due ? { type: "saveDraft" } : undefined))
 
 /** The composer: kept across restarts, so a draft and a send under way survive them; nothing is sent when Alpha opens again. */
-export const composer = together(machine, drafts, opened, saving, settling, retiring, androidDraftEntries, hearing(reports, Composer.Machine, (event: Event) => event))
+export const composer = together(machine, drafts, opened, saving, settling, retiring, callers, abandoningHandoff, androidDraftEntries, hearing(reports, Composer.Machine, (event: Event) => event))

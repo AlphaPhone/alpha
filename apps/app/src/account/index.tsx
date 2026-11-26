@@ -1,7 +1,7 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
 import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Input, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
 import { ChevronDown, RotateCw, Ticket, X } from "lucide-react";
-import { normalizeSubscriptionCode } from "@elizaos/cloud";
+import { normalizeSubscriptionCode, type SnapshotSubscription } from "@elizaos/cloud";
 import { Layer } from "effect";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import * as Billing from "../../gen/app__account__billing.effect.vibe";
@@ -13,6 +13,8 @@ import { listed, top } from "../../gen/app__shell__layers.ts";
 import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
 import { checkout, choosePurchase, recheckPlan, tierOf } from "./billing.vibe";
 import { accountAccess, checkCodePlan, codes, readReferral, referralCode, submitCode } from "./codes.vibe";
+import { managePlan } from "./change.vibe";
+import { ManagePlan } from "./ManagePlan.tsx";
 import { AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, profileLive, profileShelf } from "./profile.vibe";
 
 const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
@@ -63,8 +65,14 @@ function AccountDetails({ profile }: { profile: Profile }) {
 
 /** The offers the owner can inspect in the open Account sheet. */
 type CheckoutRuntime = Layer.Success<ReturnType<typeof checkout>>;
+type PlanRuntime = Layer.Success<ReturnType<typeof managePlan>>;
 
-function Plans({ runtime, shelf, canSubscribe }: { runtime: Shown<Resident | CheckoutRuntime | CodeRuntime>["runtime"]; shelf: ReturnType<typeof profileShelf>; canSubscribe: boolean }) {
+function Plans({ runtime, shelf, canSubscribe, subscription }: {
+  runtime: Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>["runtime"];
+  shelf: ReturnType<typeof profileShelf>;
+  canSubscribe: boolean;
+  subscription: SnapshotSubscription | undefined;
+}) {
   const { state, can, send } = useBilling(runtime);
   const catalog = useSyncExternalStore(shelf.subscribe, shelf.catalog, shelf.catalog);
   const offers = catalog && state?.offers.status === "Loaded" && state.offers.ticket === catalog.ticket ? catalog.offers : undefined;
@@ -101,6 +109,7 @@ function Plans({ runtime, shelf, canSubscribe }: { runtime: Shown<Resident | Che
         </ul>
       ) : failed || offers ? <p role="status" className="text-sm text-muted-foreground">{failed ? "Plans unavailable" : "No plans available"}</p>
         : <Spinner label="Reading plans" className="text-muted-foreground" />}
+      {subscription && catalog?.buyer && offers ? <ManagePlan key={subscription.id} runtime={runtime} subscription={subscription} offers={offers} refresh={shelf.refresh} /> : null}
       {canSubscribe && shown && catalog && selected?.tag === "PurchaseReview" ? (
         <section aria-label="Review subscription" className="mt-3 grid gap-2 rounded-tile border border-border p-4">
           <p className="text-sm font-medium">{shown.name} · {price(shown.amountCents)}/month</p>
@@ -200,7 +209,7 @@ function BrowserAccount({ open, reading, retry, close }: { open: boolean; readin
 }
 
 // spec/app/account/codes.md, "Story: Redeem a code"
-function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeRuntime>, "runtime">) {
+function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>, "runtime">) {
   const { state } = useCodes(runtime);
   const billing = useBilling(runtime).state;
   if (state === undefined || billing === undefined) return null;
@@ -267,7 +276,7 @@ function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeR
 export default {
   open(alpha, place) {
     const profile = profileFor(alpha);
-    function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime | CodeRuntime>) {
+    function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>) {
       const { state, can, send } = useMachine(runtime);
       const { state: settings } = useSettings(runtime);
       const shown = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
@@ -289,13 +298,16 @@ export default {
             <Button variant="ghost" size="icon" aria-label="Close Account" className="absolute top-9 right-6.5 size-12" onClick={onClose}><X /></Button>
             <AccountDetails profile={shown} />
             {shown.tag === "Read" && shown.purchase === "Matches" ? <PurchaseStatus runtime={runtime} /> : null}
-            {shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile} canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"} /> : null}
+            {shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile}
+              canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"}
+              subscription={shown.plan?.tag === "PlanRead" ? shown.plan.subscription : undefined}
+            /> : null}
             {shown.tag === "Read" && shown.codesAvailable ? <AccountCodes runtime={runtime} /> : null}
           </SheetContent>
         </Sheet>
       );
     }
     return area(Layer.provideMerge(profileLive(profile.publish, profile.publishCatalog, profile.refreshed, accountAccess),
-      Layer.merge(accountWrites, Layer.provideMerge(codes(profile.refresh), checkout(profile.refresh, profile.publishCatalog)))), AccountSheet).open(alpha, place);
+      Layer.mergeAll(accountWrites, managePlan(profile.refresh), Layer.provideMerge(codes(profile.refresh), checkout(profile.refresh, profile.publishCatalog)))), AccountSheet).open(alpha, place);
   },
 } satisfies Area;

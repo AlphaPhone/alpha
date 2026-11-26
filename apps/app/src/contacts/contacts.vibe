@@ -4,7 +4,7 @@ import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
-import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
@@ -31,6 +31,7 @@ export interface Book {
   readonly editBase: ContactDetail | undefined
   readonly form: Form
   readonly reach: string
+  readonly message: { readonly route: number; readonly contact: string; readonly card: number; readonly number: string } | undefined
   readonly problem: ContactDraftProblem | "stale" | "not-found" | undefined
   /** Who narrowed the list to `sought`: a filter Alpha applied shows as a chip the owner can clear. */
   readonly filteredBy: "Owner" | "Alpha"
@@ -38,7 +39,7 @@ export interface Book {
 
 export const blankForm: Form = { givenName: "", familyName: "", phones: [""], emails: [""], notes: "" }
 
-const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", problem: undefined, filteredBy: "Owner" }
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", message: undefined, problem: undefined, filteredBy: "Owner" }
 
 /** The contacts behind Contacts' counts. */
 export service Rows {
@@ -203,14 +204,22 @@ effect function written(id: number, change: Change, contact: string): Event!!(Te
 }
 
 // spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
-effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachine | Shell | Callers) {
-  const held = try (try Rows).get()
-  const number = held.reach !== "" ? held.reach : held.card?.phoneNumbers[0]?.number ?? ""
-  if (number === "") return
+effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachine | Shell | Callers | Contacts.Machine) {
+  const store = try Rows
+  const held = try store.get()
   if (how === "Message") {
-    try (try Callers).message(number)
+    const source = try (try Shell).get()
+    const card = try (try Contacts.Machine).get()
+    const request = held.message
+    if (request?.route !== source.route || !showing(source, "Contacts") || !Contacts.canReach(card)
+      || request.contact !== card.contact || request.card !== card.card.ticket || held.card?.id !== request.contact
+      || !held.card.phoneNumbers.some((phone) => phone.number === request.number)) return
+    try store.set({ message: undefined })
+    try (try Callers).message(request.number, { view: "Contacts", route: request.route })
     return
   }
+  const number = held.reach !== "" ? held.reach : held.card?.phoneNumbers[0]?.number ?? ""
+  if (number === "") return
   try ignore(dialing(number))
 }
 

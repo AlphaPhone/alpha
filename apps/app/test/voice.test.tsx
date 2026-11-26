@@ -163,7 +163,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       () => ({ warm: world.voice.warmSpeechOutputCalls, local: world.voice.localSpeechStatusCalls, live: world.voice.liveCaptureStatusCalls }),
     );
     const afterWarm = await getVoice(runtime);
-    expect([afterWarm.phase, afterWarm.mic, afterWarm.prompting, world.voice.startLiveCaptureCalls, world.ask.cloudWarmCalls, world.voice.relayWarmups]).toEqual([
+    expect([afterWarm.phase, afterWarm.mic, afterWarm.prompting, world.voice.startLiveCaptureCalls, world.ask.warmUps.length, world.voice.relayWarmups]).toEqual([
       "Idle", "Off", false, 0, 0, [],
     ]);
 
@@ -200,8 +200,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     world.voice.signedInHere?.();
     await until(runtime, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
     await sendVoice(runtime, { type: "returned" });
-    await untilCondition(runtime, () => world.ask.cloudWarmCalls >= 1 && world.voice.relayWarmups.length >= 1);
-    expect([world.ask.cloudWarmCalls >= 1, [...new Set(world.voice.relayWarmups)], world.voice.startCloudSpeechCalls]).toEqual([true, ["production"], 0]);
+    await untilCondition(runtime, () => world.ask.warmUps.length >= 1 && world.voice.relayWarmups.length >= 1);
+    expect([world.ask.warmUps.length >= 1, [...new Set(world.voice.relayWarmups)], world.voice.startCloudSpeechCalls]).toEqual([true, ["production"], 0]);
   });
 
   // spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"
@@ -605,7 +605,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(await runtime.runPromise(Effect.flatMap(VoiceBridge, (bridge) => bridge.available()))).toBe(true);
 
     await until(runtime, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
-    await untilCondition(runtime, () => world.voice.relayWarmups.length === 1 && world.ask.cloudWarmCalls >= 1, () => world.voice.relayWarmups);
+    await untilCondition(runtime, () => world.voice.relayWarmups.length === 1 && world.ask.warmUps.length >= 1, () => world.voice.relayWarmups);
     await sendVoice(runtime, { type: "returned" });
     await untilCondition(runtime, () => world.voice.relayWarmups.length === 2, () => world.voice.relayWarmups);
     expect(world.voice.relayWarmups).toEqual(["production", "production"]);
@@ -1031,7 +1031,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
         await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
         await drawn(() => review.confirmations[0]?.confirm());
       }
-      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
+      await drawnUntil(alpha, area, Voice.Machine, (state) =>
+        state.sent === 2 && state.reviewPending === (outcome === "refuse") && state.phase === "Listening" && state.mic === "On");
       if (outcome === "send") {
         await drawn(() => speakUtterance(world, "Send this text."));
         await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");

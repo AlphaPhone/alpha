@@ -167,6 +167,26 @@ pure def stepACommsReturnPreservesTheSheet(before: Shell, via: str, after: Shell
   via == "returnCommsView" implies (after.assistant == before.assistant and after.trail.length() == before.trail.length() - 1)
 ```
 
+### Opening another communications app from the stage keeps Ask Alpha open
+
+The owner's action can open an admitted communications app from the app
+currently on stage. Back can return to the source at the same height.
+
+```quint
+pure def canOpenCommsView(s: Shell, view: View): bool =
+  s.textAsk == NoTextAsk and (s.assistant == Sheet or s.assistant == Full)
+    and commsView(s.trail.nthOr(s.trail.length() - 1, Settings)) and commsView(view) and canOpenView(s, view)
+
+pure def openCommsView(s: Shell, view: View): Shell =
+  val opened = openView(s, view)
+  { ...opened, assistant: s.assistant }
+
+pure def stepACommsOpeningPreservesTheSheet(before: Shell, via: str, after: Shell): bool =
+  via == "openCommsView" implies (after.assistant == before.assistant
+    and after.trail.nthOr(after.trail.length() - 2, Settings) == before.trail.nthOr(before.trail.length() - 1, Settings)
+    and commsView(after.trail.nthOr(after.trail.length() - 1, Settings)))
+```
+
 ### Home leaves every app and closes every layer at once
 
 On Android, HOME, the app icon and a return to Alpha deliver their intents

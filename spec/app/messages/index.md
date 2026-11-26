@@ -582,6 +582,13 @@ pure def sometimesDeleteAsked(s: Messages): bool = s.confirming and s.shown.fail
 
 ### New message reads the contacts that have a number and brings back the owner's unsent New draft
 
+Message from a contact card or voicemail opens this same New draft. It fills an
+empty To field with the selected number, leaves any existing recipient and body
+in place, and leaves Send to the owner. The address belongs to the receiving
+Messages route, and it can be saved only after that route has opened New.
+If opening the draft or saving the address fails, the owner can retry while
+that route and, once open, that New visit are still current.
+
 ```quint
 pure def askChoices(further: bool, s: Messages): Moved =
   val picker = R::ask(s.picker)

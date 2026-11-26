@@ -33,7 +33,6 @@ export interface VoiceScene {
   warmSpeechOutputCalls: number;
   localSpeechStatusCalls: number;
   liveCaptureStatusCalls: number;
-  cloudWarmCalls: number;
   holdEngineCalls: number;
   releaseEngineHoldCalls: number;
   engineHeld: boolean;
@@ -64,9 +63,10 @@ export interface VoiceScene {
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
-  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
+  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "reauthenticate" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
   /** The phone's sign-in settling on the account whose key is `credentialId` now, as `ElizaSignInPlugin.java` tells it. */
   signedInHere?: () => void;
+  billingVerified?: string;
 }
 
 export function voiceScene(): VoiceScene {
@@ -86,7 +86,6 @@ export function voiceScene(): VoiceScene {
     warmSpeechOutputCalls: 0,
     localSpeechStatusCalls: 0,
     liveCaptureStatusCalls: 0,
-    cloudWarmCalls: 0,
     holdEngineCalls: 0,
     releaseEngineHoldCalls: 0,
     engineHeld: false,

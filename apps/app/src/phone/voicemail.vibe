@@ -3,6 +3,7 @@ import type { StagedDeletion, ListedVoicemail, VoicemailId, VoicemailListing } f
 import { Machine as PhoneMachine, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { type Telephony, deletionRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { recognizesVoicemail, transcribeVoicemail } from "../platform/voice.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
@@ -16,6 +17,7 @@ export interface Heard {
   readonly transcript: string
   readonly deletion: StagedDeletion | undefined
   readonly confirmation: VoicemailConfirmation | undefined
+  readonly message: { readonly route: number; readonly id: VoicemailId; readonly opening: number; readonly number: string } | undefined
 }
 
 /** The item shown when the owner opens its inline delete confirmation. */
@@ -26,7 +28,7 @@ interface VoicemailConfirmation {
   readonly expiresAt: number | undefined
 }
 
-const nothing: Heard = { rows: [], open: "", audio: "", transcript: "", deletion: undefined, confirmation: undefined }
+const nothing: Heard = { rows: [], open: "", audio: "", transcript: "", deletion: undefined, confirmation: undefined, message: undefined }
 
 /** The voicemails behind Voicemail's counts. */
 export service Voicemails {
@@ -176,20 +178,30 @@ effect function undo(id: number): Event!!(Telephony | Voicemails) {
 }
 
 // spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it"
-effect function reached(app: Voicemail.Reach): void!!(Voicemails | PhoneMachine | Callers) {
+effect function reached(app: Voicemail.Reach): void!!(Voicemails | PhoneMachine | Voicemail.Machine | Callers | Shell) {
   const open = try opened()
   if (Option.isNone(open) || open.value.number === "") return
   const number = open.value.number
-  if (app === "Message") try (try Callers).message(number)
-  else try contained((try PhoneMachine).send({ type: "dialVoicemail", number }), "the voicemail callback")
+  if (app === "Message") {
+    const store = try Voicemails
+    const request = (try store.get()).message
+    const source = try (try Shell).get()
+    const state = try (try Voicemail.Machine).get()
+    if (request?.route !== source.route || !showing(source, "Phone") || !Voicemail.canReach(state, app)
+      || request.id !== open.value.id || request.opening !== state.audio.ticket || request.number !== number) return
+    try store.set({ message: undefined })
+    try (try Callers).message(number, { view: "Phone", route: request.route })
+  } else try contained((try PhoneMachine).send({ type: "dialVoicemail", number }), "the voicemail callback")
 }
+
+export type MessageSource = { readonly view: "Contacts" | "Phone"; readonly route: number }
 
 /** Where a number handed out of Phone goes to be written to: Messages, which says how. */
 export service Callers {
-  message(number: string): void!!
+  message(number: string, owner?: MessageSource): void!!
 }
 
-function carry(fx: Out): Job<Event, Telephony | Voicemails | PhoneMachine | Voicemail.Machine | Callers | Time, []> {
+function carry(fx: Out): Job<Event, Telephony | Voicemails | PhoneMachine | Voicemail.Machine | Callers | Shell | Time, []> {
   return match (fx) {
     when { tag: "ReadList", let ticket, let refresh }: answer("list", listed(ticket, refresh), { type: "listed", ticket, ok: false, carrier: false, count: 0, unheard: 0, stillOpen: false });
     when { tag: "FetchAudio", let ticket }: answer("audio", fetched(ticket), { type: "audioFetched", ticket, ok: false, recognizer: false });

@@ -1,5 +1,5 @@
 // spec/kit/read.md, "Story: Read from outside"
-import type { Account, BillingSnapshot, PlanOffer, RedeemAnswer } from "@elizaos/cloud";
+import type { Account, BillingSnapshot, PlanOffer, RedeemAnswer, SubscriptionCommand } from "@elizaos/cloud";
 import { busy } from "./platform.ts";
 import { readJsonBody, type Route } from "./routes.ts";
 
@@ -12,6 +12,7 @@ export interface CheckoutScene {
   readonly opened: string[];
   returned: string | null;
   paid: boolean;
+  change?: { revision: number; ending: boolean; loseReply?: boolean; commands: SubscriptionCommand[] };
 }
 
 export interface RedemptionScene {
@@ -32,8 +33,11 @@ const limits = (observedAt: number, checkout?: CheckoutScene, redemption?: Redem
     : { key: "free", source: "free", effectiveUntil: null },
   subscription: checkout?.paid ? {
     id: "sub_alpha_checkout", planKey: "plus_monthly", status: "active", periodStart: observedAt,
-    periodEnd: observedAt + 86_400_000, cancelAtPeriodEnd: false, pendingPlanKey: null, dunningEndsAt: null,
-    revision: 2, control: { action: "cancel", eligible: true, expectedSubscriptionRevision: 2 },
+    periodEnd: observedAt + 86_400_000, cancelAtPeriodEnd: checkout.change?.ending ?? false, pendingPlanKey: null, dunningEndsAt: null,
+    revision: checkout.change?.revision ?? 2, control: {
+      action: checkout.change?.ending ? "undo" : "cancel", eligible: true,
+      expectedSubscriptionRevision: checkout.change?.revision ?? 2,
+    },
   } : null,
   grant: redemption?.grant ?? null,
   allowance: null,
@@ -69,6 +73,32 @@ export function cloudRoutes(signedIn: () => boolean, now: () => number, checkout
         return Response.json({
           replayed: false, grant, entitlement: { plan: { key: grant.planKey, source: "grant", effectiveUntil: grant.effectiveUntil } },
         } satisfies RedeemAnswer);
+      })();
+    },
+    (request, url) => {
+      const plan = checkout?.change;
+      if (plan === undefined) return;
+      if (request.method === "GET" && url.pathname === "/api/v1/subscriptions/commands") {
+        return Response.json({ observedAt: now(), items: plan.commands, nextCursor: null });
+      }
+      const cancel = url.pathname === "/api/v1/subscriptions/cancel";
+      if (request.method !== "POST" || (!cancel && url.pathname !== "/api/v1/subscriptions/cancel/undo")) return;
+      return (async () => {
+        const { subscriptionId, expectedSubscriptionRevision, idempotencyKey } = await readJsonBody(request);
+        if (request.headers.get("authorization") !== "Bearer billing-session") return new Response(null, { status: 428 });
+        if (subscriptionId !== "sub_alpha_checkout" || expectedSubscriptionRevision !== plan.revision ||
+            typeof idempotencyKey !== "string" || cancel === plan.ending) return new Response(null, { status: 409 });
+        const digest = new Uint8Array(await crypto.subtle.digest("SHA-256",
+          new TextEncoder().encode([account.organization_id, account.id, idempotencyKey].join("\n"))));
+        const commandId = "cmd_" + [...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+        plan.ending = cancel;
+        const command: SubscriptionCommand = {
+          commandId, subscriptionId, kind: cancel ? "cancel" : "undo", status: "succeeded",
+          expectedRevision: plan.revision, resultRevision: ++plan.revision, createdAt: now(),
+        };
+        plan.commands.push(command);
+        if (plan.loseReply) { plan.loseReply = false; return new Response(null, { status: 503 }); }
+        return Response.json(command);
       })();
     },
     (request, url) => {
