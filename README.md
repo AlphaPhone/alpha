@@ -24,7 +24,6 @@ on Effect, and the interface in React on one design system.
 | `packages/design-system` | Alpha's design tokens, built into Tailwind's theme |
 | `packages/ui` | Alpha's shared React components, with generated stories |
 | `vibestack/` | The toolchain, with [its guide](vibestack/README.md) |
-| `legacy/` | The implementation being replaced, kept as the guide to what each area does and removed area by area as it is rebuilt |
 
 The on-device agent, the Android device package and the hosted services
 are the open-source [elizaOS](https://github.com/elizaOS/eliza) packages on
@@ -64,10 +63,9 @@ Agents start with [AGENTS.md](AGENTS.md); the spec format is in
 
 APK builds, emulator HOME-role tests, an AOSP image boot, real integrations
 and device or owner acceptance are separate results; record each on its own,
-and never one as proof of another. Where this tree does not yet hold a tool,
-the procedure points at Alpha `develop` at
-[`bd70db55b2b`](https://github.com/eliza-research/alpha/tree/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a),
-the commit `legacy/` holds, so the pointer outlives `legacy/`.
+and never one as proof of another. Historical references to the pre-migration
+tree point at Alpha `develop` at
+[`bd70db55b2b`](https://github.com/eliza-research/alpha/tree/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a).
 
 ### The public site
 
