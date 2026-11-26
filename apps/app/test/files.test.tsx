@@ -1219,9 +1219,9 @@ describe("Files on a phone", () => {
 
     await press("Trash");
     await until(alpha, runtime, Bin, (s) => s.open && s.listing.status === "Loaded" && s.entries.length === 2);
-    await press("Empty the Trash");
+    await press("Empty");
     await until(alpha, runtime, Bin, (s) => s.erasing.showing && s.doomed.length === 2);
-    await pressOnTop("Erase");
+    await pressOnTop("Empty");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Unknown" && s.listing.status === "Loaded");
     const state = runtime.runSync(Bin.use((machine) => machine.get()));
     expect(state.done.map((entry) => entry.name)).toEqual(["gone.txt"]);

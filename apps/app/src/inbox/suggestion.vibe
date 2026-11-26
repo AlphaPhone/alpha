@@ -72,11 +72,11 @@ effect function startedWith(target: Target, account: number, message: number, te
   const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || acceptable(sender), policy }
   const sent = try exit(composer.send(event, "Owner"))
   if (!Exit.isSuccess(sent) || !sent.value.state.open) {
-    try words.forget(nextId)
+    try words.forget([nextId])
     return
   }
   if (sent.value.state.letter.id !== nextId) {
-    try words.forget(nextId)
+    try words.forget([nextId])
     words.set(sent.value.state.letter.id, prepared)
   }
   try ignore((try Shell).send({ type: "openView", view: "Inbox" }))

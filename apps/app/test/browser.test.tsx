@@ -178,24 +178,29 @@ const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
 });
 
-const selectedPage = (runtime: ReturnType<typeof browser.runtime>) => {
-  const tab = runtime.runSync(Effect.map(Effect.flatMap(Tabs, (m) => m.get()), (s) => s.selected));
-  return { tab, page: runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))) };
-};
-
 const askClearAll = async (alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"], runtime: ReturnType<typeof browser.runtime>, choice: "Cancel" | "Clear data") => {
-  await press("Menu");
-  await press("Clear all browsing data");
+  if (!button("Reset browser data")) {
+    await press("Menu");
+    await press("Library, bookmarks and history");
+    await libraryTab("History");
+    await press("Clear history");
+  }
+  await press("Reset browser data");
   await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
   await press(choice);
   await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept");
 };
 
+async function openHydratedPhoneBrowser() {
+  const world = { ...scene(), phone: true, image: true };
+  const opened = await onBrowser(world);
+  await until(opened.alpha, opened.runtime, Tabs, (s) => s.hydrated);
+  return { ...opened, world };
+}
+
 describe("The Browser on a phone", () => {
   it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/address.md, \"Story: Go where I typed\")", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const { alpha, runtime, world } = await openHydratedPhoneBrowser();
     // spec/app/browser/address.md, "A tab with no page says \"Search or address\" in its bar, a private tab as a normal one, and only the private mark tells them apart"
     expect(button(/^Edit address/)?.textContent).toBe("Edit addressSearch or address");
     await press("Search or type address");
@@ -805,9 +810,7 @@ describe("The Browser on a phone", () => {
   });
 
   it("Toggles desktop site per native tab from the Browser menu", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const { world, runtime } = await openHydratedPhoneBrowser();
     await go("example.com");
     await vi.waitFor(async () => expect(await committedAddress(runtime, world.browser.tabs)).toBe("https://example.com"));
     const firstTab = (await runtime.runPromise(Effect.flatMap(Tabs, (model) => model.get()))).selected;
@@ -838,7 +841,7 @@ describe("The Browser on a phone", () => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await go("http://127.0.0.1");
-    const { page } = selectedPage(runtime);
+    const page = selectedPage(runtime);
     await until(alpha, page, Page, (p) => p.phase === "Shown");
     expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["http://127.0.0.1"]);
   });
@@ -847,7 +850,7 @@ describe("The Browser on a phone", () => {
     const { alpha, runtime } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await go("news.example/on-device-agents");
-    const { page } = selectedPage(runtime);
+    const page = selectedPage(runtime);
     await until(alpha, page, Page, (p) => p.phase === "Shown");
     await press("Menu");
     await press("Find in page");
@@ -863,7 +866,7 @@ describe("The Browser on a phone", () => {
   it("Does not create a native tab when load is refused on a non-selected tab (spec/app/browser/index.md, \"A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    const { tab: first } = selectedPage(runtime);
+    const first = selectedTab(runtime);
     await press("Menu");
     await press("New tab");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 2 && s.selected !== first);
@@ -882,7 +885,8 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Library, (s) => s.read.status === "Loaded" && s.history === 3);
     await hardware("back");
     await go("https://alpha.example/fresh-visit");
-    const { tab, page } = selectedPage(runtime);
+    const tab = selectedTab(runtime);
+    const page = selectedPage(runtime, tab);
     await until(alpha, page, Page, (p) => p.phase === "Shown");
     await until(alpha, runtime, Library, (s) => s.history === 4);
     await askClearAll(alpha, runtime, "Cancel");

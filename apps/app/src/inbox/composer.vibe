@@ -450,12 +450,12 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
   words.set(nextId, prepared)
   const sent = try exit(composer.send(event, "Owner"))
   if (!Exit.isSuccess(sent) || !sent.value.state.open) {
-    try words.forget(nextId)
+    try words.forget([nextId])
     return false
   }
   const actual: Words = sent.value.state.letter.attachments === 0 && carried.length > 0 ? { ...prepared, files: [] } : prepared
   if (sent.value.state.letter.id !== nextId) {
-    try words.forget(nextId)
+    try words.forget([nextId])
     words.set(sent.value.state.letter.id, actual)
   } else if (actual !== prepared) {
     words.set(nextId, actual)

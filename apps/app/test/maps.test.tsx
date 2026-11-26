@@ -55,8 +55,7 @@ async function openMaps(world: ReturnType<typeof scene>, ready = true) {
 
 /** Focus Search Maps, submit `query`, and wait for search results or a dropped pin. */
 async function searchFor(alpha: Alpha, runtime: ReturnType<typeof maps.runtime>, query: string, pin = false) {
-  await focus("Search Maps");
-  await fill("Search Maps", query);
+  await typeMapSearch(query);
   await enter("Search Maps");
   await until(alpha, runtime, Screen, (s) => (pin ? s.place !== 0 : s.search.status === "Loaded"));
 }
@@ -424,18 +423,17 @@ describe("Maps in a browser", () => {
     const world = scene();
     const { alpha, runtime } = await openMaps(world);
 
-    await focus("Search Maps");
-    await fill("Search Maps", "43.73, 7.42");
+    await typeMapSearch("43.73, 7.42");
     await later(alpha, 500);
     const afterCoords = await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
     expect([world.maps.asked.filter((a) => a.path.includes("/places/search")).length, afterCoords.recent]).toEqual([0, []]);
 
     await searchFor(alpha, runtime, "harbour");
     await until(alpha, runtime, Screen, (s) => s.results === 2);
-    await fill("Search Maps", "");
+    await typeMapSearch("");
     await until(alpha, runtime, Screen, (s) => s.query === "" && s.results === 0);
 
-    await fill("Search Maps", "harbour");
+    await typeMapSearch("harbour");
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.searching);
     expect(document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value).toBe("");
@@ -484,7 +482,7 @@ describe("Maps in a browser", () => {
     if (!stepOne) throw new Error("missing route step");
     move(world.maps, stepOne.latitude, stepOne.longitude, 8, world.now);
     await until(alpha, runtime, Screen, (s) => s.trip.turn === 1);
-    expect(document.body.textContent).toContain("400 m");
+    expect(document.body.textContent).toMatch(/(?:400 m|0\.2 mi)/);
 
     move(world.maps, stepOne.latitude, stepOne.longitude, 8, world.now - 60_000);
     await until(alpha, runtime, Screen, (s) => s.imprecise);

@@ -81,6 +81,7 @@ async function openAssistant(world: ReturnType<typeof scene>, ready = true) {
   const runtime = assistant.runtime(alpha);
   await until(alpha, runtime, Composer, (s) => s.slot === "Open");
   if (ready) await until(alpha, runtime, Conversation, (s) => s.ready);
+  await drawn(() => vi.waitFor(() => expect(document.querySelector("textarea[aria-label='Message Alpha']")).not.toBeNull()));
   return { alpha, runtime };
 }
 
@@ -797,14 +798,14 @@ describe("Ask Alpha edge flows", () => {
   const openKeptChat = async (world: ReturnType<typeof scene>, title: string) => {
     world.ask.kept.set("c1", { roomId: "r1", title, messages: [] });
     const opened = await openAssistant(world);
-    chatsList();
+    await chatsList(opened.runtime);
     await until(opened.alpha, opened.runtime, Chats, (s) => s.list.status === "Loaded");
     row("Chats", title);
     return opened;
   };
 
   // spec/app/assistant/composer.md, "A message that may already have been sent offers Check for reply, and what the read found settles it"
-  it("Check for reply restores an unrecorded unsettled draft into the editor and slot", async () => {
+  it("Check for reply keeps LookLater without a turn receipt and restores an unrecorded unsettled draft into the editor and slot", async () => {
     const world = { ...scene(), phone: true };
     const key = draftKey(world.notes.ownerIdentity, world.notes.owner, "c1", "r1");
     world.ask.drafts.set(key, JSON.stringify({ revision: 1, text: "Unsent important draft", sending: true }));
@@ -812,6 +813,11 @@ describe("Ask Alpha edge flows", () => {
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open" && s.unsettled);
 
     await press("Check for reply");
+    await until(alpha, runtime, Conversation, (s) => s.recheck.status !== "Loading" && s.check === "LookLater");
+    await drawn(() => runtime.runPromise(Effect.flatMap(Conversation, (machine) => Effect.gen(function* () {
+      const checked = yield* machine.send({ type: "checkForReply" });
+      yield* machine.send({ type: "reconcile", ticket: checked.state.recheck.ticket, found: "Unrecorded" });
+    }))));
     await until(alpha, runtime, Composer, (s) => !s.unsettled && s.editor.text && s.draft.sync === "Kept");
     expect(composerText()).toBe("Unsent important draft");
     expect(JSON.parse(world.ask.drafts.get(key) ?? "{}")).toMatchObject({ text: "Unsent important draft", sending: false });
@@ -833,7 +839,7 @@ describe("Ask Alpha edge flows", () => {
     write("");
     await until(alpha, runtime, Composer, (s) => !s.editor.text && s.draft.sync === "Kept");
     world.ask.down = false;
-    chatsList();
+    await chatsList(runtime);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     row("Chats", "Earlier chat");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");

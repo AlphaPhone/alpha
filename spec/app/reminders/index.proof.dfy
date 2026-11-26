@@ -749,6 +749,8 @@ lemma applySync_ensures(s: Reminders, lists: seq<ListEntry>, nextListId: int, it
   ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysHiddenExactlyWhileDeleteHeld(applySync(s, lists, nextListId, items, nextItemId)))
   ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysActiveCustomListExists(applySync(s, lists, nextListId, items, nextItemId)))
   ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> alwaysSmartCountsConsistent(applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepBackShowsLists(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepLeavesOverview(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
   ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepDeleteOnlyOnExpire(s, "applySync", applySync(s, lists, nextListId, items, nextItemId), []))
   ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepUndoRestoresExactState(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))
   ensures (inv(s) ==> canApplySync(s, lists, nextListId, items, nextItemId) ==> stepDeleteListKeepsItemsValid(s, "applySync", applySync(s, lists, nextListId, items, nextItemId)))

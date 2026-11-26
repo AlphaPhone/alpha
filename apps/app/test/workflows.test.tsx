@@ -473,13 +473,17 @@ describe("Workflows", () => {
     }
   });
 
+const openStepsBuilder = async (alpha: Awaited<ReturnType<typeof open>>["alpha"], area: ReturnType<typeof workflows.runtime>) => {
+  await press("Add to Workflows");
+  await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+  await press("More options");
+  await press(/^Steps/);
+};
+
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
     const world = scene();
     const { alpha, area } = await onList(world);
-    await press("Add to Workflows");
-    await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
-    await press("More options");
-    await press(/^Steps/);
+    await openStepsBuilder(alpha, area);
     await until(alpha, area, Builder, (state) => state.offer.status === "Loaded");
 
     await write("Name", "Water the plants");
@@ -557,7 +561,7 @@ describe("Workflows", () => {
       store.set(runKey, JSON.stringify({ id: 1, submission: "s-old", workflow: "monthly-statement", version: "monthly-statement-v3" }))));
 
     await press("Run now");
-    await pressOnTop("Run now");
+    await press("Confirm run");
     await until(alpha, area, Runs, (state) => state.request.attempt.outcome === "Sent" && !state.request.live);
     await press("Check run");
     await until(alpha, area, Runs, (state) => state.request.record.status === "Failed");
@@ -565,7 +569,7 @@ describe("Workflows", () => {
     await until(alpha, area, Runs, (state) => state.request.attempt.outcome === "Unknown");
 
     await press("Run now");
-    await pressOnTop("Run now");
+    await press("Confirm run");
     await until(alpha, area, Runs, (state) => state.request.attempt.id === 2 && state.request.attempt.outcome !== "Recorded" && !state.request.live);
     const afterRun = await area.runPromise(Effect.flatMap(Runs, (m) => m.get()));
     expect(afterRun.request.attempt.outcome).toBe("Confirmed");
@@ -573,8 +577,8 @@ describe("Workflows", () => {
     const changeKey = `alpha/workflows/change/${encodeURIComponent(scope)}/${encodeURIComponent("monthly-statement")}`;
     await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) =>
       store.set(changeKey, JSON.stringify({ id: 1, mutation: "m-old", workflowId: "monthly-statement", version: "monthly-statement-v3", change: "Remove" }))));
-    await press("Remove");
-    await pressOnTop("Remove");
+    await pressWorkflowAction("Remove workflow");
+    await pressInReview("Remove");
     await until(alpha, area, Definition, (state) => state.change.attempt.outcome === "Sent" && !state.change.live);
     await area.runPromise(Effect.flatMap(Definition, (m) => Effect.all([
       m.send({ type: "checkChange" }),
@@ -584,22 +588,22 @@ describe("Workflows", () => {
     expect(button("Review the same change")).toBeDefined();
     await press("Review the same change");
     await until(alpha, area, Definition, (state) => state.review.showing);
-    await pressOnTop("Send again");
+    await pressInReview("Send again");
     await until(alpha, area, Definition, (state) => state.change.again && state.change.attempt.outcome === "Sent" && !state.change.live);
     const retainedAfterResend = await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) => store.get(changeKey)));
     expect(retainedAfterResend).toContain('"mutation":"m-old"');
     await press("Allow a different change");
     await until(alpha, area, Definition, (state) => !state.change.offered);
     await vi.waitFor(async () => expect(await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) => store.get(changeKey)))).toBeUndefined());
-    await area.runPromise(Effect.flatMap(Definition, (m) => m.send({ type: "flip", wanted: "TurnOn" })));
+    await pressWorkflowAction("Remove workflow");
+    await pressInReview("Remove");
     await until(alpha, area, Definition, (state) => state.change.attempt.id === 2 && state.change.attempt.outcome !== "Recorded" && !state.change.live);
     const afterChange = await area.runPromise(Effect.flatMap(Definition, (m) => m.get()));
     expect(afterChange.change.attempt.outcome).not.toBe("Sent");
 
     await drawn(() => alpha.back());
     await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
-    await press("Add to Workflows");
-    await press("Workflow");
+    await openStepsBuilder(alpha, area);
     await until(alpha, area, Builder, (state) => state.open);
     const builderBefore = await area.runPromise(Effect.flatMap(Builder, (m) => m.get()));
     if (builderBefore.offer.status !== "Loaded") {
@@ -665,7 +669,7 @@ describe("Workflows", () => {
     await drawn(() => alpha.back());
     await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
     await press("Add to Workflows");
-    await press("Scheduled digests");
+    await press("Scheduled digest");
     await until(alpha, area, Listing, (state) => state.place.tag === "ListingDigests");
     await until(alpha, area, DigestSchedules, (state) => state.open);
     await area.runPromise(Effect.flatMap(DigestSchedules, (m) => Effect.all([
@@ -686,6 +690,7 @@ describe("Workflows", () => {
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
 
+    await press("Add to Workflows");
     await press("Clock alarms");
     await until(alpha, area, Clock, (state) => state.open);
     for (let turn = 0; turn < 20; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
@@ -694,6 +699,8 @@ describe("Workflows", () => {
 
     await drawn(() => alpha.back());
     await until(alpha, area, Clock, (state) => !state.open);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
     for (let turn = 0; turn < 20; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
     const after = await alpha.runtime.runPromise(Effect.flatMap(Layers, (m) => m.get()));
     expect(after.steps.includes("view:Workflows")).toBe(false);

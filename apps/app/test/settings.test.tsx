@@ -843,7 +843,7 @@ describe("Settings", () => {
     expect(report).toEqual(expect.objectContaining({
       format: "alpha-diagnostics/v1",
       roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }],
-      permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true },
+      permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true, PhotosAccess: false },
       talk: { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     }));
     expect([text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\"")]).toEqual([false, false, false]);

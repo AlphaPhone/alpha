@@ -12,7 +12,8 @@ import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
-import { Views, delivery, pageIn, preparedIn, resendWithoutMode } from "../assistant/views.vibe"
+import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
+export { placeOf, viewOfPlace }
 import { filesOnlyHeaders, type MediaCard, MediaReview, sameFiles, spokenText } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
@@ -1201,7 +1202,7 @@ const bridgeEvents = hearing(
     const voice = try Voice.Machine
     const { memory } = try VoiceWords
     return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
-      if ((event.kind === "speechEnd" || (event.kind === "transcript" && event.final)) && event.text !== "") {
+      if (event.kind === "speechEnd" && event.text !== "") {
         const state = try voice.get()
         if (Voice.canTurnEnded(state, event.session)) {
           memory.heardText = { session: state.session, turn: state.turn, text: event.text }

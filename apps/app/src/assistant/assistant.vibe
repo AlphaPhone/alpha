@@ -329,7 +329,7 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
     const empty = (writing: Composer.Composer) =>
       writing.binding.owner === seat.number && writing.binding.conversation === 0 && writing.slot === "Open"
       && writing.away === "Free" && !writing.unsettled && writing.draft.sync === "Kept" && !Composer.content(writing.editor)
-      && !Composer.attached(writing.editor) && board.snapshot().typed === "" && !board.sendWhenMade
+      && !Composer.attached(writing.editor) && board.snapshot().typed === "" && board.sendWhenMade === 0
       && board.waitingRequest === undefined && board.postingRequest === undefined
     if (!empty(try composer.get())) return undefined
     const begin = { type: "start", replying: false, holding: false } as const
@@ -1444,9 +1444,9 @@ const bound = started(effect {
     const posting = board.postingRequest
     if (posting?.request.contact !== undefined && (turn.send.id > posting.ticket
       || (turn.send.id === posting.ticket && !Conversation.inFlight(turn)))) board.postingRequest = undefined
-    if (board.sendWhenMade && !Chats.making(live) && live.chosen === 0) board.sendWhenMade = false
+    if (board.sendWhenMade > 0 && !Chats.making(live) && live.chosen === 0 && live.make.id >= board.sendWhenMade) board.sendWhenMade = 0
     const request = board.waitingRequest
-    if (request !== undefined && !Chats.making(live) && (live.chosen === 0 || live.chosen === leftAt)) {
+    if (request !== undefined && !Chats.making(live) && ((live.chosen === 0 && live.make.id >= request.ticket) || (live.chosen !== 0 && live.chosen === leftAt))) {
       board.waitingRequest = undefined
       if (live.chosen !== 0) try postRequest(request)
     }
@@ -1476,9 +1476,9 @@ const bound = started(effect {
       }
       return
     }
-    if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
+    if (board.sendWhenMade > 0 && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
       if (writing.slot !== "Open" || writing.draft.sync === "Saving") return
-      board.sendWhenMade = false
+      board.sendWhenMade = 0
       const event: Composer.Event = { type: "hold", askable: Conversation.askable(talking) }
       if (Composer.enabled(writing, event)) board.outgoing = board.snapshot().typed
       if (try contained(composer.send(event), "sending what waited for its conversation")) board.change({ typed: "" })
@@ -1511,7 +1511,7 @@ effect function postRequest(request: CommsRequest): void!!ContactAttachmentScope
 export effect function askComms(request: CommsRequest): void!!(Chats.Machine | Composer.Machine | ContactAttachmentScope) {
   const { board } = try Talk
   const conversation = try (try Conversation.Machine).get()
-  if (request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade) return
+  if (request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade > 0) return
   const contact = request.contact
   if (contact === undefined && request.text.trim() === "") return
   if (contact !== undefined && (board.snapshot().contactDraft !== contact.draft || contact.draft.target.about !== request.about
@@ -1521,14 +1521,22 @@ export effect function askComms(request: CommsRequest): void!!(Chats.Machine | C
     try postRequest(request)
     return
   }
+  const ticket = (try chats.get()).make.id + 1
   const free = freedom(conversation, try (try Composer.Machine).get(), 0)
-  if (try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request")) board.waitingRequest = request
+  board.waitingRequest = { ...request, ticket }
+  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request")) && board.waitingRequest?.ticket === ticket) {
+    board.waitingRequest = undefined
+  }
 }
 
 export effect function startAndSend(start: Chats.Event): void!!(Chats.Machine | Talk) {
   const chats = try Chats.Machine
   const { board } = try Talk
-  if (try contained(chats.send(start), "starting a conversation to send")) board.queueSend()
+  const ticket = (try chats.get()).make.id + 1
+  board.queueSend(ticket)
+  if (!(try contained(chats.send(start), "starting a conversation to send")) && board.sendWhenMade === ticket) {
+    board.sendWhenMade = 0
+  }
 }
 
 export effect function holdAndSend(hold: Composer.Event): void!!(Composer.Machine | Talk) {

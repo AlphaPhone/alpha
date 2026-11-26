@@ -337,14 +337,16 @@ const presented = started(effect {
   })
 }, "presenting Home")
 
-// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
+// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing"
 const clearing = started(effect {
   clearTold()
   const home = try Home.Machine
   const shell = try Shell.Machine
-  try Stream.runForEach(Stream.zipLatest(home.changes, shell.changes), ([h, s]) => sync(() => {
+  const canvas = try Canvas
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(home.changes, shell.changes), canvas.changes), ([[h, s], c]) => sync(() => {
     if (last === undefined) return
-    if (Home.noticeAt(h, s) !== last.place) clearTold()
+    const beside = Home.besideHomeSheet(s, landscapeHomeInput(c))
+    if (Home.noticeAt(h, s, beside) !== last.place) clearTold()
     else if (last.place === "InEditBar" && h.tiles.save.outcome === "Confirmed") clearTold()
     else if (last.place === "InDrawer" && last.notice.tag === "TellAppsUnread" && h.installed.read.status === "Loaded") clearTold()
     else if (last.place === "InDrawer" && last.notice.tag === "TellNotOpened" && h.handoff.attempt.outcome === "Confirmed") clearTold()

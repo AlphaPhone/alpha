@@ -446,7 +446,11 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
       {state.removal.outcome === "Refused" && held.deleteTarget && conversation._tag === "Some" && held.deleteTarget.threadId === conversation.value.id && <p role="status" className={`${notice} px-3`}>The message was not deleted</p>}
       <DeleteMessageDialog open={state.confirming} container={view}
         onCancel={cancelDelete}
-        onDelete={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}
+        onDelete={() => {
+          if (!selectedRow || "incomplete" in selectedRow || !can(confirm)) return;
+          choose("");
+          void send(confirm);
+        }}
         onCloseAutoFocus={focusAfterCancel} />
       <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
     </>

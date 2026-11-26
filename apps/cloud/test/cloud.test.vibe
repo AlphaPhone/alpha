@@ -453,7 +453,9 @@ describe(`Secrets stay private and fit their environment (spec/cloud/rollout.md,
     try files.symlink(path.join(path.dirname(import.meta.dirname), "inside-symlink.env"), symlinked)
     const escaped = readSecrets(symlinked) catch (failure) => failure._tag
     try holds(() => assert.strictEqual(escaped, "OperatorFailed"))
-    const unprovisionedApply = operate("secrets", ["--environment", "staging", "--env-file", file, "--apply"]) catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag
+    const unprovisionedResources = path.join(directory, "unprovisioned-resources.json")
+    try files.writeFileString(unprovisionedResources, JSON.stringify({ ...resources, staging: { ...resources.staging, accountId: "PENDING", hyperdriveId: "PENDING" } }))
+    const unprovisionedApply = operate("secrets", ["--environment", "staging", "--env-file", file, "--resources", unprovisionedResources, "--apply"]) catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag
     try holds(() => assert.ok(typeof unprovisionedApply === "string" && /account|provision/i.test(unprovisionedApply), String(unprovisionedApply)))
     const wrongModePrices = operate("prices", ["--environment", "production", "--profile", "profile/candidate.example.json", "--env-file", file]) catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag
     try holds(() => assert.ok(typeof wrongModePrices === "string" && wrongModePrices.includes("STRIPE_SECRET_KEY"), String(wrongModePrices)))
@@ -486,11 +488,11 @@ describe(`Provisioning creates only what is missing (spec/cloud/rollout.md, "Sto
     try holds(() => assert.strictEqual(foreign, "the Hyperdrive alpha-test-api-staging-db is not the one recorded"))
     const fullPage = Array.from({ length: 50 }, (_, index) => ({
       id: (index + 100).toString(16).padStart(32, "d"),
-      name: index === 0 ? "alpha-test-api-staging-db" : `other-db-${index}`,
+      name: index === 0 ? `${at.ids.workerName}-db` : `other-db-${index}`,
       origin: { scheme: "postgres", host: "DB.EXAMPLE", port: 5432, database: "alpha", user: "alpha" },
       caching: { disabled: true },
     }))
-    const cfFifty = try acquireRelease(tryPromise(() => startCloudflare({ account, zone: "alphacompute.cc", token: "cf-token", hyperdrives: fullPage })), (started) => promise(() => started.stop()))
+    const cfFifty = try acquireRelease(tryPromise(() => startCloudflare({ account, zone: "alphaphone.dev", token: "cf-token", hyperdrives: fullPage })), (started) => promise(() => started.stop()))
     const fiftyIds = { ...created, hyperdriveId: fullPage[0]!.id }
     const checkedFifty = try reconcileResources({ ...at, ids: fiftyIds, creating: false, base: cfFifty.base })
     try holds(() => assert.deepStrictEqual(checkedFifty, fiftyIds))

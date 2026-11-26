@@ -472,17 +472,20 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     }
   });
 
+function createRemindersTestHarness(nowMs: number, initialTasks: Parameters<typeof makeFakeRuntime>[0]) {
+  const store = new AlphaAppsStore({ now: () => nowMs });
+  const fake = makeFakeRuntime(initialTasks);
+  const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime: fake.runtime });
+  return { store, plugin, ...fake, action: plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!, routes: plugin.routes! };
+}
+
   // spec/agent/index.md, "A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder"; spec/agent/index.md, "The page names the query values each gated route can receive"
   it("keeps each reminder's scheduled task following it, so a delete, completion or new time made in the app or in chat holds, and says so only when it does", async () => {
     const nowMs = Date.UTC(2026, 10, 24, 15, 0, 0);
-    const store = new AlphaAppsStore({ now: () => nowMs });
-    const { runtime, tasks, refusing } = makeFakeRuntime([
+    const { runtime, tasks, refusing, action, routes } = createRemindersTestHarness(nowMs, [
       { taskId: "plumber-task", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Call the plumber", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T18:00:00.000Z" }, metadata: { title: "Call the plumber" } },
       { taskId: "dentist-task", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Call the dentist", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T19:00:00.000Z" }, metadata: { title: "Call the dentist" } },
     ]);
-    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
-    const action = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
-    const routes = plugin.routes!;
     const read = async () => (await callRoute(routes, "GET", "/api/alpha/reminders")).body as unknown as RemindersSnapshot;
     const named = async (title: string) => (await read()).items.find((item) => item.title === title);
     const statusOf = (taskId: string) => tasks.find((task) => task.taskId === taskId)?.status;
@@ -522,7 +525,7 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     await action.handler(runtime, emptyMessage("rename it"), emptyState, { parameters: { op: "update", title: "keys", notes: "From the front desk" } });
     expect((await named("Pick up keys"))?.notes).toBe("From the front desk");
     const keysTask = tasks.findIndex((task) => task.metadata.alphaReminderId === keys.id && task.status !== "Dismissed");
-    tasks[keysTask] = { ...tasks[keysTask]!, status: "Dismissed" };
+    tasks[keysTask] = { ...tasks[keysTask], status: "Dismissed" };
     expect(await named("Pick up keys")).toBeUndefined();
 
     const gate = defineRoutes(routes.map(({ method, path, query }) => (query === undefined ? { method, path } : { method, path, query })));
@@ -661,14 +664,10 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     expect(fallNy).not.toBeNull();
     expect(formatLocal(fallNy!, "America/New_York")).toBe("11/01/2026, 03:00");
 
-    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15, 0, 0) });
-    const { runtime } = makeFakeRuntime([
+    const { store, plugin, runtime, action, routes } = createRemindersTestHarness(Date.UTC(2026, 10, 24, 15, 0, 0), [
       { taskId: "owner-task-1", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "First", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T16:00:00.000Z" }, metadata: { title: "First", priority: "medium" } },
       { taskId: "owner-task-2", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Second", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T17:00:00.000Z" }, metadata: { title: "Second", priority: "low" } },
     ]);
-    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
-    const action = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
-    const routes = plugin.routes!;
 
     const listed = await action.handler(runtime, emptyMessage("List"), emptyState, { parameters: { op: "list" } });
     expect(listed?.success).toBe(true);

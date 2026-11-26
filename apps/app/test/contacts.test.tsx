@@ -466,7 +466,7 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.list.status === "Loaded" && s.rows === 2);
     await press("Maya Chen");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
-    await press("Edit");
+    await press("Edit contact");
     await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Changing");
     await fill("First name", "Maya Updated");
     maya.revision += 1;
@@ -475,7 +475,7 @@ describe("Contacts on an Alpha image", () => {
     expect(document.body.textContent).toContain("This contact changed.");
     await press("Cancel");
     await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Shut");
-    await press("Back");
+    await press("Back to contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => !s.opened);
     await press("New contact");
     await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Adding");

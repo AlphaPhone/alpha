@@ -89,11 +89,11 @@ effect function changeContext() {
   const store = try KeyValueStore.KeyValueStore
   const { workflow, request } = try WorkflowsApi
   const state = try machine.get()
-  return { definition, rows, store, workflow, state, machine }
+  return { definition, rows, store, workflow, request, state, machine }
 }
 
 effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
-  const { definition, rows, store, workflow, state } = try changeContext()
+  const { definition, rows, store, workflow, request, state } = try changeContext()
   const scope = ownerAt() catch () => ""
   const exact = try definition.read(state.target)
   if (exact?.version !== version || !(try rows.sameOwner(scope, state.owner))) return { type: "changeAnswered", id, applied: false }

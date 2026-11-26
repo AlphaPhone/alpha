@@ -121,7 +121,7 @@ describe("Camera on a phone", () => {
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => state.showing && state.film.stage === "StopWhenOpened");
     expect(button("Viewfinder. Tap to focus or pinch to zoom")).toBeDefined();
-    expect([Boolean(button("Back to apps")), button("Record video")?.getAttribute("aria-busy")]).toEqual([true, "true"]);
+    expect([Boolean(button("Back to apps")), button("Start recording")?.getAttribute("aria-busy")]).toEqual([true, "true"]);
     expect(world.camera.savedVideos).toHaveLength(0);
     await drawn(recorderOpened);
     await expectSavedVideo(cameraSession);

@@ -336,7 +336,7 @@ function carryPage(tab: number) {
     });
     when { tag: "Visit", let load }: run(`visit ${tab}`, visited(tab, load));
     when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
-      const text = try (try Pages).sought(tab)
+      const { text } = try (try Pages).sought(tab)
       try hosted("find", (plugin, session) => plugin.find({ session, id: idOf(tab), query: text }))
     }));
     when { tag: "FindNext", let forward }: run(`find next ${tab}`, ignore(hosted("findNext", (plugin, session) => plugin.findNext({ session, id: idOf(tab), forward }))));

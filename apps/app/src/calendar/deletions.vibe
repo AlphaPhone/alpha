@@ -27,20 +27,25 @@ function carry(fx: Out): Job<Event, Editor.Machine, []> {
   return tell(`release ${fx.id}`, Editor.Machine, [remove], { refused: { type: "ended", id: fx.id, done: false } })
 }
 
+/** Emits whenever either calendar source transitions to or advances a loaded read. */
+export function loadedReads(view: View.Machine.Shape) {
+  const loaded = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
+  return Stream.changesWith(
+    loaded,
+    (a, b) =>
+      a.phone.status === b.phone.status
+      && a.phone.ticket === b.phone.ticket
+      && a.google.status === b.google.status
+      && a.google.ticket === b.google.ticket,
+  )
+}
+
 // spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged"
 const observed = started(effect {
   const view = try View.Machine
   const held = try Held.Machine
-  const loaded = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
   try Stream.runForEach(
-    Stream.changesWith(
-      loaded,
-      (a, b) =>
-        a.phone.status === b.phone.status
-        && a.phone.ticket === b.phone.ticket
-        && a.google.status === b.google.status
-        && a.google.ticket === b.google.ticket,
-    ),
+    loadedReads(view),
     effect () => {
       const d = try held.get()
       if (d.hiding === 0) {

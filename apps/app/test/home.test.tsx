@@ -523,19 +523,24 @@ describe("Home on a phone", () => {
   });
 
   it("Agenda advances once an event ends and a partial agent feed keeps prior titles (spec/app/home/cards.md, \"An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled\"; spec/app/home/cards.md, \"An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date\")", async () => {
-    const { world, day, hour } = agendaScene(
+    const { world, hour } = agendaScene(
       [{ id: "1", name: "Work" }],
       [
         { id: "b", calendarId: "1", title: "Dentist", startHour: 9, endHour: 10 },
         { id: "a", calendarId: "1", title: "Standup", startHour: 10, endHour: 11 },
       ],
     );
+    const startOfDay = new Date(world.now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const utcNextDay = Date.UTC(startOfDay.getFullYear(), startOfDay.getMonth(), startOfDay.getDate() + 1);
+    const holidayEnds = startOfDay.getTime() + 48 * hour;
+    const designReviewBegin = startOfDay.getTime() + 74 * hour;
     world.calendar.phoneEvents.push({
-      id: "c", calendarId: "1", title: "Holiday", begin: day + 11 * hour, end: day + 12 * hour, allDay: true, recurring: false,
+      id: "c", calendarId: "1", title: "Holiday", begin: utcNextDay, end: utcNextDay + 24 * hour, allDay: true, recurring: false,
     });
     world.calendar.feedState = "complete";
     world.calendar.events = [
-      agentEvent("Design Review", day + 38 * hour, day + 39 * hour),
+      agentEvent("Design Review", designReviewBegin, designReviewBegin + hour),
     ];
     const { alpha } = await open(world, only("home"));
     const homes = home.runtime(alpha);
@@ -551,21 +556,21 @@ describe("Home on a phone", () => {
     await later(alpha, 1 * hour);
     await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Holiday,/));
 
-    await later(alpha, 1 * hour - 2);
+    await later(alpha, holidayEnds - world.now - 1);
     expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Holiday,/);
     await later(alpha, 1);
     await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Design Review,/));
 
     world.calendar.feedState = "partial";
     world.calendar.events = [
-      agentEvent("Partial Wrong Title", day + 38 * hour, day + 39 * hour),
+      agentEvent("Partial Wrong Title", designReviewBegin, designReviewBegin + hour),
     ];
-    await later(alpha, 20 * hour);
+    await later(alpha, 24 * hour);
     await until(alpha, homes, Cards.Machine, (c) => c.agent.source === "Unavailable");
     expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Design Review,/);
   });
 
-  it("Inline drawer notice clears when the drawer closes or retrying succeeds (spec/app/home/index.md, \"A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown\")", async () => {
+  it("Inline drawer notice clears when the drawer closes or retrying succeeds (spec/app/home/index.md, \"A notice shows as a toast on bare Home and in the edit bar while editing\")", async () => {
     const world = { ...scene(), phone: true };
     world.launcher.refusing.set("org.fixture.clock", "disabled");
     const { alpha } = await open(world, only("home"));

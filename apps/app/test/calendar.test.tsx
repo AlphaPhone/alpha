@@ -942,6 +942,7 @@ describe("in a browser", () => {
 
   it("Opens a search match on the currently anchored day (spec/app/calendar/index.md, \"Story: Search my events and choose which calendars I see\")", async () => {
     const { alpha, runtime } = await openBrowserCalendar();
+    await widen(alpha, runtime);
     await press("Search events");
     await until(alpha, runtime, View, (s) => s.overlay === "Search");
     await fill("Search events", "standup");
@@ -985,6 +986,7 @@ describe("in a browser", () => {
     await until(alpha, runtime, View, (s) => s.google.status === "Loaded");
     expect((await runtime.runPromise(Held.use((d) => d.get()))).hiding).toBe(0);
 
+    await widen(alpha, runtime);
     await fromMonth("Schedule");
     await until(alpha, runtime, View, (s) => s.layout === "Agenda" && s.overlay === "NoOverlay");
     const weeklyButton = events().find((el) => (el.getAttribute("aria-label") ?? "").includes("Weekly sync"));

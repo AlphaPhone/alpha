@@ -140,8 +140,8 @@ describe("Notes", () => {
     expect(new Date(fields.begin).getHours()).toBe(9);
     expect(world.calendar.writes).toEqual([]);
     if (destination === "Reminders") {
-      await rendered(() => expect(button("Save")?.disabled).toBe(false));
-      await press("Save");
+      await rendered(() => expect(button("Save event")?.getAttribute("aria-disabled")).toBe("false"));
+      await press("Save event");
       await until(alpha, target, CalendarForm, (draft) => !draft.shown);
       await rendered(() => expect(button(/Design sync/)).toBeDefined());
       await press(/Design sync/);
@@ -802,7 +802,7 @@ describe("Notes", () => {
           });
         });
       },
-      ...notesRoutes(world.notes),
+      ...notesRoutes(world.notes, () => world.now),
     ]);
     const http = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request, url, signal) => Effect.tryPromise({
       try: () => fetched(answer, url, { method: request.method, headers: request.headers, body: request.body._tag === "Uint8Array" ? request.body.body : undefined, signal }),
@@ -832,8 +832,8 @@ describe("Notes", () => {
     await press("Open Enclave launch");
     await until(alpha, runtime, Editor, (state) => state.showing);
 
-    await control("Note actions");
-    await drawn(() => button("Note actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    await control("More");
+    await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
     await until(alpha, runtime, Actions, (state) => state.open);
 
     await hardware("back");

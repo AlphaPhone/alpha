@@ -1069,7 +1069,7 @@ describe("Messages on an Alpha image", () => {
     const { alpha } = await openImage(world);
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "two unread threads", (s) => s.list.status === "Loaded" && s.threads === 2);
-    await write("Search or ask", "Maya");
+    await fill("Search or ask", "Maya");
     await ready(alpha.runtime, Messages, "filtered to Maya", (s) => s.sought && s.list.status === "Loaded" && s.threads === 1);
     await hardware("home");
     await ready(alpha.runtime, Messages, "Messages closed on Home", (s) => !s.front);
@@ -1088,7 +1088,7 @@ describe("Messages on an Alpha image", () => {
     await press("Maya Chen");
     await ready(alpha.runtime, Messages, "Maya conversation", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
     await ready(alpha.runtime, Composer, "Maya composer", (s) => s.thread > 0 && s.sending.grant === "Granted");
-    await write("Message", "Already sent");
+    await fill("Text Maya", "Already sent");
     await ready(alpha.runtime, Composer, "owner wrote", (s) => s.slot.author === "OwnerWrote");
     await press("Send");
     await ready(alpha.runtime, Composer, "send confirmed and slot cleared", (s) => s.outgoing.op.outcome === "Confirmed" && s.slot.author === "Nobody" && s.slot.draft.sync === "Kept");

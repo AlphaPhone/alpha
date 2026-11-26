@@ -326,11 +326,24 @@ it("Voice probe recovers after interruption and cloud openMic cancels capture af
 
 it("Browser camera releases audio track on recorder error and clears film on interrupted finish (spec/app/camera/index.md, \"Story: Take photos and videos\")", async () => {
   const stoppedTracks: string[] = [];
-  const fakeStream = (label: string) => Object.assign(new MediaStream(), {
-    getTracks: () => [{ stop: () => { stoppedTracks.push(label); } } as unknown as MediaStreamTrack],
-  });
+  const makeTrack = (label: string, extra?: Record<string, unknown>) => ({
+    stop: () => { stoppedTracks.push(label); },
+    readyState: "live",
+    getCapabilities: () => ({}),
+    ...extra,
+  }) as unknown as MediaStreamTrack;
+  const fakeStream = (label: "audio" | "video" | "framed") => {
+    const track = makeTrack(label, label === "framed" ? { requestFrame: () => undefined } : undefined);
+    return Object.assign(new MediaStream(), {
+      getTracks: () => [track],
+      getVideoTracks: () => label === "audio" ? [] : [track],
+      getAudioTracks: () => label === "audio" ? [track] : [],
+    });
+  };
   const originalMediaDevices = navigator.mediaDevices;
   const originalMediaRecorder = globalThis.MediaRecorder;
+  const originalGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  const originalCaptureStream = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "captureStream");
   let lastRecorder: { state: string; mimeType: string; ondataavailable?: () => void; onerror?: () => void; onstop?: () => void; start: () => void; stop: () => void } | undefined;
   let autoStop = false;
   function FakeMediaRecorder() {
@@ -353,9 +366,22 @@ it("Browser camera releases audio track on recorder error and clears film on int
     },
   });
   Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value: () => ({ setTransform: () => undefined, drawImage: () => undefined }),
+  });
+  Object.defineProperty(HTMLCanvasElement.prototype, "captureStream", {
+    configurable: true,
+    value: () => fakeStream("framed"),
+  });
   try {
     const result = await Effect.runPromise(Effect.scoped(Effect.flatMap(CameraPort, (camera) => Effect.gen(function* () {
       const video = document.createElement("video");
+      Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+      Object.defineProperty(video, "videoHeight", { configurable: true, value: 480 });
+      Object.defineProperty(video, "play", { configurable: true, value: () => Promise.resolve() });
+      Object.defineProperty(video, "requestVideoFrameCallback", { configurable: true, value: () => 1 });
+      Object.defineProperty(video, "cancelVideoFrameCallback", { configurable: true, value: () => undefined });
       yield* camera.bind(video);
       yield* camera.start(1, "Back", "4:3");
       const started1 = yield* camera.record(true);
@@ -369,12 +395,16 @@ it("Browser camera releases audio track on recorder error and clears film on int
       yield* Fiber.interrupt(finishing);
       autoStop = true;
       const started3 = yield* camera.record(false);
-      return { started1, tracksAfterError, started2, started3 };
+      return { started1: started1 !== undefined, tracksAfterError, started2: started2 !== undefined, started3: started3 !== undefined };
     }))).pipe(Effect.provide(browserCamera)));
-    expect(result).toEqual({ started1: true, tracksAfterError: ["audio"], started2: true, started3: true });
+    expect(result).toEqual({ started1: true, tracksAfterError: ["framed", "audio"], started2: true, started3: true });
   } finally {
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: originalMediaDevices });
     Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: originalMediaRecorder });
+    if (originalGetContext) Object.defineProperty(HTMLCanvasElement.prototype, "getContext", originalGetContext);
+    else Reflect.deleteProperty(HTMLCanvasElement.prototype, "getContext");
+    if (originalCaptureStream) Object.defineProperty(HTMLCanvasElement.prototype, "captureStream", originalCaptureStream);
+    else Reflect.deleteProperty(HTMLCanvasElement.prototype, "captureStream");
   }
 });
 

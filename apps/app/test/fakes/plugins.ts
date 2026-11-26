@@ -25,15 +25,11 @@ import { alphaHostedDigests, workflowNoticesHost } from "./workflows.ts";
  */
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
-    ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
+    ElizaAgent: elizaAgent(services.agent, world.settings.recovery, () => world.platform.abortFails === true),
     ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease, () => world.voice.credentialId, (url) => {
       if (world.inbox.consent) world.inbox.consent.opened.push(url);
       else world.checkout?.opened.push(url);
     }, () => world.voice.billingVerified === world.voice.credentialId),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease, () => world.voice.credentialId, (url) => { world.checkout?.opened.push(url); }, () => world.voice.billingVerified === world.voice.credentialId),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease, (url) => { world.checkout?.opened.push(url); }),
-    ElizaAgent: elizaAgent(services.agent, world.settings.recovery, () => world.platform.abortFails === true),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease),
     AlphaAssistantDraft: alphaAssistantDraft(world.ask, () => ({ owner: world.notes.ownerIdentity, agent: world.notes.owner, epoch: 1 })),
     ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)
       || /^sms-draft:v2:(?:new|thread:[1-9][0-9]{0,18}|recipients:[0-9a-f]{64})$/.test(key) || key === "sms-outgoing:v2:device"),

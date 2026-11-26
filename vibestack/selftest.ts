@@ -4853,11 +4853,12 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
     "const later = React.useLayoutEffect;",
     `globalThis["queueMicrotask"](later);`,
     "// eslint-disable-next-line no-undef -- a global the page defines",
+    "/** What inside does. @throws {Error} */",
     "export function inside() {",
     "  /** inside a function */",
     "  return 1;",
     "}",
-  ]), ["6 code/comments", "9 code/comments", "10 code/effects", "11 code/effects", "12 code/effects", "13 no-console", "14 code/effects", "15 code/effects", "18 code/comments"]);
+  ]), ["6 code/comments", "7 code/comments", "8 code/comments", "9 code/comments", "10 code/effects", "11 code/effects", "12 code/effects", "13 no-console", "14 code/effects", "15 code/effects", "19 code/comments"]);
   assert.deepEqual([...new Set(await found("apps/app/src/probe.vibe", [
     "const clock = { setTimeout: () => undefined }",
     "const capture = { setTimeout: globalThis.setTimeout }",

@@ -635,7 +635,7 @@ describe("Reminders full journeys", () => {
     await until(alpha, runtime, AlertsMachine.Machine, (s) => s.bannerId === 0 && s.entries.some((entry) => entry.phase === "Scheduled"));
     const expectedNext = advanceDueDate(fireDate, "daily");
     expect(recorder.snapshot.items.find((one) => one.id === item!.id)).toMatchObject({ dueDate: expectedNext, completed: false });
-    const persistedRaw = localStorage.getItem("alpha.reminders.snapshot.v1");
+    const persistedRaw = localStorage.getItem("alpha.reminders.snapshot@1");
     expect(persistedRaw).not.toBeNull();
     expect((JSON.parse(persistedRaw!) as RemindersSnapshot).items.find((one) => one.id === item!.id)?.dueDate).toBe(expectedNext);
   });

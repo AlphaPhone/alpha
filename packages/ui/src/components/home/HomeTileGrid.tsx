@@ -32,6 +32,8 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
   onBeginEditing?: () => void;
   /** Schedules and cancels a stationary press on a tile. */
   hold?: LauncherHold;
+  /** Replaces each app tile's gesture surface when its owning frame or route changes without unmounting the Apps opener. */
+  tileGestureScope?: string;
   /** While editing, takes a tile off Home, by its control or Delete; left out while a change is being saved. */
   onRemove?: (id: string) => void;
   /** While editing, moves a tile, by dragging it onto another or with the arrow keys; left out while a change is being saved. */
@@ -58,7 +60,7 @@ type Drag = {
  * removed with Delete; keyboard focus stays on the tile it moved.
  * @model spec/app/home/tiles.md
  */
-export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, drawerInert, onBeginEditing, hold, onRemove, onMove, className, ...props }: HomeTileGridProps) {
+export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, drawerInert, onBeginEditing, hold, tileGestureScope, onRemove, onMove, className, ...props }: HomeTileGridProps) {
   const draggingRef = useRef<Drag | undefined>(undefined);
   const movedRef = useRef<{ id: string; from: number } | null>(null);
 
@@ -141,6 +143,7 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, dra
       {tiles.map((tile, index) => (
         <HomeTile
           key={tile.id}
+          gestureScope={tileGestureScope}
           data-home-tile={tile.id}
           label={tile.label}
           icon={tile.icon}
