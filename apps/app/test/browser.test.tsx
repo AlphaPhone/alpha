@@ -920,7 +920,13 @@ describe("The Browser on a phone", () => {
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
   });
 
-  it.each(askingFirst)("On an enrolled phone while $name, a page proposal my whole message asked for runs only on Open in Ask Alpha's card (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/settings/preferences.md, \"Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts\")", async ({ kept, status }) => {
+  /** Each way the agent may answer while the phone asks first: as it grounds the turn the phone sent, or still marked to run at once, as for a turn sent before asking first came on. */
+  const askingFirstAnswers = askingFirst.flatMap((one) => [
+    { ...one, answer: "as the agent grounds it", forced: false },
+    { ...one, answer: "even marked to run at once", forced: true },
+  ]);
+
+  it.each(askingFirstAnswers)("On an enrolled phone while $name, a page proposal my whole message asked for, $answer, runs only on Open in Ask Alpha's card (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/settings/preferences.md, \"Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts\")", async ({ kept, status, forced }) => {
     localStorage.setItem("alpha.preferences", kept);
     onTestFinished(() => localStorage.removeItem("alpha.preferences"));
     const world = { ...scene(), phone: true, image: true };
@@ -937,7 +943,7 @@ describe("The Browser on a phone", () => {
     const front = () => committedAddress(runtime, world.browser.tabs);
     const reads = review.pendingReads;
     world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
-    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, forced ? ["browser.open-direct.v1"] : capabilities);
     await fill("Message Alpha", "Open https://www.alphacompute.ai/ in Browser.");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
