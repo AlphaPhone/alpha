@@ -157,7 +157,7 @@ export function AttachmentSources({
         </div>
         <footer style={{ minHeight: 81 }} className="flex shrink-0 items-center gap-3 border-t px-5 pt-2 pb-[max(--spacing(3.5),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_--spacing(2)))] text-meta">
           <span role="status" className="flex-1 text-muted-foreground">{selected > 0 ? `${selected} selected` : ""}</span>
-          {selected > 0 && onClear && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={onClear}>Clear</Button>}
+          {selected > 0 && onClear && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm font-medium" disabled={reading} onClick={onClear}>Clear</Button>}
           {onBrowse && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={onBrowse}>{`Choose ${source}`}</Button>}
           {onImport && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={() => inputRef.current?.click()}>{importLabel}</Button>}
         </footer>

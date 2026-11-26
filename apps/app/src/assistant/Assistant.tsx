@@ -39,7 +39,7 @@ import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
-import type { Device } from "../platform/device.vibe";
+import { native, type Device } from "../platform/device.vibe";
 import type { NoteStore } from "../platform/notes.vibe";
 import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import { Documents } from "../platform/documents.vibe";
@@ -225,6 +225,8 @@ function AssistantAttachments({ runtime, attachments, preview, notice, composerR
       onPress: () => void runtime.runPromise(usePickerVolume(volume.id, state.visit)),
     })) : undefined,
   } : undefined;
+  const browsingNativePhotos = active && native() && state.tab === "Photos"
+    && state.photos.grant === "Granted" && view.availability === "available" && state.rows.status !== "Failed";
   return (
     <>
       {preview !== undefined && <AssistantPhotoPreview
@@ -255,7 +257,7 @@ function AssistantAttachments({ runtime, attachments, preview, notice, composerR
         onClear={active && state.selected > 0 ? () => void runtime.runPromise(clearPickerChoice(state.visit)) : undefined}
         onAttach={active && attachments.can(attach) ? () => void attachments.send(attach) : undefined}
         onBrowse={active && state.tab === "Documents" && view.systemDocuments ? () => void runtime.runPromise(pickSystemDocument(state.visit)) : undefined}
-        onImport={active && (!view.systemDocuments || state.tab === "Photos") ? (files) => void runtime.runPromise(importPickerFiles(files, state.visit)) : undefined}
+        onImport={active && !browsingNativePhotos && (!view.systemDocuments || state.tab === "Photos") ? (files) => void runtime.runPromise(importPickerFiles(files, state.visit)) : undefined}
         importLabel={view.systemDocuments ? "Choose photos" : undefined}
       />}
     </>
