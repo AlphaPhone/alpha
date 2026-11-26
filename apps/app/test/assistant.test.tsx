@@ -912,6 +912,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       });
     });
     await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
+    const sheetHeader = () => document.querySelector("[data-alpha-chat-header]");
+    expect([sheetHeader()?.textContent, sheetHeader()?.querySelector("[aria-label='Private screen']") !== null]).toEqual(["Telegram", true]);
     write("read my code");
     expect(button("Send")?.disabled).toBe(true);
 
@@ -927,6 +929,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       });
     });
     await until(alpha, runtime, Conversation, (s) => !s.context.sensitive && s.context.selected);
+    await vi.waitFor(() => expect(sheetHeader()?.textContent).toBe(""));
     world.ask.metadata = [];
     write("Summarize this chat");
     await press("Send");
