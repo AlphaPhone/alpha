@@ -268,15 +268,19 @@ the same move, so the owner sees where the agent went: the full screen over
 any destination, or a sheet over the view already showing, Home included.
 An Android Ask Alpha visit keeps its full screen. An app the agent brings
 forward for an action (a drafted message, an approved page, a reviewed
-keypad, Files for a reply's review, a saved note it opens) comes forward
-under Ask Alpha at its current height, so the card the owner is reading
-stays; a note opened while Notes shows is a new page there, and a sheet
-over it stays.
+keypad, Files for a reply's review) comes forward under Ask Alpha at its
+current height, so the card the owner is reading stays. A saved note the
+agent opens is a page inside Notes: a sheet over Notes stays, with the
+note in sight above it, while the full screen lowers to the bar, since it
+would hide the note.
 
-This departs from v119, and the owner sees it: v119 kept Ask Alpha's
-height on every agent navigation, so "go home" with the full screen up, or
-with a sheet over Home, changed nothing on screen. Here those lower Ask
-Alpha to its bar.
+This departs from v119, and the owner sees it. v119 kept Ask Alpha's
+height on every agent navigation. Here the full screen lowers to the bar
+whenever the agent shows Home, an app or a saved note, and a sheet lowers
+when the view the agent was asked for is already showing, Home included.
+So "go home" with the full screen up, or with a sheet over Home, now shows
+Home where v119 changed nothing on screen, and a note the agent opens
+under the full screen shows where v119 kept it hidden.
 
 ```quint
 pure def canAgentOpenView(s: Shell, view: View): bool = available(s, view) and not(showing(s, view))
@@ -310,6 +314,13 @@ pure def agentShowView(s: Shell, view: View): Shell =
   val trail = if (arrived) s.trail else if (grown.length() > maxTrail) grown.tail() else grown
   recordRoute({ before: s, after: { ...s, trail: trail, drawer: false, assistant: shownOver(s, arrived) } })
 
+pure def canAgentShowInside(s: Shell, view: View): bool = available(s, view) and (not(showing(s, view)) or hides(s, false))
+
+pure def agentShowInside(s: Shell, view: View): Shell =
+  val grown = s.trail.append(view)
+  val trail = if (showing(s, view)) s.trail else if (grown.length() > maxTrail) grown.tail() else grown
+  recordRoute({ before: s, after: { ...s, trail: trail, drawer: false, assistant: shownOver(s, false) } })
+
 pure def homeShowing(s: Shell): bool = s.trail.length() == 0 and not(s.drawer)
 
 pure def canAgentGoHome(s: Shell): bool = not(homeShowing(s)) or hides(s, true)
@@ -325,6 +336,12 @@ pure def stepAgentNavigationLeavesItsViewInSight(before: Shell, via: str, after:
     implies ((after.assistant == before.assistant or after.assistant == Bar)
       and (after.assistant == Full implies after.textAsk != NoTextAsk)
       and ((after.trail == before.trail and after.drawer == before.drawer) implies after.assistant == Bar))
+
+pure def stepAPageInsideAViewKeepsASheet(before: Shell, via: str, after: Shell): bool =
+  (via == "agentShowInside" or via == "agentShowInsideSpoken")
+    implies ((before.assistant == Sheet implies after.assistant == Sheet)
+      and (after.assistant == Full implies after.textAsk != NoTextAsk)
+      and (after.assistant == before.assistant or after.assistant == Bar))
 
 pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
 ```
@@ -363,6 +380,13 @@ pure def agentOpenSpoken(s: Shell, view: View, route: int): Shell =
   val opened = agentOpenView(s, view)
   { ...opened, spokenRoute: opened.route }
 
+pure def canAgentShowInsideSpoken(s: Shell, view: View, route: int): bool =
+  s.route == route and canAgentShowInside(s, view)
+
+pure def agentShowInsideSpoken(s: Shell, view: View, route: int): Shell =
+  val shown = agentShowInside(s, view)
+  { ...shown, spokenRoute: shown.route }
+
 pure def canAgentShowSpoken(s: Shell, view: View, route: int): bool =
   s.route == route and canAgentShowView(s, view)
 
@@ -378,7 +402,7 @@ pure def agentHomeSpoken(s: Shell, route: int): Shell =
   { ...returned, spokenRoute: returned.route }
 
 pure def stepSpokenRouteMarksTheWriter(before: Shell, via: str, after: Shell): bool =
-  if (via == "agentOpenSpoken" or via == "agentShowSpoken" or via == "agentHomeSpoken")
+  if (via == "agentOpenSpoken" or via == "agentShowSpoken" or via == "agentShowInsideSpoken" or via == "agentHomeSpoken")
     after.spokenRoute == after.route and after.route == before.route + 1
   else after.spokenRoute == before.spokenRoute
 ```

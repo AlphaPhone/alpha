@@ -1,10 +1,10 @@
-// spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Only one handoff can leave the menu for the exact note and revision reviewed"
+// spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Only one handoff can leave the menu for the exact note and revision reviewed"; spec/app/notes/actions.md, "The phone opens the share the owner asked for on a new note, once its first save lands"
 import { noteShareText } from "@elizaos/plugin-notes-client"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import { Machine as Transfer } from "../../gen/app__notes__transfer.effect.vibe"
 import * as Actions from "../../gen/app__notes__actions.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { type Editor as EditorState, Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
+import { type Editor as EditorState, Machine as Editor, canShareShown } from "../../gen/app__notes__editor.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Inbox } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Composer } from "../../gen/app__inbox__drafts.effect.vibe"
@@ -155,7 +155,11 @@ const retire = started(effect {
     if ((reviewed.open || reviewed.awaiting) && !sameSavedEditor(state, reviewed)) {
       try ignore(menu.send({ type: "left" }, phone))
     }
+    if (canShareShown(state, phone)) {
+      try ignore(menu.send({ type: "shareSaved", note: state.note, revision: state.draft.base, link: state.link, saved: true }, phone))
+      try ignore(editor.send({ type: "shareShown" }, phone))
+    }
   })
-}, "retire the note actions when the displayed draft changes")
+}, "retire the note actions when the displayed draft changes, and open the share asked for on a new note once it is saved")
 
 export const actions = together(reacting(Actions, { carry }), retire)

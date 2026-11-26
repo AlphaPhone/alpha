@@ -40,6 +40,7 @@ const Draft = Schema.Struct({
   title: Schema.String,
   body: Schema.String,
   items: Items,
+  pinned: Schema.optionalKey(Schema.Boolean),
 })
 export type DraftWords = typeof Draft.Type
 
@@ -157,7 +158,7 @@ export function wordsOf(draft: DraftWords): string {
 }
 
 export function formatOf(draft: DraftWords, existing?: StickyNote, folder?: NoteFolder): NoteFormat {
-  const data: NoteFormat["data"] = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }) }
+  const data: NoteFormat["data"] = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }), ...(draft.id === "" && draft.pinned !== undefined ? { pinned: draft.pinned } : {}) }
   if (draft.kind === "Checklist") return { kind: "list", data: { ...data, items: draft.items.map(({ t, done }) => ({ t, done })) } }
   const { items: _items, ...remaining } = data
   return { kind: "text", data: remaining }
