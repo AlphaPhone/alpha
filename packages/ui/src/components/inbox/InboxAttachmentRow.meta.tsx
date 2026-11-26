@@ -4,6 +4,7 @@ import type { InboxAttachmentRowProps } from "./InboxAttachmentRow.tsx";
 
 const onOpen = fn();
 const onSave = fn();
+const onUnsupported = fn();
 
 export const meta: ComponentMeta<InboxAttachmentRowProps> = {
   args: { name: "Invoice 2041.pdf", size: "184 KB", onOpen, saveUnconfirmed: false },
@@ -11,6 +12,7 @@ export const meta: ComponentMeta<InboxAttachmentRowProps> = {
     "Save not confirmed": { saveUnconfirmed: true },
     "Saved copy of the message": { onOpen: undefined, onSave: undefined },
     "No preview": { onOpen: undefined, onSave },
+    "Unsupported type or size": { name: "Contract.docx", size: "6.2 MB", onOpen: undefined, onSave: undefined, onUnsupported },
     "Long name": { name: "Scan of the signed rental agreement for the flat on Rua das Flores, final version 3.pdf", size: "12.4 MB" },
   },
   play: {
@@ -25,6 +27,13 @@ export const meta: ComponentMeta<InboxAttachmentRowProps> = {
       onSave.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: /^Save Invoice 2041\.pdf/ }));
       await expect(onSave.mock.calls.length).toBe(1);
+    },
+    "Unsupported type or size": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      onUnsupported.mockClear();
+      const canvas = within(canvasElement);
+      await expect(canvas.getByText("6.2 MB · Unsupported type or size")).toBeTruthy();
+      await userEvent.click(canvas.getByRole("button", { name: /Contract\.docx/ }));
+      await expect(onUnsupported.mock.calls.length).toBe(1);
     },
     "Save not confirmed": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: /^Save/ })).toBeNull(),
   },

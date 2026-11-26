@@ -31,6 +31,7 @@ const notices = {
   noRoom: { variant: "warn", text: "No room for that file" },
   contactsInSettings: { variant: "warn", text: "Allow Contacts in Settings", action: "Open Settings" },
   noContacts: { variant: "info", text: "No contacts on this phone" },
+  openInGmail: { variant: "info", text: "Open in Gmail" },
   markBusy: { variant: "info", text: "Still marking another message" },
   markFailed: { variant: "warn", text: "Gmail did not mark it" },
   markUnconfirmed: { variant: "warn", text: "Not sure it was marked. Refresh first.", action: "Refresh" },

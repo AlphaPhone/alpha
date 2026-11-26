@@ -1212,11 +1212,15 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   effect function closeMic(session: number): void!VoiceBridgeFailed {
     clearCloudPreview(session)
     const owner = cloudSpeech
-    if (owner?.session === session && owner.capture !== undefined) {
-      const capture = owner.capture
-      owner.capture = undefined
-      try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
-      return
+    if (owner?.session === session) {
+      owner.gap?.cancel()
+      owner.gap = undefined
+      if (owner.capture !== undefined) {
+        const capture = owner.capture
+        owner.capture = undefined
+        try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
+        return
+      }
     }
     try nativeCap.stop(session, false)
   }
@@ -1244,6 +1248,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session === session) {
       cloudSpeech = undefined
+      owner.gap?.cancel()
+      owner.gap = undefined
       owner.abort.abort()
       const capture = owner.capture
       if (capture !== undefined) {
@@ -1333,7 +1339,10 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
   effect function closeMic(session: number): void!VoiceBridgeFailed {
     clearCloudPreview(session)
     const owner = cloudSpeech
-    if (owner?.session !== session || owner.capture === undefined) return
+    if (owner?.session !== session) return
+    owner.gap?.cancel()
+    owner.gap = undefined
+    if (owner.capture === undefined) return
     const capture = owner.capture
     owner.capture = undefined
     try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
@@ -1372,6 +1381,8 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session !== session) return true
     cloudSpeech = undefined
+    owner.gap?.cancel()
+    owner.gap = undefined
     owner.abort.abort()
     const capture = owner.capture
     const cancelled = capture === undefined || (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)))

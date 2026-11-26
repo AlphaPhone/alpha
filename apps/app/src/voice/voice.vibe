@@ -195,7 +195,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     showSpoken: (session, turn, spoken) => {
       // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it"
       if (said === undefined || said.session !== session || said.turn !== turn || Object.values(spoken).join("").trim() === "") return
-      memory.publishSaid({ ...said, ...spoken })
+      memory.publishSaid("cue" in spoken ? { session: said.session, turn: said.turn, text: said.text, cue: spoken.cue } : { ...said, ...spoken })
     },
     retireSaid: (session, turn) => {
       if (said?.session === session && said.turn === turn) memory.publishSaid(undefined)
@@ -803,9 +803,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
   const opener = output.usedDirect ? direct : enrolled
+  let pageOpened = false
   if (review !== undefined && opener !== undefined && streamed && result?.kind === "Replied"
     && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && ranDirect(result.reply.actionResults)) {
-    try ignore(review.openAsked(opener, result.reply.userMessageId, result.reply.actionResults, atSource))
+    pageOpened = try review.openAsked(opener, result.reply.userMessageId, result.reply.actionResults, atSource)
   }
   if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let smsShown = false
@@ -878,9 +879,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   memory.lastReply = finalText
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a direct Files result is said even beside a page's card, whose notice Talk still shows.
-  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a review the reply proposed from a Messages chat that Talk could not show ends the turn quietly without setting reviewPending.
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": an unshowable Messages review or an unrun direct device action ends the turn quietly without setting reviewPending.
   const proposed = result?.kind === "Replied" && proposedReview(result.reply.actionResults)
-  const quiet = smsText !== undefined && proposed && !asks && filesReport === undefined
+  const unrunDirect = result?.kind === "Replied" && ranDirect(result.reply.actionResults) && !filesRan && !pageOpened
+  const quiet = !asks && filesReport === undefined && (unrunDirect || (smsText !== undefined && proposed))
   const says = !quiet && (!asks || filesReport !== undefined)
   if (says) output.finishSpeech(finalText)
   return { type: "replyEnds", session, turn, asks, says }

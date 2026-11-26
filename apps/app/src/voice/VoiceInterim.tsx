@@ -35,7 +35,7 @@ export function VoiceInterim({ runtime }: { runtime: ManagedRuntime.ManagedRunti
     return (
       <>
         <div data-alpha-voice-said="" className={bubble}>{said.text}</div>
-        {reply !== "" ? <AssistantMessage data-alpha-voice-reply="" author="alpha" text={reply} streaming />
+        {reply !== "" ? <AssistantMessage data-alpha-voice-reply="" author="alpha" text={reply} />
           : <AssistantTurnNote status="sending" label={said.cue === undefined || said.cue === "" ? undefined : said.cue} />}
       </>
     );

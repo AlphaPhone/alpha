@@ -1425,6 +1425,110 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(document.body.textContent).not.toContain("Create a folder");
   });
 
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+  it("from Talk over Messages, hushes an agent-flagged direct sms_send that never ran instead of speaking its claim", async () => {
+    const { world, review, alpha, area } = await talkOnMessages(1, {
+      extraCapabilities: ["files.browser.v1", "files.shown-target.v1", "browser.open-direct.v1"],
+    });
+    const observedReviewPending: boolean[] = [];
+    const watch = area.runFork(
+      Stream.runForEach(
+        Stream.unwrap(Effect.map(Voice.Machine, (machine) => machine.changes)),
+        (state) => Effect.sync(() => { observedReviewPending.push(state.reviewPending); }),
+      ),
+    );
+    review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+    world.ask.nextReplyChunks = ["Sending it now."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: review.proposal.id, state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
+    } }];
+    const from = world.voice.spoken.length;
+    try {
+      await drawn(() => speakUtterance(world, "Text +14155550100 saying Meet upstairs."));
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
+    } finally {
+      await area.runPromise(Fiber.interrupt(watch));
+    }
+    expect(button("Send this text")).toBeUndefined();
+    expect(observedReviewPending).not.toContain(true);
+    expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual([]);
+    expect([review.decisions, review.claims, review.confirmations, review.receipts, world.telephony.sent]).toEqual([[], [], [], [], []]);
+  });
+
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+  it("from Talk over Messages with a chosen SIM, speaks a direct Files result even when the reply also proposes an unshowable SMS review", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
+    const review = textReview(world.notes.owner, "messages-filter", filter);
+    review.extraCapabilities.push("sms.send.v1");
+    alsoPending(review, "unshowable-sms", { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.", subscriptionId: 2 });
+    world.telephony.textReview = review;
+    world.ask.metadata = [];
+    const { alpha, area } = await onComposer(
+      world,
+      { at: "view:Messages", load: () => import("../src/messages/index.tsx") },
+      { at: "view:Files", load: () => import("../src/files/index.tsx") },
+    );
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded" && !state.askFirst);
+    await fill("Message Alpha", "Start this chat");
+    await press("Send");
+    await drawnUntil(alpha, area, Conversation, (state) => state.turn.reply === "Complete");
+    await drawnUntil(alpha, area, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Messages" }))));
+    await drawnUntil(alpha, alpha.runtime, Messages, (state) => state.front && state.sms.grant === "Granted" && state.list.status === "Loaded");
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await raiseSheet(alpha);
+    await drawnUntil(alpha, area, Conversation, (state) => state.context.showing.tag === "App" && state.context.showing.view === "Messages");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+
+    review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+    world.ask.nextReplyChunks = ["There is a Files request and a text."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: "messages-filter", state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
+    } }, kept("unshowable-sms")];
+    const from = world.voice.spoken.length;
+    await drawn(() => speakUtterance(world, "Show PDFs in Download and text +14155550100."));
+    await drawn(() => vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "messages-filter" })]), { timeout: 10_000 }));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.phase === "Listening" && state.mic === "On" && !state.reviewPending);
+    expect(world.voice.spoken.slice(from).some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
+    expect(button("Send this text")).toBeUndefined();
+    expect(review.decisions).not.toContain("unshowable-sms");
+    expect(review.claims).not.toContain("unshowable-sms");
+    expect(world.telephony.sent).toEqual([]);
+  });
+
+  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+  it("from Talk over Messages, includes browser.open-direct.v1 only while Ask before Alpha acts is off", async () => {
+    const { world, alpha, area } = await talkOnMessages(1, {
+      extraCapabilities: ["files.browser.v1", "files.shown-target.v1", "browser.open-direct.v1"],
+    });
+    const declared: string[][] = [];
+    world.ask.nextReplyChunks = ["Ready."];
+    world.ask.nextActions = (_, capabilities) => {
+      declared.push([...capabilities]);
+      return [];
+    };
+    await drawn(() => speakUtterance(world, "Check the page."));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.phase === "Listening" && state.mic === "On");
+    expect(declared[0]).toContain("browser.open-direct.v1");
+    expect(declared[0]).toContain("sms.send.v1");
+
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.askFirst);
+    world.ask.nextReplyChunks = ["Ready again."];
+    world.ask.nextActions = (_, capabilities) => {
+      declared.push([...capabilities]);
+      return [];
+    };
+    await drawn(() => speakUtterance(world, "Check the page again."));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening" && state.mic === "On");
+    expect(declared[1]).not.toContain("browser.open-direct.v1");
+    expect(declared[1]).toContain("sms.send.v1");
+  });
+
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
   it.each([
     { answer: "Send this text.", by: "voice", again: true, outcome: "send" },
