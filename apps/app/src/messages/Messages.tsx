@@ -1,7 +1,7 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, MessageAttachmentsMenu, SearchField, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
@@ -571,7 +571,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           </div>
         </div>
       )}
-      <div ref={simControls} data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-y-auto px-3 text-caption text-muted-foreground empty:hidden">
+      <div ref={simControls} data-alpha-messages-accessories className={cn("flex max-h-[34%] shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-y-auto px-3 text-caption text-muted-foreground empty:hidden", pictures.length > 0 && "pb-1.5")}>
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
             {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
@@ -586,10 +586,10 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {here && (outgoing.denied || outgoing.op.outcome === "Refused" && outgoing.failed > 0) && <CircleAlert className="mx-2 size-4 text-destructive" role="img" aria-label="Message failed" />}
         {here && sentAll(outgoing) && <p role="status" data-alpha-messages-notice className={notice}>{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
         {pictures.map((picture, at) => (
-          <button type="button" key={picture.name} aria-label={`Remove ${picture.name}`} disabled={!can({ type: "detach" })} className={`${accessoryChip} gap-1.5 bg-secondary px-3 font-normal text-foreground`} onClick={() => {
+          <MessagePictureChip key={picture.name} name={picture.name} disabled={!can({ type: "detach" })} onRemove={() => {
             if (!can({ type: "detach" })) return;
             void runtime.runPromise(removeMessagePicture(thread, at));
-          }}>{picture.name}<X aria-hidden className="size-3.5" /></button>
+          }} />
         ))}
         {(subscriptions.length > 1 || selectedSim !== undefined && subscriptions.length === 1) && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="SIM">

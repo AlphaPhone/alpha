@@ -1,7 +1,7 @@
 // spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "The owner's New message uses the same send and never takes another draft's place"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { TelephonySubscription } from "@elizaos/os-bridges";
-import { Button, Input, MessageAttachmentsMenu, Textarea } from "@repo/ui";
+import { Button, cn, Input, MessageAttachmentsMenu, MessagePictureChip, Textarea } from "@repo/ui";
 import { Effect } from "effect";
 import { ArrowUp, Mic, RefreshCw, Square, X } from "lucide-react";
 import { useRef, useState, type RefObject } from "react";
@@ -76,7 +76,7 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
     input?.click();
   };
   return <>
-    <div className="flex shrink-0 flex-wrap gap-1.5 px-3 text-caption text-muted-foreground empty:hidden">
+    <div data-alpha-messages-accessories className={cn("flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 text-caption text-muted-foreground empty:hidden", draft.pictures.length > 0 && "pb-1.5")}>
       {(saveStatus === "Saving" || saveStatus === undefined && !saved) && <p role="status" className="basis-full">Saving message draft…</p>}
       {saveStatus === "Failed" && <p role="status" className="basis-full">Message draft couldn’t be saved <button type="button" className={textAction} onClick={onRetrySave}>Retry save</button></p>}
       {sending && <p role="status" className="basis-full">Sending…</p>}
@@ -100,10 +100,8 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
         {subscriptions.map((sim) => <Button key={sim.id} variant="secondary" aria-pressed={selected !== undefined && sameSubscription(selected, sim)}
           disabled={!editable || state.simInfo.grant !== "Granted"} onClick={() => setSelected(sim)}>{sim.displayName || `SIM ${sim.slot + 1}`}</Button>)}
       </div>}
-      {draft.pictures.map((picture) => <Button key={picture.name} variant="secondary" aria-label={`Remove ${picture.name}`} disabled={!editable || !saved}
-        onClick={() => { if (textIsSaved()) void runtime.runPromise(editNewMessage(visit, { pictures: draft.pictures.filter((one) => one !== picture) }, false, revision)); }}>
-        {picture.name}<X aria-hidden />
-      </Button>)}
+      {draft.pictures.map((picture) => <MessagePictureChip key={picture.name} name={picture.name} disabled={!editable || !saved}
+        onRemove={() => { if (textIsSaved()) void runtime.runPromise(editNewMessage(visit, { pictures: draft.pictures.filter((one) => one !== picture) }, false, revision)); }} />)}
     </div>
     <CommsBar runtime={runtime} {...(title ? { person: { label: title, initials: callerInitials(title) } } : {})} closed={recording ? (
       <div data-alpha-composer data-alpha-bar-recorder="" aria-label="Message dictation" role="group" className="flex min-w-0 flex-1 items-center gap-2">
