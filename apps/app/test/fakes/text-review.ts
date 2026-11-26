@@ -35,7 +35,15 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
     decisionGate: undefined as Promise<void> | undefined,
     claims: [] as string[],
     receipts: [] as unknown[],
+    /** Further pending proposals the resident lists after this one, for review only: none of them can be decided here. */
+    others: [] as { id: string; digest: string; state: string; expiresAt: string; payload: { installationId: string; enrollmentId: string; operation: ReviewOperation | DeviceOperation; requestMessageId?: string } }[],
   };
+}
+
+/** One more pending proposal of `review`'s enrollment, listed for review beside it. */
+export function alsoPending(review: TextReviewScene, id: string, operation: DeviceOperation, requestMessageId?: string) {
+  review.others.push({ id, digest: "c".repeat(64), state: "pending", expiresAt: review.proposal.expiresAt,
+    payload: { installationId: review.agentId, enrollmentId, operation, requestMessageId } });
 }
 
 export type TextReviewScene = ReturnType<typeof textReview>;
@@ -106,7 +114,7 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
         if (review.workflow !== undefined && !review.workflow.offered()) return Response.json({ proposals: [] });
         const payload = { ...proposal.payload, ...(review.workflow === undefined ? {} : { workflow: review.workflow.binding }) };
         const execution = ["executing", "reconciliation_required", "done"].includes(proposal.state) ? { attemptId } : undefined;
-        return Response.json({ proposals: [{ ...proposal, payload, execution, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
+        return Response.json({ proposals: [{ ...proposal, payload, execution, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }, ...review.others] });
       };
       return review.proposalsGate === undefined ? listed() : review.proposalsGate.then(listed);
     }
