@@ -37,7 +37,7 @@ effect function sessionForWorkflowNotices(): (Session | null | undefined)!! {
   } catch () => undefined
 }
 
-function sameOwner(first: NoticeOwnerIdentity, current: NoticeOwnerIdentity): boolean {
+function sameOwner(first: NoticeOwnerIdentity, current: Partial<NoticeOwnerIdentity>): boolean {
   return first.origin === current.origin && first.ownerId === current.ownerId && first.agentId === current.agentId
 }
 
@@ -171,7 +171,7 @@ const opening = started(effect {
     const session = try sessionForWorkflowNotices()
     if (session == null) return
     const offered = tryPromise(() => bridge.pendingTap()) catch () => undefined
-    if (typeof offered?.operationId !== "string" || typeof offered.token !== "string") return
+    if (typeof offered?.operationId !== "string" || typeof offered.token !== "string" || typeof offered.bindingHash !== "string") return
     const approvalNotice = offered.operationId.startsWith("approval-")
     const resultNotice = offered.operationId.startsWith("result-")
     if (!(approvalNotice || resultNotice)) return

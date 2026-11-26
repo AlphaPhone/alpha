@@ -352,7 +352,7 @@ describe("Workflows", () => {
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]));
-    const attachment = world.ask.spokenFiles.at(-1)?.images?.[0];
+    const attachment = world.ask.spokenFiles?.at(-1)?.images?.[0] as { readonly name?: string; readonly mimeType?: string; readonly data?: string } | undefined;
     expect(attachment).toMatchObject({ name: "Workflow run.json", mimeType: "application/json" });
     expect(JSON.parse(atob(attachment?.data ?? ""))).toMatchObject({
       workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3",
