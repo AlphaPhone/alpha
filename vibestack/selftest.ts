@@ -1362,8 +1362,8 @@ pure val amountValues = Set(0, 1)`;
   });
 
   test("a test that reaches only generated code, which the spec proves, is caught: a file that imports nothing else, and a test that reaches nothing else through the helpers it calls; two test files of one runner and language are a note", async () => {
-    const root = copyOfProject("test/app.test.vibe", (s) => s.replace('from "../src/app.vibe"\n', '$&import { initial } from "../gen/index.effect.vibe"\n')
-      + "\n" + citing("spec/index.md", "A new order is an empty draft") + 'it("a new order is a draft", () => { assert.strictEqual(initial.status, "Draft") })\n');
+    const root = installed(copyOfProject("test/app.test.vibe", (s) => s.replace('from "../src/app.vibe"\n', '$&import { initial } from "../gen/index.effect.vibe"\n')
+      + "\n" + citing("spec/index.md", "A new order is an empty draft") + 'it("a new order is a draft", () => { assert.strictEqual(initial.status, "Draft") })\n'));
     fs.writeFileSync(path.join(root, "test/draft.test.vibe"), citing("spec/index.md", "A new order is an empty draft") + 'import { assert, it } from "@effect/vitest"\nimport { initial } from "../gen/index.effect.vibe"\nit("a new order is a draft", () => { assert.strictEqual(initial.units, 0) })\n');
     fs.writeFileSync(path.join(root, "test/mbt-only.test.ts"), citing("spec/index.md", "A new order is an empty draft") + 'import { it } from "vitest";\nimport { planModel } from "vibestack/testing";\nimport * as oracle from "../gen/index.ts";\nit("oracle only", () => { planModel(oracle, []); });\n');
     const { failed, said, text } = await run(root);
@@ -2520,12 +2520,19 @@ function eachCheck() {
     assert.equal(json(customInstall, "package.json").scripts.postinstall, "vibestack link");
     assert.deepEqual(init(customInstall), []);
     const workspace = scratch({
-      "package.json": read("template/package.json"),
-      "pnpm-workspace.yaml": read("template/pnpm-workspace.yaml"),
-      ".gitignore": read("template/.gitignore"),
-      "tsconfig.json": read("template/tsconfig.json"),
-      "vitest.config.ts": read("template/vitest.config.ts"),
-      "spec/index.md": read("template/spec/index.md"),
+      "package.json": JSON.stringify({
+        name: "workspace-root",
+        private: true,
+        type: "module",
+        packageManager: "pnpm@10.24.0",
+        engines: { node: `>=${NODE}` },
+        scripts: { dev: "spec studio", studio: "spec studio", check: "spec check", gen: "spec gen", accept: "spec accept", new: "spec new", test: "vitest run", postinstall: "vibestack link" },
+      }, null, 2) + "\n",
+      "pnpm-workspace.yaml": "packages:\n  - apps/*\ncatalog:\n  vibelang: 0.0.13\n",
+      ".gitignore": "dist/\n",
+      "tsconfig.json": "{}\n",
+      "vitest.config.ts": 'import { project } from "vibestack/testing/vitest";\n\nexport default project({ root: import.meta.dirname });\n',
+      "spec/index.md": "# Workspace\n",
     });
     const templatePkgBefore = read("package.json", workspace);
     init(workspace);
