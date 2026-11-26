@@ -4,7 +4,7 @@ import type { ReminderItemRecord, ReminderListRecord, RemindersSnapshot } from "
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -39,6 +39,7 @@ import {
 } from "../src/reminders/store.ts";
 import workflows from "../src/workflows/index.tsx";
 import { button, closeAll, drawn, fill, later, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -427,6 +428,9 @@ describe("Reminders full journeys", () => {
       consumeTap: () => Promise.resolve(),
     };
     setNativeRemindersPort(nativePort);
+    // spec/app/notices/browserAlerts.md, "Story: Choose whether Alpha shows browser alerts": the browser keeps web Alerts on, so a due reminder shows its banner
+    vi.stubGlobal("indexedDB", memoryIndexedDB());
+    onTestFinished(() => { vi.unstubAllGlobals(); });
 
     const first = await launchReminders(baseNow);
     const { world, recorder, platform, alpha, runtime } = first;

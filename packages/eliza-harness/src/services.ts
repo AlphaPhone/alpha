@@ -471,7 +471,7 @@ export const characterOf = (email: string) => ({ name: "Alpha", system: `You are
  * worker it pins, the phone's host context revision, so an enrolled device is offered and shown its proposals as on
  * the phone, and the views the phone declares, so the agent can show its apps; `persist` keeps its conversations in `state`.
  */
-export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string }, persist: boolean): Promise<Agent> {
+export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string }, persist: boolean, timeZone?: string): Promise<Agent> {
   const pack = await builtPack();
   const launch = path.join(owned(state), "launch.json");
   fs.writeFileSync(launch, JSON.stringify({
@@ -482,6 +482,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
     model: { backend: "cloud", cloudBaseUrl: cloud.api, smallModel: cloud.model, largeModel: cloud.model, imageModel: cloud.model },
     account: { userId: key.accountId, organizationId: key.organizationId },
     embeddings: "none", persistMemory: persist, callerRole: "owner",
+    ...(timeZone === undefined ? {} : { timeZone }),
     ...(pack.hostContextRevision === undefined ? {} : { hostContextRevision: pack.hostContextRevision }),
     ...(pack.views === undefined ? {} : { views: pack.views }),
   }), { mode: 0o600 });
@@ -508,13 +509,14 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
  * The cloud and the agent a dev server runs against: one signed-in, funded owner, whose model is the scripted one or
  * `real`, and whose agent is the pack's with the phone's own character, so a real model is given the phone's system
  * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
- * directory to keep the agent's in instead.
+ * directory to keep the agent's in instead. The agent keeps the owner's time zone, the dev server's own, as the phone
+ * keeps its owner's; the journeys' agents keep UTC.
  */
 export async function startEliza(keep?: string, real?: RealModel) {
   const { character } = await builtPack();
   const state = scratch();
   const cloud = await startCloud(state, [owner.email], owner.credits, real);
   const key = cloud.owners.get(owner.email)!;
-  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined);
+  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, Intl.DateTimeFormat().resolvedOptions().timeZone);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
 }
