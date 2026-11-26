@@ -145,10 +145,10 @@ function unpaintBar(paintedBar: RefObject<HTMLElement | null>, spring = false) {
  * v119 retire (:613-651): the header and the bar or pill under the sheet shown in place again. The sheet's own height,
  * opacity and corners go back with the render that ends the drag, which drew them too.
  */
-function unpaint(section: HTMLElement | null, paintedBar: RefObject<HTMLElement | null>, springBar = false) {
+function unpaint(section: HTMLElement | null, paintedBar: RefObject<HTMLElement | null>, springBar = false, keepBar = false) {
   document.querySelector<HTMLElement>("[data-alpha-underlay]")?.style.removeProperty("opacity");
   section?.querySelector<HTMLElement>("[data-alpha-chat-header]")?.style.removeProperty("opacity");
-  unpaintBar(paintedBar, springBar);
+  if (!keepBar) unpaintBar(paintedBar, springBar);
 }
 
 /**
@@ -177,6 +177,20 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const ghostRef = useRef<HTMLElement | undefined>(undefined);
   const barRef = useRef(0);
   const paintedBarRef = useRef<HTMLElement | null>(null);
+  /**
+   * A bar pulled down to tuck keeps the finger's paint until the commit that draws it as something else, the pill, clears
+   * it, as v119's bar left with the drag (COA:640-648), so it never shows at rest for a frame first. The watch runs
+   * before the next frame is painted; a refused release drops the paint, and a new press takes it back.
+   */
+  const tuckingRef = useRef<MutationObserver | undefined>(undefined);
+  const stopTucking = () => {
+    tuckingRef.current?.disconnect();
+    tuckingRef.current = undefined;
+  };
+  const handOver = () => {
+    stopTucking();
+    unpaintBar(paintedBarRef, false);
+  };
   if (seen.detent !== detent) {
     const tap = live === undefined && !voice && !comms && animates();
     const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: sectionRef.current?.getBoundingClientRect().height || undefined } : undefined);
@@ -194,10 +208,11 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const viewport = () => (comms ? window.innerHeight - 52 : window.innerHeight);
   const done = (springBar = false) => {
     heldRef.current = undefined;
-    unpaint(sectionRef.current, paintedBarRef, springBar);
+    unpaint(sectionRef.current, paintedBarRef, springBar, tuckingRef.current !== undefined);
     setLive(undefined);
   };
   const drop = () => {
+    stopTucking();
     done(true);
     void dock.send({ type: "shift", now: untimed });
   };
@@ -209,7 +224,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   };
   const gesture: AssistantPull = {
     onPress: ({ y }) => {
-      if (paintedBarRef.current) unpaintBar(paintedBarRef, false);
+      if (paintedBarRef.current) handOver();
       const form: Form = isOpen(detent) ? "open" : pill ? "pill" : "bar";
       const floor = floorOf();
       const shown = sectionRef.current?.getBoundingClientRect().height ?? 0;
@@ -254,7 +269,15 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
         document.activeElement.blur();
       }
       const painted = dragPaint(d);
-      unpaint(sectionRef.current, paintedBarRef);
+      // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar"
+      const tucking = paintedBarRef.current;
+      stopTucking();
+      if (!comms && held.form === "bar" && direction === "down" && !isOpen(held.start) && !isOpen(landed.detent) && tucking && !tucking.hasAttribute("data-alpha-pill") && typeof MutationObserver !== "undefined") {
+        const watch = new MutationObserver(handOver);
+        watch.observe(tucking, { attributes: true, attributeFilter: ["data-alpha-pill", "data-alpha-input-bar", "hidden"] });
+        tuckingRef.current = watch;
+      }
+      unpaint(sectionRef.current, paintedBarRef, false, tuckingRef.current !== undefined);
       if (held.form === "open" && !isOpen(landed.detent) && !comms && animates()) {
         setSeen((s) => ({ ...s, growing: undefined, leaving: { tap: false, height: painted.height, opacity: painted.opacity } }));
         setLive(undefined);

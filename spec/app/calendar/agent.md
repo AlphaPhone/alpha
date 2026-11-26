@@ -253,6 +253,35 @@ pure def sometimesAManagedChangeSent(s: AgentCalendar): bool = s.stage == Sendin
 pure def sometimesDeclined(s: AgentCalendar): bool = s.result == Declined and s.write.id == 0
 ```
 
+### The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken
+
+As in Sunday's v119, a reply whose Calendar action filed a request shows
+the card in Ask Alpha, below that reply, whether the owner typed or
+talked: the same card as in Calendar, with the same Approve and Decline,
+so the owner approves where they asked and never has to open Calendar to
+find it. Which replies filed a request is read from the Calendar action's
+own result, never from the owner's words. While a change is under way its
+card stays at the foot of each conversation where a reply filed one. Once
+it ends, how it ended shows there until the owner asks something else.
+
+```quint
+type InAskAlpha = NothingToShow | ChangeUnderWay | ChangeEnded
+
+pure def inAskAlpha(s: AgentCalendar, filedByAReply: bool): InAskAlpha =
+  if (s.stage != Idle) ChangeUnderWay
+  else if (filedByAReply and s.result != NoResult and s.result != Withdrawn) ChangeEnded
+  else NothingToShow
+
+pure def shownInAskAlpha(shown: InAskAlpha, filedHere: bool, latestReply: bool): bool =
+  filedHere and (shown == ChangeUnderWay or (shown == ChangeEnded and latestReply))
+
+pure def lawACardUnderWayShowsWhereItWasAsked(latestReply: bool): bool = shownInAskAlpha(ChangeUnderWay, true, latestReply)
+
+pure def lawNothingShowsWhereNoReplyFiledOne(shown: InAskAlpha, latestReply: bool): bool = not(shownInAskAlpha(shown, false, latestReply))
+
+pure def lawAnEndedChangeLeavesWithTheNextQuestion(filedHere: bool): bool = not(shownInAskAlpha(ChangeEnded, filedHere, false))
+```
+
 ## Story: Know what the agent's change did
 
 > As the owner, I want the agent told a change is done only once it is seen
