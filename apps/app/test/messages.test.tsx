@@ -179,7 +179,7 @@ describe("Messages on an Alpha image", () => {
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded" && s.threads === 1);
     const listHeading = document.querySelector("[data-alpha-messages-header] h1");
-    // spec/app/messages/index.md, "Messages reads the conversation list each time it comes to the front": Sunday's v119 (Alpha 45f6bed30 `prototype/template.html:566-568`) titles the list "Messages".
+    // spec/app/messages/index.md, "Story: See my conversations"
     expect([listHeading?.textContent, listHeading?.classList.contains("sr-only")]).toEqual(["Messages", false]);
 
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
@@ -701,7 +701,7 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.sent.map(({ operationId }) => operationId)).toEqual([call.operationId]);
   });
 
-  it("From Home, asks the owner to review the exact text the agent just proposed (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
+  it("From Home, asks the owner to review the exact text the agent just proposed (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\"; spec/app/contacts/agent.md, \"A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it\")", async () => {
     const world = image();
     const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
     const review = textReview(world.notes.owner, "reviewed-text", sms);
@@ -727,6 +727,10 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
     expect(document.body.textContent).toContain(`To: ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
+    // spec/app/contacts/agent.md, "A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it"
+    const sendRow = button("Send this text")?.textContent ?? "";
+    expect([sendRow.startsWith(`Review SMSTo: ${displayNumber(sms.recipients[0])}${sms.body}`), sendRow.endsWith("Send")]).toEqual([true, true]);
+    expect(button("Decline Keep things as they are.")?.textContent).toBe("Keep things as they are.Decline");
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
     await press("Send this text");
     try {

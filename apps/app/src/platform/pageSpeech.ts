@@ -1,5 +1,6 @@
-// spec/app/voice/index.md, "What voice asks the phone and the voice service to do"; spec/app/voice/index.md, "Story: Hold a spoken conversation"
+// spec/app/voice/index.md, "What voice asks the phone and the voice service to do"; spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "A page served by Alpha's development server talks through that server's own Cloud speech relay, and a page that names none offers no Talk"
 import type { CloudSpeechListenerHandle, CloudSpeechStarted, CloudStreamEvent, CloudStreamPort, SpeechSessionId } from "@elizaos/os-bridges";
+import { relaysPageSpeech } from "../../gen/app__voice.ts";
 
 const RATE = 16_000;
 const FRAME_BYTES = 3_200;
@@ -39,11 +40,11 @@ interface Minted {
   readonly token: string;
 }
 
-/** The base path of the Cloud the page's own server relays speech for, which the dev server names in the page's head; undefined where it relays none. @throws {never} */
+/** The server's own /cloud relay, which the dev server names in the page's head; undefined where it names none or any other path. @throws {never} */
 export function pageSpeechBase(): string | undefined {
   if (typeof document === "undefined" || typeof navigator === "undefined" || navigator.mediaDevices?.getUserMedia === undefined) return undefined;
   const named = document.querySelector<HTMLMetaElement>('meta[name="alpha-cloud-speech"]')?.content ?? "";
-  return named.startsWith("/") ? named : undefined;
+  return relaysPageSpeech(named) ? named : undefined;
 }
 
 /** The page's microphone permission, or prompt where the browser cannot say. */
