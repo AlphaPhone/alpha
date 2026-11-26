@@ -785,8 +785,8 @@ describe("Notes", () => {
     const { alpha, runtime } = await openNamedShoppingNote(world);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
-    const shell = () => alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
-    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "raise", detent }))));
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent }))));
     const ask = async (text: string, viewId: string, saved: boolean) => {
       world.ask.nextReplyChunks = ["Here it is."];
       world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, saved)];
@@ -799,23 +799,19 @@ describe("Notes", () => {
       return shell();
     };
 
-    // From Home under the sheet: Notes opens on the named note and the sheet stays.
     await raise("Sheet");
     expect(await ask("open the note titled shopping list", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
     await rendered(() => expect(editorTitle()).toBe("shopping list"));
 
-    // Notes already showing under the sheet: the note is a new page there, so the sheet stays, as in v119.
     world.notes.target = "enclave";
     expect(await ask("open my enclave launch note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
     await rendered(() => expect(editorTitle()).toBe("Enclave launch"));
 
-    // The full screen would hide the note, so it lowers to the bar and the note shows.
     await raise("Full");
     world.notes.target = "groceries";
     expect(await ask("open my groceries note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
     await rendered(() => expect(editorTitle()).toBe("Groceries"));
 
-    // Asked for Notes itself, the view already showing under the sheet: Ask Alpha lowers so Notes shows.
     await raise("Sheet");
     expect(await ask("show me notes", "notes", false)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
   });
@@ -830,8 +826,8 @@ describe("Notes", () => {
     await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "permissionChanged", grant: "Granted" }))));
     await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "startTalking", now: untimed }))));
     await until(alpha, runtime, Talk, (s) => s.phase === "Listening" && s.mic === "On");
-    const shell = () => alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
-    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "raise", detent }))));
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent }))));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
     const say = async (text: string, turn: number) => {
       world.ask.nextReplyChunks = ["Here it is."];
