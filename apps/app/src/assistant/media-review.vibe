@@ -1291,7 +1291,17 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const conversation = try Conversation
       const chats = try Chats
       const spoken = card.spoken ?? card.spokenSms
+      const sendsReviewedText = approve && confirmation !== undefined
+        && ((card.operation.type === "sms_send" && card.sms !== undefined) || card.composeLine !== undefined)
+      const reviewedShell = try shell.get()
+      const textAskTicket = reviewedShell.textAsk.tag === "TextAskVisit" ? reviewedShell.textAsk.ticket : 0
       effect function matches(session: Session): boolean!! {
+        if (sendsReviewedText) {
+          const current = try shell.get()
+          const visit = current.textAsk
+          if (current.textAskThrough !== reviewedShell.textAskThrough
+            || (visit.tag === "TextAskVisit" ? visit.closing || visit.ticket !== textAskTicket : textAskTicket !== 0)) return false
+        }
         const showing = (try conversation.get()).context
         const chosen = (try chats.get()).chosen
         const time = try Clock.currentTimeMillis
@@ -1386,8 +1396,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         let filesOutcome: FileActionReport | undefined
         const voicemailDeletion = card.operation.type === "voicemail_delete_selected" && card.voicemail?.witness !== undefined
           ? { id: card.voicemail.id, opening: card.voicemail.opening, witness: card.voicemail.witness, expiresAt: card.expiresAt } : undefined
-        const approvedText = confirmation !== undefined && ((card.operation.type === "sms_send" && card.sms !== undefined) || card.composeLine !== undefined)
-          ? { digest: card.digest, expiresAt: card.expiresAt } : undefined
+        const approvedText = sendsReviewedText
+          ? { digest: card.digest, expiresAt: card.expiresAt, ...(textAskTicket === 0 ? {} : { textAskTicket }) } : undefined
         scopes.set(card.id, { active: current(held), ...(card.voicemail === undefined ? {} : { voicemail: card.voicemail }), reportFiles: (outcome) => { filesOutcome = outcome }, ...(card.operation.type === "sms_compose" ? { continueDraft: continueDraft(held) } : {}), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
           ...(voicemailDeletion === undefined ? {} : { voicemailDeletion }),
           ...(approvedText === undefined ? {} : { approvedText }),

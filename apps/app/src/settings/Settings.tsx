@@ -87,9 +87,11 @@ import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 import { PasswordEntries } from "./PasswordEntries.tsx";
 import { ProtonPass } from "./ProtonPass.tsx";
 import { InboxNotices } from "../inbox/notices.vibe";
+import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effect.vibe";
+import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -249,11 +251,18 @@ function Top({ runtime, alpha, common }: PageProps) {
   );
 }
 
+function browserAlertReading(state: BrowserAlerts.Alerts | undefined): SettingsFactReading {
+  if (!state || state.phase === "Reading") return { word: "waiting" };
+  if (state.status === "Unavailable") return { word: "unavailable" };
+  return state.status === "Enabled" ? { word: "reported", value: "On", status: "ok" } : { word: "reported", value: "Off", status: "off" };
+}
+
 // spec/app/settings/reset.md, "Erase all data, on the phone, asks the phone to show its disclosure and check the device credential, one review at a time"; spec/app/settings/facts.md, "Set as Home is offered when the newest answer reported a Home role that Alpha can take and does not hold, one request at a time"
 function General({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const { state: facts, can, send } = useTimed(runtime, useFacts);
   const reset = useTimed(runtime, useReset);
+  const browserAlerts = useBrowserAlerts(runtime).state;
   const prefs = useTimed(runtime, usePrefs).state;
   const request = { type: "requestHome", at: untimed } as const;
   const onPhone = pages?.phone ?? false;
@@ -265,7 +274,7 @@ function General({ runtime, alpha, common }: PageProps) {
       bluetooth={reading(facts, "Bluetooth")}
       mobileData={reading(facts, "MobileData")}
       theme={prefs && themeNames[prefs.theme]}
-      alerts={reading(facts, "Alerts")}
+      alerts={onPhone ? reading(facts, "Alerts") : browserAlertReading(browserAlerts)}
       image={pages?.image ?? false}
       onPhone={onPhone}
       reviewing={reset.state !== undefined && loading(reset.state.review)}
@@ -538,7 +547,17 @@ const drawn: Partial<Record<Page, Drawn>> = {
   Notifications: ({ runtime, alpha, common }) => {
     const facts = useFacts(runtime).state;
     const pages = usePages(runtime).state;
-    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={alpha.slot("settings/notification-collection")} channels={facts?.alerts ?? []} />;
+    const { state: web, can, send } = useBrowserAlerts(runtime);
+    const change = { type: "choose", desired: web?.status !== "Enabled" } as const;
+    const browserAlerts = pages?.phone ? undefined : {
+      enabled: !web || web.status === "Unavailable" ? undefined : web.status === "Enabled",
+      reading: !web || web.phase === "Reading",
+      saving: web?.phase === "Writing",
+      saveFailed: web?.saveFailed,
+      onChoose: can(change, "Owner") ? (enabled: boolean) => void send({ type: "choose", desired: enabled }, "Owner") : undefined,
+    };
+    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} browserAlerts={browserAlerts}
+      alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={pages?.phone ? alpha.slot("settings/notification-collection") : undefined} channels={facts?.alerts ?? []} />;
   },
   Battery: ({ runtime, common }) => <SettingsBatteryPage {...common} battery={reading(useFacts(runtime).state, "Battery")} />,
   PhonePage: Phone,

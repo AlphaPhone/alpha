@@ -174,21 +174,23 @@ pure def sometimesTheStripShows(c: Comms): bool = c.height == SheetFull and c.ca
 > drag and during a voice turn, always red and right-most, so that I can
 > always hang up (AC-18).
 
-### End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn
+### End is above the view when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn
 
-An emergency call keeps its full-screen card with its own End when the
-conversation is closed, and is never at full height.
+When closed, Android alone presents a ringing call and its Decline every
+time. An emergency call keeps its full-screen card with its own End when
+the conversation is closed, and is never at full height.
 
 ```quint
-type EndPlace = EndBesideBar | EndInCard | EndInStrip | EndOnVoicePanel | EndNowhere
+type EndPlace = EndAboveView | EndInCard | EndInStrip | EndOnVoicePanel | EndOnAndroid | EndNowhere
 
 pure def endPlace(c: Comms): EndPlace =
   if (not(c.callLive)) EndNowhere
   else if (c.voice) EndOnVoicePanel
   else if (c.height == SheetFull) (if (c.emergency) EndNowhere else EndInStrip)
   else if (c.height == SheetOpen) EndInCard
+  else if (c.ring != "") EndOnAndroid
   else if (c.emergency) EndInCard
-  else EndBesideBar
+  else EndAboveView
 
 pure def canCallChanged(c: Comms, live: bool, emergencyCall: bool, by: Actor): bool = by == Device
 

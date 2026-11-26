@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { Code, Info, LayoutGrid, Mic, Settings, Shield, UserRound } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { StatusDot } from "../StatusDot.tsx";
@@ -46,6 +46,7 @@ const links: SettingsPageLink[] = [
  * @model spec/app/settings/index.md
  */
 export function SettingsTopPage({ developer = false, onPhone = true, actions, accountDetail, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children, leading }: SettingsTopPageProps) {
+  const accountStatusId = useId();
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
@@ -57,7 +58,10 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, ac
       ) : null}
       <SettingsNavRow
         title="Account"
-        detail={accountDetail}
+        data-settings-row="account"
+        aria-label="Account"
+        aria-describedby={accountDetail ? accountStatusId : undefined}
+        detail={accountDetail ? <span id={accountStatusId}>{accountDetail}</span> : undefined}
         icon={<UserRound />}
         className="min-h-16.5 rounded-group bg-secondary py-3 text-secondary-foreground [&>span>span]:leading-normal"
         onOpen={onHandOver && (() => onHandOver("account-and-plan"))}

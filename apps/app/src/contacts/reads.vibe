@@ -11,7 +11,7 @@ import { Machine as VoicemailMachine, removing as removingVoicemail } from "../.
 import { type Telephony, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { Device } from "../platform/device.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { Drafts } from "../messages/composer.vibe"
+import { Drafts, offerMessageDraft } from "../messages/composer.vibe"
 import { Conversations, Inbox, titleOf } from "../messages/messages.vibe"
 import { Dialer, prefilled } from "../phone/phone.vibe"
 import { Callers, Voicemails } from "../phone/voicemail.vibe"
@@ -201,8 +201,7 @@ effect function drafted(body: string, number: string | undefined): ("drafted" | 
   const state = try composer.get()
   if (state.thread === 0) return "none-selected"
   if (state.slot.author !== "Nobody") return "occupied"
-  try (try Drafts).write(state.thread, body)
-  if (!(try contained(composer.send({ type: "agentDrafted", thread: state.thread }), "the agent's draft"))) return "unavailable"
+  if (!(try offerMessageDraft(state.thread, body))) return "unavailable"
   return (try composer.get()).slot.author === "AlphaWrote" ? "drafted" : "occupied"
 }
 

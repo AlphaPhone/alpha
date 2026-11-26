@@ -22,19 +22,21 @@ export const acceptedPhotos = [...images, "image/heic", "image/tiff", "image/svg
 export const acceptedFiles = [acceptedPhotos, ...documents].join(",")
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
+export type AttachmentSource = Attached | (() => Effect.Effect<Attached | undefined>)
+
 export type ReviewedDraft = (text: string, current: Effect.Effect<boolean>) => Effect.Effect<boolean>
 
 /** The owner sends a file reviewed in another app to the existing Ask Alpha draft. */
 export service MediaHandoff {
-  attach(file: Attached, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!
+  attach(source: AttachmentSource, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!
   offerTranscript(transcript: NoteTranscript): boolean!!
   reviewedDraft(): (ReviewedDraft | undefined)!!
   offerPageSpeech(speech: PageSpeech): boolean!!
   stopPageSpeech(item: number): void!!
 }
 
-export effect function attachToAlpha(file: Attached, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!MediaHandoff {
-  return try (try MediaHandoff).attach(file, current, suggestion)
+export effect function attachToAlpha(source: AttachmentSource, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!MediaHandoff {
+  return try (try MediaHandoff).attach(source, current, suggestion)
 }
 
 module web {
@@ -227,13 +229,15 @@ export effect function insertPickedFiles(
 }
 
 // spec/app/assistant/composer.md, "A shared result adds its file and leaves the owner's draft as written"
-export effect function stageAttachment(file: Attached, active: Effect.Effect<boolean> = succeed(true), suggestion?: string): boolean!!(Talk | Composer.Machine | Conversation | Shell | Agent) {
+export effect function stageAttachment(source: AttachmentSource, active: Effect.Effect<boolean> = succeed(true), suggestion?: string): boolean!!(Talk | Composer.Machine | Conversation | Shell | Agent) {
   if (suggestion !== undefined && (suggestion.trim() === "" || suggestion.length > Composer.textLimit)) return false
   const authority = try attachmentAuthority()
   if (authority === undefined) return false
   const composer = try (try Composer.Machine).get()
   const context = (try (try Conversation).get()).context
-  if (context.sensitive || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
+  if (context.sensitive || composer.slot !== "Open" || composer.away !== "Free" || !(try active)) return false
+  const file = typeof source === "function" ? try source() : source
+  if (file === undefined || !(try active) || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
   const given = Effect.try(() => selected(file.data, file.name, file.mimeType)) catch () => undefined
   if (given === undefined) return false
   const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision, authority }, [{ name: file.name, file: try encoded(given, file.id) }], active, suggestion)

@@ -125,6 +125,11 @@ pure def interrupted(f: Film, now: int): Film = stopping(now, { ...f, preempted:
 
 ### A recording whose recorder fails while it runs or stops is broken
 
+If the browser loses its encoder or the frames going into it, Camera ends
+the recording and shows that it could not save it. The browser releases
+the recording's frame and microphone streams and leaves the viewfinder
+ready for another recording.
+
 ```quint
 pure def canFailed(f: Film): bool = f.stage == Running or f.stage == Stopping
 

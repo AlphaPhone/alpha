@@ -13,7 +13,8 @@ it("Opens message actions while held and toggles them by tap (spec/app/messages/
   const world = { ...scene(), phone: true, image: true };
   const { alpha } = await open(world, only("home", "view:Messages"));
   await until(alpha, alpha.runtime, Shell, (state) => state.image);
-  await page.getByRole("button", { name: "Messages", exact: true }).click();
+  // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited": the tile's name is its app's, with what waits there said after it
+  await page.getByRole("button", { name: /^Messages(?![A-Za-z])/ }).click();
   await until(alpha, alpha.runtime, Messages, (state) => state.threads === 1 && state.list.status === "Loaded");
   await page.getByRole("button", { name: "Maya Chen", exact: true }).click();
   await until(alpha, alpha.runtime, Messages, (state) => state.shown.rows === 1 && state.page.status === "Loaded");
@@ -40,7 +41,7 @@ it("Opens message actions while held and toggles them by tap (spec/app/messages/
       expect(up).toEqual([]);
       await expect.element(menu.getByRole("menuitem", { name: "Copy" })).toBeVisible();
     } finally {
-      await pointer.pointer("[/MouseLeft]");
+      await pointer.pointer({ keys: "[/MouseLeft]", target });
     }
     expect(up).toEqual([true]);
     await expect.element(menu).toBeVisible();
@@ -55,7 +56,7 @@ it("Opens message actions while held and toggles them by tap (spec/app/messages/
       await later(alpha, 510);
       await expect.element(menu).not.toBeInTheDocument();
     } finally {
-      await pointer.pointer("[/MouseLeft]");
+      await pointer.pointer({ keys: "[/MouseLeft]", target });
     }
     await expect.element(menu).not.toBeInTheDocument();
   } finally {

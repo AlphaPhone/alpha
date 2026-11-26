@@ -54,7 +54,7 @@ it("Shows the selected day across a wide canvas and at large text (spec/app/cale
   await expect.element(views.getByRole("button", { name: "Day", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect.element(views.getByRole("button", { name: "Schedule", exact: true })).toBeVisible();
   await expect.element(views.getByRole("button", { name: "Days", exact: true })).not.toBeInTheDocument();
-  await chooseDate.click();
+  await page.getByRole("dialog", { name: "Choose calendar date" }).getByRole("button", { name: "Close month" }).click();
   const dates = columns().map((column) => column.getAttribute("aria-label"));
   await page.getByRole("group", { name: dates[2] ?? undefined, exact: true }).getByRole("button", { name: /^Overnight source,/ }).click();
   await expect.element(page.getByRole("heading", { name: "Overnight source", exact: true })).toBeVisible();

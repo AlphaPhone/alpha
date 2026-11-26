@@ -586,7 +586,7 @@ describe("Files on a phone", () => {
     await press("code.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
     const previousViewer = runtime.runSync(Shown.use((m) => m.get())).viewer;
-    await choose("Rename", "File actions");
+    await press("Rename code.txt");
     await fill("Name", "codes.txt");
     await pressOnTop("Rename");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.viewer > previousViewer);

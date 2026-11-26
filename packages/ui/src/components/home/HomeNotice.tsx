@@ -36,18 +36,22 @@ const reasons: Record<HomeWhy, string> = {
   Unable: "Android couldn't do it.",
 };
 
+const shadeGesture = "Swipe down from the top edge of the screen for Android notifications.";
+const shadeUnavailable = "Android did not open its notifications from Alpha. Swipe down from the top edge of the screen instead.";
+
 /** What Home says of `notice`, in the owner's words. */
 export const homeNoticeWords = (notice: HomeNoticeMessage): string => {
   switch (notice.tag) {
     case "TellNotOpened": {
       const { ask } = notice;
-      const lead = ask.tag === "Shade" ? "Couldn't open notifications" : ask.tag === "AppInfo" ? `Couldn't open info for ${ask.label}` : `Couldn't open ${ask.label}`;
+      if (ask.tag === "Shade") return notice.why === "NotInFront" ? `Alpha is not in front. ${shadeGesture}` : shadeUnavailable;
+      const lead = ask.tag === "AppInfo" ? `Couldn't open info for ${ask.label}` : `Couldn't open ${ask.label}`;
       return `${lead}. ${reasons[notice.why]}`;
     }
     case "TellNoAnswer":
-      return "Android didn't answer about notifications";
+      return `Android didn't answer about notifications. ${shadeGesture}`;
     case "TellUnlockFirst":
-      return "Unlock your phone first";
+      return "Unlock to see notifications";
     case "TellNotSaved":
       return "Couldn't save your change to Home";
     case "TellSavedUnreadable":

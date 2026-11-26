@@ -10,7 +10,7 @@ import { Device } from "../platform/device.vibe"
 import { type Telephony, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { currentPhoneContact, type ReviewedPhoneContact } from "../phone/named-review.vibe"
-import { Drafts } from "./composer.vibe"
+import { Drafts, offerMessageDraft } from "./composer.vibe"
 import { Conversations, Inbox } from "./messages.vibe"
 
 /** The exact thread and latest read the owner had open when the request started. */
@@ -146,30 +146,25 @@ effect function stage(body: string, thread: number, check: boolean!!Telephony, t
   )
   if (Option.isNone(opened)) return false
   const [read] = opened.value
-  if (!(try check) || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return false
-  const where = try messages.get()
-  const draft = try composer.get()
-  const shown = try inbox.get()
-  if (!where.front || where.pane !== "Conversation" || where.confirming || removing(where) || where.thread !== thread
-      || where.sms.grant !== "Granted" || where.page.status !== "Loaded" || where.page.ticket !== read.page.ticket
-      || (target !== undefined && where.page.ticket !== target.ticket) || shown.messagesThread !== thread
-      || draft.thread !== thread || draft.slot.author !== "Nobody" || draft.pictures > 0 || bound(draft)) return false
-  if (destination !== undefined) {
-    const conversation = try (try Conversations).get(thread)
-    if (Option.isNone(conversation) || !soleNumber(conversation.value.addresses, destination.number)) return false
-    const provider = destination.provider
-    if (provider !== undefined && (conversation.value.id !== provider || !inProviderThread(shown.messages[0], provider, destination.number)
-      || shown.messages.some((row) => row.threadId !== provider))) return false
+  const current = effect {
+    if (!(try check) || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return false
+    const where = try messages.get()
+    const draft = try composer.get()
+    const shown = try inbox.get()
+    if (!where.front || where.pane !== "Conversation" || where.confirming || removing(where) || where.thread !== thread
+        || where.sms.grant !== "Granted" || where.page.status !== "Loaded" || where.page.ticket !== read.page.ticket
+        || (target !== undefined && where.page.ticket !== target.ticket) || shown.messagesThread !== thread
+        || draft.thread !== thread || draft.slot.author !== "Nobody" || draft.pictures > 0 || bound(draft)) return false
+    if (destination !== undefined) {
+      const conversation = try (try Conversations).get(thread)
+      if (Option.isNone(conversation) || !soleNumber(conversation.value.addresses, destination.number)) return false
+      const provider = destination.provider
+      if (provider !== undefined && (conversation.value.id !== provider || !inProviderThread(shown.messages[0], provider, destination.number)
+        || shown.messages.some((row) => row.threadId !== provider))) return false
+    }
+    return (try (try Drafts).text(thread)) === ""
   }
-  const drafts = try Drafts
-  if ((try drafts.text(thread)) !== "") return false
-  try drafts.write(thread, body)
-  const kept = (try drafts.text(thread)) === body
-  const taken = kept && (try contained(composer.send({ type: "agentDrafted", thread }), "staging the reviewed draft"))
-  const after = try composer.get()
-  if (taken && after.thread === thread && after.slot.author === "AlphaWrote" && (try drafts.text(thread)) === body) return true
-  if ((try composer.get()).slot.author === "Nobody" && (try drafts.text(thread)) === body) try drafts.drop(thread)
-  return false
+  return try offerMessageDraft(thread, body, current)
 }
 
 /** After the proposal is approved, an addressed draft may open only its exact Messages destination. */

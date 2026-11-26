@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserQuestion, BrowserReadAloud, BrowserReview, BrowserTabs, ConfirmDialog, Mark, PrivateMark } from "@repo/ui";
-import { AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star, Trash2 } from "lucide-react";
+import { ArrowUpRight, AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -25,7 +25,7 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
-import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";
+import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openFindFromMenu, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
 import { reviewPage, cancelReading, confirmQuestion, editPageExcerpt, editQuestion, PageReading, readPageExcerpt, sensitiveReadingText, READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE } from "./reading.vibe";
 import { SharePages, cancelExternal, confirmExternal, mailTarget, offerNativeHandoff, offerShare } from "./share.vibe";
@@ -126,7 +126,6 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     : undefined;
   const canShare = share.can({ type: "openPanel", ready: binding !== undefined });
   const nativePage = binding !== undefined && "navigation" in binding && state.secure ? binding : undefined;
-  const canHandoff = nativePage !== undefined && share.can({ type: "openExternally", kind: state.kind, secure: true });
   const reviewed = share.state?.handoff.showing
     ? runtime.runSync(Effect.map(SharePages, ({ external }) => external.page))
     : undefined;
@@ -168,22 +167,23 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System", binding)) },
     canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy", binding)) },
     canMail && { label: "Email", name: "Email this page", icon: <Mail />, onSelect: () => void runtime.runPromise(offerShare("Email", binding)) },
+    native && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => {
+      void runtime.runPromise(openFindFromMenu(tab)).then((opened) => { if (opened) setFinding(""); });
+    } },
     (native || binding !== undefined) && reader.can({ type: "request", purpose: "Ask", secure: state.secure, supported: true }) && { label: "Ask", name: "Ask about page", icon: <Mark aria-hidden />, onSelect: () => void runtime.runPromise(reviewPage(tab, "Ask")) },
     (native || binding !== undefined) && reader.can({ type: "request", purpose: speechPurpose, secure: state.secure, supported: true }) && { label: "Read aloud", icon: <AudioLines />, onSelect: () => void runtime.runPromise(reviewPage(tab, speechPurpose)) },
     native && cannotRead && { label: "Read aloud", name: "Page reading unavailable", icon: <AudioLines />, reason: READING_UNSUPPORTED_MESSAGE },
     { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
-    canHandoff && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ExternalLink />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
-    native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
+    native && canShare && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ArrowUpRight />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
     native && tabs.native.includes(tab) && { label: desktopSite ? "Mobile site" : "Desktop site", name: desktopSite ? "Request mobile site" : "Request desktop site", icon: desktopSite ? <Smartphone /> : <Monitor />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => runtime.runPromise(toggleDesktopSite(tab))); } },
     clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable); void browser.send({ type: "uncover" }); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
-  const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
   const seek = (text: string) => {
     setFinding(text);
     void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.seek(tab, text))).then(() => send({ type: "typeFind", empty: text === "" }));
   };
-  const findStatus = finding === "" ? "" : state.find.status === "Loading" ? "Searching…" : state.matches > 0 ? `${Math.max(1, stood.index)} of ${state.matches}` : "No matches";
+  const findStatus = finding === "" ? "" : state.find.status === "Loading" ? "Searching…" : state.matches > 0 ? `${state.position} of ${state.matches}` : "No matches";
   const cards = tabs.open.map((one) => {
     const known = tabHost.web === undefined ? tabHost.session.info(idOf(one)) : tabHost.web.info(idOf(one));
     const address = known?.url;
@@ -276,7 +276,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       <BrowserReview open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear data" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
-        {native ? "Clears history, cookies and tabs." : "Clears Alpha's history and tabs. Your browser manages website cookies."}
+        {native ? "Clears history, cookies and tabs." : "Clears history and tabs."}
       </BrowserReview>
     </div>
   );

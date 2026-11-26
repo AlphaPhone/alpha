@@ -294,29 +294,115 @@ describe("Messages on an Alpha image", () => {
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded");
 
-    // spec/app/messages/index.md, "New message opens the picker, which reads the contacts that have a number"
+    // spec/app/messages/index.md, "New message reads the contacts that have a number and brings back the owner's unsent New draft"
     await press("New message");
-    await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Picker" && s.picker.status === "Loaded" && s.choices === 2);
+    await ready(alpha.runtime, Messages, "New draft", (s) => s.pane === "New" && s.picker.status === "Loaded" && s.choices === 2);
+    const body = "Meet at five";
+    const message = () => document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea");
+    await vi.waitFor(() => expect(message()?.getAttribute("aria-label")).toBe("Message"));
+    await fill("Message", body);
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(true));
+    expect(world.telephony.sent).toEqual([]);
 
-    // spec/app/messages/index.md, "Choosing a contact's number, or typing one, opens that conversation"
+    // spec/app/messages/index.md, "The owner can write before choosing To, then adjust To without moving or losing the message"
     await press("Ben Ortiz");
-    await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
-    await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0);
+    await ready(alpha.runtime, Messages, "Ben addressed in New", (s) => s.pane === "New" && s.newDraft.recipient > 0);
+    expect(message()?.value).toBe(body);
+    expect(message()?.getAttribute("aria-label")).toBe("Text Ben");
+    await press("Choose contacts");
+    await ready(alpha.runtime, Messages, "Recipient picker open", (s) => s.newDraft.picking);
+    await press("Dictate a text to Ben");
+    await ready(messages.runtime(alpha), Voice, "New message recording", (s) => s.recorder.field === "MessagesBar" && s.recorder.stage === "Recording");
+    await press("Stop recording");
+    await ready(messages.runtime(alpha), Voice, "New message transcript returned", (s) => s.recorder.stage === "Closed");
+    const dictated = `${body} Dictated note`;
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(message()?.value).toBe(dictated);
+    }, { timeout: 12_000 });
+    expect(world.telephony.sent).toEqual([]);
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Only the recipient picker closed", (s) => s.pane === "New" && !s.newDraft.picking);
+    expect(message()?.value).toBe(dictated);
 
     await press("Back");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Threads" && s.list.status === "Loaded");
     await press("New message");
-    await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Picker" && s.picker.status === "Loaded");
+    await ready(alpha.runtime, Messages, "New draft restored", (s) => s.pane === "New" && s.picker.status === "Loaded" && s.newDraft.recipient > 0);
+    expect(message()?.value).toBe(dictated);
     await fill("To", "+14155550100, +14155550122");
-    await press("Text 2 recipients");
-    await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0 && s.recipients === 2 && s.sending.grant === "Granted");
-    await fill(await vi.waitFor(() => document.querySelector("[data-alpha-messages-composer] textarea")?.getAttribute("aria-label") ?? expect.fail("no composer")), "Meet at five");
-    await ready(alpha.runtime, Composer, "Composer state", (s) => s.slot.author === "OwnerWrote");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    expect(world.telephony.sent).toEqual([]);
     await press("Send");
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.outgoing.op.outcome === "Confirmed");
+    await ready(alpha.runtime, Messages, "New draft sent", (s) => s.pane === "Threads" && s.list.status === "Loaded");
     expect(world.telephony.sent.map(({ operationId, recipients, body }) => ({ kind: world.telephony.journal.get(operationId)?.kind, recipients, body }))).toEqual([
-      { kind: "mms-send", recipients: ["+14155550100", "+14155550122"], body: "Meet at five" },
+      { kind: "mms-send", recipients: ["+14155550100", "+14155550122"], body: dictated },
     ]);
+    await press("New message");
+    await ready(alpha.runtime, Messages, "A fresh New draft", (s) => s.pane === "New" && s.newDraft.recipient === 0);
+    expect(message()?.value).toBe("");
+
+    // spec/app/messages/index.md, "A current Android text request opens New only when its saved draft is empty"
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Messages list before the Android request", (s) => s.pane === "Threads");
+    const sent = [...world.telephony.sent];
+    const first = { token: "first-android-text", recipients: ["+14155550122"], body: "Draft from Android" };
+    const second = { token: "second-android-text", recipients: ["+14155550100"], body: "A different Android draft" };
+    const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
+    // The first acknowledgment is in flight when Android publishes a newer request.
+    const acknowledgment = Promise.withResolvers<void>();
+    world.telephony.holdSmsDraftAcknowledgment = acknowledgment.promise;
+    try {
+      world.telephony.smsDraft = first;
+      await drawn(world.telephony.wakeSmsDraft);
+      await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([first.token]));
+      await drawn(() => undefined);
+      expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], first.body, sent]);
+
+      const ownerEdit = "I am editing my own draft";
+      const label = message()?.getAttribute("aria-label");
+      if (!label) throw new Error("The Android text draft did not show an editor");
+      await fill(label, ownerEdit);
+      await vi.waitFor(() => expect(message()?.value).toBe(ownerEdit));
+      world.telephony.smsDraft = second;
+      await drawn(world.telephony.wakeSmsDraft);
+      acknowledgment.resolve();
+      const secondReads = () => world.telephony.smsDraftReads.filter((token) => token === second.token).length;
+      await vi.waitFor(() => expect(secondReads()).toBeGreaterThan(0));
+      const reads = secondReads();
+      await drawn(world.telephony.wakeSmsDraft);
+      await vi.waitFor(() => expect(secondReads()).toBeGreaterThan(reads));
+      await drawn(() => undefined);
+      expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], ownerEdit, sent]);
+      expect([world.telephony.smsDraft, world.telephony.smsDraftAcknowledgments]).toEqual([second, [first.token]]);
+    } finally {
+      acknowledgment.resolve();
+    }
+  });
+
+  it("Sends New without replacing a saved draft for the same recipient (spec/app/messages/composer.md, \"The owner's New message uses the same send and never takes another draft's place\")", async () => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Conversations read", (s) => s.list.status === "Loaded");
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Maya composer", (s) => s.thread > 0 && s.slot.author === "Nobody");
+    await fill("Text Maya", "Keep this reply draft");
+    await ready(alpha.runtime, Composer, "Maya draft kept", (s) => s.slot.author === "OwnerWrote" && s.slot.draft.sync === "Kept");
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Conversations restored", (s) => s.pane === "Threads" && s.list.status === "Loaded");
+    await press("New message");
+    await ready(alpha.runtime, Messages, "New draft open", (s) => s.pane === "New" && s.picker.status === "Loaded");
+    await fill("Message", "A separate new message");
+    await press("Maya Chen");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await ready(alpha.runtime, Messages, "New completed", (s) => s.pane === "Threads" && s.list.status === "Loaded");
+    expect(world.telephony.sent).toMatchObject([{ recipients: ["+14155550100"], body: "A separate new message" }]);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Maya draft reopened", (s) => s.thread > 0 && s.slot.author === "OwnerWrote");
+    expect(document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea")?.value).toBe("Keep this reply draft");
   });
 
   it.each([
@@ -342,7 +428,7 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.deletionAttempts).toEqual(["sms:1"]);
   });
 
-  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
+  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send and its pending clear, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
     const world = image();
     world.telephony.holdMmsSubmission = true;
     const first = await openImage(world);
@@ -357,7 +443,7 @@ describe("Messages on an Alpha image", () => {
       Object.defineProperty(picker, "files", { value: [new File([Uint8Array.from(atob("R0lGODlhAQABAAAAACwAAAAAAQABAAA="), (byte) => byte.charCodeAt(0))], "photo.gif", { type: "image/gif" })] });
       picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await ready(first.alpha.runtime, Composer, "picture attached", (state) => state.pictures === 1);
+    await ready(first.alpha.runtime, Composer, "picture draft saved", (state) => state.pictures === 1 && state.slot.draft.sync === "Kept");
     await press("Send");
     await ready(first.alpha.runtime, Composer, "picture send awaiting receipt", (state) => state.outgoing.op.outcome === "Unknown");
     const operation = world.telephony.mmsAttempts[0];
@@ -371,12 +457,22 @@ describe("Messages on an Alpha image", () => {
     await ready(restarted.alpha.runtime, Shell, "Messages returns after restart", (state) => state.trail.at(-1) === "Messages");
     await ready(restarted.alpha.runtime, Messages, "conversation list after restart", (state) => state.list.status === "Loaded" && state.threads === 1);
     await press("Maya Chen");
-    await ready(restarted.alpha.runtime, Composer, "picture check without saved bytes", (state) => state.thread === state.outgoing.thread && state.pictures === 0 && state.outgoing.op.outcome === "Unknown");
+    await ready(restarted.alpha.runtime, Composer, "picture restored while waiting for the original receipt", (state) => state.thread === state.outgoing.thread && state.pictures === 1 && state.outgoing.op.outcome === "Unknown");
+    expect(button("Remove photo.gif")?.disabled).toBe(true);
     const priorReads = world.telephony.mmsQueries.length;
     await press("Check send status");
-    await ready(restarted.alpha.runtime, Composer, "original picture send confirmed", (state) => state.outgoing.op.outcome === "Confirmed");
+    await ready(restarted.alpha.runtime, Composer, "original picture confirmed and saved attachment removed", (state) => state.outgoing.op.outcome === "Confirmed" && state.pictures === 0 && state.pendingClear.id === 0);
+    expect(button("Remove photo.gif")).toBeUndefined();
     expect([world.telephony.mmsAttempts, world.telephony.mmsQueries.slice(priorReads), world.telephony.sent.map((send) => send.operationId)])
       .toEqual([[operation], [operation], [operation]]);
+
+    await fill("Text Maya", "The next message");
+    await ready(restarted.alpha.runtime, Composer, "next draft saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    await press("Send");
+    await ready(restarted.alpha.runtime, Composer, "next message confirmed", (state) =>
+      state.outgoing.op.id > 1 && state.outgoing.op.outcome === "Confirmed" && state.pendingClear.id === 0);
+    expect(world.telephony.journal.get(operation)?.status).toBe("sent");
+    expect(world.telephony.sent.map((send) => send.body)).toEqual(["", "The next message"]);
   });
 
   it("Shares only the reviewed open conversation (spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async () => {
