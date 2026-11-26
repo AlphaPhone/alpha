@@ -19,7 +19,9 @@ inside the shell and moves through it.
 ### The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits
 
 Home is the empty trail; the app showing is the last one on it. Ask Alpha
-rests as a bar, takes typing, opens as a sheet, or fills the screen.
+rests as a bar, takes typing, opens as a sheet, or fills the screen. An app
+rises over Home, which stays where the owner left it and takes no input
+underneath; going back takes the app away at once.
 
 ```quint
 type View = Phone | Messages | Inbox | Telegram | Slack | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
@@ -178,10 +180,18 @@ pure def goBack(s: Shell): Shell =
 As in Sunday's v119, which drew an app's Back only when Alpha was not the
 phone's launcher, the first page of Settings and of Workflows has no Back
 control in its header while Alpha is the launcher, and nor has the first
-page of Inbox or of Calendar. A page inside any of them keeps its Back, and
+page of Inbox, of Calendar, of Notes, of Files or of Photos (the notes
+list, the top of Files, the photo library or albums). A page inside any
+of them keeps its Back, and
 away from the launcher the first page keeps it too.
 The control is only how Back is drawn: Android's own Back gesture still
 closes the app as the rule above says.
+
+Phone, Messages and Contacts draw their first page the same way, as v119's
+telephony headers did: the Phone tabs (on Recents, Keypad, Voicemail and
+Contacts), the Messages conversation list and the Contacts list have no
+Back on the launcher. A conversation, a contact and a new message keep
+theirs.
 
 ```quint
 type AppPage = FirstPage | InnerPage

@@ -79,8 +79,9 @@ effect function releaseOf(row: Row): Release!!Names {
 }
 
 // spec/app/update/index.md, "Only the answer to the newest check is taken: a complete manifest replaces the offer, a withdrawn one removes it, and anything else keeps it"
-effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names) {
+effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names | Updates.Machine) {
   const store = try KeyValueStore.KeyValueStore
+  const updates = try Updates.Machine
   const reply = try race(
     Effect.option((try LauncherUpdates).check()),
     Effect.as((try Time).until((try (try Time).now()) + patience), Option.none()),
@@ -90,7 +91,7 @@ effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore
   const { manifest, digest } = reply.value
   if (Option.isNone(manifest)) {
     if (Option.isSome(digest)) return unreadable
-    try ignore(store.remove(kept))
+    if (Updates.canAnswer(try updates.get(), ticket)) try ignore(store.remove(kept))
     return { type: "answer", ticket, reply: { tag: "Withdrawn" }, now: untimed }
   }
   const found = rowsOf(manifest.value)
@@ -99,7 +100,7 @@ effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore
   for (const row of found.value.rows) releases.push(try releaseOf(row))
   const signed = Option.isSome(digest) && hex64.test(digest.value) ? try (try Names).number(digest.value) : 0
   const feed: Feed = { index: found.value.index, releases, manifest: signed }
-  try ignore(store.set(kept, manifest.value))
+  if (Updates.complete(feed) && Updates.canAnswer(try updates.get(), ticket)) try ignore(store.set(kept, manifest.value))
   return { type: "answer", ticket, reply: { tag: "Answered", ...feed }, now: untimed }
 }
 
@@ -118,7 +119,7 @@ effect function installing(fx: { readonly version: number; readonly digest: numb
   return { type: "endInstall", ending, now: untimed }
 }
 
-function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names, []> {
+function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names | Updates.Machine, []> {
   return match (fx) {
     when { tag: "CheckFeed", let ticket }: answer("check", checked(ticket), { type: "answer", ticket, reply: { tag: "Unreadable" }, now: untimed });
     when { tag: "StartInstall", let version, let digest, let signer, let manifest, let automatic }:
@@ -154,7 +155,7 @@ const shown = started(effect {
 
 /** What the owner's activity is read from: the shell, what covers or holds the phone, a call, Alpha in front, a field with focus and the other areas' reports. */
 interface Facts {
-  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly assistant: string }
+  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly drawer: boolean; readonly assistant: string }
   readonly layers: { readonly open: ReadonlyArray<{ readonly kind: string }>; readonly holds: ReadonlyArray<string>; readonly steps: ReadonlyArray<string> }
   readonly call: boolean
   readonly front: boolean
@@ -167,7 +168,7 @@ function activityOf({ shell, layers, call, front, typing, reported }: Facts): Ac
   const held = layers.holds.some((id) => id !== holder)
   return Updates.withSignIn({
     home: shell.trail.length === 0,
-    open: shell.trail.length > 0 || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
+    open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
     typing: typing || shell.assistant === "Typing", voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
     busy: reported.connecting, recording: reported.recording, front, call, audio: !call,
   }, reported.card)
@@ -187,11 +188,12 @@ const activity = started(effect {
     (fact) => ignore(updates.send({ type: "observeActivity", activity: fact })))
 }, "following the owner's activity for updates")
 
-/** The earliest time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
-function nextWake(state: Updates.Updates): Option.Option<number> {
+/** The earliest future time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
+function nextWake(state: Updates.Updates, now: number): Option.Option<number> {
   if (!state.visible || !Updates.free(state)) return Option.none()
   const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.retry : Updates.interval)
-  return Option.some(state.deferrals > 0 && state.retryAt < check ? state.retryAt : check)
+  const upcoming = [check, ...(state.deferrals > 0 ? [state.retryAt] : [])].filter((at) => at > now)
+  return upcoming.length === 0 ? Option.none() : Option.some(Math.min(...upcoming))
 }
 
 // spec/app/update/index.md, "Alpha checks on its own only while on screen, when a check is due, and never during another check or an install"; spec/app/update/index.md, "An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded"
@@ -205,7 +207,7 @@ const schedule = started(effect {
       : Updates.canPoll(state, now) ? { type: "poll", now: untimed } : undefined
     const taken = due !== undefined && (effect { try updates.send(due); return true } catch () => false)
     if (taken) continue
-    const next = Option.filter(nextWake(state), (at) => at > now)
+    const next = nextWake(state, now)
     const changed = Stream.runHead(Stream.drop(updates.changes, 1))
     if (Option.isSome(next)) try race(Effect.asVoid(changed), time.until(next.value))
     else try changed

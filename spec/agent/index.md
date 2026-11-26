@@ -296,10 +296,15 @@ streamed and asks the agent to stop a turn by its room; the assistant
 also asks the agent to warm its model before the owner's first turn. The assistant
 (`apps/app/src/assistant/assistant.vibe`) lists conversations, reads a
 conversation's messages, forks one, searches messages, asks the agent's
-health and which device steps it takes; Home and Calendar
-(`apps/app/src/home/cards.vibe`, `apps/app/src/calendar/agent.vibe`) read the
-calendar feed and the calendars and create, change, answer and delete
-events through the calendar plugin. Workflows reads the owner identity,
+health and which device steps it takes, and claims and reports assistant view
+interactions (`apps/app/src/assistant/views.vibe`). Voice warms the cloud
+connection (`apps/app/src/platform/voice.vibe`) and Messages requests reply
+drafts (`apps/app/src/messages/composer.vibe`). Home and Calendar
+(`apps/app/src/home/cards.vibe`, `apps/app/src/calendar/agent.vibe`,
+`apps/app/src/calendar/link.vibe`) read the
+calendar feed and the calendars, create, change, answer and delete
+events, and read and update linked calendar sync control, destinations and
+event links through the calendar plugin. Workflows reads the owner identity,
 active and removed workflows, prompts, scheduled tasks, definitions,
 execution and approval receipts. It sends the owner's exact-version
 approval, lifecycle and run decisions and reads back their outcomes.
@@ -341,6 +346,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/conversations/{id}/fork", stream: false },
   { method: Post, path: "/api/turns/warm", stream: false },
   { method: Post, path: "/api/turns/{roomId}/abort", stream: false },
+  { method: Post, path: "/api/cloud/warm", stream: false },
+  { method: Post, path: "/api/messages/reply-draft", stream: false },
   { method: Post, path: "/api/views/interact-claim", stream: false },
   { method: Post, path: "/api/views/interact-result", stream: false },
   { method: Get, path: "/api/client-devices/capabilities", stream: false },
@@ -360,6 +367,10 @@ pure val pageRoutes: List[Route] = List(
   { method: Patch, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Post, path: "/api/lifeops/calendar/events/{eventId}/response", stream: false },
+  { method: Get, path: "/api/lifeops/calendar/sync-control", stream: false },
+  { method: Post, path: "/api/lifeops/calendar/sync-control", stream: false },
+  { method: Get, path: "/api/lifeops/calendar/sync-control/destinations", stream: false },
+  { method: Get, path: "/api/lifeops/calendar/links", stream: false },
   { method: Get, path: "/api/notifications", stream: false },
   { method: Post, path: "/api/notifications/{id}/read", stream: false },
   { method: Get, path: "/api/scheduled-tasks", stream: false },
@@ -536,7 +547,9 @@ decimal, the cursor identifier has the same form as the window's message
 identifier, and when supplied the history limit is one. The latest and
 centered pages can omit the limit. Home's agenda and Calendar send the
 start and end of their window, and Calendar may send a time zone.
-Calendar asks for up to fifty pending approvals. Workflows lists the owner's
+Calendar asks for up to fifty pending approvals, and when deleting an event
+sends the calendar, grant, recurrence scope, expected provider version,
+idempotency key, cancellation mode and attendee notice choice. Workflows lists the owner's
 visible tasks, reads a result page for its
 client, and supplies the exact reviewed revision when removing a trigger.
 Reminders says, when it deletes a custom list, whether the list's reminders
@@ -562,6 +575,13 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
   { method: Get, path: "/api/notifications", key: "category", kind: FixedQuery, value: "workflow", example: "workflow" },
   { method: Get, path: "/api/notifications", key: "limit", kind: FixedQuery, value: "50", example: "50" },
+  { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "calendarId", kind: AnyQuery, value: "", example: "primary" },
+  { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "grantId", kind: AnyQuery, value: "", example: "grant-1" },
+  { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "recurrenceScope", kind: PatternQuery, value: "instance|this_and_following|series", example: "instance" },
+  { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "expectedProviderVersion", kind: AnyQuery, value: "", example: "v1" },
+  { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "idempotencyKey", kind: AnyQuery, value: "", example: "attempt-1" },
+  { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "cancellationMode", kind: PatternQuery, value: "organizer_cancel|decline_invitation|remove_private_copy", example: "organizer_cancel" },
+  { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "notifyAttendees", kind: PatternQuery, value: "true|false", example: "false" },
   { method: Get, path: "/api/approvals", key: "state", kind: PatternQuery, value: "pending", example: "pending" },
   { method: Get, path: "/api/approvals", key: "limit", kind: PatternQuery, value: "50", example: "50" },
   { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },

@@ -181,3 +181,30 @@ it("Resume an already-sent photo edit from an older viewer record (spec/app/phot
   expect(localStorage.getItem("alpha/photos/edit/4")).toBe(operationId);
   expect(localStorage.getItem(kept + ".unreadable")).toBeNull();
 });
+
+it("Stops playing when a video ends even if currentTime rounds slightly short of duration (spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+  const world = { ...scene(), phone: true };
+  world.photos.access = { scope: "full", images: "full", videos: "full" };
+  world.photos.rows.unshift({
+    id: "m:external_primary:v:9", name: "Clip.mp4", owned: true, kind: "video",
+    image: world.photos.rows[0]?.image ?? "", width: 1280, height: 720, size: 10_000,
+    date: 1795400500000, revision: "rev-video-9", duration: 5, path: "https://localhost/_alpha_video_/clip.mp4",
+  });
+  const { alpha } = await open(world, only("home", "view:Photos", "notice"));
+  await press("Photos");
+  const runtime = photosArea.runtime(alpha);
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded");
+  await press("Clip.mp4");
+  await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.kind === "Clip" && state.duration === 50);
+  const clip = document.querySelector("video");
+  if (!clip) throw new Error("No video element");
+  clip.play = () => Promise.resolve();
+  clip.pause = () => {};
+  await press("Play video");
+  await until(alpha, runtime, Viewer, (state) => state.playing);
+  await drawn(() => {
+    clip.currentTime = 4.92;
+    clip.dispatchEvent(new Event("ended"));
+  });
+  await until(alpha, runtime, Viewer, (state) => !state.playing && state.position === 50);
+});

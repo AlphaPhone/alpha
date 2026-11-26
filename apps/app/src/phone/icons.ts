@@ -13,7 +13,6 @@ export const Handset = glyph("Handset", "M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 1
 export const EraseDigit = glyph("EraseDigit", "M9 5h11v14H9l-6-7zM12 9.5l5 5M17 9.5l-5 5");
 export const Bubble = glyph("Bubble", "M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z");
 export const Close = glyph("Close", "M6 6l12 12M18 6L6 18");
-export const PlayGlyph = glyph("PlayGlyph", "M8 5l11 7-11 7z");
 export const PauseGlyph = glyph("PauseGlyph", "M9 6v12M15 6v12");
 export const RetryGlyph = glyph("RetryGlyph", "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5");
 

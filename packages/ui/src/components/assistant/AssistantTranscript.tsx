@@ -39,8 +39,11 @@ export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> &
   onReturnToOriginal?: () => void;
 };
 
-/** Where the conversation is read from: whether it follows the end, and the size it had when last seen, against which the end is judged. */
-type TranscriptScroll = { page?: string; follows: boolean; seen: { height: number; view: number }; paging?: { id: string; offset: number } };
+/**
+ * Where the conversation is read from: whether it follows the end, the size it had when last seen, against which the end
+ * is judged, and the place the owner was reading at when it does not follow.
+ */
+type TranscriptScroll = { page?: string; follows: boolean; seen: { height: number; view: number }; top: number; paging?: { id: string; offset: number } };
 
 function messageRow(content: HTMLElement, id: string) {
   return Array.from(content.querySelectorAll<HTMLElement>("[data-alpha-message-id]"))
@@ -55,6 +58,8 @@ function topIn(viewport: HTMLElement, row: HTMLElement) {
 function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
   if (reading.follows && !(selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode))) viewport.scrollTop = viewport.scrollHeight;
+  // A change that left the conversation shorter for a moment, as a finished reply put in place of its streamed words, drew it back to an earlier place; the owner's place is kept.
+  else if (!reading.follows && viewport.scrollTop < reading.top) viewport.scrollTop = reading.top;
   reading.seen = { height: viewport.scrollHeight, view: viewport.clientHeight };
 }
 
@@ -73,7 +78,7 @@ const MessageRows = memo(function MessageRows({ messages, hold }: { messages: re
  * @model spec/app/assistant/chats.md
  */
 export function AssistantTranscript({ messages, messagesAfterLater, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
-  const scrollRef = useRef<TranscriptScroll>({ follows: true, seen: { height: 0, view: 0 } });
+  const scrollRef = useRef<TranscriptScroll>({ follows: true, seen: { height: 0, view: 0 }, top: 0 });
   const page = position?.page;
   const around = position?.around;
   const placed = useCallback((content: HTMLDivElement | null) => {
@@ -88,6 +93,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       }
       reading.page = page;
       reading.follows = !row;
+      reading.top = viewport.scrollTop;
       reading.paging = undefined;
     }
     const follow = () => followEnd(viewport, reading);
@@ -97,7 +103,10 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
     observer.observe(viewport);
     observer.observe(content);
     return () => observer.disconnect();
-  }, [around, page, status, visible]);
+    // Each change to what the conversation shows is followed as it is drawn, as v119 did after every update (45f6bed30
+    // model.js:5561-5576): a size the observer never sees, as a reply swapped for its stored message, still keeps the end.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [around, page, status, visible, messages, messagesAfterLater, briefing, liveMessages, interim, turn]);
   const pageFrom = (button: HTMLElement, id: string | undefined, load: () => void) => {
     const content = button.parentElement;
     const viewport = content?.parentElement;
@@ -130,7 +139,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       onScroll={(event) => {
         const viewport = event.currentTarget;
         const reading = scrollRef.current;
-        if (visible && status === "loaded") reading.follows = atSeenEnd(reading, viewport.scrollTop);
+        if (visible && status === "loaded") [reading.follows, reading.top] = [atSeenEnd(reading, viewport.scrollTop), viewport.scrollTop];
         onScroll?.(event);
       }}
       {...props}

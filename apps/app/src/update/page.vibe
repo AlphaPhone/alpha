@@ -18,7 +18,11 @@ import { holder } from "./updates.vibe"
 const following = 1000
 
 /** The ids of each activation this page has read, by the number that stands for it. */
-const known = new Map<number, Ids>()
+service Known {
+  readonly ids: Map<number, Ids>
+}
+
+const known = Layer.sync(Known, () => ({ ids: new Map<number, Ids>() }))
 
 const settlements: Readonly<Record<string, Settlement>> = { installed: "WasInstalled", canceled: "WasCancelled", cancelled: "WasCancelled" }
 
@@ -34,14 +38,14 @@ effect function flushed(activation: number): Event!!(Updates.Machine | Engagemen
 }
 
 // spec/app/update/page.md, "A page answers each activation at most once"
-effect function answered(activation: number, ready: boolean): void!!LauncherUpdates {
-  const ids = known.get(activation)
+effect function answered(activation: number, ready: boolean): void!!(LauncherUpdates | Known) {
+  const ids = (try Known).ids.get(activation)
   if (ids !== undefined) try ignore((try LauncherUpdates).answer(ids, ready))
 }
 
 // spec/app/update/page.md, "Continue update is sent once per tap, never while the last one is still going"
-effect function continued(activation: number): Event!!LauncherUpdates {
-  const ids = known.get(activation)
+effect function continued(activation: number): Event!!(LauncherUpdates | Known) {
+  const ids = (try Known).ids.get(activation)
   if (ids !== undefined) try ignore((try LauncherUpdates).continueInstall(ids))
   return { type: "continued" }
 }
@@ -59,7 +63,7 @@ effect function told(): void!!(Page.Machine | Toasts.Machine | Said) {
   if (text !== "") try say(text, true)
 }
 
-function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engagements | Agent | Page.Machine | Toasts.Machine | Said, []> {
+function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engagements | Agent | Page.Machine | Toasts.Machine | Said | Known, []> {
   return match (fx) {
     when { tag: "Answer", let activation, let ready }: run(`answer ${activation}`, answered(activation, ready));
     when { tag: "Flush", let activation }: answer("flush", flushed(activation), { type: "flushed", activation, saved: false, engaged: Page.calm });
@@ -72,9 +76,10 @@ function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engageme
 const machine = reacting(Page, { carry })
 
 // spec/app/update/page.md, "A pending update is read for this page, never an older one than the page has taken up"; spec/app/update/page.md, "A page that cannot read the update state holds rather than mount"; spec/app/update/page.md, "The update settles for this page when nothing is pending, or with the outcome of its own activation"
-effect function read(): void!!(LauncherUpdates | Names | Page.Machine) {
+effect function read(): void!!(LauncherUpdates | Names | Page.Machine | Known) {
   const page = try Page.Machine
   const names = try Names
+  const ids = (try Known).ids
   const reply = try Effect.option((try LauncherUpdates).activation())
   if (Option.isNone(reply)) {
     try ignore(page.send({ type: "unreadable" }))
@@ -82,8 +87,12 @@ effect function read(): void!!(LauncherUpdates | Names | Page.Machine) {
   }
   const now = reply.value
   const number = Option.isSome(now.ids) ? try names.number(`activation:${now.ids.value.activationId}`) : (try page.get()).activation
-  if (Option.isSome(now.ids)) known.set(number, now.ids.value)
-  if (now.pending && number > 0) {
+  if (Option.isSome(now.ids)) ids.set(number, now.ids.value)
+  if (now.pending) {
+    if (number === 0) {
+      try ignore(page.send({ type: "unreadable" }))
+      return
+    }
     try ignore(page.send({ type: "read", activation: number, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }))
     return
   }
@@ -118,4 +127,4 @@ const holding = started(effect {
 }, "holding the phone while an update is pending")
 
 /** The page's side of an update, from launch: it holds or freezes, saves drafts and answers Android. */
-export const paging = together(machine, followed, holding)
+export const paging = together(known, machine, followed, holding)

@@ -53,20 +53,29 @@ function readLineOf(state: Cards.Cards, item: Cards.Item, now: number): string {
   return behind.source === "Ready" ? `Not updated since ${whenLabel(behind.since, now)}` : "Open Calendar to retry";
 }
 
+/** Home's day cards: the row, and whether the row's place above the tiles is known yet. */
+export interface DayCards {
+  /** The cards drawn, in order, each with its key; empty when none is. */
+  readonly cards: readonly ReactNode[];
+  /** A card is drawn, or both calendars have answered (or run out) since Home's cards last started, so the agenda is known. */
+  readonly settled: boolean;
+}
+
 /**
  * Home's row of cards, in the spec's order and only those drawn: the agenda, Messages, Phone, Workflows, mail and the
  * brief, each from what its area told Home; a press opens the card's app. Empty when no card is drawn.
  */
-export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | HomeMachine | Resident, unknown>, shell: Shell | undefined, beside: boolean): readonly ReactNode[] {
+export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | HomeMachine | Resident, unknown>, shell: Shell | undefined, beside: boolean): DayCards {
   const { state, can, send } = useTimed(runtime, useMachine);
   useSyncExternalStore(named.subscribe, named.snapshot, named.snapshot);
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
   const bridge = runtime.runSync(MessagingBridge);
   const messaging = useSyncExternalStore((listener) => bridge.subscribe(listener), () => bridge.snapshot(), () => bridge.snapshot());
-  if (!state || !shell) return [];
+  if (!state || !shell) return { cards: [], settled: false };
+  const answered = state.calendar.source !== "Unanswered" && state.agent.source !== "Unanswered";
   const told = others(given, shell.image, messagingStateOf(messaging.cards.Telegram), messagingStateOf(messaging.cards.Slack));
-  const now = Math.max(state.calendar.since, state.agent.since, dayStart(state.today));
-  const latest = Math.max(now, runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
+  const now = Math.max(runtime.runSync(Effect.flatMap(Time, (time) => time.latest())), state.calendar.since, state.agent.since, dayStart(state.today));
+  const latest = now;
   const open = (kind: Cards.Kind) => {
     if (kind === "MailCard" || beside) {
       const admitted = kind === "MailCard"
@@ -125,5 +134,6 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Hom
     ),
     WorkflowsCard: () => <HomeWorkflowsCard key="workflows" lines={Cards.flowRows(told.flows)} more={Cards.moreFlows(told.flows)} freshness={told.flows.freshness} {...open("WorkflowsCard")} />,
   };
-  return Cards.row(state, now, told).map((kind) => drawn[kind]());
+  const cards = Cards.row(state, now, told).map((kind) => drawn[kind]());
+  return { cards, settled: answered || cards.some(Boolean) };
 }

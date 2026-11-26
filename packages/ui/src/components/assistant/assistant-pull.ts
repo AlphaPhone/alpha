@@ -43,7 +43,11 @@ function capture(element: HTMLElement, pointer: number) {
   }
 }
 
-/** Reports a press, drag or lift from a handle or an eligible editable field. */
+/**
+ * Reports a press, drag or lift from a handle or an eligible editable field. A field the drag is under keeps the pointer
+ * when the sheet it rises into is drawn over it, as v119's bar kept the drag of its empty input (45f6bed30
+ * chat-overlay-motion-adapter.ts:1012-1020); only a press that has not moved, or a field taken away, lets it go.
+ */
 export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull | undefined, editable = false) {
   const track = useRef<Track | undefined>(undefined);
   const cancel = (event: PointerEvent<Target>) => {
@@ -54,7 +58,7 @@ export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull
   };
   return {
     onPointerDown: (event: PointerEvent<Target>) => {
-      if (pull === undefined || event.button !== 0 || track.current !== undefined) return;
+      if (pull === undefined || !event.isPrimary || event.button !== 0 || track.current !== undefined) return;
       const mouse = event.pointerType === "mouse";
       if (editable && mouse) event.preventDefault();
       if (!editable || mouse) capture(event.currentTarget, event.pointerId);
@@ -87,7 +91,11 @@ export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull
       pull.onRelease?.(settle(current, event));
     },
     onPointerCancel: cancel,
-    onLostPointerCapture: cancel,
+    onLostPointerCapture: (event: PointerEvent<Target>) => {
+      const field = event.currentTarget;
+      if (editable && track.current?.moved && track.current.pointer === event.pointerId && field.isConnected) return capture(field, event.pointerId);
+      cancel(event);
+    },
   };
 }
 

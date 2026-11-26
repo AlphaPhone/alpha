@@ -12,14 +12,13 @@ import { useMachine as useConversation } from "../../gen/app__assistant.react.ts
 import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
-import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
-import { attachments as attachmentCount, content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
+import { content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { browserFieldPull, focused as dockFocused, isOpen as dockOpen, sent as dockSent } from "../../gen/app__assistant__dock.ts";
+import { browserFieldPull, focused as dockFocused, isOpen as dockOpen, pill as dockPill, sent as dockSent } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
@@ -47,7 +46,7 @@ import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import type { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, openContactAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
-import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
+import { askComms, freedom, holdAndSend, openChatSearch, restTyping, startAndSend } from "./assistant.vibe";
 import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeContactFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
@@ -618,7 +617,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
-  const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
+  const compact = shell.state !== undefined && !onComms && dockPill(shell.state, dock.state?.tucked ?? false);
   const { drawn: live, underlay, leaving, style: sheetStyle, ref: sheetRef, gesture, done } = useSheetFollow({
     dock, detent: assistantDetent, pill: compact, comms: onComms, voice: dock.state?.voice ?? false,
     canLand: (detent) => detent === assistantDetent || shell.can({ type: "raise", detent }) || shell.can({ type: "goBack" }),
@@ -689,13 +688,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       return;
     }
     if (newChat) {
-      board.queueSend();
-      void chats.send(start);
+      void runtime.runPromise(startAndSend(start));
       return;
     }
-    board.hold(seen.typed);
-    board.type("");
-    void composer.send(hold);
+    void runtime.runPromise(holdAndSend(hold));
   };
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
@@ -709,6 +705,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const revealComposer = () => {
     const typing = { type: "raise", detent: "Typing" } as const;
     if (!shell.can(typing)) return;
+    if (dock.state?.tucked) void dock.send({ type: "putAway", now: untimed });
     focusOnRevealRef.current = true;
     void shell.send(typing).then((sent) => { if (sent._tag === "Failure") focusOnRevealRef.current = false; });
   };
@@ -800,6 +797,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           opener: !open ? grabber : undefined,
           onOpen: !open && !grabber ? openSheet : undefined,
           onType: compact ? revealComposer : undefined,
+          // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a bar tucked by a drag is the pill where it is, with no entrance, as v119's
+          still: compact && dock.state?.tucked === true,
           onSend: sendable && !inFlight(talking.turn) ? () => {
             if (!open) openSheet();
             send();
@@ -809,7 +808,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onAttach: selectedContact !== undefined && searchRoute !== undefined && contactFiles.length < maxFiles && !inFlight(talking.turn)
             ? () => { void runtime.runPromise(openContactAttachmentPicker(searchRoute, selectedContact)); }
             : !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
+            const request = { type: "openPicker", room: maxFiles - writing.editor.files } as const;
             if (!attachments.can(request)) return;
             void runtime.runPromise(attachmentAuthority()).then((authority) => {
               if (authority === undefined) {
@@ -825,10 +824,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu'], [role='dialog'], [role='alertdialog']"))) return;
             void runtime.runPromise(restTyping);
           } : undefined,
-          onHistory: history.browse,
           onSearch: history.search,
-          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
-          making: making(shown),
           onRemoveAttachment: onComms ? contactDraft === undefined || inFlight(talking.turn) ? undefined : (id) => {
             void runtime.runPromise(removeContactFile(contactDraft.target, id));
           } : (id) => {

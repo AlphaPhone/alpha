@@ -5,7 +5,7 @@ import * as Pages from "../../gen/app__settings.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Nearby, WiFi } from "../platform/wifi.vibe"
-import { type Due, type Job, answer, due, following, hearing, reacting, together, untimed } from "../runtime/reactor.vibe"
+import { type Due, type Job, answer, applying, due, following, hearing, reacting, together, untimed } from "../runtime/reactor.vibe"
 
 /** The networks the last scan found, kept beside the machine that counts them: the rows of the Network page. */
 export service Found {
@@ -19,10 +19,13 @@ const found = Layer.sync(Found, () => {
 })
 
 // spec/app/settings/network.md, "Only the newest scan's answer is taken: the networks it found, or why it could not scan"
-effect function scanned(scan: number): Network.Event!!(WiFi | Found) {
+effect function scanned(scan: number): Network.Event!!(WiFi | Found | Network.Machine) {
   const { scan: result, networks } = try (try WiFi).scan()
-  try (try Found).set(networks)
-  return { type: "scanned", scan, result, found: result === "Found" ? networks.length : 0 }
+  const count = result === "Found" ? networks.length : 0
+  if (Network.canScanned(try (try Network.Machine).get(), scan, result, count)) {
+    try (try Found).set(result === "Found" ? networks : [])
+  }
+  return { type: "scanned", scan, result, found: count }
 }
 
 // spec/app/settings/network.md, "Only Android's answer to the newest join settles it, and the phone is then read again; a wrong password is said only of a join that had one"
@@ -38,7 +41,7 @@ effect function connectivity(reading: number): Network.Event!!WiFi {
     : { type: "connectivityRead", reading, answered: false, online: false, validated: false, portal: false }
 }
 
-function carryNetwork(fx: Network.Effect): Job<Network.Event, WiFi | Found, []> {
+function carryNetwork(fx: Network.Effect): Job<Network.Event, WiFi | Found | Network.Machine, []> {
   return match (fx) {
     when { tag: "ScanNearby", let scan }: answer("scan", scanned(scan), { type: "giveUpOnScan", now: untimed });
     when { tag: "JoinNetwork", let join, let name, let security, let passphrase }: answer("join", joined(join, name, security, passphrase), { type: "giveUpOnJoin", now: untimed, at: untimed });
@@ -55,11 +58,12 @@ function networkTimers(state: Network.Network): ReadonlyArray<Due<Network.Event,
   return waits.flatMap(([busy, key, at, event]) => (busy ? [due<Network.Event, []>(key, at, event)] : []))
 }
 
-const network = together(
-  Layer.provideMerge(reacting(Network, { carry: carryNetwork, timers: networkTimers }), found),
+const network = Layer.provideMerge(together(
+  reacting(Network, { carry: carryNetwork, timers: networkTimers }),
   // spec/app/settings/network.md, "Opening the page scans and reads whether the phone is online, each unless already asked, with ten seconds to answer"; spec/app/settings/network.md, "Leaving the page retires what it asked and forgets what it found; a join in flight is Android's and goes on"
   following(Pages.Machine, (state) => state.page === "NetworkPage", Network.Machine, (shown): Network.Event => (shown ? { type: "opened", at: untimed } : { type: "leave" })),
-)
+  applying(Network.Machine, (state) => state.found === 0, effect (empty) => { if (empty) try (try Found).set([]) }),
+), found)
 
 // spec/app/settings/carrier.md, "Only the newest read's answer is shown; a read that failed or was not answered in time shows nothing"
 effect function identifiers(reading: number): Carrier.Event!!CarrierSetup {

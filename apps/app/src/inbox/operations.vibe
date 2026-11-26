@@ -65,13 +65,16 @@ effect function changed(attempt: number, kind: Kind, account: number, messages: 
 
 // spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
 /** The draft `draft` sent from `account` exactly as the owner wrote it, once, under the attempt's own key. */
-effect function sent(attempt: number, account: number, draft: number): Event!!(Attempts | Cloud | Mail | Letters) {
-  const words = (try Letters).words(draft)
+effect function sent(attempt: number, account: number, draft: number, gmail: number): Event!!(Attempts | Cloud | Mail | Letters) {
+  const letters = try Letters
+  const words = letters.words(draft)
+  const copy = gmail === 0 ? undefined : letters.copy(gmail)
   const files = filesOf(words.files)
   if (files === undefined) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
   const ended = try operate(attempt, account, {
     kind: "send", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
     ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
+    ...(copy === undefined || copy.account !== account ? {} : { draftId: copy.id, expectedDigest: copy.digest }),
     ...files.fields,
   }, { matches: files.matches })
   return { type: "answered", attempt, done: ended.done, matches: ended.known, gmail: 0 }
@@ -106,8 +109,8 @@ const toDraft = (event: DraftEvent) => effect { try ignore((try Drafts.Machine).
 
 function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine, [by: Actor]> {
   return match (fx) {
-    when { tag: "Request", kind: "Send", let attempt, let access, let draft }:
-      answer(`request ${attempt}`, sent(attempt, access.account, draft), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "Send", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, sent(attempt, access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", kind: "SaveDraft", let attempt, let access, let draft, let gmail }:
       answer(`request ${attempt}`, drafted(attempt, "SaveDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", kind: "ReplaceDraft", let attempt, let access, let draft, let gmail }:
@@ -135,8 +138,12 @@ const released = started(effect {
   const operations = try Sending.Machine
   const list = try Inbox.Machine
   const time = try Time
-  const held = Stream.changesWith(operations.changes, (a, b) => a.undo.holding === b.undo.holding && a.undo.until === b.undo.until)
-  try Stream.runForEach(Stream.switchMap(held, (state) => (state.undo.holding === "Held" ? Stream.fromEffect(time.until(state.undo.until)) : Stream.empty)), effect () => {
+  const held = Stream.zipLatest(operations.changes, list.changes) |> Stream.map(%, ([op, mailbox]) => ({
+    holding: op.undo.holding,
+    until: op.undo.until,
+    modify: accessOf(mailbox, op.account).grant.modify,
+  })) |> Stream.changesWith(%, (a, b) => a.holding === b.holding && a.until === b.until && a.modify === b.modify)
+  try Stream.runForEach(Stream.switchMap(held, (state) => (state.holding === "Held" && state.modify ? Stream.fromEffect(time.until(state.until)) : Stream.empty)), effect () => {
     const access = accessOf(try list.get(), (try operations.get()).account)
     try contained(operations.send({ type: "dispatchNow", access, revision: 0, kept: false, now: untimed }, "World"), "releasing a held change")
   })
@@ -147,19 +154,19 @@ const dispatched = started(effect {
   const operations = try Sending.Machine
   const list = try Inbox.Machine
   const drafts = try Drafts.Machine
-  const ready = Stream.zipLatest(operations.changes, drafts.changes) |> Stream.map(%, ([op, draft]) => ({
+  const ready = Stream.zipLatest(Stream.zipLatest(operations.changes, drafts.changes), list.changes) |> Stream.map(%, ([[op, draft], mailbox]) => ({
     attempt: op.attempt.id,
     recorded: op.attempt.outcome === "Recorded" && !Sending.holdable(op.kind),
     draft: Sending.ofDraft(op.kind),
-    kept: draft.open && draft.letter.id === op.draft && draft.letter.sending === op.attempt.id && draft.stored && Drafts.flushed(draft),
-    revision: draft.letter.revision,
+    kept: Drafts.keptWith(draft, op.draft, op.attempt.id),
+    revision: Drafts.letterNamed(draft, op.draft).revision,
     account: op.account,
+    access: accessOf(mailbox, op.account),
   }))
   try Stream.runForEach(Stream.changesWith(ready, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
     if (!fact.recorded) return
     if (fact.draft && !fact.kept) return
-    const access = accessOf(try list.get(), fact.account)
-    try ignore(operations.send({ type: "dispatchNow", access, revision: fact.draft ? fact.revision : 0, kept: fact.draft, now: untimed }, "World"))
+    try ignore(operations.send({ type: "dispatchNow", access: fact.access, revision: fact.draft ? fact.revision : 0, kept: fact.draft, now: untimed }, "World"))
   })
 }, "dispatching a recorded operation")
 
@@ -167,9 +174,19 @@ const dispatched = started(effect {
 const told = started(effect {
   const operations = try Sending.Machine
   const list = try Inbox.Machine
-  const facts = Stream.zipLatest(list.changes, operations.changes) |> Stream.map(%, ([mailbox, held]) => ({
-    access: accessOf(mailbox, held.account), revision: mailbox.revision, review: held.review.showing && !Sending.ofDraft(held.kind),
-  }))
+  const drafts = try Drafts.Machine
+  const facts = Stream.zipLatest(Stream.zipLatest(list.changes, operations.changes), drafts.changes) |> Stream.map(%, ([[mailbox, held], draft]) => {
+    const forDraft = Sending.ofDraft(held.kind)
+    const watching = held.review.showing || (held.attempt.outcome === "Recorded" && !held.withdrawn && forDraft)
+    const draftRevision = draft.open && draft.letter.id === held.draft
+      ? draft.letter.revision
+      : draft.shelf.shelved.includes(held.draft) ? Drafts.letterNamed(draft, held.draft).revision : 0
+    return {
+      access: accessOf(mailbox, held.account),
+      revision: forDraft ? draftRevision : mailbox.revision,
+      review: watching && (!forDraft || held.draft !== 0),
+    }
+  })
   try Stream.runForEach(Stream.changesWith(facts, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
     try contained(operations.send({ type: "accessChanged", access: fact.access }, "World"), "the grant of the change")
     if (fact.review) try ignore(operations.send({ type: "outdated", revision: fact.revision }, "World"))
