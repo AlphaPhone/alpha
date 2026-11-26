@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Playback echo after a reply is dropped without closing the microphone, while real speech and echo-cancelled captures go through"
 import { parseVoiceTranscriptEnvelope } from "@elizaos/agent"
 import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os-bridges"
 import { fresh } from "../runtime/attempts.vibe"
@@ -10,7 +10,7 @@ export type VoiceGrant = "granted" | "denied" | "prompt"
 
 export type VoiceEvent =
   | { readonly kind: "speechStart"; readonly session: number }
-  | { readonly kind: "speechEnd"; readonly session: number; readonly text: string }
+  | { readonly kind: "speechEnd"; readonly session: number; readonly text: string; readonly startedAtMs?: number }
   | { readonly kind: "bargeIn"; readonly session: number; readonly echo: boolean }
   | { readonly kind: "ended"; readonly session: number; readonly reason: string }
   | { readonly kind: "recordingStopped"; readonly ticket: number; readonly recorded: boolean }
@@ -42,6 +42,8 @@ interface LiveCapture {
   requested: boolean
   openingStop: Promise<{ captureId: string; serverClosed: boolean }> | undefined
   echoCancelled: boolean
+  speechStartedAtMs: number | undefined
+  speechTurnId: string | undefined
 }
 
 interface DictationClip extends RecordedClip {
@@ -288,7 +290,7 @@ effect function hearNativePreview(capture: LiveCapture, current: () => boolean, 
   if (preview === undefined) return
   const heard = (try Agent).feed("voice")
   let turn: { readonly id: string; sequence: number; open: boolean } | undefined
-  const listen = Stream.runForEach(heard, (event) => sync(() => {
+  const listen = Stream.runForEach(heard, effect (event) => {
     if (!current()) return
     const words = parseVoiceTranscriptEnvelope({ type: "event", event }, capture.captureId)
     if (words === undefined) return
@@ -296,6 +298,8 @@ effect function hearNativePreview(capture: LiveCapture, current: () => boolean, 
       if (turn?.id !== words.turnId) {
         preview.clear()
         turn = { id: words.turnId, sequence: 0, open: true }
+        capture.speechTurnId = words.turnId
+        capture.speechStartedAtMs = try Clock.currentTimeMillis
       }
       return
     }
@@ -304,12 +308,16 @@ effect function hearNativePreview(capture: LiveCapture, current: () => boolean, 
     if (words.kind !== "partial") {
       turn.open = false
       preview.clear()
+      if (words.kind === "failed" && capture.speechTurnId === words.turnId) {
+        capture.speechTurnId = undefined
+        capture.speechStartedAtMs = undefined
+      }
       return
     }
     if (capture.phase !== "Listening" || words.seq <= turn.sequence) return
     turn.sequence = words.seq
     preview.show(words.text)
-  }))
+  })
   const retired = Effect.callback<void>((resume) => {
     const stop = () => resume(Effect.void)
     if (preview.retired.aborted) { stop(); return }
@@ -352,15 +360,28 @@ function makeNativeEvents(
           const failure = asString(data.error)
           if (failure !== "") {
             retireNativePreview(live)
+            live.speechStartedAtMs = undefined
+            live.speechTurnId = undefined
             return [{ kind: "ended", session, reason: failure }]
           }
-          const text = asString(asRecord(data.final)?.text).trim()
+          const final = asRecord(data.final)
+          const text = asString(final?.text).trim()
           if (text === "") {
             live.preview?.clear()
+            live.speechStartedAtMs = undefined
+            live.speechTurnId = undefined
             return []
           }
-          retireNativePreview(live)
-          return [{ kind: "speechStart", session }, { kind: "speechEnd", session, text }]
+          live.preview?.clear()
+          const turnId = asString(final?.turnId)
+          const explicit = typeof final?.startedAtMs === "number" && Number.isFinite(final.startedAtMs) ? final.startedAtMs : undefined
+          const startedAtMs = explicit ?? (turnId !== "" && live.speechTurnId === turnId ? live.speechStartedAtMs : undefined)
+          live.speechStartedAtMs = undefined
+          live.speechTurnId = undefined
+          return [
+            { kind: "speechStart", session },
+            { kind: "speechEnd", session, text, ...(startedAtMs === undefined ? {} : { startedAtMs }) },
+          ]
         }),
         register("liveCaptureBargeIn", (_data, { session, echoCancelled }) => {
           return [{ kind: "bargeIn", session, echo: !echoCancelled }]
@@ -738,11 +759,142 @@ effect function playLocalCue(text: string, requestId: string, current: () => boo
   })
 }
 
+function cloudListenHandlers(
+  signal: AbortSignal,
+  session: number,
+  clock: Clock.Clock,
+  publish: (event: VoiceEvent) => void,
+  onSegmentClear: () => void,
+  onEnded: (cause: unknown) => void,
+) {
+  let speechStartedAtMs: number | undefined
+  return {
+    signal,
+    onSpeechStart: () => {
+      speechStartedAtMs = Effect.runSync(clock.currentTimeMillis)
+      publish({ kind: "speechStart", session })
+    },
+    onSpeechEnd: () => undefined,
+    onSegment: (text: string | null) => {
+      const startedAtMs = speechStartedAtMs
+      speechStartedAtMs = undefined
+      onSegmentClear()
+      if (text !== null && text !== "") {
+        publish({ kind: "speechEnd", session, text, ...(startedAtMs === undefined ? {} : { startedAtMs }) })
+      }
+    },
+    onEnd: (cause?: unknown) => {
+      speechStartedAtMs = undefined
+      onEnded(cause)
+    },
+  }
+}
+
+function phoneNativeCapture(
+  lifetime: Scope.Scope,
+  active: () => number,
+  restoreLocalOutput: (retiring: (owner: number) => boolean) => boolean!!,
+) {
+  let nativeCapture: LiveCapture | undefined
+
+  effect function stopCapture(capture: LiveCapture, discard: boolean): void!VoiceBridgeFailed {
+    const opening = capture.phase === "Opening" || capture.phase === "Cancelling"
+    capture.phase = opening ? "Cancelling" : "Retired"
+    retireNativePreview(capture)
+    if (capture.requested) {
+      let observed = capture.openingStop
+      const request = tryPromise({
+        try: () => {
+          if (!opening) return localPlugin().stopLiveCapture({ captureId: capture.captureId, discard })
+          const attempt = capture.openingStop ??= localPlugin().stopLiveCapture({ captureId: capture.captureId, discard: true })
+          observed = attempt
+          return attempt
+        },
+        catch: (cause) => new VoiceBridgeFailed({ method: "stopLiveCapture", cause }),
+      })
+      const stopped = request catch effect (failure) => {
+        if (opening && capture.openingStop === observed) capture.openingStop = undefined
+        throw failure
+      }
+      if (stopped.captureId !== capture.captureId || stopped.serverClosed !== true) {
+        if (opening && capture.openingStop === observed) capture.openingStop = undefined
+        throw new VoiceBridgeFailed({ method: "stopLiveCapture", cause: "not-closed" })
+      }
+    }
+    if (nativeCapture === capture) nativeCapture = undefined
+  }
+
+  effect function openNativeMic(session: number, reopen: boolean, preview?: VoicePreview): boolean!VoiceBridgeFailed!Agent {
+    if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
+    const live = tryPromise(() => localPlugin().liveCaptureStatus({})) catch () => undefined
+    if (live?.available !== true || live.nativeTransport !== true) {
+      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-transport-unavailable" })
+    }
+    if (!(try restoreLocalOutput((owner) => owner !== session))) {
+      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "speaker-reset-unconfirmed" })
+    }
+    if (active() !== session) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
+    if (nativeCapture !== undefined) retireNativePreview(nativeCapture)
+    const capture: LiveCapture = {
+      session, captureId: fresh(), preview, stopPreview: undefined, phase: "Opening",
+      requested: false, openingStop: undefined, echoCancelled: false,
+      speechStartedAtMs: undefined, speechTurnId: undefined,
+    }
+    nativeCapture = capture
+    const start = effect {
+      try hearNativePreview(capture, () => nativeCapture === capture && active() === session
+        && (capture.phase === "Opening" || capture.phase === "Listening") && capture.stopPreview !== undefined, lifetime)
+      if (nativeCapture !== capture || capture.phase !== "Opening" || active() !== session) {
+        throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
+      }
+      return try tryPromise({
+        try: () => {
+          const requested = localPlugin().startLiveCapture({
+            captureId: capture.captureId, nativeAsr: true, echoCancel: true, bargeIn: true, reopen,
+          })
+          capture.requested = true
+          return requested
+        },
+        catch: (cause) => new VoiceBridgeFailed({ method: "startLiveCapture", cause }),
+      })
+    }
+    const started = onInterrupt(start, () => Effect.ignore(stopCapture(capture, true))) catch effect (failure) => {
+      retireNativePreview(capture)
+      if (nativeCapture === capture && capture.phase === "Opening") nativeCapture = undefined
+      throw failure
+    }
+    if (capture.phase !== "Opening") throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
+    if (started.captureId !== capture.captureId || started.nativeAsr !== true || nativeCapture !== capture || active() !== session) {
+      retireNativePreview(capture)
+      try ignore(tryPromise(() => localPlugin().stopLiveCapture({ captureId: capture.captureId, discard: true })))
+      if (nativeCapture === capture) nativeCapture = undefined
+      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-capture-refused" })
+    }
+    capture.echoCancelled = started.echoCancelled === true
+    capture.phase = "Listening"
+    return capture.echoCancelled
+  }
+
+  effect function stopNativeCapture(session: number, discard: boolean): void!VoiceBridgeFailed {
+    const capture = nativeCapture
+    if (capture?.session === session) try stopCapture(capture, discard)
+  }
+
+  function forgetNativeCapture(): void {
+    if (nativeCapture === undefined) return
+    if (nativeCapture.phase === "Opening") nativeCapture.phase = "Cancelling"
+    else if (nativeCapture.phase === "Listening") nativeCapture.phase = "Retired"
+    retireNativePreview(nativeCapture)
+  }
+
+  return { currentCapture: () => nativeCapture, openNativeMic, stopNativeCapture, forgetNativeCapture }
+}
+
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   const lifetime = try Effect.scope
+  const clock = try Clock.clockWith((clock) => succeed(clock))
   const { probeStatus, warmDevice, invalidateStatus, awaitWarmup } = phoneSpeechStatus()
   let activeSession = 0
-  let nativeCapture: LiveCapture | undefined
   let cloudSpeech: CloudVoiceSession | undefined
   let cloudKey: CredentialId | undefined
   let accountEpoch = 0
@@ -751,6 +903,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let activePlaybackRequest: string | undefined
   let cueStop: Deferred.Deferred<void> | undefined
   const { restoreLocalOutput, setLocalSpeakerMuted } = try phoneSpeaker()
+  const { currentCapture, openNativeMic, stopNativeCapture, forgetNativeCapture } = phoneNativeCapture(lifetime, () => activeSession, restoreLocalOutput)
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
 
   const publish = (event: VoiceEvent) => {
@@ -803,19 +956,17 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       const previewOwner = { session: currentSession, outlet: preview }
       cloudPreview = previewOwner
       const capture = tryPromise({
-        try: () => owner.stream.listen({
-          signal: owner.signal,
-          onSpeechStart: () => publish({ kind: "speechStart", session: currentSession }),
-          onSpeechEnd: () => undefined,
-          onSegment: (text) => {
-            if (cloudPreview === previewOwner) preview?.clear()
-            if (text !== null && text !== "") publish({ kind: "speechEnd", session: currentSession, text })
-          },
-          onEnd: (cause) => {
+        try: () => owner.stream.listen(cloudListenHandlers(
+          owner.signal,
+          currentSession,
+          clock,
+          publish,
+          () => { if (cloudPreview === previewOwner) preview?.clear() },
+          (cause) => {
             if (cloudPreview === previewOwner) clearCloudPreview(currentSession)
             publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : interruptedByCall(cause) ? "call-active" : "error" })
           },
-        }),
+        )),
         catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
       }) catch effect (failure) => {
         if (cloudPreview === previewOwner) clearCloudPreview(currentSession)
@@ -832,85 +983,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       owner.capture = capture
       return capture.fullDuplex
     }
-    if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
-    const live = tryPromise(() => localPlugin().liveCaptureStatus({})) catch () => undefined
-    if (live?.available !== true || live.nativeTransport !== true) {
-      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-transport-unavailable" })
-    }
-    if (!(try restoreLocalOutput((owner) => owner !== session))) {
-      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "speaker-reset-unconfirmed" })
-    }
-    if (activeSession !== session) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
-    if (nativeCapture !== undefined) retireNativePreview(nativeCapture)
-    const capture: LiveCapture = {
-      session, captureId: fresh(), preview, stopPreview: undefined, phase: "Opening",
-      requested: false, openingStop: undefined, echoCancelled: false,
-    }
-    nativeCapture = capture
-    const start = effect {
-      try hearNativePreview(capture, () => nativeCapture === capture && activeSession === session
-        && (capture.phase === "Opening" || capture.phase === "Listening") && capture.stopPreview !== undefined, lifetime)
-      if (nativeCapture !== capture || capture.phase !== "Opening" || activeSession !== session) {
-        throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
-      }
-      return try tryPromise({
-        try: () => {
-          const requested = localPlugin().startLiveCapture({
-            captureId: capture.captureId, nativeAsr: true, echoCancel: true, bargeIn: true, reopen,
-          })
-          capture.requested = true
-          return requested
-        },
-        catch: (cause) => new VoiceBridgeFailed({ method: "startLiveCapture", cause }),
-      })
-    }
-    const started = onInterrupt(start, () => Effect.ignore(stopCapture(capture, true))) catch effect (failure) => {
-      retireNativePreview(capture)
-      if (nativeCapture === capture && capture.phase === "Opening") nativeCapture = undefined
-      throw failure
-    }
-    if (capture.phase !== "Opening") throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
-    if (started.captureId !== capture.captureId || started.nativeAsr !== true || nativeCapture !== capture || activeSession !== session) {
-      retireNativePreview(capture)
-      try ignore(tryPromise(() => localPlugin().stopLiveCapture({ captureId: capture.captureId, discard: true })))
-      if (nativeCapture === capture) nativeCapture = undefined
-      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-capture-refused" })
-    }
-    capture.echoCancelled = started.echoCancelled === true
-    capture.phase = "Listening"
-    return capture.echoCancelled
-  }
-
-  effect function stopCapture(capture: LiveCapture, discard: boolean): void!VoiceBridgeFailed {
-    const opening = capture.phase === "Opening" || capture.phase === "Cancelling"
-    capture.phase = opening ? "Cancelling" : "Retired"
-    retireNativePreview(capture)
-    if (capture.requested) {
-      let observed = capture.openingStop
-      const request = tryPromise({
-        try: () => {
-          if (!opening) return localPlugin().stopLiveCapture({ captureId: capture.captureId, discard })
-          const attempt = capture.openingStop ??= localPlugin().stopLiveCapture({ captureId: capture.captureId, discard: true })
-          observed = attempt
-          return attempt
-        },
-        catch: (cause) => new VoiceBridgeFailed({ method: "stopLiveCapture", cause }),
-      })
-      const stopped = request catch effect (failure) => {
-        if (opening && capture.openingStop === observed) capture.openingStop = undefined
-        throw failure
-      }
-      if (stopped.captureId !== capture.captureId || stopped.serverClosed !== true) {
-        if (opening && capture.openingStop === observed) capture.openingStop = undefined
-        throw new VoiceBridgeFailed({ method: "stopLiveCapture", cause: "not-closed" })
-      }
-    }
-    if (nativeCapture === capture) nativeCapture = undefined
-  }
-
-  effect function stopNativeCapture(session: number, discard: boolean): void!VoiceBridgeFailed {
-    const capture = nativeCapture
-    if (capture?.session === session) try stopCapture(capture, discard)
+    return try openNativeMic(session, reopen, preview)
   }
 
   effect function closeMic(session: number): void!VoiceBridgeFailed {
@@ -1041,11 +1114,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     }),
     forgetAccount: () => sync(() => {
       clearCloudPreview(activeSession)
-      if (nativeCapture !== undefined) {
-        if (nativeCapture.phase === "Opening") nativeCapture.phase = "Cancelling"
-        else if (nativeCapture.phase === "Listening") nativeCapture.phase = "Retired"
-        retireNativePreview(nativeCapture)
-      }
+      forgetNativeCapture()
       accountEpoch += 1
       cloudKey = undefined
       if (activeSession === 0) cloudSpeech = undefined
@@ -1060,7 +1129,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     readAloud,
     silenceReading,
     shut,
-    events: makeNativeEvents(eventSubscribers, () => nativeCapture, stoppedRecording),
+    events: makeNativeEvents(eventSubscribers, currentCapture, stoppedRecording),
     account: signedInAccount, signIns: settledSignIns(),
     ...dictation,
   }
@@ -1074,6 +1143,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
  * reading aloud or dictation.
  */
 export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
+  const clock = try Clock.clockWith((clock) => succeed(clock))
   const base = pageSpeechBase()
   const relay = base === undefined ? undefined : pageSpeechRelay(base)
   let activeSession = 0
@@ -1116,19 +1186,17 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     const previewOwner = { session, outlet: preview }
     cloudPreview = previewOwner
     const capture = tryPromise({
-      try: () => owner.stream.listen({
-        signal: owner.signal,
-        onSpeechStart: () => publish({ kind: "speechStart", session }),
-        onSpeechEnd: () => undefined,
-        onSegment: (text) => {
-          if (cloudPreview === previewOwner) preview?.clear()
-          if (text !== null && text !== "") publish({ kind: "speechEnd", session, text })
-        },
-        onEnd: (cause) => {
+      try: () => owner.stream.listen(cloudListenHandlers(
+        owner.signal,
+        session,
+        clock,
+        publish,
+        () => { if (cloudPreview === previewOwner) preview?.clear() },
+        (cause) => {
           if (cloudPreview === previewOwner) clearCloudPreview(session)
           publish({ kind: "ended", session, reason: cause === undefined ? "ended" : "error" })
         },
-      }),
+      )),
       catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
     }) catch effect (failure) => {
       if (cloudPreview === previewOwner) clearCloudPreview(session)

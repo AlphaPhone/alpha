@@ -1514,4 +1514,133 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(world.voice.dictationClips).toHaveLength(1);
     expect(world.ask.said).toEqual([]);
   });
+
+  // spec/app/voice/index.md, "The microphone opens for the current session only, and a microphone that cannot open fails the conversation"; spec/app/voice/index.md, "Playback echo after a reply is dropped without closing the microphone, while real speech and echo-cancelled captures go through"
+  it("drops post-reply echo over Cloud speech when echoCancelled is false, and accepts the same utterance once the echo window elapses or when echoCancelled is true", async () => {
+    const withoutAec = { ...scene(), phone: true };
+    withoutAec.voice.onDevice = false;
+    withoutAec.voice.echoCancelled = false;
+    withoutAec.ask.nextReplyChunks = ["Ready to send this text whenever you say send this text."];
+    const rtNoAec = await startListening(withoutAec);
+    expect((await getVoice(rtNoAec)).echoCancelled).toBe(false);
+
+    const relay = withoutAec.voice.activeMicSession;
+    withoutAec.voice.emitCloud?.({ type: "speech-start", sessionId: relay });
+    withoutAec.voice.emitCloud?.({ type: "speech-end", sessionId: relay, text: "Draft a quick reply" });
+    await until(rtNoAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect((await getVoice(rtNoAec)).echoCancelled).toBe(false);
+
+    await advance(rtNoAec, 400);
+    withoutAec.voice.emitCloud?.({ type: "speech-start", sessionId: relay });
+    await advance(rtNoAec, 100);
+    withoutAec.voice.emitCloud?.({ type: "speech-end", sessionId: relay, text: "Send this text." });
+    await untilCondition(rtNoAec, () => withoutAec.voice.activeMicSession === relay);
+    for (let i = 0; i < 40; i += 1) await rtNoAec.runPromise(Effect.yieldNow);
+    const afterEcho = await getVoice(rtNoAec);
+    expect([afterEcho.phase, afterEcho.mic, afterEcho.heard, afterEcho.sent, afterEcho.turn, withoutAec.ask.said]).toEqual([
+      "Listening", "On", false, 1, 2, ["Draft a quick reply"],
+    ]);
+
+    await advance(rtNoAec, 1_200);
+    withoutAec.voice.emitCloud?.({ type: "speech-start", sessionId: relay });
+    withoutAec.voice.emitCloud?.({ type: "speech-end", sessionId: relay, text: "Send this text." });
+    await until(rtNoAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
+    expect(withoutAec.voice.spoken.at(-1)?.text).toBe("There’s no text open for review.");
+
+    withoutAec.ask.nextReplyChunks = ["Ready to send it right away."];
+    withoutAec.voice.emitCloud?.({ type: "speech-start", sessionId: relay });
+    withoutAec.voice.emitCloud?.({ type: "speech-end", sessionId: relay, text: "Check the draft status" });
+    await until(rtNoAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 3 && s.turn === 4);
+
+    await advance(rtNoAec, 1_700);
+    withoutAec.voice.emitCloud?.({ type: "speech-start", sessionId: relay });
+    withoutAec.voice.emitCloud?.({ type: "speech-end", sessionId: relay, text: "Send it." });
+    await until(rtNoAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 4 && s.turn === 5);
+    expect(withoutAec.ask.said).toEqual(["Draft a quick reply", "Check the draft status", "Send it."]);
+
+    const withAec = { ...scene(), phone: true };
+    withAec.voice.onDevice = false;
+    withAec.voice.echoCancelled = true;
+    withAec.ask.nextReplyChunks = ["Ready to send this text whenever you say send this text."];
+    const rtAec = await startListening(withAec);
+    expect((await getVoice(rtAec)).echoCancelled).toBe(true);
+
+    const aecRelay = withAec.voice.activeMicSession;
+    withAec.voice.emitCloud?.({ type: "speech-start", sessionId: aecRelay });
+    withAec.voice.emitCloud?.({ type: "speech-end", sessionId: aecRelay, text: "Draft a quick reply" });
+    await until(rtAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect((await getVoice(rtAec)).echoCancelled).toBe(true);
+
+    await advance(rtAec, 200);
+    withAec.voice.emitCloud?.({ type: "speech-start", sessionId: aecRelay });
+    withAec.voice.emitCloud?.({ type: "speech-end", sessionId: aecRelay, text: "Send this text." });
+    await until(rtAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
+    expect(withAec.voice.spoken.at(-1)?.text).toBe("There’s no text open for review.");
+
+    withAec.ask.nextReplyChunks = ["Say send it when you are ready."];
+    withAec.voice.emitCloud?.({ type: "speech-start", sessionId: aecRelay });
+    withAec.voice.emitCloud?.({ type: "speech-end", sessionId: aecRelay, text: "Prepare the draft" });
+    await until(rtAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 3 && s.turn === 4);
+
+    await advance(rtAec, 150);
+    withAec.voice.emitCloud?.({ type: "speech-start", sessionId: aecRelay });
+    withAec.voice.emitCloud?.({ type: "speech-end", sessionId: aecRelay, text: "Send it." });
+    await until(rtAec, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 4 && s.turn === 5);
+    expect(withAec.ask.said).toEqual(["Draft a quick reply", "Prepare the draft", "Send it."]);
+  });
+
+  // spec/app/voice/index.md, "Playback echo after a reply is dropped without closing the microphone, while real speech and echo-cancelled captures go through"
+  it("drops on-device playback echo within the tail when echoCancelled is false, keeps the interim preview live, and accepts speech after the echo window", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.voice.echoCancelled = false;
+    world.ask.nextReplyChunks = ["First sentence is ready for review."];
+    const { alpha, area } = await onComposer(world);
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await raiseSheet(alpha);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    expect((await getVoice(area)).echoCancelled).toBe(false);
+
+    speakUtterance(world, "Give me an update");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    await drawn(() => vi.waitFor(() => expect([...world.platform.listening].some(({ topic }) => topic === "voice")).toBe(true)));
+
+    const capture = world.voice.activeMicSession;
+    const seenInterim = () => document.querySelector("[data-alpha-voice-interim]")?.textContent;
+    const say = (turnId: string, phase: string, extra = {}) => publish(world.platform, "voice", {
+      type: "agent_event", stream: "voice-transcript",
+      payload: { type: "voice-transcript", sessionId: capture, turnId, phase, ...extra },
+    });
+
+    await later(alpha, 300);
+    await drawn(() => {
+      say("echo-1", "speech-start");
+      say("echo-1", "partial", { seq: 1, text: "First sentence" });
+    });
+    await drawn(() => vi.waitFor(() => expect(seenInterim()).toBe("First sentence")));
+    await drawn(() => world.voice.emitLocal?.("liveCaptureTranscript", {
+      captureId: capture,
+      final: { turnId: "echo-1", text: "First sentence is ready.", mode: "device" },
+    }));
+    await drawn(() => vi.waitFor(() => expect(seenInterim()).toBeUndefined()));
+    for (let i = 0; i < 40; i += 1) await drawn(() => area.runPromise(Effect.yieldNow));
+    const afterEcho = await getVoice(area);
+    expect([afterEcho.phase, afterEcho.mic, afterEcho.heard, afterEcho.sent, afterEcho.turn, world.ask.said]).toEqual([
+      "Listening", "On", false, 1, 2, ["Give me an update"],
+    ]);
+
+    await later(alpha, 1_400);
+    await drawn(() => {
+      say("real-2", "speech-start");
+      say("real-2", "partial", { seq: 1, text: "First sentence" });
+    });
+    await drawn(() => vi.waitFor(() => expect(seenInterim()).toBe("First sentence")));
+    await drawn(() => world.voice.emitLocal?.("liveCaptureTranscript", {
+      captureId: capture,
+      final: { turnId: "real-2", text: "First sentence is ready.", mode: "device" },
+    }));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
+    expect(world.ask.said).toEqual(["Give me an update", "First sentence is ready."]);
+  });
 });

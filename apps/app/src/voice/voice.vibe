@@ -1,6 +1,6 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"; spec/app/voice/index.md, "Playback echo after a reply is dropped without closing the microphone, while real speech and echo-cancelled captures go through"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { TurnController, type ConversationRecord, type TurnContext, type TurnResult, type TurnTransport } from "@elizaos/agent"
+import { shouldRespondToVoiceTurn, TurnController, type ConversationRecord, type TurnContext, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { sendsOpenDocument } from "../../gen/app__assistant__context.effect.vibe"
@@ -102,6 +102,8 @@ export interface VoiceMemory {
   chat: SpokenChat | undefined
   heardText: { readonly session: number; readonly turn: number; readonly text: string } | undefined
   lastReply: string
+  lastReplySession: number
+  lastReplyEndedAtMs: number | undefined
   readonly queuedSentences: string[]
   dispatchedSentences: number
   playbackTurn: number
@@ -131,6 +133,8 @@ export interface VoiceMemory {
   cueAudible(turn: number): void
   /** The turn's acknowledgment is no longer heard: it played out, or it was dropped or cut. */
   endCue(turn: number, how: "Ended" | "Dropped"): void
+  recordSpoken(session: number, text: string): void
+  clearReply(session?: number): void
   clearQueued(): void
 }
 
@@ -166,6 +170,8 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     chat: undefined,
     heardText: undefined,
     lastReply: "",
+    lastReplySession: 0,
+    lastReplyEndedAtMs: undefined,
     queuedSentences: [],
     dispatchedSentences: 0,
     playbackTurn: 0,
@@ -229,6 +235,23 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
       if (cue?.turn !== turn || cue.phase === "Ended" || cue.phase === "Dropped") return
       cue.phase = how === "Ended" && cue.phase === "Audible" ? "Ended" : "Dropped"
       cue.end()
+    },
+    recordSpoken(session: number, text: string) {
+      const trimmed = text.trim()
+      if (trimmed === "") return
+      if (memory.lastReplySession !== session) {
+        memory.lastReplySession = session
+        memory.lastReply = trimmed
+      } else if (memory.lastReply === "") {
+        memory.lastReply = trimmed
+      } else {
+        memory.lastReply = `${memory.lastReply} ${trimmed}`
+      }
+    },
+    clearReply(session?: number) {
+      memory.lastReplySession = session ?? 0
+      memory.lastReply = ""
+      memory.lastReplyEndedAtMs = undefined
     },
     clearQueued() {
       memory.playbackEpoch += 1
@@ -727,7 +750,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   })
   if (!(try currentRequest)) return refused
   if (isCloudFundsRefusal(result)) {
-    memory.lastReply = ""
+    memory.clearReply()
     return { type: "refusedForFunds", session, turn }
   }
   if (result?.kind === "Replied") try lease.settle(result, spoken)
@@ -814,8 +837,11 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
       }
     }
   }
-  memory.lastReply = finalText
-  if (!asks) output.finishSpeech(finalText)
+  if (!asks) {
+    const spoken = speakableText(replyBlocks(finalText).words).trim()
+    if (spoken !== "") memory.recordSpoken(session, spoken)
+    output.finishSpeech(finalText)
+  }
   return { type: "replyEnds", session, turn, asks }
 }
 
@@ -837,6 +863,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const chat = Option.getOrUndefined(try Effect.serviceOption(Talk))?.board
     const heard = memory.heardText
     memory.heardText = undefined
+    memory.clearReply(session)
     const spoken = heard?.session === session && heard.turn === turn ? heard.text.trim() : ""
     const finishLocally = (words?: string) => {
       if (words !== undefined) {
@@ -902,6 +929,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     memory.heardText = undefined
+    memory.clearReply(session)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
   })
@@ -979,8 +1007,8 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const prepare = (try VoiceWords).memory.prepareInterim
       const preview = prepare === undefined ? undefined : try prepare(session)
       return effect {
-        try (try VoiceBridge).openMic(session, network, preview)
-        return { type: "micOpened", session } as const
+        const echoCancelled = try (try VoiceBridge).openMic(session, network, preview)
+        return { type: "micOpened", session, echoCancelled } as const
       } catch effect (failure) => {
         preview?.retire()
         return interruptedByCall(failure.cause)
@@ -1006,6 +1034,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
         return memory.playbackEpoch === epoch && Voice.canSentencePlayed(try voice.get(), session, turn)
       }
       let heard: SpokenCue | undefined
+      let cueSpoke = false
       try Semaphore.withPermit(memory.playLock, effect {
         if (!(try current)) return
         try bridge.awaitSpeechOutputWarmup(session)
@@ -1016,8 +1045,11 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
         // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": the cue plays on its own fiber so the reply's first sentence can drop or bound it.
         if (piece.cue && cue?.turn === turn) {
           heard = cue
-          try Effect.forkDetach(Effect.ensuring(ignore(bridge.playCue(session, turn, piece.text, () => memory.cueAudible(turn))),
-            sync(() => memory.endCue(turn, "Ended"))))
+          try Effect.forkDetach(Effect.ensuring(ignore(bridge.playCue(session, turn, piece.text, () => {
+            cueSpoke = true
+            memory.recordSpoken(session, piece.text)
+            memory.cueAudible(turn)
+          })), sync(() => memory.endCue(turn, "Ended"))))
           return
         }
         let append = piece.append
@@ -1036,18 +1068,33 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
           }
           if (!(try current)) return
         }
-        try ignore(bridge.playSentence(session, turn, piece.text, append))
+        memory.recordSpoken(session, piece.text)
+        try ensuring(ignore(bridge.playSentence(session, turn, piece.text, append)), effect {
+          memory.lastReplySession = session
+          memory.lastReplyEndedAtMs = try Clock.currentTimeMillis
+        })
       })
       const playing = heard
-      if (playing !== undefined) try Effect.promise(() => playing.ended)
+      if (playing !== undefined) {
+        try Effect.promise(() => playing.ended)
+        if (cueSpoke) {
+          memory.lastReplySession = session
+          memory.lastReplyEndedAtMs = try Clock.currentTimeMillis
+        }
+      }
       return { type: "sentencePlayed", session, turn }
     }, { type: "sentencePlayed", session, turn });
     when { tag: "Hush", let turn }: run("hush", effect {
-      (try VoiceWords).memory.clearQueued()
+      const { memory } = try VoiceWords
+      const hadPlayback = memory.dispatchedSentences > 0
+      memory.clearQueued()
       try (try VoiceBridge).hush(turn)
+      if (hadPlayback) memory.lastReplyEndedAtMs = try Clock.currentTimeMillis
     });
     when { tag: "Shut", let session }: answer("shut", effect {
-      (try VoiceWords).memory.clearQueued()
+      const { memory } = try VoiceWords
+      memory.clearQueued()
+      memory.clearReply()
       const confirmed = try (try VoiceBridge).shut(session)
       return { type: "stopped", confirmed }
     }, { type: "stopped", confirmed: false });
@@ -1195,13 +1242,28 @@ const bridgeEvents = hearing(
     return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
       if (event.kind === "speechEnd") {
         const state = try voice.get()
-        if (event.text !== "" && state.session === event.session && state.phase === "Listening") {
-          memory.heardText = { session: state.session, turn: state.turn, text: event.text }
-        }
+        if (state.session !== event.session || state.phase !== "Listening" || state.mic !== "On") return undefined
+        const recent = memory.lastReplySession === state.session
+        const recentAgentReply = recent ? memory.lastReply : ""
+        const endedAtMs = recent ? memory.lastReplyEndedAtMs : undefined
+        const nowMs = try Clock.currentTimeMillis
+        const turnStartedAfterReplyEndMs = event.startedAtMs !== undefined && endedAtMs !== undefined
+          ? event.startedAtMs - endedAtMs
+          : undefined
+        const replyAgeMs = endedAtMs !== undefined ? nowMs - endedAtMs : undefined
+        const accepted = event.text.trim() !== "" && shouldRespondToVoiceTurn(event.text, {
+          recentAgentReply,
+          agentSpeaking: false,
+          echoCancelled: state.echoCancelled,
+          ...(turnStartedAfterReplyEndMs === undefined ? {} : { turnStartedAfterReplyEndMs }),
+          ...(replyAgeMs === undefined ? {} : { replyAgeMs }),
+        })
+        if (!accepted) return { type: "speechIgnored", session: event.session }
+        memory.heardText = { session: state.session, turn: state.turn, text: event.text }
+        return { type: "turnEnded", session: event.session }
       }
       return match (event) {
         when { kind: "speechStart", let session }: { type: "speechHeard", session };
-        when { kind: "speechEnd", let session }: { type: "turnEnded", session };
         when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
         when { kind: "ended", let session, let reason }: reason === "ended"
           ? undefined
@@ -1237,7 +1299,8 @@ function stored(key: string, start?: Voice.Voice) {
     const store = try KeyValueStore.KeyValueStore
     const current = store.get(key) catch () => undefined
     if (current !== undefined) return Voice.stored(key, start)
-    const earlier = store.get("alpha/app/voice/index@2") catch () => undefined
+    const v3 = store.get("alpha/app/voice/index@3") catch () => undefined
+    const earlier = v3 ?? (store.get("alpha/app/voice/index@2") catch () => undefined)
     const raw = earlier ?? (store.get("alpha/app/voice/index@1") catch () => undefined)
     const old = raw === undefined ? undefined : rememberedVoice(raw)
     const recovered = old === undefined ? undefined : (Voice.decodeState({ ...Voice.initial, ...old }) catch () => undefined)
@@ -1248,7 +1311,7 @@ function stored(key: string, start?: Voice.Voice) {
 export const voicing = Layer.provideMerge(
   together(
     reacting({ ...Voice, stored }, {
-      keep: 3,
+      keep: 4,
       open: [{ type: "restart" }],
       carry: carryVoice,
       timers: (v) => (v.retryAt > 0 ? [due("retry", v.retryAt, { type: "retryDue", now: untimed })] : []),

@@ -19,6 +19,7 @@ export interface VoiceScene {
   recognitionProbeGate?: () => Promise<void>;
   liveCaptureAvailable: boolean;
   nativeTransport: boolean;
+  echoCancelled: boolean;
   transcriptionFailures: number;
   dictationInFront: boolean;
   refuseRecordingStop: boolean;
@@ -76,6 +77,7 @@ export function voiceScene(): VoiceScene {
     localReady: true,
     liveCaptureAvailable: true,
     nativeTransport: true,
+    echoCancelled: true,
     transcriptionFailures: 0,
     dictationInFront: true,
     refuseRecordingStop: false,
@@ -162,7 +164,7 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
       startLiveCapture: ({ captureId, nativeAsr }: { captureId: string; nativeAsr: boolean }) => {
         voice.startLiveCaptureCalls += 1;
         voice.activeMicSession = captureId;
-        return Promise.resolve({ captureId, nativeAsr, echoCancelled: true });
+        return Promise.resolve({ captureId, nativeAsr, echoCancelled: voice.echoCancelled });
       },
       stopLiveCapture: ({ captureId }: { captureId: string }) => {
         voice.stopLiveCaptureCalls += 1;
@@ -267,7 +269,7 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
         if (credentialId !== voice.credentialId) return Promise.reject(rejection("Voice is already active or unavailable"));
         voice.startCloudSpeechCalls += 1;
         voice.activeMicSession = sessionId;
-        return Promise.resolve({ sessionId, sampleRate: 16000, echoCancelled: true });
+        return Promise.resolve({ sessionId, sampleRate: 16000, echoCancelled: voice.echoCancelled });
       },
       stopCloudSpeech: ({ sessionId }) => {
         voice.stopCloudSpeechCalls += 1;

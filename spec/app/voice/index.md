@@ -37,7 +37,7 @@ type Mic = Off | Asking | Opening | On | Closing
 type Output = SpeakerUnknown | SpeakerChecking | SpeakerUnavailable | SpeakerOn | SpeakerMuting | SpeakerOff | SpeakerUnmuting
 
 type Voice = {
-  phase: Phase, session: int, turn: int, sent: int, mic: Mic, muted: bool, heard: bool,
+  phase: Phase, session: int, turn: int, sent: int, mic: Mic, echoCancelled: bool, muted: bool, heard: bool,
   speaker: Output, speakerTicket: int,
   network: bool, disclosing: bool, retries: int, retryAt: int,
   queued: int, played: int, replied: bool, playing: int,
@@ -47,7 +47,7 @@ type Voice = {
 }
 
 pure val initial: Voice = {
-  phase: Idle, session: 0, turn: 0, sent: 0, mic: Off, muted: false, heard: false,
+  phase: Idle, session: 0, turn: 0, sent: 0, mic: Off, echoCancelled: false, muted: false, heard: false,
   speaker: SpeakerUnknown, speakerTicket: 0,
   network: false, disclosing: false, retries: 0, retryAt: 0,
   queued: 0, played: 0, replied: false, playing: 0,
@@ -67,6 +67,7 @@ pure val nowValues = Set(0, 30, 90, 700)
 pure val waitValues = Set(0, 20, 120)
 pure val weight_micOpened = 15
 pure val weight_speechHeard = 10
+pure val weight_speechIgnored = 6
 pure val weight_turnEnded = 10
 pure val weight_micClosed = 15
 pure val weight_sentence = 10
@@ -208,21 +209,21 @@ conversation stops or fails.
 ```quint
 pure def begin(network: bool, v: Voice): Change =
   if (v.muted)
-    { state: { ...v, phase: Listening, network: network, mic: Off, engineHeld: true }, out: holdOut(v) }
+    { state: { ...v, phase: Listening, network: network, mic: Off, echoCancelled: false, engineHeld: true }, out: holdOut(v) }
   else if (P::allows(v.permission))
-    { state: { ...v, network: network, mic: Opening, engineHeld: true },
+    { state: { ...v, network: network, mic: Opening, echoCancelled: false, engineHeld: true },
       out: holdOut(v).concat(List(Listen({ session: v.session, network: network }))) }
   else if (P::canAsk(v.permission))
-    { state: { ...v, network: network, mic: Asking, prompting: true, permission: P::ask(v.permission) }, out: List(AskMicrophone) }
+    { state: { ...v, network: network, mic: Asking, echoCancelled: false, prompting: true, permission: P::ask(v.permission) }, out: List(AskMicrophone) }
   else
-    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0 },
+    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, echoCancelled: false, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0 },
       out: releaseOut(v) }
 
 pure def canStartTalking(v: Voice, now: int): bool =
   quiet(v) and v.recorder.stage == D::Closed and not(v.latched) and not(v.prompting) and v.callNotice == NoCallNotice
 
 pure def startTalking(v: Voice, now: int): Change =
-  val fresh = { ...v, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, muted: false,
+  val fresh = { ...v, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, muted: false, echoCancelled: false,
     failure: D::NoFailure, retries: 0, retryAt: 0, followed: 0, network: false, reviewPending: false }
   if (R::asksConsent(v.route, now)) { state: { ...fresh, disclosing: true }, out: List() }
   else begin(onNetwork(v.route, now), fresh)
@@ -318,11 +319,15 @@ pure def sometimesListeningAfterTheFirstGrant(v: Voice): bool =
 
 ### The microphone opens for the current session only, and a microphone that cannot open fails the conversation
 
+Opening the microphone records whether the capture reported active echo
+cancellation (`echoCancelled`). That flag stays true only while the microphone
+is open and clears when the microphone closes, mutes or stops.
+
 ```quint
 pure def canMicOpened(v: Voice, session: int): bool = v.mic == Opening and session == v.session and talking(v)
 
-pure def micOpened(v: Voice, session: int): Change =
-  val listening = { ...v, mic: On, phase: if (v.phase == Starting) Listening else v.phase }
+pure def micOpened(v: Voice, session: int, echoCancelled: bool): Change =
+  val listening = { ...v, mic: On, echoCancelled: echoCancelled, phase: if (v.phase == Starting) Listening else v.phase }
   val ticket = v.speakerTicket + 1
   if (v.speaker != SpeakerUnknown) { state: listening, out: List() }
   else
@@ -333,9 +338,15 @@ pure def canMicFailed(v: Voice, session: int): bool = v.mic == Opening and sessi
 
 pure def micFailed(v: Voice, session: int): Change =
   if (v.phase == Starting)
-    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, engineHeld: false, reviewPending: false },
+    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, echoCancelled: false, engineHeld: false, reviewPending: false },
       out: releaseOut(v) }
   else shutDown(D::NoMicrophone, false, v)
+
+pure def alwaysEchoCancellationBelongsToAnOpenMic(v: Voice): bool =
+  v.echoCancelled implies v.mic == On
+
+pure def sometimesListeningWithEchoCancellation(v: Voice): bool =
+  v.phase == Listening and v.mic == On and v.echoCancelled
 ```
 
 ### What the owner says is shown as it is heard
@@ -362,7 +373,7 @@ pure def canTurnEnded(v: Voice, session: int): bool =
   v.phase == Listening and v.mic == On and v.heard and session == v.session
 
 pure def turnEnded(v: Voice, session: int): Change =
-  { state: { ...v, phase: Transcribing, mic: Closing }, out: List(CloseMicrophone({ session: v.session })) }
+  { state: { ...v, phase: Transcribing, mic: Closing, echoCancelled: false }, out: List(CloseMicrophone({ session: v.session })) }
 
 pure def canMicClosed(v: Voice, session: int): bool = v.mic == Closing and session == v.session and talking(v)
 
@@ -388,6 +399,33 @@ pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, 
 pure def canMicCloseFailed(v: Voice, session: int): bool = v.mic == Closing and session == v.session and talking(v)
 
 pure def micCloseFailed(v: Voice, session: int): Change = shutDown(D::NoMicrophone, false, v)
+```
+
+### Playback echo after a reply is dropped without closing the microphone, while real speech and echo-cancelled captures go through
+
+When playback finishes, Talk records when the reply ended (`replyEndedAtMs`)
+alongside what Alpha last said, and the voice bridge stamps when each
+utterance started on `onSpeechStart` (surfacing `startedAtMs` on `speechEnd`
+when known). On `speechEnd`, Talk applies `@elizaos/agent`'s
+`shouldRespondToVoiceTurn` with `recentAgentReply`,
+`turnStartedAfterReplyEndMs` (computed cleanly when a reply ended in this
+session and `startedAtMs` is known), `replyAgeMs`, and the open microphone's
+`echoCancelled` flag. When `echoCancelled` is false and the transcript is
+rejected as playback echo or non-speech within the post-reply echo window,
+Talk ignores it (`speechIgnored`), clears `heard`, and keeps listening with
+the microphone open without sending a turn. Short real replies, including
+"Send this text." and "Send it.", pass when `echoCancelled` is true or once
+the echo window has elapsed.
+
+```quint
+pure def canSpeechIgnored(v: Voice, session: int): bool =
+  v.phase == Listening and v.mic == On and v.heard and session == v.session
+
+pure def speechIgnored(v: Voice, session: int): Voice = { ...v, heard: false }
+
+pure def stepIgnoredSpeechKeepsListening(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  via == "speechIgnored" implies
+    (after.phase == Listening and after.mic == On and not(after.heard) and after.sent == before.sent and out == List())
 ```
 
 ### Alpha's reply is spoken a sentence at a time, sentences streamed before the reply is complete included, and only for the current turn
@@ -631,7 +669,7 @@ pure def alwaysPlaybackIsTheCurrentTurns(v: Voice): bool =
 ```quint
 pure def canMute(v: Voice): bool = talking(v) and not(v.muted) and v.mic != Asking
 
-pure def mute(v: Voice): Change = { state: { ...v, muted: true, mic: closedMic(v.mic) }, out: closeOut(v) }
+pure def mute(v: Voice): Change = { state: { ...v, muted: true, mic: closedMic(v.mic), echoCancelled: false }, out: closeOut(v) }
 
 pure def canUnmute(v: Voice): bool = talking(v) and v.muted
 
@@ -714,7 +752,7 @@ controls offer Stop and no keyboard switch, as in Alpha's Sunday demo build.
 
 ```quint
 pure def shutDown(failure: D::Failure, keyboard: bool, v: Voice): Change =
-  { state: { ...v, phase: Stopping, failure: failure, mic: closedMic(v.mic), disclosing: false, retryAt: 0,
+  { state: { ...v, phase: Stopping, failure: failure, mic: closedMic(v.mic), echoCancelled: false, disclosing: false, retryAt: 0,
       queued: 0, played: 0, replied: false, playing: 0, claim: 0, claimRoute: 0, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
     out: List(Shut({ session: v.session, keyboard: keyboard })).concat(releaseOut(v)) }
 
@@ -725,7 +763,7 @@ pure def stop(v: Voice, keyboard: bool): Change = shutDown(D::NoFailure, keyboar
 pure def canStopped(v: Voice, confirmed: bool): bool = v.phase == Stopping
 
 pure def stopped(v: Voice, confirmed: bool): Voice =
-  { ...v, phase: if (v.failure == D::NoFailure) Idle else Failed, mic: Off, network: false, latched: v.latched or not(confirmed) }
+  { ...v, phase: if (v.failure == D::NoFailure) Idle else Failed, mic: Off, echoCancelled: false, network: false, latched: v.latched or not(confirmed) }
 
 pure val fair_stopped = "weak"
 
@@ -818,7 +856,7 @@ pure def canSpeechFailed(v: Voice, session: int, fault: R::Fault, wait: int, dev
 pure def speechFailed(v: Voice, session: int, fault: R::Fault, wait: int, deviceReady: bool, now: int): Change =
   val route = if (deviceReady) R::noteFailure(v.route, fault, wait, now) else R::clearHold(v.route)
   val transient = fault == R::Brief or fault == R::RateLimited
-  val base = { ...v, route: route, queued: 0, played: 0, replied: false, playing: 0, claim: 0, claimRoute: 0, speaker: SpeakerUnknown }
+  val base = { ...v, route: route, echoCancelled: false, queued: 0, played: 0, replied: false, playing: 0, claim: 0, claimRoute: 0, speaker: SpeakerUnknown }
   val shut = List(Shut({ session: v.session, keyboard: false }))
   val onPhone = begin(false, { ...base, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, mic: Off })
   if (v.network and R::fallsBack(fault) and v.played == 0 and v.queued == 0 and deviceReady)
