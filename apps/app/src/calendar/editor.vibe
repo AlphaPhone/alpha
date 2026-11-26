@@ -7,6 +7,7 @@ import { say } from "../notices/toasts.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import type { Effect as Out, Event, Scope, Write } from "../../gen/app__calendar__editor.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
+import { allows } from "../../gen/kit__permission.effect.vibe"
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import { loadedReads } from "./deletions.vibe"
 import { type Readback, type WriteKind, agentCalendarAccepts, answerReadback, defaultStart, deviceRoute, newEventTarget, readbackSeen } from "../../gen/app__calendar__writing.effect.vibe"
@@ -105,7 +106,8 @@ export effect function startForm(edit: Event, day: number, row?: Row) {
       : { title: row.title, place: row.place, notes: row.notes, begin: row.begin, end: row.end, allDay: row.allDay, people: "" }
     try ignore(keep(fields, state.owner))
   }
-  if ((try contained(editor.send(edit), "opening the form")) && edit.type === "newEvent") try askForPhone()
+  const opened = try contained(editor.send(edit), "opening the form")
+  if (opened && edit.type === "newEvent" && !(try (try View.Machine).get()).connected) try askForPhone()
 }
 
 // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once"
@@ -118,9 +120,12 @@ effect function askForPhone() {
   try Stream.runHead(Stream.filter(view.changes, (state) => state.access.grant !== "Unasked"))
 }
 
-/** Save the form; one going to the phone's calendar first asks Android for it while Calendar still may, as live v119 did. */
+/** Save the form; one going to the phone's calendar first asks Android for it while Calendar still may, and goes out only with access, as live v119 did. */
 export effect function saveEvent(toPhone: boolean) {
-  if (toPhone) try askForPhone()
+  if (toPhone) {
+    try askForPhone()
+    if ((try PhoneCalendar).present && !allows((try (try View.Machine).get()).access)) return
+  }
   const editor = try Editor.Machine
   if (Editor.canSave(try editor.get())) try contained(editor.send({ type: "save" }), "saving the event")
 }
