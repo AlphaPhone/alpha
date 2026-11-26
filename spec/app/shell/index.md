@@ -185,6 +185,12 @@ away from the launcher the first page keeps it too.
 The control is only how Back is drawn: Android's own Back gesture still
 closes the app as the rule above says.
 
+Phone, Messages and Contacts draw their first page the same way, as v119's
+telephony headers did: the Phone tabs (on Recents, Keypad, Voicemail and
+Contacts), the Messages conversation list and the Contacts list have no
+Back on the launcher. A conversation, a contact and a new message keep
+theirs.
+
 ```quint
 type AppPage = FirstPage | InnerPage
 
