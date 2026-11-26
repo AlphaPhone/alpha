@@ -87,10 +87,10 @@ type InterimContext = Device | Layers.Machine | Shell.Machine | Voice.Machine | 
 
 export type PageSpeech = {
   readonly item: number
-  readonly source?: "workflow"
+  readonly source?: "workflow" | "workflow-step"
   readonly words: string | NativePageSpeech
   readonly current: () => boolean!!
-  readonly retire: () => void!!
+  readonly retire: (result: "Finished" | "Stopped") => void!!
 }
 
 export interface VoiceMemory {
