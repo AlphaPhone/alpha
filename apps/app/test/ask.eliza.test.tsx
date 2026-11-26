@@ -142,16 +142,7 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   await raiseConversation(alpha, runtime);
   await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open");
 
-  await drawn(() => {
-    const trigger = button("Chat actions");
-    if (!trigger) throw new Error("Chat actions did not open from Home");
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  });
-  await drawn(() => {
-    const start = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "New chat");
-    if (!start) throw new Error("New chat was not offered");
-    start.click();
-  });
+  await drawn(() => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.send({ type: "start", replying: false, holding: false }))));
   await until(alpha, runtime, Chats, (state) => state.chosen > 0 && state.make.outcome === "Confirmed" && state.page.status === "Loaded");
   await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
   const opened = await rooms();

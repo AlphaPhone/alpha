@@ -381,4 +381,130 @@ describe("Ask Alpha dock and shell navigation", () => {
     });
     expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: [], assistant: "Sheet" });
   });
+
+  // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"
+  it("swiping down on the resting bar tucks Home and Browser into the pill, Type untucks it, and closing an open sheet rests on the bar first", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const dockState = () => runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()));
+    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const swipeDown = async (target: Element | null, pointerId: number) => {
+      expect(target).not.toBeNull();
+      const send = (type: string, y: number) =>
+        underAct(() => { target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId, pointerType: "touch", isPrimary: true })); });
+      await send("pointerdown", 700);
+      await send("pointermove", 720);
+      await send("pointermove", 770);
+      await send("pointerup", 770);
+    };
+
+    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    expect((await dockState()).tucked).toBe(false);
+
+    const mark = named("Open conversation");
+    const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+    expect(mark).not.toBeNull();
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 700, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 740, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    expect(bar?.style.transform).toBe("translateY(40px)");
+    expect(Number(bar?.style.opacity)).toBeLessThan(1);
+    expect(detent()).toBe("bar");
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 770, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 770, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    await expect.poll(async () => (await dockState()).tucked).toBe(true);
+    expect((await shellState()).assistant).toBe("Bar");
+    expect(Array.from(document.querySelectorAll("[data-alpha-compact-dock] button"), (btn) => btn.getAttribute("aria-label")))
+      .toEqual(["Open conversation", "Type", "Talk"]);
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.hidden).toBe(true);
+
+    const pillType = document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']");
+    await underAct(() => { pillType?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 24, pointerType: "touch", isPrimary: true })); });
+    await underAct(() => { pillType?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 800, pointerId: 24, pointerType: "touch", isPrimary: true })); });
+    expect(detent()).toBe("bar");
+    await underAct(() => { pillType?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 800, pointerId: 24, pointerType: "touch", isPrimary: true })); });
+    expect(detent()).toBe("bar");
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await resting(runtime, "Typing");
+    });
+    await expect.poll(async () => (await dockState()).tucked).toBe(false);
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    expect(field?.hidden).toBe(false);
+    expect(document.activeElement).toBe(field);
+
+    await act(async () => {
+      field?.blur();
+      await resting(runtime, "Bar");
+    });
+    expect((await dockState()).tucked).toBe(false);
+    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+
+    await act(async () => {
+      field?.focus();
+      await resting(runtime, "Typing");
+    });
+    await swipeDown(field, 22);
+    await expect.poll(async () => [(await shellState()).assistant, (await dockState()).tucked]).toEqual(["Bar", true]);
+    expect(document.activeElement).not.toBe(field);
+    expect(document.querySelector("[data-alpha-compact-dock]")).not.toBeNull();
+
+    await act(async () => { await Effect.runPromise(Effect.sleep("450 millis")); });
+    await act(async () => {
+      named<HTMLButtonElement>("Open conversation")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    });
+    await expect.poll(async () => (await dockState()).tucked).toBe(false);
+    await act(async () => {
+      named<HTMLButtonElement>("Minimize chat")?.click();
+      await resting(runtime, "Bar");
+    });
+    expect((await dockState()).tucked).toBe(false);
+    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+
+    await act(async () => {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view: "Browser" })));
+    });
+    const browserField = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    await act(async () => {
+      browserField?.focus();
+      await resting(runtime, "Typing");
+    });
+    await swipeDown(browserField, 23);
+    await expect.poll(async () => [(await shellState()).trail, (await shellState()).assistant, (await dockState()).tucked])
+      .toEqual([["Browser"], "Bar", true]);
+    expect(document.querySelector("[data-alpha-compact-dock]")).not.toBeNull();
+
+    await act(async () => {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
+    });
+    await expect.poll(async () => [(await shellState()).trail, (await dockState()).tucked]).toEqual([[], false]);
+    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+  });
+
+  // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/attachments.md, "Story: Choose files to attach"
+  it("the Chat actions menu offers only Attach media and Search chat on the resting bar and open sheet", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    const menuItems = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].map((item) => item.textContent);
+
+    await underAct(() => {
+      named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(menuItems()).toEqual(["Attach media", "Search chat"]);
+    await underAct(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+
+    await act(async () => {
+      named<HTMLButtonElement>("Open conversation")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    });
+    await underAct(() => {
+      named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(menuItems()).toEqual(["Attach media", "Search chat"]);
+  });
 });
