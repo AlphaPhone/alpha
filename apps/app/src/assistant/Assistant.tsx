@@ -63,7 +63,7 @@ import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
-import { AskedRequest, asked, boundIn } from "../calendar/asked.ts";
+import { AskedRequest, asked, boundIn, filedBy } from "../calendar/asked.ts";
 import { shownInAskAlpha } from "../../gen/app__calendar__agent.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
@@ -666,6 +666,12 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const calendarCard = calendarReview !== undefined && !talking.context.sensitive && shownInAskAlpha(calendar.shown, bound !== undefined, latestFiled)
     ? [{ id: `calendar review ${bound ?? ""}`, author: "alpha" as const, text: "",
       children: <AskedRequest.Provider value={bound}>{calendarReview}</AskedRequest.Provider> }] : [];
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": how a change ended draws under the reply that filed it, as v119 kept each reply's own card, so it never reads as a later reply's.
+  // A filing reply that draws no row here, blank or off this page, keeps the outcome at the foot, so it is never lost.
+  const filer = calendar.shown === "ChangeEnded" ? filedBy(calendar, shown.chosen) : undefined;
+  const endedUnder = filer !== undefined && [...rows.messages, ...(rows.messagesAfterLater ?? [])].some((row) => row.id === filer) ? filer : undefined;
+  const under = (placed: typeof rows.messages) => endedUnder === undefined ? placed
+    : placed.flatMap((row) => row.id === endedUnder ? [row, ...calendarCard] : [row]);
   const offer = seen.recordingSummary;
   const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
     && lines.some((line) => !line.mine && line.id === offer.message)
@@ -679,8 +685,10 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const failed = failure === undefined || (readAgain && !liveAddsToHistory(failure.kind, liveFix, failure.waitMs)) ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure kind={failure.kind} fix={liveFix} waitMs={failure.waitMs} live onRetry={retry} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   return {
     ...rows,
+    messages: under(rows.messages),
+    messagesAfterLater: rows.messagesAfterLater && under(rows.messagesAfterLater),
     holdMessage: open ? holdMessage : undefined,
-    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...calendarCard, ...mediaNote, ...recordingSummary],
+    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...(endedUnder === undefined ? calendarCard : []), ...mediaNote, ...recordingSummary],
     interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
     position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
     visible: open,
