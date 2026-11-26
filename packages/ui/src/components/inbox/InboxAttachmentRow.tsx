@@ -15,6 +15,8 @@ export type InboxAttachmentRowProps = {
   saveUnconfirmed?: boolean;
   /** The save used the browser's downloads instead of Files. */
   browserDownload?: boolean;
+  /** The save goes through Android's picker, where the owner names the copy. */
+  picker?: boolean;
 };
 
 /**
@@ -23,8 +25,8 @@ export type InboxAttachmentRowProps = {
  *
  * @model spec/app/inbox/message.md
  */
-export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false, browserDownload = false }: InboxAttachmentRowProps) {
-  const saveLabel = browserDownload ? "Download" : "Save to Files";
+export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false, browserDownload = false, picker = false }: InboxAttachmentRowProps) {
+  const saveLabel = picker ? "Save as…" : browserDownload ? "Download" : "Save to Files";
   const detail = onOpen ? `${size} · Review attachment` : onSave && !saveUnconfirmed ? `${size} · No preview · ${saveLabel}` : size;
   return (
     <div className="flex max-w-full items-center gap-2">
@@ -41,7 +43,7 @@ export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed
           <span className="text-fine text-muted-foreground">{detail}</span>
         </span>
       </button>
-      {saveUnconfirmed ? <StatusDot status="warn" label={browserDownload ? "Save not confirmed, check your downloads" : "Save not confirmed, look in Files"} /> : null}
+      {saveUnconfirmed ? <StatusDot status="warn" label={browserDownload ? "Save not confirmed, check your downloads" : picker ? "Save not confirmed, check the chosen file" : "Save not confirmed, look in Files"} /> : null}
     </div>
   );
 }

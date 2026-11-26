@@ -322,6 +322,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
           onSave: state.revision > 0 && destination !== "unavailable" && !canPreviewAttachment(one) && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
           saveUnconfirmed: unsure(at + 1),
           browserDownload: destination === "download",
+          picker: destination === "picker",
         }))}
         unread={unread}
         onToggleRead={loaded && marking.can(mark, "Owner") ? () => void marking.send(mark, "Owner") : undefined}
@@ -346,6 +347,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         outcome={outcomeOf(state.file) ?? "review"}
         preview={preview}
         browserDownload={destination === "download"}
+        picker={destination === "picker"}
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
         onSave={file && destination !== "unavailable" && canSaveAttachment(file) && can(saveReviewed) ? () => void send(saveReviewed) : undefined}
         saveOutcome={state.handling === "Opening" ? outcomeOf(state.keep) : undefined}

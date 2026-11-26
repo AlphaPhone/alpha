@@ -219,23 +219,19 @@ describe("observation.chatHeight", () => {
       return shell();
     };
 
-    // Full at Home: "go home" was answered and nothing moved; now Home shows.
     await setShell(alpha, undefined, "Full");
     expect(await navigating("go home", "home", 2)).toMatchObject({ trail: [], drawer: false, assistant: "Bar" });
     expect(metaAt(world, 1)?.observation).toMatchObject({ view: "home", chatHeight: "full" });
 
-    // A sheet over Home asked for Home lowers too.
     await setShell(alpha, undefined, "Sheet");
     expect(await navigating("go home", "home", 3)).toMatchObject({ trail: [], assistant: "Bar" });
     expect(metaAt(world, 2)?.observation).toMatchObject({ view: "home", chatHeight: "sheet" });
 
-    // A sheet over Calendar asked for Calendar lowers; Full over Calendar asked for Notes opens Notes with Ask Alpha lowered.
     await setShell(alpha, "Calendar", "Sheet");
     expect(await navigating("show my calendar", "calendar", 4)).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
     await setShell(alpha, "Calendar", "Full");
     expect(await navigating("open notes", "notes", 5)).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Bar" });
 
-    // Not overshooting: a sheet stays raised when the view it opens is in sight above it, as in v119.
     await setShell(alpha, "Calendar", "Sheet");
     expect(await navigating("open notes", "notes", 6)).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Sheet" });
     await setShell(alpha, "Calendar", "Sheet");
