@@ -40,7 +40,7 @@ type Pdf = { page: int, pages: int, drawing: R::Read }
 type MessageView = {
   account: int, message: int, thread: int, position: int, body: R::Read, fromPhone: bool, fault: Fault, revision: int,
   remote: bool, images: bool, link: int, warning: bool,
-  attachment: int, handling: Handling, file: A::Attempt, keep: A::Attempt, attempts: int, unsure: List[Held], pdf: Pdf,
+  attachment: int, handling: Handling, file: A::Attempt, keep: A::Attempt, attempts: int, unsure: List[Held], cancelled: int, pdf: Pdf,
 }
 
 type Effect =
@@ -58,7 +58,7 @@ pure val emptyPdf: Pdf = { page: 0, pages: 0, drawing: R::unread }
 pure val initial: MessageView = {
   account: 0, message: 0, thread: 0, position: 0, body: R::unread, fromPhone: false, fault: Fine, revision: 0,
   remote: false, images: false, link: 0, warning: false,
-  attachment: 0, handling: Opening, file: A::plan(0), keep: A::plan(0), attempts: 0, unsure: List(), pdf: emptyPdf,
+  attachment: 0, handling: Opening, file: A::plan(0), keep: A::plan(0), attempts: 0, unsure: List(), cancelled: 0, pdf: emptyPdf,
 }
 
 pure val accountValues = Set(0, 1, 2)
@@ -433,19 +433,26 @@ Android saves to a destination the owner picks. A browser with Files saves
 a copy there. Both confirm success only after reading back the same bytes.
 A browser download cannot confirm what was saved.
 
-```quint
-pure def canAttachmentHandled(s: MessageView, attempt: int, done: bool, known: bool, pages: int): bool =
-  (A::canConclude(s.file, attempt) and (pages == 0 or (pages > 0 and done and known and s.handling == Opening)))
-    or (A::canConclude(s.keep, attempt) and pages == 0)
+As in live v119, an owner who backs out of the Android picker has
+cancelled the save: nothing was written, the save is refused under its own
+attempt number, the review says the save was cancelled, and Save is offered
+again. `cancelled` names the save attempt whose last answer was that.
 
-pure def attachmentHandled(s: MessageView, attempt: int, done: bool, known: bool, pages: int): MessageView =
+```quint
+pure def canAttachmentHandled(s: MessageView, attempt: int, done: bool, known: bool, pages: int, cancelled: bool): bool =
+  ((A::canConclude(s.file, attempt) and (pages == 0 or (pages > 0 and done and known and s.handling == Opening)))
+    or (A::canConclude(s.keep, attempt) and pages == 0))
+    and (cancelled implies (not(done) and known and pages == 0 and (A::canConclude(s.keep, attempt) or s.handling == Saving)))
+
+pure def attachmentHandled(s: MessageView, attempt: int, done: bool, known: bool, pages: int, cancelled: bool): MessageView =
   val keep = A::conclude(s.keep, done, known)
   val file = A::conclude(s.file, done, known)
+  val cancel = if (cancelled) attempt else if (s.cancelled == attempt) 0 else s.cancelled
   if (A::canConclude(s.keep, attempt))
-    { ...s, keep: keep, unsure: if (keep.outcome == A::Unknown) remembered(s.unsure, heldOf(s)) else s.unsure }
+    { ...s, keep: keep, cancelled: cancel, unsure: if (keep.outcome == A::Unknown) remembered(s.unsure, heldOf(s)) else s.unsure }
   else
     {
-      ...s, file: file,
+      ...s, file: file, cancelled: cancel,
       unsure:
         if (file.outcome == A::Unknown and s.handling == Saving) remembered(s.unsure, heldOf(s))
         else s.unsure,
@@ -548,7 +555,7 @@ pure def stepNothingRunsOnItsOwn(before: MessageView, via: str, after: MessageVi
   })
 ```
 
-### Images can be shown, a link can be under review with a warning, a save can end unknown and stay so after closing
+### Images can be shown, a link can be under review with a warning, a save can end unknown and stay so after closing, or be cancelled and offered again
 
 ```quint
 pure def sometimesImagesAreShown(s: MessageView): bool = imagesLoad(s) and s.images
@@ -563,6 +570,11 @@ pure def sometimesASaveStaysUnsureAfterClosing(s: MessageView): bool = s.unsure.
 
 pure def sometimesAnAttachmentOpened(s: MessageView): bool =
   s.file.outcome == A::Confirmed and s.handling == Opening
+
+pure def sometimesASaveIsCancelledAndOfferedAgain(s: MessageView): bool =
+  s.attachment != 0 and s.cancelled != 0
+    and ((s.handling == Opening and s.keep.id == s.cancelled and A::canRecord(s.keep))
+      or (s.handling == Saving and s.file.id == s.cancelled and A::canRecord(s.file)))
 ```
 
 ## Story: Ask Alpha about a message

@@ -112,7 +112,7 @@ effect function render(blob: Blob, page: number) {
 /** Carries out exactly the use confirmed by the owner, while its account, reader ticket and provider revision agree. */
 export effect function handleAttachment(request: Request): Message.Event!!(Cloud | Mail | Inbox.Machine | Message.Machine | AttachmentPreviews | InboxAttachmentFiles | Shell) {
   const { attempt, handling } = request
-  const refused = { type: "attachmentHandled", attempt, done: false, known: true, pages: 0 } as const
+  const refused = { type: "attachmentHandled", attempt, done: false, known: true, pages: 0, cancelled: false } as const
   const owner = try custody(request, "Sent")
   if (owner === undefined) return refused
   const client = provider(try Cloud)
@@ -153,7 +153,7 @@ export effect function handleAttachment(request: Request): Message.Event!!(Cloud
   const saved = client.gmailOpaqueAttachment(grant, id, part.partId, history) catch () => undefined
   if (saved === undefined || !matches(part, saved) || !(try current)) return refused
   const outcome = try destination.save(attempt, saved)
-  return { ...refused, done: outcome === "saved", known: outcome !== "unknown" }
+  return { ...refused, done: outcome === "saved", known: outcome !== "unknown", cancelled: outcome === "cancelled" }
 }
 
 // spec/app/inbox/message.md, "A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review"
