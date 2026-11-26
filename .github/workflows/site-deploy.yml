@@ -10,6 +10,7 @@ on:
     paths:
       - apps/site/**
       - spec/site/**
+      - packages/deployment/**
       - packages/design-system/**
       - packages/ui/**
       - vibestack/**
