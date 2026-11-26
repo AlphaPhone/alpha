@@ -134,6 +134,7 @@ describe("Messages on an Alpha image", () => {
     await press("Maya Chen");
     await ready(alpha.runtime, Composer, "Two SIMs loaded", (state) => state.thread > 0 && state.sims === 2 && state.simInfo.grant === "Granted");
     await fill("Text Maya", "Use the reviewed line");
+    await ready(alpha.runtime, Composer, "Draft kept", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
     await press("Travel");
 
     const replacement = { ...second, id: 9 };
