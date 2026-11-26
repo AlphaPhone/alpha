@@ -95,6 +95,7 @@ describe("Contacts on an Alpha image", () => {
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Messages" && state.assistant === "Sheet");
     await enabled("Return to Contacts");
+    expect(button("Return to Contacts")?.closest('section[aria-label="Ask Alpha"]')).toBeInstanceOf(HTMLElement);
     await press("Return to Contacts");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts" && state.assistant === "Sheet");
     // spec/app/contacts/index.md, "Leaving Contacts forgets the rows and the open contact, and keeps a form the owner was filling in"
