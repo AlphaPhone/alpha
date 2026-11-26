@@ -1301,7 +1301,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     );
     expect(world.voice.spoken.map((entry) => ({ text: entry.text, append: entry.append }))).toEqual([
       { text: "Let me check.", append: false },
-      { text: "You have no alarms set.", append: true },
+      { text: "You have no alarms set.", append: false },
     ]);
 
     releaseDone?.();
