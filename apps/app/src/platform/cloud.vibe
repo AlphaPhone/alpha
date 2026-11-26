@@ -115,7 +115,7 @@ function typed(fetch: typeof globalThis.fetch): CloudClient {
   return createCloudClient({ baseUrl: placeholder, credential: () => undefined, fetch })
 }
 
-/** fetch over `direct`, for eliza's client: the same path, query, headers and body, sent through the platform's `HttpClient`. */
+/** fetch over `direct`, for eliza's client: the same path, query, headers and body, sent through the platform's `HttpClient`. Reads a refusal's whole body while preserving status on bodyless refusals. */
 function fetching(direct: Wired): typeof globalThis.fetch {
   return (input, init) => {
     const { url, method, headers, body, signal } = asked(input, init)
@@ -223,7 +223,7 @@ function plugged(relay: Relay, wifi: WiFi.Shape): Omit<Account, "client" | "clie
       when Refused: throw cause;
       default: throw new Unreachable({ cause });
     }
-    if (!replied(reply.status)) throw refusal(reply.status, reply.retryAfter)
+    if (!replied(reply.status)) throw refusal(reply.status, reply.retryAfter, undefined, new TextDecoder().decode(reply.body))
     return try parsed(new TextDecoder().decode(reply.body))
   }
   return {

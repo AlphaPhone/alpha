@@ -22,6 +22,7 @@ import { type Incoming, handOver } from "../inbox/adding.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { adopt, keptAt } from "../platform/adoption.vibe"
+import { earlierCleared } from "../../gen/app__platform__adoption.effect.vibe"
 import { Documents, previewUrl } from "../platform/documents.vibe"
 import { type Files, called } from "../platform/files.vibe"
 import { type Job, answer, following, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
@@ -158,13 +159,26 @@ module kept {
       const rows = found.flatMap((row): Earlier[] => typeof row?.selectionId === "string" && /^[A-Za-z0-9:._/-]{1,100}$/.test(row.selectionId) && row.kind === "selected"
         && row.status === "ready" && typeof row.name === "string" && typeof row.mimeType === "string" && Number.isFinite(row.openedAt)
         ? [{ selection: row.selectionId, name: row.name, mimeType: row.mimeType, at: Number(row.openedAt) }] : [])
-      return rows.sort((a, b) => a.at - b.at).slice(-most)
+      const newest = rows.sort((a, b) => a.at - b.at).filter((row, at, all) => !all.slice(at + 1).some((later) => later.selection === row.selection))
+      return newest.slice(-most)
     } catch {
       return []
     }
   }
+
+  /** Every selection the earlier Alpha's Recent and open document name, held with access or not. @throws {never} */
+  export function earlierHeld(raw: string, open: string | undefined): string[] {
+    const selection = /^[A-Za-z0-9:._/-]{1,100}$/
+    try {
+      const found: unknown = JSON.parse(raw)
+      const named = Array.isArray(found) ? found.flatMap((row): string[] => typeof row?.selectionId === "string" && selection.test(row.selectionId) ? [row.selectionId] : []) : []
+      return [...new Set([...named, ...(open !== undefined && selection.test(open) ? [open] : [])])]
+    } catch {
+      return open !== undefined && selection.test(open) ? [open] : []
+    }
+  }
 }
-import { base64, earlierOf, grantsOf, namesOf, pageImage, textFromBase64, upgradePreview } from kept
+import { base64, earlierHeld, earlierOf, grantsOf, namesOf, pageImage, textFromBase64, upgradePreview } from kept
 
 /**
  * The documents Recent holds access to, each by its grant's number, kept across restarts with what the owner calls
@@ -914,8 +928,19 @@ const adopting = started(effect {
     },
     clear: () => Effect.void,
   }
-  try adopt(try keptAt("alpha.files.recent.v1"), current, (raw: string) => { const rows = earlierOf(raw, Recent.limit); return rows.length === 0 ? Option.none() : Option.some(rows) })
-  try ignore((try keptAt("alpha.files.open.v1")).clear())
+  const earlier = try keptAt("alpha.files.recent.v1")
+  const open = try keptAt("alpha.files.open.v1")
+  const raw = earlier.read() catch () => Option.none<string>()
+  const wasOpen = open.read() catch () => Option.none<string>()
+  const adoption = try adopt(earlier, current, (value: string) => { const rows = earlierOf(value, Recent.limit); return rows.length === 0 ? Option.none() : Option.some(rows) })
+  if (Option.isSome(raw) && earlierCleared(adoption)) {
+    const kept = new Set(earlierOf(raw.value, Recent.limit).map((row) => row.selection))
+    const docs = documents() catch () => undefined
+    for (const selection of earlierHeld(raw.value, Option.getOrUndefined(wasOpen))) {
+      if (docs !== undefined && !kept.has(selection)) try ignore(tryPromise(() => docs.forget(selection as SelectionId)))
+    }
+  }
+  try ignore(open.clear())
 }, "adopting")
 
 /** The viewer and Recent, kept across restarts, over the documents the phone holds for Alpha. */

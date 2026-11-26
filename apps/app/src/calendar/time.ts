@@ -1,4 +1,4 @@
-// spec/app/calendar/index.md, "The calendar holds its layout, today and the day it is anchored to, what each source last read and whether the phone's read was cut short, the owner it reads for and the calendars hidden, the reminders it was told of, an open event, one overlay, and whether it is in front or a write is under way"; spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"
+// spec/app/calendar/index.md, "The calendar holds its layout, today and the day it is anchored to, what each source last read and whether that read was cut short, the owner it reads for and the calendars hidden, the reminders it was told of, an open event and the phone's inspection of it, one overlay, the editor's form and the delete review over it, and whether it is in front, covered or a write is under way"; spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"
 import { windowFirstMonth, windowLastMonth } from "../../gen/app__calendar__presentation.ts";
 import type { WallTime } from "../../gen/app__calendar__writing.ts";
 
@@ -114,4 +114,28 @@ export function plainHttps(url: string): boolean {
 /** Open `url` outside Alpha, where it is a plain HTTPS address without credentials; whether it was handed on. @throws {never} */
 export function openLink(url: string): boolean {
   return plainHttps(url) && globalThis.open?.(new URL(url).href, "_blank", "noopener") !== undefined;
+}
+
+/** The local minutes since midnight of `ms`. @throws {never} */
+export function minutesOf(ms: number): number {
+  const at = new Date(ms);
+  return at.getHours() * 60 + at.getMinutes();
+}
+
+/** The instant civil `day` reads `minutes` past midnight on the phone's clock. @throws {never} */
+export function wallTime(day: number, minutes: number): number {
+  return wallDateTime(day, Math.floor(minutes / 60), minutes % 60);
+}
+
+// spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"
+/** Whether `minutes` past midnight of civil `day` exists on the phone's clock, is skipped by a clock change, or comes twice. @throws {never} */
+export function wallOf(day: number, minutes: number): WallTime {
+  return localWallTime(day, Math.floor(minutes / 60), minutes % 60).kind;
+}
+
+// spec/app/calendar/writing.md, "An existing event whose timing cannot be shown as a wall-clock span keeps its original time"
+/** The minutes between two instants as the phone's clock shows them, which a clock change can make zero or less. @throws {never} */
+export function wallSpan(begin: number, end: number): number {
+  const wall = (ms: number) => { const at = new Date(ms); return Date.UTC(at.getFullYear(), at.getMonth(), at.getDate(), at.getHours(), at.getMinutes()); };
+  return Math.round((wall(end) - wall(begin)) / 60_000);
 }

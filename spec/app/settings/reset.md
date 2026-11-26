@@ -8,6 +8,10 @@ for the cloud, and erases. Alpha starts it, says how it went, and never
 says data was erased that the phone did not confirm. The row sits at the
 foot of General, on the phone only ([Settings](./index.md)). While a reset
 is pending, the startup area shows its recovery screen in place of Alpha.
+The phone's erase removes every file Alpha keeps, the earlier agent's
+store moved aside to `files/agent-legacy` among them
+([adoption](../platform/adoption.md)). Settings offers no backup, import or
+export of the owner's data: erasing is the one thing it does with all of it.
 
 ## Story: Erase all data
 

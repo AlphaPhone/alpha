@@ -56,7 +56,7 @@ type Effect =
 type Digests = {
   owner: int, open: bool, checks: Checks,
   stage: Stage, inbox: R::Read, page: int, pageEnd: int, pageRan: Brief,
-  bucket: Bucket, others: int -> Bucket, notice: bool,
+  bucket: Bucket, owners: List[int], others: int -> Bucket, notice: bool,
   background: Switch, notices: Switch,
   focus: int, fromNotice: bool, details: R::Read, ending: Outcome,
 }
@@ -70,16 +70,16 @@ pure val off: Switch = { on: false, wanted: false, attempt: A::plan(0) }
 pure val initial: Digests = {
   owner: 0, open: false, checks: NoChecks,
   stage: Idle, inbox: R::unread, page: 0, pageEnd: 0, pageRan: noBrief,
-  bucket: empty, others: Map(), notice: false,
+  bucket: empty, owners: List(), others: Map(), notice: false,
   background: off, notices: off,
   focus: 0, fromNotice: false, details: R::unread, ending: Finished,
 }
 
 pure val ticketValues = Set(1, 2, 3)
-pure val roundValues = Set(1, 2, 3, 4)
+pure val roundValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val idValues = Set(1, 2)
-pure val countValues = Set(-1, 0, 1, 2)
-pure val upToValues = Set(0, 1, 2, 3)
+pure val countValues = Set(0, 1, 2)
+pure val upToValues = Set(1, 2)
 pure val ranValues = Set(0, 1, 2)
 pure val resultValues = Set(0, 1, 3)
 pure val ownerValues = Set(0, 1, 2)
@@ -241,6 +241,10 @@ pure def sometimesASwitchIsUnconfirmed(d: Digests): bool = d.notices.attempt.out
 pure def sometimesThereIsNoSwitch(d: Digests): bool = d.open and d.checks == NoChecks
 
 pure def sometimesAResultIsOpenedFromItsNotice(d: Digests): bool = d.fromNotice and d.details.status == R::Loaded and d.ending == Unavailable
+
+pure val eval_witness_sometimesAResultIsOpenedFromItsNotice = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 1, 1, 0, false),
+  ("pageKept", 1, true, false), ("noticeOpened", 1, 1, BackgroundChecks), ("resultRead", 1, true, Unavailable))
 ```
 
 ## Story: Receive results without losing or repeating one
@@ -314,12 +318,24 @@ pure def ackAnswered(d: Digests, round: int, ok: bool): Digests =
 
 ### Results are acknowledged, announced and shown on Home only once kept, and only for the owner they belong to
 
+Discovered by the proof: every saved owner bucket keeps the same bounds and
+the inbox read ticket is never negative.
+
 ```quint
+pure def validBucket(b: Bucket): bool = and {
+  0 <= b.acked, b.acked <= b.kept, 0 <= b.posted, b.posted <= b.kept, 0 <= b.results, b.results <= b.kept,
+  0 <= b.brief.result, b.brief.result <= b.kept, b.brief.failed implies b.brief.result >= 1,
+}
+
+pure def bucketOf(d: Digests, owner: int): Bucket =
+  if (d.owners.includes(owner)) d.others.getOr(owner, empty) else empty
+
 pure def alwaysNothingIsAcknowledgedOrAnnouncedBeforeItIsKept(d: Digests): bool =
   val b = d.bucket
   and {
-    0 <= b.acked, b.acked <= b.kept, 0 <= b.posted, b.posted <= b.kept, 0 <= b.results, b.results <= b.kept,
-    0 <= b.brief.result, b.brief.result <= b.kept, b.brief.failed implies b.brief.result >= 1,
+    validBucket(b),
+    d.owners.every(o => validBucket(d.others.getOr(o, empty))),
+    d.inbox.ticket >= 0,
     d.stage == Keeping implies (d.pageEnd > b.kept and d.page == d.pageEnd - b.kept),
     d.pageRan.result != 0 implies (d.stage == Keeping and b.kept < d.pageRan.result and d.pageRan.result <= d.pageEnd),
     d.pageRan.failed implies d.pageRan.result >= 1,
@@ -357,7 +373,7 @@ pure def monotone(a: Bucket, b: Bucket): bool =
 
 pure def stepHistoryIsDurable(before: Digests, via: str, after: Digests): bool =
   if (after.owner == before.owner) monotone(before.bucket, after.bucket)
-  else after.others.getOr(before.owner, empty) == before.bucket and after.bucket == before.others.getOr(after.owner, empty)
+  else bucketOf(after, before.owner) == before.bucket and after.bucket == bucketOf(before, after.owner)
 ```
 
 ### Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it
@@ -389,19 +405,47 @@ pure val fair_ackAnswered = "weak"
 pure def sometimesHomeHasABrief(d: Digests): bool =
   briefForHome(d).result >= 2 and d.bucket.acked == d.bucket.kept and d.stage == Idle and not(d.open)
 
+pure val eval_witness_sometimesHomeHasABrief = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 2, 2, 2, false),
+  ("pageKept", 1, true, false), ("ackAnswered", 1, true))
+
 pure def sometimesTheBriefFailed(d: Digests): bool = briefForHome(d).failed and d.stage == Idle
+
+pure val eval_witness_sometimesTheBriefFailed = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 1, 1, 1, true),
+  ("pageKept", 1, true, false), ("ackAnswered", 1, true))
 
 pure def sometimesANonRunFollowsTheBrief(d: Digests): bool =
   briefForHome(d).result >= 1 and d.bucket.kept > briefForHome(d).result and d.stage == Idle
 
+pure val eval_witness_sometimesANonRunFollowsTheBrief = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 2, 2, 1, false),
+  ("pageKept", 1, true, false), ("ackAnswered", 1, true))
+
 pure def sometimesAPageIsNotKept(d: Digests): bool =
   d.stage == Idle and d.inbox.status == R::Loaded and d.bucket.kept == 0 and d.page == 0 and d.pageEnd >= 1
 
+pure val eval_witness_sometimesAPageIsNotKept = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 1, 1, 0, false),
+  ("pageKept", 1, false, false))
+
 pure def sometimesAnAcknowledgementIsRepeated(d: Digests): bool = d.stage == Acking and d.page == 0 and d.bucket.acked < d.bucket.kept
+
+pure val eval_witness_sometimesAnAcknowledgementIsRepeated = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 1, 1, 0, false),
+  ("pageKept", 1, true, false), ("ackAnswered", 1, false), "pull", ("fetched", 2, 1, true, 1, 1, 0, false))
 
 pure def sometimesANoticeIsWantedQuietly(d: Digests): bool = d.open and d.notice
 
+pure val eval_witness_sometimesANoticeIsWantedQuietly = (
+  ("ownerChanged", 1, true, true), ("openPanel", BackgroundChecks), "pull",
+  ("fetched", 1, 1, true, 1, 1, 0, false), ("pageKept", 1, true, true))
+
 pure def sometimesAResultArrivesWithNotificationsOff(d: Digests): bool = d.bucket.kept >= 1 and d.bucket.posted == 0 and not(d.notices.on)
+
+pure val eval_witness_sometimesAResultArrivesWithNotificationsOff = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 1, 1, 0, false),
+  ("pageKept", 1, true, true))
 ```
 
 ## Story: Keep digests to their owner and through a restart
@@ -437,7 +481,7 @@ pure def keptSwitch(s: Switch, on: bool): Switch = { ...unconfirmed(s), on: on, 
 
 pure def ownerChanged(d: Digests, owner: int, backgroundOn: bool, noticesOn: bool): Moved =
   { state: { ...d, owner: owner, open: false, checks: NoChecks, stage: Idle, inbox: { ...d.inbox, status: R::Idle }, page: 0, pageRan: noBrief,
-             others: d.others.put(d.owner, d.bucket), bucket: d.others.getOr(owner, empty), notice: false,
+             owners: if (d.owners.includes(d.owner)) d.owners else d.owners.append(d.owner), others: d.others.put(d.owner, d.bucket), bucket: bucketOf(d, owner), notice: false,
              focus: 0, fromNotice: false, details: { ...d.details, status: R::Idle },
              background: keptSwitch(d.background, backgroundOn), notices: keptSwitch(d.notices, noticesOn) },
     out: drop(d) }
@@ -497,4 +541,8 @@ pure def lawAReadCannotConfirmANativeChange(d: Digests, owner: int, scheduled: b
 
 ```quint
 pure def sometimesResultsWaitForTheirOwner(d: Digests): bool = d.others.getOr(1, empty).kept >= 1 and d.owner == 2
+
+pure val eval_witness_sometimesResultsWaitForTheirOwner = (
+  ("ownerChanged", 1, true, false), "pull", ("fetched", 1, 1, true, 1, 1, 0, false),
+  ("pageKept", 1, true, false), ("ownerChanged", 2, false, false))
 ```

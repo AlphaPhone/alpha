@@ -1,6 +1,7 @@
 // spec/app/platform/adoption.md, "Story: Keep what the earlier Alpha kept"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Adoption, adoptionOf, earlierCleared } from "../../gen/app__platform__adoption.effect.vibe"
+import { registered } from "./device.vibe"
 import { type Slot, Vault } from "./vault.vibe"
 
 module earlier {
@@ -67,6 +68,7 @@ export function earlierSlot(slot: string): Place<string> {
   let seen: string | undefined
   return {
     effect read() {
+      if (!registered("AlphaConnection")) throw new EarlierOnly({ place: slot })
       const said = try tryPromise(() => connection().secureRead({ slot }))
       seen = typeof said.value === "string" ? said.value : undefined
       return seen === undefined ? Option.none() : Option.some(seen)
@@ -74,7 +76,7 @@ export function earlierSlot(slot: string): Place<string> {
     write: () => Effect.fail(new EarlierOnly({ place: slot })),
     effect clear() {
       const expectedValue = seen
-      if (expectedValue === undefined) return
+      if (expectedValue === undefined || !registered("AlphaConnection")) return
       try tryPromise(() => connection().secureCompareExchange({ slot, expectedValue, value: null }))
     },
   }

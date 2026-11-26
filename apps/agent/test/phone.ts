@@ -5,7 +5,7 @@ import net from "node:net";
 import path from "node:path";
 import { Effect } from "effect";
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent";
-import { type Cloud, type DeviceKey, packPrepared, said, scratch, startCloud } from "@repo/eliza-harness";
+import { type Cloud, type DeviceKey, packCheckout, said, scratch, startCloud } from "@repo/eliza-harness";
 
 /** The owner every journey of the pack signs in. */
 const owner = "owner@alpha.test";
@@ -37,6 +37,9 @@ export interface Listed {
 /** The policy the build wrote beside the bundle. */
 export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } };
 
+/** The host file the build wrote, as eliza's agent service reads it. */
+export const hostFile = () => read("host.json") as { google: { gmailChanges: boolean; calendarEdits: boolean }; views: { id: string; label: string; path: string; aliases?: string[] }[] };
+
 /** The routes the host file admits for the page. */
 export const listed = (channel: "routes" | "nativeRoutes" = "routes") => read("host.json")[channel] as Listed[];
 
@@ -46,12 +49,13 @@ export const manifest = () => JSON.parse(fs.readFileSync(path.join(pack, "bundle
 };
 
 /**
- * The workflow worker the bundle pinned, where the pack's clone built it: the phone stages the same executable beside
- * the bundle and names it in the launch (`spec/agent/index.md`, "The launch names the pack's pinned workflow worker").
+ * The workflow worker the bundle pinned, where the pack's clone built it, the clone prepared where a build cache
+ * restored the pack without it: the phone stages the same executable beside the bundle and names it in the launch
+ * (`spec/agent/index.md`, "The launch names the pack's pinned workflow worker").
  */
-export function pinnedWorker() {
+export async function pinnedWorker() {
   const plugins = (read("policy.json") as { plugins: { load: string[] } }).plugins.load.filter((name) => name.startsWith("@elizaos/plugin-"));
-  const clone = packPrepared(plugins);
+  const clone = await packCheckout(plugins);
   const runtimeDir = path.join(clone.packages.get("@elizaos/plugin-workflow") ?? "", "dist");
   const { executable } = JSON.parse(fs.readFileSync(path.join(runtimeDir, "workflow-worker.json"), "utf8")) as { executable: string };
   return { runtimeDir, executable, sha256: manifest().workflowWorkerSha256 ?? "" };
@@ -62,7 +66,7 @@ export function pinnedWorker() {
  * (`spec/os/agentService/config.md`, "The launch carries the active key's account"), against the run's own cloud: its
  * origin and the model it offers stand where a hosted deployment's would. `extra` adds the keys the phone adds: the pinned workflow worker, unless a journey names another.
  */
-export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, extra: Record<string, unknown> = { workflowWorker: pinnedWorker() }) {
+export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, extra?: Record<string, unknown>) {
   const file = path.join(state, "launch.json");
   const host = read("host.json");
   const policy = read("policy.json") as { actions: { allowed: string[] }; plugins: { load: string[] } };
@@ -72,7 +76,7 @@ export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, ext
   fs.writeFileSync(file, JSON.stringify({
     schema: 1, character: read("character.json"), policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins }, model,
     account: { userId: key.accountId, organizationId: key.organizationId }, embeddings: host.embeddings, persistMemory: host.persistMemory,
-    callerRole: host.callerRole, views: host.views, privacy: host.privacy, google: host.google, ...extra,
+    callerRole: host.callerRole, views: host.views, privacy: host.privacy, google: host.google, ...(extra ?? { workflowWorker: await pinnedWorker() }),
   }), { mode: 0o600 });
   return file;
 }
@@ -180,6 +184,6 @@ export async function ready(running: Running, within = 120_000) {
     if (ended !== undefined) throw new Error(`the agent exited with ${ended} before it was ready`);
     if ((await call(running, "GET", "/api/health").catch(() => ({ status: 0 }))).status === 200) return;
     if (Date.now() > deadline) throw new Error("the agent was not ready in time");
-    await Effect.runPromise(Effect.sleep(100));
+    await Effect.runPromise(Effect.sleep("100 millis"));
   }
 }

@@ -4,8 +4,9 @@ import { Camera as CameraIcon, ChevronLeft, MicOff, SwitchCamera, Video, Zap, Za
 import { useCallback, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
-import { maxBytes, maxSeconds } from "../../gen/app__camera__recording.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
+import type { Clock as Reading, Film } from "../../gen/app__camera__recording.ts";
+import { nearLimit, remaining, timer as elapsedClock } from "../../gen/app__camera__recording.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
@@ -52,15 +53,9 @@ function bands(sheet: boolean) {
 const railed = "landscape:right-33";
 const headerButton = cn("relative flex size-13 shrink-0 items-center justify-center rounded-tile text-foreground active:bg-accent disabled:cursor-default", focusRing);
 
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")}`;
+const read = ({ minutes, seconds }: Reading) => `${minutes}:${seconds.toString().padStart(2, "0")}`;
 
-/** The recording timer: the elapsed time, and the time left once a length or size limit is a minute away. */
-function recordingLabel(elapsed: number, bytes: number) {
-  let left = maxSeconds - elapsed;
-  if (elapsed >= 2 && bytes > 0) left = Math.min(left, (maxBytes - bytes) / (bytes / elapsed));
-  left = Math.max(0, left);
-  return left <= 60 ? `${clock(elapsed)} · ${clock(Math.ceil(left))} left` : clock(elapsed);
-}
+const timed = (film: Film) => nearLimit(film) ? `${read(elapsedClock(film))} · ${read(remaining(film))} left` : read(elapsedClock(film));
 
 function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
   state: Visit;
@@ -321,7 +316,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         <span className="flex-1" />
         {inProgress && (
           <span role="timer" aria-label="Recording" className="flex h-7.5 items-center gap-2 rounded-segment bg-background/75 px-3 text-sm font-semibold text-foreground tabular-nums">
-            <span aria-hidden className="size-1.75 rounded-full bg-record motion-safe:animate-blink" />{recordingLabel(state.film.elapsed, state.film.bytes)}
+            <span aria-hidden className="size-1.75 rounded-full bg-record motion-safe:animate-blink" />{timed(state.film)}
           </span>
         )}
         {!inProgress && <button type="button" className={headerButton} aria-label="Switch camera" disabled={!can({ type: "flip" })} onClick={() => fire({ type: "flip" })}><SwitchCamera className="size-5.5" aria-hidden /></button>}

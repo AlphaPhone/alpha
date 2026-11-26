@@ -8,20 +8,20 @@ lemma toggleDay_ensures(a: Automations, day: int)
 {
   if inv(a) && canToggleDay(a, day) {
     var after := toggleDay(a, day);
-    forall x | x in after.days ensures 0 <= x && x <= 6 {
-      if day in a.days {
-        ProofLib.FilterMember((set_x: int) => !((set_x in [day])), a.days, x);
+    forall x | x in after.when.days ensures 0 <= x && x <= 6 {
+      if day in a.when.days {
+        ProofLib.FilterMember((set_x: int) => !((set_x in [day])), a.when.days, x);
       } else {
-        ProofLib.FilterMember((set_x: int) => !((set_x in a.days)), [day], x);
+        ProofLib.FilterMember((set_x: int) => !((set_x in a.when.days)), [day], x);
       }
     }
-    if day in a.days {
-      var other :| other in a.days && other != day;
-      ProofLib.FilterMember((set_x: int) => !((set_x in [day])), a.days, other);
-      assert other in after.days;
+    if day in a.when.days {
+      var other :| other in a.when.days && other != day;
+      ProofLib.FilterMember((set_x: int) => !((set_x in [day])), a.when.days, other);
+      assert other in after.when.days;
     } else {
-      ProofLib.FilterMember((set_x: int) => !((set_x in a.days)), [day], day);
-      assert day in after.days;
+      ProofLib.FilterMember((set_x: int) => !((set_x in a.when.days)), [day], day);
+      assert day in after.when.days;
     }
   }
 }

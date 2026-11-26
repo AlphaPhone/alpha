@@ -9,7 +9,7 @@ name: release
 # the spec does not allow.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
     inputs:
       candidate:
@@ -68,10 +68,13 @@ jobs:
           ELIZAOS_VERSION_CODE: ${{ github.run_number }}
       - name: Build the candidate, mirror it and plan its signing
         working-directory: apps/app
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           private="$RUNNER_TEMP/candidate"
           mkdir -p "$private"
-          pnpm -s release candidate --run "$private/run.json" --number "${{ github.run_number }}" --attempt "${{ github.run_attempt }}" --apk-manifest artifacts/apk-manifest.json
+          pnpm -s release upstream --out "$private/upstream.json"
+          pnpm -s release candidate --run "$private/run.json" --number "${{ github.run_number }}" --attempt "${{ github.run_attempt }}" --apk-manifest artifacts/apk-manifest.json --upstream "$private/upstream.json"
           pnpm -s release mirror --run "$private/run.json" --apk artifacts/launcher-release-unsigned.apk --to "$private"
           pnpm -s release plan --run "$private/run.json" --apk artifacts/launcher-release-unsigned.apk --out "$private/plan.json" | tee "$private/plan-answer.json"
           echo "Signing plan: \`$(node -p 'require(process.argv[1]).planSha256' "$private/plan-answer.json")\`" >> "$GITHUB_STEP_SUMMARY"
@@ -134,5 +137,7 @@ jobs:
         if: always()
         with:
           name: release-ledger
-          path: ${{ runner.temp }}/candidate/run.json
+          path: |
+            ${{ runner.temp }}/candidate/run.json
+            ${{ runner.temp }}/candidate/upstream.json
           retention-days: 90

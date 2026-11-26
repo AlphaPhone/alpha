@@ -7,7 +7,7 @@ export type AssistantQuoteBarProps = Omit<ComponentProps<"div">, "children"> & {
   kind: "quote" | "editing";
   /** The quoted message; the first lines show. */
   text?: string;
-  /** Takes the quote off; a quote can be removed, an edit stays until it is sent. */
+  /** Takes the quote or the editing mark off while keeping whatever is in the field. */
   onRemove?: () => void;
 };
 
@@ -20,7 +20,7 @@ export function AssistantQuoteBar({ kind, text, onRemove, className, ...props }:
     <div className={cn("flex min-h-11 items-center gap-2 rounded-md bg-secondary py-1.5 pl-4 text-caption text-secondary-foreground", onRemove ? "pr-1.5" : "pr-4", className)} {...props}>
       <span className="line-clamp-2 min-w-0 flex-1 break-words">{kind === "quote" ? text : "Editing to send again"}</span>
       {onRemove ? (
-        <button type="button" aria-label="Remove quote" onClick={onRemove} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent")}>
+        <button type="button" aria-label={kind === "quote" ? "Remove quote" : "Stop editing"} onClick={onRemove} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent")}>
           <X aria-hidden className="size-4" />
         </button>
       ) : null}

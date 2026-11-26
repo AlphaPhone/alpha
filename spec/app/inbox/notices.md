@@ -9,6 +9,15 @@ notifications, are the notices area's; a tap comes back here as
 `tapped`, naming the account and message, and opens that message in
 Inbox.
 
+The earlier Alpha checked mail in the background on a native schedule of
+its own, keeping what it watched and where it had read to in the
+encrypted slot `gmail-background:v1`, bound to the cloud key it had. This
+Alpha leaves that slot unread, as [adoption](../platform/adoption.md)
+says, and its check stops with the earlier schedule: after the update,
+watching starts afresh for the account selected in the list, from a
+starting point of its own, so mail that came before that point is not
+noticed.
+
 The shell configures the phone's mail history worker with the grant of the
 account selected in the list and the current owner's cloud identity. The
 worker owns the durable checkpoint, notification permission and exact
@@ -219,6 +228,13 @@ pure def sometimesAFurtherPageIsToRead(s: Notices): bool = s.page != 0 and s.pos
 pure def sometimesEarlierMailWasMissed(s: Notices): bool = s.expired
 
 pure def sometimesWatchingStopped(s: Notices): bool = s.halt == Refused
+
+pure val eval_witness_sometimesWatchingStopped = (
+  ("watch", { account: 1, grant: { read: true, send: false, modify: false } }, 1, true),
+  "poll", ("checked", 1, false, Forbidden, false, 1, 0, Set(), 1),
+  "poll", ("checked", 2, false, Forbidden, false, 1, 0, Set(), 1),
+  "poll", ("checked", 3, false, Forbidden, false, 1, 0, Set(), 1),
+)
 
 pure def sometimesWatchingIsUnauthorized(s: Notices): bool = s.halt == Unauthorized
 

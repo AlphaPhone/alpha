@@ -474,6 +474,48 @@ lemma toggleComplete_ensures(s: Reminders, itemId: int, nextDueDay: int, at: int
   }
 }
 
+lemma adoptReopened_ensures(s: Reminders, itemId: int, dueDay: int, dueMinute: int)
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysDefaultListExists(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysEveryItemWellFormed(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysSelectedItemExists(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysHiddenExactlyWhileDeleteHeld(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysActiveCustomListExists(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysSmartCountsConsistent(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepBackShowsLists(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepLeavesOverview(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepDeleteOnlyOnExpire(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute), []))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepUndoRestoresExactState(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepDeleteListKeepsItemsValid(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepNoSentWriteAfterRestart(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute), []))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepRecurringCompleteAdvancesDue(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+{
+  if inv(s) && canAdoptReopened(s, itemId, dueDay, dueMinute) {
+    ItemsUniqueFromCounts(s.items);
+    var after := adoptReopened(s, itemId, dueDay, dueMinute);
+    assert |after.items| == |s.items|;
+    forall i | 0 <= i < |after.items|
+      ensures after.items[i].id == s.items[i].id && itemWellFormed(after.items[i], after.lists, after.nextItemId)
+    {
+      assert s.items[i] in s.items;
+      if s.items[i].id == itemId {
+        ItemOfUnique(s.items, s.items[i]);
+      }
+    }
+    ItemsCountsFromUnique(after.items);
+    forall id ensures hasItem(after.items, id) == hasItem(s.items, id) {
+      if hasItem(s.items, id) {
+        var j :| 0 <= j < |s.items| && s.items[j].id == id;
+        assert after.items[j] in after.items && after.items[j].id == id;
+      }
+      if hasItem(after.items, id) {
+        var j :| 0 <= j < |after.items| && after.items[j].id == id;
+        assert s.items[j] in s.items && s.items[j].id == id;
+      }
+    }
+    SmartCountsHold(after);
+  }
+}
+
 lemma deleteItem_ensures(s: Reminders, itemId: int, at: int)
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> alwaysDefaultListExists(deleteItem(s, itemId, at).state))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> alwaysEveryItemWellFormed(deleteItem(s, itemId, at).state))

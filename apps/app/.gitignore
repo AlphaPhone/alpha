@@ -19,6 +19,7 @@ artifacts/
 /android/app/src/main/assets/
 /android/app/src/main/res/xml/config.xml
 /android/runtime/
+/android/workflow-worker/
 /android/agent/
 /android/.android-user/
 /android/capacitor-cordova-android-plugins/

@@ -221,7 +221,7 @@ pure def begin(network: bool, v: Voice): Change =
   else if (P::canAsk(v.permission))
     { state: { ...v, network: network, mic: Asking, prompting: true, permission: P::ask(v.permission) }, out: List(AskMicrophone) }
   else
-    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0 },
+    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0, speaker: SpeakerUnknown },
       out: releaseOut(v) }
 
 pure def canStartTalking(v: Voice, now: int): bool =
@@ -290,7 +290,7 @@ pure def answerPrompt(v: Voice, granted: bool): Change =
       { state: { ...base, mic: Opening, engineHeld: true },
         out: holdOut(v).concat(List(Listen({ session: v.session, network: v.network }))) }
      else
-      { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false },
+      { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
         out: releaseOut(v) })
   else if (v.recorder.stage == D::Starting)
     (if (granted) { state: base, out: List(Record({ ticket: v.recorder.ticket })) }
@@ -339,7 +339,7 @@ pure def canMicFailed(v: Voice, session: int): bool = v.mic == Opening and sessi
 
 pure def micFailed(v: Voice, session: int): Change =
   if (v.phase == Starting)
-    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, engineHeld: false, reviewPending: false },
+    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
       out: releaseOut(v) }
   else shutDown(D::NoMicrophone, false, v)
 ```
@@ -576,13 +576,14 @@ pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: V
 ### A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does
 
 Cloud's own code for an account with no plan allowance and no credits
-left decides it, never the owner's words. Nothing of the turn is spoken,
-voice shows no text of its own about it, and it does not listen again:
-the conversation shuts down as Stop shuts it.
+left decides it, never the owner's words — whether Cloud refuses a spoken
+turn or refuses real-time Talk startup or streaming. Nothing of the turn is
+spoken, and voice does not listen again or loop on fallback: the
+conversation shuts down as Stop shuts it.
 
 ```quint
 pure def canRefusedForFunds(v: Voice, session: int, turn: int): bool =
-  (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)
+  talking(v) and v.mic != Asking and not(v.disclosing) and session == v.session and turn == v.turn and not(v.replied)
 
 pure def refusedForFunds(v: Voice, session: int, turn: int): Change = shutDown(D::NoFailure, false, v)
 
@@ -997,7 +998,18 @@ pure def alwaysAClaimBelongsToAnActiveConversation(v: Voice): bool =
 
 pure def sometimesFollowedItsNavigation(v: Voice): bool = v.followed != 0 and talking(v)
 
+pure val eval_witness_sometimesFollowedItsNavigation = (
+  ("startTalking", 0), ("answerPrompt", true), ("micOpened", 1), ("speechHeard", 1),
+  ("turnEnded", 1), ("micClosed", 1), ("agentNavigates", 1, 1, 1, 0), ("navigated", 1, 1, true)
+)
+
 pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phase == Listening and v.followed != 0 and v.mic == On
+
+pure val eval_witness_sometimesFollowedAgentNavigationWhileListening = (
+  ("startTalking", 0), ("answerPrompt", true), ("micOpened", 1), ("speechHeard", 1),
+  ("turnEnded", 1), ("micClosed", 1), ("agentNavigates", 1, 1, 1, 0), ("navigated", 1, 1, true),
+  ("replyEnds", 1, 1, false), ("micOpened", 1)
+)
 ```
 
 ## Story: Choose where my speech goes

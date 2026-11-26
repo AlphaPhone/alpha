@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { workflowSha } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
 import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -834,5 +835,45 @@ const openStepsBuilder = async (alpha: Awaited<ReturnType<typeof open>>["alpha"]
     for (let turn = 0; turn < 20; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
     const after = await alpha.runtime.runPromise(Effect.flatMap(Layers, (m) => m.get()));
     expect(after.steps.includes("view:Workflows")).toBe(false);
+  });
+
+  // spec/app/workflows/builder.md, "Story: Keep the workflow draft I was writing before this version"
+  it('Adopts an earlier Alpha workflow draft once, clears its slot after readback, and never overwrites a kept draft (spec/app/workflows/builder.md, "The previous version\'s draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back")', async () => {
+    const world = scene();
+    world.phone = true;
+    const identity = await Effect.runPromise(workflowSha(["https://device.alpha.invalid", world.notes.ownerIdentity, world.notes.owner]));
+    const slot = `workflow-draft:v1:${identity}`;
+    const earlierSpec = {
+      version: 1,
+      name: "Morning note",
+      description: "",
+      trigger: { kind: "manual" },
+      steps: [{ id: "s1", kind: "Read", operation: "supplied_text", text: "Good morning" }],
+    };
+    world.platform.earlier.set(slot, JSON.stringify({ format: 1, identity, spec: earlierSpec }));
+
+    const first = await open(world, only("home", "view:Workflows", "notice"));
+    await until(first.alpha, home.runtime(first.alpha), Home, (state) => state.tiles.load.status === "Loaded");
+    await press("Workflows");
+    const area = workflows.runtime(first.alpha);
+    await until(first.alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await until(first.alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+    await press("More options");
+    await press(/^Steps/);
+    await until(first.alpha, area, Builder, (state) => state.offer.status === "Loaded" && state.name === earlierSpec.name.length && state.steps.length === 1);
+    expect(world.platform.earlier.has(slot)).toBe(false);
+    world.platform.earlier.set(slot, JSON.stringify({ format: 1, identity, spec: { ...earlierSpec, name: "Another draft" } }));
+    await first.close();
+
+    const { alpha: second } = await open(world, only("home", "view:Workflows", "notice"));
+    const secondArea = workflows.runtime(second);
+    await until(second, secondArea, Listing, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await until(second, secondArea, Listing, (state) => state.place.tag === "ListingAdd");
+    await press("More options");
+    await press(/^Steps/);
+    await until(second, secondArea, Builder, (state) => state.offer.status === "Loaded" && state.name === earlierSpec.name.length && state.steps.length === 1);
+    expect(world.platform.earlier.has(slot)).toBe(true);
   });
 });

@@ -170,10 +170,12 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaHostedDigestDeliveryPlugin.class);
   registerPlugin(AlphaPhotosPermissionsPlugin.class);
   registerPlugin(AlphaResetPlugin.class);
+  registerPlugin(AlphaConnectionPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
   registerPlugin(AlphaCarrierSetupPlugin.class);
   registerPlugin(AlphaCallStatePlugin.class);
+  registerPlugin(AlphaNetworkLocationPlugin.class);
   registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
   boolean image = AlphaImageCapability.verified(this);

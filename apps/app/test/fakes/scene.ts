@@ -19,7 +19,7 @@ import { type PhotosScene, photosScene } from "./photos.ts";
 import type { MailLeaseScene } from "./phone.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { textReviewRoute } from "./text-review.ts";
-import { type UpdateScene, updateScene } from "./update.ts";
+import { type UpdateScene, updateRoutes, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
 import { type SlackScene, type TelegramScene, slackRoutes, slackScene, telegramRoutes, telegramScene } from "./messaging.ts";
@@ -104,6 +104,7 @@ export function services(world: Scene) {
   return {
     agent: answering([
       () => world.residentAvailable ? undefined : new Response(null, { status: 503 }),
+      ...updateRoutes(world.update, () => world.now),
       health,
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
@@ -113,6 +114,10 @@ export function services(world: Scene) {
       ...notesRoutes(world.notes, () => world.now),
       ...workflowRoutes(world.workflows),
       ...remindersRoutes(world.reminders, () => world.now),
+      ...workflowRoutes(world.workflows),
+      ...remindersRoutes(world.reminders, () => world.now),
+      ...(review === undefined ? [] : [textReviewRoute(review, world.notes.ownerIdentity)]),
+      ...notesRoutes(world.notes),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
       ...walletRoutes(world.wallet, () => world.now),

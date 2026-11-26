@@ -18,8 +18,8 @@ lemma CheckedUp(s: Notices, ticket: int, ok: bool, problem: Problem, reset: bool
 }
 
 lemma checked_ensures(s: Notices, ticket: int, ok: bool, problem: Problem, reset: bool, point: int, page: int, messages: seq<int>, now: int)
-  ensures (inv(s) ==> canChecked(s, ticket, ok, reset, point, messages) ==> alwaysWatchingStopsOnlyWhenRefused(checked(s, ticket, ok, problem, reset, point, page, messages, now).state))
   ensures (inv(s) ==> canChecked(s, ticket, ok, reset, point, messages) ==> alwaysWatchingNeedsAnAccount(checked(s, ticket, ok, problem, reset, point, page, messages, now).state))
+  ensures (inv(s) ==> canChecked(s, ticket, ok, reset, point, messages) ==> alwaysWatchingStopsOnlyWhenRefused(checked(s, ticket, ok, problem, reset, point, page, messages, now).state))
   ensures (inv(s) ==> canChecked(s, ticket, ok, reset, point, messages) ==> stepNoNoticeBeforeTheStartingPoint(s, "checked", checked(s, ticket, ok, problem, reset, point, page, messages, now).state, checked(s, ticket, ok, problem, reset, point, page, messages, now).out))
   ensures (inv(s) ==> canChecked(s, ticket, ok, reset, point, messages) ==> stepTheStartingPointMovesBackOnlyOnAReset(s, "checked", checked(s, ticket, ok, problem, reset, point, page, messages, now).state, checked(s, ticket, ok, problem, reset, point, page, messages, now).out))
   ensures (inv(s) ==> canChecked(s, ticket, ok, reset, point, messages) ==> stepThePointWaitsForTheLastPage(s, "checked", checked(s, ticket, ok, problem, reset, point, page, messages, now).state))

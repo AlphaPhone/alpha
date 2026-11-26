@@ -101,15 +101,16 @@ describe("Home on a phone", () => {
     await press("Notes");
     await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
-    // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists": Wallet, which the Sunday demo build's Home did not have, is one of them.
-    await press("Wallet");
-    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 3);
-    await press("Telegram");
-    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 4);
+    // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists": Clock, Reminders, Wallet, Telegram and Slack start in Apps until added to Home.
+    for (const [step, label] of [["Clock", 3], ["Reminders", 4], ["Wallet", 5], ["Telegram", 6]] as const) {
+      await press(step);
+      await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === label);
+    }
     await press("Slack");
     // spec/app/home/index.md, "Add to Home closes once there is nothing left to add"
-    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 5);
-    expect(tiles().slice(-4)).toEqual(["view:Notes", "view:Wallet", "view:Telegram", "view:Slack"]);
+    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 7);
+    const added = ["view:Notes", "view:Clock", "view:Reminders", "view:Wallet", "view:Telegram", "view:Slack"];
+    expect(tiles().slice(-added.length)).toEqual(added);
 
     // spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
     await hardware("back");
@@ -125,13 +126,13 @@ describe("Home on a phone", () => {
     await first.close();
     const second = await open(world, only("home"));
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
-    expect(tiles().slice(-4)).toEqual(["view:Notes", "view:Wallet", "view:Telegram", "view:Slack"]);
+    expect(tiles().slice(-added.length)).toEqual(added);
 
     // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the same saved tiles on an Alpha image that grants contacts show Phone, Messages and Contacts in Home order too.
     await second.close();
     const third = await open({ ...world, image: true }, only("home"));
     await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
-    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes", "view:Wallet", "view:Telegram", "view:Slack"]);
+    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), ...added]);
 
     // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
     await third.close();
@@ -751,8 +752,8 @@ describe("Home on a phone", () => {
     expect([browser.reads, browser.acknowledgements]).toEqual([0, []]);
   });
 
-  // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
-  it("Keep saved installed apps on Home up to date and open them (spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
+  // spec/app/home/apps.md, "Story: Know what is installed"; spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
+  it("Keep saved installed apps on Home up to date and open them (spec/app/home/apps.md, \"Story: Know what is installed\"; spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
     const world = { ...scene(), phone: true };
     localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: "org.fixture.clock/org.fixture.clock.Main" }]));
     const { alpha } = await open(world);
@@ -784,6 +785,17 @@ describe("Home on a phone", () => {
     world.launcher.changed();
     await until(alpha, homes, Home.Machine, (h) => h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main"));
     expect(tiles().at(-1)).toBe("app:org.fixture.clock/org.fixture.clock.Main");
+
+    // spec/app/home/apps.md, "A change seen while Alpha shows is read at once, unless a reading is on its way; seen while Alpha is away, it waits"; spec/app/home/apps.md, "When Alpha comes back to the front, a change that waited is read once"
+    const asked = (await homes.runPromise(Home.Machine.use((h) => h.get()))).installed.read.ticket;
+    await seen(false);
+    world.launcher.apps = world.launcher.apps.slice(1);
+    world.launcher.changed();
+    await until(alpha, homes, Home.Machine, (h) => h.installed.pending);
+    expect((await homes.runPromise(Home.Machine.use((h) => h.get()))).installed.read.ticket).toBe(asked);
+    await seen(true);
+    await until(alpha, homes, Home.Machine, (h) => !h.installed.pending && h.installed.read.status === "Loaded" && !h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main"));
+    expect((await homes.runPromise(Home.Machine.use((h) => h.get()))).installed.read.ticket).toBe(asked + 1);
   });
 
   // spec/app/home/index.md, "Story: Pull down for notifications"
@@ -815,6 +827,7 @@ describe("Home on a phone", () => {
 
     // spec/app/home/index.md, "Alpha is told when it becomes, or stops being, the phone's launcher"
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: false, holders: ["com.android.launcher3"] } : role);
+    await seen(false);
     await seen(true);
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsApp");
     await pulled();

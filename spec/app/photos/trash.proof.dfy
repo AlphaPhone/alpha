@@ -1,6 +1,3 @@
-// spec/app/photos/trash.md: sending a recovery's request takes items still to send, and
-// toggling keeps the selection within what is listed.
-
 lemma Joined(xs: seq<int>, ys: seq<int>)
   ensures forall x :: x in xs + ProofLib.Filter((set_x: int) => !((set_x in xs)), ys) <==> (x in xs || x in ys)
 {

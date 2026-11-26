@@ -52,6 +52,7 @@ type Effect =
   | Ended({ draft: int, attempt: int, outcome: A::Outcome, revision: int, gmail: int })
   | Changed({ account: int, known: bool })
   | OpenGoogleAccess({ account: int })
+  | ReadRecord({ attempt: int, kind: Kind, account: int })
 type Done = { state: Operations, out: List[Effect] }
 
 pure val window = 10000
@@ -382,11 +383,16 @@ pure def alwaysAnUnseenUnknownIsOfThisSession(s: Operations): bool =
 ### A draft already sent, or whose send is unknown, is never sent again without the owner choosing to
 
 Discovered by the proof: the owner's choice holds for the whole
-operation, through a refusal and a review again.
+operation, through a refusal and a review again. So does a draft the
+earlier Alpha sent, or whose send it could not confirm.
 
 ```quint
 pure def alwaysASendAgainIsChosen(s: Operations): bool =
   (s.kind == Send and s.repeat) implies s.again
+
+pure def lawAnEarlierSendIsSentAgainOnlyByChoice(access: Access, before: L::Before): bool =
+  before != L::NotSent implies
+    not(canPrepare(initial, Send, access, L::earlier(1, 0, L::Fresh, 1, 1, 0, 0, 0, false, 0, before), true, false, Owner))
 ```
 
 ### Only the operation in flight tells how it ended, once: the draft is cleared only after a fresh confirmation of its send, and a stopped operation tells its draft nothing went out
@@ -429,6 +435,50 @@ pure def sometimesASendWaitsForARecipient(s: Operations): bool = s.kind == Send 
 
 pure def sometimesASentDraftIsSentAgainKnowingly(s: Operations): bool =
   s.kind == Send and s.again and s.repeat and s.review.showing
+```
+
+### What the earlier Alpha sent, or never heard the answer to, is taken in as the operation in flight, is never sent again, and ends as Gmail's record of it says
+
+The earlier Alpha kept the one operation of each account on the phone.
+When the accounts are read and nothing is under way here, a send or a
+change to a Gmail draft it had sent, or whose outcome it never learned,
+is taken in as the operation in flight of its account and kind, for a
+draft numbered below 0, so that it is never one of this composer's, and
+every other operation waits for it. It is never requested again: Gmail's
+record of it is read once, under the earlier Alpha's own request, and
+that answer ends it as any answer does, so an outcome still unknown is
+told until the owner has seen it. One the earlier Alpha was still
+preparing or reviewing never left the phone, and is cleared instead of
+taken in; so is one already settled. The earlier record is cleared only
+once this one is kept.
+
+```quint
+pure def canEarlierFound(s: Operations, kind: Kind, account: int, draft: int, by: Actor): bool =
+  by == World and free(s) and not(s.review.showing) and account != 0 and ofDraft(kind) and draft < 0
+
+pure def earlierFound(s: Operations, kind: Kind, account: int, draft: int, by: Actor): Done =
+  val taken = A::dispatch(A::record(A::plan(s.attempts + 1)))
+  {
+    state: {
+      ...s, of: s.session, kind: kind, account: account, draft: draft, messages: Set(), gmail: 0, history: 0,
+      review: V::unreviewed, warned: warns(kind), addressed: true, repeat: false, again: false, changed: false,
+      attempt: taken, attempts: s.attempts + 1, withdrawn: false, undo: U::free, approvedBy: World,
+      confirmations: 0, requests: 0, noticed: true,
+    },
+    out: List(ReadRecord({ attempt: taken.id, kind: kind, account: account })),
+  }
+
+pure val draftValues = Set(-1, -2, 1, 2)
+
+pure def stepAnEarlierOperationIsNeverRequestedAgain(before: Operations, via: str, after: Operations, out: List[Effect]): bool =
+  via == "earlierFound" implies (
+    after.requests == 0 and after.confirmations == 0 and after.attempt.outcome == A::Sent and after.draft < 0
+      and out.every(e => match e { | ReadRecord(r) => r.attempt == after.attempt.id and r.account == after.account | _ => false })
+  )
+
+pure def sometimesAnEarlierSendIsTakenIn(s: Operations): bool = s.kind == Send and s.draft < 0 and s.attempt.outcome == A::Sent
+
+pure def sometimesAnEarlierSendStaysUnknown(s: Operations): bool = s.kind == Send and s.draft < 0 and s.attempt.outcome == A::Unknown and not(s.noticed)
 ```
 
 ## Story: Save my draft to Gmail, or delete it there, knowingly
@@ -567,6 +617,7 @@ pure def sessionChanged(s: Operations): Operations = {
 ```quint
 pure def alwaysEachOperationHasANewNumber(s: Operations): bool =
   0 <= s.attempt.id and s.attempt.id <= s.attempts and s.of <= s.session
+    and (s.attempt.outcome != A::Planned implies s.attempt.id != 0)
     and (s.attempt.id != 0 implies (
       s.account != 0
         and (if (ofDraft(s.kind)) (s.draft != 0 and s.messages.size() == 0) else (s.draft == 0 and s.messages.size() >= 1))

@@ -88,7 +88,7 @@ export function withoutDetails(spot: Spot): Spot {
 }
 
 function keyOf(spot: Spot): string {
-  return spot.providerId !== "" ? `${spot.providerId}/${spot.id}` : `@${spot.at.lat},${spot.at.lng}`
+  return spot.id !== "" && spot.providerId !== "" ? `${spot.providerId}/${spot.id}` : `@${spot.at.lat},${spot.at.lng}`
 }
 
 function mergeSpot(prior: Spot | undefined, next: Spot): Spot {
@@ -254,9 +254,38 @@ function createAtlas(): AtlasStore & { readonly reset: () => void } {
   }
 }
 
+let active: AtlasStore = createAtlas()
+
+/** The currently mounted runtime's atlas, for callers outside a scoped `Atlas` context. */
+export const atlas: AtlasStore = {
+  snapshot: () => active.snapshot(),
+  subscribe: (listener) => active.subscribe(listener),
+  numberOf: (spot) => active.numberOf(spot),
+  numberAll: (spots) => active.numberAll(spots),
+  spot: (place) => active.spot(place),
+  found: (places) => active.found(places),
+  originsFound: (places) => active.originsFound(places),
+  routed: (ticket, ways) => active.routed(ticket, ways),
+  way: (ticket, chosen) => active.way(ticket, chosen),
+  located: (here) => active.located(here),
+  showMe: () => active.showMe(),
+  covered: (ticket, coverage) => active.covered(ticket, coverage),
+  coverage: (ticket) => active.coverage(ticket),
+  viewed: (view) => active.viewed(view),
+  creditedFor: (credited) => active.creditedFor(credited),
+  accountOf: (id) => active.accountOf(id),
+  handleOf: (place) => active.handleOf(place),
+  forgetDetails: () => active.forgetDetails(),
+  forget: () => active.forget(),
+}
+
 /** Provides a fresh scoped `Atlas` per runtime and clears it when the runtime scope closes. */
 export const atlasLayer = Layer.effect(Atlas, effect {
   const store = createAtlas()
-  try Effect.addFinalizer(() => sync(() => { store.reset() }))
+  active = store
+  try Effect.addFinalizer(() => sync(() => {
+    store.reset()
+    if (active === store) active = createAtlas()
+  }))
   return store
 })

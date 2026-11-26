@@ -139,6 +139,24 @@ pure def slotRead(c: Composer, ticket: int, found: Found, revision: int): Compos
   else { ...c, read: read, slot: Open }
 ```
 
+### A draft the earlier Alpha kept for the conversation is taken once into an unused slot, and one it was sending comes back for review
+
+The earlier Alpha kept each conversation's draft in the phone's secure
+store, in a slot named from the session and the conversation
+([adoption](../platform/adoption.md)). When the slot of the conversation
+that opens holds nothing, the earlier text is copied into it once, as it
+was marked: a draft is read as a saved draft, and a text the earlier Alpha
+was sending as one that may already have been sent, so it waits for the
+owner's review and is never sent by itself. A slot already used here, an
+empty or unreadable earlier slot, and another conversation's slot take
+nothing; the earlier slot is cleared only once this one holds the text.
+
+```quint
+pure def lawADraftTheEarlierAlphaWasSendingIsNeverHeld(c: Composer, ticket: int, revision: int): bool =
+  canSlotRead(c, ticket, revision) implies
+    (slotRead(c, ticket, Sending, revision).unsettled and slotRead(c, ticket, Sending, revision).away == c.away)
+```
+
 ### The slot is read only while it is closed
 
 ```quint
@@ -765,6 +783,20 @@ pure def canEditAgain(c: Composer, message: int, mine: bool, recorded: bool): bo
 
 pure def editAgain(c: Composer, message: int, mine: bool, recorded: bool): Composer =
   { ...c, draft: D::edit(c.draft), editor: { ...c.editor, text: true, editing: message } }
+```
+
+### Back, or removing the mark, leaves an edit as an ordinary draft
+
+The text stays in the composer to send as a new message; only the mark of
+the message it came from is taken off.
+
+```quint
+pure def canStopEditing(c: Composer): bool = c.away == Free and c.editor.editing > 0
+
+pure def stopEditing(c: Composer): Composer = { ...c, editor: { ...c.editor, editing: 0 } }
+
+pure def lawStoppingAnEditKeepsTheText(c: Composer): bool =
+  canStopEditing(c) implies (stopEditing(c).editor.text == c.editor.text and stopEditing(c).editor.editing == 0)
 ```
 
 ### Attachments can fill to their limit

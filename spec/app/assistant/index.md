@@ -16,6 +16,7 @@ for its reply. The rest of the area:
 - [Question](./question.md): Ask Alpha on a file, reviewed before it joins the draft
 - [Email card](./email.md): an email the agent drafted, sent from the chat once per version
 - [Kit extensions](./extend.md): what the area needs of the kit that it lacks
+- [Entry](./entry.md): opening Ask Alpha from outside Alpha, and when that starts voice
 
 Alpha shows the turn's status as pulsing dots or a shape at the foot of the
 conversation, with the status as its accessible name. The agent's own label

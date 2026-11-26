@@ -36,6 +36,8 @@ export interface AskScene {
   /** The failure fields of the resident's terminal reply. */
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
+  /** The agent chooses not to reply: its turn ends with no text. */
+  silent?: boolean;
   nextReplyProvisional?: boolean;
   /** After the next reply's chunks, the agent writes their whole text once without the provisional mark, as eliza writes the reply it decided before storing it. */
   nextReplySettled?: boolean;
@@ -147,6 +149,11 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (streamedCue !== undefined) controller.enqueue(frame({ type: "token", fullText: "" }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
+      if (scene.silent) {
+        controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length) }));
+        controller.close();
+        return;
+      }
       if (scene.stalled) {
         for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
         if (settles) controller.enqueue(frame({ type: "token", fullText: (custom ?? ["Thinking"]).join("") }));
@@ -321,5 +328,6 @@ export function askRoutes(scene: AskScene): Route[] {
       scene.warmUps.push(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza-"))));
       return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
     },
+    (request, url) => (request.method === "GET" && url.pathname === "/api/agents" ? Response.json({ agents: [{ id: "agent-owner", name: "Alpha", status: "running" }] }) : undefined),
   ];
 }

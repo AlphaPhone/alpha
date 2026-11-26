@@ -28,22 +28,28 @@ lemma FilterEmpty(xs: seq<StageProblem>)
   }
 }
 
-lemma StageProblemsFilter(s: Stage)
-  ensures stageProblems(s) == ((((reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))) + ProofLib.Filter((set_x: StageProblem) => !((set_x in (reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))))), listenerProblems(s))) + ProofLib.Filter((set_x: StageProblem) => !((set_x in ((reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))) + ProofLib.Filter((set_x: StageProblem) => !((set_x in (reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))))), listenerProblems(s))))), patchProblems(s))) + ProofLib.Filter((set_x: StageProblem) => !((set_x in (((reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))) + ProofLib.Filter((set_x: StageProblem) => !((set_x in (reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))))), listenerProblems(s))) + ProofLib.Filter((set_x: StageProblem) => !((set_x in ((reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))) + ProofLib.Filter((set_x: StageProblem) => !((set_x in (reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s))))), listenerProblems(s))))), patchProblems(s))))), brandingProblems(s)))
-{
-}
-
 lemma StageProblemsEmpty(s: Stage)
   requires stageAdmitted(s)
   ensures reviewProblems(s) == []
   ensures ownerTelephonyProblems(s) == []
   ensures listenerProblems(s) == []
 {
-  StageProblemsFilter(s);
-  assert reviewProblems(s) == [];
-  FilterEmpty(ownerTelephonyProblems(s));
-  assert reviewProblems(s) + ProofLib.Filter((set_x: StageProblem) => !((set_x in reviewProblems(s))), ownerTelephonyProblems(s)) == [];
-  FilterEmpty(listenerProblems(s));
+  reveal Std.Collections.Seq.Filter();
+  var r := reviewProblems(s);
+  var o := ownerTelephonyProblems(s);
+  var l := listenerProblems(s);
+  var f1 := Std.Collections.Seq.Filter((set_x: StageProblem) => !((set_x in r)), o);
+  var f2 := Std.Collections.Seq.Filter((set_x: StageProblem) => !((set_x in (r + f1))), l);
+  assert r == [];
+  assert f1 == [];
+  if |o| > 0 {
+    assert !(o[0] in r);
+  }
+  assert r + f1 == [];
+  assert f2 == [];
+  if |l| > 0 {
+    assert !(l[0] in (r + f1));
+  }
 }
 
 lemma ReviewProblemsFilter(s: Stage)
@@ -76,16 +82,16 @@ lemma OwnerTelephonyProblemsEmpty(s: Stage)
 }
 
 lemma ListenerProblemsFilter(s: Stage)
-  ensures listenerProblems(s) == (problemIf((listenerImage(s) && (!s.target.Pixel10a?)), StageProblem.ListenerImageOffThePixel) + ProofLib.Filter((set_x: StageProblem) => !((set_x in problemIf((listenerImage(s) && (!s.target.Pixel10a?)), StageProblem.ListenerImageOffThePixel))), problemIf((listenerImage(s) && !(((s.listener && s.qualified) && carriesListenerPatches(s)))), StageProblem.ListenerImageIncomplete)))
+  ensures listenerProblems(s) == (problemIf((listenerImage(s) && (!s.target.Pixel10a?)), StageProblem.ListenerImageOffThePixel) + ProofLib.Filter((set_x: StageProblem) => !((set_x in problemIf((listenerImage(s) && (!s.target.Pixel10a?)), StageProblem.ListenerImageOffThePixel))), problemIf((listenerImage(s) && !((((s.listener && s.qualified) && s.speechPinned) && carriesListenerPatches(s)))), StageProblem.ListenerImageIncomplete)))
 {
 }
 
 lemma ListenerProblemsEmpty(s: Stage)
   requires listenerProblems(s) == []
   requires listenerImage(s)
-  ensures s.target.Pixel10a? && s.qualified && carriesListenerPatches(s)
+  ensures s.target.Pixel10a? && s.qualified && s.speechPinned && carriesListenerPatches(s)
 {
   ListenerProblemsFilter(s);
   assert problemIf((listenerImage(s) && (!s.target.Pixel10a?)), StageProblem.ListenerImageOffThePixel) == [];
-  FilterEmpty(problemIf((listenerImage(s) && !(((s.listener && s.qualified) && carriesListenerPatches(s)))), StageProblem.ListenerImageIncomplete));
+  FilterEmpty(problemIf((listenerImage(s) && !((((s.listener && s.qualified) && s.speechPinned) && carriesListenerPatches(s)))), StageProblem.ListenerImageIncomplete));
 }

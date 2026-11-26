@@ -1946,4 +1946,38 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     memory.enqueueSentence(1, "Late turn one sentence.");
     expect(memory.dequeueSentence(2)?.text).toBe("Turn two sentence.");
   });
+
+  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
+  it("preserves Cloud credit refusals during real-time Talk and keeps actionable Talk failures visible when fallback is unavailable", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.voice.localReady = false;
+    world.voice.liveCaptureAvailable = false;
+    const { alpha, area } = await onComposer(world, ...only("notice"));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const sessionId = world.voice.activeMicSession;
+    expect(sessionId).toBeDefined();
+
+    await drawn(() => world.voice.emitCloud?.({ sessionId: sessionId ?? "", type: "error", code: "insufficient_credits" }));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off" && s.failure === "NoFailure");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Voice needs more Eliza Cloud credits. Add credits, then try again.");
+    });
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const secondSession = world.voice.activeMicSession;
+    expect(secondSession).toBeDefined();
+
+    await drawn(() => world.voice.emitCloud?.({ sessionId: secondSession ?? "", type: "error", code: "unauthorized" }));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Sign in to use Cloud voice.");
+    });
+  });
 });

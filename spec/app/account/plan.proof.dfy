@@ -1,5 +1,3 @@
-// Proofs for spec/app/account/plan.md.
-
 lemma checked_ensures(p: Plan, ticket: int, answer: Verified, signIn: int, now: int)
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> alwaysExpiryIsHonest(checked(p, ticket, answer, signIn, now).state))
   ensures (inv(p) ==> canChecked(p, ticket, signIn) ==> alwaysGraceIsBoundToASignInsRecordAndKeptOnlyOffline(checked(p, ticket, answer, signIn, now).state))

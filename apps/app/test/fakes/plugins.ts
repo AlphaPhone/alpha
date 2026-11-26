@@ -8,6 +8,8 @@ import { alphaNotes } from "./notes.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
 import { alphaPhotos, elizaPhotosPermissions } from "./photos.ts";
 import { alphaConnection } from "./platform.ts";
+import { alphaPhotos } from "./photos.ts";
+import { alphaConnection, alphaNetworkLocation } from "./platform.ts";
 import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
 import type { Scene } from "./scene.ts";
@@ -59,6 +61,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
         : { kind: "signedOut" })(emit) }),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
+    AlphaNetworkLocation: alphaNetworkLocation(world.platform, () => world.now),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn, world.mailLease),

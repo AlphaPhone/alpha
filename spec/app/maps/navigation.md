@@ -106,9 +106,12 @@ pure def retireTrip(t: Trip): Trip = forgetRoute(endGuidance(t))
 
 ### The route shown leads somewhere, and was brought by a request already made
 
+Discovered by the proof: a route request in flight has a newer ticket than the route already shown.
+
 ```quint
 pure def alwaysARouteHasTurns(t: Trip): bool =
   (t.route != 0 implies (t.turns > 0 and t.route <= t.plan.ticket)) and t.route >= 0
+    and (t.plan.status == R::Loading implies t.route < t.plan.ticket)
 ```
 
 ### Route requests are numbered from one

@@ -2,11 +2,11 @@
 import {
   Alert, Button, InboxAccountList, type InboxAttachmentPreview, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, InboxDiscardDialog, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
-  type InboxNoticeKind, ToastRegion,
+  type InboxNoticeKind, InboxSendOutcome, ToastRegion,
 } from "@repo/ui";
 import type { MailCard } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Folder, type Mailbox, accessOf, readable, searchOpen, searchableIn, showsAttachment } from "../../gen/app__inbox.ts";
 import type { Machine as List } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useList } from "../../gen/app__inbox.react.ts";
@@ -30,6 +30,7 @@ import type { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vi
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
+import { loadsImages } from "../../gen/app__settings__preferences.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { openInboxAccount } from "../account/profile.vibe";
 import { useTimed } from "../runtime/react.ts";
@@ -183,6 +184,18 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
   return null;
 }
 
+// spec/app/inbox/sending.md, "What the earlier Alpha sent, or never heard the answer to, is taken in as the operation in flight, is never sent again, and ends as Gmail's record of it says"
+/** How a send the earlier Alpha made, taken in here, stands: while Gmail's record is read, then as it said, with Dismiss for an unknown one. */
+function EarlierSend({ runtime }: { runtime: Runtime }) {
+  const { state, can, send } = useTimed(runtime, useChanges);
+  if (!state || state.kind !== "Send" || state.draft >= 0 || state.of !== state.session) return null;
+  const outcome = state.attempt.outcome;
+  const told = outcome === "Sent" ? "sending" : outcome === "Confirmed" ? "sent" : outcome === "Refused" ? "refused" : outcome === "Unknown" && !state.noticed ? "unknown" : undefined;
+  if (told === undefined) return null;
+  const dismiss = { type: "dismissOutcome" } as const;
+  return <InboxSendOutcome earlier outcome={told} onDismiss={can(dismiss, "Owner") ? () => void send(dismiss, "Owner") : undefined} />;
+}
+
 type LinkReview = (at: number, facts: { readonly secure: boolean; readonly mismatch: boolean }) => void;
 
 /** The body of a message with nothing able to run, its remote images only once they may load, and its links each reviewed. */
@@ -219,14 +232,24 @@ function Body({ text, contents, images, onReview }: { text: string; contents: Re
   </>;
 }
 
+// spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+/** Whether the owner turned on loading images in Inbox, as Settings last read it. */
+function useRemote(runtime: Runtime): boolean {
+  const preferences = usePreferences(runtime).state;
+  return preferences !== undefined && loadsImages(preferences);
+}
+
 /** The message open: its body, links and attachments each reviewed before use, its marks, Archive and Trash, Retry and Ask Alpha. */
 function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list: Mailbox; onRefresh: (() => void) | undefined; onBegin: (beginning: Beginning) => (() => void) | undefined }) {
   const { state, can, send } = useMessage(runtime);
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
-  const remote = usePreferences(runtime).state?.images ?? false;
+  const remote = useRemote(runtime);
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const mail = runtime.runSync(Mail);
+  const subscribeSaved = useCallback((listener: () => void) => mail.subscribeSavedBodies(listener), [mail]);
+  const savedVersion = useCallback(() => mail.savedBodiesVersion(), [mail]);
+  useSyncExternalStore(subscribeSaved, savedVersion, savedVersion);
   const read = state?.body.status === "Loaded" ? mail.body(state.body.ticket) : undefined;
   const reviewLink = useCallback<LinkReview>((at, { secure, mismatch }) => {
     const event = { type: "reviewLink", link: at, secure, mismatch } as const;
@@ -416,7 +439,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const canvas = useCanvas(runtime).state;
   // spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it": as v119 45f6bed30 prototype/model.js:6415 drew Inbox's Back only off the launcher.
   const firstPageBack = shell.state && drawsAppBack(shell.state, canvas?.launcher ?? false, "FirstPage") ? () => void alpha.back() : undefined;
-  const remote = usePreferences(runtime).state?.images ?? false;
+  const remote = useRemote(runtime);
   const [typed, setTyped] = useState<{ text: string; over: string; folder: string } | undefined>();
   const [selection, setSelection] = useState<string>();
   const [unopenedDraft, setUnopenedDraft] = useState<number>();
@@ -653,6 +676,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       {mustChoose ? <InboxAccountList accounts={accounts} onChoose={chooseAccount} /> : null}
       <FileOffer runtime={runtime} />
       <Suggested runtime={runtime} />
+      <EarlierSend runtime={runtime} />
       <ChangeReview runtime={runtime} list={state} cards={cards} selecting={selecting} />
     </>
   );

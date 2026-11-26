@@ -1,0 +1,280 @@
+// spec/app/calendar/actions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/app/calendar/sharing.md, "Story: Offer the agent only the Calendar actions this phone runs"; spec/app/calendar/sharing.md, "Story: Be told plainly what the agent was shown of an event I named"; spec/app/calendar/sharing.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"
+import { NOT_DISPATCHED, readResult } from "@elizaos/agent"
+import type { DeviceOperation, ExecutorCall } from "@elizaos/agent"
+import { deleteUndoMs } from "@elizaos/os-bridges"
+import { CALENDAR_CAPABILITY, CALENDAR_NAMED_READ_CAPABILITY, NamedReadUnavailable, ReviewedReadsMachine, executeNamedCalendarRead, type NamedCalendarReadContext, type NamedCalendarReadProvider, type NamedReadOutcome } from "@elizaos/plugin-calendar-client"
+import * as Actions from "../../gen/app__calendar__actions.effect.vibe"
+import type { Action, Screen } from "../../gen/app__calendar__actions.ts"
+import * as View from "../../gen/app__calendar.effect.vibe"
+import { selectedEvent } from "../../gen/app__calendar.effect.vibe"
+import type { Action as Offer, Named } from "../../gen/app__calendar__sharing.ts"
+import { advertised, namedChangeAllowed, rangeAdmitted, rangeOutcome, said, shareOffered } from "../../gen/app__calendar__sharing.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { PhoneCalendar, type Reviewed } from "../platform/calendar.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type CalendarObject, subjectNow } from "./selection.ts"
+import { shown } from "./shown.ts"
+
+/** The agent's Calendar actions this phone runs, as the agent's operation vocabulary names them. */
+export type CalendarOperation = Extract<DeviceOperation, { readonly type:
+  "calendar_create_local" | "calendar_read_next" | "calendar_create" | "calendar_read_selected" | "calendar_update" | "calendar_delete" | "calendar_named" | "read_calendar_range" }>
+
+type Target = { readonly sourceId: string; readonly sourceRevision: string; readonly eventId: string; readonly revision: string }
+type Fields = { readonly title: string; readonly description: string; readonly location: string; readonly start: string; readonly end: string; readonly timeZone: string }
+
+/** The operation `value` is, when it is one of Calendar's. */
+export function calendarOperation(value: DeviceOperation): CalendarOperation | undefined {
+  switch (value.type) {
+    case "calendar_create_local":
+    case "calendar_read_next":
+    case "calendar_create":
+    case "calendar_read_selected":
+    case "calendar_update":
+    case "calendar_delete":
+    case "calendar_named":
+    case "read_calendar_range":
+      return value
+    default:
+      return undefined
+  }
+}
+
+const capabilities: ReadonlyArray<readonly [Offer, string]> = [
+  ["LocalEvent", CALENDAR_CAPABILITY], ["CreateOnPhone", "calendar.create.v1"], ["NextRead", "calendar.next-read.v1"], ["NamedRead", CALENDAR_NAMED_READ_CAPABILITY],
+]
+
+// spec/app/calendar/sharing.md, "A local event is always offered; the agenda read only in a browser; every other action only when the agent offers it"
+/** Of the capabilities the agent `offered`, those Calendar advertises from the phone; a named change also needs the agent's named target. */
+export function calendarCapabilities(offered: readonly string[]): string[] {
+  const names = capabilities.filter(([offer, name]) => advertised(offer, offered.includes(name), false)).map(([, name]) => name)
+  return offered.includes("device.named-target.v1") ? [...names, "device.named-target.v1"] : names
+}
+
+const spoken = (at: string, zone: string) => {
+  const ms = Date.parse(at)
+  return Number.isFinite(ms) ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: zone }).format(ms) : at
+}
+
+function when(fields: Fields): string {
+  return `${spoken(fields.start, fields.timeZone)} – ${spoken(fields.end, fields.timeZone)} (${fields.timeZone})`
+}
+
+/** What a reviewed change says: the event, where it lands, and that nobody is invited. */
+function detailOf(fields: Fields, where: "phone" | "chosen" | "open"): string {
+  const calendar = where === "phone" ? "Calendar: the calendar kept on this phone. No account calendar is changed."
+    : where === "chosen" ? "Calendar: the calendar you chose." : "Calendar: the calendar of the event you have open."
+  const people = where === "open" ? "Attendees: existing attendees are kept." : "Attendees: none. No invitations are sent."
+  return [fields.title, when(fields), fields.location === "" ? "" : `Location: ${fields.location}`, calendar, people,
+    fields.description.trim() === "" ? "" : `Description: ${fields.description.trim()}`].filter((line) => line.trim() !== "").join("\n")
+}
+
+/** How the owner's card names one Calendar action. */
+export function calendarOperationWords(op: CalendarOperation): { readonly title: string; readonly detail: string } {
+  switch (op.type) {
+    case "calendar_create_local": return { title: "Add an event to this phone’s calendar", detail: detailOf(op.fields, "phone") }
+    case "calendar_read_next": return { title: "Share your next Calendar event", detail: "The phone reads its own calendar and shows you the event before it is shared." }
+    case "calendar_create": return { title: "Add an event to the calendar you chose", detail: detailOf(op.fields, "chosen") }
+    case "calendar_read_selected": return { title: "Share the event you have open", detail: "Only the open event is shared, after you review it." }
+    case "calendar_update": return { title: "Change the event you have open", detail: detailOf(op.fields, "open") }
+    case "calendar_delete": return { title: "Delete the event you have open", detail: "You can undo the deletion for 10 seconds." }
+    case "read_calendar_range": return {
+      title: "Share your calendar for these dates",
+      detail: `From ${spoken(op.start, op.timeZone)} to ${spoken(op.end, op.timeZone)} (${op.timeZone}), from ${op.calendarIds.length === 1 ? "one calendar" : `${op.calendarIds.length} calendars`} on this phone, up to ${op.maximumEvents} events. Titles and times only, never places, notes or guests.`,
+    }
+    case "calendar_named": return op.action === "update"
+      ? { title: `Change “${op.name}”`, detail: detailOf(op.fields, "open") }
+      : op.action === "read"
+        ? { title: `Share “${op.name}”`, detail: "Open the matching event in Calendar, then review what to share. Nothing changes yet." }
+        : { title: `Delete “${op.name}”`, detail: "Open the matching event in Calendar to review this deletion." }
+  }
+}
+
+const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+
+/** The screen an action is bound to now: Calendar, Home or another app, and whether Alpha is out of sight or covered. */
+effect function bindingNow() {
+  const front = (try (try Shell).get()).trail.at(-1)
+  const screen: Screen = front === "Calendar" ? "OnCalendar" : front === undefined ? "OnHome" : "Elsewhere"
+  const hidden = !(try (try Device).showing()) || pageInert(try (try Layers).get())
+  return { screen, hidden }
+}
+
+/** The event open on Calendar as Ask Alpha was given it, while its detail still shows. */
+effect function openNow(): (CalendarObject | undefined)!!View.Machine {
+  return selectedEvent(try (try View.Machine).get()) === 0 ? undefined : subjectNow().event
+}
+
+function sameTarget(open: CalendarObject | undefined, target: Target): boolean {
+  return open?.kind === "calendar-event" && open.accountId === target.sourceId && open.sourceRevision === target.sourceRevision
+    && open.id === target.eventId && open.revision === target.revision
+}
+
+function targetOf(open: CalendarObject | undefined): Target | undefined {
+  return open?.kind === "calendar-event" ? { sourceId: open.accountId, sourceRevision: open.sourceRevision, eventId: open.id, revision: open.revision } : undefined
+}
+
+/** Whether `title` holds `name` as eliza's named read compares them: both NFKC-normalized, case folded and trimmed. */
+function foldedIncludes(title: string, name: string): boolean {
+  const fold = (text: string) => text.normalize("NFKC").toLowerCase().trim()
+  return fold(title).includes(fold(name))
+}
+
+/** Titles compared as a named change compares them: trimmed, runs of spaces folded and case folded. */
+function sameTitle(title: string, name: string): boolean {
+  const fold = (text: string) => text.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase()
+  return fold(title) !== "" && fold(title) === fold(name)
+}
+
+function actOf(op: CalendarOperation): Action | undefined {
+  switch (op.type) {
+    case "calendar_create_local": return "CreateOnPhone"
+    case "calendar_read_next": return "ReadNext"
+    case "calendar_read_selected": return "ReadOpen"
+    case "calendar_update": return "ChangeOpen"
+    case "calendar_delete": return "DeleteOpen"
+    default: return undefined
+  }
+}
+
+/** What the agent is told of an action that ended: applied with its record, unknown, or refused and why. */
+function answered(ending: Actions.Actions, reply: Reviewed | undefined, record: (result: unknown) => unknown) {
+  if (ending.ending === "Done") return { kind: "applied", result: record(reply?.result) }
+  if (ending.ending === "Unknown") return undefined
+  if (ending.review === "Cancelled") return { kind: "refused", code: "cancelled" }
+  if (ending.review === "Refused") return { kind: "refused", code: "target_changed" }
+  return refused
+}
+
+/** The phone's review answer, as the action's machine takes it. */
+function reviewEvent(status: string): Actions.Event {
+  return status === "cancelled" ? { type: "reviewCancelled" }
+    : status === "conflict" || status === "changed" ? { type: "reviewRefused" }
+    : status === "queued" ? { type: "reviewHeld" }
+    : status === "applied" || status === "saved" || status === "shared" ? { type: "reviewApplied" }
+    : { type: "unanswered" }
+}
+
+// spec/app/calendar/actions.md, "There is no direct path: the only way in is the owner's card on the bound screen"; spec/app/calendar/actions.md, "Creating on the phone and reading next ask Android for access first; a refusal fails before the phone's review"; spec/app/calendar/actions.md, "The phone reads the open event again; a changed one is refused there, and a cancelled review changes nothing"; spec/app/calendar/actions.md, "A deletion is only held, and what the agent is told is unknown while Undo can still win"
+/** One action the owner's card approved, run through the phone's own review once the screen it is bound to holds. */
+effect function onPhone(exact: CalendarOperation, act: Action, call: ExecutorCall, record: (result: unknown) => unknown) {
+  const machine = try Actions.Machine
+  const phone = try PhoneCalendar
+  const unbound = act === "CreateOnPhone" || act === "ReadNext"
+  const open = try openNow()
+  const target = "target" in exact ? exact.target : undefined
+  const bound = unbound || (target !== undefined && sameTarget(open, target))
+  const access = unbound ? (act === "CreateOnPhone" ? phone.requestAccess() : phone.readAccess()) catch () => false : true
+  const { screen, hidden } = try bindingNow()
+  effect function send(event: Actions.Event): (Actions.Actions | undefined)!! {
+    return machine.send(event) catch () => undefined
+  }
+  if ((try send({ type: "scene", screen, sensitive: false, open: bound && !unbound ? selectedEvent(try (try View.Machine).get()) : 0, access })) === undefined) return refused
+  if (hidden) try send({ type: "goAway" })
+  if ((try send({ type: "propose", act })) === undefined) return refused
+  if ((try send({ type: "approve" })) === undefined) return refused
+  if ((try send({ type: "accessRefused" })) !== undefined) {
+    try send({ type: "finish" })
+    return refused
+  }
+  if ((try send({ type: "askReview" })) === undefined) {
+    try send({ type: "finish" })
+    return refused
+  }
+  const row = bound && !unbound ? shown.find(selectedEvent(try (try View.Machine).get())) : undefined
+  const reply = phone.review({ operation: exact, operationId: call.operationId }) catch () => ({ status: "unknown" })
+  const moved = (try send(reviewEvent(reply.status))) ?? (try send({ type: "unanswered" }))
+  const ending = moved ?? (try machine.get())
+  if (ending.holding) fork.detached (effect {
+    const time = try Time
+    try time.until((try time.now()) + deleteUndoMs)
+    const still = row === undefined ? undefined
+      : phone.inspect({ id: row.key, calendarId: row.calendarId, expected: { title: row.title, body: row.notes, location: row.place, begin: row.begin, end: row.end } }) catch () => undefined
+    try send(still === undefined ? { type: "windowEnds" } : { type: "undo" })
+  })
+  try send({ type: "finish" })
+  return answered(ending, reply, record)
+}
+
+// spec/app/calendar/sharing.md, "What Calendar tells the agent says shared exactly when the event was shared, and otherwise why not"; spec/app/calendar/sharing.md, "The phone's Share review is offered only for the event open on a Calendar screen that is not sensitive"
+/** A named read, through eliza's reviewed read of the open event; anything but a share says why nothing was shared. */
+effect function namedRead(op: CalendarOperation, call: ExecutorCall) {
+  const phone = try PhoneCalendar
+  const owner = ownerAt() catch () => ""
+  effect function contextNow(): NamedCalendarReadContext!!(Shell | Device | Layers | View.Machine) {
+    const { screen, hidden } = try bindingNow()
+    const open = try openNow()
+    return {
+      view: hidden ? "hidden" : screen === "OnCalendar" ? "calendar" : screen === "OnHome" ? "home" : "other", sensitive: false, owner,
+      ...(open?.kind === "calendar-event" ? { selectedObject: open } : {}),
+    }
+  }
+  const context = try contextNow()
+  const services = try Effect.context<Shell | Device | Layers | View.Machine>()
+  const offered = shareOffered(context.view === "calendar", context.sensitive === true, context.selectedObject !== undefined)
+  const provider: NamedCalendarReadProvider = {
+    executeAgent: (input) => Effect.mapError(phone.review(input), (cause) => new NamedReadUnavailable({ reason: String(cause.cause) })),
+    cancelAgent: (input) => phone.cancelReview(input.operationId),
+  }
+  const outcome: NamedReadOutcome | undefined = offered ? (Effect.provideService(executeNamedCalendarRead(provider, op, call.operationId, context, [CALENDAR_NAMED_READ_CAPABILITY, CALENDAR_CAPABILITY], () => Effect.runSync(Effect.provideContext(contextNow(), services))),
+    ReviewedReadsMachine, try ReviewedReadsMachine) catch () => undefined) : undefined
+  if (outcome?.status === "succeeded") return { kind: "applied", result: outcome.foregroundResult }
+  const after = try contextNow()
+  const openRow = shown.find(selectedEvent(try (try View.Machine).get()))
+  const named: Named = !offered ? "NotOpen"
+    : JSON.stringify(after.selectedObject) !== JSON.stringify(context.selectedObject) ? "Changed"
+    : openRow !== undefined && op.type === "calendar_named" && !foldedIncludes(openRow.title, op.name) ? "NameDiffers"
+    : "NamedUnavailable"
+  return { kind: "refused", code: "not_shared", result: { summary: sentences[said(named)] } }
+}
+
+const sentences: Readonly<Record<string, string>> = {
+  SaysShared: "Shared the event you chose.",
+  SaysOpenIt: "Open the event in Calendar first. Nothing was shared.",
+  SaysItChanged: "The event changed before it could be shared. Nothing was shared.",
+  SaysTheNameDiffers: "The open event has a different name. Nothing was shared.",
+  SaysNotShared: "The event wasn’t shared.",
+}
+
+// spec/app/calendar/sharing.md, "A range is read only while Calendar can be seen and Android lets it read the calendar"; spec/app/calendar/sharing.md, "Only a whole read within the step's limit is shared, with titles and times alone"
+/** A reviewed range read: only while Alpha is in sight with Android's access, and only a whole read within the step's limit that eliza admits. */
+effect function rangeRead(op: Extract<CalendarOperation, { type: "read_calendar_range" }>) {
+  const phone = try PhoneCalendar
+  const seen = !(try bindingNow()).hidden
+  const access = seen ? (phone.readAccess() catch () => false) : false
+  if (!rangeAdmitted(seen, access)) return refused
+  const read = phone.readRange({ calendarIds: op.calendarIds, start: op.start, end: op.end, timeZone: op.timeZone, maximumEvents: op.maximumEvents }) catch () => undefined
+  const events = read?.status === "ready" && Array.isArray(read.events) ? read.events : undefined
+  const result = { kind: "calendar", events: events ?? [] }
+  const outcome = rangeOutcome(read?.status === "ready", events !== undefined, events?.length ?? 0, op.maximumEvents, events !== undefined && readResult(op, result) !== undefined)
+  if ((try bindingNow()).hidden) return refused
+  switch (outcome) {
+    case "Shared": return { kind: "applied", result }
+    case "TooMany": return { kind: "refused", code: "calendar_overflow", result: { maximumEvents: op.maximumEvents } }
+    case "Incomplete": return { kind: "refused", code: "calendar_incomplete" }
+    case "Unverified": return { kind: "refused", code: "calendar_unverified" }
+    default: return { kind: "refused", code: read?.status === "permission-required" ? "calendar_permission" : "calendar_unavailable" }
+  }
+}
+
+// spec/app/calendar/sharing.md, "A change or deletion of an event the owner named is asked only for the open event, and only when its title is that name"
+/** An action of the agent's on the phone's calendar that its device journal approved; whatever the screen no longer holds is refused. */
+export effect function executeCalendar(op: CalendarOperation, call: ExecutorCall) {
+  if (op.type === "read_calendar_range") return try rangeRead(op)
+  if (op.type === "calendar_named" && op.action === "read") return try namedRead(op, call)
+  if (op.type !== "calendar_named") {
+    const act = actOf(op)
+    return act === undefined ? refused : try onPhone(op, act, call, (result) => result)
+  }
+  const open = try openNow()
+  const target = targetOf(open)
+  const row = open === undefined ? undefined : shown.find(selectedEvent(try (try View.Machine).get()))
+  if (target === undefined || !namedChangeAllowed(true, row !== undefined && sameTitle(row.title, op.name))) {
+    return { kind: "refused", code: target === undefined ? NOT_DISPATCHED : "name_differs" }
+  }
+  const exact = (op.action === "update" ? { type: "calendar_update", target, fields: op.fields } : { type: "calendar_delete", target }) as CalendarOperation
+  return try onPhone(exact, op.action === "update" ? "ChangeOpen" : "DeleteOpen", call,
+    (record) => ({ version: 1, kind: "calendar_named", action: op.action, name: op.name, basis: "owner-chosen", operation: exact, record }))
+}

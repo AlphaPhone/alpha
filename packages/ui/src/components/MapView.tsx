@@ -87,6 +87,12 @@ export interface MapViewProps {
   onPressMove: (pixels: number) => void;
   /** The press ended: lifted, a second finger, or the menu that follows a held finger. */
   onPressEnd: () => void;
+  /** The secondary button asked for a pin here (desktop right click, without a long press in progress). */
+  onMenu?: (at: MapPoint) => void;
+  /** The closest zoom `follow` keeps (sixteen unless told). */
+  followZoom?: number;
+  /** Padding around a fitted route, in pixels (forty-eight unless told). */
+  fitPadding?: number;
   /** The camera came to rest on this view. */
   onSettled: (view: MapBounds) => void;
   /** The owner began to drag the map. */
@@ -98,12 +104,15 @@ export interface MapViewProps {
 
 let protocols = 0;
 
-function styleOf(style: MapStyle, protocol: string): string | StyleSpecification {
+function styleOf(style: MapStyle, protocol: string, land: string): string | StyleSpecification {
   if (style.kind === "vector") return style.url;
   return {
     version: 8,
     sources: { cloud: { type: "raster", tiles: [`${protocol}://tiles/{z}/{x}/{y}`], tileSize: style.tileSize, minzoom: style.minZoom, maxzoom: style.maxZoom } },
-    layers: [{ id: "cloud-raster", type: "raster", source: "cloud" }],
+    layers: [
+      { id: "land", type: "background", paint: { "background-color": land } },
+      { id: "cloud-raster", type: "raster", source: "cloud" },
+    ],
   };
 }
 
@@ -156,6 +165,12 @@ function pinElement(pin: MapPin, onClick: () => void): { button: HTMLButtonEleme
 const mapAccent = (node: HTMLElement) => {
   const raw = getComputedStyle(node).getPropertyValue("--map").trim();
   return resolveCssColor(node, raw ? "--map" : "--primary");
+};
+
+/** The map canvas background, `--muted`, resolved to a MapLibre-safe hex color. */
+const mapLand = (node: HTMLElement) => {
+  const raw = getComputedStyle(node).getPropertyValue("--muted").trim();
+  return raw ? resolveCssColor(node, "--muted") : "transparent";
 };
 
 /** Where the phone is: a dot in the map accent ringed in white, the same in both themes. */
@@ -241,12 +256,12 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   if (camera.kind === "keep" || camera.key === painted.camera) return;
   painted.camera = camera.key;
   const motion = (ms: number) => (reducedMotion() ? 0 : ms);
-  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), 16.5), duration: motion(500) });
+  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), props.followZoom ?? 16), duration: motion(500) });
   else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, offset: [0, -(camera.lift ?? 0)], duration: 0 });
   else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: motion(350) });
   else if (camera.points.length > 0) {
     const bounds = camera.points.reduce((b, p) => b.extend([p.lng, p.lat]), new maplibregl.LngLatBounds());
-    map.fitBounds(bounds, { padding: 48, maxZoom: camera.maxZoom, duration: motion(350) });
+    map.fitBounds(bounds, { padding: props.fitPadding ?? 48, maxZoom: camera.maxZoom, duration: motion(350) });
   }
 }
 
@@ -287,8 +302,9 @@ export function MapView(props: MapViewProps) {
     let styleLoaded = false;
     try {
       maplibregl.setWorkerUrl(mapWorkerUrl);
+      maplibregl.setWorkerCount(1);
       instance = new maplibregl.Map({
-        container: node, style: styleOf(chosen, protocol), attributionControl: false,
+        container: node, style: styleOf(chosen, protocol, mapLand(node)), attributionControl: false,
         center: opening === undefined ? [0, 20] : [opening.at.lng, opening.at.lat], zoom: opening?.zoom ?? 1.5,
         ...(chosen.kind === "raster" ? { minZoom: chosen.minZoom, maxZoom: chosen.maxZoom } : {}),
       });
@@ -306,6 +322,7 @@ export function MapView(props: MapViewProps) {
       if (typeof MutationObserver !== "undefined") {
         themeObserver = new MutationObserver(() => {
           if (instance.getLayer("route-line")) instance.setPaintProperty("route-line", "line-color", mapAccent(node));
+          if (instance.getLayer("land")) instance.setPaintProperty("land", "background-color", mapLand(node));
         });
         themeObserver.observe(node.ownerDocument.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
       }
@@ -342,7 +359,11 @@ export function MapView(props: MapViewProps) {
     instance.on("mousedown", (event) => { if (event.originalEvent.button === 0) press(event.lngLat, event.point); });
     instance.on("mousemove", (event) => moved(event.point));
     instance.on("mouseup", end);
-    instance.on("contextmenu", end);
+    instance.on("contextmenu", (event) => {
+      event.originalEvent.preventDefault();
+      if (down !== undefined) return end();
+      latestRef.current.onMenu?.({ lat: event.lngLat.lat, lng: event.lngLat.lng });
+    });
     window.addEventListener("mouseup", end);
     instance.on("dragstart", () => latestRef.current.onDragged?.());
     instance.on("moveend", () => {

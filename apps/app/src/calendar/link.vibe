@@ -189,6 +189,7 @@ const account = started(effect {
   })
 }, "reading the Google account for the link")
 
+// spec/app/calendar/link.md, "Setup starts only from a write grant, for the owner signed in; a read-only grant goes on to consent for more access, and a missing one sends nothing"
 /** Read what Google allows now and start the link setup. */
 export effect function setUp(): void!!(Cloud | Link.Machine | Time | LinkCache) {
   const link = try Link.Machine

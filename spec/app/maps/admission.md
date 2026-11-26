@@ -79,3 +79,16 @@ pure def stepAdmittedOnlyWithMapsShown(before: AgentSurface, after: AgentSurface
 pure def sometimesAdmittedAfterOpen(s: AgentSurface): bool = s.admitted >= 1 and s.opens >= 1
 pure def sometimesNotShown(s: AgentSurface): bool = s.notShown >= 1
 ```
+
+### A waiting request and a pending open each account for an unanswered request or open
+
+Discovered by the proof: without stating that a waiting request is not yet
+answered and a pending open is not yet counted late, committing or timing out
+an open could push the counts past the requests or opens begun.
+
+```quint
+pure def alwaysPendingWorkIsUnanswered(s: AgentSurface): bool =
+  s.begun >= 0
+    and s.admitted + s.notShown + (if (s.waiting > 0) 1 else 0) == s.begun
+    and s.lateOpens + (if (s.pendingOpen) 1 else 0) <= s.opens
+```

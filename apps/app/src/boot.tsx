@@ -5,6 +5,7 @@ import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } 
 import { readPage, stopPage } from "./assistant/read-aloud.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { FileContext } from "./assistant/file-context.vibe";
+import { MapsContext } from "./assistant/maps-context.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import type { View } from "../gen/app__shell.ts";
 import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.vibe";
@@ -198,6 +199,12 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       return browser.runtime(alpha).runPromise(openMessageLink(href, "Inbox", current), { signal });
     }).pipe(Effect.orElseSucceed(() => false)),
   });
+  const mapsContext = Layer.succeed(MapsContext, {
+    selected: () => Effect.tryPromise(async (signal) => {
+      const [{ default: maps }, { mapsSelected }] = await Promise.all([import("./maps/index.tsx"), import("./maps/agent.vibe")]);
+      return maps.runtime(alpha).runPromise(mapsSelected(), { signal });
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  });
   const inboxCard = Layer.succeed(InboxCardEntry, {
     prepare: () => Effect.tryPromise(async (signal) => {
       const [{ default: inbox }, { prepareInboxCardEntry }] = await Promise.all([import("./inbox/index.tsx"), import("./inbox/message.vibe")]);
@@ -241,7 +248,7 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
   });
   const signIn = Layer.tap(startupSignIn(requireNativeSignIn), (context) => Effect.sync(() => { builtSignIn = Context.get(context, StartupSignIn); }));
   const startup = Layer.provideMerge(startupAccessLifecycle(requireNativeSignIn), Layer.provideMerge(signIn, Layer.provideMerge(resident, lateSignIn)));
-  const root = rooted(Layer.provideMerge(startup, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, inboxCard, scans, calendarReviews)));
+  const root = rooted(Layer.provideMerge(startup, Layer.mergeAll(platform, media, executors, fileContext, mapsContext, downloads, agentPages, inboxLinks, inboxCard, scans, calendarReviews)));
   const placed = new Map<Place, ReactElement[]>();
   /** The runtimes `over` makes while a screen is being opened. */
   let making: Array<{ context: () => Promise<unknown> }> | undefined;

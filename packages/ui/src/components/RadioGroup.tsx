@@ -8,10 +8,11 @@ export type RadioGroupItemProps = ComponentProps<typeof RadioGroupPrimitive.Item
 
 /**
  * One choice out of a few, all in view: holds a `RadioGroupItem` for each. Name it with `aria-label`. A disabled group
- * refuses a click on itself as its disabled choices do, since Radix leaves the group's own element clickable.
+ * refuses a click on itself as its disabled choices do, and says it is disabled, since Radix leaves the group's own
+ * element clickable and unmarked.
  */
 export function RadioGroup({ className, onClick, ...props }: RadioGroupProps) {
-  return <RadioGroupPrimitive.Root className={cn("flex flex-col", className)} onClick={props.disabled ? undefined : onClick} {...props} />;
+  return <RadioGroupPrimitive.Root className={cn("flex flex-col", className)} aria-disabled={props.disabled || undefined} onClick={props.disabled ? undefined : onClick} {...props} />;
 }
 
 /** One choice of a `RadioGroup`. Name it with a `Label` or `aria-label`. */

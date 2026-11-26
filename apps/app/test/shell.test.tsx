@@ -260,6 +260,41 @@ describe("the shell", () => {
     document.documentElement.style.fontSize = "";
   });
 
+  // spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"
+  it("Type without the page turning sideways and take host keyboard reports (spec/app/shell/keyboard.md, \"Story: Type without the page turning sideways\")", async () => {
+    const sized = (width: number, height: number) => drawn(() => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+      window.dispatchEvent(new Event("resize"));
+    });
+    const marks = () => ["landscape", "agenda", "split"].filter((name) => document.documentElement.hasAttribute(`data-alpha-${name}`));
+    await sized(412, 915);
+    const { alpha } = await open({ ...scene(), phone: true });
+    await until(alpha, alpha.runtime, Canvas, (c) => c.mounted && c.base.h === 915);
+
+    // spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured": the keyboard keeps the portrait canvas, a rotation while typing turns it.
+    const input = document.body.appendChild(document.createElement("input"));
+    await drawn(() => input.focus());
+    await until(alpha, alpha.runtime, Canvas, (c) => c.field === "OtherField");
+    await sized(412, 500);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.height === 500);
+    expect([(await alpha.runtime.runPromise(Canvas.use((c) => c.get()))).base, marks()]).toEqual([{ w: 412, h: 915 }, []]);
+    await sized(915, 380);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.width === 915);
+    expect([(await alpha.runtime.runPromise(Canvas.use((c) => c.get()))).base, marks()]).toEqual([{ w: 915, h: 412 }, ["landscape"]]);
+
+    // spec/app/shell/keyboard.md, "Where Android reports the keyboard, the keyboard hiding puts the composer away, unless it hid to hand the composer to voice": the host's report is taken as it comes.
+    const reported = (keyboard: boolean) => drawn(() => window.dispatchEvent(new CustomEvent("alpha-insets", { detail: { keyboard } })));
+    await reported(true);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.keyboard === "Shown");
+    await reported(false);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.keyboard === "Hidden");
+    await drawn(() => input.blur());
+    input.remove();
+    await sized(412, 915);
+    await until(alpha, alpha.runtime, Canvas, (c) => !c.landscape);
+  });
+
   // spec/app/shell/landing.md, "Story: Come back to Alpha after authorizing a connection"
   it("Come back to Alpha after authorizing a connection (spec/app/shell/landing.md, \"Story: Come back to Alpha after authorizing a connection\")", () => {
     const state = "a".repeat(43);

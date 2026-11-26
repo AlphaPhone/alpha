@@ -8,6 +8,85 @@ lemma ForgottenFilter(saved: seq<Saved>, place: int)
 {
 }
 
+lemma AdoptedStep(acc: seq<Saved>, s: Saved)
+  requires distinctAndNamed(acc)
+  requires |acc| < maxSaved
+  requires s.place > 0 && s.name != "" && !isSaved(acc, s.place)
+  ensures distinctAndNamed(acc + [s])
+  ensures |acc + [s]| == |acc| + 1
+  ensures isSaved(acc + [s], s.place)
+  ensures forall p :: isSaved(acc, p) ==> isSaved(acc + [s], p)
+{
+  var after := acc + [s];
+  SavedFilter(acc);
+  SavedFilter(after);
+  forall x | x in after
+    ensures x.place > 0 && x.name != "" && |ProofLib.Filter((o: Saved) => (o.place == x.place), after)| == 1
+  {
+    ProofLib.FilterAppend((o: Saved) => (o.place == x.place), acc, s);
+    if x in acc {
+      assert x.place != s.place;
+    } else {
+      assert x == s;
+      ProofLib.FilterNone((o: Saved) => (o.place == x.place), acc);
+      assert forall i :: 0 <= i < |acc| ==> acc[i] in acc;
+    }
+  }
+  assert s in after;
+  forall p | isSaved(acc, p)
+    ensures isSaved(after, p)
+  {
+    var w :| w in acc && w.place == p;
+    assert w in after;
+  }
+}
+
+lemma AdoptedFold(acc: seq<Saved>, rest: seq<Saved>)
+  requires distinctAndNamed(acc)
+  requires |acc| <= maxSaved
+  ensures distinctAndNamed(Std.Collections.Seq.FoldLeft((taken: seq<Saved>, s: Saved) => (if ((((s.place > 0) && (s.name != "")) && !(isSaved(taken, s.place))) && (|taken| < maxSaved)) then (taken + [s]) else taken), acc, rest))
+  ensures |Std.Collections.Seq.FoldLeft((taken: seq<Saved>, s: Saved) => (if ((((s.place > 0) && (s.name != "")) && !(isSaved(taken, s.place))) && (|taken| < maxSaved)) then (taken + [s]) else taken), acc, rest)| <= maxSaved
+  ensures forall p :: isSaved(acc, p) ==> isSaved(Std.Collections.Seq.FoldLeft((taken: seq<Saved>, s: Saved) => (if ((((s.place > 0) && (s.name != "")) && !(isSaved(taken, s.place))) && (|taken| < maxSaved)) then (taken + [s]) else taken), acc, rest), p)
+  ensures |acc| + |rest| <= maxSaved ==> forall s :: s in rest && s.place > 0 && s.name != "" ==> isSaved(Std.Collections.Seq.FoldLeft((taken: seq<Saved>, s: Saved) => (if ((((s.place > 0) && (s.name != "")) && !(isSaved(taken, s.place))) && (|taken| < maxSaved)) then (taken + [s]) else taken), acc, rest), s.place)
+  decreases |rest|
+{
+  var f := (taken: seq<Saved>, s: Saved) => (if ((((s.place > 0) && (s.name != "")) && !(isSaved(taken, s.place))) && (|taken| < maxSaved)) then (taken + [s]) else taken);
+  if |rest| == 0 {
+  } else {
+    var s := rest[0];
+    var next := f(acc, s);
+    if s.place > 0 && s.name != "" && !isSaved(acc, s.place) && |acc| < maxSaved {
+      AdoptedStep(acc, s);
+    }
+    AdoptedFold(next, rest[1..]);
+    if |acc| + |rest| <= maxSaved {
+      forall x | x in rest && x.place > 0 && x.name != ""
+        ensures isSaved(Std.Collections.Seq.FoldLeft(f, acc, rest), x.place)
+      {
+        if x == s {
+          assert isSaved(next, s.place);
+        } else {
+          assert x in rest[1..];
+        }
+      }
+    }
+  }
+}
+
+lemma lawAnAdoptedListIsSavedOncePerPlaceUnderAName_ensures(saved: seq<Saved>)
+  ensures (lawAnAdoptedListIsSavedOncePerPlaceUnderAName(saved) == true)
+{
+  SavedFilter([]);
+  AdoptedFold([], saved);
+}
+
+lemma lawAnAdoptedListKeepsTheFirstOfEachPlace_ensures(saved: seq<Saved>)
+  ensures (lawAnAdoptedListKeepsTheFirstOfEachPlace(saved) == true)
+{
+  SavedFilter([]);
+  AdoptedFold([], saved);
+}
+
 lemma lawNamingSavesOnce_ensures(saved: seq<Saved>, place: int, name: string)
   ensures (lawNamingSavesOnce(saved, place, name) == true)
 {

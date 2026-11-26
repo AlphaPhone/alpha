@@ -1,9 +1,11 @@
-// spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Keep the draft on the phone"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
+// spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Keep the draft on the phone"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/builder.md, "The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL, SELECTED_REMINDERS_WINDOW, type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, phoneStepUsesDevice, phoneWorkflowCivilMidnight, validatePhoneWorkflowSpec, workflowCalendarRangeFitsLocalDays, workflowSha, workflowUuid } from "@elizaos/plugin-workflow-client"
 import { projectNoteForModel } from "@elizaos/plugin-notes-client"
 import { MediaReview, type WorkflowPhone } from "../assistant/media-review.vibe"
+import { earlierSlot } from "../platform/adoption.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
+import { registered } from "../platform/device.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import * as Build from "../../gen/app__workflows__builder.effect.vibe"
@@ -12,7 +14,7 @@ import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { When } from "../../gen/app__workflows__schedule.effect.vibe"
 import type { Operation, Step } from "../../gen/app__workflows__steps.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import { launchOwnerOf, ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
 import { WorkflowsApi, localTimeZone } from "./api.vibe"
@@ -170,6 +172,81 @@ const Saved = Schema.fromJsonString(Schema.Struct({
   expected: Schema.Struct({ mutationId: Schema.NonEmptyString, specDigest: Schema.NonEmptyString, compilerRevision: Schema.NonEmptyString }),
 }))
 
+const earlierOrigin = "https://device.alpha.invalid"
+const earlierMaxBytes = 100_000
+
+const EarlierSlotDraft = Schema.fromJsonString(Schema.Struct({
+  format: Schema.Literal(1),
+  identity: Schema.NonEmptyString,
+  spec: Schema.Unknown,
+  pending: Schema.optionalKey(Schema.NullOr(Schema.Struct({
+    mutationId: Schema.NonEmptyString,
+    specDigest: Schema.NonEmptyString,
+    compilerRevision: Schema.NonEmptyString,
+  }))),
+}))
+
+/** Parse an earlier Alpha `workflow-draft:v1:*` slot for `identity` into a validated phone workflow spec and optional pending save expectation. */
+effect function previousOf(raw: string, identity: string): {
+  readonly previous: Build.PreviousDraft
+  readonly spec?: PhoneWorkflowSpec
+  readonly pending?: PhoneWorkflowSaveExpectation
+}!! {
+  const unreadable = { previous: "UnreadablePreviousDraft" as Build.PreviousDraft }
+  if (raw.length > earlierMaxBytes) return unreadable
+  const parsed = Schema.decodeUnknownEffect(EarlierSlotDraft)(raw) catch () => undefined
+  if (parsed === undefined || parsed.identity !== identity) return unreadable
+  const spec = validatePhoneWorkflowSpec(parsed.spec) catch () => undefined
+  if (spec === undefined) return unreadable
+  if (parsed.pending !== undefined && parsed.pending !== null) {
+    return {
+      previous: "PreviousSaveSent",
+      spec,
+      pending: {
+        mutationId: parsed.pending.mutationId,
+        specDigest: parsed.pending.specDigest,
+        compilerRevision: parsed.pending.compilerRevision,
+      },
+    }
+  }
+  return { previous: "PreviousDraftHeld", spec }
+}
+
+// spec/app/workflows/builder.md, "The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back"
+/** Take in an earlier Alpha's unsaved workflow draft for this resident session once, only while none is kept, clearing the slot only after readback matches. */
+effect function adoptPreviousDraft(scope: string, state: Build.Builder): void!!(Agent | KeyValueStore.KeyValueStore) {
+  if (!registered("AlphaConnection")) return
+  const owner = launchOwnerOf(scope) catch () => undefined
+  if (owner === undefined) return
+  const identity = workflowSha([earlierOrigin, owner.identityId, owner.agentId]) catch () => ""
+  if (identity === "") return
+  const place = earlierSlot(`workflow-draft:v1:${identity}`)
+  const found = place.read() catch () => Option.none<string>()
+  if (Option.isNone(found)) return
+  const { previous, spec, pending } = try previousOf(found.value, identity)
+  if (spec === undefined) return
+  const store = try KeyValueStore.KeyValueStore
+  const existingDraft = store.get(draftKey(scope)) catch () => undefined
+  const existingSave = store.get(saveKey(scope)) catch () => undefined
+  const held = existingDraft !== undefined || existingSave !== undefined || state.name !== 0 || state.steps.length !== 0 || state.save.attempt.outcome !== "Planned"
+  const bytes = JSON.stringify(spec)
+  if (Build.previousDraftAdopted(previous, held)) {
+    const wroteDraft = effect { try store.set(draftKey(scope), bytes); return true } catch () => false
+    if (!wroteDraft) return
+    if (Build.previousSaveKept(previous, held) && pending !== undefined) {
+      const wroteSave = effect { try store.set(saveKey(scope), JSON.stringify({ id: 1, expected: pending })); return true } catch () => false
+      if (!wroteSave) return
+    }
+  }
+  const readBackDraft = try readDraft(scope)
+  const readBackSaveRaw = store.get(saveKey(scope)) catch () => undefined
+  const readBackSave = readBackSaveRaw === undefined ? undefined : (Schema.decodeUnknownEffect(Saved)(readBackSaveRaw) catch () => undefined)
+  const { held: _held, ...readBackSpec } = readBackDraft ?? { held: 0 }
+  const same = readBackDraft !== undefined && JSON.stringify(readBackSpec) === bytes
+    && (previous !== "PreviousSaveSent" || (pending !== undefined && readBackSave?.expected.mutationId === pending.mutationId))
+  if (Build.previousDraftSlotClears(previous, same)) try ignore(place.clear())
+}
+
 type Needs = Agent | WorkflowsApi | DraftWords | Rows | KeyValueStore.KeyValueStore | List.Machine | Build.Machine
   | NoteStore | PhoneCalendar | MediaReview | SystemSettings
 
@@ -183,8 +260,9 @@ effect function offer(ticket: number): Build.Event!!Needs {
   const scope = ownerAt() catch () => ""
   if (!(try rows.sameOwner(scope, state.owner))) return failed
   const catalog = (workflow.phoneCatalog() catch () => undefined)
-  const prior = state.name === 0 && state.steps.length === 0 ? try readDraft(scope) : undefined
   if (catalog === undefined || (ownerAt() catch () => "") !== scope) return failed
+  try adoptPreviousDraft(scope, state)
+  const prior = state.name === 0 && state.steps.length === 0 ? try readDraft(scope) : undefined
   const device = phone.some((operation) => offered(catalog, operation)) ? try (try MediaReview).workflowDevice() : undefined
   if ((ownerAt() catch () => "") !== scope) return failed
   const live = try machine.get()

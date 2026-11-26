@@ -10,6 +10,7 @@ import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Refused, ask } from "../platform/remote.vibe"
+import { fromAreas } from "../home/cards.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
 import { LinkCache } from "./link.vibe"
 import { Requests, Shown } from "./stores.vibe"
@@ -109,13 +110,14 @@ const editorOwner = started(effect {
   )
 }, "synchronizing Editor owner after in-flight writes")
 
-// spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"
-/** Keep the calendars the owner hid in that owner's own slot, each time they change. */
+// spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"
+/** Keep the calendars the owner hid in that owner's own slot, each time they change, and tell Home which they are. */
 const remembered = started(effect {
   const view = try View.Machine
   const store = try KeyValueStore.KeyValueStore
   try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.owner === b.owner && JSON.stringify(a.hidden) === JSON.stringify(b.hidden)), effect (s) => {
     if (s.owner > 0) try ignore(store.set(hiddenKey(s.owner), JSON.stringify(s.hidden)))
+    fromAreas.hidden(s.hidden)
   })
 }, "keeping the hidden calendars")
 

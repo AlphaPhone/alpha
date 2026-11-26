@@ -4,16 +4,19 @@ import * as View from "../../gen/app__calendar.effect.vibe"
 import type { Effect as Out, Event, Source } from "../../gen/app__calendar.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import * as Writes from "../../gen/app__calendar__editor.effect.vibe"
 import { inFlight } from "../../gen/app__calendar__editor.ts"
-import type * as Held from "../../gen/app__calendar__deletions.effect.vibe"
+import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import type * as Notices from "../../gen/app__notices__toasts.effect.vibe"
 import { pageOffered } from "../../gen/app__calendar__presentation.ts"
 import { type Provider, answersOffered, cancellation, mutability, ownAnswer } from "../../gen/app__calendar__writing.ts"
 import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type * as Linking from "../../gen/app__calendar__link.effect.vibe"
 import type * as Reopen from "../../gen/app__calendar__reminderReopen.effect.vibe"
+import { allows } from "../../gen/kit__permission.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os-bridges"
+import { EventRecord } from "@elizaos/plugin-calendar-client"
 import { Agent } from "../platform/agent.vibe"
 import type { Said } from "../notices/toasts.vibe"
 import type { Cloud } from "../platform/cloud.vibe"
@@ -30,6 +33,7 @@ import type { LinkCache } from "./link.vibe"
 import { datedReminders } from "./reminders.ts"
 import { type Person, type Read, androidWindowOf, onDay, repeatText } from "./shown.ts"
 import { type Requests, Shown } from "./stores.vibe"
+import { inspectShown } from "./subject.vibe"
 import { civilDay, dayStart, feedParams, localDate, openLink, plainHttps, readWindow } from "./time.ts"
 
 /** Storage key where Calendar places an event's address before bringing Maps forward. */
@@ -47,42 +51,17 @@ function phoneRow(event: AndroidCalendarEvent): Read {
   }
 }
 
-/** One of an event's people as the agent's feed gives them (eliza's `CalendarAttendee` of `@elizaos/plugin-calendar`). */
-schema FeedAttendee {
-  readonly email: string | null
-  readonly displayName: string | null
-  readonly responseStatus: string | null
-  readonly self: boolean
-  readonly organizer: boolean
-}
-
-/** The part of the agent's calendar feed Calendar shows (eliza's `CalendarFeed` of `@elizaos/plugin-calendar`). */
-schema FeedEvent {
-  readonly id: string
-  readonly calendarId: string
-  readonly title: string
-  readonly description: string
-  readonly location: string
-  readonly startAt: string
-  readonly endAt: string
-  readonly isAllDay: boolean
-  readonly htmlLink: string | null
-  readonly conferenceLink: string | null
-  readonly provider: string
-  readonly attendees: ReadonlyArray<FeedAttendee>
-  readonly recurringEventId?: string | null
-  readonly recurrence?: ReadonlyArray<string> | null
-  readonly updatedAt: string
-  readonly metadata: { readonly etag?: string; readonly managed?: boolean }
-  readonly organizer: { readonly self?: boolean } | null
-}
+/** An event of the agent's calendar feed, as eliza's `EventRecord` of `@elizaos/plugin-calendar-client` reads it. */
+type FeedEvent = typeof EventRecord.Type
 
 /** The version a write names, as eliza's `eventVersion` of `@elizaos/plugin-calendar` reads it: the provider's etag, or the change time. */
 function versionOf(event: FeedEvent): string {
-  const etag = event.metadata.etag ?? ""
+  const etag = typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : ""
   return etag !== "" ? etag : event.updatedAt
 }
-schema Feed { readonly state: "complete" | "partial" | "unavailable"; readonly events: FeedEvent[] }
+
+/** The agent's calendar feed (eliza's `CalendarFeed`), as far as Calendar reads it: whether Google gave it whole, the window it covers and its events. */
+const Feed = Schema.Struct({ state: Schema.Literals(["complete", "partial", "unavailable"]), timeMin: Schema.String, timeMax: Schema.String, events: Schema.Array(EventRecord) })
 
 /** Which calendar an event of the agent's feed comes from, as eliza's `CalendarSourceKey` names providers. */
 const providers: Readonly<Record<string, Provider>> = {
@@ -91,7 +70,7 @@ const providers: Readonly<Record<string, Provider>> = {
 
 /** The calendar the agent manages for the owner, whose answers and deletions are the owner's to make in Google Calendar. */
 function managed(event: FeedEvent): boolean {
-  return event.metadata.managed === true
+  return event.metadata["managed"] === true
 }
 
 // spec/app/calendar/presentation.md, "An event's page is offered only for a Google event at a plain HTTPS address without credentials"; spec/app/calendar/writing.md, "An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline"
@@ -100,7 +79,7 @@ function googleRow(event: FeedEvent): Read {
   const begin = event.isAllDay ? localDate(event.startAt) : Date.parse(event.startAt)
   const end = event.isAllDay ? localDate(event.endAt) : Date.parse(event.endAt)
   const own = event.attendees.find((person) => person.self && !person.organizer)
-  const organizes = event.provider === "eliza" || event.organizer?.self === true || event.attendees.some((person) => person.self && person.organizer)
+  const organizes = event.provider === "eliza" || event.organizer?.["self"] === true || event.attendees.some((person) => person.self && person.organizer)
   const answer = ownAnswer(own !== undefined, own?.responseStatus ?? "")
   const recurring = (event.recurringEventId ?? "") !== ""
   const mode = cancellation(organizes, own !== undefined, false, false)
@@ -123,13 +102,14 @@ export effect function readFeed(day: number): Option.Option<ReadonlyArray<Read>>
   return Option.map(try readWhole(day), (read) => read.rows)
 }
 
-// spec/app/calendar/presentation.md, "A day is free only when the read covering it was complete"
-/** The agent's calendar for the window around `day`, and whether Google gave only part of it; none where no Google account is connected to the agent. */
-effect function readWhole(day: number): Option.Option<{ readonly rows: ReadonlyArray<Read>; readonly partial: boolean }>!Failure!Agent {
-  const request = HttpClientRequest.get("/api/lifeops/calendar/feed", { urlParams: feedParams(day) })
-  const feed = try ask(Agent, request, Feed)
+// spec/app/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/app/calendar/index.md, "Only the newest answer for each source is shown, and only while it may still be read"
+/** The agent's calendar for the window around `day`, whether Google gave only part of it, and whether the feed is for the window asked; none where no Google account is connected to the agent. */
+effect function readWhole(day: number): Option.Option<{ readonly rows: ReadonlyArray<Read>; readonly partial: boolean; readonly exact: boolean }>!Failure!Agent {
+  const urlParams = feedParams(day)
+  const feed = try ask(Agent, HttpClientRequest.get("/api/lifeops/calendar/feed", { urlParams }), Feed)
   if (feed.state === "unavailable") return Option.none()
-  return Option.some({ rows: feed.events.map(googleRow).filter((row) => Number.isFinite(row.begin) && Number.isFinite(row.end)), partial: feed.state === "partial" })
+  const exact = Date.parse(feed.timeMin) === Date.parse(urlParams.timeMin) && Date.parse(feed.timeMax) === Date.parse(urlParams.timeMax)
+  return Option.some({ rows: feed.events.map(googleRow).filter((row) => Number.isFinite(row.begin) && Number.isFinite(row.end)), partial: feed.state === "partial", exact })
 }
 
 // spec/app/calendar/editor.md, "The form's edits always build on the revision of the event as last read"
@@ -137,7 +117,7 @@ effect function readWhole(day: number): Option.Option<{ readonly rows: ReadonlyA
 const revisionsKey = "alpha.calendar.revisions"
 const decodeRevisions = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.Tuple([Schema.String, Schema.String, Schema.Number]))))
 
-// spec/app/calendar/index.md, "Only the newest answer for each source is shown, and only while it may still be read"; spec/app/calendar/index.md, "A read the phone cut short is shown as limited, never as complete"
+// spec/app/calendar/index.md, "Only the newest answer for each source is shown, and only while it may still be read"; spec/app/calendar/index.md, "A read the phone cut short, or Google gave only in part, is shown as limited, never as complete"
 /** What `source` holds for `day`, as the answer to the read numbered `ticket`. */
 effect function readDay(source: Source, ticket: number, day: number): Event!!(PhoneCalendar | Agent | View.Machine | KeyValueStore.KeyValueStore | Shown) {
   const shown = try Shown
@@ -148,8 +128,9 @@ effect function readDay(source: Source, ticket: number, day: number): Event!!(Ph
         shown.drop("Google")
         return { type: "googleChanged", connected: false } as Event
       }
-      return { type: "googleAnswered", ticket, ok: true, rows: shown.keep("Google", day, read.value.rows, read.value.partial).length } as Event
-    } catch () => ({ type: "googleAnswered", ticket, ok: false, rows: 0 })
+      if (!read.value.exact) return { type: "googleAnswered", ticket, ok: false, rows: 0, limited: false } as Event
+      return { type: "googleAnswered", ticket, ok: true, rows: shown.keep("Google", day, read.value.rows, read.value.partial).length, limited: read.value.partial } as Event
+    } catch () => ({ type: "googleAnswered", ticket, ok: false, rows: 0, limited: false })
   }
   const phone = try PhoneCalendar
   const view = try View.Machine
@@ -166,8 +147,14 @@ effect function readDay(source: Source, ticket: number, day: number): Event!!(Ph
   } catch () => ({ type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false })
 }
 
-// spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes"
-/** Read the open event's day again, from its own source, merging only that row without replacing the window or clearing partial status. */
+/** What of an event a return compares: the phone keeps no version, so its content; the agent's calendar its version. */
+function sameAsLeft(left: Read, now: Read): boolean {
+  return left.version !== "" ? now.version === left.version
+    : JSON.stringify([left.title, left.place, left.notes, left.begin, left.end, left.allDay]) === JSON.stringify([now.title, now.place, now.notes, now.begin, now.end, now.allDay])
+}
+
+// spec/app/calendar/index.md, "An event comes back only if an exact read finds it as it was left; otherwise it closes"
+/** Read the open event's window again, from its own source, merging only that row when a whole read finds it as it was left. */
 effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | Agent | View.Machine | Shown) {
   const shown = try Shown
   const row = shown.find(id) ?? shown.lastSeen(id)
@@ -175,19 +162,22 @@ effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | A
   if (row === undefined) return gone
   const day = civilDay(row.begin)
   const again: Option.Option<ReadonlyArray<Read>> = row.source === "Google"
-    ? (readFeed(day) catch () => Option.none<ReadonlyArray<Read>>())
+    ? (effect {
+        const read = try readWhole(day)
+        return Option.isSome(read) && read.value.exact && !read.value.partial ? Option.some(read.value.rows) : Option.none<ReadonlyArray<Read>>()
+      } catch () => Option.none<ReadonlyArray<Read>>())
     : (effect {
         const listed = try (try PhoneCalendar).list(readWindow(day))
-        return listed.status === "ready" ? Option.some(listed.events.map(phoneRow)) : Option.none<ReadonlyArray<Read>>()
+        return listed.status === "ready" && !listed.truncated ? Option.some(listed.events.map(phoneRow)) : Option.none<ReadonlyArray<Read>>()
       } catch () => Option.none<ReadonlyArray<Read>>())
   const found = Option.isSome(again) ? again.value.find((candidate) => candidate.key === row.key) : undefined
-  if (found === undefined) return gone
-  if (row.source === "Phone" && !View.canEventFound(try (try View.Machine).get(), ticket)) return gone
+  if (found === undefined || !sameAsLeft(row, found)) return gone
+  if (row.source === "Phone" && !View.canEventFound(try (try View.Machine).get(), ticket, true)) return gone
   shown.mergeOne(row.source, found)
-  return { type: "eventFound", ticket }
+  return { type: "eventFound", ticket, exact: true }
 }
 
-// spec/app/calendar/index.md, "The video call is joined, and the event opened in Android Calendar, only from the event shown"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
+// spec/app/calendar/index.md, "The video call is joined, and the event opened in Android Calendar, only from the event shown"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back from Maps or Android Calendar reads the event again"
 /** Hand the open event to Maps, Android Calendar, Google Calendar or its video call. */
 effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall" | "GoogleCalendar") {
   const row = (try Shown).find(id)
@@ -207,8 +197,9 @@ effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall" | 
 function carry(fx: Out): Job<Event, PhoneCalendar | Agent | View.Machine | SystemSettings | Shell.Machine | Settings | Time | KeyValueStore.KeyValueStore | Shown, []> {
   return match (fx) {
     when { tag: "ReadDay", let source, let ticket, let day }:
-      answer(`read ${source}`, readDay(source, ticket, day), source === "Google" ? { type: "googleAnswered", ticket, ok: false, rows: 0 } : { type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false });
+      answer(`read ${source}`, readDay(source, ticket, day), source === "Google" ? { type: "googleAnswered", ticket, ok: false, rows: 0, limited: false } : { type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false });
     when { tag: "ReadEvent", let ticket, let id }: answer("event", readEvent(ticket, id), { type: "eventGone", ticket });
+    when { tag: "Inspect", let ticket, let id }: answer("inspect", inspectShown(ticket, id), { type: "inspected", ticket, ok: false });
     when { tag: "Hand", let id, let to }: run(`hand ${to}`, Effect.ignore(hand(id, to)));
     when { tag: "AskAccess" }:
       answer("access", effect {
@@ -228,6 +219,15 @@ function carry(fx: Out): Job<Event, PhoneCalendar | Agent | View.Machine | Syste
 /** Today on this phone, as `dayBegins` takes it. */
 effect function today(): Event!!Time {
   return { type: "dayBegins", day: civilDay(try (try Time).now()) }
+}
+
+// spec/app/calendar/index.md, "An event in a loaded neighboring column opens without changing the selected day"
+export effect function openColumn(id: number, day: number, columns: number): void!!(View.Machine | Shown) {
+  const view = try View.Machine
+  const state = try view.get()
+  const row = (try Shown).visible(state.hidden, allows(state.access), state.connected).find((candidate) => candidate.id === id && onDay(candidate, day))
+  if (row === undefined) return
+  try contained(view.send({ type: "openColumnEvent", id, day, columns, place: row.place !== "", video: row.video !== "", local: row.source === "Phone", web: row.link !== "" }), "opening an event from its calendar column")
 }
 
 // spec/app/calendar/index.md, "When the date changes, a calendar on today moves to the new today, and any other day stays the same date"; spec/app/calendar/index.md, "While Calendar is in front it reads again once a minute, never during a read and never under an open event"
@@ -252,13 +252,17 @@ const told = started(effect {
   if (phone.present) try contained(view.send({ type: "accessAnswered", grant: try phone.grant() }), "telling Calendar of its access")
 }, "reading what Calendar may read")
 
-/** Whether Calendar is the app the shell shows, each time that changes. */
-const showing = Stream.unwrap(effect {
-  return Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar")))
+// spec/app/calendar/index.md, "Calendar says when it comes in front and when it leaves; coming in front reads again"
+/** Whether Calendar is in front, each time that changes: the app the shell shows, on a page that is visible and unlocked. */
+export const calendarInFront: Stream.Stream<boolean, never, Shell.Machine | Device> = Stream.unwrap(effect {
+  const device = try Device
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const app = Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar"))
+  return Stream.changes(Stream.map(Stream.zipLatest(app, visible), ([shown, seen]) => shown && seen))
 })
 
-/** Each time the shell brings Calendar forward. */
-const forward = Stream.filter(showing, (front) => front)
+/** Each time Calendar comes in front: brought forward by the shell, or the page shown again after another app. */
+const forward = Stream.filter(calendarInFront, (front) => front)
 
 // spec/app/calendar/index.md, "What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go"
 const accessOnReturn = started(effect {
@@ -284,9 +288,31 @@ const accessOnReturn = started(effect {
   try Stream.runDrain(Stream.switchMap(Stream.merge(forward, resumed), () => Stream.fromEffect(check)))
 }, "refreshing Calendar access on return")
 
-// spec/app/calendar/index.md, "Calendar says when it comes in front and when it leaves; coming in front reads again"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
-const fronted = hearing(showing, View.Machine, (front): Event => ({ type: "frontChanged", front, now: untimed }))
+// spec/app/calendar/index.md, "Calendar says when it comes in front and when it leaves; coming in front reads again"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back from Maps or Android Calendar reads the event again"
+const fronted = hearing(calendarInFront, View.Machine, (front): Event => ({ type: "frontChanged", front, now: untimed }))
 const returned = hearing(forward, View.Machine, (): Event => ({ type: "comeBack" }))
+
+// spec/app/calendar/index.md, "Leaving Calendar closes its search, its sheets and its dialogs"
+const covering = following(Layers, (layers) => pageInert(layers), View.Machine, (covered): Event => ({ type: "coverChanged", covered }))
+
+// spec/app/calendar/index.md, "The editor and the deletions say when a form or a delete review opens over the days, which closes the overlay"
+const forms = following(Writes.Machine, (form) => (!form.shown ? "NoFormShown" : form.form === "NewEvent" ? "NewFormShown" : "EditFormShown"), View.Machine,
+  (form): Event => ({ type: "formChanged", form }))
+const reviews = following(Held.Machine, (held) => held.asked !== 0, View.Machine, (review): Event => ({ type: "reviewChanged", review }))
+
+// spec/app/calendar/index.md, "Each detail of the phone's shown is inspected by the phone, and only the newest inspection counts"
+/** Each read of the phone that shows the open event changed tells Calendar its detail changed, which the phone inspects again. */
+const detailWatch = started(effect {
+  const view = try View.Machine
+  const shown = try Shown
+  let left = { open: 0, revision: -1 }
+  try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.open === b.open && a.phone.ticket === b.phone.ticket && a.phone.status === b.phone.status), effect (s) => {
+    const revision = s.open === 0 || !s.local ? -1 : (shown.find(s.open)?.revision ?? -1)
+    const changed = s.open === left.open && s.phone.status === "Loaded" && revision !== left.revision
+    left = { open: s.open, revision }
+    if (changed) try contained(view.send({ type: "detailChanged" }), "telling Calendar the open event changed")
+  })
+}, "following the open event's detail")
 
 // spec/app/calendar/index.md, "A screen that narrows shows one day instead of several"
 const widened = following(Canvas.Machine, (canvas) => canvas.wide, View.Machine, (wide): Event => ({ type: "resize", wide }))
@@ -320,7 +346,7 @@ const reminders = started(effect {
 }, "reading reminders for Calendar")
 
 /** Calendar's view: in memory, told today by Alpha's time and the shell, and what it may read by Android and the agent. */
-export const calendar = together(kept, told, accessOnReturn, fronted, returned, widened, writing, reminders)
+export const calendar = together(kept, told, accessOnReturn, fronted, returned, widened, writing, covering, forms, reviews, detailWatch, reminders)
 
 /** Every machine and scoped store of the Calendar area, which its screen reads, and Alpha's time. */
 export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Shell.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Shown | Requests | DeletionMeta | LinkCache | Notices.Machine | Said

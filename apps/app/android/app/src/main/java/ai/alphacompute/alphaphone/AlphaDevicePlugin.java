@@ -312,7 +312,7 @@ public final class AlphaDevicePlugin extends Plugin {
     out.put("testMocks",false);out.put("sdkInt",Build.VERSION.SDK_INT);
     out.put("androidRelease",Build.VERSION.RELEASE);out.put("securityPatch",Build.VERSION.SECURITY_PATCH);
     JSObject hashes=new JSObject();
-    for(String asset:new String[]{"agent/alpha-source.json","agent/agent-bundle.js","agent/workflow-worker/manifest.json","agent/workflow-worker/files.sha256"}){String hash=assetSha256(asset);if(hash!=null)hashes.put(asset,hash);}
+    for(String asset:new String[]{"agent/alpha-source.json","agent/inventory.json","agent/agent.mjs","agent/workflow-worker/manifest.json","agent/workflow-worker/files.sha256"}){String hash=assetSha256(asset);if(hash!=null)hashes.put(asset,hash);}
     out.put("runtimeHashes",hashes);
     try(java.io.InputStream in=getContext().getAssets().open("agent/alpha-source.json")){
      String base=new org.json.JSONObject(new String(AlphaUtil.readBounded(in,64*1024,null),java.nio.charset.StandardCharsets.UTF_8)).optString("base","");
@@ -377,8 +377,8 @@ public final class AlphaDevicePlugin extends Plugin {
   * Self-update without a system dialog is supported from Android 12. Android still decides at commit.
   * An image may allow-list INSTALL_SELF_UPDATES (signature|privileged) for its preinstalled launcher. Android then admits
   * Alpha's update of itself, and only that, without the owner's install-unknown-apps choice. Android grants it to an
-  * update only when the image's own launcher also declares it. The launcher does not declare it yet: the shared image
-  * stager must first admit it to its reviewed privileged set. Until then every install needs that choice once.
+  * update only when the image's own launcher also declares it. The launcher declares it; an image grants it once the
+  * shared image stager admits it to its reviewed privileged set. A launcher installed by hand never holds it and asks once.
   */
  static String automaticUpdateStatus(Context context){
   if(Build.VERSION.SDK_INT<31)return "unsupported";

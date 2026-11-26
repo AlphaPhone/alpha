@@ -493,6 +493,15 @@ pure def alwaysPdfBelongsToTheOpenReview(s: MessageView): bool =
     and 1 <= s.pdf.page and s.pdf.page <= s.pdf.pages and s.pdf.drawing.status != R::Idle
 
 pure def sometimesALaterPdfPageIsDrawn(s: MessageView): bool = s.pdf.page > 1 and s.pdf.drawing.status == R::Loaded
+
+pure val eval_witness_sometimesALaterPdfPageIsDrawn = (
+  ("open", { account: 1, grant: { read: true, send: false, modify: false } }, 1, 1, false),
+  ("loaded", 1, { account: 1, grant: { read: true, send: false, modify: false } }, true, Fine, 1, 1, 0, 1),
+  ("reviewAttachment", 1, Opening),
+  ("confirmAttachment", { account: 1, grant: { read: true, send: false, modify: false } }),
+  ("attachmentHandled", 1, true, true, 3),
+  ("pdfPage", { account: 1, grant: { read: true, send: false, modify: false } }, 2),
+  ("pdfDrawn", 1, 2, 2, true))
 ```
 
 ### An attachment whose saving may have happened is not saved again, from this message of this account or after closing it, and is remembered once

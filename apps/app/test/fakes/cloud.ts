@@ -1,6 +1,6 @@
 // spec/kit/read.md, "Story: Read from outside"
 import type { Account, BillingSnapshot, PlanOffer, RedeemAnswer, SubscriptionCommand } from "@elizaos/cloud";
-import { busy } from "./platform.ts";
+import { busy, spent } from "./platform.ts";
 import { readJsonBody, type Route } from "./routes.ts";
 
 /** The owner's account as eliza's cloud answers `GET /api/v1/user`: typed by eliza's own client, so a change of its shape stops this compiling. */
@@ -121,5 +121,6 @@ export function cloudRoutes(signedIn: () => boolean, now: () => number, checkout
     },
     (request, url) => (request.method === "GET" && url.pathname === "/api/v1/subscriptions/plans" ? Response.json({ plans }) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === "/api/v1/platform/busy" ? busy(Number(url.searchParams.get("status"))) : undefined),
+    (request, url) => (request.method === "GET" && url.pathname === "/api/v1/platform/spent" ? spent(Number(url.searchParams.get("until"))) : undefined),
   ];
 }

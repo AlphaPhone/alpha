@@ -3,8 +3,11 @@
 import { ConversationRecord, TurnController, createRuntimeJsonClient, defineRoutes } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
 import { CleanupReceipt } from "@elizaos/plugin-notes-client"
-import { configurationExit, coreActions, entryCarried, launchViews, packedPlugins, productPluginName, refusedActions, walletKeysAllowed, workerAdmitted } from "../gen/agent.effect.vibe"
-import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun, taskStorageKey } from "./phone.ts"
+import {
+  calendarEdits, configurationExit, coreActions, entryCarried, gmailChanges, googleAdmitted, launchViews, loadList, packedPlugins, productPluginName, proposalsAdmitted, refusedActions,
+  serviceAvailable, viewsAdmitted, walletKeysAllowed, workerAdmitted,
+} from "../gen/agent.effect.vibe"
+import { type Running, call, hostFile, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun, taskStorageKey } from "./phone.ts"
 
 type Run = Awaited<ReturnType<typeof startRun>>
 
@@ -21,6 +24,15 @@ function phoneAgent(run: Run, state: string) {
 }
 
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
+
+/** A route of the conversation the run opened, or of its room. */
+const conversational = (route: string) => route.startsWith("/api/conversations/") || route.startsWith("/api/turns/")
+
+/** A route naming the scheduled task or the trigger the run saved, whose module answers a record it does not hold exactly as the agent answers a route nothing serves. */
+const namesHeldRecord = (route: string) => route.startsWith("/api/scheduled-tasks/{id}") || route.startsWith("/api/triggers/{id}")
+
+/** A route naming a record the run does not hold: an event, a workflow, an alarm, a reminder or a proposal. */
+const namesUnheldRecord = (route: string) => /\{[a-zA-Z]+\}/.test(route) && !conversational(route) && !namesHeldRecord(route)
 
 /** A concrete path that probes route admission without targeting an existing record outside the test conversation. */
 const filled = (route: string, conversation: ConversationRecord, taskId: string, triggerId: string) => {
@@ -42,6 +54,25 @@ const answerOf = (status: number, body: string) => {
   try { return { status, body: JSON.parse(body) as unknown } } catch { return { status, body } }
 }
 
+/** The collection a route naming one record by `{id}` belongs to, as `/api/triggers` for `/api/triggers/{id}`. */
+const collectionOf = (path: string) => /^(\/api\/[^{]+)\/\{id\}/.exec(path)?.[1]
+const ofListedCollection = (path: string) => {
+  const collection = collectionOf(path)
+  return collection !== undefined && listed().some((route) => route.path === collection)
+}
+const isUnserved = (answer: { status: number; body: unknown }) =>
+  answer.status === unserved.status && JSON.stringify(answer.body) === JSON.stringify(unserved.body)
+
+/**
+ * What a listed route answered, as the check expects it: a stream opened and sent something; a route naming a record
+ * the run does not hold answered as its plugin or module, not as the agent's own unserved route; any other route was
+ * found, or belongs to a listed collection whose module answers a missing record with the same not-found body.
+ */
+const served = (route: { path: string; stream?: boolean }, answer: { status: number; body: unknown }) =>
+  route.stream === true ? answer.status === 200 && typeof answer.body === "number" && answer.body > 0
+    : namesUnheldRecord(route.path) ? !isUnserved(answer)
+    : answer.status !== 404 || ofListedCollection(route.path)
+
 schema Created { conversation: ConversationRecord }
 schema Listed { conversations: { id: string }[] }
 schema History { messages: { id: string; timestamp: Schema.Int }[] }
@@ -49,6 +80,9 @@ error MissingHistoryMessages { expected: number; received: number }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
+schema WorkflowStatus { status: string; hostedNativeSourceProtocol?: number }
+schema Operation { id: string; available: boolean }
+schema Catalog { palette: { kind: string; operations: Operation[] }[] }
 schema ResidentScope { userId: string; organizationId: string; agentId: string; epoch: Schema.Int }
 const Receipts = Schema.Array(CleanupReceipt)
 schema CleanupQueue { success: boolean; data: Receipts }
@@ -63,10 +97,15 @@ describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "Every package the bundle carries is the pinned eliza's, except the pack's entry and Alpha's product plugin"
   // spec/agent/index.md, "Only Android's native speech transport can call the resident recognizer"
   // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
-  it("Build the pack only from the pinned eliza", () => {
+  // spec/agent/index.md, "The pack carries the plugins the old phone's agent loaded, under the pinned eliza's names, and the launch loads them with the agent's own modules the old agent had"
+  // spec/agent/index.md, "A proposed device step goes through eliza's device-action module, and the phone says which steps it takes"
+  // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by"
+  // spec/agent/index.md, "The agent changes the owner's mail and calendar through Google only where the launch consents, and the pack's host file consents to neither"
+  it("Build the pack only from the pinned eliza", async () => {
     const built = manifest()
     const registered = built.actions.map(({ name }) => name)
     const { actions, plugins } = policy()
+    const host = hostFile()
     expect({ plugins: [...built.plugins].sort(), productPlugin: built.productPlugin, localInference: built.localInference, worker: /^[a-f0-9]{64}$/.test(built.workflowWorkerSha256 ?? "") })
       .toEqual({ plugins: [...packedPlugins].sort(), productPlugin: productPluginName, localInference: true, worker: true })
     const native = listed("nativeRoutes")
@@ -87,9 +126,12 @@ describe("Build the pack only from the pinned eliza", () => {
       .toEqual(["@repo/agent-pack-entry", productPluginName].sort())
     expect(Object.keys(actions.refused).sort()).toEqual(refusedActions(registered).sort())
     expect(Object.keys(actions.refused)).toContain("CALCULATE")
+    expect({ loaded: plugins.load, proposals: proposalsAdmitted(plugins.load, actions.allowed) }).toEqual({ loaded: loadList, proposals: true })
+    expect({ google: googleAdmitted(host.google.gmailChanges, host.google.calendarEdits), consented: host.google }).toEqual({ google: true, consented: { gmailChanges, calendarEdits } })
+    expect(viewsAdmitted(host.views.map(({ id, label, path, aliases }) => ({ id, label, path, aliases: aliases ?? [] })))).toBe(true)
     expect(coreActions.every((name) => actions.allowed.includes(name))).toBe(true)
     expect(Object.values(actions.refused).every((reason) => reason.trim() !== "")).toBe(true)
-    expect(workerAdmitted(pinnedWorker().sha256, built.workflowWorkerSha256 ?? "")).toBe(true)
+    expect(workerAdmitted((await pinnedWorker()).sha256, built.workflowWorkerSha256 ?? "")).toBe(true)
   })
 })
 
@@ -151,9 +193,10 @@ describe("Run Alpha's agent on the phone", () => {
       const { trigger } = try Schema.decodeUnknownEffect(Schema.fromJsonString(SavedTrigger))(queued.body)
       try Effect.try(() => expect({ alarm: createdAlarm.status, reminder: createdReminder.status, routine: routine.status, task: task !== undefined, trigger: queued.status }).toEqual({ alarm: 201, reminder: 201, routine: 201, task: true, trigger: 201 }))
       const taskId = task?.taskId ?? ""
+      const unanswered: { method: string; route: string; answer: { status: number; body: unknown } }[] = []
       for (const route of try Effect.try(() => listed())) {
         const target = filled(route.path, opened, taskId, trigger.id)
-        const status = route.stream === true
+        const answer = route.stream === true
           ? try promise(async () => {
             const streamed = await runtime.stream(target, { text: "Again." })
             const chunks: Uint8Array[] = []
@@ -164,11 +207,12 @@ describe("Run Alpha's agent on the phone", () => {
             const body = route.method === "GET" || route.method === "DELETE" ? undefined
               : target.endsWith("/messages") ? { text: "Again." }
               : route.path === "/api/triggers/{id}/execute" || route.path === "/api/scheduled-tasks/{id}/fire" ? { probe: true } : {}
-            const answer = await call(first, route.method, target, body)
-            return answerOf(answer.status, answer.body)
+            const replied = await call(first, route.method, target, body)
+            return answerOf(replied.status, replied.body)
           })
-        try Effect.try(() => expect({ route: route.path, answer: status }).not.toEqual({ route: route.path, answer: unserved }))
+        if (!served(route, answer)) unanswered.push({ method: route.method, route: route.path, answer })
       }
+      try Effect.try(() => expect(unanswered).toEqual([]))
       const created = try promise(() => call(first, "POST", "/api/notes/interact", { capability: "create-note", params: { content: "Heron food on Thursday" } }))
       const notes = try promise(() => call(first, "POST", "/api/notes/interact", { capability: "get-notes", params: {} }))
       const read = try Schema.decodeUnknownEffect(Schema.fromJsonString(Interacted))(notes.body)
@@ -233,7 +277,7 @@ describe("Run Alpha's agent on the phone", () => {
       expect(keptReminders.body).toContain("Buy heron seed")
     })
     const refused = try Effect.try(() => run.place("refused"))
-    const worker = { workflowWorker: { ...(try Effect.try(() => pinnedWorker())), sha256: "0".repeat(64) } }
+    const worker = { workflowWorker: { ...(try promise(() => pinnedWorker())), sha256: "0".repeat(64) } }
     const launch = try promise(() => launchFor(run.cloud, run.key, refused, worker))
     const code = try promise(() => startPhoneAgent(launch, refused, run.cloud, run.key).exited)
     try Effect.try(() => expect(code).toBe(configurationExit))
@@ -269,5 +313,21 @@ describe("The wallet is given no storage key until the owner allows wallet keys"
       taskStorage: "ok",
       held: [{ custody: "none", canHold: false, accounts: [] }, { custody: "none", canHold: false, accounts: [] }],
     }))
+  }), 300_000)
+})
+
+describe("Give the plugins the phone's device services, and say plainly which it cannot give yet", () => {
+  // spec/agent/index.md, "The pack's entry gives the workflow plugin the enrolled phone's steps and Maps its saved places"
+  // spec/agent/index.md, "The native digest sources the phone does not give its plugins yet are named, and nothing in the pack fakes them"
+  it.live("Give the plugins the phone's device services, and say plainly which it cannot give yet", () => scoped(effect {
+    const run = try acquireRelease(promise(() => startRun()), (started) => promise(() => started.stop()))
+    const agent = try phoneAgent(run, try Effect.try(() => run.place("phone")))
+    const workflows = try promise(() => call(agent, "GET", "/api/workflow/status"))
+    const engine = try Schema.decodeUnknownEffect(Schema.fromJsonString(WorkflowStatus))(workflows.body)
+    const offered = try promise(() => call(agent, "GET", "/api/workflow/phone/catalog"))
+    const catalog = try Schema.decodeUnknownEffect(Schema.fromJsonString(Catalog))(offered.body)
+    const calendarRange = catalog.palette.flatMap(({ operations }) => operations).find(({ id }) => id === "calendar_range")
+    try Effect.try(() => expect({ status: workflows.status, engine: engine.status, native: engine.hostedNativeSourceProtocol !== undefined, catalog: offered.status, deviceStep: calendarRange?.available })
+      .toEqual({ status: 200, engine: "ready", native: serviceAvailable("workflow-native-digests"), catalog: 200, deviceStep: serviceAvailable("workflow-device") }))
   }), 300_000)
 })

@@ -61,6 +61,8 @@ export interface SettingsScene {
   reset: { status: string; message: string };
   readonly reviews: number[];
   networks: WiFiNetwork[];
+  /** The code Android rejects a scan with, where it refuses one. */
+  scanRefusal?: "LOCATION_PERMISSION_REQUIRED" | "LOCATION_DISABLED";
   wifiScanGate?: Promise<unknown>;
   joinAnswer: ApprovedJoinResult["status"];
   readonly joins: ConnectOptions[];
@@ -196,6 +198,7 @@ export function elizaWiFi(scene: SettingsScene): Faked {
     },
     listAvailableNetworks: async () => {
       await scene.wifiScanGate;
+      if (scene.scanRefusal !== undefined) throw Object.assign(new Error("Android refused the Wi-Fi scan"), { code: scene.scanRefusal });
       return { networks: scene.networks.map((network) => ({ ...network })) };
     },
     connectToNetwork: () => Promise.resolve({ success: false }),

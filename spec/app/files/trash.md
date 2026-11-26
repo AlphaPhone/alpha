@@ -121,6 +121,19 @@ pure def moveToTrash(s: Trash, items: List[int], approval: int, by: Actor): Move
 pure def alwaysItemsWaitOnlyBehindAJob(s: Trash): bool = s.waiting.length() > 0 implies busy(s)
 ```
 
+### A job holds entries only while it is running, and clears the read, marks and details until it finishes
+
+Discovered by the proof: once a job has ended or been cut by a restart, no
+entries remain on the idle job, so starting the next job cannot drop anything
+an unseen Trash still kept; and while a job runs, the previous read, marks and
+item details remain cleared.
+
+```quint
+pure def alwaysAJobHoldsEntriesOnlyWhileRunning(s: Trash): bool =
+  (not(busy(s)) implies s.job.entries.length() == 0)
+    and (busy(s) implies (s.listing.status == R::Idle and s.marked.length() == 0 and s.details == 0))
+```
+
 ### A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown
 
 What a job brought back or erased leaves the list at once, and what went in
@@ -139,7 +152,7 @@ pure def concluded(results: List[Entry], known: bool, now: int, window: int, s: 
   val whole = if (s.job.kind == Binning) s.job.items.every(i => done.some(e => e.item == i)) else s.job.entries.every(e => done.some(d => d.mark == e.mark))
   val binning = s.job.kind == Binning
   val entries = if (binning) done.select(d => not(s.entries.includes(d))).concat(s.entries)
-    else s.entries.select(e => not(done.some(d => d.mark == e.mark)))
+    else s.entries.select(e => not(s.job.entries.includes(e) and done.some(d => d.mark == e.mark)))
   { ...s, attempt: A::conclude(s.attempt, whole, known), job: idle, done: done, waiting: List(), entries: entries,
     erasing: if (entries == s.entries) s.erasing else V::revise(s.erasing),
     binned: if (binning) done else List(), undo: if (binning and done.length() > 0) U::hold(now, window) else if (binning) U::free else s.undo,

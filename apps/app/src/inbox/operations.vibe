@@ -1,18 +1,20 @@
 // spec/app/inbox/sending.md, "Story: Send a draft I reviewed"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"; spec/app/inbox/sending.md, "Story: Restore mail I archived or trashed"
+import { inboxOperationKey } from "@elizaos/plugin-inbox-client"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import { accessOf } from "../../gen/app__inbox.effect.vibe"
 import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
 import type { Effect as Out, Event, Kind } from "../../gen/app__inbox__sending.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import type { MailOperation } from "@elizaos/cloud"
-import { type Cloud } from "../platform/cloud.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { earlierSlot } from "../platform/adoption.vibe"
 import { type Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Job, answer, contained, hearing, reacting, run, started, stop, together, untimed } from "../runtime/reactor.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { type Attached, Letters } from "./composer.vibe"
-import { Mail, type Proposal, operate, operationStoreVersion, relabel } from "./gmail.vibe"
+import { Mail, type Proposal, asked, operate, operationStoreVersion, recorded, relabel } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 const labels = {
@@ -104,11 +106,96 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
   return { type: "answered", attempt, done, matches: ended.known && (!ended.done || done), gmail: done ? saved : 0 }
 }
 
+/** The request the earlier Alpha sent an operation under, and its kind as Gmail names it, for each attempt taken in from it. */
+export service Earlier {
+  take(attempt: number, requestId: string, kind: Proposal["kind"]): void
+  of(attempt: number): { readonly requestId: string; readonly kind: Proposal["kind"] } | undefined
+  /** Keep the raw record read from `slot` before clearing it so draft adoption can inspect it without racing. */
+  remember(slot: string, raw: string): void
+  seen(slot: string): string | undefined
+}
+
+const earlier = Layer.sync(Earlier, () => {
+  const taken = new Map<number, { readonly requestId: string; readonly kind: Proposal["kind"] }>()
+  const remembered = new Map<string, string>()
+  return {
+    take: (attempt: number, requestId: string, kind: Proposal["kind"]) => void taken.set(attempt, { requestId, kind }),
+    of: (attempt: number) => taken.get(attempt),
+    remember: (slot: string, raw: string) => void remembered.set(slot, raw),
+    seen: (slot: string) => remembered.get(slot),
+  }
+})
+
+/** The earlier Alpha's kinds this one takes in: a send and each change to a Gmail draft. */
+const earlierKinds = { send: "Send", "draft-create": "SaveDraft", "draft-replace": "ReplaceDraft", "draft-delete": "DeleteDraft" } as const satisfies Partial<Record<Proposal["kind"], Kind>>
+
+/** The earlier Alpha's record of an account's one operation, as far as this one reads it. */
+const EarlierRecord = Schema.fromJsonString(Schema.Struct({
+  requestId: Schema.NonEmptyString,
+  phase: Schema.Literals(["preparing", "review", "dispatching", "observed"]),
+  proposal: Schema.Struct({ kind: Schema.String }),
+  receipt: Schema.NullOr(Schema.Struct({ state: Schema.String })),
+}))
+const decodeEarlier = Schema.decodeUnknownOption(EarlierRecord)
+
+/** The cloud environments the earlier Alpha kept an owner's mail under. */
+const earlierEnvironments = ["production", "staging"] as const
+
+// spec/app/inbox/sending.md, "What the earlier Alpha sent, or never heard the answer to, is taken in as the operation in flight, is never sent again, and ends as Gmail's record of it says"
+/** Gmail's record of what the earlier Alpha sent as attempt `attempt`, read once: it ends the attempt as any answer does. */
+effect function settled(attempt: number, kind: Kind, account: number): Event!!(Cloud | Mail | Letters | Earlier) {
+  const taken = (try Earlier).of(attempt)
+  if (taken === undefined) return { type: "replyLost", attempt }
+  const ended = try recorded(account, taken.requestId, taken.kind)
+  const letters = try Letters
+  const id = ended.result?.["draftId"]
+  const digest = ended.result?.["providerDigest"]
+  const saved = ended.done && kind === "SaveDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(account, id, digest) : 0
+  const done = ended.done && (kind !== "SaveDraft" || (saved !== 0 && (try letters.keepCopies())))
+  return { type: "answered", attempt, done, matches: ended.known && (!ended.done || done), gmail: done ? saved : 0 }
+}
+
+/**
+ * Take in what the earlier Alpha kept of `account`'s one operation, for the owner `user` of `organization`: one it
+ * had sent, or never heard the answer to, becomes the operation in flight here; one it was still preparing or
+ * reviewing, or had settled, is cleared. Its record is cleared only once this one is kept or it was dropped.
+ * This is the sole owner of clearing `inbox-operation:v1:*`.
+ */
+effect function takeIn(account: number, grant: string, user: string, organization: string): void!!(Sending.Machine | Earlier) {
+  const operations = try Sending.Machine
+  const held = try Earlier
+  for (const environment of earlierEnvironments) {
+    const slotKey = try inboxOperationKey(JSON.stringify([environment, user, organization]), grant)
+    const slot = earlierSlot(slotKey)
+    const kept = slot.read() catch () => Option.none<string>()
+    if (Option.isNone(kept)) continue
+    held.remember(slotKey, kept.value)
+    const record = decodeEarlier(kept.value)
+    if (Option.isNone(record)) continue
+    const { requestId, phase, proposal, receipt } = record.value
+    if (!(proposal.kind in earlierKinds)) continue
+    const settledThere = receipt?.state === "succeeded" || receipt?.state === "rejected"
+    if (phase === "preparing" || phase === "review" || (phase === "observed" && settledThere)) {
+      try ignore(slot.clear())
+      continue
+    }
+    const kind = earlierKinds[proposal.kind as keyof typeof earlierKinds]
+    const now = try operations.get()
+    const event = { type: "earlierFound", kind, account, draft: -(now.attempts + 1) } as const
+    if (!Sending.canEarlierFound(now, kind, account, event.draft, "World")) continue
+    held.take(now.attempts + 1, requestId, proposal.kind as Proposal["kind"])
+    const taken = try exit(operations.send(event, "World"))
+    if (Exit.isSuccess(taken)) try ignore(slot.clear())
+  }
+}
+
 /** Tell the composer `event` about the draft an operation was handed. */
 const toDraft = (event: DraftEvent) => effect { try ignore((try Drafts.Machine).send(event, "World")) }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine, [by: Actor]> {
+function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine | Earlier, [by: Actor]> {
   return match (fx) {
+    when { tag: "ReadRecord", let attempt, let kind, let account }:
+      answer(`record ${attempt}`, settled(attempt, kind, account), { type: "replyLost", attempt }, "World");
     when { tag: "Request", kind: "Send", let attempt, let access, let draft, let gmail }:
       answer(`request ${attempt}`, sent(attempt, access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", kind: "SaveDraft", let attempt, let access, let draft, let gmail }:
@@ -195,5 +282,22 @@ const told = started(effect {
 
 const sessions = hearing(ownerChanges, Sending.Machine, (): Event => ({ type: "sessionChanged" }), "World")
 
+// spec/app/inbox/sending.md, "What the earlier Alpha sent, or never heard the answer to, is taken in as the operation in flight, is never sent again, and ends as Gmail's record of it says"
+/** Each answer naming the accounts looks for what the earlier Alpha kept of each one's operation. */
+const earlierTaken = started(effect {
+  const list = try Inbox.Machine
+  const ledger = try Mail
+  const { client } = try Cloud
+  const answered = Stream.changesWith(Stream.filter(list.changes, (state) => state.signedIn && state.accounts.status === "Loaded"), (a, b) => a.accounts.ticket === b.accounts.ticket)
+  try Stream.runForEach(answered, effect (state) => {
+    const owner = effect { return try asked((signal) => client.account({ signal })) } catch () => undefined
+    if (owner === undefined) return
+    for (const linked of state.connected) {
+      const grant = ledger.grant(linked.account)
+      if (grant !== undefined) try contained(takeIn(linked.account, grant, owner.id, owner.organization_id), "taking in the earlier Alpha's operation")
+    }
+  })
+}, "taking in the earlier Alpha's operations")
+
 /** Archive, Trash and their restores: kept across restarts, held for the undo window, and sent through the owner's cloud. */
-export const operations = together(reacting(Sending, { keep: operationStoreVersion, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told, sessions)
+export const operations = together(Layer.provideMerge(reacting(Sending, { keep: operationStoreVersion, open: [{ type: "restart" }, "World"], carry }), earlier), released, dispatched, told, sessions, earlierTaken)

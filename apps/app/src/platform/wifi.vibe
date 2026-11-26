@@ -1,5 +1,5 @@
 // spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/network.md, "Story: See whether I am online"
-import type { JoinableWiFiSecurity, WiFiSecurity } from "@elizaos/os-bridges"
+import { type JoinableWiFiSecurity, type WiFiSecurity, rejectionCode } from "@elizaos/os-bridges"
 import type { Joined, Scan, Security } from "../../gen/app__settings__network.ts"
 import { registered } from "./device.vibe"
 
@@ -50,17 +50,22 @@ const answers = { connected: "Connected", captivePortal: "Portal", declined: "De
 
 const wifiPluginName = "ElizaWiFi"
 
+// spec/app/settings/network.md, "Only the newest scan's answer is taken: the networks it found, or why it could not scan"
+const scanRefusals: Readonly<Partial<Record<string, Scan>>> = { LOCATION_PERMISSION_REQUIRED: "NeedsLocation", LOCATION_DISABLED: "LocationOff" }
+
 effect function scanned(): Scanned!! {
   if (!registered(wifiPluginName)) return { scan: "ScanUnavailable", networks: [] }
   const wifi = client()
   const permission = try Effect.option(tryPromise(() => wifi.checkPermissions()))
   if (Option.isSome(permission) && permission.value.location !== "granted") return { scan: "NeedsLocation", networks: [] }
-  const found = try Effect.option(tryPromise(() => wifi.listAvailableNetworks({ joinable: false })))
-  if (Option.isNone(found)) return { scan: "ScanUnavailable", networks: [] }
-  return {
-    scan: "Found",
-    networks: found.value.networks.map((network) => ({ name: network.ssid, strength: network.rssi, security: network.security === undefined ? (network.secured ? "Wpa2" : "OpenNet") : securities[network.security] })),
-  }
+  return effect {
+    const found = try tryPromise(() => wifi.listAvailableNetworks({ joinable: false }))
+    const scan: Scanned = {
+      scan: "Found",
+      networks: found.networks.map((network) => ({ name: network.ssid, strength: network.rssi, security: network.security === undefined ? (network.secured ? "Wpa2" : "OpenNet") : securities[network.security] })),
+    }
+    return scan
+  } catch (refused) => ({ scan: scanRefusals[rejectionCode(refused.cause) ?? ""] ?? "ScanUnavailable", networks: [] })
 }
 
 effect function joined(name: string, security: Security, passphrase: Redacted.Redacted<string>): Joined!! {

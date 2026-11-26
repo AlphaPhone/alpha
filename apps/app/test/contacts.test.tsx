@@ -353,6 +353,28 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Withdrawn");
     expect(document.querySelector("[role=dialog]")).toBeNull();
 
+    // spec/app/contacts/agent.md, "A text's review says when it likely goes as several linked texts"
+    const said = () => [...document.querySelectorAll("[role=dialog] p")].map((one) => one.textContent);
+    await ask({ type: "sms_send", recipients: ["+14155550199"], body: "a".repeat(160), subscriptionId: 1 }, true);
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "Text");
+    const card = document.querySelector<HTMLElement>("[role=dialog]");
+    const shown = await alpha.runtime.runPromise(Agent.use((machine) => machine.get()));
+    expect([card?.dataset.alphaReview, card?.dataset.alphaReviewVersion]).toEqual([String(shown.request), String(shown.review.shown)]);
+    expect(said().some((line) => line?.includes("linked texts"))).toBe(false);
+    await press("Not now");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
+    await ask({ type: "sms_send", recipients: ["+14155550199"], body: `${"a".repeat(158)}{}`, subscriptionId: 1 }, true);
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "Text");
+    expect(said()).toContain("It likely goes as 2 linked texts");
+    await press("Not now");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
+    await ask({ type: "sms_send", recipients: ["+14155550199"], body: `${"a".repeat(140)}😀`, subscriptionId: 1 }, true);
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "Text");
+    expect(said()).toContain("It likely goes as 3 linked texts");
+    await press("Not now");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
+    expect(world.telephony.sent).toHaveLength(1);
+
     // spec/app/contacts/agent.md, "A change that would leave the contact as it is is never offered"
     await ask({ type: "contact_update", query: "Ben", add: { phoneNumbers: ["+14155550122"] } });
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Unchanged");

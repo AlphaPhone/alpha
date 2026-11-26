@@ -1024,9 +1024,13 @@ describe("Files on a phone", () => {
       { key: "selected:a", kind: "selected", name: "lease.pdf", mimeType: "application/pdf", openedAt: 2, status: "ready", selectionId: leaseSelection },
       { key: "selected:b", kind: "selected", name: "gone.txt", mimeType: "text/plain", openedAt: 3, status: "revoked", selectionId: "b" },
     ]));
+    world.files.selections.set("b", { volume: "primary", path: "Download/gone.txt", canRename: true });
+    world.files.selections.set("c", { volume: "primary", path: "Documents/notes.txt", canRename: true });
+    localStorage.setItem("alpha.files.open.v1", "c");
     const first = await onFiles(world);
     await until(first.alpha, first.runtime, Recent, (s) => s.rows.length === 1 && s.rows[0]?.origin === "Picked");
     expect(localStorage.getItem("alpha.files.recent.v1")).toBeNull();
+    await vi.waitFor(() => expect([[...world.files.forgotten].sort(), localStorage.getItem("alpha.files.open.v1")]).toEqual([["b", "c"], null]));
     await until(first.alpha, first.runtime, Browser, (s) => s.open && s.storage.status === "Loaded");
     await press("lease.pdf");
     await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.kind === "Pdf" && s.revision === 5);

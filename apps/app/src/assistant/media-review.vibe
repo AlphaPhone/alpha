@@ -17,6 +17,7 @@ import { latestSenderResult, sameVoicemail, selectedVoicemail, type VoicemailRea
 import { composeDraftOnly, composeRecipient, reviewedCompose, type MessageDraftTarget } from "../messages/agent.vibe"
 import { composeLine, readAgentSms, type ComposeLine } from "../messages/agent-send.vibe"
 import { activeSmsSelection, currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
+import { calendarCapabilities, calendarOperation, calendarOperationWords } from "../calendar/device-actions.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
 import type { ReviewedVoicemailDeletion } from "../phone/agent.vibe"
 import { phoneContactChoices, phoneQuery, pickPhoneContact, type NamedPhoneReview, type ReviewedPhoneContact } from "../phone/named-review.vibe"
@@ -488,9 +489,10 @@ function operation(raw: unknown) {
     case "files_move":
     case "files_trash":
     case "browser_navigate":
+    case "maps_read_selected":
       return value
     default:
-      return notesOperation(value)
+      return notesOperation(value) ?? calendarOperation(value)
   }
 }
 
@@ -509,6 +511,14 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "notes_move":
     case "notes_folder_create":
     case "notes_restore": return notesOperationWords(value)
+    case "calendar_create_local":
+    case "calendar_read_next":
+    case "calendar_create":
+    case "calendar_read_selected":
+    case "calendar_update":
+    case "calendar_delete":
+    case "calendar_named":
+    case "read_calendar_range": return calendarOperationWords(value)
     case "phone_keypad": return { title: "Open the keypad", detail: value.number ?? "Phone" }
     case "phone_dial": return { title: "Open the phone dialer", detail: value.target.kind === "number" ? value.target.number : phoneQuery(value) ?? "Phone" }
     case "phone_call": return { title: "Call", detail: value.target.kind === "number" ? value.target.number : phoneQuery(value) ?? "Phone" }
@@ -541,6 +551,10 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_move": return { title: "Move files", detail: "paths" in value ? `${value.paths.join(", ")} → ${value.dest || "Internal storage"}` : value.dest || "Internal storage" }
     case "files_trash": return { title: "Move to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the selected files" }
     case "browser_navigate": return { title: "Open this page?", detail: pageWords(value.url) }
+    case "maps_read_selected": return {
+      title: value.target.kind === "map-route" ? "Share this route" : "Share this place",
+      detail: "Share the place or route open in Maps with the agent: its name, position and provider.",
+    }
   }
 }
 
@@ -625,7 +639,9 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
     ...(registered("AlphaPhotoLibrary") ? photosCapabilities : []),
     ...(registered("ElizaFiles") ? filesCapabilities : []),
     ...(registered("AlphaNotes") ? ["notes.organize.v1"] : []),
+    ...(registered("ElizaCalendar") ? calendarCapabilities(offer.deviceActions.capabilities) : []),
     ...(image && registered("ElizaTelephony") ? phoneCapabilities : []),
+    "maps.selected-read.v1",
     directOpenCapability,
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
   if (capabilities.length === 0) throw new EnrollmentRefused({ reason: "Media operations are unavailable" })
@@ -690,6 +706,7 @@ function completion(op: DeviceOperation, synced: boolean): string {
     case "files_share": return "Choose where to share in Android."
     case "files_move":
     case "files_trash": return synced ? "Files shows which items changed." : "Files shows which items changed. Agent receipt pending."
+    case "maps_read_selected": return synced ? "Shared what Maps shows with the agent." : "Maps place prepared. Agent receipt pending."
     default: return synced ? "Done" : "Done. Agent receipt pending."
   }
 }
@@ -1100,8 +1117,10 @@ const mediaReviewContext = effect {
   effect function enrollmentIsCurrent(opened: Session): boolean!! {
     const status = life.status() catch () => undefined
     const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
+    if (opened !== latest || status?.state !== "running" || status.epoch !== opened.epoch || owner !== opened.identity.ownerId) return false
     const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
-    return status?.state === "running" && status.epoch === opened.epoch && owner === opened.identity.ownerId && front && (try device.showing())
+    const after = life.status() catch () => undefined
+    return front && opened === latest && after?.state === "running" && after.epoch === opened.epoch && (try device.showing())
   }
   effect function workflowOffers(runId: string, current: Effect.Effect<boolean>): readonly WorkflowDeviceOffer[]!! {
     if (!(try current)) return []

@@ -99,17 +99,19 @@ pure def lawFollowingHidesTheCompass(bearing: int, pitch: int): bool = not(compa
 
 Every map Alpha draws, the world map and the Cloud rasters alike, covers the
 world, so the camera treats them alike. Guidance following the phone owns
-the camera. Otherwise a new route is fitted into view up to street zoom
+the camera, at street zoom (16) or closer. Otherwise a new route is fitted into view up to street zoom
 (17); a newly picked place is centred at zoom 14 between the sheets and a
 line 60 points under the search field, as v119 measured it; and a new
 set of result pins, with no place picked and no route, is fitted into view
-up to zoom 14. Leaving guidance turns the map north up again. Anything else
+up to zoom 14. What is fitted keeps 48 pixels clear on every side. Leaving guidance turns the map north up again. Anything else
 keeps the camera where the owner left it.
 
 ```quint
 type Aim = KeepCamera | CenterOnPlace | FitResults | FitRoute | FollowPhone
 
 pure val placeZoom = 14
+pure val followZoom = 16
+pure val fitPadding = 48
 pure val resultsMaxZoom = 14
 pure val routeMaxZoom = 17
 
@@ -170,7 +172,7 @@ pure def copyrightAnswered(s: Credits, token: int, success: bool, text: str): Cr
     { ...s, pending: 0, shownView: if (success) s.requestedView else -1, copyrightShown: success, copyrightFailed: not(success), copyright: if (success) text else "" }
   else s
 
-pure def alwaysAPendingRequestIsForTheView(s: Credits): bool = s.pending > 0 implies (s.requestedView == s.view and s.raster and s.pending < s.nextToken)
+pure def alwaysAPendingRequestIsForTheView(s: Credits): bool = s.pending > 0 implies (s.plane > 0 and s.requestedView == s.view and s.raster and s.pending < s.nextToken)
 
 pure def alwaysTheShownCopyrightMatchesTheView(s: Credits): bool =
   s.copyrightShown implies (s.plane > 0 and not(s.copyrightFailed) and s.pending == 0 and s.shownView == s.view)

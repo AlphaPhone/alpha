@@ -1,0 +1,8 @@
+// spec/app/maps/index.md, "While Maps is in front the agent is told what it shows, a place, a route or a search, by a handle that names it on this phone only"
+import type { Selected } from "../maps/maps.vibe"
+
+/** What the Maps area shows the agent while it is on screen: the place or route by its handle and revision, or nothing. */
+export service MapsContext {
+  selected(): (Selected | undefined)!!
+  static readonly defaultValue = () => ({ selected: () => succeed(undefined) })
+}

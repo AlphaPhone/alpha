@@ -350,10 +350,10 @@ const DRILLS: Readonly<Record<string, Os.Drill>> = {
 /** The profile the image's enrolment stages: the pilot enrolment's manifest, hosts, product, device and certificate, with the channel's verified-boot key. */
 function enrolledProfile(): Os.Profile {
   const pilot = json(ENROLLMENT) as { readonly manifestUrl: string; readonly hosts: readonly string[]; readonly product: string; readonly device: string; readonly otaCertificateSha256: string; readonly rotatePlatformOrAVBKeys: boolean; readonly wipeData: boolean };
-  const channel = json(CHANNEL) as { readonly avbPublicKeySha256: string };
+  const channel = json(CHANNEL) as { readonly avbPublicKeySha256: string; readonly downgradeAllowed: boolean };
   return {
     manifest: pilot.manifestUrl, hosts: pilot.hosts.join(" "), product: pilot.product, device: pilot.device,
-    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData,
+    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData, downgrade: channel.downgradeAllowed,
   };
 }
 

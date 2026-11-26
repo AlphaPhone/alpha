@@ -12,6 +12,7 @@ import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platfor
 import { attachToAlpha, type CapturedPhotoOffer } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { answer, applying, contained, due, reacting, run, started, stream, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
+import { checkPreviousPendingCopy } from "./previous.ts"
 
 type Phone = ["Phone"]
 type CameraJob = Job<Camera.Event, CameraPort | Camera.Machine | CameraAssets | Shell.Machine | SystemSettings | PhotosPort | Effect.Services<ReturnType<typeof askAbout>>, Phone>
@@ -463,7 +464,14 @@ effect function askAbout(photo: number) {
   try attachToAlpha({ id: `camera:${before.visit}:${photo}:${before.preview}`, name: "Camera.jpg", mimeType: from.mime, data: result })
 }
 
-export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, reapplyZoom, reapplyFlash, approval, latest, videoThumbnail)
+// spec/app/photos/index.md, "A saved copy the earlier Alpha left pending is checked once instead of forgotten"
+const previousCopy = started(effect {
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return
+  try ignore(tryPromise(() => checkPreviousPendingCopy(phone.value)))
+}, "checking the earlier Alpha's saved copy")
+
+export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, reapplyZoom, reapplyFlash, approval, latest, videoThumbnail, previousCopy)
 
 /** Take one step within Camera before handing Back to the shell. */
 export const cameraBack = effect {

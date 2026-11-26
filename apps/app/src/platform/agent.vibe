@@ -1,11 +1,11 @@
-// spec/kit/read.md, "Story: Read from outside"; spec/app/account/index.md, "Story: Have the agent running"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
+// spec/kit/read.md, "Story: Read from outside"; spec/app/account/index.md, "Story: Have the agent running"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent"; spec/app/platform/index.md, "A failed view request is recorded by its step and a fingerprint of its id, never by its path or body"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
 import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, type TurnResult, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent"
 import { BridgeUnavailable } from "@elizaos/os-bridges"
 import type { AgentEvent, AgentMethod, AgentRecoveryArchive, AgentRecoveryReview, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os-bridges"
-import { chunkTaken, deliveryOf, replied } from "../../gen/app__platform.effect.vibe"
+import { type ViewStep, chunkTaken, deliveryOf, fingerprintWritten, replied } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Failure, type Listening, type Opened, type Remote, type Wired, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
+import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
 
 /** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
 export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
@@ -22,6 +22,46 @@ module held {
   }
 }
 import { client } from held
+
+module web {
+  import type { AgentTopic, ElizaAgentPlugin } from "@elizaos/os-bridges"
+
+  /** The first sixteen hex digits of the SHA-256 of `id`. */
+  export async function fingerprint(id: string): Promise<string> {
+    const bytes = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id)))].slice(0, 8)
+    return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+  /** The string `body`, as JSON, names under `key`, where it is JSON and names one. @throws {never} */
+  export function keyed(body: string, key: string): string | undefined {
+    let read: unknown
+    try {
+      read = JSON.parse(body)
+    } catch {
+      return undefined
+    }
+    const id = typeof read === "object" && read !== null ? (read as Record<string, unknown>)[key] : undefined
+    return typeof id === "string" ? id : undefined
+  }
+  /** @throws {never} */
+  export function bytes(base64: string): Uint8Array {
+    return Uint8Array.from(atob(base64), (one) => one.charCodeAt(0))
+  }
+  /** Subscribe to native agent events and immediately unsubscribe if the stream closed before subscription settled. */
+  export async function subscribeGuarded(
+    plugin: ElizaAgentPlugin,
+    id: string,
+    topic: AgentTopic,
+    clientId: string | undefined,
+    isClosed: () => boolean,
+  ): Promise<{ readonly id: string }> {
+    const result = await plugin.subscribeEvents({ id, topic, ...(clientId === undefined ? {} : { clientId }) })
+    if (isClosed() && result.id === id) {
+      void plugin.unsubscribeEvents({ id }).catch(() => undefined)
+    }
+    return result
+  }
+}
+import { bytes, fingerprint, keyed, subscribeGuarded } from web
 
 /**
  * eliza's own client of its agent: `request(path, body?)` and `stream(path, body, signal?)`, which wait for an agent
@@ -181,18 +221,55 @@ function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"], 
     runtime,
     feed,
     life,
-    effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
-      const sent = try plain(request)
-      if (Option.isNone(sent)) return try direct.call(request)
-      return try tryPromise({
-        try: () => runtime.request(sent.value.path, sent.value.body, sent.value.headers),
-        catch: (cause): Failure => cause instanceof RuntimeRequestError ? refusal(cause.status, cause.retryAfter, cause.message)
-          : cause instanceof Error && refusedByTheClient.includes(cause.message) ? new Unsent({ cause })
-          : new Unreachable({ cause }),
-      })
+    call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
+      const sent = effect {
+        const sent = try plain(request)
+        if (Option.isNone(sent)) return try direct.call(request)
+        return try tryPromise({
+          try: () => runtime.request(sent.value.path, sent.value.body, sent.value.headers),
+          catch: (cause): Failure => cause instanceof RuntimeRequestError ? refusal(cause.status, cause.retryAfter, cause.message)
+            : cause instanceof Error && refusedByTheClient.includes(cause.message) ? new Unsent({ cause })
+            : new Unreachable({ cause }),
+        })
+      }
+      return Effect.tapError(sent, (failure) => noted(request, failure))
     },
     events: (request: HttpClientRequest.HttpClientRequest, listening?: Listening) => direct.events(request, listening),
   }
+}
+
+const generatedId = /^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$/
+const phases: Readonly<Record<ViewStep, string>> = { NotAView: "", ClaimStep: "claim", ResultStep: "result", PrepareStep: "prepare" }
+
+/** Which step on a screen a `POST` to `path` is: claiming one, reporting its result, or preparing a view's navigation. */
+export function viewStepOf(method: string, path: string): ViewStep {
+  const bare = path.split("?")[0] ?? ""
+  if (method !== "POST") return "NotAView"
+  if (bare === "/api/views/interact-claim") return "ClaimStep"
+  if (bare === "/api/views/interact-result") return "ResultStep"
+  return /^\/api\/views\/[A-Za-z0-9_-]+\/navigate$/.test(bare) ? "PrepareStep" : "NotAView"
+}
+
+/**
+ * What Alpha's log says of a view request the agent refused: its step, and where its body (of at most 4096
+ * characters) names a generated id, the fingerprint of that id; nothing for any other request.
+ */
+export effect function viewDiagnostic(method: string, path: string, body: string | undefined): string!! {
+  const step = viewStepOf(method, path)
+  if (step === "NotAView") return ""
+  const said = ` navigation=${phases[step]}`
+  const small = body !== undefined && body.length <= 4096
+  const id = small && body !== undefined ? keyed(body, step === "PrepareStep" ? "completedActionHandoffId" : "requestId") : undefined
+  if (id === undefined || !fingerprintWritten(step, generatedId.test(id), small)) return said
+  return `${said} navigation_ref=${try promise(() => fingerprint(id))}`
+}
+
+/** Log a refusal of `request` that is a view request, by `viewDiagnostic`. */
+effect function noted(request: HttpClientRequest.HttpClientRequest, failure: Failure): void!! {
+  if (!(failure instanceof Refused)) return
+  const body = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : undefined
+  const said = try viewDiagnostic(request.method, request.url, body)
+  if (said !== "") try logWarning(`the agent refused a view request with ${failure.status}:${said}`)
 }
 
 /** A page that is no phone: the agent's feeds reach only the phone's own page. */
@@ -245,30 +322,6 @@ effect function relayed(request: HttpClientRequest.HttpClientRequest): AgentRout
   if (typeof body.value !== "object" || body.value === null || Array.isArray(body.value)) throw new Unsent({ cause: "only a JSON object is relayed" })
   return { ...route, body: body.value as Record<string, unknown> }
 }
-
-module web {
-  import type { AgentTopic, ElizaAgentPlugin } from "@elizaos/os-bridges"
-
-  export function bytes(base64: string): Uint8Array {
-    return Uint8Array.from(atob(base64), (one) => one.charCodeAt(0))
-  }
-
-  /** Subscribe to native agent events and immediately unsubscribe if the stream closed before subscription settled. */
-  export async function subscribeGuarded(
-    plugin: ElizaAgentPlugin,
-    id: string,
-    topic: AgentTopic,
-    clientId: string | undefined,
-    isClosed: () => boolean,
-  ): Promise<{ readonly id: string }> {
-    const result = await plugin.subscribeEvents({ id, topic, ...(clientId === undefined ? {} : { clientId }) })
-    if (isClosed() && result.id === id) {
-      void plugin.unsubscribeEvents({ id }).catch(() => undefined)
-    }
-    return result
-  }
-}
-import { bytes, subscribeGuarded } from web
 
 /**
  * One stream of the plugin as it arrives: `requestStream` under an id made here, heard as `streamData` and
@@ -342,7 +395,7 @@ function plugged(plugin: ElizaAgentPlugin): Remote {
         when Unsent: throw cause;
         default: throw new Unreachable({ cause });
       }
-      if (!replied(answered.status)) throw refusal(answered.status, undefined)
+      if (!replied(answered.status)) throw refusal(answered.status, undefined, undefined, answered.data === undefined || answered.data === null ? undefined : JSON.stringify(answered.data))
       return answered.data
     },
     events(request: HttpClientRequest.HttpClientRequest, listening?: Listening) {
@@ -413,14 +466,14 @@ function hosted(plugin: ElizaAgentPlugin): Life {
 
 schema ViewPayload { readonly clientId: string; readonly frame: Schema.Unknown }
 /** A step the agent took on a screen, as eliza's agent publishes it on its `view` topic. */
-schema ViewStep { readonly stream: "view-interact"; readonly payload: ViewPayload }
+schema ViewFeedStep { readonly stream: "view-interact"; readonly payload: ViewPayload }
 /** A transcript, as eliza's agent publishes it on its `voice` topic. */
 schema Transcript { readonly stream: "voice-transcript" }
 
 /** What one event of a feed of `topic` is for the screen `clientId` names: its kind, whether it is that screen's, and what the screen is given. */
 function stepOf(topic: AgentTopic, clientId: string | undefined, event: Record<string, unknown>): { readonly kind: FrameKind; readonly forClient: boolean; readonly given: ReadonlyArray<unknown> } {
   if (topic === "view") {
-    const step = Schema.decodeUnknownOption(ViewStep)(event)
+    const step = Schema.decodeUnknownOption(ViewFeedStep)(event)
     if (Option.isNone(step)) return { kind: "OtherFrame", forClient: false, given: [] }
     return { kind: "Step", forClient: step.value.payload.clientId === clientId, given: [step.value.payload.frame] }
   }

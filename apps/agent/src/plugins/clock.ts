@@ -114,22 +114,24 @@ function formatDuration(ms: number): string {
   return parts.join(" ");
 }
 
-const dayBits: Readonly<Record<string, number>> = {
+const dayBits = new Map(Object.entries({
   sunday: 1, monday: 2, tuesday: 4, wednesday: 8, thursday: 16, friday: 32, saturday: 64,
   sun: 1, mon: 2, tue: 4, wed: 8, thu: 16, fri: 32, sat: 64,
-};
+}));
 
 /** The repeat days the model named, as a mask; any day it named that is not a weekday is returned for it to correct. */
 function parseDaysMask(input: unknown): { readonly mask: number } | { readonly unknown: readonly string[] } {
   if (typeof input === "number" && Number.isFinite(input)) return { mask: Math.max(0, Math.min(127, Math.trunc(input))) };
-  const text = (value: unknown): string => {
-    if (typeof value === "string") return value;
-    if (typeof value === "number" || typeof value === "boolean" || value === null || value === undefined) return String(value);
-    return JSON.stringify(value) ?? "unknown";
-  };
-  const days = Array.isArray(input) ? input.map(text) : input === undefined || input === null ? [] : [text(input)];
-  const unknown = days.filter((day) => dayBits[day.trim().toLowerCase()] === undefined);
-  return unknown.length > 0 ? { unknown } : { mask: days.reduce((mask, day) => mask | (dayBits[day.trim().toLowerCase()] ?? 0), 0) };
+  const values: readonly unknown[] = Array.isArray(input) ? input : input === undefined || input === null ? [] : [input];
+  const unknown: string[] = [];
+  let mask = 0;
+  for (const day of values) {
+    const name = typeof day === "string" ? day : "non-text value";
+    const bit = dayBits.get(name.trim().toLowerCase());
+    if (bit === undefined) unknown.push(name);
+    else mask |= bit;
+  }
+  return unknown.length > 0 ? { unknown } : { mask };
 }
 
 const unknownDays = (unknown: readonly string[]) =>
@@ -381,7 +383,7 @@ export function clockActions(store: AlphaAppsStore, timeZone: string): AgentActi
         { name: "action", description: "Op.", required: true, schema: { type: "string", enum: ["set", "update", "toggle", "snooze", "dismiss", "delete", "list"] } },
         { name: "hour", description: "24h hour.", required: false, schema: { type: "integer", minimum: 0, maximum: 23 } },
         { name: "minute", description: "Minute.", required: false, schema: { type: "integer", minimum: 0, maximum: 59 } },
-        { name: "days", description: "Repeat days (omit for one-time).", required: false, schema: { type: "array", items: { type: "string", enum: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] } } },
+        { name: "days", description: "Repeat days (omit for one-time).", required: false, schema: { type: "array", items: { type: "string" } } },
         labelParameter(),
         { name: "enabled", description: "On/off.", required: false, schema: { type: "boolean" } },
         { name: "snoozeMinutes", description: "Snooze min.", required: false, schema: { type: "integer", minimum: 1 } },

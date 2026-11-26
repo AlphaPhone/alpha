@@ -70,6 +70,15 @@ pure def endTurn(s: Delivery, turn: int): Delivery = if (turn == s.accepted) { .
 pure def alwaysTheRelayIsTheAcceptedTurns(s: Delivery): bool = (s.relay iff s.connected) and (s.connected implies s.accepted >= 1)
 ```
 
+### An accepted turn is never negative and never ahead of the latest offer
+
+Discovered by the proof: without stating that accepted turns stay between zero
+and the latest offer, settling a new offer could accept a non-positive turn.
+
+```quint
+pure def alwaysAnAcceptedTurnWasOffered(s: Delivery): bool = 0 <= s.accepted and s.accepted <= s.offer
+```
+
 ### A navigation effect runs only under a returned claim, and a redelivery never runs it twice
 
 A claim that returned no id within 5 seconds is unknown and never retried.
@@ -99,4 +108,14 @@ pure def stepAnUnknownClaimIsNeverReplayed(before: Delivery, via: str, after: De
   (before.claimPhase == ClaimUnknown and after.request == before.request) implies after.claimPhase == ClaimUnknown
 pure def sometimesRedeliveredWithoutDuplicate(s: Delivery): bool = s.claimPhase == Acknowledged and s.request >= 2 and s.applied.length() == 1
 pure def sometimesCleanedUp(s: Delivery): bool = s.negatives >= 1
+```
+
+### A claimed navigation holds a positive claim id
+
+Discovered by the proof: without stating that a claimed navigation carries a
+positive claim id, applying it could fail to show the effect ran under a
+returned claim.
+
+```quint
+pure def alwaysAClaimedRequestHasAClaim(s: Delivery): bool = s.claimPhase == Claimed implies s.claim > 0
 ```

@@ -1079,4 +1079,29 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Library, (s) => s.history === 0);
     expect(runtime.runSync(Effect.map(TabHost, (host) => host.session.info(`tab${tab}`)))).toBeUndefined();
   });
+
+  it("Retries a transient empty Browser excerpt capture within the turn budget before giving up", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    let attempts = 0;
+    world.browser.reviewQuestion = () => {
+      attempts += 1;
+      return Promise.resolve({ text: attempts === 1 ? "" : "Settled article body after retry." });
+    };
+    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+    const runtime = browser.runtime(alpha);
+    await press("Browser");
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("https://example.test/article", "normal");
+    const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);
+    placeNative();
+    await press("Menu");
+    await drawn(() => vi.waitFor(() => expect(button("Ask about page")).toBeTruthy()));
+    await pressOnTop("Ask about page");
+    await later(alpha, 250);
+    await until(alpha, runtime, Reader, (s) => s.phase === "Reviewing");
+    expect(attempts).toBe(2);
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Content excerpt']")?.value).toBe("Settled article body after retry.");
+  });
 });

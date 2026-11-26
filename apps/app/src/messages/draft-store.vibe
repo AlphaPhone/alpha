@@ -71,7 +71,7 @@ export effect function settleDraftRecord(held: HeldDraft, sent: SentDraft): { re
 }
 
 module legacy {
-  import { allowsTestMocks } from "../platform/build.ts"
+  import { allowsTestOrigin } from "../platform/build.ts"
   import { replyTo } from "../platform/portReply.ts"
 
   interface DraftPort extends EventTarget { postMessage(data: string): void }
@@ -79,7 +79,7 @@ module legacy {
     | { kind: "retire"; threadId: string | null; expected: string }
 
   export async function request(input: Request, signal: AbortSignal): Promise<unknown> {
-    if (typeof window === "undefined" || (!allowsTestMocks() && (window.top !== window || window.location.origin !== "https://localhost"))) {
+    if (typeof window === "undefined" || (!allowsTestOrigin() && (window.top !== window || window.location.origin !== "https://localhost"))) {
       throw new Error("Installed Messages drafts are unavailable.")
     }
     const candidate = (window as Window & { alphaLegacySmsDrafts?: DraftPort }).alphaLegacySmsDrafts

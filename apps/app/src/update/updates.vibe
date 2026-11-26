@@ -9,7 +9,7 @@ import { Device } from "../platform/device.vibe"
 import { LauncherUpdates } from "../platform/launcherUpdates.vibe"
 import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Engagement, Engagements, engagements } from "./activity.vibe"
+import { type Engagement, Engagements, engagements, notesReported } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
 
 const hex64 = /^[0-9a-f]{64}$/
@@ -163,7 +163,7 @@ interface Facts {
   readonly reported: Engagement
 }
 
-/** The owner's activity: what an automatic update waits on. The phone reports no audio mode apart from a call. */
+/** The owner's activity: what an automatic update waits on. Audio counts as normal while no call is up; Alpha's updater reads Android's audio mode itself before it commits. */
 function activityOf({ shell, layers, call, front, typing, reported }: Facts): Activity {
   const held = layers.holds.some((id) => id !== holder)
   return Updates.withSignIn({
@@ -191,19 +191,32 @@ const activity = started(effect {
 /** The earliest future time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
 function nextWake(state: Updates.Updates, now: number): Option.Option<number> {
   if (!state.visible || !Updates.free(state)) return Option.none()
-  const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.retry : Updates.interval)
+  const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.backoff(state.misses) : Updates.interval)
   const candidates = [check, ...(state.deferrals > 0 ? [state.retryAt] : [])].filter((at) => at > now)
   return candidates.length > 0 ? Option.some(Math.min(...candidates)) : Option.none()
 }
+
+const offerKey = (state: Updates.Updates) =>
+  `${state.checkedAt}:${state.offer.release.version}:${state.offer.release.digest}:${state.offer.manifest}`
 
 // spec/app/update/index.md, "Alpha checks on its own only while on screen, when a check is due, and never during another check or an install"; spec/app/update/index.md, "An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded"
 const schedule = started(effect {
   const updates = try Updates.Machine
   const time = try Time
+  let inAutomatic: string | undefined
+  let accepted: string | undefined
   for (;;) {
     const state = try updates.get()
+    const key = offerKey(state)
+    if (state.installing && state.automatic) {
+      inAutomatic = key
+    } else if (!state.installing && inAutomatic !== undefined) {
+      if (inAutomatic === key && state.deferrals === 0 && state.permission === "Supported" && state.offer.manifest > 0) accepted = key
+      inAutomatic = undefined
+    }
+    if (accepted !== undefined && accepted !== key) accepted = undefined
     const now = try time.now()
-    const due: Event | undefined = Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
+    const due: Event | undefined = accepted !== key && Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
       : Updates.canPoll(state, now) ? { type: "poll", now: untimed } : undefined
     const taken = due !== undefined && (try contained(updates.send(due), "the update schedule"))
     if (taken) continue
@@ -218,4 +231,4 @@ const schedule = started(effect {
 }, "the update schedule")
 
 /** Alpha's launcher updates, from launch: checks and automatic updates run whether or not Settings was ever opened. */
-export const updating = together(names, engagements, machine, phone, shown, activity, schedule)
+export const updating = together(names, engagements, machine, phone, shown, activity, schedule, notesReported)

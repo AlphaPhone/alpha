@@ -352,7 +352,7 @@ type Route = { method: Method, path: str, stream: bool }
 pure val browserNotesCleanup = "/api/alpha/notes/browser-cleanup"
 pure val browserNotesTranscription = "/api/alpha/notes/transcription"
 pure val browserNotesTranscriptionLimit = 1100000
-pure val pageRoutes: List[Route] = List(
+pure val pageRoutesCore: List[Route] = List(
   { method: Get, path: "/api/health", stream: false },
   { method: Get, path: "/api/status", stream: false },
   { method: Post, path: "/api/conversations", stream: false },
@@ -384,6 +384,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/lifeops/calendar/events", stream: false },
   { method: Patch, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
+)
+pure val pageRoutesApps: List[Route] = List(
   { method: Post, path: "/api/lifeops/calendar/events/{eventId}/response", stream: false },
   { method: Get, path: "/api/lifeops/calendar/sync-control", stream: false },
   { method: Post, path: "/api/lifeops/calendar/sync-control", stream: false },
@@ -415,6 +417,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/alpha/reminders/items/{id}/reopen", stream: false },
   { method: Post, path: "/api/alpha/reminders/items/{id}/snooze", stream: false },
   { method: Post, path: "/api/alpha/reminders/items/{id}/restore", stream: false },
+)
+pure val pageRoutesWorkflows: List[Route] = List(
   { method: Get, path: "/api/auth/me", stream: false },
   { method: Get, path: "/api/workflow/workflows", stream: false },
   { method: Get, path: "/api/workflow/removed-workflows", stream: false },
@@ -448,6 +452,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/workflow/workflows/{id}/run", stream: false },
   { method: Post, path: "/api/workflow/executions/{id}/cancel", stream: false },
   { method: Get, path: "/api/workflow/workflows/{id}/submissions/{submissionId}", stream: false },
+)
+pure val pageRoutesTasksWallet: List[Route] = List(
   { method: Get, path: "/api/workflow/phone/catalog", stream: false },
   { method: Get, path: "/api/workflow/phone/mutations/{mutationId}", stream: false },
   { method: Post, path: "/api/workflow/phone/generate", stream: false },
@@ -476,6 +482,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/wallet/requests/{id}/review", stream: false },
   { method: Post, path: "/api/wallet/requests/{id}/decide", stream: false },
 )
+pure def concatRoutes(a: List[Route], b: List[Route]): List[Route] = a.concat(b)
+pure val pageRoutes: List[Route] = concatRoutes(concatRoutes(pageRoutesCore, pageRoutesApps), concatRoutes(pageRoutesWorkflows, pageRoutesTasksWallet))
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =
   listed.length() == pageRoutes.length() and listed.every(r => pageRoutes.includes(r)) and pageRoutes.every(r => listed.includes(r))
@@ -749,24 +757,42 @@ pure val launchCarriesWorkflowWorker: bool = true
 pure def workerAdmitted(named: str, pinned: str): bool = named == pinned
 ```
 
-## Story: Say plainly what the phone cannot do yet
+## Story: Give the plugins the phone's device services, and say plainly which it cannot give yet
 
-> As the owner, I want the phone to tell me which parts of the old agent's
-> work have no device service behind them yet, rather than pretend they do.
+> As the owner, I want my workflows to take steps on my phone and Maps to
+> keep my saved places, as the old agent did, and the phone to tell me which
+> parts of the old agent's work have no device service behind them yet,
+> rather than pretend they do.
 
-### The host services the pack's entry does not give its plugins yet are named, and nothing in the pack fakes them
+### The pack's entry gives the workflow plugin the enrolled phone's steps and Maps its saved places
 
-eliza's plugins find some device services by name, which Alpha's entry is to
-supply (`spec/agent/plugins/profile.md` in eliza, "Host runtime services
+eliza's plugins find some device services by name, which Alpha's entry
+supplies (`spec/agent/plugins/profile.md` in eliza, "Host runtime services
 register with storage before every listed plugin, never under an agent
-service's name, and a pinned worker is the workflow-worker service"):
-`workflow-device` uses eliza's workflow offer and waits for the receipt from
-the exact enrolled phone. The pack keeps Android's decision, claim and
-receipt protocol even when a run is already approved in Workflows. Native
-digest sources and Maps' saved places still answer that the phone cannot
-do them.
+service's name, and a pinned worker is the workflow-worker service"). The
+entry is written inside the pinned clone, beside Alpha's product plugin,
+and starts eliza's agent with runtime services of its own, as the old
+phone's resident did: `workflow-device`, which uses eliza's workflow offer
+and waits for the receipt from the exact enrolled phone, keeping Android's
+decision, claim and receipt protocol even when a run is already approved in
+Workflows; and Maps' saved places, one file per owner under the agent's
+state directory, written only against the revision it read.
 
 ```quint
-pure val awaitingHostServices: Set[str] = Set("workflow-native-digests", "maps-saved-places")
-pure def serviceAvailable(service: str): bool = not(awaitingHostServices.contains(service))
+pure val entryServices: Set[str] = Set("workflow-device", "maps-saved-places")
+```
+
+### The native digest sources the phone does not give its plugins yet are named, and nothing in the pack fakes them
+
+The old phone read a digest's native sources (its calendar, messages and
+notifications) through a bridge in its own app process, which eliza's agent
+service does not carry: the agent reaches the app process only for local
+inference, and no launch names such a bridge. The entry gives no
+`workflow-native-digests` service, so the workflow plugin answers that
+native sources are unavailable on this agent, and its status offers no
+native source.
+
+```quint
+pure val awaitingHostServices: Set[str] = Set("workflow-native-digests")
+pure def serviceAvailable(service: str): bool = entryServices.contains(service) and not(awaitingHostServices.contains(service))
 ```
