@@ -51,8 +51,10 @@ export interface VoiceScene {
   speakerMuted: boolean;
   speakerGainGate?: (muted: boolean) => Promise<void>;
   synthesisGate?: () => Promise<void>;
-  /** While set, a local playback is reported ended only once this settles, as a long line plays out. */
+  /** While set, a local or relay playback is reported ended only once this settles, as a long line plays out. */
   playbackHold?: () => Promise<void>;
+  /** Whether the relay's microphone cancels Alpha's own voice, as `CloudSpeechWire.java` reports it; true unless set. */
+  relayEchoCancelled?: boolean;
   /** What the local speaker started playing, in order, and when. */
   readonly played: { readonly text: string; readonly at: number }[];
   readonly speakerGainRequests: boolean[];
@@ -267,7 +269,7 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
         if (credentialId !== voice.credentialId) return Promise.reject(rejection("Voice is already active or unavailable"));
         voice.startCloudSpeechCalls += 1;
         voice.activeMicSession = sessionId;
-        return Promise.resolve({ sessionId, sampleRate: 16000, echoCancelled: true });
+        return Promise.resolve({ sessionId, sampleRate: 16000, echoCancelled: voice.relayEchoCancelled ?? true });
       },
       stopCloudSpeech: ({ sessionId }) => {
         voice.stopCloudSpeechCalls += 1;
@@ -278,8 +280,10 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
       setCloudSpeechMuted: () => Promise.resolve({}),
       speakCloudSpeech: ({ sessionId, utteranceId, text }) => {
         voice.spoken.push({ text, append: false, replace: false, channel: "cloud" });
-        void Promise.resolve().then(() => {
+        const hold = voice.playbackHold;
+        void Promise.resolve().then(async () => {
           emit("cloudSpeechEvent", { sessionId, type: "audio-start", utteranceId });
+          await hold?.();
           emit("cloudSpeechEvent", { sessionId, type: "audio-end", utteranceId });
         });
         return Promise.resolve({});

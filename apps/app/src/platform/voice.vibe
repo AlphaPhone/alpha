@@ -704,6 +704,21 @@ interface CloudVoiceSession {
   capture: Awaited<ReturnType<CloudStreamingSpeech["listen"]>> | undefined
 }
 
+// spec/app/voice/index.md, "The owner speaking over Alpha interrupts it and starts the next turn, but Alpha's own voice never does"
+/**
+ * What Talk is told of words the Cloud relay heard on `owner`'s capture: any words while Alpha speaks interrupt it, and
+ * a finished utterance is the next turn, one begun while Alpha spoke included. Only a capture that cancels Alpha's own
+ * voice is heard over it.
+ */
+function cloudWords(owner: CloudVoiceSession, text: string, finished: boolean): ReadonlyArray<VoiceEvent> {
+  if (text.trim() === "") return []
+  const { session } = owner
+  const duplex = owner.capture?.fullDuplex === true
+  const over: VoiceEvent = { kind: "bargeIn", session, echo: !duplex }
+  if (!finished) return [over]
+  return [over, ...(duplex ? [{ kind: "speechStart", session } as const] : []), { kind: "speechEnd", session, text }]
+}
+
 // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": the phone's cue is audible once play answers, and is over at its playback's end or a stop.
 effect function playLocalCue(text: string, requestId: string, current: () => boolean, started: () => void, stop: Deferred.Deferred<void>): void!VoiceBridgeFailed {
   const plugin = localPlugin()
@@ -794,6 +809,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
             const current = cloudPreview
             if (activeSession !== currentSession || current?.session !== currentSession) return
             current.outlet?.show(text)
+            for (const event of cloudWords(owner, text, false)) publish(event)
           },
         }, relayPlugin()),
       }
@@ -809,7 +825,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
           onSpeechEnd: () => undefined,
           onSegment: (text) => {
             if (cloudPreview === previewOwner) preview?.clear()
-            if (text !== null && text !== "") publish({ kind: "speechEnd", session: currentSession, text })
+            if (text !== null) for (const event of cloudWords(owner, text, true)) publish(event)
           },
           onEnd: (cause) => {
             if (cloudPreview === previewOwner) clearCloudPreview(currentSession)
@@ -1108,6 +1124,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
           const current = cloudPreview
           if (activeSession !== session || current?.session !== session) return
           current.outlet?.show(text)
+          for (const event of cloudWords(owner, text, false)) publish(event)
         },
       }, relay),
     }
@@ -1122,7 +1139,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
         onSpeechEnd: () => undefined,
         onSegment: (text) => {
           if (cloudPreview === previewOwner) preview?.clear()
-          if (text !== null && text !== "") publish({ kind: "speechEnd", session, text })
+          if (text !== null) for (const event of cloudWords(owner, text, true)) publish(event)
         },
         onEnd: (cause) => {
           if (cloudPreview === previewOwner) clearCloudPreview(session)

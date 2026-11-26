@@ -681,7 +681,11 @@ pure def stepChangingOutputKeepsTheMicrophone(before: Voice, via: str, after: Vo
 Everything Alpha is saying, streamed sentences included, is the reference
 the voice service compares what it hears with. Discovered in the existing
 app: during streamed playback that reference was empty, so Alpha's own
-reply could interrupt it.
+reply could interrupt it. On the Cloud speech relay, the first words heard
+while Alpha speaks interrupt it, as in Alpha's Sunday demo build, and only
+on a capture that cancels Alpha's own voice. What the owner says then is
+the next turn, and so is an utterance begun while Alpha spoke and finished
+after it: neither is shown and then dropped.
 
 ```quint
 pure def canBargeIn(v: Voice, session: int, echo: bool): bool =

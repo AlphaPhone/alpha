@@ -416,6 +416,56 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     ]);
   });
 
+  it('over the Cloud relay, words over Alpha\'s reply stop it and are the next turn, as is speech begun over it and finished after, and a capture that hears Alpha\'s own voice never interrupts it (spec/app/voice/index.md, "The owner speaking over Alpha interrupts it and starts the next turn, but Alpha\'s own voice never does")', async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    const runtime = await startListening(world);
+    const relay = () => world.voice.activeMicSession;
+    const hear = (...events: ReadonlyArray<Omit<Parameters<NonNullable<typeof world.voice.emitCloud>>[0], "sessionId">>) => {
+      for (const event of events) world.voice.emitCloud?.({ ...event, sessionId: relay() } as Parameters<NonNullable<typeof world.voice.emitCloud>>[0]);
+    };
+    const speaking = async (asked: string) => {
+      let finish = () => {};
+      world.voice.playbackHold = () => new Promise<void>((resolve) => { finish = resolve; });
+      hear({ type: "speech-start" }, { type: "speech-end", text: asked });
+      await until(runtime, Voice.Machine, (s) => s.phase === "Speaking" && s.mic === "On");
+      world.voice.playbackHold = undefined;
+      return () => finish();
+    };
+
+    await speaking("What is 2 plus 2?");
+    const hushed = world.voice.hushCalls;
+    hear({ type: "speech-start" }, { type: "transcript", text: "And also", final: false });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.heard && s.turn === 2);
+    await untilCondition(runtime, () => world.voice.hushCalls > hushed, () => world.voice.hushCalls);
+    hear({ type: "speech-end", text: "And also tell me what 3 plus 3 is." });
+    await until(runtime, Voice.Machine, (s) => s.sent === 2 && s.phase === "Listening" && s.mic === "On" && s.turn === 3);
+
+    const played = await speaking("What is 4 plus 4?");
+    hear({ type: "speech-start" });
+    played();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.turn === 4);
+    hear({ type: "speech-end", text: "What is 5 plus 5?" });
+    await until(runtime, Voice.Machine, (s) => s.sent === 4 && s.phase === "Listening" && s.turn === 5);
+    expect(world.ask.said).toEqual(["What is 2 plus 2?", "And also tell me what 3 plus 3 is.", "What is 4 plus 4?", "What is 5 plus 5?"]);
+
+    await sendVoice(runtime, { type: "stop", keyboard: false });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
+    world.voice.relayEchoCancelled = false;
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    const echoing = await speaking("What is 6 plus 6?");
+    const before = world.voice.hushCalls;
+    hear({ type: "speech-start" }, { type: "transcript", text: "6 plus 6 is", final: false });
+    for (let i = 0; i < 50; i += 1) await runtime.runPromise(Effect.yieldNow);
+    expect([(await getVoice(runtime)).phase, world.voice.hushCalls]).toEqual(["Speaking", before]);
+    echoing();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 6);
+    hear({ type: "speech-end", text: "6 plus 6 is 12." });
+    for (let i = 0; i < 50; i += 1) await runtime.runPromise(Effect.yieldNow);
+    expect([world.ask.said.at(-1), (await getVoice(runtime)).phase]).toEqual(["What is 6 plus 6?", "Listening"]);
+  });
+
   // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
   it("drops an acknowledgment the reply overtakes before it is heard, and never says it after", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
