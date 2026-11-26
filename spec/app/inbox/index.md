@@ -182,7 +182,9 @@ pure def emptied(account: int, s: Mailbox): Mailbox =
 Both need read access. A folder starts without a search. Spam and Trash
 are chosen only where they can be searched. A signed-out owner can open
 and type into the search field. Submitting a nonempty search there opens
-Cloud sign-in before any mail is requested.
+Cloud sign-in before any mail is requested. When the phone has no mail sign-in
+to ask for, Search and Connect Eliza Cloud open Account above the current Inbox
+visit. Back closes Account and keeps the search field and its text.
 
 ```quint
 pure def canChooseFolder(s: Mailbox, folder: Folder): bool =

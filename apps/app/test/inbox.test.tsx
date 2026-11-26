@@ -9,11 +9,13 @@ import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
 import { Machine as Adding } from "../gen/app__inbox__adding.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
+import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
+import { openInboxAccount } from "../src/account/profile.vibe";
 import { useInEmail } from "../src/inbox/suggestion.vibe";
 import inbox from "../src/inbox/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { Effect } from "effect";
 import { Letters, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
@@ -71,6 +73,7 @@ const sibling = (snippet: string) => drawn(() => {
 });
 const search = (text: string) => fill("Search mail", text).then(() => document.querySelector("form[role=search]")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 const inboxMounts = only("home", "view:Inbox", "view:Browser", "view:Settings", "assistant", "notice");
+const inboxAccountMounts = [...inboxMounts, { at: "overlay", load: () => import("../src/account/index.tsx") } as const];
 
 async function homeIsReady(alpha: Alpha) {
   await until(alpha, home.runtime(alpha), Home, (state) => state.tiles.load.status === "Loaded");
@@ -461,12 +464,48 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 });
 
+it("Open and close Cloud sign-in without leaving Inbox (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
+  const world = scene();
+  world.signedIn = false;
+  const { alpha } = await open(world, inboxAccountMounts);
+  await openInboxFromHome(alpha);
+  await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Inbox"));
+  const visit = await alpha.runtime.runPromise(Shell.use((shell) => shell.get()));
+  const sheet = () => document.querySelector('[role="dialog"]');
+  const searchField = () => document.querySelector<HTMLInputElement>('input[aria-label="Search mail"]');
+  const ready = () => vi.waitFor(() => expect(sheet()?.textContent).toContain("Unavailable"));
+
+  expect(sheet()).toBeNull();
+  await drawn(() => button("Connect Eliza Cloud")?.focus());
+  await press("Connect Eliza Cloud");
+  await ready();
+  await pressOnTop("Back");
+  await until(alpha, alpha.runtime, Layers.Machine, (s) => !Layers.listed(s, "account"));
+  await vi.waitFor(() => expect(document.activeElement).toBe(button("Connect Eliza Cloud")));
+
+  await press("Search email");
+  await search("standup");
+  await ready();
+  await hardware("back");
+  await vi.waitFor(() => expect(sheet()).toBeNull());
+  expect(searchField()?.value).toBe("standup");
+  const after = await alpha.runtime.runPromise(Shell.use((shell) => shell.get()));
+  expect(after.route).toBe(visit.route);
+  expect(showing(after, "Inbox")).toBe(true);
+
+  await hardware("home");
+  await openInboxFromHome(alpha);
+  await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Inbox") && s.route !== visit.route);
+  await drawn(() => alpha.runtime.runPromise(openInboxAccount(visit.route)));
+  expect(sheet()).toBeNull();
+});
+
 it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
   const world = { ...scene(), phone: true };
   world.inbox.google = undefined;
   world.inbox.offline = true;
   world.signedIn = false;
-  const { alpha } = await openInbox(world);
+  const { alpha } = await open(world, inboxAccountMounts);
   const runtime = inbox.runtime(alpha);
 
   // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
@@ -478,7 +517,9 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect(document.activeElement).toBe(button("Search email"));
   await press("Search email");
   await search("standup");
-  await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Settings"));
+  await until(alpha, alpha.runtime, Layers.Machine, (s) => Layers.top(s).id === "account");
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
+  expect(showing(await alpha.runtime.runPromise(Shell.use((shell) => shell.get())), "Inbox")).toBe(true);
   expect(world.mailLease.asked).toBe(0);
   world.signedIn = true;
   await hardware("home");
