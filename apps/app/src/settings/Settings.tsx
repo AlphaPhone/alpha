@@ -241,11 +241,12 @@ function useDevice(runtime: SettingsRuntime) {
   };
 }
 
+/** Settings' first page; on the launcher it has no Back, as v119 drew it (prototype/model.js:6415, template.html:4159). */
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const listener = useListener(runtime).state;
   return (
-    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false}
+    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} className="in-data-[alpha-launcher]:hidden" />} onPhone={pages?.phone ?? false}
       developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} micMayBeOn={listener?.mayBeOn}
       onHandOver={(neighbour) => neighbour === "listener" ? common.onAndroid({ target: "android-home" }) : common.onHandOver(neighbour)} />
   );
