@@ -37,6 +37,8 @@ export interface AskScene {
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
   nextReplyProvisional?: boolean;
+  /** After the next reply's chunks, the agent writes their whole text once without the provisional mark, as eliza writes the reply it decided before storing it. */
+  nextReplySettled?: boolean;
   /** The actions the next reply says it ran, made from the turn's metadata and the device capabilities the turn declared, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown, capabilities: readonly string[]) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
@@ -119,6 +121,7 @@ const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${tu
 function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown, capabilities: readonly string[]): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
+  const settles = scene.nextReplySettled === true;
   const actions = scene.nextActions?.(metadata, capabilities) ?? [];
   const holdDone = scene.holdDoneAfterReady;
   const holdReady = scene.holdReady;
@@ -127,6 +130,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
   scene.nextNewestProgressOnly = undefined;
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
+  scene.nextReplySettled = undefined;
   scene.nextActions = undefined;
   scene.holdDoneAfterReady = undefined;
   scene.holdReady = undefined;
@@ -145,6 +149,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
         for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
+        if (settles) controller.enqueue(frame({ type: "token", fullText: (custom ?? ["Thinking"]).join("") }));
         scene.turns.set(room, () => controller.close());
         return;
       }
@@ -156,6 +161,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         if (custom !== undefined && custom.length > 0) {
           for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
           const full = custom.join("");
+          if (settles) controller.enqueue(frame({ type: "token", fullText: full }));
           keep(full);
           if (holdDone !== undefined) {
             const announce = () => {

@@ -51,6 +51,13 @@ it("Save an attachment from inside its review, with one button per attachment", 
   await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
   expect([world.inbox.savedAttachments.size, document.querySelector("[aria-label='Attachment contents']")?.textContent]).toEqual([0, text]);
 
+  // spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown": backing out of Android's picker writes nothing, says "Save cancelled." as v119 did, and offers Save as… again
+  world.inbox.pickerCancels = 1;
+  await confirm("Save as…");
+  await until(alpha, runtime, Shown, (s) => s.keep.outcome === "Refused" && s.cancelled === s.keep.id);
+  await drawn(() => expect([...document.querySelectorAll("[role=dialog] [role=status]")].map((one) => one.textContent)).toEqual(["Save cancelled."]));
+  expect([world.inbox.savedAttachments.size, told().includes("Could not save it"), inDialog("Save as…").map((one) => one.disabled)]).toEqual([0, false, [false]]);
+
   await confirm("Save as…");
   await until(alpha, runtime, Shown, (s) => s.keep.outcome === "Confirmed");
   await drawn(() => expect(told()).toContain("Saved."));

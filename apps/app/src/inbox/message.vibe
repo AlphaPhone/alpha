@@ -168,7 +168,7 @@ function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox
     when { tag: "OpenLink", let message, let link }: run("link", opened(message, link));
     // spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
     when { tag: "HandleAttachment", let attempt, let account, let message, let attachment, let handling }:
-      answer(`attachment ${attempt}`, handleAttachment({ tag: "HandleAttachment", attempt, account, message, attachment, handling }), { type: "attachmentHandled", attempt, done: false, known: false, pages: 0 });
+      answer(`attachment ${attempt}`, handleAttachment({ tag: "HandleAttachment", attempt, account, message, attachment, handling }), { type: "attachmentHandled", attempt, done: false, known: false, pages: 0, cancelled: false });
     // spec/app/inbox/message.md, "A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review"
     when { tag: "DrawPdf", let attempt, let ticket, let page }:
       answer("pdf page", drawAttachmentPage({ tag: "DrawPdf", attempt, ticket, page }), { type: "pdfDrawn", attempt, ticket, page, ok: false });

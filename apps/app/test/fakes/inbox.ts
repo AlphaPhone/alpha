@@ -59,6 +59,8 @@ export interface InboxScene {
   readonly attached: string[];
   readonly attachmentReads: string[];
   readonly savedAttachments: Map<string, string>;
+  /** How many more times the owner backs out of the save picker, which then writes nothing. */
+  pickerCancels?: number;
   loseSendReply?: boolean;
   loseDraftReply?: boolean;
   rejectDraftReply?: boolean;
@@ -116,6 +118,10 @@ export const alphaInboxNotices = (scene: InboxNoticeScene): Faked => (emit) => {
 /** Android's save picker in the fake phone, with its selected documents kept as exact copies. */
 export const alphaInboxAttachments = (scene: InboxScene) => () => ({
   saveReviewed: ({ name, dataBase64 }: OpaqueMailAttachment) => {
+    if (scene.pickerCancels) {
+      scene.pickerCancels--;
+      return Promise.resolve({ status: "cancelled" });
+    }
     scene.savedAttachments.set(name, atob(dataBase64));
     return Promise.resolve({ status: "saved" });
   },

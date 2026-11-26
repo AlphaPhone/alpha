@@ -2,7 +2,6 @@
 // spec/app/camera/agent.md, "A capture is taken only when the phone saved a photo it names; any other answer, or the camera released first, is uncertain"
 import { DeviceExecution, NOT_DISPATCHED, RuntimeRequestError, type ConversationRecord, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
 import { mayRunDirectly, readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
-import type { PhoneNumber } from "@elizaos/os-bridges"
 import { filterLabel } from "@elizaos/plugin-files-client"
 import { PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL, type PhoneDeviceTarget, type WorkflowDeviceBinding, parseWorkflowBinding } from "@elizaos/plugin-workflow-client"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
@@ -357,9 +356,8 @@ function spokenOperation(proposal: Proposal, opened: Session, message: string, r
   return request === message || commsReview(op) || op.type.startsWith("files_") || op.type === "browser_navigate" ? op : undefined
 }
 
-/** The exact Talk request that presented an addressed text in the already-open chat. */
+/** The exact Talk request whose reply proposed a text in the already-open chat. */
 export interface SpokenSmsReview extends SpokenReview {
-  readonly recipient: PhoneNumber
   readonly selection: SmsSelection
   readonly room: ConversationRecord
   readonly conversation: number
@@ -1272,7 +1270,7 @@ function makeSpokenReview(deps: {
       if (proposal === undefined) return undefined
       const op = operation(proposal.payload.operation)
       const expiresAt = Date.parse(proposal.expiresAt)
-      if (op?.type !== "sms_send" || op.recipients.length !== 1 || op.recipients[0] !== source.recipient
+      if (op?.type !== "sms_send" || op.recipients.length !== 1
         || op.subscriptionId !== source.selection.subscription.id || !Number.isFinite(expiresAt)) return undefined
       const status = timeout(effect {
         const clients = try telephony.clients()

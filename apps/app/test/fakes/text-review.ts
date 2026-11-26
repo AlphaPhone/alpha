@@ -42,7 +42,7 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
 
 /** One more pending proposal of `review`'s enrollment, listed for review beside it. */
 export function alsoPending(review: TextReviewScene, id: string, operation: DeviceOperation, requestMessageId?: string) {
-  review.others.push({ id, digest: "c".repeat(64), state: "pending", expiresAt: review.proposal.expiresAt,
+  review.others.push({ id, digest: (review.others.length + 1).toString(16).padStart(64, "c"), state: "pending", expiresAt: review.proposal.expiresAt,
     payload: { installationId: review.agentId, enrollmentId, operation, requestMessageId } });
 }
 

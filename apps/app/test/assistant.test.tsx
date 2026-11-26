@@ -822,6 +822,28 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     }
   });
 
+  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
+  it("See the reply as soon as the agent decides it, before it is stored, and keep exactly that text on Stop (spec/app/assistant/reply.md, \"The planning label shows until the first settled text, and provisional text is neither shown nor spoken\"; spec/app/assistant/index.md, \"Story: Stop a reply\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistantWithPreferences(world);
+    world.ask.stalled = true;
+    world.ask.noStatus = true;
+    world.ask.nextReplyChunks = ["I can't open", " the Camera from here."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.nextReplySettled = true;
+    write("Open the camera");
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.status === "Streaming" && !s.provisional && s.shown === "I can't open the Camera from here.".length);
+    await vi.waitFor(() => expect(writingReply()).toBe("I can't open the Camera from here."));
+    expect([replying(), (await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()))).final]).toEqual([false, 0]);
+    await press("Stop reply");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+    const stopped = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
+    expect([stopped.stopped, stopped.shown]).toEqual([true, "I can't open the Camera from here.".length]);
+    expect([writingReply(), lines()]).toEqual(["I can't open the Camera from here.", ["Open the camera", "I can't open the Camera from here."]]);
+  });
+
   // spec/app/assistant/index.md, "Story: Stop a reply"
   it("Stop a reply, and learn how it ended (spec/app/assistant/index.md, \"Story: Stop a reply\")", async () => {
     const world = { ...scene(), phone };

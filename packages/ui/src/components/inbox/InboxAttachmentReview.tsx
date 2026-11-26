@@ -24,8 +24,8 @@ export type InboxAttachmentReviewProps = {
   size: string;
   /** Whether it is to be opened or saved to Files. */
   handling: "open" | "save";
-  /** Where the use stands: waiting for the owner, under way, done, refused, or ended with no way to know whether it happened. */
-  outcome?: "review" | "working" | "done" | "refused" | "unknown";
+  /** Where the use stands: waiting for the owner, under way, done, refused, cancelled by the owner in the picker, or ended with no way to know whether it happened. */
+  outcome?: "review" | "working" | "done" | "refused" | "cancelled" | "unknown";
   /** The verified text or a raster derived from the reviewed attachment. */
   preview?: InboxAttachmentPreview;
   /** The save uses the browser's downloads, which do not report whether the file landed. */
@@ -37,13 +37,13 @@ export type InboxAttachmentReviewProps = {
   /** Saves the file from a review for opening, before or after it opens; left out while that is not allowed. */
   onSave?: () => void;
   /** Where that save stands, once asked. */
-  saveOutcome?: "working" | "done" | "refused" | "unknown";
+  saveOutcome?: "working" | "done" | "refused" | "cancelled" | "unknown";
   /** Called when the sheet is dismissed or closed. */
   onClose: () => void;
 };
 
 const verbs = { open: { ask: "Open", done: "Opened", refused: "Could not open it" }, save: { ask: "Save", done: "Saved to Files", refused: "Could not save it" } } as const;
-const pickerSave = { ask: "Save as…", done: "Saved.", unknown: "Couldn’t confirm the save. Check the chosen file before trying again." } as const;
+const pickerSave = { ask: "Save as…", done: "Saved.", cancelled: "Save cancelled.", unknown: "Couldn’t confirm the save. Check the chosen file before trying again." } as const;
 
 function PdfPreview({ page, pages, drawing, onPrevious, onNext }: Extract<InboxAttachmentPreview, { kind: "pdf" }>) {
   const name = `Page ${page} of ${pages}`;
@@ -70,6 +70,7 @@ export function InboxAttachmentReview({ open, name, size, handling, outcome = "r
   const save = picker ? { ...verbs.save, ask: pickerSave.ask, done: pickerSave.done } : verbs.save;
   const words = handling === "open" ? verbs.open : save;
   const ended = outcome !== "review" && outcome !== "working";
+  const offeredAgain = handling === "save" && outcome === "cancelled";
   const opened = outcome === "done" && handling === "open" ? preview : undefined;
   const saveUnknown = browserDownload ? "Save not confirmed. Check your downloads." : picker ? pickerSave.unknown : "Not sure it was saved. Look in Files.";
   const unknown = handling === "open" ? "Not sure it opened." : saveUnknown;
@@ -82,12 +83,13 @@ export function InboxAttachmentReview({ open, name, size, handling, outcome = "r
           <>
             <SheetClose asChild><Button variant="secondary">{ended ? "Close" : "Cancel"}</Button></SheetClose>
             {saving ? <Button variant={ended ? "primary" : "secondary"} loading={saveOutcome === "working"} disabled={!onSave} onClick={onSave}>{save.ask}</Button> : null}
-            {!ended ? <Button loading={outcome === "working"} disabled={!onConfirm} onClick={onConfirm}>{words.ask}</Button> : null}
+            {!ended || offeredAgain ? <Button loading={outcome === "working"} disabled={!onConfirm} onClick={onConfirm}>{words.ask}</Button> : null}
           </>
         }
       >
         {handling === "open" && saveOutcome === "working" ? <p role="status" className="mb-3 text-sm text-muted-foreground">Saving…</p> : null}
         {handling === "open" && saveOutcome === "done" ? <p role="status" className="mb-3 flex items-center gap-2 text-sm"><CircleCheck aria-hidden className="size-5 text-ok" />{save.done}</p> : null}
+        {handling === "open" && saveOutcome === "cancelled" ? <p role="status" className="mb-3 text-sm">{pickerSave.cancelled}</p> : null}
         {handling === "open" && saveOutcome === "refused" ? <p role="alert" className="mb-3 flex items-center gap-2 text-sm"><CircleAlert aria-hidden className="size-5 text-destructive" />{save.refused}</p> : null}
         {handling === "open" && saveOutcome === "unknown" ? (
           <p role="alert" className="mb-3 flex items-center gap-2 text-sm"><TriangleAlert aria-hidden className="size-5 shrink-0 text-warn" />{saveUnknown}</p>
@@ -103,6 +105,7 @@ export function InboxAttachmentReview({ open, name, size, handling, outcome = "r
             </section>
           </>
         ) : outcome === "done" ? <p role="status" className="mt-4 flex items-center gap-2 text-sm"><CircleCheck aria-hidden className="size-5 text-ok" />{words.done}</p> : null}
+        {outcome === "cancelled" ? <p role="status" className="mt-4 text-sm">{pickerSave.cancelled}</p> : null}
         {outcome === "refused" ? <p role="alert" className="mt-4 flex items-center gap-2 text-sm"><CircleAlert aria-hidden className="size-5 text-destructive" />{words.refused}</p> : null}
         {outcome === "unknown" ? (
           <p role="alert" className="mt-4 flex items-center gap-2 text-sm"><TriangleAlert aria-hidden className="size-5 shrink-0 text-warn" />{unknown}</p>

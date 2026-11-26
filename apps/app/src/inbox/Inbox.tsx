@@ -266,7 +266,8 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const outcomeOf = (attempt: typeof state.file) => attempt.outcome === "Planned" ? undefined
-    : attempt.outcome === "Recorded" || attempt.outcome === "Sent" ? "working" : attempt.outcome === "Confirmed" ? "done" : attempt.outcome === "Refused" ? "refused" : "unknown";
+    : attempt.outcome === "Recorded" || attempt.outcome === "Sent" ? "working" : attempt.outcome === "Confirmed" ? "done"
+      : attempt.outcome === "Refused" ? (attempt.id === state.cancelled ? "cancelled" : "refused") : "unknown";
   const saveReviewed = { type: "saveReviewed", access } as const;
   const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
     ? runtime.runSync(AttachmentPreviews).read(state.file.id)
