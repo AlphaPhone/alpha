@@ -205,7 +205,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const remote = usePreferences(runtime).state?.images ?? false;
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const mail = runtime.runSync(Mail);
-  const read = state ? mail.body(state.body.ticket) : undefined;
+  const read = state?.body.status === "Loaded" ? mail.body(state.body.ticket) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
     if (!link || at < 1) return;

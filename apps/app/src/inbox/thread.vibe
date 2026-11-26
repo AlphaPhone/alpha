@@ -134,8 +134,8 @@ export effect function threadMessage(account: number, anchor: MailCard, position
   if (paging && read.offset !== target) throw new RejectedThread({ fault: "Moved" })
   const found = at(read, target)
   if (found === undefined) throw new RejectedThread({ fault: "Gone" })
-  if (newest) cache.keep(source, initial)
   cache.keep(source, read, forward ? { earlier: initial.offset } : undefined)
+  if (newest && read.offset !== initial.offset) cache.keep(source, initial)
   const original = known?.original
   return { position: target, thread: initial.total, body: original?.message.id === found.message.id ? original : messageOf(found, anchor) }
 }
