@@ -355,6 +355,23 @@ describe("Home on a phone", () => {
     expect(dialog()).toBeNull();
   });
 
+  // spec/app/home/index.md, "Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would"
+  it('Lists Telegram, Slack and Wallet in Apps, not on Home, and opens one from there (spec/app/home/index.md, "Apps also lists Alpha\'s own apps that are not on Home, and opens one as its tile would")', async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home", "assistant", "view:Wallet"));
+    const homes = home.runtime(alpha);
+    await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
+    expect(tiles()).not.toContain("view:Wallet");
+    expect(Boolean(button("Wallet"))).toBe(false);
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await vi.waitFor(() => expect(Boolean(button("Open Wallet"))).toBe(true));
+    expect(Boolean(button("Open Phone"))).toBe(false);
+    await press("Open Wallet");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.trail.at(-1) === "Wallet");
+  });
+
   it('Holds a native app for App info and to pin it (spec/app/home/drawer.md, "Story: Act on an installed app from its menu")', async () => {
     const world = { ...scene(), phone: true };
     const { alpha } = await open(world, only("home"));
