@@ -434,7 +434,8 @@ pure def callsCard(image: bool, rows: List[Row]): Card = if (image and rows.leng
 ### The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row
 
 What Inbox loaded is what the card shows: Home reads no mail of its own.
-As v121 drew it (`legacy/apps/app/src/ui/overview/daily-overview.ts:171-198`),
+As the Sunday demo build drew it (Alpha 45f6bed30,
+`apps/app/src/ui/overview/daily-overview.ts:171-198`),
 the card closes on "Open to retry · last updated 10:24 PM" only when Inbox's
 last read or account check failed, on "Updating email…" while Inbox reads
 its page, and otherwise on "Recent email" when

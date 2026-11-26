@@ -562,7 +562,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 0);
   expect(told()).toContain("Connect Gmail");
   await press("Connect Gmail");
-  const mailScopes = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.drafts", "google.gmail.mailbox"];
+  const mailScopes = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.drafts", "google.gmail.mailbox"] as const;
   await afterDraw(() => expect([consent.requests, consent.opened, rows()]).toEqual([[mailScopes], [consent.authUrl], []]));
 
   // spec/app/inbox/index.md, "Mail is read only while signed in, for a selected account whose grant allows reading, and not once Google refused it as withdrawn"

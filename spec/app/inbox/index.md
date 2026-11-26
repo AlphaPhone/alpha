@@ -532,8 +532,8 @@ and the read in flight. With read access the first page is
 read when access is new, or when nothing fresh is on screen: no list, a
 saved list, or a list whose last read failed. So a check after a failed
 read reads the mail again and the count recovers, as v121 read the mail
-again each time Alpha came back to the front
-(`legacy/apps/app/src/prototype/inbox-cloud-adapter.ts:255-311`, `:1431`). Without it
+again each time Alpha came back to the front (the Sunday demo build, Alpha
+45f6bed30, `apps/app/src/prototype/inbox-cloud-adapter.ts:255-312`, `:1387`). Without it
 the screen is emptied. A failed check changes nothing. An answer ends a
 wait for the mail lease, as it ends a withdrawal.
 

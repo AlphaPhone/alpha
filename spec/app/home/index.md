@@ -298,10 +298,10 @@ pure def tryAgain(h: Home, shell: S::Shell): Moved = thenReadApps(List(), h, fal
 
 ### Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would
 
-v121's Home held its 13 apps and the Apps tile
-(`legacy/apps/app/src/prototype/home-shell.ts`, `appsTile`). Alpha's apps
-that v121 did not have, such as Telegram, Slack and Wallet, start in Apps,
-beside the phone's own apps, until the owner adds them to Home.
+The Sunday demo build's Home held its 14 apps and the Apps tile (Alpha
+45f6bed30, `apps/app/src/prototype/home-shell.ts:191-192`). Alpha's apps
+that build did not have, Telegram and Slack, start in Apps, beside the
+phone's own apps, until the owner adds them to Home.
 
 ```quint
 pure def drawerViews(h: Home, shell: S::Shell): List[S::View] = if (onPhone(h)) hiddenApps(h, shell) else List()
@@ -532,7 +532,7 @@ pure def sometimesATileWaitsForItsApp(h: Home): bool =
 
 ### Add to Home adds one of Alpha's own apps it lists
 
-Wallet is available through Add to Home and is kept when saved on Home.
+Telegram and Slack are available through Add to Home and are kept when saved on Home.
 
 ```quint
 pure def holdsView(tiles: List[T::Tile], view: S::View): bool = tiles.some(t => T::shows(t, view))
