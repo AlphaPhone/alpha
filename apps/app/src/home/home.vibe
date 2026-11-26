@@ -7,7 +7,7 @@ import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
 import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
-import { Machine as Canvas, type Canvas as CanvasState } from "../../gen/app__shell__keyboard.effect.vibe"
+import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
@@ -15,8 +15,9 @@ import { type Job, answer, contained, due, following, hearing, reacting, run, st
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { landscapeHomeInput } from "../shell/canvas.vibe"
+import { homeEditFrame, landscapeHomeInput } from "../shell/canvas.vibe"
 import { stepping } from "../shell/shell.vibe"
+import { addHomeLayer, reconcileAddHome } from "./addHome.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
 
@@ -144,6 +145,7 @@ export effect function chooseApp(app: string, action: "Pin" | "Info", route: num
 export effect function backHome() {
   const drawer = try Drawer.Machine
   if (Drawer.canCloseMenu(try drawer.get())) return try contained(drawer.send({ type: "closeMenu" }), "closing the Apps menu")
+  try reconcileAddHome()
   const home = try Home.Machine
   const shell = try Shell.Machine
   const route = (try shell.get()).route
@@ -181,12 +183,8 @@ export effect function homeInput(beside: boolean) {
     && (!beside || landscapeHomeInput(Effect.runSync(canvas.get())))
 }
 
-export function homeEditFrame(frame: CanvasState | undefined): boolean {
-  return frame?.mounted === true && !frame.voice && !frame.covered && frame.keyboard !== "Shown" && frame.field === "NoField"
-}
-
 export type HomeEditInput = Extract<Event, {
-  type: "beginEditing" | "removeFromHome" | "moveTile" | "showHidden" | "addToHome" | "done" | "backOut"
+  type: "beginEditing" | "removeFromHome" | "moveTile" | "done"
 }>
 
 // spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
@@ -197,13 +195,12 @@ export effect function editHome(input: HomeEditInput, route: number, beside: boo
   const free = try homeInput(beside)
   const before = try shell.get()
   const event = "shell" in input ? { ...input, shell: before } : input
-  const current = (state: Home.Home) => {
+  const current = () => {
     const where = Effect.runSync(shell.get())
     return where.route === route && where.image === before.image && where.contacts === before.contacts
       && Home.editSite(where, beside) && free() && homeEditFrame(Effect.runSync(canvas.get()))
-      && (input.type !== "backOut" || state.adding)
   }
-  if (!current(try home.get())) return false
+  if (!current()) return false
   const accepted = try contained(home.send(event, owner, current), "changing Home")
   if (accepted && input.type === "beginEditing" && last?.place === "InEditBar") {
     last = undefined
@@ -326,6 +323,7 @@ const presented = started(effect {
 
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
 export const home = together(
+  addHomeLayer,
   reacting(Home, {
     keep: 1,
     open: [{ type: "restart" }, owner],

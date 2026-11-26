@@ -152,6 +152,10 @@ export function landscapeHomeInput(frame: Canvas.Canvas | undefined): boolean {
   return native() && frame?.mounted === true && frame.landscape && !frame.voice
 }
 
+export function homeEditFrame(frame: Canvas.Canvas | undefined): boolean {
+  return frame?.mounted === true && !frame.voice && !frame.covered && frame.keyboard !== "Shown" && frame.field === "NoField"
+}
+
 // spec/app/shell/keyboard.md, "Where Android reports the keyboard, the keyboard hiding puts the composer away, unless it hid to hand the composer to voice"
 /** Preserve the focused composer during a voice handoff on a phone reporting its keyboard. */
 export effect function keyboardVoice(voice: boolean): void!!Canvas.Machine {
