@@ -526,7 +526,7 @@ describe("Notes", () => {
       await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
     };
     /** The `turn`th question went with the selected Design sync note and its transcript flag. */
-    const expectTranscriptTurn = (turn: number) => expect(world.ask.metadata[turn]).toMatchObject({
+    const expectTranscriptTurn = (turn: number) => expect(world.ask.metadata?.[turn]).toMatchObject({
       observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
       useSelectedVoiceNoteTranscript: true,
     });
