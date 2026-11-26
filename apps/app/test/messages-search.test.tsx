@@ -61,4 +61,35 @@ describe("Messages search", () => {
     await until(alpha, runtime, Messages, (state) => !state.searching && !state.sought && state.front && state.pane === "Threads");
     await vi.waitFor(() => expect(searchField()).toBeNull());
   });
+
+  it(`The search opens empty, and a conversation opened from its results returns to them before Back closes the search (${rule})`, async () => {
+    const { alpha } = await open(alphaImage(), only("home", "assistant", "view:Messages"));
+    const runtime = messages.runtime(alpha);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Messages" }))));
+    await until(alpha, runtime, Messages, (state) => state.front && state.pane === "Threads" && state.list.status === "Loaded");
+    const everyone = (await runtime.runPromise(Effect.flatMap(Messages, (machine) => machine.get()))).threads;
+    const words = document.querySelector("ul[aria-label='Conversations'] button")?.getAttribute("aria-label")?.split(" ")[0] ?? "";
+
+    await fill("Search or ask", "Nobody by this name");
+    await until(alpha, runtime, Messages, (state) => state.sought && !state.searching && state.list.status === "Loaded" && state.threads === 0);
+    await press("Search messages");
+    await until(alpha, runtime, Messages, (state) => state.searching && !state.sought && state.list.status === "Loaded" && everyone > 0 && state.threads === everyone);
+    await vi.waitFor(() => expect(searchField()?.value).toBe(""));
+
+    await fill("Search conversations", words);
+    await until(alpha, runtime, Messages, (state) => state.sought && state.list.status === "Loaded" && state.threads > 0);
+    const found = (await runtime.runPromise(Effect.flatMap(Messages, (machine) => machine.get()))).threads;
+    await drawn(() => document.querySelector<HTMLButtonElement>("ul[aria-label='Conversations'] button")?.click());
+    await until(alpha, runtime, Messages, (state) => state.pane === "Conversation");
+
+    await hardware("back");
+    await until(alpha, runtime, Messages, (state) => state.pane === "Threads" && state.searching && state.sought && state.list.status === "Loaded" && state.threads === found);
+    await vi.waitFor(() => expect(searchField()?.value).toBe(words));
+
+    await hardware("back");
+    await until(alpha, runtime, Messages, (state) => state.pane === "Threads" && !state.searching && !state.sought);
+    await vi.waitFor(() => expect(searchField()).toBeNull());
+    expect((await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.get()))).trail.at(-1)).toBe("Messages");
+  });
 });
