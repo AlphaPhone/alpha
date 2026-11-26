@@ -344,10 +344,24 @@ to the phone's calendar asks too, waits for the answer, and goes out only
 with access. Either asks only while Calendar may still ask; after that,
 Calendar's settings notice, on the days and on a form going to the phone's
 calendar, is the way to grant it, and Save to the phone's calendar waits
-for it.
+for it. v119's default Agent Calendar never asked at New event; only its
+opt-in Android calendars mode did, where the phone's own calendars are the
+calendar, which here is a phone with no agent's calendar connected. Once
+Android said no, the form going to the phone's calendar says No access, as
+v119 did.
 
 ```quint
 pure def canAskAccess(s: Calendar): bool = P::canAsk(s.access)
+
+pure def asksAtNewEvent(s: Calendar): bool = canAskAccess(s) and not(s.connected)
+
+pure def phoneTakesASave(s: Calendar): bool = P::allows(s.access) or canAskAccess(s)
+
+pure def lawADeniedPhoneTakesNoSave(grant: P::Grant): bool =
+  not(phoneTakesASave({ ...initial, access: { grant: grant, asked: true } })) or grant == P::Granted or grant == P::Limited
+
+pure def lawAConnectedAgentIsNeverAskedForAtNewEvent(grant: P::Grant): bool =
+  not(asksAtNewEvent({ ...initial, connected: true, access: { grant: grant, asked: false } }))
 
 pure def askAccess(s: Calendar): Viewed = { state: { ...s, access: P::ask(s.access) }, out: List(AskAccess) }
 ```
