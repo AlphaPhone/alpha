@@ -65,7 +65,7 @@ type Place = View | "Home"
 interface SpokenView {
   readonly held: Held | PageHeld
   readonly current: Effect.Effect<boolean>
-  readonly front: (place: Place) => Effect.Effect<boolean>
+  readonly front: (place: Place, keep: boolean) => Effect.Effect<boolean>
   readonly completed: Deferred.Deferred<void>
 }
 
@@ -77,6 +77,12 @@ function viewPlace(viewId: string): Place | undefined {
   if (viewId.toLowerCase() === homeViewId) return "Home"
   const opened = parseEvent({ type: "openView", view: `${viewId.charAt(0).toUpperCase()}${viewId.slice(1).toLowerCase()}` })
   return opened?.type === "openView" ? opened.view : undefined
+}
+
+// spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
+/** Whether a handoff opens a saved note: a new page in Notes, brought forward under Ask Alpha at its height. */
+function savedNote(handoff: Handoff): boolean {
+  return handoff.subview === "saved-note-v1"
 }
 
 /** The place a handoff names, if Alpha has it: a saved note only in Notes. */
@@ -95,7 +101,7 @@ export service Views {
   current(): number!!
   hold(ticket: number, held: TypedHeld): void!!
   take(ticket: number): Option.Option<TypedHeld>!!
-  spoken(held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>): void!!
+  spoken(held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, keep: boolean) => Effect.Effect<boolean>): void!!
   /** The ids of the views this screen can show now: Home and every app the shell has here. */
   shown(): readonly string[]!!
   readonly heard: Queue.Dequeue<SpokenView>
@@ -133,7 +139,7 @@ export const handoffs = Layer.effect(Views, effect {
       typed = undefined
       return Option.some(found)
     }),
-    spoken: effect (held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>) => {
+    spoken: effect (held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, keep: boolean) => Effect.Effect<boolean>) => {
       const completed = try Deferred.make<void>()
       try Queue.offer(heard, { held, current, front, completed })
       try Deferred.await(completed)
@@ -188,15 +194,15 @@ effect function asAllowed(page: AgentPage): AgentPage!!Prefs.Machine {
   return { ...page, atOnce: false }
 }
 
-/** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
-effect function navigated(ticket: number, place: Place): boolean!!Conversation.Machine {
+/** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. `keep` leaves Ask Alpha where it is, as a saved note's opening does. */
+effect function navigated(ticket: number, place: Place, keep = false): boolean!!Conversation.Machine {
   const conversation = try Conversation.Machine
   if (place === "Home") {
     if (!Conversation.canNavigateHome(try conversation.get(), ticket)) return false
     try ignore(conversation.send({ type: "navigateHome", ticket }))
   } else {
-    if (!Conversation.canNavigate(try conversation.get(), ticket, place)) return false
-    try ignore(conversation.send({ type: "navigate", ticket, view: place }))
+    if (!Conversation.canNavigate(try conversation.get(), ticket, place, keep)) return false
+    try ignore(conversation.send({ type: "navigate", ticket, view: place, keep }))
   }
   return try navigationEnded(conversation, ticket)
 }
@@ -270,7 +276,7 @@ effect function openPrepared(ticket: number) {
     return
   }
   const place = placeFor(held.value.handoff)
-  if (place !== undefined) try carriedOut(held.value, navigated(ticket, place))
+  if (place !== undefined) try carriedOut(held.value, navigated(ticket, place, savedNote(held.value.handoff)))
 }
 
 // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
@@ -289,11 +295,11 @@ export const carriedAloud = started(effect {
     const held = work.held
     if (held.asked !== (try views.current()) || !(try work.current)) return
     if ("page" in held) {
-      if (try work.front("Browser")) try (try AgentPages).open(try asAllowed(held.page), Effect.map(views.current(), (now) => now === held.asked))
+      if (try work.front("Browser", false)) try (try AgentPages).open(try asAllowed(held.page), Effect.map(views.current(), (now) => now === held.asked))
       return
     }
     const place = placeFor(held.handoff)
     if (place === undefined) return
-    try contained(carriedOut(held, work.front(place)), "opening what a spoken reply prepared")
+    try contained(carriedOut(held, work.front(place, savedNote(held.handoff))), "opening what a spoken reply prepared")
   }, asVoid(Deferred.succeed(work.completed, undefined))))
 }, "opening what a spoken reply prepared")

@@ -268,8 +268,15 @@ the same move, so the owner sees where the agent went: the full screen over
 any destination, or a sheet over the view already showing, Home included.
 An Android Ask Alpha visit keeps its full screen. An app the agent brings
 forward for an action (a drafted message, an approved page, a reviewed
-keypad, Files for a reply's review) comes forward under Ask Alpha at its
-current height, so the card the owner is reading stays.
+keypad, Files for a reply's review, a saved note it opens) comes forward
+under Ask Alpha at its current height, so the card the owner is reading
+stays; a note opened while Notes shows is a new page there, and a sheet
+over it stays.
+
+This departs from v119, and the owner sees it: v119 kept Ask Alpha's
+height on every agent navigation, so "go home" with the full screen up, or
+with a sheet over Home, changed nothing on screen. Here those lower Ask
+Alpha to its bar.
 
 ```quint
 pure def canAgentOpenView(s: Shell, view: View): bool = available(s, view) and not(showing(s, view))
