@@ -390,6 +390,31 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe("You're clear tomorrow. Nothing is booked.");
   });
 
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"; spec/app/voice/index.md, "When the whole reply has been heard, Alpha listens for the next turn"
+  it("over the Cloud relay, says the acknowledgment, keeps the turn while its tools run, then says the reply and listens again", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.ask.acknowledgment = "Let me check your calendar.";
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["You're clear tomorrow. ", "Nothing is booked."];
+    const runtime = await startListening(world);
+    expect([(await getVoice(runtime)).network, world.voice.startCloudSpeechCalls]).toEqual([true, 1]);
+
+    const relay = world.voice.activeMicSession;
+    world.voice.emitCloud?.({ type: "speech-start", sessionId: relay });
+    world.voice.emitCloud?.({ type: "speech-end", sessionId: relay, text: "What's on tomorrow" });
+    await untilCondition(runtime, () => world.voice.spoken.length === 1, () => world.voice.spoken);
+    await until(runtime, Voice.Machine, (s) => (s.mic === "On" && s.played === 1) || !Voice.talking(s));
+    expect([(await getVoice(runtime)).phase, world.voice.spoken.map((one) => one.text), world.ask.turns.size, world.voice.stopCloudSpeechCalls, world.voice.activeMicSession !== undefined]).toEqual([
+      "Speaking", ["Let me check your calendar."], 1, 0, true,
+    ]);
+    for (const release of [...world.ask.turns.values()]) release();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect([world.voice.spoken.map((one) => one.text), world.ask.kept.get("c1")?.messages.at(-1)?.text, world.voice.activeMicSession !== undefined]).toEqual([
+      ["Let me check your calendar.", "You're clear tomorrow.", "Nothing is booked."], "You're clear tomorrow. Nothing is booked.", true,
+    ]);
+  });
+
   // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
   it("drops an acknowledgment the reply overtakes before it is heard, and never says it after", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
