@@ -217,7 +217,7 @@ export function App({ alpha }: AppProps) {
         onTouchEnd={touchEnded}
         onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
         style={frameStyle}
-        className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
+        className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", showing === "Camera" && "bg-black", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
       >
         <div
           data-alpha-shell-page=""
@@ -255,7 +255,7 @@ export function App({ alpha }: AppProps) {
                 <div
                   key={showing}
                   onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen({ view: showing, done: true }); }}
-                  className="relative flex min-h-0 flex-1 flex-col bg-background motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent"
+                  className={cn("relative flex min-h-0 flex-1 flex-col motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent", showing === "Camera" ? "bg-black" : "bg-background")}
                 >
                   {!viewHasHeader(showing) && <AppHeader
                     title={views[showing].label}

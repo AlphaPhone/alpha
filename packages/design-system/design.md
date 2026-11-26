@@ -72,6 +72,7 @@ do next.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
   `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen, `animate-fadein` a photo or preview fading in on `ease-standard`, `animate-startup` the Alpha mark at launch (a 0.3 s pause, then a 0.7 s fade),
   `animate-shimmer` work in progress, `animate-blink` the dots of a reply being written, `animate-wiggle` an app tile on Home while Home is being edited.
+  The dimmed page behind a dialog or a sheet takes no animation: it is dim at once, while the panel rises, or appears at once for a review card.
   Reduced motion stops them all.
 - **Width.** Layout follows the measured width, not the orientation: from `md` a centered reading
   column, from `lg` a list beside its detail.

@@ -146,7 +146,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       appCardsInert={s.assistant !== "Bar"}
       drawerInert={s.assistant !== "Bar" && !alongside}
       covered={h.editing && !editVisible}
-      editing={editing}
+      editing={editing || (h.editing && addLayer !== undefined)}
       tileGestureScope={`${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}`}
       onOpenTile={(id) => {
         const tile = tileOf(id);

@@ -113,12 +113,18 @@ export function pressDrag(form: "open" | "bar" | "pill", shown: number, floor: n
 }
 
 /** COA:793-805 paintChatMotion's geometry: whether the finger is past the slop, and the height it puts the sheet at. */
-export function moveDrag(d: ChatDrag, delta: number, bar: boolean): boolean {
+export function moveDrag(d: ChatDrag, delta: number): boolean {
   if (!d.moved && Math.abs(delta) < TAP_SLOP) return false;
   d.moved = true;
   d.delta = delta;
-  d.height = bar && delta > 0 ? 0 : clamp01((d.start - delta) / Math.max(1, d.full)) * d.full;
+  d.height = !d.open && delta > 0 ? 0 : clamp01((d.start - delta) / Math.max(1, d.full)) * d.full;
   return true;
+}
+
+/** COA:339-346 dockStyle when pulling the resting bar down to dismiss it to the pill: follows the finger downward and fades out. */
+export function barDismissPaint(d: ChatDrag): { translateY: number; opacity: number } | undefined {
+  if (d.open || d.height > 0 || d.delta <= 0) return undefined;
+  return { translateY: d.delta, opacity: 1 - clamp01(Math.abs(d.delta) / Math.max(80, d.half)) };
 }
 
 /** COA:261-263 paintedHeight: the sheet never paints shorter than its composer, which stays where the bar rests. */
@@ -198,7 +204,8 @@ export function easedTimeAt(progress: number): number {
 
 /**
  * The header's opacity keyframes while the sheet's height eases from `from` to `to` over a SHEET_EASE move: hidden until
- * the sheet has `fit` of height for it, then shown over the next ROW_REVEAL (COA:281-295).
+ * the sheet has `fit` of height for it, then shown over the next ROW_REVEAL (COA:281-295). Their offsets are already
+ * times on that curve, so the animation that plays them runs linearly.
  */
 export function revealFrames(from: number, to: number, fit: number): Keyframe[] {
   const [low, high] = [Math.min(from, to), Math.max(from, to)];
