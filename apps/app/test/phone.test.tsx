@@ -147,9 +147,18 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([["14155550100"], []]);
 
-    // spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
+    // spec/app/phone/index.md, "Phone reads the call log whenever Recents comes to the front"; spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
+    world.telephony.calls.push({ id: 4, number: "+14155550123", name: "New caller", date: 1_700_000_350_000, type: "incoming" });
     await tab("Recents");
-    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 3);
+    expect(button("Call New caller")).toBeDefined();
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad");
+    world.telephony.callLog = "denied";
+    await tab("Recents");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Failed" && s.log.grant === "Denied" && s.rows === 0);
+    expect(button("Call New caller")).toBeUndefined();
+    expect(button("Retry call history")).toBeUndefined();
     await hardware("home");
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
   });

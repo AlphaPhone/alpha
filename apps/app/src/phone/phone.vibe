@@ -57,16 +57,16 @@ effect function readLog(ticket: number, device: boolean): Event!!(Telephony | Di
   let grant = before.log.grant
   let ok = true
   if (source === undefined || grant !== "Granted") {
-    const status = telephony("status", (c) => c.phone.status()) catch () => undefined
-    grant = grantOf(status?.permissions.callLog)
-    ok = status !== undefined
-    if (grant === "Granted") {
-      const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
-      ok = page !== undefined
-      if (page !== undefined) {
-        const names = try namesOf("phone", page.calls.map((entry) => entry.number))
-        source = page.calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName }))
-      }
+    const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
+    ok = page !== undefined
+    if (page === undefined) {
+      const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+      grant = grantOf(status?.permissions.callLog)
+      source = undefined
+    } else {
+      grant = "Granted"
+      const names = try namesOf("phone", page.calls.map((entry) => entry.number))
+      source = page.calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName }))
     }
   }
   const current = try machine.get()
