@@ -11,6 +11,7 @@ import { Machine as Builder } from "../gen/app__workflows__builder.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import home from "../src/home/index.tsx";
+import { fromAreas } from "../src/home/cards.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
@@ -125,6 +126,20 @@ describe("Workflows", () => {
     await pressOnTop("Refresh list");
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && !state.complete);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Retired brief"]);
+  });
+
+  it('Keeps Home\'s Workflows card as the last answer left it while the list is read again (spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row")', async () => {
+    const world = scene();
+    const { alpha, area } = await onList(world, { complete: true });
+    const asked = (await area.runPromise(Listing.use((machine) => machine.get()))).list.ticket;
+    expect(fromAreas.snapshot().flows.freshness).toBe("UpToDate");
+    const told: string[] = [];
+    onTestFinished(fromAreas.subscribe(() => { told.push(fromAreas.snapshot().flows.freshness); }));
+    // Back to Home reads Workflows again: the card keeps "up to date" through the read, with no "Not current" between.
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.list.ticket > asked && state.list.status === "Loaded");
+    await drawn(() => undefined);
+    expect([told.length > 0, told.includes("NotCurrent"), fromAreas.snapshot().flows.freshness]).toEqual([true, false, "UpToDate"]);
   });
 
   it('Explores Add to Workflows while signed out (spec/app/workflows/list.md, "From the list the owner can open a row, Add to Workflows, or the digests; Back returns to the same filters")', async () => {

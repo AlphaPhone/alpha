@@ -4,7 +4,7 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import { createRoot } from "react-dom/client";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import { Assistant } from "../src/assistant/Assistant.tsx";
+import { Assistant, type AssistantProps } from "../src/assistant/Assistant.tsx";
 import { assisting } from "../src/assistant/assistant.vibe";
 import { MediaHandoff } from "../src/assistant/attachments.vibe";
 import { MediaExecutors } from "../src/assistant/media-review.vibe";
@@ -29,7 +29,7 @@ export async function closeAllDocks() {
 const dockAgent = "dock-agent";
 const dockOwner = "dock-owner";
 
-export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
+export async function mountDock({ view = "Browser", withToast = false, flush, speech }: { view?: "Browser" | "Calendar" | "Home" | "Notes" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void>; speech?: AssistantProps["speech"] } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
   const client = Layer.succeed(
     HttpClient.HttpClient,
@@ -68,7 +68,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
       <div className="relative flex min-h-dvh w-full flex-col bg-background text-foreground">
         <AppHeader title={view} />
         {withToast ? <Toast>Saved</Toast> : <div className="flex-1 p-4 text-sm text-muted-foreground">Web page content</div>}
-        <Assistant runtime={runtime} />
+        <Assistant runtime={runtime} speech={speech} />
       </div>,
     );
     await runtime.runPromise(Effect.void);

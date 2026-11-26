@@ -44,6 +44,8 @@ export interface MapsScene {
   here: { latitude: number; longitude: number; accuracy: number } | undefined;
   /** Whether Android currently grants Alpha location permission. */
   allowed: "granted" | "denied" | "prompt";
+  /** When set, Android's location prompt stays open until it settles. */
+  answer?: Promise<void>;
   /** How precisely Android lets Alpha locate the phone, once location is allowed. */
   precision: "precise" | "approximate";
   /** The page's listeners of the fake location plugin. */
@@ -142,7 +144,10 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
     let next = 0;
     return {
       checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: scene.precision }),
-      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: scene.precision }),
+      requestPermissions: async () => {
+        await scene.answer;
+        return { location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: scene.precision };
+      },
       getCurrentPosition: () => (scene.here && scene.allowed === "granted" ? Promise.resolve({ coords: { ...scene.here, timestamp: now() }, cached: false }) : Promise.reject(rejection("TIMEOUT"))),
       watchPosition: () => {
         const watchId = `w${++next}`;

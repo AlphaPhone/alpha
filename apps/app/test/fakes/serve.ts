@@ -4,6 +4,7 @@ import type { ReadableStream as NodeStream } from "node:stream/web";
 import type { Plugin } from "vite";
 import type { Answering } from "./routes.ts";
 import { seedReferenceWeek } from "./calendar.ts";
+import { developedRecording } from "./notes.ts";
 import { type Scene, scene, services } from "./scene.ts";
 
 async function relay(answer: Answering, incoming: IncomingMessage, outgoing: ServerResponse) {
@@ -19,10 +20,13 @@ async function relay(answer: Answering, incoming: IncomingMessage, outgoing: Ser
 
 /**
  * What the dev server shows beyond the journeys' empty world, as develop's browser fixture does: the agent's calendar
- * holds develop's reference week, "Design review" at 3:00 PM today among it.
+ * holds develop's reference week, "Design review" at 3:00 PM today among it, and "Design sync" keeps its recording, as
+ * the fake phone's dev page holds it (`developedRecording`), so it plays as v119's did.
  */
 function developed(world: Scene): Scene {
   seedReferenceWeek(world.calendar, Date.now());
+  const sync = world.notes.notes.find((note) => note.id === developedRecording.noteId);
+  if (sync?.format?.kind === "voice") sync.format = { ...sync.format, data: { ...sync.format.data, audioId: developedRecording.audioId } };
   return world;
 }
 

@@ -11,6 +11,7 @@ import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
 import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
@@ -54,9 +55,11 @@ function onMessage(text: string, item: string) {
 const chatsSheet = () => [...document.querySelectorAll("[role='dialog']")].find((dialog) =>
   document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent === "Chats");
 
-/** Open the list of conversations, from the chat actions. */
-async function chatsList() {
-  chatAction("Chat history");
+/** Open the list of conversations sheet over Ask Alpha. */
+async function chatsList(runtime: ReturnType<typeof assistant.runtime>) {
+  await drawn(() => runtime.runPromise(Effect.flatMap(Layers, (machine) =>
+    machine.send({ type: "openLayer", id: "assistant-history", kind: "SheetLayer", covers: true }))));
+  await drawn(() => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.send({ type: "browse" }))));
   await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeDefined()));
 }
 
@@ -105,7 +108,7 @@ it("Keeps my phone draft through restart and leaves it with my account (spec/app
   world.ask.kept.set("c1", { roomId: "r1", title: "Shared fixture ID", messages: [] });
 
   const selectConversation = async (alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof assistant.runtime>) => {
-    await chatsList();
+    await chatsList(runtime);
     await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
     row("Chats", "Shared fixture ID");
     await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
@@ -232,7 +235,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    await chatsList();
+    await chatsList(runtime);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
     await drawn(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
@@ -520,7 +523,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     write("Ideas for dinner");
     const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
     const detent = (await shellState()).assistant;
-    await chatsList();
+    await chatsList(runtime);
     await hardware("back");
     await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeUndefined()));
     expect([(await shellState()).assistant, composerText(), lines()]).toEqual([detent, "Ideas for dinner", ["Dinner at eight?"]]);
@@ -585,7 +588,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     runtime = assistant.runtime(fifth.alpha);
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
     world.ask.holdLists = false;
-    await chatsList();
+    await chatsList(runtime);
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
     expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
     for (const release of world.ask.heldLists.splice(0)) release();
@@ -594,7 +597,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
     world.ask.holdLists = true;
-    await chatsList();
+    await chatsList(runtime);
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
     await pressOnTop("New chat");
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
@@ -611,7 +614,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     write(carried);
     await until(fifth.alpha, runtime, Composer, (s) => s.binding.conversation === made && s.editor.text && s.draft.sync === "Kept");
     world.ask.kept.clear();
-    await chatsList();
+    await chatsList(runtime);
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.ids.length === 0 && s.list.status === "Loaded");
     await until(fifth.alpha, runtime, Composer, (s) => s.binding.conversation === 0 && s.slot === "Open" && s.editor.text && s.draft.sync === "Kept");
     await hardware("back");
@@ -631,7 +634,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const { alpha, runtime } = await openAssistant(world);
     await press("Open conversation");
     await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
-    await chatsList();
+    await chatsList(runtime);
     await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
     row("Chats", "Earlier history");
     await until(alpha, runtime, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
@@ -664,7 +667,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [] });
     world.ask.opened = 1;
     const { alpha, runtime } = await openAssistant(world);
-    await chatsList();
+    await chatsList(runtime);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     row("Chats", "Ask Alpha");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");

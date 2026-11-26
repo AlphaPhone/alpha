@@ -6,13 +6,21 @@ import { useMachine } from "../../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
 
+/** Whether an app's first page draws its Back: never while Alpha is the launcher (`drawsAppBack`, FirstPage). */
+export function useFirstPageBack(alpha: Alpha): boolean {
+  const { state } = useMachine(alpha.runtime);
+  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
+  return state !== undefined && drawsAppBack(state, launcher, "FirstPage");
+}
+
 /**
  * The shell's Back control placed inside an area's own header; `className` sizes it to that header. Marked as an app's
- * `firstPage`, it is not drawn while Alpha is the launcher; Android's Back still leaves.
+ * `firstPage`, it is not drawn while Alpha is the launcher; Android's Back still leaves. `label` names it, "Back" unless the
+ * app's own header names it otherwise.
  */
-export function AppBack({ alpha, className, firstPage = false }: { alpha: Alpha; className?: string; firstPage?: boolean }) {
+export function AppBack({ alpha, className, firstPage = false, label = "Back" }: { alpha: Alpha; className?: string; firstPage?: boolean; label?: string }) {
   const { state } = useMachine(alpha.runtime);
   const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   if (!state || !drawsAppBack(state, launcher, firstPage ? "FirstPage" : "InnerPage")) return null;
-  return <Button variant="ghost" size="icon" aria-label="Back" className={cn("rounded-lg", className)} onClick={() => void alpha.back()}><ChevronLeft /></Button>;
+  return <Button variant="ghost" size="icon" aria-label={label} className={cn("rounded-lg", className)} onClick={() => void alpha.back()}><ChevronLeft /></Button>;
 }

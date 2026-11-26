@@ -20,8 +20,13 @@ module page {
     const label = element.getAttribute("aria-label") ?? (element.textContent ?? "").trim().slice(0, 40)
     return `${element.getAttribute("role") ?? element.tagName.toLowerCase()}:${label}`
   }
+  /** Home held under an app (App.tsx) is not on the screen: nothing in it takes focus until the app closes. */
+  const showing = (element: Element): boolean => element.closest("[data-alpha-home-layer][inert]") === null
+  function first(root: ParentNode, selector: string): HTMLElement | undefined {
+    return [...root.querySelectorAll<HTMLElement>(selector)].find(showing)
+  }
   function find(key: string): HTMLElement | undefined {
-    return [...document.querySelectorAll<HTMLElement>(focusable)].find((element) => keyOf(element) === key)
+    return [...document.querySelectorAll<HTMLElement>(focusable)].find((element) => showing(element) && keyOf(element) === key)
   }
   /** The key of the control focused now. @throws {never} */
   export const active = (): string => document.activeElement?.closest("[inert]") ? "" : keyOf(document.activeElement)
@@ -52,10 +57,10 @@ module page {
     if (main === null) return undefined
     if (target === "Search") {
       const field = document.documentElement.hasAttribute("data-alpha-keyboard") ? "input[type=search]" : "h1"
-      return main.querySelector<HTMLElement>(`[data-alpha-apps-drawer] ${field}`) ?? undefined
+      return first(main, `[data-alpha-apps-drawer] ${field}`)
     }
-    if (target === "HomeStart") return main.querySelector<HTMLElement>("[data-home-tile]") ?? main.querySelector<HTMLElement>(focusable) ?? undefined
-    if (target === "Title") return main.querySelector<HTMLElement>("h1") ?? undefined
+    if (target === "HomeStart") return first(main, "[data-home-tile]") ?? first(main, focusable)
+    if (target === "Title") return first(main, "h1")
     if (target === "Region") return main
     return undefined
   }

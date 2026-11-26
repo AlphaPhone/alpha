@@ -219,9 +219,14 @@ const home = applying(List.Machine, (state) => ({ owner: state.owner, read: stat
   const source = try (try Rows).view(owner)
   const displayed = source.rows.filter((row) => (row.kind === "Routine" || row.kind === "Prompt") && row.on && !row.removed)
     .map((row) => ({ title: row.title, detail: "Enabled" }))
+  // While Workflows is read again, the card keeps what the last answer said (up to date, or stale after a failure), as
+  // v119's Home card kept its cached list through a re-read (45f6bed30 apps/app/src/prototype/automations-adapter.ts:202),
+  // so a return Home does not flash "Not current". Before the owner's first answer there is no row, so no card.
+  const settled = fromAreas.snapshot().flows.freshness
   const freshness: Freshness = read.status === "Failed" ? "Stale"
     : source.problems.some((problem) => problem === "Workflows" || problem === "Prompts") ? "SomeUnavailable"
-      : read.status === "Loaded" ? "UpToDate" : "NotCurrent"
+      : read.status === "Loaded" ? "UpToDate"
+        : settled === "UpToDate" || settled === "Stale" ? settled : "NotCurrent"
   fromAreas.flows({ rows: displayed, freshness })
 })
 

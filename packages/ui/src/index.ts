@@ -59,6 +59,7 @@ export * from "./components/assistant/AssistantEventCard.tsx";
 export * from "./components/assistant/AssistantFileRow.tsx";
 export * from "./components/assistant/AssistantGenericCard.tsx";
 export * from "./components/assistant/AssistantGrabber.tsx";
+export * from "./components/assistant/chat-overlay-motion.ts";
 export * from "./components/assistant/AssistantMessage.tsx";
 export { watchMessageMenu } from "./components/assistant/messagePress.ts";
 export * from "./components/assistant/AssistantNoteCard.tsx";

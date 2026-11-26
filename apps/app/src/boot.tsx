@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Stream } from "effect";
-import { type ReactElement, Suspense, lazy } from "react";
+import { type ComponentType, type ReactElement, Suspense, useLayoutEffect, useState } from "react";
 import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
 import { readPage, stopPage } from "./assistant/read-aloud.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
@@ -10,11 +10,12 @@ import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
 import { ScanExports } from "./files/scanEntry.vibe";
 import { InboxCardEntry } from "./home/cards.vibe";
+import { homeFrame } from "./home/firstFrame.ts";
 import { AgentPages, BrowserDownloadsHandoff, InboxBrowserLinks } from "./platform/browser.vibe";
 import { Device } from "./platform/device.vibe";
 import type { Platform } from "./platform/platform.vibe";
 import { resident } from "./resident.vibe";
-import type { Alpha } from "./runtime/area.tsx";
+import type { Alpha, Area } from "./runtime/area.tsx";
 import { Contained } from "./runtime/contained.tsx";
 import { rooted } from "./runtime/root.vibe";
 import { accessCover, startupAccessLifecycle } from "./startup/settingsAccess.vibe";
@@ -22,7 +23,16 @@ import { startupSignIn, StartupSignIn } from "./startup/signIn.vibe";
 import * as Access from "../gen/app__startup__access.effect.vibe";
 import { back, taking } from "./shell/shell.vibe";
 
-/** Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, loaded when it is first drawn, and contained: one that throws or cannot be loaded stops alone. */
+/** How long an idle moment may wait before a screen's chunk is fetched anyway, in milliseconds. */
+const idleWait = 2000;
+
+/**
+ * Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, opened
+ * when it is first drawn, and contained: one that throws or cannot be loaded stops alone. Each screen's code is a chunk
+ * of its own; once Home's first frame is drawn the chunks are fetched one per idle moment (and a tile's on a press), so
+ * an app's first open waits only for its machines to start, not for its code, closer to v119, whose one bundle held
+ * every view (45f6bed30 apps/app/src/main.tsx).
+ */
 export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every, requireNativeSignIn = false): Alpha {
   const media = Layer.succeed(MediaHandoff, {
     attach: (file, current, suggestion) => Effect.promise(async () => {
@@ -139,14 +149,23 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
   const startup = Layer.provideMerge(startupAccessLifecycle(requireNativeSignIn), Layer.provideMerge(signIn, Layer.provideMerge(resident, lateSignIn)));
   const root = rooted(Layer.provideMerge(startup, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, inboxCard, scans)));
   const placed = new Map<Place, ReactElement[]>();
+  /** The runtimes `over` makes while a screen is being opened. */
+  let making: Array<{ context: () => Promise<unknown> }> | undefined;
   const alpha: Alpha = {
     runtime: root.runtime,
-    over: (layer) => root.over(layer),
+    over: (layer) => {
+      const made = root.over(layer);
+      making?.push(made);
+      return made;
+    },
     slot: (place) => placed.get(place),
     back: () => root.runtime.runPromiseExit(back()),
     requiresSignIn: requireNativeSignIn,
     taking: (place, took) => void root.runtime.runPromiseExit(taking(place, took)),
-    dispose: root.dispose,
+    dispose: () => {
+      quiet();
+      return root.dispose();
+    },
   };
   if (requireNativeSignIn) alpha.taking("startup/sign-in", () => root.runtime.runPromise(StartupSignIn.use((signIn) => Effect.gen(function* () {
     if (yield* signIn.active()) {
@@ -165,8 +184,101 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     return current() && !access.covered && (!access.begun || !Access.completed(access));
   }))));
   const stopped = (place: string, cause: unknown) => void root.runtime.runPromiseExit(Effect.logError(`the screen at ${place} stopped`, cause));
+  const fetched = new Map<Mount, Area>();
+  const fetching = new Map<Mount, Promise<Area>>();
+  /** `mount`'s chunk, fetched once and never opened here; one that failed is fetched again when next asked. */
+  const fetch = (mount: Mount): Promise<Area> => {
+    const known = fetching.get(mount);
+    if (known) return known;
+    const loading = mount.load().then(({ default: loaded }) => {
+      fetched.set(mount, loaded);
+      return loaded;
+    });
+    fetching.set(mount, loading);
+    void loading.catch(() => fetching.delete(mount));
+    return loading;
+  };
+  const later = mounts.filter((mount) => mount.first === undefined);
+  let idle: (() => void) | undefined;
+  let prefetching = false;
+  /** The chunks the idle sweep has asked for: each once, so one that cannot be loaded is left to its first draw. */
+  const swept = new Set<Mount>();
+  /** Fetch the chunk at `place`, or with no place every chunk not fetched yet, one per idle moment, in the order of areas.ts. */
+  const prefetch = (place?: Place) => {
+    if (place !== undefined) {
+      for (const mount of later) if (mount.at === place) void fetch(mount).catch(() => undefined);
+      return;
+    }
+    if (prefetching || typeof requestIdleCallback !== "function") return;
+    prefetching = true;
+    const next = () => {
+      const mount = later.find((candidate) => !swept.has(candidate) && !fetched.has(candidate));
+      if (mount === undefined) return;
+      swept.add(mount);
+      const asked = requestIdleCallback(() => {
+        idle = undefined;
+        void fetch(mount).catch(() => undefined).finally(() => { if (prefetching) next(); });
+      }, { timeout: idleWait });
+      idle = () => cancelIdleCallback(asked);
+    };
+    next();
+  };
+  const unserve = homeFrame.serve(prefetch);
+  const unwatch = homeFrame.subscribe(() => { if (homeFrame.snapshot()) prefetch(); });
+  if (homeFrame.snapshot()) prefetch();
+  function quiet() {
+    prefetching = false;
+    idle?.();
+    unserve();
+    unwatch();
+  }
+  /**
+   * The screen of `mount`, opened the first time it is drawn (in a layout effect, never during a render), and shown once
+   * the runtime opening it made is built, so its machines have started and it never draws a state they have not reached
+   * (an unread month, an owner not known yet); at once on every later draw. A runtime that fails to build shows the
+   * screen too, whose machines then say so. One whose chunk cannot be loaded, or that cannot be opened, throws to its
+   * Contained; a chunk that failed is fetched again on the next draw. Unlike React's lazy, no Suspense reveal throttle
+   * holds a screen that is ready.
+   */
+  const opened = (mount: Mount): ComponentType => {
+    let Opened: ComponentType | undefined;
+    let broken: { cause: unknown } | undefined;
+    let built: Promise<void> | undefined;
+    let ready = false;
+    const open = (loaded: Area): Promise<void> => {
+      if (built) return built;
+      making = [];
+      try {
+        Opened = loaded.open(alpha, mount.at);
+      } catch (cause) {
+        broken = { cause };
+      } finally {
+        const made = making ?? [];
+        making = undefined;
+        built = Promise.all(made.map((runtime) => runtime.context())).then(() => { ready = true; }, () => { ready = true; });
+      }
+      return built;
+    };
+    return function Later() {
+      const [shown, show] = useState<{ readonly Screen?: ComponentType; readonly failed?: { cause: unknown } }>(() => (broken ? { failed: broken } : { Screen: ready ? Opened : undefined }));
+      useLayoutEffect(() => {
+        if (shown.Screen || shown.failed) return;
+        let live = true;
+        const reveal = (loaded: Area) => {
+          if (!live) return;
+          void open(loaded).then(() => { if (live) show(broken ? { failed: broken } : { Screen: Opened }); });
+        };
+        const loaded = fetched.get(mount);
+        if (loaded) reveal(loaded);
+        else void fetch(mount).then(reveal, (cause: unknown) => { if (live) show({ failed: { cause } }); });
+        return () => { live = false; };
+      }, [shown]);
+      if (shown.failed) throw shown.failed.cause;
+      return shown.Screen ? <shown.Screen /> : null;
+    };
+  };
   for (const mount of mounts) {
-    const Screen = mount.first?.open(alpha, mount.at) ?? lazy(async () => ({ default: (await mount.load()).default.open(alpha, mount.at) }));
+    const Screen = mount.first?.open(alpha, mount.at) ?? opened(mount);
     const drawn = (
       <Contained key={`${mount.at} ${placed.get(mount.at)?.length ?? 0}`} place={mount.at} told={mount.at.startsWith("view:")} onStopped={stopped}>
         <Suspense fallback={null}><Screen /></Suspense>

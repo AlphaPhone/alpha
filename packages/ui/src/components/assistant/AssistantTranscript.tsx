@@ -1,5 +1,4 @@
 import { type ComponentProps, type ReactNode, memo, useCallback, useRef } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { EmptyState } from "../EmptyState.tsx";
@@ -40,8 +39,8 @@ export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> &
   onReturnToOriginal?: () => void;
 };
 
-/** Where the conversation is read from: whether it follows the end, and the end it was last brought to, below which only the owner scrolls. */
-type TranscriptScroll = { page?: string; follows: boolean; end: number; paging?: { id: string; offset: number } };
+/** Where the conversation is read from: whether it follows the end, and the size it had when last seen, against which the end is judged. */
+type TranscriptScroll = { page?: string; follows: boolean; seen: { height: number; view: number }; paging?: { id: string; offset: number } };
 
 function messageRow(content: HTMLElement, id: string) {
   return Array.from(content.querySelectorAll<HTMLElement>("[data-alpha-message-id]"))
@@ -52,12 +51,15 @@ function topIn(viewport: HTMLElement, row: HTMLElement) {
   return row.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
 }
 
+// spec/app/assistant/chats.md, "The conversation keeps its newest message in view until the owner scrolls up from it"
 function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
-  if (selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode)) return;
-  viewport.scrollTop = viewport.scrollHeight;
-  reading.end = viewport.scrollTop;
+  if (reading.follows && !(selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode))) viewport.scrollTop = viewport.scrollHeight;
+  reading.seen = { height: viewport.scrollHeight, view: viewport.clientHeight };
 }
+
+/** v119's measure (45f6bed30 model.js:5585): within 80 points of the end as the conversation was last seen. */
+const atSeenEnd = (reading: TranscriptScroll, top: number) => reading.seen.height - top - reading.seen.view < 80;
 
 const MessageRows = memo(function MessageRows({ messages, hold }: { messages: readonly TranscriptMessage[]; hold?: MessageHold }) {
   return messages.map(({ id, ...message }) => (
@@ -71,7 +73,7 @@ const MessageRows = memo(function MessageRows({ messages, hold }: { messages: re
  * @model spec/app/assistant/chats.md
  */
 export function AssistantTranscript({ messages, messagesAfterLater, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
-  const scrollRef = useRef<TranscriptScroll>({ follows: true, end: 0 });
+  const scrollRef = useRef<TranscriptScroll>({ follows: true, seen: { height: 0, view: 0 } });
   const page = position?.page;
   const around = position?.around;
   const placed = useCallback((content: HTMLDivElement | null) => {
@@ -88,7 +90,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       reading.follows = !row;
       reading.paging = undefined;
     }
-    const follow = () => { if (reading.follows) followEnd(viewport, reading); };
+    const follow = () => followEnd(viewport, reading);
     follow();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(follow);
@@ -108,9 +110,9 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
     if (status === "failed") return <EmptyState title="Messages did not load">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>;
     return (
       <>
-        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
+        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}>Earlier</Button> : null}
         <MessageRows messages={messages} hold={holdMessage} />
-        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}>Later</Button> : null}
         {messagesAfterLater?.length ? <MessageRows messages={messagesAfterLater} hold={holdMessage} /> : null}
         {briefing}
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
@@ -128,13 +130,13 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       onScroll={(event) => {
         const viewport = event.currentTarget;
         const reading = scrollRef.current;
-        if (visible && status === "loaded") reading.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80 || (reading.follows && viewport.scrollTop >= reading.end);
+        if (visible && status === "loaded") reading.follows = atSeenEnd(reading, viewport.scrollTop);
         onScroll?.(event);
       }}
       {...props}
     >
       <div ref={placed} className="flex min-h-full flex-col gap-5">
-        {onReturnToOriginal ? <Button variant="ghost" size="sm" className="self-start" onClick={onReturnToOriginal}><ArrowLeft aria-hidden />Original chat</Button> : null}
+        {onReturnToOriginal ? <Button variant="ghost" size="sm" className="self-start" onClick={onReturnToOriginal}>Original chat</Button> : null}
         {body()}
       </div>
     </div>

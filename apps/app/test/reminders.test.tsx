@@ -4,7 +4,7 @@ import type { ReminderItemRecord, ReminderListRecord, RemindersSnapshot } from "
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -39,6 +39,7 @@ import {
 } from "../src/reminders/store.ts";
 import workflows from "../src/workflows/index.tsx";
 import { button, closeAll, drawn, fill, later, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -357,7 +358,7 @@ describe("Reminders full journeys", () => {
       recurrence: "none", priority: "none", flagged: false, subtasks: [], completed: false, completedAtMs: null, snoozedUntilMs: null,
       notifiedAtMs: null, agentTaskId: "plumber-task", revision: 1, createdAtMs: baseNow, updatedAtMs: baseNow,
     };
-    const { recorder, alpha, runtime } = await launchReminders(baseNow, [plumber]);
+    const { recorder, alpha, runtime, close, platform } = await launchReminders(baseNow, [plumber]);
 
     await drawn(() => runtime.runPromise(toggleReminderComplete(plumber.id)));
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Held" && s.write.outcome === "Confirmed");
@@ -384,13 +385,50 @@ describe("Reminders full journeys", () => {
     const second = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Take out trash" }));
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
     await drawn(() => runtime.runPromise(deleteReminderItem(first!.id)));
-    const queued = runtime.runPromise(deleteReminderItem(second!.id));
-    await later(alpha, 5_100);
-    await drawn(() => queued);
+    await drawn(() => runtime.runPromise(deleteReminderItem(second!.id)));
+    expect(recorder.snapshot.items.some((item) => item.id === first!.id)).toBe(false);
     expect({ hidden: [...remindersStore.snapshot().hiddenIds], undo: Boolean(button("Undo")) }).toEqual({ hidden: [second!.id], undo: true });
     await later(alpha, 5_100);
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
     expect(recorder.snapshot.items.filter((item) => item.id === first!.id || item.id === second!.id)).toEqual([]);
+
+    // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made": three fast changes run in turn, each with its own write
+    const gone = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Old list" }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    await drawn(() => runtime.runPromise(deleteReminderItem(gone!.id)));
+    await drawn(() => Promise.all([runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Buy stamps" })), runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Call mom" }))]));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed" && s.undo.holding !== "Held");
+    expect(recorder.snapshot.items.map((item) => item.title).filter((title) => ["Old list", "Buy stamps", "Call mom"].includes(title)).toSorted()).toEqual(["Buy stamps", "Call mom"]);
+
+    // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made": a held delete resumed after a restart commits the reminder it held
+    const kept = remindersStore.snapshot().snapshot.items.find((item) => item.title === "Call mom")!;
+    await drawn(() => runtime.runPromise(deleteReminderItem(kept.id)));
+    await close();
+    resetReminderStores();
+    const again = await openOver(platform, withReminders);
+    const againRuntime = remindersArea.runtime(again.alpha);
+    await later(again.alpha, 60_000);
+    await until(again.alpha, againRuntime, RemindersMachine.Machine, (s) => s.undo.holding !== "Held" && s.write.outcome !== "Sent");
+    expect(recorder.snapshot.items.some((item) => item.id === kept.id)).toBe(false);
+    expect(recorder.snapshot.items.some((item) => item.title === "Buy stamps")).toBe(true);
+  });
+
+  // spec/app/reminders/index.md, "Creating, updating, flagging and moving a reminder validates its list, due time and recurrence and sends one write at a time"
+  it("a full Reminders refuses another add and says so, instead of showing one that vanishes", async () => {
+    const held: ReminderItemRecord[] = Array.from({ length: 200 }, (_, n) => ({
+      id: `rem-full-${n}`, listId: DEFAULT_LIST_ID, title: `Reminder ${n}`, notes: "", dueDate: null, dueMinute: null, alertMinutes: null,
+      recurrence: "none", priority: "none", flagged: false, subtasks: [], completed: false, completedAtMs: null, snoozedUntilMs: null,
+      notifiedAtMs: null, agentTaskId: null, revision: 1, createdAtMs: baseNow, updatedAtMs: baseNow,
+    }));
+    const { recorder, runtime } = await launchReminders(baseNow, held);
+    let extra: ReminderItemRecord | undefined = held[0];
+    await drawn(async () => { extra = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "One more" })); });
+    expect({
+      made: extra,
+      kept: remindersStore.snapshot().snapshot.items.some((item) => item.title === "One more"),
+      sent: recorder.calls.some((call) => call.method === "POST" && call.path === "/api/alpha/reminders/items"),
+      said: document.body.textContent?.includes("Reminders holds 200 reminders. Delete one to add another."),
+    }).toEqual({ made: undefined, kept: false, sent: false, said: true });
   });
 
   // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
@@ -404,6 +442,9 @@ describe("Reminders full journeys", () => {
       consumeTap: () => Promise.resolve(),
     };
     setNativeRemindersPort(nativePort);
+    // spec/app/notices/browserAlerts.md, "Story: Choose whether Alpha shows browser alerts": the browser keeps web Alerts on, so a due reminder shows its banner
+    vi.stubGlobal("indexedDB", memoryIndexedDB());
+    onTestFinished(() => { vi.unstubAllGlobals(); });
 
     const first = await launchReminders(baseNow);
     const { world, recorder, platform, alpha, runtime } = first;

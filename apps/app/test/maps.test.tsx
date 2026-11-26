@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Screen } from "../gen/app__maps.effect.vibe";
 import { Machine as Credits } from "../gen/app__maps__credits.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { handToMaps } from "../src/maps/handoff.ts";
 import maps from "../src/maps/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
@@ -173,6 +174,38 @@ describe("Maps on a phone", () => {
     expect(world.maps.guidance.arrivals).toEqual(["Arrived at Harbour Cafe."]);
   });
 
+  it("A handed search runs at once, and Recenter tells why before Android asks, then locates (spec/app/maps/index.md, \"Story: Use my location\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.maps.allowed = "prompt";
+    const why = "Maps uses your location to show where you are";
+    const now = (runtime: Awaited<ReturnType<typeof onMaps>>["runtime"]) => runtime.runPromise(Effect.flatMap(Screen, (machine) => machine.get()));
+
+    const { alpha, runtime } = await onMaps(world);
+    await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
+
+    // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a places card's Map button, with the disclosure unread, searches at once, as v119 did
+    await act(async () => { handToMaps("harbour"); });
+    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+    expect(results()).toEqual(["Harbour Cafe", "Harbour Gallery"]);
+    expect([(await now(runtime)).link.disclosed, document.body.textContent?.includes(why)]).toEqual([false, false]);
+
+    // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Android is not asked yet
+    await press("Recenter");
+    await until(alpha, runtime, Screen, (s) => s.explaining);
+    const shown = await now(runtime);
+    expect([shown.link.location.asked, document.body.textContent?.includes(why)]).toEqual([false, true]);
+
+    // spec/app/maps/index.md, "Continuing past the disclosure asks Android, once, and then locates": Recenter stays while Android's prompt is open, as on v119
+    let answer = () => {};
+    world.maps.answer = new Promise((settle) => { answer = settle; });
+    await press("Continue");
+    await until(alpha, runtime, Screen, (s) => s.link.prompting && s.owedLocate && !s.explaining);
+    expect([Boolean(button("Recenter")), document.body.textContent?.includes(why)]).toEqual([true, false]);
+    await act(async () => { answer(); });
+    await until(alpha, runtime, Screen, (s) => !s.link.prompting && s.link.session > shown.link.session && !s.owedLocate);
+    expect(Boolean(button("Recenter"))).toBe(true);
+  });
+
   it("Signed out, Maps asks Cloud nothing and says to sign in (spec/app/maps/index.md, \"Story: Connect through my cloud account\")", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, runtime } = await onMaps(world);
@@ -203,12 +236,15 @@ describe("Maps in a browser", () => {
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart": the previous Alpha's list is read
     await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Office");
+    // spec/app/maps/connection.md, "The owner reads Alpha's location disclosure before Android asks": Maps opens on the bare map with Recenter, as v119 did, and no location card
+    expect([Boolean(button("Recenter")), document.querySelector("[role=dialog][aria-label=Location]")]).toEqual([true, null]);
 
-    // spec/app/maps/index.md, "Coordinates typed into Search drop a pin"
+    // spec/app/maps/index.md, "Coordinates typed into Search drop a pin"; spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": the card is v119's "Dropped pin" with Rename, and the field keeps what was typed
     await typeMapSearch("43.73, 7.42");
     await enter("Search Maps");
     await until(first.alpha, runtime, Screen, (s) => s.place !== 0 && !s.pinning);
     expect(world.maps.asked).toEqual([]);
+    expect([document.querySelector("h2")?.textContent, document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value, Boolean(button("Rename place"))]).toEqual(["Dropped pin", "43.73, 7.42", true]);
 
     // spec/app/maps/index.md, "The place on the card is saved under a name, renamed under another, or forgotten"; spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
     await press("Save");
