@@ -19,8 +19,7 @@ export function notesTranscriptionRoutes(
   ready: (signal: AbortSignal) => Promise<boolean>,
 ): readonly AgentRoute[] {
   const { account, environment } = context.launch;
-  if (account === undefined || environment?.ALPHA_LOCAL_SPEECH_SOCKET !== undefined ||
-      environment?.ALPHA_BROWSER_NOTES_SPEECH_SOCKET === undefined) return [];
+  if (account === undefined || environment?.ALPHA_LOCAL_SPEECH_SOCKET !== undefined) return [];
   const { runtime } = context;
   const registered = () => {
     const models = runtime.getModelRegistrations().filter((model) => model.modelType === "TRANSCRIPTION" && model.provider === provider);
