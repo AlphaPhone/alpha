@@ -530,7 +530,9 @@ pure def sometimesAnAttachmentOpened(s: MessageView): bool =
 ### Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision
 
 The shell raises Ask Alpha with it. The assistant area reviews with the
-owner exactly what of it goes to Alpha, refuses one too long to send in
+owner exactly what of it goes to Alpha, sends the revalidated email in
+structured turn context (`metadata.reviewedEmail`) rather than concatenating
+it into the owner's typed request text, refuses one too long to send in
 full or one that changed since, and decides what Alpha may do next with
 [what it may do with mail](./agent.md).
 
