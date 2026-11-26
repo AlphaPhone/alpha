@@ -7,10 +7,13 @@ import ai.eliza.plugins.messages.SmsTelephony;
 import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
 import ai.eliza.plugins.messages.TelephonyPlugin;
 import android.Manifest;
+import android.net.Uri;
 import android.os.CancellationSignal;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.TelephonyManager;
 import android.webkit.WebView;
+import androidx.webkit.JavaScriptReplyProxy;
+import com.getcapacitor.Bridge;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -18,7 +21,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 @CapacitorPlugin(name = "ElizaTelephony", permissions = {
@@ -29,6 +34,8 @@ import org.json.JSONObject;
  @Permission(alias = "callLog", strings = { Manifest.permission.READ_CALL_LOG })
 })
 public final class AlphaTelephonyPlugin extends TelephonyPlugin {
+ private static final Pattern LEGACY_DRAFT_REQUEST_ID = Pattern.compile("[A-Za-z0-9_-]{1,128}");
+
  @Override protected SmsTelephonyConfiguration configuration() { return AlphaTelephony.CONFIGURATION; }
 
  @Override protected void checkSmsDispatch() {
@@ -137,6 +144,67 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
 
  @Override protected DeletionWindow deletionWindow() {
   return (kind, target) -> AlphaTelephonyDeletions.stage(getContext(), kind, target);
+ }
+
+ /** Called on the UI thread by the packaged main-frame port, including its frame-bound reply. */
+ void accessLegacyDraft(MainActivity activity, WebView view, Bridge bridge, String text, JavaScriptReplyProxy reply) {
+  long visit = activity.composerVisit();
+  BooleanSupplier current = () -> composerCurrent(activity, view, visit, 0, () -> true, false);
+  boolean opened = legacyPage(view, current);
+  bridge.execute(() -> {
+   JSObject request;
+   try { request = new JSObject(text); }
+   catch (JSONException invalid) { return; }
+   if (!(request.opt("requestId") instanceof String id) || !LEGACY_DRAFT_REQUEST_ID.matcher(id).matches()) return;
+   JSObject answer = opened && current.getAsBoolean() ? readOrRetireLegacyDraft(request) : legacyDraftUnavailable();
+   bridge.executeOnMainThread(() -> {
+    JSObject response = legacyPage(view, current) ? answer : legacyDraftUnavailable();
+    try { reply.postMessage(response.put("requestId", id).toString()); }
+    catch (RuntimeException detached) { return; }
+   });
+  });
+ }
+
+ private JSObject readOrRetireLegacyDraft(JSObject request) {
+  Object kind = request.opt("kind");
+  Object thread = request.opt("threadId");
+  Object raw = request.opt("expected");
+  boolean retire = "retire".equals(kind);
+  try {
+   if (retire ? request.length() != 4 || !(raw instanceof String expected) || expected.isEmpty()
+     || expected.length() > AlphaLegacySms.DRAFT_BYTES : !"read".equals(kind) || request.length() != 3) {
+    throw new IllegalArgumentException();
+   }
+   AlphaLegacySms.draftSlot(thread);
+  } catch (IllegalArgumentException invalid) {
+   return legacyDraftError("Invalid saved Messages draft", "invalid");
+  }
+  try {
+   JSObject result = new JSObject();
+   if (retire) {
+    boolean removed = AlphaLegacySms.retireDraft(getContext(), thread, (String) raw);
+    result.put("status", removed ? "removed" : "conflict");
+   } else {
+    String value = AlphaLegacySms.readDraft(getContext(), thread);
+    result.put("value", value == null ? JSONObject.NULL : value);
+   }
+   return new JSObject().put("result", result);
+  } catch (Exception unavailable) {
+   return legacyDraftUnavailable();
+  }
+ }
+
+ private static JSObject legacyDraftUnavailable() {
+  return legacyDraftError("Saved Messages drafts are unavailable", "unavailable");
+ }
+
+ private static JSObject legacyDraftError(String message, String code) {
+  return new JSObject().put("error", new JSObject().put("message", message).put("code", code));
+ }
+
+ private static boolean legacyPage(WebView view, BooleanSupplier current) {
+  String url = view.getUrl();
+  return current.getAsBoolean() && url != null && AlphaMessagesComposerPort.packagedOrigin(Uri.parse(url));
  }
 
  @Override protected void handleOnResume() {

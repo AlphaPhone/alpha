@@ -502,7 +502,7 @@ export type Proposal = Parameters<CloudClient["gmailPrepare"]>[0]["proposal"]
 export const operationStoreVersion = 1
 
 /** The receipt of the original Gmail operation, under its original installation, grant and attempt. */
-export effect function operationReceipt(account: number, attempt: number, kind: Proposal["kind"]): (MailOperation["receipt"] | undefined)!!(Cloud | Mail | Install) {
+export effect function operationReceipt(account: number, attempt: number, kind: Proposal["kind"]): (MailOperation["receipt"] | undefined)!!(Cloud | Mail | Install | KeyValueStore.KeyValueStore) {
   const { client } = try Cloud
   const mail = try Mail
   const grantId = mail.grant(account)

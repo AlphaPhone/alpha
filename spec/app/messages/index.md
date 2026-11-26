@@ -235,10 +235,13 @@ pure def smsNeeded(s: Messages): bool = s.front and not(readable(s))
 
 ### What the phone said is held only in the pane showing it, with the access it needs
 
-Conversations are held only on the list, messages only in their
-conversation, and the picker's choices only in the picker; "Older
-conversations", earlier messages and more choices are offered only under
-rows.
+Conversations are held only on the list and messages only in their
+conversation. Contacts are held only on the foreground recipient picker
+or the New message that owns its own recipient choices. A New visit can
+show contacts inline before the owner picks To and can keep them while
+the owner writes or closes the expanded chooser. Leaving the visit
+forgets its choices and retires its read. "Older conversations", earlier
+messages and more choices are offered only under rows.
 
 ```quint
 pure def alwaysRowsOnlyWhileShowing(s: Messages): bool = and {
@@ -247,7 +250,7 @@ pure def alwaysRowsOnlyWhileShowing(s: Messages): bool = and {
   s.moreThreads implies s.threads > 0,
   (s.shown.rows > 0 or s.earlier) implies (showingPane(s, Conversation) and readable(s)),
   s.earlier implies s.shown.rows > 0,
-  (s.choices > 0 or s.moreChoices) implies (showingPane(s, Picker) and P::allows(s.book)),
+  (s.choices > 0 or s.moreChoices) implies (holdsChoices(s) and P::allows(s.book)),
   s.moreChoices implies s.choices > 0,
 }
 ```
@@ -420,9 +423,13 @@ pure def arrived(s: Messages): Moved = if (s.pane == Threads) askThreads(false, 
 
 ### A conversation is open only in its pane, and a page holds no more failed or unreadable messages than it has
 
+The selected thread is positive in Conversation and zero in every other
+pane. The New draft has its own recipient, separate from the selected thread.
+
 ```quint
 pure def alwaysAConversationIsOpenOnlyInItsPane(s: Messages): bool =
-  (s.pane == Conversation iff s.thread > 0) and (s.pane != Threads implies s.front) and fitsPage(s.shown)
+  (if (s.pane == Conversation) s.thread > 0 else s.thread == 0)
+    and (s.pane != Threads implies s.front) and fitsPage(s.shown)
 ```
 
 ### Messages are marked read only from the open conversation's newest read that showed them, and only where Alpha is the SMS app

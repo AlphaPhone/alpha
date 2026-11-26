@@ -32,7 +32,7 @@ export service MediaHandoff {
   offerTranscript(transcript: NoteTranscript): boolean!!
   reviewedDraft(): (ReviewedDraft | undefined)!!
   offerPageSpeech(speech: PageSpeech): boolean!!
-  stopPageSpeech(item: number): void!!
+  stopPageSpeech(item: number, source?: PageSpeech["source"]): void!!
 }
 
 export effect function attachToAlpha(source: AttachmentSource, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!MediaHandoff {

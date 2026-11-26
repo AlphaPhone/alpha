@@ -11,7 +11,7 @@ import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
 import { type VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
-import { Drafts, editNewMessage, newDraftHeld } from "./composer.vibe"
+import { Drafts, editNewMessage, newDraftHeld, writeMessageDraft } from "./composer.vibe"
 import { Conversations } from "./messages.vibe"
 
 /** The open thread or exact New visit owns the recorder. Across a pane change it must retire. */
@@ -80,8 +80,7 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
         |> Effect.provideService(%, Said, said))
       return
     }
-    try drafts.write(thread, next)
-    if (!(try contained(composer.send({ type: "typeText", empty: false }), "putting dictation in the message draft")) && (try drafts.text(thread)) === next) try drafts.write(thread, before)
+    try writeMessageDraft(thread, next)
   })
   if (opened) try contained(voice.send({ type: "startRecording" }), "starting message dictation")
 }

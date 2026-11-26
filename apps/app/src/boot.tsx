@@ -39,9 +39,9 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       const { default: assistant } = await import("./assistant/index.tsx");
       return assistant.runtime(alpha).runPromise(readPage(speech));
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
-    stopPageSpeech: (item) => Effect.promise(async () => {
+    stopPageSpeech: (item, source) => Effect.promise(async () => {
       const { default: assistant } = await import("./assistant/index.tsx");
-      return assistant.runtime(alpha).runPromise(stopPage(item));
+      return assistant.runtime(alpha).runPromise(stopPage(item, source));
     }).pipe(Effect.ignoreCause),
   });
   const executors = Layer.succeed(MediaExecutors, {

@@ -641,7 +641,8 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Forward");
   expect(told()).toContain("actions.txt");
   await fill("To", "reader@example.test");
-  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  // happy-dom submits no form on an Enter keydown, so the address is submitted as Enter would in a browser.
+  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1 && s.stored && !s.pending && s.write.status === "Loaded");
   await press("Send email");
@@ -706,7 +707,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   const restored = inbox.runtime(again.alpha);
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await menu("Drafts", "More folders");
-  await press("Draft, (No subject)");
+  await row("(No subject)");
   await until(again.alpha, restored, Writing, (s) => s.open);
   expect([
     document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value,
