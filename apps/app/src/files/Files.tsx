@@ -4,7 +4,7 @@ import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
 import { ArrowDown, ArrowUp, AudioLines, Calendar, Check, ChevronLeft, Copy, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, HardDrive, Image, Info, LayoutGrid, Menu as Rows, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Type, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useCallback, useMemo, useState } from "react";
 import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
-import { ahead, browse, chosen, detailed, grouped, empty, filled } from "../../gen/app__files.ts";
+import { ahead, backLayer, browse, chosen, detailed, grouped, empty, filled } from "../../gen/app__files.ts";
 import { useMachine } from "../../gen/app__files.react.ts";
 import type { Dest, Work } from "../../gen/app__files__change.ts";
 import { finding } from "../../gen/app__files__search.ts";
@@ -206,7 +206,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   };
   const pickFile = { type: "openPicker", replacing: 0 } as const;
   const canPick = atTop && recent.can(pickFile, "Owner");
-  const showStorage = owner({ type: "openTop" });
+  const showStorage = backLayer(state) !== "TopLayer" && owner({ type: "openTop" });
   const showTools = showFilter || refresh || makeFolder || owner(changeLayout) || canPick || showStorage;
   const [firstListed] = sorted;
   const canChoose = !groupedCategory && firstListed !== undefined && owner({ type: "toggle", target: firstListed.id });
