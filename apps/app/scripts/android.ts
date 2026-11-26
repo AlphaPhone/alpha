@@ -496,19 +496,27 @@ function assertSafeZipEntry(entry: string): void {
   }
 }
 
-function verifyCloudRoutes(name: string, capacitor: Record<string, unknown>): void {
+export function verifyCloudRoutes(name: string, capacitor: Record<string, unknown>): void {
   const cloud = record(record(capacitor.plugins).ElizaCloud);
-  const routes = Array.isArray(cloud.routes) ? cloud.routes : [];
-  if (routes.length === 0) throw new Error(`${name} carries no ElizaCloud.routes table`);
-  for (const item of routes) {
-    const route = record(item);
-    const method = typeof route.method === "string" ? route.method : "";
-    const routePath = typeof route.path === "string" ? route.path : "";
-    if (method === "" || !routePath.startsWith("/")) {
-      throw new Error(`${name} carries a malformed ElizaCloud route: ${JSON.stringify(item)}`);
+  const groups = Array.isArray(cloud.routes) ? cloud.routes : [];
+  if (groups.length === 0) throw new Error(`${name} carries no ElizaCloud.routes table`);
+  for (const item of groups) {
+    const group = record(item);
+    if (!Array.isArray(group.prefixes) || group.prefixes.length === 0 ||
+        group.prefixes.some((prefix) => typeof prefix !== "string" || !prefix.startsWith("/")) ||
+        typeof group.id !== "string" || !Array.isArray(group.routes) || group.routes.length === 0) {
+      throw new Error(`${name} carries a malformed ElizaCloud route group`);
     }
-    if (SIGN_IN_OWNED_PREFIXES.some((prefix) => routePath.startsWith(prefix))) {
-      throw new Error(`${name} puts sign-in-owned route ${routePath} in ElizaCloud.routes`);
+    for (const entry of group.routes) {
+      const route = record(entry);
+      const routePath = route.path;
+      if (typeof route.method !== "string" || route.method === "" ||
+          typeof routePath !== "string" || !routePath.startsWith("/")) {
+        throw new Error(`${name} carries a malformed ElizaCloud route`);
+      }
+      if (SIGN_IN_OWNED_PREFIXES.some((prefix) => routePath === prefix.slice(0, -1) || routePath.startsWith(prefix))) {
+        throw new Error(`${name} puts sign-in-owned route ${routePath} in ElizaCloud.routes`);
+      }
     }
   }
 }
