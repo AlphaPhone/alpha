@@ -6,6 +6,32 @@ import "../src/main.css";
 
 afterEach(closeAll);
 
+it('Keep a message and its list on a wide phone canvas (spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"; spec/app/inbox/message.md, "Story: Read a message")', async () => {
+  await page.viewport(1280, 800);
+  const world = { ...scene(), phone: true };
+  await open(world, only("home", "view:Inbox", "assistant"));
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  const list = page.locator('[data-alpha-subview="inbox-list"]');
+  const reader = page.locator('[data-alpha-subview="inbox-detail"]');
+  const row = list.getByRole("button", { name: /Standup notes/ });
+  await row.click();
+  await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
+  await expect.element(row).toHaveAttribute("aria-current", "true");
+  await expect.poll(() => {
+    const columns = [list.element(), reader.element()].map((pane) => pane.getBoundingClientRect());
+    const [left, right] = columns;
+    return Boolean(left && right && left.width >= 300 && left.right <= right.left && right.width > 400);
+  }).toBe(true);
+
+  await page.viewport(412, 915);
+  await expect.element(list).toHaveAttribute("inert", "");
+  await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
+  await expect.poll(() => reader.element().contains(document.activeElement)).toBe(true);
+  await reader.getByRole("button", { name: "Back to the list", exact: true }).click();
+  await expect.element(row).toHaveFocus();
+  expect(world.inbox.changes).toEqual([]);
+});
+
 function twoPagePdf(): Uint8Array<ArrayBuffer> {
   const pages = [120, 160].map((width) => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} 200] >>`);
   const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>", ...pages];
