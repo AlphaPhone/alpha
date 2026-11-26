@@ -203,12 +203,15 @@ describe("Maps in a browser", () => {
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart": the previous Alpha's list is read
     await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Office");
+    // spec/app/maps/connection.md, "The owner reads Alpha's location disclosure before Android asks": Maps opens on the bare map with Recenter, as v119 did, and no location card
+    expect([Boolean(button("Recenter")), document.querySelector("[role=dialog][aria-label=Location]")]).toEqual([true, null]);
 
-    // spec/app/maps/index.md, "Coordinates typed into Search drop a pin"
+    // spec/app/maps/index.md, "Coordinates typed into Search drop a pin": the card is v119's "Dropped pin", and the field keeps what was typed
     await typeMapSearch("43.73, 7.42");
     await enter("Search Maps");
     await until(first.alpha, runtime, Screen, (s) => s.place !== 0 && !s.pinning);
     expect(world.maps.asked).toEqual([]);
+    expect([document.querySelector("h2")?.textContent, document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value]).toEqual(["Dropped pin", "43.73, 7.42"]);
 
     // spec/app/maps/index.md, "The place on the card is saved under a name, renamed under another, or forgotten"; spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
     await press("Save");
