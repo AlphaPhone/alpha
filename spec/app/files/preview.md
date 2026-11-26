@@ -18,6 +18,11 @@ with the names beside it that the preview was given.
 > told plainly while it loads or why it cannot be shown, and to close it
 > without anything of it staying behind.
 
+As Sunday's v119 drew it, a text file is shown on white paper cards, eight
+of its lines to a card, each line with its number beside it; every card is
+headed with the file's name, and each after the first with the name and
+"(continued)". A PDF shows one page at a time with "Page x of y" below it.
+
 ### The preview holds the viewer showing, the file it shows and the names beside it, what was read of it, the page drawn, the handoff to Inbox under way and what it carries
 
 Viewers are numbered as they open; no viewer is showing when the number is
