@@ -133,8 +133,10 @@ describe("Notes", () => {
     await until(alpha, target, CalendarForm, (state) => state.shown && state.kept);
     const state = await target.runPromise(CalendarForm.use((form) => form.get()));
     const fields = await target.runPromise(kept(state.day, state.owner));
-    expect(fields).toMatchObject({ title: row, notes: expect.stringContaining(words), noteOrigin: {
-      agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2, revision: expect.any(String),
+    const noted: unknown = expect.stringContaining(words);
+    const revision: unknown = expect.any(String);
+    expect(fields).toMatchObject({ title: row, notes: noted, noteOrigin: {
+      agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2, revision,
     } });
     expect(fields.calendar).toBe(destination);
     expect(new Date(fields.begin).getHours()).toBe(9);
@@ -317,7 +319,7 @@ describe("Notes", () => {
     const world = scene();
     const { alpha, runtime } = await openNotesFromHome(world);
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    // Rows carry no menu of their own, as v121's had none.
+    // spec/app/notes/index.md, "Story: Organise my notes": rows carry no menu of their own, as v121's had none.
     expect(button("Gift ideas · Priya options")).toBeUndefined();
     await press("Open Gift ideas · Priya");
     await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
@@ -331,7 +333,7 @@ describe("Notes", () => {
 
   it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
     const world = scene();
-    const { alpha, runtime } = await openSavedVoiceNote(world);
+    await openSavedVoiceNote(world);
     const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
     try {
       const reopenShare = async () => {

@@ -25,6 +25,9 @@ export function rejection(message: string, code = message) {
   return Object.assign(new Error(message), { code });
 }
 
+/** A plugin call's answer, worked out at once as Capacitor's bridge does: what `work` throws, the call rejects with. */
+export const answered = <T>(work: () => T) => new Promise<T>((resolve) => resolve(work()));
+
 const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fromCharCode(one)).join(""));
 
 /**
@@ -233,7 +236,7 @@ function legacySmsDrafts(earlier: NativeMethods | undefined) {
     try {
       if (kind === "read") {
         const slot = legacySmsSlot(fields, 1);
-        const result = await (earlier?.secureRead?.({ slot }) ?? { value: null });
+        const result = await Promise.resolve(earlier?.secureRead?.({ slot }) ?? { value: null });
         reply({ requestId, result });
         return;
       }

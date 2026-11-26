@@ -49,7 +49,7 @@ async function typingOverCalendar() {
     await resting(runtime, "Typing");
   });
   const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
-  await act(async () => { textarea?.focus(); });
+  await drawn(() => { textarea?.focus(); });
   return { runtime, textarea };
 }
 
