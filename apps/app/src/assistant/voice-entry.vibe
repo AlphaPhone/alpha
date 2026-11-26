@@ -6,7 +6,6 @@ import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { say } from "../notices/toasts.vibe"
 import { CommsPrompts } from "../phone/comms.vibe"
 import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
@@ -14,13 +13,31 @@ import { contained, started, untimed } from "../runtime/reactor.vibe"
 import { keyboardVoice } from "../shell/canvas.vibe"
 import { Talk } from "./talk.vibe"
 
-/** Start only if the microphone and speaker are free at the time of the owner's request. */
+/** Where Ask Alpha rests as the floating pill over an app (Assistant.tsx, `compact`), which on-device Talk keeps (v119 voice-adapter.ts:1094). */
+function resting(page: Shell.Shell): boolean {
+  const view = page.trail.at(-1)
+  return page.assistant === "Bar" && view !== undefined && view !== "Browser" && view !== "Phone" && view !== "Messages" && view !== "Contacts"
+}
+
+/**
+ * Start only if the microphone and speaker are free at the time of the owner's request. Talk is drawn in Ask Alpha's
+ * sheet, as in the Sunday demo build (v119 45f6bed30, apps/app/src/prototype/voice-adapter.ts:1092-1094): from the bar
+ * or while typing it opens the sheet, and from the pill over an app it opens the sheet for Cloud speech and stays in the
+ * pill for on-device speech.
+ */
 export effect function beginTalk() {
   const voice = try Voice.Machine
+  const shell = try Shell.Machine
   const call = (try (try Phone).get()).telecom
   const speaker = try (try Speaker).get()
+  const before = try voice.get()
   if (call === "OrdinaryCall" || call === "MaybeEmergencyCall" || speaker.stage !== "Silent" || speaker.retiring
-    || !(try (try Device).showing()) || !(try (try VoiceBridge).available()) || !Voice.canStartTalking(try voice.get(), untimed)) return
+    || !(try (try Device).showing()) || !(try (try VoiceBridge).available()) || !Voice.canStartTalking(before, untimed)) return
+  const page = try shell.get()
+  if ((page.assistant === "Typing" || (page.assistant === "Bar" && (!resting(page) || Voice.onNetwork(before.route, untimed))))
+    && Shell.canRaise(page, "Sheet")) {
+    try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha for Talk")
+  }
   try keyboardVoice(true)
   if (!(try contained(voice.send({ type: "startTalking", now: untimed }), "starting Talk"))) try keyboardVoice(false)
 }
@@ -36,10 +53,7 @@ export const talkFromComms = started(effect {
   try Stream.runForEach(requests, effect ({ about, view }) => {
     const before = try shell.get()
     if (!Shell.showing(before, view) || !Shell.canRaise(before, "Sheet") || (try comms.get()).key !== about || !(try device.showing())) return
-    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) {
-      try say("Talk is unavailable right now", true)
-      return
-    }
+    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) return
     if (!(try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Talk from the communications bar"))) return
     const current = try shell.get()
     if (Shell.showing(current, view) && current.assistant === "Sheet" && (try comms.get()).key === about
