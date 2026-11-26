@@ -1,5 +1,5 @@
 export * from "./lib/cn.ts";
-export { dockClearance } from "./lib/styles.ts";
+export { aboveDock, dockClearance } from "./lib/styles.ts";
 export { CalendarGlyph } from "./lib/icons.ts";
 export * from "./components/Alert.tsx";
 export * from "./components/AppHeader.tsx";

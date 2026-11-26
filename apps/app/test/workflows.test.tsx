@@ -124,6 +124,7 @@ describe("Workflows", () => {
     await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
 
     const alarm = document.querySelector('[role="dialog"][aria-label="Clock alarms"]');
+    expect(opener?.closest("[inert]")).not.toBeNull();
     expect(alarm?.querySelector("h2")?.textContent).toBe("Alarms");
     expect(alarm?.querySelector('input[aria-label="Alarm time"]')).toBeInstanceOf(HTMLInputElement);
     await vi.waitFor(() => expect(document.activeElement).toBe(button("Close Clock")));

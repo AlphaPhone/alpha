@@ -119,7 +119,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   const filter = { type: "openFilters" } as const;
   const add = { type: "openAdd" } as const;
   const screen = (
-    <Screen title={title} leading={<AppBack alpha={alpha} />} actions={<>
+    <Screen title={title} inert={clock.state?.open === true} leading={<AppBack alpha={alpha} />} actions={<>
       {place?.tag === "ListingRows" && <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
       {selected?.kind === "Prompt" && state && <AutomationPower runtime={runtime} row={selected} owner={state.owner} />}
       {selected?.kind === "Routine" && state && <WorkflowPower runtime={runtime} row={selected} owner={state.owner} />}

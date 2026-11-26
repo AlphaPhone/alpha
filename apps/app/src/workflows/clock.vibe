@@ -139,4 +139,8 @@ const gone = applying(Shell.Machine, (state) => Shell.showing(state, "Workflows"
   try ignore((try Model.Machine).send({ type: "leave" }))
 })
 
-export const clock = together(reacting(Model, { carry }), label, hidden, gone)
+const openedAsk = applying(Shell.Machine, (state) => Shell.showing(state, "Workflows") && state.assistant !== "Bar", effect (opened: boolean) => {
+  if (opened) try ignore((try Model.Machine).send({ type: "closeClock" }))
+})
+
+export const clock = together(reacting(Model, { carry }), label, hidden, gone, openedAsk)
