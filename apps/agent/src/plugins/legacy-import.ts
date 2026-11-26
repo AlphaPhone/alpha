@@ -100,6 +100,11 @@ interface ImportRecord {
   readonly at: number;
 }
 
+interface ReadRecord {
+  readonly attempts: number;
+  readonly settled: boolean;
+}
+
 const skipOf: Record<Exclude<Bringing, "BringIn">, SkipReason> = {
   NotTheOwner: "not_the_owner",
   NoEarlierStore: "no_earlier_store",
@@ -405,11 +410,12 @@ async function sweepEarlierScratch(stateDirectory: string): Promise<void> {
   }
 }
 
-async function readImportRecord(stateDirectory: string): Promise<ImportRecord> {
+async function readImportRecord(stateDirectory: string): Promise<ReadRecord> {
   const text = await fs.readFile(path.join(stateDirectory, LEGACY_IMPORT_RECORD_FILE), "utf8").catch(() => undefined);
   const parsed = asPlainObject(text === undefined ? {} : parseJsonColumn(text));
   const attempts = typeof parsed.attempts === "number" && Number.isSafeInteger(parsed.attempts) && parsed.attempts >= 0 ? parsed.attempts : 0;
-  return { attempts, outcome: { status: "started" }, at: 0 };
+  const outcome = asPlainObject(parsed.outcome);
+  return { attempts, settled: outcome.status === "imported" || (outcome.status === "skipped" && outcome.reason === "gave_up") };
 }
 
 async function writeImportRecord(stateDirectory: string, record: ImportRecord): Promise<void> {
@@ -936,8 +942,8 @@ export async function importLegacyStore(options: LegacyImportOptions): Promise<L
   const result: LegacyImportResult = sameAccount(options.owner, options.account)
     ? await decideAndBringIn(options, nowMs)
     : { status: "skipped", reason: skipOf.NotTheOwner };
-  if (!isSettledByAnEarlierLaunch(result)) {
-    const record = await readImportRecord(options.stateDirectory);
+  const record = await readImportRecord(options.stateDirectory);
+  if (result.status === "imported" || !(record.settled || isSettledByAnEarlierLaunch(result))) {
     await writeImportRecord(options.stateDirectory, { attempts: record.attempts, outcome: result, at: nowMs }).catch(() => undefined);
   }
   if (result.status !== "imported") {

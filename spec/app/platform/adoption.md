@@ -131,8 +131,8 @@ directory before it starts, so a launch stopped part way counts too; after
 three, it is not tried again. What a launch found is written there and
 logged: brought in with the counts, not the owner, no earlier store (which
 is all an account the phone passes nothing to can find), the store in use,
-or failed with the kind of error only, never its text. A launch that finds
-it already brought in, or given up, leaves the record as it was.
+or failed with the kind of error only, never its text. Once a record says
+brought in or given up, no later launch writes over it.
 
 ```quint
 type Bringing = BringIn | NotTheOwner | NoEarlierStore | AlreadyBroughtIn | StoreInUse | GaveUp
@@ -200,8 +200,9 @@ none is run. The owner may set one up again. The roles and ownership the
 earlier worlds granted are left out. The earlier agent's cache, which held
 its own running state (approval queues, confirmations, its embedding model's
 identity, its pseudonym map), is not brought in, and neither are its
-embeddings, which another model may have made: the agent embeds memories
-again if it embeds them at all.
+embeddings, which another model may have made, so the memories brought in
+are kept as history without embeddings and do not come up in a search by
+meaning.
 
 ```quint
 type BroughtTask = Paused | Missed

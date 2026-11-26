@@ -696,6 +696,10 @@ describe("Earlier v121 PGlite one-shot importer", () => {
       expect(openedCount).toBe(1);
       expect((await opened.adapter.getAllWorlds()).map((world) => world.id)).toEqual([WORLD_ID]);
       expect(readRecord(stateDir)).toMatchObject({ attempts: 1, outcome: { status: "imported" } });
+      await launchAs({ account: account("owner-5", "org-5"), environment: {} });
+      await launchAs({ account: account("owner-5", "org-5"), environment: { ALPHA_LEGACY_STORE_DIR: sharedFixtureDir, ALPHA_LEGACY_OWNER: owner } });
+      expect(openedCount).toBe(1);
+      expect(readRecord(stateDir)).toMatchObject({ attempts: 1, outcome: { status: "imported", counts: { worlds: 1 } } });
       expect(snapshotDirectory(sharedFixtureDir)).toEqual(sharedFixtureBefore);
     } finally {
       fs.rmSync(vaultDir, { recursive: true, force: true });
