@@ -62,8 +62,9 @@ effect function covering(voice: boolean) {
   const recorder = try (try Recorder.Machine).get()
   const trash = try (try Trash.Machine).get()
   const editor = try (try Editor.Machine).get()
+  const microphone = try (try Mic.Machine).get()
   return Previous.canBack(try (try Previous.Machine).get()) || Recorder.unfinished(recorder) || Recorder.canBack(recorder)
-    || (try (try Mic.Machine).get()).asking || (try (try Transfer.Machine).get()).job !== "NoJob"
+    || microphone.asking || microphone.browserDenied || (try (try Transfer.Machine).get()).job !== "NoJob"
     || Link.canBack(try (try Link.Machine).get()) || (try (try Voice.Machine).get()).showing
     || trash.showing || trash.question !== "NoQuestion" || Trash.canBack(trash)
     || editor.deleting || editor.dropping || (voice && editor.showing)

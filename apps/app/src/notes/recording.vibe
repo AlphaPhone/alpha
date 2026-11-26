@@ -92,20 +92,29 @@ effect function start(folder: number): boolean!!Scope {
 
 /** The owner's Record button, whether it can start or needs to ask Android first. */
 export const record = effect {
-  const list = try (try Notes).get()
+  const notes = try Notes
+  const before = try notes.get()
   const device = try NoteDevice
   const mic = try Mic.Machine
   const grant = try device.permission()
+  const list = try notes.get()
+  if (list.owner !== before.owner || list.filter !== before.filter || (try mic.get()).owner !== list.owner
+    || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Notes")) return
   try ignore(mic.send({ type: "reported", grant }, phone))
   if (grant === "Granted") {
     try start(list.filter)
     return
   }
   const state = try mic.get()
-  if (Mic.canOpenSettings(state, "Owner")) {
+  const available = readyForNew(list)
+  if (device.onWeb && grant === "Denied") {
+    if (!Rec.unfinished(try (try Rec.Machine).get())) {
+      try ignore(mic.send({ type: "showBrowserDenial", available, covered: try covered() }, "Owner"))
+    }
+  } else if (!device.onWeb && Mic.canOpenSettings(state, "Owner")) {
     try ignore(mic.send({ type: "openSettings" }, "Owner"))
   } else {
-    try ignore(mic.send({ type: "ask", available: readyForNew(list), folder: list.filter, covered: try covered() }, "Owner"))
+    try ignore(mic.send({ type: "ask", available, folder: list.filter, covered: try covered(), browser: device.onWeb }, "Owner"))
   }
 }
 
@@ -258,10 +267,11 @@ function carry(fx: Rec.Effect): Job<Rec.Event, Scope | KeyValueStore.KeyValueSto
 function microphone(fx: Mic.Effect): Job<Mic.Event, Scope, [Actor]> {
   return match (fx) {
     when { tag: "AsksMicrophone" }: answer("microphone", effect {
-      const grant = try (try NoteDevice).request()
+      const device = try NoteDevice
+      const grant = try device.request()
       const ready = grant === "Granted" && (try room()).front && !(try covered())
-      return { type: "answered", grant, ready } satisfies Mic.Event
-    }, { type: "answered", grant: "Unasked", ready: false }, phone);
+      return { type: "answered", grant, ready, browser: device.onWeb } satisfies Mic.Event
+    }, { type: "answered", grant: "Unasked", ready: false, browser: false }, phone);
     when { tag: "Records" }: run("record", start(fx.folder), phone);
     when { tag: "OpensSettings" }: run("settings", effect { try (try NoteDevice).settings() }, phone);
   }
@@ -339,13 +349,31 @@ const updates = started(effect {
 const calls = following(Calls, (state) => state.calls.length > 0, Rec.Machine,
   (active): Rec.Event => ({ type: active ? "callStarted" : "callEnded" }), phone)
 
+function storedMicrophone(key: string, start?: Mic.Microphone) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const readable = {
+      ...store,
+      effect get(name: string) {
+        const raw = try store.get(name)
+        if (name !== key) return raw
+        const saved = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(raw))
+        if (typeof saved !== "object" || saved === null || Array.isArray(saved) || "browserDenied" in saved) return raw
+        const previous = Mic.decodeState({ ...saved, browserDenied: false }) catch () => undefined
+        return previous === undefined ? raw : JSON.stringify(previous)
+      },
+    }
+    return Layer.provide(Mic.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, readable))
+  })
+}
+
 export const recording = Layer.provideMerge(together(
   reacting(Rec, { keep: 1, open: effect {
     const device = try NoteDevice
     const tape = device.status() catch () => undefined
     return [{ type: "restart", intact: tape !== undefined, found: tape?.segments?.length ?? 0 }, phone] as const
   }, carry }),
-  reacting(Mic, { keep: 1, open: [{ type: "restart" }, phone], carry: microphone }),
+  reacting({ ...Mic, stored: storedMicrophone }, { keep: 1, open: [{ type: "restart" }, phone], carry: microphone }),
   updates,
   calls,
 ), Layer.merge(noteDevice, display))
