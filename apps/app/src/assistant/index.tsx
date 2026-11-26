@@ -58,7 +58,6 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
   const preview = dictating && recorder.stage === "Review" && noCall && speaker !== undefined && !speaker.latched && runtime.runSync(bridge.canRead())
     ? {
       playing: speaker.text === "Transcript" && speaker.item === recorder.ticket && speaker.stage !== "Silent",
-      failed: speaker.text === "Transcript" && speaker.item === recorder.ticket && speaker.outcome === "Failed",
       toggle: (ticket: number) => void runtime.runPromise(readTranscript(ticket)),
     } : undefined;
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());

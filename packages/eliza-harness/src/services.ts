@@ -39,6 +39,27 @@ export interface RealModel {
 }
 
 /**
+ * Real speech for the local cloud's relay, in place of none: the key of Cartesia, which eliza's hosted cloud speaks
+ * through, kept in this process and handed only to the cloud command's environment, never to a file or the page.
+ */
+export interface RealSpeech {
+  readonly key: string;
+}
+
+/**
+ * The hosted cloud's speech settings (apps/cloud/profile/candidate.example.json) with the voice and model eliza's own
+ * Cartesia client speaks in (`CartesiaSpeech.VOICE`), so Talk in the browser is heard and spoken as on the phone.
+ */
+const speechSettings = {
+  provider: "cartesia",
+  baseUrl: "https://api.cartesia.ai",
+  realtimeUrl: "wss://api.cartesia.ai",
+  apiKeyEnv: "CARTESIA_API_KEY",
+  tts: { defaultVoiceId: "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4", defaultModelId: "sonic-3.5", voiceIds: ["db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"], modelIds: ["sonic-3.5"], microsPerCharacter: 30 },
+  stt: { languageCodes: ["en", "en-US"], microsPerSecond: 100 },
+} as const;
+
+/**
  * The local eliza cloud: eliza's own cloud command (`elizaos-cloud serve`) over a database of this run, with its
  * staging mailbox, an operator who funds each owner, and, where a real deployment has a model provider and a payment
  * provider, a scripted model or a real one, and a read-only catalog of the two plans.
@@ -369,8 +390,8 @@ async function startFront(state: string, upstream: URL) {
 }
 
 /** eliza's cloud command with `args`, from the pinned checkout's build: what it printed, and when it ended. */
-function cloudCommand(secrets: string, args: readonly string[]) {
-  const child = spawn(node, ["--no-warnings", `--env-file=${secrets}`, "dist/src/main.js", ...args], { cwd: prepared().cloud, env: { PATH: process.env.PATH, TZ: "UTC" }, stdio: ["ignore", "pipe", "pipe"] });
+function cloudCommand(secrets: string, args: readonly string[], keys: Readonly<Record<string, string>> = {}) {
+  const child = spawn(node, ["--no-warnings", `--env-file=${secrets}`, "dist/src/main.js", ...args], { cwd: prepared().cloud, env: { PATH: process.env.PATH, TZ: "UTC", ...keys }, stdio: ["ignore", "pipe", "pipe"] });
   children.add(child);
   let output = "";
   for (const stream of [child.stdout, child.stderr]) stream.setEncoding("utf8").on("data", (text: string) => { output += text; });
@@ -378,8 +399,8 @@ function cloudCommand(secrets: string, args: readonly string[]) {
   return { child, exited, output: () => output };
 }
 
-async function served(secrets: string, args: readonly string[], origin: string) {
-  const running = cloudCommand(secrets, ["serve", ...args]);
+async function served(secrets: string, args: readonly string[], origin: string, keys: Readonly<Record<string, string>> = {}) {
+  const running = cloudCommand(secrets, ["serve", ...args], keys);
   let over = false;
   void running.exited.then(() => { over = true; });
   await answering(`${origin}/api/public/service`, () => (over ? `the cloud stopped before it served: ${running.output()}` : undefined));
@@ -416,7 +437,7 @@ async function signIn(local: string, email: string, signInReturn: string): Promi
  * command needs the database to itself, so every owner of a run is made before the cloud serves that run: the cloud
  * serves once to sign them in, stops, is funded, and serves again at the same address.
  */
-export async function startCloud(state: string, emails: readonly string[], credits: number, real?: RealModel): Promise<Cloud> {
+export async function startCloud(state: string, emails: readonly string[], credits: number, real?: RealModel, speech?: RealSpeech): Promise<Cloud> {
   const home = owned(path.join(state, "cloud"));
   const fixture = (name: string) => fs.readFileSync(path.join(prepared().cloud, "test/fixtures", name), "utf8");
   const file = (name: string, text: string) => { fs.writeFileSync(path.join(home, name), text, { mode: 0o600 }); return path.join(home, name); };
@@ -427,7 +448,8 @@ export async function startCloud(state: string, emails: readonly string[], credi
   const { web } = profile.environments.staging;
   profile.environments.staging = {
     ...profile.environments.staging,
-    capabilities: ["inference", "billing"],
+    capabilities: speech === undefined ? ["inference", "billing"] : ["inference", "billing", "speech"],
+    ...(speech === undefined ? {} : { speech: speechSettings }),
     billing: {
       apiUrl: `${provider.origin}/stripe`, secretKeyEnv: "STRIPE_SECRET_KEY", webhookSecretEnv: "STRIPE_WEBHOOK_SECRET", publishableKey: "pk_test_local",
       plans: Object.fromEntries(Object.entries(plans).map(([plan, { priceId, productId }]) => [plan, { priceId, productId }])),
@@ -442,18 +464,19 @@ export async function startCloud(state: string, emails: readonly string[], credi
   const local = `http://127.0.0.1:${port}`;
   const at = [...deployment, "--port", String(port), "--host", "127.0.0.1"];
   const owners = new Map<string, DeviceKey>();
+  const keys: Readonly<Record<string, string>> = speech === undefined ? {} : { [speechSettings.apiKeyEnv]: speech.key };
   try {
-    const first = await served(secrets, [...at, "--seed", file("seed.json", JSON.stringify(seed))], local);
+    const first = await served(secrets, [...at, "--seed", file("seed.json", JSON.stringify(seed))], local, keys);
     try {
       for (const email of emails) owners.set(email, await signIn(local, email, signInReturn));
     } finally {
       await ended(first);
     }
     for (const [email, key] of owners) {
-      const funded = cloudCommand(secrets, ["credits", "add", "--organization", key.organizationId, "--amount", String(credits), "--request", `grant-${email}`, ...deployment]);
+      const funded = cloudCommand(secrets, ["credits", "add", "--organization", key.organizationId, "--amount", String(credits), "--request", `grant-${email}`, ...deployment], keys);
       if (await funded.exited !== 0) throw new Error(`the operator could not fund ${email}: ${funded.output()}`);
     }
-    const running = await served(secrets, at, local);
+    const running = await served(secrets, at, local, keys);
     const front = await startFront(home, new URL(local));
     return { api: front.api, caFile: front.caFile, local, model, provider: provider.origin, owners, stop: async () => { await front.stop(); await ended(running); await provider.stop(); } };
   } catch (cause) {
@@ -513,13 +536,13 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
  * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
  * directory to keep the agent's in instead.
  */
-export async function startEliza(keep?: string, real?: RealModel) {
+export async function startEliza(keep?: string, real?: RealModel, speech?: RealSpeech) {
   const { character } = await builtPack();
   const state = scratch();
-  const cloud = await startCloud(state, [owner.email], owner.credits, real);
+  const cloud = await startCloud(state, [owner.email], owner.credits, real, speech);
   const key = cloud.owners.get(owner.email)!;
-  const speech = process.env.ALPHA_LOCAL_SPEECH_SOCKET;
-  const browserNotesSpeech = speech === undefined || !path.isAbsolute(speech) ? undefined : speech;
+  const socket = process.env.ALPHA_LOCAL_SPEECH_SOCKET;
+  const browserNotesSpeech = socket === undefined || !path.isAbsolute(socket) ? undefined : socket;
   const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, browserNotesSpeech);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
 }

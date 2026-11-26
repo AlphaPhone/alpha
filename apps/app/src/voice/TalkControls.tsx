@@ -2,7 +2,7 @@
 import { Button, ConfirmDialog, cn } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { ReactNode } from "react";
-import { Keyboard, Mic, MicOff, Square, Volume2, VolumeX } from "lucide-react";
+import { Keyboard, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { Machine } from "../../gen/app__voice.effect.vibe";
@@ -20,16 +20,16 @@ export interface TalkControlsProps {
   onKeyboard?: VoiceKeyboard;
 }
 
-const compactStatus: Record<Phase, string> = {
+const spoken: Record<Phase | "Muted", string> = {
   Idle: "", Starting: "Connecting to voice", Listening: "Listening", Transcribing: "Transcribing", Thinking: "Thinking",
-  Speaking: "Speaking", Stopping: "Stopping voice", Failed: "",
+  Speaking: "Speaking", Stopping: "Stopping voice", Failed: "", Muted: "Microphone muted",
 };
 
-const expandedStatus: Partial<Record<Phase, string>> = {
-  Starting: "Connecting…", Listening: "Listening", Transcribing: "Transcribing…", Thinking: "Thinking…", Speaking: "Speaking",
-};
-
-/** The controls the Voice machine offers while Talk owns the composer. The sheet shows a brief phase label beside the controls. */
+/**
+ * The controls the Voice machine offers while Talk owns the composer, as v121 drew them (apps/app/src/prototype/
+ * template.html:4425-4431 in the sheet, :4526-4533 in the pill): the phase as motion, never as words on screen; its
+ * name is read to assistive technology only.
+ */
 export function TalkControls({ runtime, trailing, compact = false, onKeyboard }: TalkControlsProps) {
   const { state, can, send } = useMachine(runtime);
   const shell = useShell(runtime);
@@ -52,12 +52,9 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
   const spinner = <span aria-hidden="true" className="size-4.5 shrink-0 rounded-full border-2 border-border border-t-alpha motion-safe:animate-spin" style={{ animationDuration: "900ms" }} />;
   const activity = <VoiceWaveform phase={phase} compact={compact} />;
   const review = state.reviewPending && state.phase === "Listening";
-  const label = review ? "Review in chat" : compact ? undefined : connecting ? expandedStatus.Starting :
-    state.phase === "Stopping" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
   const status = (
-    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={cn(label === undefined ? "sr-only" : "flex min-w-0 items-center gap-2.25 text-sm leading-voice-status font-semibold text-foreground", compact && review && "pr-1 text-xs")}>
-      {!compact && connecting && spinner}
-      <span className={label === undefined ? undefined : "truncate"}>{label ?? (state.muted ? "Microphone muted" : compactStatus[state.phase])}</span>
+    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className="sr-only">
+      {review ? "Review in chat" : spoken[phase]}
     </p>
   );
   return (
@@ -67,25 +64,25 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
           compact ? "gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark"
             : "min-h-17 gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5 [&>button]:size-12")}>
         {compact && shell.can(open) && <Button variant="ghost" size="icon" aria-label="Open conversation" onClick={() => void shell.send(open)}>
-          {connecting || state.phase === "Stopping" ? spinner : activity}
+          {connecting ? spinner : activity}
         </Button>}
         {compact ? status : (
           <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
             {status}
-            {!connecting && activity}
+            {connecting ? spinner : activity}
           </div>
         )}
         {!compact && onKeyboard && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={(event) => onKeyboard(event.currentTarget, typeAfterStop)}><Keyboard /></Button>}
-        {(!compact || !speakerConfirmed) && can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
+        {can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
         {speakerConfirmed && <Button variant="ghost" size="icon" disabled={!can(setSpeaker)} aria-pressed={speakerMuted}
           aria-label={speakerMuted ? "Unmute speaker" : "Mute speaker"} onClick={() => void send(setSpeaker)}>
           {speakerMuted ? <VolumeX /> : <Volume2 />}
         </Button>}
-        {(compact || canMute) && <Button variant="ghost" size="icon" disabled={!canMute} aria-pressed={state.muted} aria-label={state.muted ? "Unmute microphone" : "Mute microphone"} onClick={() => void send(mute)}>
+        {canMute && <Button variant="ghost" size="icon" aria-pressed={state.muted} aria-label={state.muted ? "Unmute microphone" : "Mute microphone"} onClick={() => void send(mute)}>
           {state.muted ? <MicOff /> : <Mic />}
         </Button>}
         {(compact || can(stop)) && <Button size="icon" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!can(stop)} aria-label="Stop voice conversation" onClick={() => void send(stop)}>
-          {compact ? <Square className="size-2.5" fill="currentColor" /> : <VoiceStopIcon />}
+          <VoiceStopIcon />
         </Button>}
         {trailing}
       </section>
