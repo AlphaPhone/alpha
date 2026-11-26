@@ -58,6 +58,15 @@ export interface FilesScene {
   selectedByPicker: string | undefined;
   pickerRenameNeedsReselection: boolean;
   readonly selections: Map<string, DocumentSelection>;
+  /** A PDF page comes back as a drawn picture, as Android's renderer gives one, rather than an address no page can load. */
+  drawsPages: boolean;
+}
+
+/** A drawn PDF page: white paper with the file's name, lines of text and its page number, as an image the page can load. */
+function drawnPage(path: string, page: number): string {
+  const lines = [88, 92, 80, 95, 70, 90, 84, 60].map((width, at) => `<rect x='56' y='${160 + at * 28}' width='${width * 5}' height='10' rx='5' fill='#ddd'/>`).join("");
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='612' height='792'><rect width='612' height='792' fill='#fff'/><text x='56' y='110' font-family='Georgia,serif' font-size='30' fill='#1a1a1a'>${leaf(path)}</text>${lines}<text x='572' y='766' font-family='sans-serif' font-size='14' text-anchor='end' fill='#555'>${page}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -76,7 +85,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false, selections: new Map(),
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false, selections: new Map(), drawsPages: false,
   };
 }
 
@@ -332,7 +341,7 @@ export function selectedDocuments(scene: FilesScene): Faked {
       },
       pdfSelected({ selectionId, page }) {
         const found = held(selectionId);
-        return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
+        return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: scene.drawsPages ? drawnPage(found.path, page) : `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
       },
       readSelected({ selectionId }) {
         if (scene.refusing.includes("readSelected")) return Promise.resolve({ status: "failed", message: "" });

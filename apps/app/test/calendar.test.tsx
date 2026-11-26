@@ -267,6 +267,38 @@ describe("Calendar without a connected account", () => {
     expect(button("Open Calendar settings")).toBeUndefined();
   });
 
+  it("Keeps a draft's repeat on this phone's calendar when Google connects before it is resumed (spec/app/calendar/writing.md, \"The form offers with the agent's calendar only what it holds, and keeps the calendar chosen\"; spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    world.calendar.down = true;
+    const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.owner > 0 && !state.connected && state.phoneRows === 1);
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.shown && state.form === "NewEvent" && state.receipts.status === "Loaded");
+    await fill("Title", "Piano");
+    expect([Boolean(button("Your agent's calendar")), button("This phone's calendar")?.getAttribute("aria-pressed")]).toEqual([false, "true"]);
+    await press("Weekly");
+    await until(alpha, runtime, Editor, (state) => state.titled && state.kept);
+    await press("Back to calendar");
+    await until(alpha, runtime, Editor, (state) => !state.shown && state.banner === "Available");
+
+    world.calendar.down = false;
+    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" })));
+    await until(alpha, runtime, View, (state) => !state.front);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.connected);
+    await press("Resume event draft");
+    await until(alpha, runtime, Editor, (state) => state.shown && state.receipts.status === "Loaded");
+    const pressed = (name: string) => button(name)?.getAttribute("aria-pressed");
+    expect([pressed("This phone's calendar"), pressed("Your agent's calendar"), pressed("Weekly")]).toEqual(["true", "false", "true"]);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NoForm" && state.write.outcome === "Confirmed");
+    expect(world.calendar.phoneEvents.find(({ title }) => title === "Piano")).toMatchObject({ recurring: true });
+    expect(world.calendar.events.some(({ title }) => title === "Piano")).toBe(false);
+  });
+
   it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
     const { alpha, runtime } = await onDisconnected();
     await widen(alpha, runtime);
@@ -654,9 +686,32 @@ describe("on a phone", () => {
     await press("New event");
     await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
     await fill("Title", "Office closure");
-    await press("This phone's calendar");
     await press("All day");
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
+    const agentChosen = () => button("Your agent's calendar")?.getAttribute("aria-pressed") === "true";
+    const offered = () => ["Once", "Weekdays", "Video link", "None", "10 min"].map((name) => button(name)?.disabled);
+    expect([agentChosen(), offered()]).toEqual([true, [false, true, true, false, true]]);
     await press("Weekdays");
+    await press("Video link");
+    await press("10 min");
+    await until(alpha, runtime, Editor, (e) => e.titled && e.allDay && e.kept);
+    expect([agentChosen(), button("Once")?.getAttribute("aria-pressed"), button("Video link")?.getAttribute("aria-checked"), button("None")?.getAttribute("aria-pressed")])
+      .toEqual([true, "true", "false", "true"]);
+    expect([button("Save event")?.getAttribute("aria-disabled"), Boolean(button("Open in Android Calendar"))]).toEqual(["false", false]);
+    await press("This phone's calendar");
+    expect(offered()).toEqual([false, false, false, false, false]);
+    await press("Weekdays");
+    await press("Video link");
+    await press("10 min");
+    await until(alpha, runtime, Editor, (e) => e.extras);
+    await press("Your agent's calendar");
+    await until(alpha, runtime, Editor, (e) => !e.extras);
+    expect([agentChosen(), button("Once")?.getAttribute("aria-pressed"), button("Video link")?.getAttribute("aria-checked"), button("None")?.getAttribute("aria-pressed")])
+      .toEqual([true, "true", "false", "true"]);
+    expect(button("Save event")?.getAttribute("aria-disabled")).toBe("false");
+    await press("This phone's calendar");
+    await press("Weekdays");
+    expect(button("This phone's calendar")?.getAttribute("aria-pressed")).toBe("true");
     await press("Save event");
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
     await until(alpha, runtime, View, (state) => state.phoneRows === 3);

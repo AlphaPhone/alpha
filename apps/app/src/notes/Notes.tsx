@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, dockClearance, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
-import { useCallback, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
@@ -24,6 +24,8 @@ import type { Alpha } from "../runtime/area.tsx";
 import { fresh } from "../runtime/attempts.vibe";
 import { untimed } from "../runtime/reactor.vibe";
 import { AppBack } from "../shell/AppBack.tsx";
+import { Layers, Over, Under } from "../shell/Layers.tsx";
+import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 import { desktopPreview } from "../shell/canvas.vibe";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, numberOf, savedVoice, sourced } from "./content.vibe";
 import { NoteEditor } from "./editor.vibe";
@@ -468,20 +470,20 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const optionsRef = useRef<HTMLButtonElement>(null);
   const state = list.state;
   const writing = editor.state;
-  if (state === undefined || writing === undefined) return null;
+  if (state === undefined || writing === undefined) return <NotesOpening alpha={alpha} />;
   const { collection, draft } = data;
   const listEvent = (event: Notes.Event) => void list.send(event, "Owner");
   const can = (event: Notes.Event) => list.can(event, "Owner");
-  if (previous.state?.showing) return <Previous runtime={runtime} />;
-  if (bin.state?.showing) return <RecentlyDeleted runtime={runtime} collection={collection} />;
-  if (links.state?.showing) return <LinkedNote runtime={runtime} collection={collection} />;
-  if (voice.state?.showing) return <VoiceNote runtime={runtime} collection={collection} />;
-  if (writing.showing && draft !== undefined) return <>
-    <EditorScreen key={draft.creation} runtime={runtime} saved={draft} />
-    {bin.state?.question === "AskFull" && <RecentlyDeleted runtime={runtime} collection={collection} />}
-  </>;
-  if (recorder.state !== undefined && unfinished(recorder.state)) return <Recording runtime={runtime} />;
-  if (mic.state?.browserDenied && mic.state.owner === state.owner) {
+  const over: { readonly key: string; readonly page: ReactNode } | undefined = previous.state?.showing ? { key: "previous", page: <Previous runtime={runtime} /> }
+    : bin.state?.showing ? { key: "trash", page: <RecentlyDeleted runtime={runtime} collection={collection} /> }
+    : links.state?.showing ? { key: "link", page: <LinkedNote runtime={runtime} collection={collection} /> }
+    : voice.state?.showing ? { key: "voice", page: <VoiceNote runtime={runtime} collection={collection} /> }
+    : writing.showing && draft !== undefined ? { key: `note-${draft.creation}`, page: <>
+      <EditorScreen key={draft.creation} runtime={runtime} saved={draft} />
+      {bin.state?.question === "AskFull" && <RecentlyDeleted runtime={runtime} collection={collection} />}
+    </> } : undefined;
+  if (over === undefined && recorder.state !== undefined && unfinished(recorder.state)) return <Recording runtime={runtime} />;
+  if (over === undefined && mic.state?.browserDenied && mic.state.owner === state.owner) {
     return <MicrophoneUnavailable onRecord={() => void runtime.runPromise(record)}
       onDiscard={() => void mic.send({ type: "closeBrowserDenial" }, "Owner")} />;
   }
@@ -550,12 +552,13 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const hasOptionsMenu = canSelect || canOpenTrash || canShowPrevious || canAddFolder || canRenameFolder || canRemoveFolder;
   const pinned = shown.filter((item) => item.pinned);
   const rest = shown.filter((item) => !item.pinned);
-  return (
+  return <Layers>
+    <Under covered={over !== undefined}>
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
-      {selecting ? <AppHeader detail title={selected === 0 ? "Select notes" : `${selected} selected`}>
+      {selecting ? <AppHeader detail className={launcherInnerHeader} title={selected === 0 ? "Select notes" : `${selected} selected`}>
         <Button size="icon" variant="ghost" aria-label="Delete selected notes" disabled={!can(reviewSelection)} onClick={() => listEvent(reviewSelection)}><Trash2 /></Button>
         <Button variant="ghost" className="h-11 px-3 font-semibold" disabled={busy} onClick={closeSelection}>Done</Button>
-      </AppHeader> : <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
+      </AppHeader> : <AppHeader title="Notes" className={launcherFirstHeader} leading={<AppBack alpha={alpha} firstPage />}>
         {canStartRecord && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic className="size-5" /></Button>}
         {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, draftWaiting))}><Plus className="size-5" /></Button>}
         {hasOptionsMenu && <Menu>
@@ -612,18 +615,28 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
           <Button size="sm" aria-label="Import text note" className="h-12 px-3.5 text-sm font-normal" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><Download /> Import</Button>
         </div>
       )}
-      <ConfirmDialog open={state.selection === "Reviewing"} title={selected === 1 ? "Delete this note?" : `Delete ${selected} notes?`}
+      <ConfirmDialog open={over === undefined && state.selection === "Reviewing"} title={selected === 1 ? "Delete this note?" : `Delete ${selected} notes?`}
         destructive confirmLabel="Delete" onCancel={closeSelection} onConfirm={() => void runtime.runPromise(deleteSelection())}>
         The selected {selected === 1 ? "note will" : "notes will"} move to Recently deleted.
       </ConfirmDialog>
     </section>
-  );
+    </Under>
+    {over !== undefined && <Over key={over.key}>{over.page}</Over>}
+  </Layers>;
+}
+
+/** Notes before its machines first answer: its header over an empty list, so the app rises with its frame drawn. */
+function NotesOpening({ alpha }: { readonly alpha: Alpha }) {
+  return <section aria-label="Notes" data-alpha-subview="notes-list" aria-busy className="flex min-h-0 flex-1 flex-col">
+    <AppHeader title="Notes" className={launcherFirstHeader} leading={<AppBack alpha={alpha} firstPage />} />
+  </section>;
 }
 
 /** @model spec/app/notes/index.md */
 export function NotesScreen({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Runtime }) {
   const notes = useNotes(runtime);
   if (notes.cause) return <Alert variant="destructive" className="m-4">Alpha couldn't open Notes</Alert>;
-  if (notes.state === undefined) return null;
-  return <NotesList alpha={alpha} runtime={runtime} />;
+  return <div className={cn("flex min-h-0 flex-1 flex-col", launcherTop)}>
+    {notes.state === undefined ? <NotesOpening alpha={alpha} /> : <NotesList alpha={alpha} runtime={runtime} />}
+  </div>;
 }

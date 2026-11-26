@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { App } from "../src/App.tsx";
+import type { AssistantProps } from "../src/assistant/Assistant.tsx";
 import assistant from "../src/assistant/index.tsx";
 import { boot } from "../src/boot.tsx";
 import { say } from "../src/notices/toasts.vibe";
@@ -19,10 +20,10 @@ export async function closeAllDocks() {
   resetDocument();
 }
 
-export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
+export async function mountDock({ view = "Browser", withToast = false, flush, speech }: { view?: "Browser" | "Calendar" | "Home" | "Notes" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void>; speech?: AssistantProps["speech"] } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
-  const mounts = only("home", "assistant", "notice", "view:Browser", "view:Calendar", "view:Settings");
-  const world = scene();
+  const mounts = only("home", "assistant", "notice", "view:Browser", "view:Calendar", "view:Notes", "view:Settings");
+  const world = { ...scene(), ...(speech?.onTalk ? { phone: true } : {}) };
   const alpha = boot(fakeWorld(world), mounts);
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);

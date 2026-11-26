@@ -20,7 +20,7 @@ public final class AlphaApplication extends Application {
   super.onCreate();
   if (android.os.Process.isIsolated() || AlphaResetPlugin.RESET.isRecoveryProcess(this, getProcessName())) return;
   boolean main = getPackageName().equals(getProcessName());
-  if (main) AlphaLegacyAgentArchive.moveAside(this);
+  if (main) AlphaLegacyAgentArchive.putBack(this);
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(credentials);
   if (main) AgentService.useGoogleBroker(DeviceCustody.googleBroker(this, BuildConfig.CLOUD_API_ORIGIN));

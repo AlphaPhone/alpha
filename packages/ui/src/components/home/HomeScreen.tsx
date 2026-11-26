@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode, type Ref } from "react";
+import { isValidElement, type ReactNode, type Ref, useCallback, useRef } from "react";
 import { cn } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
 import { AddToHomeSheet } from "./AddToHomeSheet.tsx";
@@ -9,8 +9,10 @@ import { HomeTileGrid, type HomeTileItem, type HomeTileMove } from "./HomeTileGr
 import type { LauncherHold } from "./launcherPress.ts";
 
 export type HomeScreenProps = {
-  /** The cards drawn above the tiles, in order, each with its key; the row is not drawn without one, and starts again at its first card when the cards drawn change. */
+  /** The cards drawn above the tiles, in order, each with its key; the row is not drawn without one, keeps its place while cards come and go, and starts again at its first card when that card changes. */
   cards?: readonly ReactNode[];
+  /** Cards may still arrive: while none is drawn, the row's height is kept free above the tiles, so a card drawn moments later does not push them down. */
+  cardsAwaited?: boolean;
   /** Cards an app draws itself, such as Clock's running timer, in a row of their own under the day's cards; the row is hidden while none draws. */
   appCards?: ReactNode;
   /** The tiles shown, in Home's order; left out until what was saved has been read. */
@@ -29,6 +31,8 @@ export type HomeScreenProps = {
   launcher?: boolean;
   /** Opens a tile's app; left out where nothing may be opened. */
   onOpenTile?: (id: string) => void;
+  /** A press has begun on a tile, before it opens or holds: time to fetch what opening it needs. */
+  onPressTile?: (id: string) => void;
   /** Opens the phone's installed Apps drawer. */
   onOpenDrawer?: () => void;
   /** Starts editing from a long press on a tile; left out off the phone, before the tiles are read and under a layer. */
@@ -72,9 +76,18 @@ const noop = () => undefined;
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], appCards, tiles, editing = false, covered = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], cardsAwaited = false, appCards, tiles, editing = false, covered = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onPressTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, addInFrame, hidden = [], onAddToHome, onCloseAdding = noop, className,
 }: HomeScreenProps) {
+  const first = cards.find(isValidElement)?.key ?? null;
+  const lastFirstRef = useRef<string | null>(first);
+  const rowRef = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    if (lastFirstRef.current !== first) {
+      lastFirstRef.current = first;
+      node.scrollLeft = 0;
+    }
+  }, [first]);
   return (
     <div inert={covered || undefined} className={cn("@container flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
       <div ref={scrollRef} className={cn(dockClearance, homeSpacing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
@@ -82,10 +95,18 @@ export function HomeScreen({
           <h1 className="sr-only">Home</h1>
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
-        {cards.length > 0 ? <HomeCardRow inert={cardsInert || undefined} key={cards.map((card) => (isValidElement(card) ? card.key : "")).join(" ")}>{cards}</HomeCardRow> : null}
-        {appCards ? <HomeCardRow inert={appCardsInert || undefined} aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
+        {cards.length > 0 ? (
+          <HomeCardRow ref={rowRef} inert={cardsInert || undefined}>{cards}</HomeCardRow>
+        ) : cardsAwaited ? (
+          <div aria-hidden data-home-cards-awaited="" className="h-49 shrink-0" />
+        ) : null}
+        {appCards ? <HomeCardRow inert={appCardsInert || undefined} aria-label={undefined} className={cn((cards.length > 0 || cardsAwaited) && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
+          <div className="contents" onPointerDownCapture={onPressTile ? (event) => {
+            const id = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-home-tile]")?.dataset.homeTile : undefined;
+            if (id) onPressTile(id);
+          } : undefined}>
           <HomeTileGrid
             key={tileGestureScope}
             tiles={tiles}
@@ -98,6 +119,7 @@ export function HomeScreen({
             onRemove={onRemoveTile}
             onMove={onMoveTile}
           />
+          </div>
         ) : (
           <div role="status" aria-label="Loading apps" aria-busy className="min-h-24" />
         )}

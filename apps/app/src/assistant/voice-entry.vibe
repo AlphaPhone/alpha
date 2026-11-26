@@ -30,7 +30,7 @@ export effect function beginTalk() {
   if (call === "OrdinaryCall" || call === "MaybeEmergencyCall" || speaker.stage !== "Silent" || speaker.retiring
     || !(try (try Device).showing()) || !(try (try VoiceBridge).available()) || !Voice.canStartTalking(before, untimed)) return
   const page = try shell.get()
-  if ((page.assistant === "Typing" || (page.assistant === "Bar" && Voice.onNetwork(before.route, untimed))) && Shell.canRaise(page, "Sheet")) {
+  if (Voice.talkRaisesTheSheet(page.assistant === "Typing", page.assistant === "Bar", Voice.onNetwork(before.route, untimed)) && Shell.canRaise(page, "Sheet")) {
     try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha for Talk")
   }
   try keyboardVoice(true)

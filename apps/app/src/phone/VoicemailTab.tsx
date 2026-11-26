@@ -2,7 +2,7 @@
 import type { ListedVoicemail } from "@elizaos/os-bridges";
 import { Banner, Button, Slider, Spinner, cn, focusRing } from "@repo/ui";
 import { Effect, Exit } from "effect";
-import { Phone as Handset, Trash2 } from "lucide-react";
+import { Phone as Handset, Play, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
@@ -11,7 +11,7 @@ import type { PhoneProps } from "./Phone.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 import { Player, Voicemails, askVoicemailDeletion } from "./voicemail.vibe";
 import { callerTitle, clockLength, shortWhen } from "./words.ts";
-import { Bubble, Close, PauseGlyph, PlayGlyph, RetryGlyph } from "./icons.ts";
+import { Bubble, Close, PauseGlyph, RetryGlyph } from "./icons.ts";
 
 type Props = Pick<PhoneProps, "runtime"> & { now: number };
 
@@ -68,7 +68,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
           <Button size="icon" className={cn("bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80", state.confirming && "disabled:opacity-100")} data-alpha-phone-play=""
             aria-label={state.playback === "Playing" ? "Pause" : "Play"} disabled={!can(pause) && !can(play)}
             onClick={() => void send(can(pause) ? pause : play)}>
-            {state.playback === "Playing" ? <PauseGlyph className="size-4.5" /> : <PlayGlyph className="size-4.5" />}
+            {state.playback === "Playing" ? <PauseGlyph className="size-4.5" /> : <Play className="size-4.5" />}
           </Button>
         )}
         <Position runtime={runtime} length={row.durationSeconds} enabled={state.audio.status === "Loaded" && !state.confirming && !busy} />

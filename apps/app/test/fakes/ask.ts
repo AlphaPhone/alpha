@@ -46,6 +46,8 @@ export interface AskScene {
   readonly drafts: Map<string, string>;
   beforeDraftExchange?: () => Promise<void>;
   refusedDraftExchanges: number;
+  /** When true, /api/status omits serverInstanceId so the peer does not declare optional turn-context fields. */
+  noOptionalFields?: boolean;
   /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
   canRespond: boolean;
   warmUps: Record<string, string>[];
@@ -275,7 +277,7 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/status") return;
       scene.statusReads += 1;
-      return Response.json({ serverInstanceId: "alpha-fake", canRespond: scene.canRespond });
+      return Response.json({ ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }), canRespond: scene.canRespond });
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;

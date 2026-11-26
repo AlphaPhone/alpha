@@ -337,7 +337,7 @@ export function profileLive<R>(publish: (value: Profile) => void, publishCatalog
         cached.last = undefined
         return Stream.succeed<Profile>(reading)
       }
-      return Stream.switchMap(Stream.concat(Stream.succeed(false), Stream.map(refreshed, () => true)), (forced) => {
+      return Stream.switchMap(Stream.merge(Stream.succeed(false), Stream.map(refreshed, () => true)), (forced) => {
         if (!forced && place === "Settings" && cached.last !== undefined && cached.last.tag !== "Reading") {
           return Stream.succeed(cached.last)
         }

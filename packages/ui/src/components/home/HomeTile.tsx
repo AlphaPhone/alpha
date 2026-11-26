@@ -43,7 +43,7 @@ export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, 
             onClick={onRemove}
             className={cn(
               focusRing,
-              "absolute -top-4 left-[calc(50%-3rem)] flex size-11 origin-[3rem_3rem] animate-wiggle items-center justify-center rounded-full focus-visible:-outline-offset-focus disabled:opacity-50 motion-reduce:animate-none group-data-[home-dragging]/home-cell:animate-none",
+              "absolute -top-4 left-[calc(50%-3rem)] flex size-11 origin-[3rem_3rem] animate-wiggle items-center justify-center rounded-full focus-visible:-outline-offset-focus motion-reduce:animate-none group-data-[home-dragging]/home-cell:animate-none",
             )}
           >
             <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-foreground text-background">

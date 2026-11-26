@@ -1,9 +1,14 @@
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { AssistantCard } from "./AssistantCard.tsx";
 import type { AssistantTranscriptProps } from "./AssistantTranscript.tsx";
 
 const onRetry = fn();
+const long = Array.from({ length: 12 }, (_, at) => ({ id: `long-${at}`, author: at % 2 === 0 ? "owner" as const : "alpha" as const, text: `Message ${at + 1}: what was said, long enough to wrap onto a second line in a narrow sheet.` }));
+/** The scroll of the log, `below` how far its end is out of view. */
+const scrollOf = (log: HTMLElement) => ({ top: log.scrollTop, below: log.scrollHeight - log.scrollTop - log.clientHeight });
+/** More text arriving at the end of the log, as a reply growing does. */
+const arrive = (log: HTMLElement) => log.firstElementChild?.append(Object.assign(document.createElement("div"), { style: "height: 300px; flex-shrink: 0" }));
 const onReturnToOriginal = fn();
 
 export const meta: ComponentMeta<AssistantTranscriptProps> = {
@@ -30,8 +35,29 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
     "Around a message": { onEarlier: fn(), onLater: fn() },
     Failed: { messages: [], status: "failed", onRetry },
     Empty: { messages: [] },
+    "Following the end": { messages: long },
   },
   play: {
+    // spec/app/assistant/chats.md, "The conversation keeps its newest message in view until the owner scrolls up from it"
+    "Following the end": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const log = within(canvasElement).getByRole("log");
+      log.style.height = "160px";
+      if (log.clientHeight === 0) return;
+      await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
+      arrive(log);
+      log.dispatchEvent(new Event("scroll"));
+      await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
+      log.scrollTop -= 200;
+      await waitFor(() => expect(scrollOf(log).below).toBeGreaterThan(150));
+      const reading = scrollOf(log).top;
+      arrive(log);
+      await waitFor(() => expect(scrollOf(log).below).toBeGreaterThan(400));
+      await expect(scrollOf(log).top).toBe(reading);
+      log.scrollTop = log.scrollHeight;
+      await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
+      arrive(log);
+      await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
+    },
     Failed: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRetry.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Try again" }));

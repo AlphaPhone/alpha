@@ -17,10 +17,10 @@ export type CalendarFormPageProps = ComponentProps<"div"> & {
   saving?: boolean;
 };
 
-/** A new or changed event, over the days: Back and Save, then its fields. */
+/** A new or changed event, rising over the days as Alpha's earlier build drew it (v119 45f6bed30 template.html:1362 `class="enter"`): Back and Save, then its fields. */
 export function CalendarFormPage({ onBack, onSave, actions, saving = false, className, children, ...props }: CalendarFormPageProps) {
   return (
-    <div data-alpha-subview="calendar-form" className={cn("absolute inset-0 z-50 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
+    <div data-alpha-subview="calendar-form" className={cn("absolute inset-0 z-50 flex flex-col bg-background motion-safe:animate-rise", className)} {...props}>
       <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 pr-4 pl-2">
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />

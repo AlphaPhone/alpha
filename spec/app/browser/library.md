@@ -200,6 +200,20 @@ pure def visited(s: Library, count: int, remaining: int): Library =
   { ...s, history: count, kept: remaining }
 ```
 
+### The Library lists every bookmark and every page of history, one plain list each, with no search and no day headings
+
+As in Sunday's v119, the Library shows Bookmarks or History as one list
+of pages, each a row with its initial, title and address: there is no field
+to search them and history is not grouped under day headings. Every page
+the library holds is listed; the time range only chooses what Clear
+history clears.
+
+```quint
+pure def rowsListed(s: Library, bookmarks: bool): int = if (bookmarks) s.marks else s.history
+
+pure def lawEveryKeptPageIsListed(s: Library): bool = rowsListed(s, true) == s.marks and rowsListed(s, false) == s.history
+```
+
 ### Removing a history row forgets only the visit the owner selected
 
 A later visit to the same address is a new visit. It stays in the list even

@@ -111,8 +111,8 @@ describe("Browser hit-test", () => {
 
     const grabber = document.querySelector<HTMLElement>("button[aria-label='Resize chat'], [aria-label='Resize chat']");
     expect(grabber).not.toBeNull();
+    await expect.poll(() => hitAtCenter(grabber!).includes(grabber!)).toBe(true);
     const start = centerOf(grabber!);
-    expect(hitAtCenter(grabber!)).toContain(grabber!);
 
     grabber!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, button: 0, clientX: start.x, clientY: start.y, pointerId: 7, pointerType: "touch" }));
     for (const nextY of [Math.max(20, start.y - 80), Math.max(20, start.y - 200), 100, 20]) {

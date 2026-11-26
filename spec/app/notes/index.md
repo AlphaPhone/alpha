@@ -16,6 +16,12 @@ agent's store, and every write in Notes names the revision it builds on, so
 the store refuses one that another writer overtook. The list then reads the
 store again, so what it shows is always what the store holds.
 
+A note, a voice note, a link note, the notes from before and Recently deleted
+each rise over the list as Alpha's earlier build drew them, and the list stays
+under them as it was, scrolled where the owner left it; Back takes the page
+away at once. Before the list has first been read, Notes shows its header
+over an empty list, never a blank screen.
+
 ## Story: See my notes
 
 > As the owner, I want my notes listed with the pinned ones first, narrowed

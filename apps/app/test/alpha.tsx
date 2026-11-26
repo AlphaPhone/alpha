@@ -129,8 +129,8 @@ export function asleep(world: Scene, ms: number) {
   world.now += ms;
 }
 
-/** The button whose accessible name is `name`, if one is shown. */
-export const button = (name: string | RegExp) => [...document.querySelectorAll("button")].find((found) => {
+/** The button whose accessible name is `name`, if one is shown: Home held under an app shows none. */
+export const button = (name: string | RegExp) => [...document.querySelectorAll("button")].filter((found) => !found.closest("[data-alpha-home-layer][inert]")).find((found) => {
   const label = found.getAttribute("aria-label") ?? found.textContent ?? "";
   return typeof name === "string" ? label === name : label.trim().search(name) !== -1;
 });

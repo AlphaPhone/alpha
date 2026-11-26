@@ -106,6 +106,8 @@ export service RemindersNowShelf {
 export service RemindersLedger {
   readonly pendingWrites: Map<number, PendingRequest>
   readonly armedNative: Map<string, ArmedNativeAlarm>
+  readonly hydrated: Deferred.Deferred<void>
+  readonly turn: Semaphore.Semaphore
   getActiveUndo(): ActiveUndo | undefined
   setActiveUndo(next: ActiveUndo | undefined): void
   nextUndoAbout(): number
@@ -143,6 +145,8 @@ const remindersNowLayer = Layer.effect(RemindersNowShelf, effect {
 const remindersLedgerLayer = Layer.effect(RemindersLedger, effect {
   const pendingWrites = new Map<number, PendingRequest>()
   const armedNative = new Map<string, ArmedNativeAlarm>()
+  const hydrated = Deferred.makeUnsafe<void>()
+  const turn = Semaphore.makeUnsafe(1)
   let activeUndo: ActiveUndo | undefined
   let undoCounter = 1
   try Effect.addFinalizer(() => sync(() => {
@@ -154,6 +158,8 @@ const remindersLedgerLayer = Layer.effect(RemindersLedger, effect {
   return {
     pendingWrites,
     armedNative,
+    hydrated,
+    turn,
     getActiveUndo: () => activeUndo,
     setActiveUndo: (next: ActiveUndo | undefined) => { activeUndo = next },
     nextUndoAbout: () => undoCounter++,

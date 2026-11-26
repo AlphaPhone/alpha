@@ -16,17 +16,24 @@ export interface ShellLayerHostProps {
  * to shell Back routing (`ui-layer`) without duplicating explicit `Layers.Machine` registrations.
  */
 export function ShellLayerHost({ alpha, portalContainer, children }: ShellLayerHostProps) {
-  const stackRef = useRef<Array<{ readonly id: string; readonly dismiss: () => void }>>([]);
+  const stackRef = useRef<Array<{ readonly id: string; readonly dismiss: () => void; readonly active?: () => boolean }>>([]);
   const onLayerChange = useCallback((entry: LayerEntry) => {
     stackRef.current = stackRef.current.filter((item) => item.id !== entry.id);
     if (entry.open) {
-      stackRef.current.push({ id: entry.id, dismiss: entry.dismiss });
+      stackRef.current.push({ id: entry.id, dismiss: entry.dismiss, active: entry.active });
     }
     alpha.taking("ui-layer", () => {
-      const top = stackRef.current.at(-1);
-      if (!top) return Promise.resolve(false);
-      top.dismiss();
-      return Promise.resolve(true);
+      while (stackRef.current.length > 0) {
+        const top = stackRef.current.at(-1);
+        if (!top) break;
+        if (top.active && !top.active()) {
+          stackRef.current.pop();
+          continue;
+        }
+        top.dismiss();
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(false);
     });
   }, [alpha]);
 

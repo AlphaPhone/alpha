@@ -9,6 +9,7 @@ export interface LayerEntry {
   kind: LayerKind;
   open: boolean;
   dismiss: () => void;
+  active?: () => boolean;
 }
 
 /** Receives open and close notifications for floating layers. */
@@ -83,7 +84,7 @@ export function useLayerRef<T extends HTMLElement>(kind: LayerKind, forwarded?: 
       node.dispatchEvent(event);
     };
     activeRef.current = { node, dismiss, cleanup };
-    onLayerChange?.({ id, kind, open: true, dismiss });
+    onLayerChange?.({ id, kind, open: true, dismiss, active: () => node.isConnected });
   }, [id, kind, onLayerChange, forwarded]);
 }
 

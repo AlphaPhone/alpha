@@ -483,16 +483,30 @@ pure def undoAction(s: Reminders, now: int): Moved =
 pure def canExpireUndo(s: Reminders, now: int): bool =
   U::canRelease(s.undo, now) and not(writing(s))
 
-pure def expireUndo(s: Reminders, now: int): Moved =
+pure def holdEnding(kind: UndoKind, s: Reminders): Moved =
   val target = s.hiddenId
   val attemptId = s.write.id + 1
-  if (s.undoData.kind == UndoDelete)
+  if (kind == UndoDelete)
     { state: { ...s, items: s.items.select(it => it.id != target), hiddenId: 0,
                undo: U::release(s.undo), undoData: noUndoData,
                write: A::dispatch(A::record(A::plan(attemptId))) },
       out: List(CommitDelete({ attemptId: attemptId, itemId: target })) }
   else
     { state: { ...s, undo: U::release(s.undo), undoData: noUndoData }, out: List() }
+
+pure def expireUndo(s: Reminders, now: int): Moved = holdEnding(s.undoData.kind, s)
+```
+
+### A change the owner starts while an Undo is held ends the hold at once: a held deletion is committed and a held completion settles
+
+The owner who checks off or deletes one reminder after another does not wait
+five seconds between them: the next change ends the hold of the one before,
+as its expiry would.
+
+```quint
+pure def canSettleUndo(s: Reminders): bool = undoHeld(s) and not(writing(s))
+
+pure def settleUndo(s: Reminders): Moved = holdEnding(s.undoData.kind, s)
 ```
 
 ## Story: Sync with the resident agent and recover across restarts
@@ -575,9 +589,9 @@ reminder the agent no longer holds is forgotten, however many it holds: the
 cap on reminders made here does not drop one the agent already has. The
 reminder an Undo holds is left as it is until the hold ends. A reminder
 keeps its number when Alpha opens again, so a hold resumed after a restart
-commits the reminder it held. A change made while an Undo is held or a write
-is still answering waits for the hold to end and the write to answer, so
-two quick deletes both happen, each with its own Undo.
+commits the reminder it held. A change made while an Undo is held ends that hold first, and one made while
+a write is still answering waits for it, so two quick deletes both happen,
+each with its own Undo.
 
 ```quint
 pure def canTakeList(s: Reminders, listId: int): bool =
@@ -675,12 +689,12 @@ pure def alwaysSmartCountsConsistent(s: Reminders): bool =
     and smartCount(s, AllView) + smartCount(s, CompletedView) == visibleItems(s).length()
 ```
 
-### Deletions commit only on Undo expiry, Undo restores exact state, deleting a list keeps all remaining items valid, repeating completions advance their due day, and reopening leaves no write in flight
+### Deletions commit only when their Undo ends, on expiry or when the owner starts another change, Undo restores exact state, deleting a list keeps all remaining items valid, repeating completions advance their due day, and reopening leaves no write in flight
 
 ```quint
 pure def stepDeleteOnlyOnExpire(before: Reminders, via: str, after: Reminders, out: List[Effect]): bool =
   out.some(e => match e { | CommitDelete(d) => true | _ => false }) implies
-    (via == "expireUndo" and before.undoData.kind == UndoDelete and after.write.outcome == A::Sent)
+    ((via == "expireUndo" or via == "settleUndo") and before.undoData.kind == UndoDelete and after.write.outcome == A::Sent)
 
 pure def stepUndoRestoresExactState(before: Reminders, via: str, after: Reminders): bool =
   via == "undoAction" implies (

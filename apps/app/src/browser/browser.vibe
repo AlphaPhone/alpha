@@ -587,9 +587,12 @@ const shown = started(effect {
   const host = try TabHost
   const visibility = Stream.concat(Stream.succeed(try device.showing()), device.visible)
   const states = Stream.zipLatestAll(shell.changes, layers.changes, visibility, machine.changes)
+  let wasOpen = false
   try Stream.runForEach(states, effect ([where, above, deviceShowing, s]) => {
     const open = deviceShowing && showing(where, "Browser")
-    if (open && Tabs.canAskRestore(s)) try tellTabs({ type: "askRestore" })
+    const entered = open && !wasOpen
+    wasOpen = open
+    if (open && Tabs.canAskRestore(s) && (s.restore.status === "Idle" || entered)) try tellTabs({ type: "askRestore" })
     const aimed = try (try Pages).aimed(s.selected)
     if (open && Tabs.steady(s) && !s.native.includes(s.selected) && Option.isSome(aimed)) {
       const p = try pageOf(s.selected)

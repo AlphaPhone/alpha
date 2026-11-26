@@ -11,6 +11,7 @@ import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemai
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
+import { useFirstPageBack } from "../shell/AppBack.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Dialer, type Dialing, keypadDigits } from "./phone.vibe";
 import type { Player, Voicemails } from "./voicemail.vibe";
@@ -62,6 +63,7 @@ const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
 export function Phone({ runtime, alpha }: PhoneProps) {
   const phone = usePhone(runtime);
   const shell = useShell(runtime);
+  const firstPageBack = useFirstPageBack(alpha);
   const voicemail = useVoicemail(runtime).state;
   const zeroDownRef = useRef<number | undefined>(undefined);
   const longZeroRef = useRef(false);
@@ -115,7 +117,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
     <section aria-label="Phone" data-alpha-phone="" className="flex min-h-0 flex-1 flex-col">
       <Tabs value={state.tab} onValueChange={select} className="min-h-0 flex-1 gap-0">
         <PhoneTabs title={state.tab} contacts={shell.can(contacts)} voicemail={state.voicemail} unheard={(voicemail?.unheard ?? 0) > 0}
-          onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined} />
+          onBack={firstPageBack ? () => void alpha.back() : undefined} />
         {state.failedDial && <p role="status" className="mx-6 mb-2 text-center text-sm text-muted-foreground">Couldn’t open the dialer</p>}
         {state.unsureDial && <p role="status" className="mx-6 mb-2 text-center text-sm text-muted-foreground">Alpha cannot tell whether the call started</p>}
         <TabsContent value="Recents" data-alpha-phone-recents="" className="min-h-0 flex-1 overflow-y-auto rounded-none">

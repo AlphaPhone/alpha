@@ -292,6 +292,19 @@ While a page loads, after it fails and once it is stopped there is no mark.
 pure def alwaysTheSecureMarkIsForAShownPage(p: Page): bool = p.secure implies p.phase == Shown
 ```
 
+### The secure mark is drawn only in the phone's own Browser, beside a page that committed over HTTPS
+
+Only the phone's Browser hears from Android that a page came over HTTPS
+with a certificate it accepted. A page shown anywhere else, such as a
+browser frame on a computer, has no mark, as in Sunday's v119.
+
+```quint
+pure def showsTheLock(p: Page, native: bool): bool = native and p.secure
+
+pure def lawTheLockIsOnlyForASecurePageOnThePhone(p: Page, native: bool): bool =
+  showsTheLock(p, native) implies (native and p.secure and p.phase == Shown)
+```
+
 ### Load numbers only go forward
 
 ```quint
@@ -346,6 +359,18 @@ pure def stepATabKeepsItsKind(before: Page, via: str, after: Page): bool =
 pure def sometimesPrivatePage(p: Page): bool = p.kind == Private and p.phase == Shown
 ```
 
+### A tab with no page says "Search or address" in its bar, a private tab as a normal one, and only the private mark tells them apart
+
+As in Sunday's v119, the bar of a tab with no page shows the muted hint
+"Search or address", never "New tab" or "New private tab". A private tab
+carries its private mark before the hint.
+
+```quint
+pure def addressHint(p: Page): str = "Search or address"
+
+pure def lawEveryTabHasTheSameHint(p: Page): bool = addressHint(p) == addressHint({ ...p, kind: Normal })
+```
+
 ## Story: Find in page
 
 > As the owner, I want to find text on the page, step through the matches,
@@ -354,7 +379,8 @@ pure def sometimesPrivatePage(p: Page): bool = p.kind == Private and p.phase == 
 ### The find bar opens over a shown page
 
 On Android, choosing Find with no shown page keeps the menu open and asks
-the owner to load a page.
+the owner to load a page. The phone draws the page above Alpha, so while the
+find bar is open the page starts at the find bar's foot and never covers it.
 
 ```quint
 pure def canOpenFind(p: Page): bool = p.phase == Shown and not(p.finding)

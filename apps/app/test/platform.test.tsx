@@ -12,6 +12,7 @@ import { ownedCaptureId } from "../src/platform/camera.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { testMocks } from "../src/platform/device.vibe";
 import { boundWaitSeconds, createPkcePair, mapHttpFailure, parseRetryAfter } from "../src/platform/messaging.vibe";
+import { pageSpeechBase } from "../src/platform/pageSpeech.ts";
 import { Garbled, Refused, isDeclinedStatus, outcomeOf } from "../src/platform/remote.vibe";
 import { assertSlackUserToken } from "../src/platform/slack.vibe";
 import { Telegram } from "../src/platform/telegram.vibe";
@@ -66,6 +67,26 @@ it('keeps an unconfigured messaging route on the phone (spec/app/platform/index.
     expect([failed(account)?._tag, failed(updates)?._tag, fetch.mock.calls]).toEqual(["Unsent", "Unsent", []]);
   } finally {
     fetch.mockRestore();
+  }
+});
+
+it('Talks in a page only through the relay at exactly "/cloud" (spec/app/voice/index.md, "A page served by Alpha\'s development server talks through that server\'s own Cloud speech relay, and a page that names none offers no Talk")', () => {
+  const devices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: () => Promise.reject(new Error("not asked")) } });
+  const named = (content: string | undefined) => {
+    document.head.querySelectorAll('meta[name="alpha-cloud-speech"]').forEach((meta) => meta.remove());
+    if (content !== undefined) document.head.append(Object.assign(document.createElement("meta"), { name: "alpha-cloud-speech", content }));
+    return pageSpeechBase();
+  };
+  try {
+    expect(named("/cloud")).toBe("/cloud");
+    expect(["//other-host", "//other-host/cloud", "/cloud/", "/cloud/speech", "/cloudy", "/clou", "https://other-host/cloud", "cloud", " /cloud", "/CLOUD", ""]
+      .map(named)).toEqual(Array.from({ length: 11 }, () => undefined));
+    expect(named(undefined)).toBeUndefined();
+  } finally {
+    document.head.querySelectorAll('meta[name="alpha-cloud-speech"]').forEach((meta) => meta.remove());
+    if (devices) Object.defineProperty(navigator, "mediaDevices", devices);
+    else Reflect.deleteProperty(navigator, "mediaDevices");
   }
 });
 

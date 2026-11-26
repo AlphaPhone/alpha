@@ -90,6 +90,8 @@ it("Keeps the Messages title in its header at large text (spec/app/shell/keyboar
   };
   await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
   expect(header().top.height).toBeCloseTo(56, 1);
+  // spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it": v119 drew no Back on the launcher.
+  expect(document.querySelector('[data-alpha-messages-header] button[aria-label^="Back"]')).toBeNull();
 
   document.documentElement.style.fontSize = "32px";
   await until(alpha, alpha.runtime, Canvas, (canvas) => canvas.textScale === 200);

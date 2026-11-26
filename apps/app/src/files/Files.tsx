@@ -13,6 +13,7 @@ import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 import { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
 import { changedOn, folderLocation, parentPath, sized, validFileName } from "./entries.vibe";
@@ -22,6 +23,8 @@ import type { Machine as RecentMachine } from "../../gen/app__files__recent.effe
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
 import { useMachine as useScan } from "../../gen/app__files__scan.react.ts";
+import { useMachine as usePreview } from "../../gen/app__files__preview.react.ts";
+import { showing as showingPreview } from "../../gen/app__files__preview.ts";
 import type { Opened } from "./preview.vibe";
 import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
@@ -100,6 +103,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const { state, cause, can, send } = useMachine(runtime);
   const recent = useRecent(runtime);
   const scan = useScan(runtime);
+  const previewing = usePreview(runtime).state;
   const [text, setText] = useState("");
   const [naming, setNaming] = useState<Naming | undefined>(undefined);
   const [kind, setKind] = useState<Kind | undefined>(undefined);
@@ -120,15 +124,16 @@ export function Files({ runtime, alpha }: FilesProps) {
   const marked = state?.picked;
   const marks = useMemo(() => new Set(marked), [marked]);
   const back = <AppBack alpha={alpha} />;
+  const firstBack = <AppBack alpha={alpha} firstPage />;
   const scanner = <Scan runtime={runtime} alpha={alpha} />;
-  const header = (title: string) => <AppHeader title={title} leading={back} />;
+  const header = (title: string) => <AppHeader title={title} className={launcherFirstHeader} leading={firstBack} />;
   if (cause) return <>{header("Files")}<Alert variant="destructive" className="m-4">Alpha could not open Files</Alert></>;
-  if (!state) return null;
+  if (!state) return <section aria-label="Files" aria-busy className="relative flex min-h-0 flex-1 flex-col">{header("Files")}</section>;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
   const shown = browse(state);
   const label = (handle: number) => labelOf(runtime, handle);
-  if (shown === "Closed") return null;
+  if (shown === "Closed") return <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">{header("Files")}</section>;
   if (shown === "Unsupported") return <>{header("Files")}<StorageStatus title="Storage unavailable" />{scanner}</>;
   if (shown === "NotAsked" || shown === "NoAccess") {
     const allow = owner({ type: "allow" }) ? () => tell({ type: "allow" }) : undefined;
@@ -165,7 +170,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const summary = (item: Item, showFolder: boolean) => {
     if (item.kind === "Folder") return "";
     const folder = showFolder ? Option.map(parentOf(item), (path) => path || label(item.volume)) : Option.none();
-    return [sized(item.bytes), changedOn(item.revision, today), Option.getOrUndefined(folder)].filter(Boolean).join(" · ");
+    return [kindOf(item).name, sized(item.bytes), changedOn(item.revision, today), Option.getOrUndefined(folder)].filter(Boolean).join(" · ");
   };
   const row = (item: Item) => {
     const toggle = { type: "toggle", target: item.id } as const;
@@ -181,7 +186,7 @@ export function Files({ runtime, alpha }: FilesProps) {
         <FilesRow
           layout={grid ? "tile" : "row"}
           aria-label={item.name}
-          aria-description={[kind, detail].filter(Boolean).join(" · ")}
+          aria-description={detail || kind}
           name={item.name}
           detail={detail}
           icon={<Icon />}
@@ -230,9 +235,9 @@ export function Files({ runtime, alpha }: FilesProps) {
   const selectionActions = actionsOf({ owner, tell, chosenCount: marks.size, setDestination, rename: () => setNaming({ work: "Rename", name: firstPicked?.name ?? "", place: placeKey }) });
   const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
-    <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col">
-        <AppHeader title={title} detail={selecting || !atTop} className={cn(selecting || !atTop ? "[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0" : undefined, selecting && "[&>h1]:font-display [&>h1]:text-2xl [&>h1]:font-light")} leading={selecting && (choosing || owner({ type: "cancelSelection" })) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={endChoosing}><X /></Button> : back}>
+    <section aria-label="Files" className={cn("relative flex min-h-0 flex-1 flex-col", launcherTop)}>
+      <div key={atTop ? "top" : "folder"} inert={previewing !== undefined && showingPreview(previewing)} className={cn("flex min-h-0 flex-1 flex-col", !atTop && "motion-safe:animate-rise")}>
+        <AppHeader title={title} detail={selecting || !atTop} className={cn(selecting || !atTop ? cn("[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0", launcherInnerHeader) : launcherFirstHeader, selecting && "[&>h1]:font-display [&>h1]:text-2xl [&>h1]:font-light")} leading={selecting && (choosing || owner({ type: "cancelSelection" })) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={endChoosing}><X /></Button> : atTop ? firstBack : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
           {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
           {!selecting && showTools && (
@@ -302,7 +307,7 @@ export function Files({ runtime, alpha }: FilesProps) {
                   {state.search.hits.map((hit) => {
                     const { icon: Icon, name: kind } = kindOf(hit);
                     const detail = summary(hit, true);
-                    return <FilesRow key={hit.id} aria-label={hit.name} aria-description={[kind, detail].filter(Boolean).join(" · ")} name={hit.name} icon={<Icon />} detail={detail} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
+                    return <FilesRow key={hit.id} aria-label={hit.name} aria-description={detail || kind} name={hit.name} icon={<Icon />} detail={detail} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
                   })}
                 </div>
               )}

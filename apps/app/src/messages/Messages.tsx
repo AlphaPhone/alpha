@@ -129,7 +129,6 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
   };
   const allow = { type: "allow", need: "SmsAccess" } as const;
   const settings = { type: "goToSettings", need: "SmsAccess" } as const;
-  const unread = { type: "pickChip", chip: "UnreadThreads" } as const;
   const all = { type: "pickChip", chip: "AllThreads" } as const;
   const newMessage = { type: "newMessage" } as const;
   const handoffOpening = handoff?.phase === "Opening";
@@ -172,9 +171,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
       {!smsNeeded(state) && (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2 empty:hidden" role="group" aria-label="Filter conversations">
-            {state.chip === "UnreadThreads"
-              ? <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations" className="min-h-11 [&>button_svg]:size-3.5">Unread</Chip>
-              : searching && can(unread) && <Button size="sm" variant="ghost" className="min-h-11" onClick={() => void send(unread)}>Unread</Button>}
+            {state.chip === "UnreadThreads" && <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations" className="min-h-11 [&>button_svg]:size-3.5">Unread</Chip>}
             {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search" className="min-h-11 [&>button_svg]:size-3.5">{sought}</Chip>}
           </div>
           <div data-alpha-messages-threads className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-1">

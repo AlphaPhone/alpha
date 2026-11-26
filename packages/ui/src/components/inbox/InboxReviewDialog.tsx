@@ -37,12 +37,12 @@ export function InboxReviewDialog({ open, title, children, noLabel = "No", yesLa
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next && !busy) onNo(); }}>
       <AlertDialogPrimitive.Portal container={defaultContainer}>
-        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-alert bg-foreground/45 motion-safe:animate-fade dark:bg-background/70" />
+        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-alert bg-foreground/45 dark:bg-background/70" />
         <AlertDialogPrimitive.Content
           ref={layerRef}
           data-covers-dock=""
           {...(children ? {} : { "aria-describedby": undefined })}
-          className="fixed inset-x-4 bottom-[max(--spacing(18),calc(var(--alpha-safe-bottom)+--spacing(4)))] z-alert mx-auto max-h-[calc(var(--alpha-viewport-height,100dvh)-5.5rem)] max-w-md overflow-auto rounded-tile border border-border/60 bg-popover p-5 text-popover-foreground shadow-md outline-none motion-safe:animate-rise dark:border-border"
+          className="fixed inset-x-4 bottom-[max(--spacing(18),calc(var(--alpha-safe-bottom)+--spacing(4)))] z-alert mx-auto max-h-[calc(var(--alpha-viewport-height,100dvh)-5.5rem)] max-w-md overflow-auto rounded-tile border border-border/60 bg-popover p-5 text-popover-foreground shadow-md outline-none dark:border-border"
         >
           <AlertDialogPrimitive.Title className="text-xl leading-tight font-bold">{title}</AlertDialogPrimitive.Title>
           {children ? <AlertDialogPrimitive.Description asChild><div className="mt-3 text-base">{children}</div></AlertDialogPrimitive.Description> : null}

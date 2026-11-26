@@ -3,6 +3,7 @@ import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
 import { type AssistantPull, useAssistantPull } from "./assistant-pull.ts";
 export type { AssistantPull, AssistantRelease } from "./assistant-pull.ts";
+export { type AssistantBarDrag, useAssistantBarDrag } from "./assistant-pull.ts";
 
 type Press = { now: number };
 
@@ -19,12 +20,15 @@ export type AssistantGrabberProps = Omit<ComponentProps<"button">, keyof Assista
 
 /**
  * The handle of Ask Alpha: it reports a finger pressing, dragging, lifting or released as plain facts with their time;
- * the dock's rules choose where Ask Alpha lands.
+ * the dock's rules choose where Ask Alpha lands. Alpha's mark on the bar or the pill only taps: a drag from it is the
+ * bar's, which keeps the finger as the sheet replaces the mark, as v119's pill and bar did
+ * (45f6bed30 chat-overlay-motion-adapter.ts:1040, :1096-1097).
  * @model spec/app/assistant/dock.md
  */
 export function AssistantGrabber({ variant = "handle", onPress, onDrag, onDragMove, onDragStateChange, onRelease, onLift, onCancel, onTap, className, ...props }: AssistantGrabberProps) {
+  const mark = variant === "mark";
   const draggingRef = useRef(false);
-  const pull = useAssistantPull<HTMLButtonElement>({
+  const pull = useAssistantPull<HTMLButtonElement>(mark ? undefined : {
     onPress,
     onDrag: onDrag || onDragMove || onDragStateChange ? ({ y }) => {
       if (!draggingRef.current) {
@@ -54,13 +58,14 @@ export function AssistantGrabber({ variant = "handle", onPress, onDrag, onDragMo
     <button
       type="button"
       data-alpha-grabber=""
-      aria-label={variant === "mark" ? "Open conversation" : "Resize chat"}
-      className={cn(focusRing, "flex size-11 shrink-0 touch-none justify-center", variant === "mark" ? "items-center overflow-hidden rounded-full bg-alpha text-alpha-foreground" : "cursor-grab items-start rounded-sm px-0.5 pt-1.5", className)}
+      data-alpha-input-drag-alpha={mark ? "" : undefined}
+      aria-label={mark ? "Open conversation" : "Resize chat"}
+      className={cn(focusRing, "flex size-11 shrink-0 touch-none justify-center", mark ? "items-center overflow-hidden rounded-full bg-alpha text-alpha-foreground" : "cursor-grab items-start rounded-sm px-0.5 pt-1.5", className)}
       {...pull}
       onClick={(event) => onTap?.({ now: event.timeStamp, keyboard: event.detail === 0 })}
       {...props}
     >
-      {variant === "mark" ? <Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /> : <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/45" />}
+      {mark ? <Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /> : <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/45" />}
     </button>
   );
 }

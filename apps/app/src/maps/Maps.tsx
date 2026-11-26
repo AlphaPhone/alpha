@@ -93,6 +93,12 @@ function waitMessage(state: State): string {
 /** How a place is named on screen: a dropped pin, named by its coordinates, is "Selected location", as on develop. */
 const shown = (name: string) => (pointIn(name) === undefined ? name : "Selected location");
 
+/** A place's title: a pin not yet saved is "Dropped pin", as v119 named it (ui/maps/maps-screen.ts:658). */
+const titleOf = (spot: Spot, kept: Kept | undefined) => (kept === undefined && spot.id === "" && pointIn(spot.name) !== undefined ? "Dropped pin" : shown(kept?.name ?? spot.name));
+
+/** Where a place's pin stands above the centre: in the middle of the map left between the search field and the credits, as v119 placed it (maps/map-plane.ts:586-593, 770-776). */
+const liftOver = (bottom: number) => Math.max(0, (bottom + 46 - 100) / 2);
+
 /** Where the world map first stands: North America, as develop opens it. */
 const northAmerica = { lat: 45, lng: -98 };
 
@@ -123,7 +129,7 @@ const statusTop: Record<string, string> = {
 
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
 /** Where the camera goes for `state`, named so the map applies each aim once. */
-function cameraOf(state: State, seen: Seen, store: AtlasStore, following: boolean, recentered: number): MapCamera {
+function cameraOf(state: State, seen: Seen, store: AtlasStore, following: boolean, recentered: number, bottom: number): MapCamera {
   const now = mode(state);
   if (now === "Navigating" && !following) return { kind: "keep" };
   const way = now === "Directions" || now === "Navigating" ? store.way(state.trip.route, state.chosen) : undefined;
@@ -132,7 +138,7 @@ function cameraOf(state: State, seen: Seen, store: AtlasStore, following: boolea
   const aim = cameraAim(following, way !== undefined, true, spot !== undefined, true, true, results.length);
   if (aim === "FollowPhone" && seen.here !== undefined) return { kind: "follow", key: `here:${seen.here.at.lat}:${seen.here.at.lng}:${recentered}`, at: degreesOf(seen.here.at) };
   if (aim === "FitRoute" && way !== undefined) return { kind: "fit", key: `route:${state.trip.route}:${state.chosen}`, points: way.line.map(degreesOf), maxZoom: routeMaxZoom };
-  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom };
+  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom, lift: liftOver(bottom) };
   if (aim === "FitResults") {
     const points = results.flatMap((place) => store.spot(place)?.at ?? []).map(degreesOf);
     return { kind: "fit", key: `results:${state.search.ticket}`, points, maxZoom: resultsMaxZoom };
@@ -256,6 +262,11 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
     typing("");
     if (can({ type: "search", query: "", chars: 0 })) void send({ type: "search", query: "", chars: 0 });
   };
+  // spec/app/maps/index.md, "Story: Search for a place": the field's Clear on a place leaves it for an empty search, as v119's clearQuery did (ui/maps/maps-screen.ts:612-624)
+  const clearPlace = () => {
+    setTyped("");
+    void send({ type: "goBack" }).then(() => send({ type: "search", query: "", chars: 0 }));
+  };
   const alternatives = seen.ways.get(state.trip.route) ?? [];
   const cardHeight = now === "Place"
     ? (state.sheet === "Full" ? sheetHeights.Full : state.sheet === "Peek" ? 250 : (spot?.phone === undefined ? 400 : 452))
@@ -271,7 +282,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const opened = offer(screen, { type: "openSearch" });
   const openSearch = opened && (() => { setTyped(""); opened(); });
   const leave = back && (() => { if (now === "Search") setTyped(""); back(); });
-  const placeName = spot === undefined ? "" : shown(kept?.name ?? spot.name);
+  const placeName = spot === undefined ? "" : titleOf(spot, kept);
   const inside = spot === undefined || !coverage?.available || coverage.regions.some(({ bounds: [west, south, east, north] }) => {
     const at = degreesOf(spot.at);
     const lng = normalizeLng(at.lng);
@@ -280,7 +291,9 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const retryMap = offer(screen, { type: "retryMap" });
   const refused = now === "Browse" && needsSettings(state.link);
   const myLocation = offer(screen, { type: "useMyLocation" });
-  const disclosing = can({ type: "continueDisclosure" }) && myLocation === undefined && (now === "Browse" || now === "Directions");
+  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is not guiding, as on v119 (prototype/maps-adapter.ts:455), and does nothing while Maps is locating or Android's prompt is open
+  const locate = () => myLocation?.();
+  const disclosing = can({ type: "continueDisclosure" }) && now !== "Navigating";
   const hideFloatingForFullSheet = (now === "Search" || now === "Place" || now === "Directions") && state.sheet === "Full";
   // spec/app/maps/index.md, "Story: Use my location": every state Maps reports stands in one card under the search field, as on develop.
   const said: string[] = [
@@ -325,7 +338,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           pins={pins}
           here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
           line={now === "Directions" || now === "Navigating" ? way?.line.map(degreesOf) : undefined}
-          camera={cameraOf(state, seen, store, following, recentered)}
+          camera={cameraOf(state, seen, store, following, recentered, floatBottom)}
           compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
           onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
           onTrouble={(plane, trouble) => {
@@ -349,12 +362,12 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           aria-label="Search Maps"
           placeholder="Search"
           maxLength={300}
-          value={now === "Place" ? placeName : now === "Search" ? typed : ""}
+          value={now === "Place" ? typed || placeName : now === "Search" ? typed : ""}
           readOnly={now === "Place"}
           onFocus={openSearch}
           onChange={(event) => typing(event.target.value)}
           onSubmit={submit}
-          onClear={now === "Search" && typed !== "" ? clear : undefined}
+          onClear={typed === "" ? undefined : now === "Search" ? clear : now === "Place" && back ? clearPlace : undefined}
         />
       )}
       {(now === "Directions" || now === "Navigating") && (
@@ -375,7 +388,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         </button>
       )}
 
-      {now === "Directions" && spot !== undefined && <DirectionsCard key={`${state.link.account}:${state.place}:${state.startPlace}`} screen={screen} state={state} seen={seen} store={store} spot={spot} kept={kept} saved={saved} coverage={coverage} back={back} />}
+      {now === "Directions" && spot !== undefined && <DirectionsCard key={`${state.link.account}:${state.place}:${state.startPlace}`} screen={screen} state={state} seen={seen} store={store} spot={spot} kept={kept} saved={saved} coverage={coverage} back={back} locate={myLocation} />}
       {now === "Navigating" && spot !== undefined && (
         <>
           <GuidanceHeader state={state} seen={seen} spot={spot} kept={kept} way={way} />
@@ -403,8 +416,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           actions={statusActions.length > 0 ? statusActions : undefined} />
       )}
 
-      {now !== "Navigating" && myLocation && !hideFloatingForFullSheet && (
-        <MapsRoundButton tone="float" size="md" aria-label="Recenter" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard motion-reduce:transition-none" style={{ bottom: `min(${floatBottom}px, calc(100% - 176px))` }} onClick={myLocation}><LocateFixed /></MapsRoundButton>
+      {now !== "Navigating" && !hideFloatingForFullSheet && (
+        <MapsRoundButton tone="float" size="md" aria-label="Recenter" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard motion-reduce:transition-none" style={{ bottom: `min(${floatBottom}px, calc(100% - 176px))` }} onClick={locate}><LocateFixed /></MapsRoundButton>
       )}
       {now === "Navigating" && can({ type: "recenter" }) && (
         <MapsRoundButton tone="night" size="xl" aria-label="Recenter" className="absolute right-4 bottom-34 z-10" onClick={() => { setRecentered((n) => n + 1); void send({ type: "recenter" }); }}><LocateFixed /></MapsRoundButton>
@@ -445,7 +458,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
       {state.copyNotice !== "Uncopied" && <ToastRegion><Toast>{copies[state.copyNotice]}</Toast></ToastRegion>}
 
       {now === "Search" && <SearchSheet screen={screen} state={state} seen={seen} store={store} saved={saved} height={sheetHeights[state.sheet]} onRecent={setTyped} />}
-      {now === "Place" && spot !== undefined && <PlaceSheet key={`${state.link.account}:${state.place}`} screen={screen} state={state} spot={spot} kept={kept} height={cardHeight} back={back} />}
+      {now === "Place" && spot !== undefined && <PlaceSheet key={`${state.link.account}:${state.place}`} screen={screen} state={state} spot={spot} kept={kept} height={cardHeight} back={back} outside={saysOutsideCoverage(state, inside)} />}
       {now === "Directions" && <DirectionsSheet screen={screen} state={state} store={store} way={way} alternatives={alternatives} height={cardHeight} />}
     </section>
   );
@@ -507,19 +520,19 @@ function SearchSheet({ screen, state, seen, store, saved, height, onRecent }: { 
 }
 
 /** A place's card: its name and kind, Directions, Save, Share and the like, its address and number. */
-function PlaceSheet({ screen, state, spot, kept, height, back }: { screen: Screen; state: State; spot: Spot; kept: Kept | undefined; height: number | string; back: (() => void) | undefined }) {
+function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { screen: Screen; state: State; spot: Spot; kept: Kept | undefined; height: number | string; back: (() => void) | undefined; outside: boolean }) {
   const [name, setName] = useState("");
   const { can, send } = screen;
   const saveName = kept?.name ?? spot.name;
   const pinned = spot.id === "" && pointIn(spot.name) !== undefined;
   return (
-    <MapsSheet aria-label={shown(saveName)} height={height} grows className="z-sheet">
+    <MapsSheet aria-label={titleOf(spot, kept)} height={height} grows className="z-sheet">
       <SheetGrabber screen={screen} sheet={state.sheet} label="Resize place sheet" />
       <div className={cn("min-h-0 flex-1 touch-pan-y overflow-y-auto px-5", dockClearance)}>
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <h2 className="font-display text-3xl font-light break-words">{shown(saveName)}</h2>
-            {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className={cn(focusRing, "min-h-12 rounded-md px-3 text-primary")} onClick={() => { setName(saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
+            <h2 className="font-display text-3xl font-light break-words">{titleOf(spot, kept)}</h2>
+            {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className={cn(focusRing, "min-h-12 rounded-md px-3 text-primary")} onClick={() => { setName(kept === undefined ? titleOf(spot, kept) : saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
             <div className="mt-1.5 text-sm text-muted-foreground">{pinned ? "Selected location" : spot.category || "Place"}</div>
             {spot.hours !== undefined && <div className="mt-1 text-sm"><span className="font-semibold">Hours</span><span className="text-muted-foreground">{` · ${spot.hours}`}</span></div>}
           </div>
@@ -532,7 +545,7 @@ function PlaceSheet({ screen, state, spot, kept, height, back }: { screen: Scree
             : can({ type: "forgetPlace" }) && <MapsRoundButton aria-label="Remove from saved" aria-pressed className="text-primary" onClick={() => void send({ type: "forgetPlace" })}><Star className="fill-current" /></MapsRoundButton>}
           {can({ type: "handOn", kind: "SharePlace" }) && <MapsRoundButton aria-label="Share" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 /></MapsRoundButton>}
           {spot.website !== undefined && can({ type: "handOn", kind: "Website" }) && <MapsRoundButton aria-label="Website" onClick={() => void send({ type: "handOn", kind: "Website" })}><Globe /></MapsRoundButton>}
-          {can({ type: "handOn", kind: "MapsApp" }) && <MapsRoundButton aria-label="Open in another app" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}><ExternalLink /></MapsRoundButton>}
+          {outside && can({ type: "handOn", kind: "MapsApp" }) && <MapsRoundButton aria-label="Open in another app" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}><ExternalLink /></MapsRoundButton>}
         </div>
         <div className="mt-5 flex items-center gap-2.5 text-sm text-muted-foreground"><MapPin aria-hidden className="size-4.5 shrink-0" />{spot.address ?? "Selected location"}</div>
         {spot.phone !== undefined && (
@@ -557,13 +570,13 @@ function PlaceSheet({ screen, state, spot, kept, height, back }: { screen: Scree
 }
 
 /** The card over the top of the map in directions: where from, where to, and how to travel. */
-function DirectionsCard({ screen, state, seen, store, spot, kept, saved, coverage, back }: { screen: Screen; state: State; seen: Seen; store: AtlasStore; spot: Spot; kept: Kept | undefined; saved: Kept[]; coverage: Coverage | undefined; back: (() => void) | undefined }) {
+function DirectionsCard({ screen, state, seen, store, spot, kept, saved, coverage, back, locate }: { screen: Screen; state: State; seen: Seen; store: AtlasStore; spot: Spot; kept: Kept | undefined; saved: Kept[]; coverage: Coverage | undefined; back: (() => void) | undefined; locate: (() => void) | undefined }) {
   const [start, setStart] = useState("");
   const { can, send } = screen;
   const startAt = pointIn(start);
   const canSearchOrigin = can({ type: "findOrigin", query: "start" });
   const canPlanCoords = can({ type: "planFrom", origin: "Coordinates", lat: 0, lng: 0 });
-  const canLocate = can({ type: "useMyLocation" });
+  const canLocate = locate !== undefined;
   const startFrom = () => {
     if (startAt !== undefined && can({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng })) {
       return void send({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng });
@@ -591,10 +604,10 @@ function DirectionsCard({ screen, state, seen, store, spot, kept, saved, coverag
               <Input aria-label="Starting point" maxLength={300} value={start} disabled={!canSearchOrigin && !canPlanCoords} onChange={(event) => setStart(event.target.value)}
                 placeholder={from === undefined ? "My location" : shown(from.name)}
                 className="h-11.5 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0.5 text-body placeholder:text-foreground focus-visible:outline-none" />
-              {canLocate && <MapsRoundButton tone="plain" size="sm" aria-label="Use my location" onClick={() => void send({ type: "useMyLocation" })}><LocateFixed /></MapsRoundButton>}
+              {locate && <MapsRoundButton tone="plain" size="sm" aria-label="Use my location" onClick={locate}><LocateFixed /></MapsRoundButton>}
             </form>
           )}
-          <div className="flex h-8 items-center gap-3 text-md font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{shown(kept?.name ?? spot.name)}</span></div>
+          <div className="flex h-8 items-center gap-3 text-md font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{titleOf(spot, kept)}</span></div>
         </div>
         <MapsRoundButton tone="plain" aria-label="Swap starting point and destination" aria-disabled={!swappable} className="size-12 aria-disabled:pointer-events-auto aria-disabled:opacity-40"
           onClick={swappable ? () => void send({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng }) : undefined}><ArrowUpDown /></MapsRoundButton>
@@ -698,7 +711,7 @@ function GuidanceHeader({ state, seen, spot, kept, way }: { state: State; seen: 
         <div className="min-w-0">
           <div className="font-display text-figure-lg font-light">{arrived ? "Arrived" : precise && remaining !== undefined ? distance(remaining.toTurn) : state.trip.rerouting ? "Rerouting…" : "Locating…"}</div>
           <div className="mt-1 truncate text-lead font-semibold">
-            {arrived ? shown(kept?.name ?? spot.name) : seen.here === undefined ? "Waiting for your location" : imprecise ? "Turn guidance needs a precise location" : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
+            {arrived ? titleOf(spot, kept) : seen.here === undefined ? "Waiting for your location" : imprecise ? "Turn guidance needs a precise location" : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
           </div>
         </div>
       </div>

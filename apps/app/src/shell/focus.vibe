@@ -30,9 +30,14 @@ module page {
     const label = element.getAttribute("aria-label") ?? (element.textContent ?? "").trim().slice(0, 40)
     return `${element.getAttribute("role") ?? element.tagName.toLowerCase()}:${label}`
   }
+  /** Home held under an app (App.tsx) is not on the screen: nothing in it takes focus until the app closes. */
+  const showing = (element: Element): boolean => element.closest("[data-alpha-home-layer][inert]") === null
+  function first(root: ParentNode, selector: string): HTMLElement | undefined {
+    return [...root.querySelectorAll<HTMLElement>(selector)].find((element) => showing(element) && element.closest("[inert], [hidden]") === null)
+  }
   function findEvenInert(key: string): HTMLElement | undefined {
     return [...document.querySelectorAll<HTMLElement>(focusable)].find((element) =>
-      element.isConnected && !element.hasAttribute("hidden") && !element.hasAttribute("disabled") && element.getAttribute("aria-disabled") !== "true" && keyOf(element) === key)
+      showing(element) && element.isConnected && !element.hasAttribute("hidden") && !element.hasAttribute("disabled") && element.getAttribute("aria-disabled") !== "true" && keyOf(element) === key)
   }
   /** The key of the control focused now. @throws {never} */
   export const active = (): string => document.activeElement?.closest("[inert]") ? "" : keyOf(document.activeElement)
@@ -81,19 +86,19 @@ module page {
     if (main === null) return undefined
     if (target === "Search") {
       const field = document.documentElement.hasAttribute("data-alpha-keyboard") ? "input[type=search]" : "h1"
-      return main.querySelector<HTMLElement>(`[data-alpha-apps-drawer] ${field}`) ?? undefined
+      return first(main, `[data-alpha-apps-drawer] ${field}`)
     }
     if (target === "HomeStart") {
       if (!document.documentElement.hasAttribute("data-alpha-keyboard")) {
-        const heading = [...main.querySelectorAll<HTMLElement>("h1")].find((node) => node.closest("[inert], [hidden]") === null)
+        const heading = first(main, "h1")
         if (heading) return heading
       }
-      const tile = [...main.querySelectorAll<HTMLElement>("[data-home-tile]")].find(eligible)
+      const tile = [...main.querySelectorAll<HTMLElement>("[data-home-tile]")].find((element) => showing(element) && eligible(element))
       if (tile) return tile
-      return [...main.querySelectorAll<HTMLElement>(focusable)].find(eligible) ?? undefined
+      return [...main.querySelectorAll<HTMLElement>(focusable)].find((element) => showing(element) && eligible(element)) ?? undefined
     }
     if (target === "Title") {
-      return [...main.querySelectorAll<HTMLElement>("h1")].find((node) => node.closest("[inert], [hidden]") === null) ?? undefined
+      return first(main, "h1") ?? undefined
     }
     if (target === "Region") return regionOf(main)
     return undefined

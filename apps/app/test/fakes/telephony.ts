@@ -4,10 +4,15 @@ import type { ActionJournalPlugin } from "@elizaos/os-bridges";
 import type { AddressBookNativePlugin } from "@elizaos/os-bridges";
 import type { MessagesNativePlugin } from "@elizaos/os-bridges";
 import type { PhoneNativePlugin, TelephonySubscription } from "@elizaos/os-bridges";
-import { mmsBinding, smsBindingHash } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 import { type TextReviewScene, textReviewEnrollment } from "./text-review.ts";
+
+/**
+ * eliza's bridges, loaded at the first send: loading them registers every plugin they bind, and Capacitor binds a
+ * plugin once to what the host has declared by then, so the fake phone must declare its plugins first.
+ */
+const bridges = () => import("@elizaos/os-bridges");
 
 /** A call in the phone's log. */
 export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed"; seconds?: number }
@@ -352,6 +357,7 @@ function telephony(world: TelephonyScene): Faked {
         if (review?.proposal.id === operationId) {
           await new Promise<void>((confirm) => { review.confirmations.push({ operationId, recipients, body, subscriptionId, confirm }); });
         }
+        const { smsBindingHash } = await bridges();
         const bindingHash = await smsBindingHash({ recipients: recipients as never, body, subscriptionId });
         world.sent.push({ operationId, recipients, body });
         const thread = world.texts.find((one) => one.address === recipients[0])?.thread ?? Math.max(0, ...world.texts.map((one) => one.thread)) + 1;
@@ -369,6 +375,7 @@ function telephony(world: TelephonyScene): Faked {
         const kept = world.journal.get(operationId);
         if (kept !== undefined) return kept;
         if (world.hold !== undefined) await world.hold;
+        const { mmsBinding } = await bridges();
         const { hash: bindingHash } = await mmsBinding({
           recipients: recipients as never, body, subscriptionId,
           attachments: attachments.map((one) => ({ name: one.name, contentType: one.contentType, bytes: Uint8Array.from(atob(one.data), (byte) => byte.charCodeAt(0)) })),

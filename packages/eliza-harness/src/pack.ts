@@ -179,6 +179,13 @@ export function stagePackEntry(pack: Pack, source: string, product?: ProductPack
         path.join(productTarget, "package.json"),
         `${JSON.stringify({ name: product.name, version: "0.1.0", private: true, type: "module", main: "./index.js" }, null, 2)}\n`,
       );
+      const generated = path.join(product.dir, "..", "..", "gen");
+      if (fs.existsSync(generated)) {
+        fs.mkdirSync(path.join(staging, "gen"), { recursive: true });
+        for (const entry of fs.readdirSync(generated)) {
+          if (entry.endsWith(".js")) fs.copyFileSync(path.join(generated, entry), path.join(staging, "gen", entry));
+        }
+      }
     }
     if (fs.existsSync(target)) {
       fs.renameSync(target, backup);

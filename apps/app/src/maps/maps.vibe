@@ -700,7 +700,7 @@ const handoffs = started(effect {
     const query = try sync(() => handedQuery())
     if (query === undefined) return
     const current = try screen.get()
-    if (!Screen.canHandOver(current, query, query.length) || Screen.canContinueDisclosure(current)) return
+    if (!Screen.canHandOver(current, query, query.length)) return
     try sync(() => takeHandedQuery())
     try ignore(screen.send({ type: "handOver", query, chars: query.length }))
   })

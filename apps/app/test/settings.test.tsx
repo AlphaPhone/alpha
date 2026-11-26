@@ -34,8 +34,8 @@ vi.stubGlobal("fetch", fetchWithNotices);
 
 const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/notification-collection", "overlay"));
 
-/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its decorative icon or its value beside it. */
-const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span:not([aria-hidden]) > span")?.textContent === title);
+/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its decorative icon or its value beside it, and never a row on a page covered by the one open over it. */
+const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => !found.closest("[inert]") && found.querySelector("span:not([aria-hidden]) > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
 const tap = (title: string) => drawn(() => {
@@ -125,6 +125,18 @@ describe("Settings", () => {
     expect(button("Back")).toBeUndefined();
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    for (const app of ["Inbox", "Calendar"] as const) {
+      await drawn(() => {
+        const tile = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${app}']`);
+        if (!tile) throw new Error(`No ${app} home tile`);
+        tile.click();
+      });
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === app);
+      expect(button("Back")).toBeUndefined();
+      expect(button("Back to apps")).toBeUndefined();
+      await hardware("back");
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    }
   });
 
   it("Off the launcher, Settings' first page keeps its Back (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {

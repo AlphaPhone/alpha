@@ -17,6 +17,7 @@ import { homeEditFrame, landscapeHomeInput } from "../shell/canvas.vibe";
 import { feel } from "../shell/haptics.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
+import { homeFrame } from "./firstFrame.ts";
 import { actOnAddHome, addLayerAt, openAddHome, reconcileAddHome } from "./addHome.vibe";
 import { catalog, labelOf } from "./catalog.vibe";
 import { type AppsInput, type HomeEditInput, actInApps, chooseApp, closeApps, editHome, openApps, openHomeFavorite, openOwnInApps, openOwnTile, told } from "./home.vibe";
@@ -25,6 +26,8 @@ import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
 
 const owner = "Owner" as const;
+const noop = () => undefined;
+const noSnapshot = () => null;
 
 /** A tile's id on the screen: `view:<View>` for one of Alpha's own apps, `app:<key>` for an installed one. */
 const idOf = (tile: Tile): string => (tile.tag === "Own" ? `view:${tile.view}` : `app:${tile.app}`);
@@ -66,7 +69,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const s = shell.state;
   const landscapePhone = landscapeHomeInput(canvas);
   const alongside = s !== undefined && Home.besideHomeSheet(s, landscapePhone);
-  const day = useDayCards(runtime, s, alongside);
+  const { cards: day, settled } = useDayCards(runtime, s, alongside);
   const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: phoneLocked(), now: untimed }, owner);
   const [mount, setMount] = useState<{ frame: HTMLElement; current: () => boolean }>();
   const homeScroller = useCallback((node: HTMLDivElement | null) => {
@@ -85,6 +88,12 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     const fiber = alpha.runtime.runFork(launcherHeld(held));
     return () => fiber.interruptUnsafe();
   }, [alpha]);
+  const whole = h !== undefined && s !== undefined && (h.host === "AssistantOnly" || (ready(h.tiles) && (!Home.showsCards(h) || settled)));
+  const markWhole = useCallback(() => {
+    if (whole) homeFrame.drawn();
+    return noop;
+  }, [whole]);
+  useSyncExternalStore(markWhole, noSnapshot, noSnapshot);
   if (!h || !s || h.host === "AssistantOnly") return null;
   const can = (event: Home.Event) => home.can(event, owner);
   const editVisible = Home.editSite(s, alongside) && homeEditFrame(canvas) && layers !== undefined && !pageInert(layers);
@@ -137,6 +146,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <HomeScreen
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
+      cardsAwaited={Home.showsCards(h) && !settled}
       appCards={Home.showsCards(h) && alpha.slot("home/cards")}
       tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => ({
         ...tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing),
@@ -146,8 +156,9 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       appCardsInert={s.assistant !== "Bar"}
       drawerInert={s.assistant !== "Bar" && !alongside}
       covered={h.editing && !editVisible}
-      editing={editing}
+      editing={editing || (h.editing && addLayer !== undefined)}
       tileGestureScope={h.editing ? `${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}` : "home"}
+      onPressTile={(id) => { if (id.startsWith("view:")) homeFrame.want(id as `view:${View}`); }}
       onOpenTile={(id) => {
         const tile = tileOf(id);
         if (tile.tag === "Own") void runtime.runPromise(openOwnTile(tile.view, s.route, alongside));

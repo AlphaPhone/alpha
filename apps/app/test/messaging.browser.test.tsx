@@ -186,9 +186,10 @@ describe("Messaging E2E", () => {
     await page.getByRole("button", { name: "Unlock account" }).click();
     await until(alpha, alpha.runtime, TelegramAuth.Machine, (s) => s.step === "Authenticated");
     await until(alpha, alpha.runtime, TelegramList.Machine, (s) => s.list.status === "Loaded" && s.pages > 0);
-    await expect.element(page.getByText("Maya Chen")).toBeVisible();
+    const mayaChat = page.getByLabelText("Telegram chats").getByText("Maya Chen");
+    await expect.element(mayaChat).toBeVisible();
 
-    await page.getByText("Maya Chen").click();
+    await mayaChat.click();
     await until(alpha, alpha.runtime, TelegramConversation.Machine, (s) => s.chat > 0 && s.read.status === "Loaded");
     await page.getByLabelText("Message").fill("Hello from Chromium E2E");
     await page.getByRole("button", { name: "Send" }).first().click();

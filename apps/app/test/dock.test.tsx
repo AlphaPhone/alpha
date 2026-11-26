@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { Effect, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
@@ -36,9 +37,17 @@ async function showAttachments() {
   await expect.poll(() => named("Attach files")).not.toBeNull();
 }
 
-/** Wait until Ask Alpha rests at `detent`. */
-const resting = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"], detent: "Bar" | "Typing") =>
+/** Wait until Ask Alpha reaches `detent`. */
+const resting = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"], detent: "Bar" | "Typing" | "Sheet") =>
   runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
+
+const openConversationSheet = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"]) =>
+  act(async () => {
+    named<HTMLButtonElement>("Open conversation")?.click();
+    await resting(runtime, "Sheet");
+  });
+
+const clearedPaint = (element: HTMLElement | null) => [element?.style.transform, element?.style.opacity, element?.style.transition, element?.style.animation];
 
 /** Ask Alpha rests on the bar and Calendar is still the app shown. */
 const restsOverCalendar = async (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"]) =>
@@ -256,7 +265,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Dock, (m) => m.send({ type: "drag" })));
       await runtime.runPromise(Effect.flatMap(Dock, (m) => m.send({ type: "release", direction: "Up", flick: false, height: 420, floor: 80, full: 800, now: 200 })));
     });
-    expect((await runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()))).kept).toBe(420);
+    expect((await runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()))).kept).toBe(525);
 
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
@@ -272,17 +281,17 @@ describe("Ask Alpha dock and shell navigation", () => {
     const at = (type: string, y: number, target: EventTarget = window) =>
       underAct(() => { target.dispatchEvent(new PointerEvent(type, { bubbles: true, isPrimary: true, clientY: y, pointerId: 5, pointerType: "touch" })); });
     const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
-    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Pressed"))));
+    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture !== "Idle"))));
 
     const mark = document.querySelector<HTMLElement>("button[aria-label='Open conversation']");
     expect(mark).not.toBeNull();
     await at("pointerdown", 700, mark ?? window);
-    await underAct(async () => { await pressed(); });
     await at("pointermove", 650, mark ?? window);
-    await at("pointermove", 500, mark ?? window);
-    expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "302px"]);
+    await underAct(async () => { await pressed(); });
+    await at("pointermove", 500, section() ?? window);
+    expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "290px"]);
     expect((await shell()).assistant).toBe("Bar");
-    await at("pointerup", 500, mark ?? window);
+    await at("pointerup", 500, section() ?? window);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet")))); });
 
     // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled to the floor by its handle, the open sheet follows and rests on the bar
@@ -292,10 +301,28 @@ describe("Ask Alpha dock and shell navigation", () => {
     await underAct(async () => { await pressed(); });
     await at("pointermove", 500, handle ?? window);
     await at("pointermove", 740, handle ?? window);
-    expect(section()?.style.height).toBe("102px");
+    expect([section()?.style.height, section()?.style.opacity]).toEqual(["0px", "0"]);
     await at("pointerup", 740, handle ?? window);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v119's retire did (45f6bed30 chat-overlay-motion-adapter.ts:613-651), the bar is Ask Alpha at once while the sheet fades over it
+    await act(async () => { await Effect.runPromise(Effect.sleep("700 millis")); });
     expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
+  });
+
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet put away hands over to the bar at once, whose Talk is its own button and never the sheet's black one
+  it("puts the sheet away onto a bar whose Talk was never the sheet's (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const settled = (detent: "Sheet" | "Bar") => act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent)))); });
+    await underAct(() => { named<HTMLButtonElement>("Open conversation")?.click(); });
+    await settled("Sheet");
+    const sheetTalk = section()?.querySelector<HTMLButtonElement>("button[aria-label='Talk']");
+    expect(sheetTalk?.className).toContain("bg-foreground");
+    await underAct(() => { named<HTMLButtonElement>("Minimize chat")?.click(); });
+    await settled("Bar");
+    const barTalk = section()?.querySelector<HTMLButtonElement>("button[aria-label='Talk']");
+    expect([section()?.getAttribute("data-alpha-detent"), barTalk === sheetTalk, barTalk?.className.includes("bg-foreground")]).toEqual(["bar", false, false]);
+    expect(section()?.hasAttribute("inert")).toBe(false);
   });
 
   // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v121's chat scrim did, a tap or a drag on the page outside the open sheet lowers it when it ends
@@ -424,5 +451,285 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Idle"))));
     });
     expect(section?.getAttribute("data-alpha-dragging")).toBeNull();
+  });
+
+  // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"
+  it("swiping down on the resting bar tucks Home and Browser into the pill, Type untucks it, and closing an open sheet rests on the bar first", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const dockState = () => runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()));
+    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const swipeDown = async (target: Element | null, pointerId: number) => {
+      expect(target).not.toBeNull();
+      const send = (type: string, y: number) =>
+        underAct(() => { target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId, pointerType: "touch", isPrimary: true })); });
+      await send("pointerdown", 700);
+      await send("pointermove", 720);
+      await send("pointermove", 770);
+      await send("pointerup", 770);
+    };
+
+    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    expect((await dockState()).tucked).toBe(false);
+
+    const mark = named("Open conversation");
+    const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+    expect(mark).not.toBeNull();
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 700, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 740, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    expect(bar?.style.transform).toBe("translateY(40px)");
+    expect(Number(bar?.style.opacity)).toBeLessThan(1);
+    expect(detent()).toBe("bar");
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 770, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    await underAct(() => { mark?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 770, pointerId: 21, pointerType: "touch", isPrimary: true })); });
+    await expect.poll(async () => (await dockState()).tucked).toBe(true);
+    expect((await shellState()).assistant).toBe("Bar");
+    expect(Array.from(document.querySelectorAll("[data-alpha-compact-dock] button"), (btn) => btn.getAttribute("aria-label")))
+      .toEqual(["Open conversation", "Type", "Talk"]);
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.hidden).toBe(true);
+
+    const pillType = document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']");
+    await underAct(() => { pillType?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 24, pointerType: "touch", isPrimary: true })); });
+    await underAct(() => { pillType?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 800, pointerId: 24, pointerType: "touch", isPrimary: true })); });
+    expect(detent()).toBe("bar");
+    await underAct(() => { pillType?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 800, pointerId: 24, pointerType: "touch", isPrimary: true })); });
+    expect(detent()).toBe("bar");
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await resting(runtime, "Typing");
+    });
+    await expect.poll(async () => (await dockState()).tucked).toBe(false);
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    expect(field?.hidden).toBe(false);
+    expect(document.activeElement).toBe(field);
+
+    const expectWideBar = async () => {
+      expect((await dockState()).tucked).toBe(false);
+      expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+      expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    };
+    await act(async () => {
+      field?.blur();
+      await resting(runtime, "Bar");
+    });
+    await expectWideBar();
+
+    await act(async () => {
+      field?.focus();
+      await resting(runtime, "Typing");
+    });
+    await swipeDown(field, 22);
+    await expect.poll(async () => [(await shellState()).assistant, (await dockState()).tucked]).toEqual(["Bar", true]);
+    expect(document.activeElement).not.toBe(field);
+    expect(document.querySelector("[data-alpha-compact-dock]")).not.toBeNull();
+
+    await act(async () => { await runtime.runPromise(TestClock.adjust(450)); });
+    await openConversationSheet(runtime);
+    await expect.poll(async () => (await dockState()).tucked).toBe(false);
+    await act(async () => {
+      named<HTMLButtonElement>("Minimize chat")?.click();
+      await resting(runtime, "Bar");
+    });
+    await expectWideBar();
+
+    await act(async () => {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view: "Browser" })));
+    });
+    const browserField = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    await act(async () => {
+      browserField?.focus();
+      await resting(runtime, "Typing");
+    });
+    await swipeDown(browserField, 23);
+    await expect.poll(async () => [(await shellState()).trail, (await shellState()).assistant, (await dockState()).tucked])
+      .toEqual([["Browser"], "Bar", true]);
+    expect(document.querySelector("[data-alpha-compact-dock]")).not.toBeNull();
+
+    await act(async () => {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
+    });
+    await expect.poll(async () => [(await shellState()).trail, (await dockState()).tucked]).toEqual([[], false]);
+    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+  });
+
+  // spec/app/assistant/dock.md, "A short, slow pull of the bar or the pill leaves Ask Alpha where it was"
+  it("a short slow pull down while Typing keeps Typing and focus intact, clears inline paint, and respects reduced motion", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const dockState = () => runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()));
+    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+    expect(field).not.toBeNull();
+    expect(bar).not.toBeNull();
+
+    await act(async () => {
+      field?.focus();
+      await resting(runtime, "Typing");
+    });
+    expect(document.activeElement).toBe(field);
+
+    const slowShortPull = async (pointerId: number, checkMidDrag = false) => {
+      const send = (type: string, y: number) =>
+        underAct(() => { field?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId, pointerType: "touch", isPrimary: true })); });
+      await send("pointerdown", 700);
+      await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
+      await send("pointermove", 712);
+      if (checkMidDrag) {
+        expect(document.activeElement).toBe(field);
+        expect((await shellState()).assistant).toBe("Typing");
+        expect(bar?.style.transform).toBe("translateY(12px)");
+        expect(Number(bar?.style.opacity)).toBeLessThan(1);
+      }
+      await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
+      await send("pointerup", 712);
+      await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
+    };
+
+    await slowShortPull(31, true);
+    expect((await shellState()).assistant).toBe("Typing");
+    expect((await dockState()).tucked).toBe(false);
+    expect(document.activeElement).toBe(field);
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    expect([bar?.style.transform, bar?.style.opacity, bar?.style.transition, bar?.style.animation]).toEqual(["", "", "", ""]);
+
+    const animateDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    let animateCalls = 0;
+    let reduced = true;
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      writable: true,
+      value: () => {
+        animateCalls += 1;
+        return { finished: Promise.resolve(), cancel: () => undefined };
+      },
+    });
+    const reducedQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    Object.defineProperty(reducedQuery, "matches", { configurable: true, get: () => reduced });
+    const originalMatch = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(prefers-reduced-motion: reduce)" ? reducedQuery : originalMatch(query));
+    const assertCleanTyping = async (expectedCalls: number) => {
+      expect(animateCalls).toBe(expectedCalls);
+      expect((await shellState()).assistant).toBe("Typing");
+      expect(document.activeElement).toBe(field);
+      expect(clearedPaint(bar)).toEqual(["", "", "", ""]);
+    };
+    try {
+      await slowShortPull(32);
+      await assertCleanTyping(0);
+
+      reduced = false;
+      await slowShortPull(33);
+      await assertCleanTyping(1);
+    } finally {
+      media.mockRestore();
+      if (animateDescriptor) Object.defineProperty(HTMLElement.prototype, "animate", animateDescriptor);
+      else Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    }
+  });
+
+  // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"
+  it("swiping down while Typing inside Notes settles cleanly to the pill with zero leftover inline styles", async () => {
+    const { runtime } = await mountDock({ view: "Notes", flush: underAct, speech: { onTalk: () => undefined } });
+    const dockState = () => runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()));
+    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+
+    expect(document.querySelector("[data-alpha-pill]")).not.toBeNull();
+    expect(document.querySelector("[data-alpha-input-bar]")).toBeNull();
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await resting(runtime, "Typing");
+    });
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    const dockEl = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+    expect(field).not.toBeNull();
+    expect(dockEl).not.toBeNull();
+    expect(document.activeElement).toBe(field);
+
+    const send = (type: string, y: number, pointerId: number) =>
+      underAct(() => { field?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId, pointerType: "touch", isPrimary: true })); });
+
+    await send("pointerdown", 700, 41);
+    await send("pointermove", 720, 41);
+    await send("pointermove", 770, 41);
+    expect(document.activeElement).toBe(field);
+    expect((await shellState()).assistant).toBe("Typing");
+    expect(dockEl?.hasAttribute("data-alpha-input-bar")).toBe(true);
+    expect(dockEl?.hasAttribute("data-alpha-pill")).toBe(false);
+    expect(dockEl?.style.transform).toBe("translateY(70px)");
+    expect(Number(dockEl?.style.opacity)).toBeLessThan(1);
+
+    await send("pointerup", 770, 41);
+    await expect.poll(async () => [(await shellState()).trail, (await shellState()).assistant, (await dockState()).tucked])
+      .toEqual([["Notes"], "Bar", true]);
+    expect(document.activeElement).not.toBe(field);
+    const pill = document.querySelector<HTMLElement>("[data-alpha-pill]");
+    expect(pill).toBe(dockEl);
+    expect([pill?.style.transform, pill?.style.opacity, pill?.style.transition, pill?.style.animation]).toEqual(["", "", "", ""]);
+
+    await act(async () => { await runtime.runPromise(TestClock.adjust(450)); });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await resting(runtime, "Typing");
+    });
+    const barAgain = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+    expect(barAgain).toBe(dockEl);
+    expect([barAgain?.style.transform, barAgain?.style.opacity, barAgain?.style.transition, barAgain?.style.animation]).toEqual(["", "", "", ""]);
+
+    // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": even if an external blur swaps the bar to the pill mid-drag, releasing clears paint on the exact painted element.
+    await send("pointerdown", 700, 42);
+    await send("pointermove", 730, 42);
+    expect(barAgain?.style.transform).toBe("translateY(30px)");
+    await act(async () => {
+      field?.blur();
+      await resting(runtime, "Bar");
+    });
+    expect(barAgain?.hasAttribute("data-alpha-pill")).toBe(true);
+    await send("pointerup", 730, 42);
+    expect([barAgain?.style.transform, barAgain?.style.opacity, barAgain?.style.transition, barAgain?.style.animation]).toEqual(["", "", "", ""]);
+  });
+
+  // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar"
+  it("swiping down from an open Sheet rests on the wide Bar first without tucking to the pill", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const dockState = () => runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()));
+    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture !== "Idle"))));
+
+    await openConversationSheet(runtime);
+    const handle = document.querySelector<HTMLElement>("button[aria-label='Resize chat']");
+    expect(handle).not.toBeNull();
+    const at = (type: string, y: number) =>
+      underAct(() => { handle?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 51, pointerType: "touch", isPrimary: true })); });
+    await at("pointerdown", 400);
+    await underAct(async () => { await pressed(); });
+    for (const y of [500, 740]) await at("pointermove", y);
+    await at("pointerup", 740);
+    await act(async () => { await resting(runtime, "Bar"); });
+    expect((await shellState()).assistant).toBe("Bar");
+    expect((await dockState()).tucked).toBe(false);
+    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+  });
+
+  // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/attachments.md, "Story: Choose files to attach"
+  it("the Chat actions menu offers only Attach media and Search chat on the resting bar and open sheet", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    const openMenuItems = async () => {
+      await underAct(() => {
+        named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+      return [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].map((item) => item.textContent);
+    };
+
+    expect(await openMenuItems()).toEqual(["Attach media", "Search chat"]);
+    await underAct(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+
+    await openConversationSheet(runtime);
+    expect(await openMenuItems()).toEqual(["Attach media", "Search chat"]);
   });
 });

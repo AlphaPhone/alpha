@@ -1,7 +1,7 @@
 # Scan a document
 
-Pages made into a PDF in [Files](./index.md). The scan opens from Camera or
-from Files; each page comes from the [capture dialog](./capture.md) and its
+Pages made into a PDF in [Files](./index.md). The scan opens from Files,
+or from a picture chosen in Photos; each page comes from the [capture dialog](./capture.md) and its
 edges from the [correction dialog](./correction.md). Text read from a page
 on the phone stays with that page, and the owner sees and corrects it;
 what is done with it is [Text on a scanned page](./scanText.md). The pages
@@ -150,11 +150,11 @@ pure def loaded(s: Scan, ticket: int, ok: bool, readable: bool, base: int, pages
   { ...s, keeping: K::loaded(s.keeping, ticket, ok, readable, base, pages) }
 ```
 
-### A selected image or live Camera frame opens a transient text review, reads text immediately, and becomes a multi-page document only at the owner's request
+### A selected image opens a transient text review, reads text immediately, and becomes a multi-page document only at the owner's request
 
 The image does not enter the Photos library or replace the saved Files draft.
 Discovered by the proof: closing a scan during draft deletion could allow a transient image to open before deletion settled. A draft read or deletion must settle before the transient image opens.
-A Camera frame can be kept in Photos at the owner's request. The owner can correct its text, review links, save a note,
+The owner can correct its text, review links, save a note,
 review an event, and save a PDF. Choosing Multi-page adds page controls
 to this review, leaving the saved Files draft alone.
 
@@ -169,9 +169,6 @@ pure def imageReview(camera: bool, s: Scan): Moved =
   recognize(opened, image, Owner)
 
 pure def startImage(s: Scan, frame: int, by: Actor): Moved = imageReview(false, s)
-
-pure def canStartCameraImage(s: Scan, frame: int, by: Actor): bool = canStartImage(s, frame, by)
-pure def startCameraImage(s: Scan, frame: int, by: Actor): Moved = imageReview(true, s)
 
 pure def canShowPages(s: Scan, by: Actor): bool = by == Owner and s.origin == SelectedImage and editable(s)
 pure def showPages(s: Scan, by: Actor): Scan = { ...s, origin: SelectedDocument }

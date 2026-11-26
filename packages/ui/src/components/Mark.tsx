@@ -15,6 +15,14 @@ export function Mark({ className, ...props }: MarkProps) {
   );
 }
 
+/**
+ * Alpha's thin-lined mark (`brand/mark.svg`, served as `/icons/auth-mark.svg`), in the color of the text around it and
+ * as tall as that text unless sized: v119's `.alpha-compute-mark` (apps/app/src/prototype/phone.css:287).
+ */
+export function LogoMark({ className, ...props }: Omit<ComponentProps<"span">, "children">) {
+  return <span aria-hidden className={cn("inline-block size-[1em] shrink-0 bg-current [mask:url(/icons/auth-mark.svg)_center/contain_no-repeat]", className)} {...props} />;
+}
+
 /** The mark used on Alpha's connection and sign-in screens, colored to match the theme. */
 export function AuthMark({ className, ...props }: Omit<ComponentProps<"span">, "children">) {
   return <span aria-hidden className={cn("block size-11 shrink-0 bg-alpha [mask:url(/icons/auth-mark.svg)_center/contain_no-repeat]", className)} {...props} />;

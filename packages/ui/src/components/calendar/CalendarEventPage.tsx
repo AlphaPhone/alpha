@@ -27,11 +27,11 @@ export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
   children?: ReactNode;
 };
 
-/** An event, over the days: Back and its actions, its title, time, day and calendar, then what it holds. */
+/** An event, rising over the days as Alpha's earlier build drew it (v119 45f6bed30 template.html:1277 `class="enter"`): Back and its actions, its title, time, day and calendar, then what it holds. */
 export function CalendarEventPage({ title, onBack, actions, when, day, source, repeat, dot = "primary", notes, className, children, ...props }: CalendarEventPageProps) {
   const dotClass = cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : "bg-foreground");
   return (
-    <div data-alpha-subview="calendar-detail" className={cn("absolute inset-0 z-20 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
+    <div data-alpha-subview="calendar-detail" className={cn("absolute inset-0 z-20 flex flex-col bg-background motion-safe:animate-rise", className)} {...props}>
       <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 px-2">
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />

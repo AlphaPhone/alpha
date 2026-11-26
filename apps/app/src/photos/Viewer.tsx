@@ -14,6 +14,7 @@ import { trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
 import { headingOf } from "../runtime/dateHeading.ts";
 import { Time } from "../runtime/time.vibe";
 import { Device } from "../platform/device.vibe";
+import { fadeIn } from "../shell/Layers.tsx";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
 const messages = {
@@ -244,7 +245,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
     <div ref={syncVideoPlaying} role={clipEditor ? "dialog" : undefined} aria-modal={clipEditor || undefined} aria-label={clipEditor ? "Edit video" : name}
       data-alpha-subview={clipEditor ? "photos-clip-editor" : state.editing ? "photos-editor" : "photos-viewer"}
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
-      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background pt-[var(--alpha-safe-top)] text-foreground", !clipEditor && dockClearance)}>
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background pt-[var(--alpha-safe-top)] text-foreground", fadeIn, !clipEditor && dockClearance)}>
       <header data-host-chrome="" className={cn("motion-safe:transition-opacity", clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : "flex min-h-13 shrink-0 items-center gap-0.5 px-2", !chrome && hiddenChrome)}>
         <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : state.editing ? undefined : "size-13 rounded-tile"} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
         {clipEditor ? <h1 className="flex-1 text-base font-normal">Edit video</h1> : state.editing ? <div className="flex-1"><h1 className="sr-only">Edit photo</h1></div> : <div className="min-w-0 flex-1">

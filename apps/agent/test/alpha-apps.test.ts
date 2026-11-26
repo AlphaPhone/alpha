@@ -456,7 +456,7 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15, 0, 0) });
     const { runtime } = makeFakeRuntime();
 
-    const hosted = await Effect.runPromise(alphaAppsModule({ timeZone: "UTC", runtime } as Parameters<typeof alphaAppsModule>[0]));
+    const hosted = await Effect.runPromise(alphaAppsModule({ timeZone: "UTC", runtime, launch: {} } as Parameters<typeof alphaAppsModule>[0]));
     expect(hosted.name).toBe(alphaAppsPluginName);
     expect(hosted.plugin.name).toBe(alphaAppsPluginName);
 

@@ -21,34 +21,40 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   composer: AssistantComposerProps;
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
   detent?: "bar" | "sheet" | "full";
-  /** Dismisses the open half-sheet when tapping the dimmed backdrop scrim; defaults to `header.onClose`. */
+  /** Dismisses the open half-sheet when tapping the dimmed backdrop scrim; when omitted, no internal scrim is drawn. */
   onDismiss?: () => void;
   /** A drag anywhere on the resting bar moves Ask Alpha as a drag of its handle does, the sheet following the finger as it rises; left out where it may not be dragged. */
   barDrag?: AssistantBarDrag;
+  /**
+   * The bar, or the pill, Ask Alpha will rest on, drawn under a sheet that is being pulled down onto it or shrinking onto
+   * it after a tap, as v119 drew them (45f6bed30 chat-overlay-motion-adapter.ts:968-973, 990-996). It takes no input.
+   */
+  underlay?: "bar" | "pill";
 };
 
 const scrimClass = "fixed inset-0 z-assistant-sheet bg-foreground/15 transition-opacity duration-fast ease-standard motion-safe:animate-fade motion-reduce:transition-none dark:bg-background/50";
+const noop = () => undefined;
 
 /**
  * Ask Alpha as a resting bar, a half-screen sheet or the full screen: the handle, header, messages and composer.
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, contextAction, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", onDismiss, barDrag, className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, contextAction, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", onDismiss, barDrag, underlay, className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
   const sheet = detent === "sheet";
   const full = detent === "full";
   const dragging = useAssistantBarDrag(barDrag ?? {});
   const panel = resting ? undefined : voicePanel;
-  const dismiss = onDismiss ?? header.onClose;
   return (
     <>
-      {sheet ? (
-        dismiss ? (
-          <button type="button" aria-hidden tabIndex={-1} data-alpha-assistant-scrim="" onClick={dismiss} className={cn(scrimClass, "cursor-default")} />
-        ) : (
-          <div aria-hidden data-alpha-assistant-scrim="" className={cn(scrimClass, "pointer-events-none")} />
-        )
+      {underlay ? (
+        <div inert aria-hidden data-alpha-underlay="" className="pointer-events-none fixed inset-x-0 bottom-0 z-dock mx-auto max-w-md">
+          <AssistantComposer {...composer} fieldRef={undefined} fieldPull={undefined} onFocusField={undefined} voice={undefined} opener={undefined} variant="bar" onOpen={noop} onType={underlay === "pill" ? noop : undefined} />
+        </div>
+      ) : null}
+      {sheet && onDismiss ? (
+        <button type="button" aria-hidden tabIndex={-1} data-alpha-assistant-scrim="" onClick={onDismiss} className={cn(scrimClass, "cursor-default")} />
       ) : null}
       <section
         aria-label="Ask Alpha"
@@ -56,7 +62,7 @@ export function AssistantConversation({ header, contextAction, attachmentNotice,
         data-alpha-detent={detent}
         className={cn(
           "relative flex flex-col text-foreground",
-          resting ? "z-dock in-[body:has([data-covers-dock])]:invisible" : "z-assistant-sheet overflow-hidden bg-popover text-popover-foreground",
+          resting ? "z-dock in-[body:has([data-covers-dock])]:invisible" : "z-assistant-sheet overflow-hidden bg-popover text-popover-foreground [interpolate-size:allow-keywords]",
           full
             ? "h-full rounded-none pt-[calc(var(--alpha-safe-top)+--spacing(1))] in-data-[alpha-native]:pt-[calc(var(--alpha-safe-top)+--spacing(4))]"
             : resting ? null : cn("rounded-t-chat border-t border-border/60 pt-2 shadow-sheet dark:border-border", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
@@ -65,7 +71,7 @@ export function AssistantConversation({ header, contextAction, attachmentNotice,
         {...(barDrag ? { ...dragging, onPointerDownCapture: resting ? dragging.onPointerDownCapture : undefined } : {})}
         {...props}
       >
-        <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel && "overflow-y-auto")}>
+        <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel ? "overflow-y-auto" : "overflow-hidden")}>
           <AssistantChatHeader {...header} expanded={header.expanded ?? full} grabber={full ? undefined : header.grabber} />
           {contextAction}
           {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}

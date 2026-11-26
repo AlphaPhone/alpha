@@ -1,7 +1,7 @@
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Layer, ManagedRuntime } from "effect";
+import { ManagedRuntime } from "effect";
 import { createElement } from "react";
 import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import tokens from "@repo/design-system/tokens.json" with { type: "json" };
@@ -11,7 +11,7 @@ import vibelang from "vibelang-vite";
 import { type Plugin, build, defineConfig } from "vite";
 import type { LegalPage as Legal, policyPages as Pages } from "./src/Legal.tsx";
 import type { Site } from "./src/Site.tsx";
-import type { browserPage as Page, demo as Demo } from "./src/demo.vibe";
+import type { demo as Demo } from "./src/demo.vibe";
 
 const stable = { "alpha-home.webp": "src/alpha-home.webp", "alpha-mark.svg": "../../packages/design-system/brand/symbol.svg" };
 
@@ -45,8 +45,8 @@ function prerender(): Plugin {
       const built = (name: string) => import(pathToFileURL(join(server, `${name}.js`)).href);
       const { Site: drawn } = (await built("Site")) as { Site: typeof Site };
       const { LegalPage, policyPages } = (await built("Legal")) as { LegalPage: typeof Legal; policyPages: typeof Pages };
-      const { demo, browserPage } = (await built("demo")) as { demo: typeof Demo; browserPage: typeof Page };
-      const runtime = ManagedRuntime.make(Layer.provide(demo, browserPage));
+      const { demo } = (await built("demo")) as { demo: typeof Demo };
+      const runtime = ManagedRuntime.make(demo);
       let page: string;
       try {
         page = renderToString(createElement(drawn, { runtime }));

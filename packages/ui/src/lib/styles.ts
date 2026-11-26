@@ -22,8 +22,8 @@ export const floatingRow = cn(
   "flex min-h-11 cursor-default items-center gap-3 rounded-md px-3.5 text-base outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent",
 );
 
-/** The dimmed page behind a dialog or a sheet. */
-export const overlay = cn("fixed inset-0 bg-foreground/18 motion-safe:animate-fade dark:bg-background/55");
+/** The dimmed page behind a dialog or a sheet: it dims at once, without a fade, as v119's scrims do (phone.css:1165, automations.css:70, template.html:114). */
+export const overlay = cn("fixed inset-0 bg-foreground/18 dark:bg-background/55");
 
 /** The panel of a dialog: a card held over the foot of the dimmed page, clear of Ask Alpha, as develop's are. */
 export const dialogPanel = cn("fixed inset-x-4 bottom-30 z-dialog mx-auto flex max-h-[min(75dvh,calc(var(--alpha-viewport-height,100dvh)-2rem))] max-w-sm flex-col gap-3 overflow-y-auto rounded-sheet border border-border/60 bg-popover px-5 pt-5.5 pb-6 text-popover-foreground shadow-md outline-none motion-safe:animate-rise dark:border-border");

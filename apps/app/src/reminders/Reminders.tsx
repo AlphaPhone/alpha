@@ -854,9 +854,9 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
     void runtime.runPromise(beginEditReminder(item));
   };
   const handleSaveDraft = () => { void runtime.runPromise(saveReminderDraft()); };
-  const handleToggleComplete = (id: string) => { void runtime.runPromise(toggleReminderComplete(id)); };
+  const handleToggleComplete = (id: string) => { void runtime.runPromise(toggleReminderComplete(id, store.findItem(id)?.revision)); };
   const handleToggleFlag = (id: string) => { void runtime.runPromise(toggleReminderFlag(id)); };
-  const handleDeleteItem = (id: string) => { void runtime.runPromise(deleteReminderItem(id)); };
+  const handleDeleteItem = (id: string) => { void runtime.runPromise(deleteReminderItem(id, store.findItem(id)?.revision)); };
   const handleQuickAdd = (title: string, dueDate: string | null) => {
     const flagged = activeView.tag === "Smart" && activeView.view === "FlaggedView";
     void runtime.runPromise(createReminderItem({ listId: activeListId, title, dueDate, flagged }));

@@ -1,4 +1,4 @@
-import { Check, Copy, Trash2 } from "lucide-react";
+import { Trash2, createLucideIcon } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type Ref } from "react";
 import type { CopyReport } from "./messages.vibe";
 
@@ -14,6 +14,10 @@ interface MessageActionMenuProps {
   close: () => void;
   ref?: Ref<HTMLDivElement>;
 }
+
+/** Copy and Copied glyphs drawn as strokes, while Delete uses Lucide's trash-2. */
+const CopyGlyph = createLucideIcon({ name: "MessageCopy", node: [["path", { key: "copy", d: "M9 9h11v11H9zM5 15H4V4h11v1" }]] });
+const CopiedGlyph = createLucideIcon({ name: "MessageCopied", node: [["path", { key: "check", d: "M5 12l5 5 9-10" }]] });
 
 const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm leading-normal font-semibold whitespace-nowrap transition-colors duration-fast pointer-fine:hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 
@@ -46,7 +50,7 @@ export function MessageActionMenu({ actions, focusOnOpen, close, ref }: MessageA
         const attempt = ++copyAttemptRef.current;
         setCopy("pending");
         actions.copy?.((outcome) => { if (attempt === copyAttemptRef.current) setCopy(outcome); });
-      }}>{copy === "copied" ? <><Check aria-hidden className="size-4" />Copied!</> : <><Copy aria-hidden className="size-4" />Copy</>}</button>}
+      }}>{copy === "copied" ? <><CopiedGlyph aria-hidden className="size-4" />Copied!</> : <><CopyGlyph aria-hidden className="size-4" />Copy</>}</button>}
       {actions.remove && <button type="button" role="menuitem" autoFocus={focusOnOpen && !actions.copy} className={`${actionItem} text-hangup`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
       <span role="status" className={copy === "failed" ? "basis-full px-2 pb-1 text-caption text-muted-foreground" : "sr-only"}>{copy === "copied" ? "Copied." : copy === "failed" ? "Copy failed" : ""}</span>
     </div>

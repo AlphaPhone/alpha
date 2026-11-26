@@ -1,6 +1,6 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing } from "@repo/ui";
-import { Camera as CameraIcon, ChevronLeft, FileScan, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
+import { Camera as CameraIcon, ChevronLeft, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
@@ -9,15 +9,15 @@ import { useMachine } from "../../gen/app__camera.react.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import { Scan } from "../files/Scan.tsx";
-import type { cameraScan } from "../files/scan.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import { drawsAppBack } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import { approveCapture, CameraAssets, focus, shutter, type CameraThumbnails, type camera } from "./camera.vibe";
 import { Effect, type Layer } from "effect";
 
-type Runtime = Layer.Success<typeof camera> | Layer.Success<typeof cameraScan> | Resident;
+type Runtime = Layer.Success<typeof camera> | Resident;
 type Can = (event: Event) => boolean;
 type Fire = (event: Event) => void;
 
@@ -145,8 +145,8 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
         muted
         playsInline
         aria-hidden
-        className={cn("pointer-events-none absolute inset-0 size-full object-cover", state.lens === "Front" && "-scale-x-100", native && "invisible")}
-        style={native ? undefined : { scale: state.zoom / 10 }}
+        className={cn("pointer-events-none absolute inset-0 size-full object-cover", native && "invisible")}
+        style={native ? undefined : { scale: `${(state.lens === "Front" ? -1 : 1) * state.zoom / 10} ${state.zoom / 10}` }}
       />
       <span aria-hidden className={cn("pointer-events-none absolute top-1/2 -left-[4%] block w-[108%] -translate-y-1/2", state.wide && state.mode === "Photo" ? "aspect-9/16" : "aspect-3/4")}>
         {state.grid && ready(state) && (
@@ -191,12 +191,6 @@ function Access({ state, present, native, can, fire, takeSilent }: {
   const title = failed ? "Can’t start camera" : noCamera ? "Camera off" : "Mic off";
   const ask = { type: noCamera ? "askAccess" : "askMicrophone" } as const;
   const allow = failed ? undefined : can(ask) ? ask : native && can({ type: "openSettings" }) ? { type: "openSettings" } as const : undefined;
-  const way = native ? "Tap Allow to turn it on in Settings" : "Allow it for this page in your browser, then tap Retry";
-  const detail = failed
-    ? "The camera didn’t start. If another app is using it, close that app, then tap Retry."
-    : noCamera
-      ? `Alpha needs camera access to take photos and videos. ${way}.`
-      : `Videos record sound with the microphone. ${way}, or record without sound.`;
   const action = cn("min-h-11 rounded-tile bg-foreground/16 px-4 text-base font-normal text-foreground", focusRing);
   return (
     <section role="alert" aria-label={title} data-alpha-camera-access="" className="absolute inset-x-4 top-[38%] z-50 flex max-h-[max(160px,calc(62%_-_var(--alpha-dock-clearance,108px)))] flex-col gap-3 overflow-y-auto overscroll-contain rounded-xl bg-camera-panel p-4 text-center text-foreground landscape:right-37">
@@ -205,7 +199,6 @@ function Access({ state, present, native, can, fire, takeSilent }: {
         {!noMic && <span className="absolute -top-0.5 left-1/2 -ml-px h-9 w-[2.5px] -rotate-45 rounded-full bg-current ring-2 ring-camera-panel" />}
       </span>
       <strong>{title}</strong>
-      <p className="text-sm leading-detail text-foreground/72">{detail}</p>
       <div className="flex flex-wrap justify-center gap-2">
         {allow && <button type="button" className={action} aria-label={allow.type === "openSettings" ? "Allow in Settings" : undefined} onClick={() => fire(allow)}>{native ? "Allow" : "Retry"}</button>}
         {failed && can({ type: "retry" }) && <button type="button" className={action} onClick={() => fire({ type: "retry" })}>Retry</button>}
@@ -260,6 +253,7 @@ function LastCapture({ id, media, thumbnails, open }: {
 export function Camera({ runtime, alpha }: Shown<Runtime>) {
   const { state, can: permits, send } = useTimed(runtime, useMachine);
   const shell = useShell(alpha.runtime);
+  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   const bind = useCallback((video: HTMLVideoElement | null) => {
     if (!video) return;
     void runtime.runPromiseExit(Effect.flatMap(CameraAssets, (assets) => assets.bind(video)));
@@ -322,8 +316,8 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
       />
       {sheet && <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-(--alpha-dock-clearance,0px) h-40 bg-linear-to-b from-transparent to-background/55" />}
 
-      <header data-alpha-app-header="main" className="absolute inset-x-0 top-0 z-10 flex h-13 items-center gap-0.5 px-2">
-        {shell.can({ type: "goBack" }) && <button type="button" className={cn(headerButton, "rounded-lg")} aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft className="size-5.5" aria-hidden /></button>}
+      <header data-alpha-app-header="main" className="absolute inset-x-0 top-0 z-10 flex h-13 items-center px-2.5 portrait:top-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))]">
+        {shell.state && drawsAppBack(shell.state, launcher, "FirstPage") && <button type="button" className={cn(headerButton, "rounded-lg")} aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft className="size-5.5" aria-hidden /></button>}
         <span className="flex-1" />
         {inProgress && (
           <span role="timer" aria-label="Recording" className="flex h-7.5 items-center gap-2 rounded-segment bg-background/75 px-3 text-sm font-semibold text-foreground tabular-nums">
@@ -337,7 +331,6 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
             {autoFlash && <span aria-hidden className="absolute right-0.5 bottom-0.5 text-camera-badge font-bold">A</span>}
           </button>
         )}
-        {can({ type: "scanDocument" }) && <button type="button" className={headerButton} aria-label="Scan document" onClick={() => fire({ type: "scanDocument" })}><FileScan className="size-5.5" aria-hidden /></button>}
       </header>
 
       {state.countdown > 0 && (
@@ -397,7 +390,6 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         </button>
         <span aria-hidden className="size-13" />
       </div>
-      <Scan runtime={runtime} alpha={alpha} />
     </section>
   );
 }

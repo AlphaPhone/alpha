@@ -24,6 +24,7 @@ import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import { deletableShelfDraft, type ShelfPick } from "../../gen/app__inbox__drafts.ts";
 import { held } from "../../gen/app__inbox__shelf.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
+import { drawsAppBack } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe";
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
@@ -405,6 +406,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
   const canvas = useCanvas(runtime).state;
+  // spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it": as v119 45f6bed30 prototype/model.js:6415 drew Inbox's Back only off the launcher.
+  const firstPageBack = shell.state && drawsAppBack(shell.state, canvas?.launcher ?? false, "FirstPage") ? () => void alpha.back() : undefined;
   const remote = usePreferences(runtime).state?.images ?? false;
   const [typed, setTyped] = useState<{ text: string; over: string; folder: string } | undefined>();
   const [selection, setSelection] = useState<string>();
@@ -425,7 +428,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
     const waiting = state.accounts.status !== "Failed";
     return <InboxListScreen folder="incoming" rows={[]} search="" onSearchChange={() => undefined} loading={waiting}
       state={waiting ? undefined : "failed"} onStateAction={retryAccess}
-      onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined} />;
+      onBack={firstPageBack} />;
   }
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
   const onBegin = (beginning: Beginning) => {
@@ -553,7 +556,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
           onFocusCapture={() => { lastPaneRef.current = "list"; }}
           className={covered ? "hidden" : split ? "h-full w-[clamp(300px,36%,400px)] shrink-0 border-r border-border" : "min-h-0 min-w-0 flex-1"}>
         <InboxListScreen
-          onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined}
+          onBack={firstPageBack}
           account={account === 0 ? undefined : mail.email(account)}
           folder={folderNames[folder]}
           unavailable={!state.searchable}

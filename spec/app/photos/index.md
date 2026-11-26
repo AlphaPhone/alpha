@@ -14,6 +14,11 @@ the senders are [Who acts on photos](./actor.md). Photos are taken in the
 [Camera](../camera/). The shell decides when Photos is showing and from
 where; Notices shows Undo and says when it is gone.
 
+A photo opened full screen fades in over the grid and an album rises over the
+albums, as Alpha's earlier build drew them; Back takes them away at once.
+Before Photos has its first answer, it shows its header, never a blank
+screen or a spinner.
+
 ## Story: Scan text from a selected image
 
 > As the owner, I want to read text from one image I choose, with on-device
