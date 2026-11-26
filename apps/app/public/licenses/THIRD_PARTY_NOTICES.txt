@@ -3791,7 +3791,7 @@ SOFTWARE.
 
 ==============================================================================
 elizaOS (@elizaos/agent, @elizaos/os, @elizaos/cloud)
-Version: 79d850995af6352a2680b0543684c1fd84d7b078
+Version: a202bc62dc126eeef1e7d941b4338a604d12e9f6
 License: MIT
 Source: https://github.com/elizaOS/eliza.git (develop)
 
