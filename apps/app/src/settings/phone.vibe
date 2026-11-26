@@ -5,7 +5,7 @@ import * as Pages from "../../gen/app__settings.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Nearby, WiFi } from "../platform/wifi.vibe"
-import { type Due, type Job, answer, due, following, hearing, reacting, together, untimed } from "../runtime/reactor.vibe"
+import { type Due, type Job, answer, applying, due, following, hearing, reacting, together, untimed } from "../runtime/reactor.vibe"
 import { type Shelf, createShelf } from "../runtime/shelf.vibe"
 
 /** The networks the last scan found, kept beside the machine that counts them: the rows of the Network page. */
@@ -30,7 +30,9 @@ const found = Layer.effect(Found, effect {
 effect function scanned(scan: number): Network.Event!!(WiFi | Found | Network.Machine) {
   const { scan: result, networks } = try (try WiFi).scan()
   const event: Network.Event = { type: "scanned", scan, result, found: result === "Found" ? networks.length : 0 }
-  if (Network.enabled(try (try Network.Machine).get(), event)) try (try Found).set(networks)
+  if (Network.enabled(try (try Network.Machine).get(), event)) {
+    try (try Found).set(result === "Found" ? networks : [])
+  }
   return event
 }
 
@@ -64,11 +66,12 @@ function networkTimers(state: Network.Network): ReadonlyArray<Due<Network.Event,
   return waits.flatMap(([busy, key, at, event]) => (busy ? [due<Network.Event, []>(key, at, event)] : []))
 }
 
-const network = together(
-  Layer.provideMerge(reacting(Network, { carry: carryNetwork, timers: networkTimers }), found),
+const network = Layer.provideMerge(together(
+  reacting(Network, { carry: carryNetwork, timers: networkTimers }),
   // spec/app/settings/network.md, "Opening the page scans and reads whether the phone is online, each unless already asked, with ten seconds to answer"; spec/app/settings/network.md, "Leaving the page retires what it asked and forgets what it found; a join in flight is Android's and goes on"
   following(Pages.Machine, (state) => state.page === "NetworkPage", Network.Machine, (shown): Network.Event => (shown ? { type: "opened", at: untimed } : { type: "leave" })),
-)
+  applying(Network.Machine, (state) => state.found === 0, effect (empty) => { if (empty) try (try Found).set([]) }),
+), found)
 
 // spec/app/settings/carrier.md, "Only the newest read's answer is shown; a read that failed or was not answered in time shows nothing"
 effect function identifiers(reading: number): Carrier.Event!!CarrierSetup {

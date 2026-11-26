@@ -14,8 +14,8 @@ const undoArea = "Calendar"
 
 /** Scoped per-runtime metadata tracking released deletion revisions and the active Undo toast id. */
 export service DeletionMeta {
-  remember(id: number, revision: number, version: string): void
-  of(id: number): { readonly revision: number; readonly version: string } | undefined
+  remember(id: number, revision: number, version: string, answer: string): void
+  of(id: number): { readonly revision: number; readonly version: string; readonly answer: string } | undefined
   forget(id: number): void
   offered(): number
   setOffered(id: number): void
@@ -23,11 +23,11 @@ export service DeletionMeta {
 }
 
 const deletionMeta = Layer.effect(DeletionMeta, effect {
-  const sent = new Map<number, { readonly revision: number; readonly version: string }>()
+  const sent = new Map<number, { readonly revision: number; readonly version: string; readonly answer: string }>()
   let activeOffer = 0
   try Effect.addFinalizer(() => sync(() => { sent.clear(); activeOffer = 0 }))
   return {
-    remember(id: number, revision: number, version: string) { sent.set(id, { revision, version }) },
+    remember(id: number, revision: number, version: string, answer: string) { sent.set(id, { revision, version, answer }) },
     of: (id: number) => sent.get(id),
     forget(id: number) { sent.delete(id) },
     offered: () => activeOffer,
@@ -66,7 +66,7 @@ function carry(fx: Out): Job<Event, Editor.Machine | Shown | DeletionMeta, []> {
     const shown = try Shown
     const meta = try DeletionMeta
     const row = shown.find(fx.id) ?? shown.lastSeen(fx.id)
-    meta.remember(fx.id, fx.revision, row?.version ?? "")
+    meta.remember(fx.id, fx.revision, row?.version ?? "", row?.answer ?? "")
     const remove: Editor.Event = {
       type: "deleteEvent", id: fx.id, revision: fx.revision,
       scope: fx.reach === "WholeSeries" ? "WholeSeries" : fx.reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne", repeating: row?.recurring ?? false,
@@ -77,6 +77,19 @@ function carry(fx: Out): Job<Event, Editor.Machine | Shown | DeletionMeta, []> {
     } catch () => Stream.succeed({ type: "ended", id: fx.id, done: false } as Event)
   }
   return Job.Run({ key: `release ${fx.id}`, answers: Stream.unwrap(released), lost: Option.some({ type: "ended", id: fx.id, done: false }), by: [], allowEmpty: true })
+}
+
+/** Emits whenever either calendar source transitions to or advances a loaded read. */
+export function loadedReads(view: View.Machine.Shape) {
+  const loaded = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
+  return Stream.changesWith(
+    loaded,
+    (a, b) =>
+      a.phone.status === b.phone.status
+      && a.phone.ticket === b.phone.ticket
+      && a.google.status === b.google.status
+      && a.google.ticket === b.google.ticket,
+  )
 }
 
 // spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"
@@ -140,8 +153,7 @@ const reconciled = started(effect {
   const held = try Held.Machine
   const shown = try Shown
   const meta = try DeletionMeta
-  const settled = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
-  try Stream.runForEach(Stream.changesWith(settled, (a, b) => a.phone.ticket === b.phone.ticket && a.phone.status === b.phone.status && a.google.ticket === b.google.ticket && a.google.status === b.google.status), effect (s) => {
+  try Stream.runForEach(loadedReads(view), effect (s) => {
     const d = try held.get()
     if (d.hiding === 0) return
     const id = d.hiding
@@ -160,7 +172,9 @@ const reconciled = started(effect {
     }
     const before = meta.of(id)
     const changed = current.answer === "AnsweredDeclined"
-      || (before !== undefined ? current.revision !== before.revision || (before.version !== "" && current.version !== before.version) : current.revision !== d.revision)
+      || (before !== undefined
+        ? current.revision !== before.revision || (before.version !== "" && current.version !== before.version) || current.answer !== before.answer
+        : current.revision !== d.revision)
     if (changed) meta.forget(id)
     try contained(held.send({ type: "readShows", id, unchanged: !changed }), "updating a hidden deletion after read")
   })

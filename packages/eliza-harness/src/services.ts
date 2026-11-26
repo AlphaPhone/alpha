@@ -461,12 +461,28 @@ function cloudCommand(secrets: string, args: readonly string[], keys: Readonly<R
   return { child, exited, output: () => output };
 }
 
+/** Wait for a spawned child service to answer 200 at `url`, or fail promptly if it exits or is killed by a signal. */
+export async function awaitChildService(
+  child: ChildProcess,
+  url: string,
+  label: string,
+  output: () => string,
+): Promise<void> {
+  let stopped: string | undefined;
+  child.once("close", (code, signal) => {
+    children.delete(child);
+    stopped = `${label} stopped with ${signal ?? code}: ${output()}`;
+  });
+  await answering(
+    url,
+    () => stopped ?? (child.exitCode !== null || child.signalCode !== null ? `${label} stopped with ${child.signalCode ?? child.exitCode}: ${output()}` : undefined),
+  );
+}
+
 async function served(secrets: string, args: readonly string[], origin: string, keys: Readonly<Record<string, string>> = {}) {
   const running = cloudCommand(secrets, ["serve", ...args], keys);
-  let over = false;
-  void running.exited.then(() => { over = true; });
   try {
-    await answering(`${origin}/api/public/service`, () => (over ? `the cloud stopped before it served: ${running.output()}` : undefined));
+    await awaitChildService(running.child, `${origin}/api/public/service`, "the cloud", running.output);
     return running.child;
   } catch (cause) {
     await ended(running.child);
@@ -545,9 +561,9 @@ export async function startCloud(state: string, emails: readonly string[], credi
       if (await funded.exited !== 0) throw new Error(`the operator could not fund ${email}: ${funded.output()}`);
     }
     running = await served(secrets, at, local, keys);
+    const active = running;
     const front = await startFront(home, new URL(local));
-    const cloudProcess = running;
-    return { api: front.api, caFile: front.caFile, local, model, provider: provider.origin, owners, stop: async () => { await front.stop(); await ended(cloudProcess); await provider.stop(); } };
+    return { api: front.api, caFile: front.caFile, local, model, provider: provider.origin, owners, stop: async () => { await front.stop(); await ended(active); await provider.stop(); } };
   } catch (cause) {
     if (running !== undefined) await ended(running);
     await provider.stop();
@@ -595,7 +611,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
   child.stdin.end(`${JSON.stringify({ version: 1, token, epoch: Date.now(), credential: { version: 1, value: key.token }, storageKey: base64url(randomBytes(32)) })}\n`);
   const origin = `http://127.0.0.1:${port}`;
   try {
-    await answering(`${origin}/api/health`, () => (child.exitCode === null ? undefined : `the agent stopped with ${child.exitCode}: ${errors}`));
+    await awaitChildService(child, `${origin}/api/health`, "the agent", () => errors);
   } catch (cause) {
     await ended(child);
     throw cause;

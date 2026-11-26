@@ -489,13 +489,11 @@ effect function signInUser(
   if (Option.isSome(needPassword)) {
     return { kind: "PasswordRequired", hint: needPassword.value.hint, pendingAuthId: needPassword.value.pending_auth_id }
   }
-  const err = Schema.decodeUnknownOption(TelegramErrorBody)(opened.body)
-  if (Option.isSome(err)) {
-    throw telegramFailureFromBody(opened.status, opened.body, opened.headers["retry-after"])
-  }
   if (!replied(opened.status)) {
     throw telegramFailureFromBody(opened.status, opened.body, opened.headers["retry-after"])
   }
+  const err = Schema.decodeUnknownOption(TelegramErrorBody)(opened.body)
+  if (Option.isSome(err)) throw telegramErrorFromCode(err.value.error_message, err.value.error_code, opened.headers["retry-after"])
   const auth = try Msg.decodeWith(TelegramAuthorization, opened.body)
   return { kind: "Authenticated", sessionToken: auth.session_token, user: auth.user }
 }

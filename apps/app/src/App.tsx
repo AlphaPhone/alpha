@@ -1,6 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { Effect } from "effect";
 import { type MouseEvent, type PointerEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
@@ -188,9 +187,9 @@ export function App({ alpha }: AppProps) {
     const main = node?.closest("main");
     if (!main || homeShown) return;
     const stop = new AbortController();
-    void Effect.runPromise(firstFrame(main), { signal: stop.signal }).then(() => setHomeShown(true), () => undefined);
+    void alpha.runtime.runPromise(firstFrame(main), { signal: stop.signal }).then(() => setHomeShown(true), () => undefined);
     return () => stop.abort();
-  }, [homeShown]);
+  }, [alpha, homeShown]);
   const [risen, setRisen] = useState<{ view: View | undefined; done: boolean }>({ view: undefined, done: false });
   const shellFailed = cause !== undefined;
   const showing = state?.trail.at(-1);

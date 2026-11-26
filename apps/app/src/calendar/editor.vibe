@@ -8,6 +8,7 @@ import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import type { Effect as Out, Event, Scope, Write } from "../../gen/app__calendar__editor.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
+import { loadedReads } from "./deletions.vibe"
 import { type Readback, type WriteKind, agentCalendarAccepts, answerReadback, defaultStart, deviceRoute, newEventTarget, readbackSeen } from "../../gen/app__calendar__writing.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
@@ -343,7 +344,10 @@ function endedBy(found: Found | undefined, row: Row, kind: WriteKind, reply: str
   const event = found?.events.find((candidate) => candidate.id === row.key)
   const declined = row.cancel === "DeclineInvitation" && (event?.attendees.some((person) => person.self && person.responseStatus === "declined") ?? false)
   const readback: Readback = found === undefined ? "ReadbackFailed"
-    : kind === "AnswerKind" ? answerReadback(event !== undefined, event?.attendees.some((person) => person.self && person.responseStatus === reply) ?? false)
+    : kind === "AnswerKind"
+      ? (reply === "declined" && event === undefined
+        ? "ReadbackFound"
+        : answerReadback(event !== undefined, event?.attendees.some((person) => person.self && person.responseStatus === reply) ?? false))
     : kind === "ChangeKind" ? (event !== undefined && (fields === undefined || updatedMatches(event, fields)) ? "ReadbackFound" : "ReadbackMissing")
     : event === undefined || declined ? "ReadbackMissing" : "ReadbackFound"
   const seen = readbackSeen(kind, readback)
@@ -412,10 +416,11 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
   }
   if (kind === "Remove") {
     if (row.cancel === "NoCancellation" || row.managed) return refused
-    const cancellationMode = row.cancel === "DeclineInvitation" ? "decline_invitation" : "organizer_cancel"
+    const declining = row.cancel === "DeclineInvitation"
+    const cancellationMode = declining ? "decline_invitation" : "organizer_cancel"
     const sent = try attemptedWith(Agent, (key) => HttpClientRequest.delete(event, { urlParams: { ...scoped, expectedProviderVersion: row.version, idempotencyKey: key, cancellationMode, notifyAttendees: "false" } }), attempt)
     if (filed(sent.body)) return waiting
-    return sent.confirmed ? try readBackAgent(row, "DeleteKind", "") : { confirmed: sent.confirmed, known: sent.known }
+    return sent.confirmed ? try readBackAgent(row, declining ? "AnswerKind" : "DeleteKind", declining ? "declined" : "") : { confirmed: sent.confirmed, known: sent.known }
   }
   if (!row.editable) return refused
   const maybe = try readKept(try owner())
@@ -566,8 +571,7 @@ const reread = started(effect {
   const view = try View.Machine
   const editor = try Editor.Machine
   const shown = try Shown
-  const loaded = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
-  try Stream.runForEach(Stream.changesWith(loaded, (a, b) => a.phone.ticket === b.phone.ticket && a.google.ticket === b.google.ticket), effect () => {
+  try Stream.runForEach(loadedReads(view), effect () => {
     const form = try editor.get()
     const state = try view.get()
     for (const id of new Set([...(form.form === "EditReminder" ? [] : [form.target]), ...form.latched])) {

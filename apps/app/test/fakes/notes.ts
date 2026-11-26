@@ -40,6 +40,9 @@ const day = 24 * hour;
 const iso = (at: number) => new Date(Math.floor(at / 1000) * 1000).toISOString();
 
 /** A note of the store, made and last changed at `at`. */
+/** The recording the dev server's "Design sync" keeps, on the agent and on the fake phone alike, so it plays. */
+export const developedRecording = { noteId: "sync", audioId: "sync-recording", durationMs: 408_000 } as const;
+
 export function note(id: string, title: string, body: string, at: number, format?: StickyNote["format"]): StickyNote {
   return { id, title, body, color: "yellow", ...(format === undefined ? {} : { format }), createdAt: iso(at), updatedAt: iso(at) };
 }
@@ -187,7 +190,9 @@ function interact(scene: NotesScene, input: unknown, now: () => number): Respons
     scene.deleteRequests?.push({ id: present.id, expectedRevision: params.expectedRevision });
     if (present.id === scene.refuseDiscardId) return refused(409);
     scene.notes = scene.notes.filter((item) => item !== present);
-    scene.trash.push({ note: present, deletedAt: iso(now()) });
+    /** The store and the phone share one clock, as the resident agent does on the device: a deletion is stamped at the world's time. */
+    const deletedAt = iso(now());
+    scene.trash.push({ note: present, deletedAt });
     scene.revision += 1;
     return result(scene, present);
   }
@@ -217,6 +222,7 @@ export function notesRoutes(scene: NotesScene, now: () => number): Route[] {
         const advertised = scene.deleteAtRevision === false ? {} : { deleteAtRevision: true };
         return scene.failing ? refused(503) : Response.json({ success: true, data: { ...snapshot(scene), ...advertised } });
       }
+      if (request.method === "GET" && url.pathname === "/api/notes/trash/recordings") return Response.json({ success: true, data: [] });
       if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body, now));
       if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
         return request.json().then(async (body: Record<string, unknown>) => {

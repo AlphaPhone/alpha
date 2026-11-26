@@ -39,11 +39,12 @@ export interface Book {
   readonly problem: ContactDraftProblem | "stale" | "not-found" | undefined
   /** Who narrowed the list to `sought`: a filter Alpha applied shows as a chip the owner can clear. */
   readonly filteredBy: "Owner" | "Alpha"
+  readonly refusedWrite: number | undefined
 }
 
 export const blankForm: Form = { givenName: "", familyName: "", phones: [""], emails: [""], notes: "" }
 
-const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: undefined, problem: undefined, filteredBy: "Owner" }
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: undefined, problem: undefined, filteredBy: "Owner", refusedWrite: undefined }
 
 /** The contacts behind Contacts' counts. */
 export service Rows {
@@ -241,6 +242,7 @@ effect function written(id: number, change: Change, contact: string): Event!!(Te
     if (done.status === "stale" || done.status === "not-found") try store.set({ problem: done.status })
     return done.status === "unknown" ? { made: false, known: false } : answered(done.status === "saved")
   } catch (failure) => answered(false, failure)
+  if (change !== "Remove") try store.set({ refusedWrite: !outcome.made && outcome.known ? id : undefined })
   return { type: "writeAnswered", id, ...outcome }
 }
 
@@ -302,7 +304,7 @@ const forget = applying(Contacts.Machine, (state) => ({
   try (try Rows).set({
     ...(list ? { rows: [], next: undefined } : {}),
     ...(card ? { card: undefined, reach: undefined } : {}),
-    ...(form ? { form: blankForm, editBase: undefined, problem: undefined } : {}),
+    ...(form ? { form: blankForm, editBase: undefined, problem: undefined, refusedWrite: undefined } : {}),
   })
 })
 

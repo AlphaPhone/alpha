@@ -798,6 +798,8 @@ effect function saveReminderDraftNow(): (ReminderItemRecord | undefined)!!(Remin
     if (Editor.canLanded(after)) try contained(editor.send({ type: "landed" }), "landing reminder draft")
     else if (Editor.canClose(after)) try contained(editor.send({ type: "close" }), "closing reminder draft")
     try clearPersistedDraft()
+  } else {
+    try contained(editor.send({ type: "reopen" }), "releasing failed reminder save")
   }
   return saved
 }

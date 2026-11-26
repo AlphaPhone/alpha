@@ -25,6 +25,9 @@ export function rejection(message: string, code = message) {
   return Object.assign(new Error(message), { code });
 }
 
+/** A plugin call's answer, worked out at once as Capacitor's bridge does: what `work` throws, the call rejects with. */
+export const answered = <T>(work: () => T) => new Promise<T>((resolve) => resolve(work()));
+
 const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fromCharCode(one)).join(""));
 
 /**
@@ -34,7 +37,7 @@ const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fro
  * its channel admits; `subscribeEvents` answers `{ id }`, then emits each event the agent publishes on the topic as
  * `agentEvent`, until `unsubscribeEvents`.
  */
-export function elizaAgent(agent: Answering, recovery?: RecoveryScene): Faked {
+export function elizaAgent(agent: Answering, recovery?: RecoveryScene, abortFails: () => boolean = () => false): Faked {
   return plugin<ElizaAgentPlugin, AgentEvents>((emit, onUnplug) => {
     const calls = new Map<string, AbortController>();
     let state: "running" | "stopped" | "failed" = recovery === undefined ? "running" : "failed";
@@ -113,6 +116,7 @@ export function elizaAgent(agent: Answering, recovery?: RecoveryScene): Faked {
       const call = calls.get(id);
       calls.delete(id);
       call?.abort();
+      if (abortFails()) return Promise.reject(rejection("AbortFailed"));
       return Promise.resolve({ aborted: call !== undefined });
     };
     return {
@@ -286,6 +290,13 @@ interface Capacitor {
   nativeCallback?: (plugin: string, method: string, options: { eventName?: string; callbackId?: string }, heard?: Hear) => string;
 }
 
+let currentHearing = new Map<string, Map<string, Hear>>();
+
+/** Number of active Capacitor listeners currently registered for `plugin` and `event`. */
+export function listenerCount(name: string, event: string): number {
+  return currentHearing.get(`${name} ${event}`)?.size ?? 0;
+}
+
 /**
  * Make the page a phone's: Android's bridge object, which is how Capacitor tells the platform, and on `Capacitor` the
  * header of each plugin of `plugins` and the two calls its runtime makes of the native side. The returned function
@@ -300,6 +311,7 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   const previousCallback = capacitor.nativeCallback;
   const hearing = new Map<string, Map<string, Hear>>();
   const cleanups: (() => void)[] = [];
+  currentHearing = hearing;
   const heard = (name: string, event: string) => hearing.get(`${name} ${event}`) ?? hearing.set(`${name} ${event}`, new Map()).get(`${name} ${event}`)!;
   const made = Object.fromEntries(Object.entries(plugins).map(([name, make]) => [
     name,

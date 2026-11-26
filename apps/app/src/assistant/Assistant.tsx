@@ -15,7 +15,7 @@ import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.ef
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
-import { attachments as attachmentCount, content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
+import { content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
 import { browserFieldPull, composerLift, focused as dockFocused, isOpen as dockOpen, pill as dockPill, sent as dockSent } from "../../gen/app__assistant__dock.ts";
@@ -32,7 +32,6 @@ import { useMachine as useContact } from "../../gen/app__contacts.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { Machine as CanvasMachine } from "../../gen/app__shell__keyboard.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
-import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
@@ -47,7 +46,7 @@ import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import type { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, openContactAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
-import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
+import { askComms, freedom, holdAndSend, openChatSearch, restTyping, startAndSend } from "./assistant.vibe";
 import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeContactFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
@@ -63,6 +62,8 @@ import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
+import { asked } from "../calendar/asked.ts";
+import { shownInAskAlpha } from "../../gen/app__calendar__agent.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
@@ -76,6 +77,8 @@ export interface AssistantProps {
   };
   canReadAloud?: boolean;
   onBack?: () => void;
+  /** Calendar's card for a change a reply filed (calendar/sheet.tsx). */
+  calendarReview?: ReactNode;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -402,7 +405,7 @@ function openLiveAttachments(
 ) {
   const initial = runtime.runSyncExit(Effect.flatMap(ComposerMachine, (machine) => machine.get()));
   if (initial._tag !== "Success") return;
-  const initialRequest = { type: "openPicker", room: maxFiles - attachmentCount(initial.value.editor) } as const;
+  const initialRequest = { type: "openPicker", room: maxFiles - initial.value.editor.files } as const;
   if (!attachments.can(initialRequest)) return;
   void runtime.runPromise(attachmentAuthority()).then((authority) => {
     if (authority === undefined) {
@@ -416,7 +419,7 @@ function openLiveAttachments(
       return { comp, conv, picker };
     }));
     if (live._tag !== "Success") return;
-    const room = maxFiles - attachmentCount(live.value.comp.editor);
+    const room = maxFiles - live.value.comp.editor.files;
     if (room <= 0 || !canOpenPicker(live.value.picker, room)) return;
     void runtime.runPromise(openAttachmentPicker({ binding: live.value.comp.binding, slot: live.value.comp.read.ticket, revision: live.value.conv.context.revision, authority }, room));
   });
@@ -571,7 +574,7 @@ function useMailReview(runtime: AssistantProps["runtime"], board: Board, compose
   return { mail, reviewed, attachMail, dismissMail };
 }
 
-interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageActions"> {
+interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageActions" | "calendarReview"> {
   board: Board;
   seen: Seen;
   conversation: ReturnType<typeof useConversation>;
@@ -587,8 +590,9 @@ interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageAct
 }
 
 function useAssistantTranscript({ runtime, board, seen, conversation, chats, writing, shell, free, canReadAloud,
-  messageActions, onPreview, open, interim, retry }: TranscriptOptions): AssistantTranscriptProps | undefined {
+  messageActions, onPreview, open, interim, retry, calendarReview }: TranscriptOptions): AssistantTranscriptProps | undefined {
   const [talking, shown] = [conversation.state, chats.state];
+  const calendar = useSyncExternalStore(asked.subscribe, asked.snapshot);
   const draftCards = useMessagingDrafts(runtime, shell);
   const holdMessage = useCallback((held: () => void) => {
     const fiber = runtime.runFork(holdMessagePress(held));
@@ -653,6 +657,11 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+  const filedHere = calendar.filed.filter((one) => one.conversation === shown.chosen);
+  const calendarCard = calendarReview !== undefined && !talking.context.sensitive
+    && shownInAskAlpha(calendar.shown, filedHere.length > 0, filedHere.some((one) => one.message === lines.at(-1)?.id))
+    ? [{ id: "calendar review", author: "alpha" as const, text: "", children: calendarReview }] : [];
   const offer = seen.recordingSummary;
   const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
     && lines.some((line) => !line.mine && line.id === offer.message)
@@ -667,7 +676,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   return {
     ...rows,
     holdMessage: open ? holdMessage : undefined,
-    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
+    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...calendarCard, ...mediaNote, ...recordingSummary],
     interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
     position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
     visible: open,
@@ -680,7 +689,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   };
 }
 /** @model spec/app/assistant/index.md */
-export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onBack }: AssistantProps) {
+export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onBack, calendarReview }: AssistantProps) {
   const conversation = useConversation(runtime);
   const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
@@ -688,7 +697,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reply = useReply(runtime);
   const search = useSearch(runtime);
   const shell = useShell(runtime);
-  const layers = useLayers(runtime);
   const dock = useDock(runtime);
   const comms = useComms(runtime);
   const contact = useContact(runtime).state;
@@ -727,7 +735,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     if (origin?.tag !== "ContactDock") returnChatFocus();
     else if (origin.route === searchRoute) document.getElementById(contactChatActionsId(origin.route, origin.person))?.focus();
   };
-  const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
+  const history = useHistorySheets(chats, search, seen, free, beginSearch, returnSearchFocus);
   const subject = onComms ? comms.state?.key : undefined;
   const priorStage = comms.state?.stage.at(-1);
   const returnTo = priorStage === undefined ? undefined : commsViewOf(priorStage.app);
@@ -749,7 +757,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   const transcript = useAssistantTranscript({
     runtime, board, seen, conversation, chats, writing, shell, free, messageActions, canReadAloud, open, interim,
-    onPreview: canPreview ? preview : undefined, retry: retryLastSent,
+    onPreview: canPreview ? preview : undefined, retry: retryLastSent, calendarReview,
   });
   const { mail, reviewed, attachMail, dismissMail } = useMailReview(runtime, board, composer, writing?.offeredAt, type, composerRef);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
@@ -779,19 +787,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       return;
     }
     if (newChat) {
-      board.queueSend();
-      void chats.send(start);
+      void runtime.runPromise(startAndSend(start));
       return;
     }
-    const prior = seen.typed;
-    board.hold(prior);
-    board.type("");
-    void composer.send(hold).then((outcome) => {
-      if (outcome._tag === "Failure" && board.outgoing === prior) {
-        board.outgoing = "";
-        if (board.snapshot().typed === "") board.type(prior);
-      }
-    });
+    void runtime.runPromise(holdAndSend(hold));
   };
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
@@ -891,6 +890,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           opener: !open ? grabber : undefined,
           onOpen: !open && !grabber ? openSheet : undefined,
           onType: compact ? revealComposer : undefined,
+          // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a bar tucked by a drag is the pill where it is, with no entrance, as v119's
+          still: compact && dock.state?.tucked === true,
           onSend: sendable && !inFlight(talking.turn) ? () => {
             if (!open) openSheet();
             send();

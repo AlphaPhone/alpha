@@ -22,7 +22,7 @@ public final class AlphaApplication extends Application {
   boolean main = getPackageName().equals(getProcessName());
   if (main) AlphaLegacyAgentArchive.putBack(this);
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
-  AgentService.useCredentials(credentials);
+  AgentService.useCredentials(DeviceCustody.agentCredentials(this, BuildConfig.CLOUD_API_ORIGIN));
   if (main) AgentService.useGoogleBroker(DeviceCustody.googleBroker(this, BuildConfig.CLOUD_API_ORIGIN));
   CredentialReader reader = credentials.reader();
   HostedDigestDelivery digests = main ? HostedDigestDelivery.start(this, reader) : null;

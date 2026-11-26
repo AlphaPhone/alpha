@@ -40,14 +40,12 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
   onHandOver?: (neighbour: Neighbour) => void;
 };
 
-const NotificationAccessRowContext = createContext<ReactNode>(null);
-
 /**
  * The row that opens Android's notification access, given to the collection drawn in `collectionPolicy` so it sits
  * second in that one card, after Other apps, as the Sunday v119 demo build drew it (Alpha 45f6bed30,
  * prototype/settings-adapter.ts:1150-1155).
  */
-export const NotificationAccessRow = NotificationAccessRowContext;
+export const NotificationAccessRowContext = createContext<ReactNode>(null);
 
 /**
  * Notifications: whether Alpha's notifications are on, Do Not Disturb, Android's page for them, each channel on its own

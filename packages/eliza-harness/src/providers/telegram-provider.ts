@@ -697,7 +697,7 @@ function handleGetDialogs(req: ParsedRequest, res: ServerResponse, state: Telegr
     .filter(({ dialog, summary }) => {
       if (folderId !== undefined && folderId !== 0 && dialog.folder_id !== folderId) return false;
       if (archived !== undefined && dialog.archived !== archived) return false;
-      if (archived === undefined && folderId === undefined && dialog.archived) return false;
+      if (archived === undefined && (folderId === undefined || folderId === 0) && dialog.archived) return false;
       if (pinnedOnly && !dialog.pinned) return false;
       if (unreadOnly && Number(summary.unread_count) === 0) return false;
       if (offsetDate !== undefined && Number(summary.top_date) >= offsetDate) return false;

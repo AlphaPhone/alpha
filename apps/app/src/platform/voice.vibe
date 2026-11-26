@@ -769,6 +769,12 @@ interface CloudMicPreview {
   readonly outlet: VoicePreview | undefined
 }
 
+/** Speak `text` on `cloud`'s stream until `abort` stops it. */
+const speakOn = (cloud: CloudVoiceSession, text: string, abort: AbortController, started: () => void) => tryPromise({
+  try: () => cloud.stream.speak(text, abort.signal, started),
+  catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
+})
+
 interface CloudMicConfig {
   readonly currentSession: () => number
   readonly getSpeech: () => CloudVoiceSession | undefined
@@ -1272,7 +1278,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
   const relay = base === undefined ? undefined : pageSpeechRelay(base)
   let activeSession = 0
   let cloudSpeech: CloudVoiceSession | undefined
-  let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
+  let cloudPreview: CloudMicPreview | undefined
   let cloudSpeechAbort: AbortController | undefined
   let cueStop: Deferred.Deferred<void> | undefined
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
@@ -1311,10 +1317,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (activeSession !== session || cloud?.session !== session) return
     const abort = makeAbort()
     cloudSpeechAbort = abort
-    try tryPromise({
-      try: () => cloud.stream.speak(text, abort.signal, started),
-      catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
-    })
+    try speakOn(cloud, text, abort, started)
   }
 
   effect function setSpeakerMuted(session: number, muted: boolean): boolean!! {

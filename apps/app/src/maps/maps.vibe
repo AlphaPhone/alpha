@@ -2,7 +2,7 @@
 import { CloudError } from "@elizaos/cloud"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
-import { mode, pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
+import { pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
 import type { Change, Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
 import * as Credits from "../../gen/app__maps__credits.effect.vibe"
 import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
@@ -366,7 +366,8 @@ function previouslyKeptIn(text: string): ReadonlyArray<KeptPlace> | undefined {
   if (!isRecord(data) || data.version !== 1 || !Array.isArray(data.items)) return undefined
   const read: ReadonlyArray<KeptPlace | "google" | undefined> = data.items.map(previouslyKept)
   if (read.includes(undefined)) return undefined
-  return read.filter((entry): entry is KeptPlace => entry !== undefined && entry !== "google")
+  const kept = read.filter((entry): entry is KeptPlace => entry !== undefined && entry !== "google")
+  return kept.length <= 200 ? kept : undefined
 }
 
 /** The machine's saved list of `kept`, numbered in the atlas, once per place. */
@@ -599,12 +600,11 @@ const opening = started(effect {
     if (!shown) return
     const caps = try device.capabilities()
     try ignore(screen.send({ type: "admitDialer", on: caps.image }))
-    const grant = allowedOf(try location.permission())
-    try ignore(screen.send({ type: "observeLocation", grant }))
-    const now = try screen.get()
-    if (grant !== "Denied" && grant !== "Unasked" && mode(now) === "Browse") try ignore(screen.send({ type: "quietFix" }))
     try accountRead()
     try ignore(screen.send({ type: "connect" }))
+    const grant = allowedOf(try location.permission())
+    try ignore(screen.send({ type: "observeLocation", grant }))
+    try ignore(screen.send({ type: "quietFix" }))
   })
 }, "opening Maps")
 
@@ -641,6 +641,7 @@ const presence = started(effect {
         try accountRead()
         try ignore(screen.send({ type: "connect" }))
       }
+      if ((try screen.get()).link.known) try ignore(screen.send({ type: "quietFix" }))
       return
     }
     try ignore(screen.send({ type: "leaveMaps" }))

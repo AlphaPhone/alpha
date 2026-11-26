@@ -130,6 +130,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     localStorage.setItem(kept, JSON.stringify({ titles: "of another shape" }));
     const fourth = await open(world, withSample);
     await until(fourth.alpha, sample.runtime(fourth.alpha), Reminders, (s) => s.list.status === "Loaded");
+    // spec/app/sample/index.md, "When Alpha opens again, a read and a hold under way are taken up again, the feed is closed, and a deletion sent is unknown": the Notes view draws its own header, so the sample mounted there shows no title of the shell's; the shell is still at Notes.
     expect([
       localStorage.getItem(`${kept}.unreadable`),
       Boolean(document.querySelector("section[aria-label=Reminders]")),

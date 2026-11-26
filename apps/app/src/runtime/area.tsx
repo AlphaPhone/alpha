@@ -4,6 +4,7 @@ import type { Effect, Layer, ManagedRuntime } from "effect";
 import type { ComponentType, ReactNode } from "react";
 import type { Place } from "../areas.ts";
 import type { MediaHandoff } from "../assistant/attachments.vibe";
+import type { CalendarReviews } from "../calendar/reviews.vibe";
 import type { ScanExports } from "../files/scanEntry.vibe";
 import type { InboxCardEntry } from "../home/cards.vibe";
 import type { AgentPages, BrowserDownloadsHandoff, InboxBrowserLinks } from "../platform/browser.vibe";
@@ -12,7 +13,7 @@ import type { resident } from "../resident.vibe";
 import type { Whole } from "./reactor.vibe";
 
 /** What the root runtime gives every area: the platform and the resident machines. */
-export type Resident = Platform | MediaHandoff | AgentPages | BrowserDownloadsHandoff | InboxBrowserLinks | InboxCardEntry | ScanExports | SignInMachine | StartupSignIn | Layer.Success<typeof resident>;
+export type Resident = Platform | MediaHandoff | AgentPages | BrowserDownloadsHandoff | InboxBrowserLinks | InboxCardEntry | ScanExports | CalendarReviews | SignInMachine | StartupSignIn | Layer.Success<typeof resident>;
 
 /** Alpha as boot.tsx opened it. */
 export interface Alpha {

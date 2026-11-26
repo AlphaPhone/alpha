@@ -131,9 +131,11 @@ pure def toggle(s: Alarms, id: int, on: bool, fireAt: int): Alarms =
 
 ### Deleting an alarm holds it for a five-second Undo window before committing removal
 
+Deleting a second alarm while an earlier deletion is still held commits the earlier deletion and holds the newer one.
+
 ```quint
 pure def canRequestDelete(s: Alarms, id: int, now: int): bool =
-  not(s.hasHidden) and hasAlarm(s.items, id) and now >= 0
+  hasAlarm(s.items, id) and now >= 0
 
 pure def requestDelete(s: Alarms, id: int, now: int): Alarms =
   val target = alarmOf(s.items, id)
@@ -242,6 +244,8 @@ pure def ackMissed(s: Alarms, id: int): Alarms =
 ```
 
 ### Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing
+
+Timed-out repeating alarms settle to `Idle` with `fireAt: 0` so they never double-fire on restart; `reschedule` arms their next future fire time while preserving `missed`.
 
 ```quint
 pure def timedOutAt(a: Alarm, now: int): bool =

@@ -53,7 +53,7 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
   if (snapshot?.trash === undefined) return failed
   const note = snapshot.notes.find((row) => numberOf("note", row.id) === subject)
   const entry = snapshot.trash.find((row) => numberOf("note", row.note.id) === subject)
-  if (act !== "Sweep" && snapshot.revision + 1 !== revision) return failed
+  if (act !== "Sweep" && act !== "EmptyAll" && snapshot.revision + 1 !== revision) return failed
   const discardTarget = effect {
     if (note === undefined || snapshot.deleteAtRevision !== true) return undefined
     const seen = (try (try NoteContent).collection()).noteByNumber.get(subject)

@@ -261,10 +261,12 @@ export function Authoring({ runtime, owner, offered = true }: AuthoringProps) {
         The agent didn’t confirm the save.
         <Button variant="secondary" onClick={() => tell({ type: "checkSave" })}>Check save</Button>
       </Alert>}
-      <div className="flex flex-wrap gap-2">
-        {builder.can({ type: "reviewResend" }) && <Button variant="secondary" onClick={() => tell({ type: "reviewResend" })}>Review the same save</Button>}
-        {builder.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow editing again</Button>}
-      </div>
+      {(builder.can({ type: "reviewResend" }) || builder.can({ type: "letGo" })) && (
+        <div className="flex flex-wrap gap-2">
+          {builder.can({ type: "reviewResend" }) && <Button variant="secondary" onClick={() => tell({ type: "reviewResend" })}>Review the same save</Button>}
+          {builder.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow a different save</Button>}
+        </div>
+      )}
       {state.save.attempt.outcome === "Refused" && !state.save.offered && <Alert variant="warn" role="status">Your agent didn’t save this workflow.</Alert>}
       <ConfirmDialog open={state.review.showing} title={`Save “${draft.name.trim()}”?`}
         confirmLabel={state.save.offered ? "Send again" : "Save workflow"} onConfirm={() => tell(confirm)} onCancel={() => tell({ type: "cancelSave" })}>

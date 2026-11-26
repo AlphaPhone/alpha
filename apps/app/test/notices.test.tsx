@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { keep, offer, say, withdraw } from "../src/notices/toasts.vibe";
-import { button, closeAll, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -67,5 +67,32 @@ describe("the toasts", () => {
     expect(dialog.querySelector("[role=status]")?.textContent).toBe("Copied inside dialog");
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "confirm" })));
     dialog.remove();
+  });
+
+  it("Concurrent raises keep every toast message and focus holds a toast after pointer leave (spec/app/notices/toasts.md, \"Every toast raised is shown at once, or waits\"; spec/app/notices/toasts.md, \"A plain toast the owner is reading is held, and its whole time starts again when they let go\")", async () => {
+    const { alpha } = await open(scene(), only("home", "notice"));
+    const toastRegion = () => document.querySelector("[role=status][aria-live]")?.textContent;
+    await alpha.runtime.runPromise(Effect.all([
+      offer("Deleted note", "notes", 1, Effect.void),
+      say("Second notice"),
+    ], { concurrency: "unbounded" }));
+    await until(alpha, alpha.runtime, Toasts, (t) => t.showing && t.current.undo);
+    expect(toastRegion()).toContain("Deleted note");
+    await press("Undo");
+    await until(alpha, alpha.runtime, Toasts, (t) => t.showing && !t.current.undo);
+    expect(toastRegion()).toBe("Second notice");
+
+    const card = document.querySelector<HTMLElement>("[role=status][aria-live] > div");
+    if (!card) throw new Error("no toast card");
+    card.tabIndex = 0;
+    await drawn(() => {
+      card.focus();
+      card.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await until(alpha, alpha.runtime, Toasts, (t) => t.held);
+    await drawn(() => { card.dispatchEvent(new PointerEvent("pointerout", { bubbles: true })); });
+    await later(alpha, 5_000);
+    expect((await alpha.runtime.runPromise(Toasts.use((m) => m.get()))).showing).toBe(true);
+    expect(toastRegion()).toBe("Second notice");
   });
 });

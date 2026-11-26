@@ -283,6 +283,25 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   });
 
+  it("Editing a contact opened from Phone's Contacts tab keeps the card and the list under the form (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
+    const { alpha } = await openPhoneWorld();
+    await until(alpha, alpha.runtime, Shell, (state) => state.image && state.contacts);
+    await openPhone(alpha);
+    await tab("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.list.status === "Loaded" && state.rows === 2);
+    const row = button("Ben Ortiz");
+    await press("Maya Chen");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.opened && state.card.status === "Loaded");
+    const card = document.querySelector("[data-alpha-contact-detail]");
+    await press("Edit contact");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.form === "Changing");
+    await vi.waitFor(() => expect(button("Cancel")).toBeDefined());
+    expect([card?.isConnected, row?.isConnected]).toEqual([true, true]);
+    await press("Cancel");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.form === "Shut" && state.opened);
+    expect([document.querySelector("[data-alpha-contact-detail]") === card, row?.isConnected]).toEqual([true, true]);
+  });
+
   it(`Opens the reviewed keypad without dialing (spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials")`, async () => {
     const world = image();
     const alpha = await mountedImage(world);
@@ -764,5 +783,43 @@ describe("The call strip on an Alpha image", () => {
     await hardware("home");
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.missed === 0);
     expect(world.telephony.calls.some((one) => one.type === "missed")).toBe(true);
+  });
+
+  const openRecents = async (world = image()) => {
+    const running = await openPhoneWorld(world);
+    await until(running.alpha, running.alpha.runtime, Shell, (s) => s.image && s.contacts);
+    await openPhone(running.alpha);
+    await until(running.alpha, running.alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
+    return running;
+  };
+
+  it("Resyncs Comms subject when returning to the same Phone tab from Contacts (spec/app/phone/comms.md, \"A view change while the conversation is open keeps the sheet's height and remembers the view it left\")", async () => {
+    const { alpha } = await openRecents();
+    await until(alpha, alpha.runtime, Comms, (s) => s.app === "PhoneApp" && s.key === "phone:recents:");
+    await tab("Contacts");
+    await until(alpha, alpha.runtime, Comms, (s) => s.app === "ContactsApp");
+    await drawn(() => {
+      const target = document.querySelector<HTMLButtonElement>('[data-alpha-phone-tab="recents"]');
+      if (!target) throw new Error("no Phone recents tab");
+      target.focus();
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    });
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.recents.status === "Loaded");
+    await vi.waitFor(async () => {
+      const state = await alpha.runtime.runPromise(Comms.use((m) => m.get()));
+      expect([state.app, state.key]).toEqual(["PhoneApp", "phone:recents:"]);
+    }, { timeout: 3_000 });
+  });
+
+  it("Clears stale Recents search filter when opening Missed (spec/app/phone/index.md, \"Story: See my recent calls\")", async () => {
+    const { alpha } = await openRecents();
+    await fill("Call or ask", "0111");
+    await until(alpha, alpha.runtime, Phone, (s) => s.sought && s.recents.status === "Loaded" && s.rows === 1);
+    await drawn(() => alpha.runtime.runPromise(Phone.use((m) => m.send({ type: "missedReported", count: 1 }))));
+    await drawn(() => alpha.runtime.runPromise(Phone.use((m) => m.send({ type: "openMissed" }))));
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.chip === "MissedCalls" && s.recents.status === "Loaded");
+    const missedState = await alpha.runtime.runPromise(Phone.use((m) => m.get()));
+    const queryField = document.querySelector<HTMLInputElement>('input[aria-label="Call or ask"]');
+    expect([missedState.sought, missedState.rows, queryField?.value ?? ""]).toEqual([false, 1, ""]);
   });
 });

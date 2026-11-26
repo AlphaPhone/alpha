@@ -48,6 +48,10 @@ export interface AskScene {
   refusedDraftExchanges: number;
   /** When true, /api/status omits serverInstanceId so the peer does not declare optional turn-context fields. */
   noOptionalFields?: boolean;
+  /** When true, /api/status fails with 503 (for testing transient support probe failures). */
+  failStatus?: boolean;
+  /** Optional hook awaited before answering /api/status (for simulating slow startup support probes). */
+  beforeStatus?: () => Promise<void>;
   /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
   canRespond: boolean;
   warmUps: Record<string, string>[];
@@ -277,7 +281,10 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/status") return;
       scene.statusReads += 1;
-      return Response.json({ ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }), canRespond: scene.canRespond });
+      const answer = () => scene.failStatus
+        ? Response.json({ error: "status_unavailable" }, { status: 503 })
+        : Response.json({ ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }), canRespond: scene.canRespond });
+      return scene.beforeStatus ? scene.beforeStatus().then(answer) : answer();
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;

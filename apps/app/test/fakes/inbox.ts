@@ -61,6 +61,7 @@ export interface InboxScene {
   readonly savedAttachments: Map<string, string>;
   loseSendReply?: boolean;
   loseDraftReply?: boolean;
+  rejectDraftReply?: boolean;
   readonly receiptReads: string[];
   notices?: InboxNoticeScene;
   consent?: { authUrl: string; readonly requests: string[][]; readonly opened: string[] };
@@ -364,6 +365,11 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const kind = requestId === undefined ? undefined : asked.get(requestId)?.kind;
       if (request.method !== "POST" || requestId === undefined || (kind !== "draft-create" && kind !== "draft-replace" && kind !== "draft-delete")) return;
       return request.json().then(({ proposal }: { proposal: { to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; bodyText?: string; mode?: string; draftId?: string; attachments?: unknown[] } }) => {
+        if (scene.rejectDraftReply) {
+          scene.rejectDraftReply = false;
+          receipts.set(requestId, operation(requestId, kind, "rejected"));
+          return Response.json(operation(requestId, kind, "outcome-unknown"));
+        }
         scene.changes.push(`${kind} ${proposal.subject ?? proposal.draftId ?? ""}`);
         const draftId = proposal.draftId ?? `d${scene.changes.length}`;
         const answer = (providerResult: Record<string, unknown>) => {

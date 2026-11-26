@@ -202,21 +202,23 @@ effect function joined(draft: number, account: number, mib: number): void!!(Inco
   if (file === undefined) return
   const composer = try Drafts.Machine
   const words = try Letters
-  const current = try composer.get()
-  const into = draft !== 0 ? draft : current.made + 1
-  const before = words.words(into)
+  const target = draft !== 0 ? draft : (try composer.get()).made + 1
+  const before = words.words(target)
+  const next = { ...before, files: [...before.files, file] }
+  words.set(target, next)
   const event: Drafts.Event = draft !== 0 ? { type: "attached", now: untimed, draft, mib, policy } : { type: "startedWithFile", account, mib, policy }
-  words.set(into, { ...before, files: [...before.files, file] })
   const sent = try exit(composer.send(event, "Owner"))
   if (!Exit.isSuccess(sent)) {
-    words.set(into, before)
+    if (draft !== 0) words.set(target, before)
+    else try words.forget([target])
     return
   }
-  const actual = sent.value.state.letter.id
-  if (actual !== into) {
-    words.set(into, before)
-    const target = words.words(actual)
-    words.set(actual, { ...target, files: [...target.files, file] })
+  const into = sent.value.state.letter.id
+  if (into !== target) {
+    if (draft !== 0) words.set(target, before)
+    else try words.forget([target])
+    const actual = words.words(into)
+    words.set(into, { ...actual, files: [...actual.files, file] })
   }
 }
 

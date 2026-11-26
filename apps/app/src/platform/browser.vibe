@@ -6,15 +6,23 @@ import { registered } from "./device.vibe"
 import { WebFrames, type FrameEvent } from "./browserWeb.vibe"
 
 module held {
-  import type { BrowserPageGuard, BrowserTabHostListener, BrowserTabHostPlugin } from "@elizaos/os-bridges"
+  import type { BrowserPageGuard, BrowserTabHostListener, BrowserTabHostPlugin, BrowserTabPresentation } from "@elizaos/os-bridges"
   import { BrowserTabSession } from "@elizaos/os-bridges"
   import { plugin as capacitorPlugin } from "./capacitor.ts"
+
+  /** A place of Alpha's on the page, rounded by `cornerRadius`. */
+  type HostRect = { readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly cornerRadius: number }
 
   /**
    * Alpha's `AlphaBrowser`: eliza's tab host, the read of the page it presents for one chat turn (`AlphaBrowserPlugin.pageContext`),
    * and a failed page opened in another browser at the HTTPS address the host named (`AlphaBrowserPlugin.openFailedPage`).
    */
   export type AlphaTabHost = BrowserTabHostPlugin & {
+    /**
+     * Draws a tab's page above Alpha. `hostRects` are the places of Alpha's controls drawn over the page, in the page's
+     * own pixels: the page is left out of them and a touch there is Alpha's (`AlphaBrowserPlugin.present`).
+     */
+    present(options: BrowserTabPresentation | (Extract<BrowserTabPresentation, { readonly id: string }> & { readonly hostRects?: readonly HostRect[] })): Promise<void>
     pageContext(options: BrowserPageGuard): Promise<unknown>
     openFailedPage(options: BrowserPageGuard): Promise<void>
     setDesktopSite(options: { readonly session: string; readonly id: string; readonly enabled: boolean }): Promise<unknown>
@@ -87,13 +95,14 @@ export service InboxBrowserLinks {
   open(href: string, current: Effect.Effect<boolean>): boolean!!
 }
 
-/** A page the agent's reply asked the Browser to open: eliza's typed open, which waits for the owner's Open on the Browser's card. */
+/** A page the agent's reply asked the Browser to open: eliza's typed open, at once when the owner's whole message asked for it (`atOnce`), else after the owner's Open on the Browser's card. */
 export interface AgentPage {
   readonly operation: Extract<DeviceOperation, { readonly type: "browser_navigate" }>
+  readonly atOnce: boolean
 }
 
-// spec/app/browser/index.md, "Story: Let the agent open a page"
-/** Hand a page the agent asked for to the Browser, which shows it on its card for the owner's Open while `current` says the request that asked for it is still the owner's latest: whether the Browser took it. */
+// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+/** Hand a page the agent asked for to the Browser, which opens it at once or shows it on its card for the owner's Open while `current` says the request that asked for it is still the owner's latest: whether the Browser took it. */
 export service AgentPages {
   open(page: AgentPage, current: Effect.Effect<boolean>): boolean!!
 }

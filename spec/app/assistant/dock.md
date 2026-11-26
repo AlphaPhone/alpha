@@ -41,7 +41,11 @@ closes it from the bar grows it from the bar or shrinks it onto the bar the
 same way, keeping its composer until the bar shows. A sheet put away
 shrinks and fades over the bar or pill already drawn under it, which then
 stays in place with its own controls in their own colours: no control of
-the sheet's, such as its black Talk, is carried onto the bar. A tap or a drag on the
+the sheet's, such as its black Talk, is carried onto the bar. A resting
+bar dragged down and let go becomes the pill where it is, with no entrance:
+as v119 left the bar or pill in place after any drag (45f6bed30
+chat-overlay-motion-adapter.ts:637-646), it does not drop and rise again.
+A tap or a drag on the
 page outside an open sheet lowers Ask Alpha when it ends; outside the bar
 being typed in, it only leaves the field, which rests the bar once.
 
@@ -129,11 +133,11 @@ pure def lawAFlickGoesByItsDirection(start: S::Detent, direction: Direction, hei
 Swiping down from an open sheet or full screen rests on the bar first;
 swiping down on the resting bar or while typing keeps the bar detent and
 tucks the bar into the compact pill everywhere, including on Home and the
-Browser. Allowing Home's resting bar to tuck on swipe down is an explicit
-owner product decision departing from v119's `!home` rule (old-line Alpha
-45f6bed30, chat-overlay-motion-adapter.ts:337-339, :866-869), while
-preserving v119's bar-first resting state on Home and the Browser until
-swiped down.
+Browser. Tucking Home's resting bar departs from v119's `!home` rule, under
+which Home's bar was never dismissed (old-line Alpha 45f6bed30,
+chat-overlay-motion-adapter.ts:337-339, :866-869); it is pending the
+owner's decision. Home and the Browser still rest on the whole bar until it
+is swiped down.
 
 ```quint
 pure def lawPulledDownAtRestStaysOnTheBar(start: S::Detent, flick: bool, height: int, floor: int, full: int): bool =
@@ -457,10 +461,10 @@ pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
 The pill is how the bar is drawn in an app other than the Browser, and also
 on Home or the Browser after the owner swipes down on the resting bar
 (`tucked = true`), not another height: Back, gestures and every guard treat
-it as the bar. Both Home and the Browser keep v119's bar-first resting state
-until swiped down; allowing Home's resting bar to tuck into the pill is an
-explicit owner product decision overriding v119's `!home` restriction.
-Tapping Type, opening the sheet or full screen, or changing views clears
+it as the bar. Both Home and the Browser rest on the whole bar until it is
+swiped down; tucking Home's bar into the pill departs from v119's `!home`
+rule (chat-overlay-motion-adapter.ts:337-339, :866-869) and is pending the
+owner's decision. Tapping Type, opening the sheet or full screen, or changing views clears
 `tucked`. Alpha's mark opens the sheet, Type focuses the
 composer, and Talk starts a spoken turn. A swipe up that starts on one of
 the pill's buttons opens the sheet, which follows the finger as it does from

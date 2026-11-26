@@ -37,6 +37,7 @@ export service CameraAssets {
   readonly mounted: Stream.Stream<boolean>
   readonly shutter: Semaphore.Semaphore
   newest(): number!!
+  clearNewest(previous: number): void!!
   store(media: CameraMedia, secure: boolean): number!!
   read(id: number): (CameraMedia | undefined)!!
   readonly thumbnails: CameraThumbnails
@@ -68,6 +69,7 @@ const assets = Layer.effect(CameraAssets, effect {
     mounted: SubscriptionRef.changes(mounted),
     shutter,
     newest: () => sync(() => newest),
+    clearNewest: (previous: number) => sync(() => { if (newest === previous) newest = 0 }),
     effect store(media: CameraMedia, secure: boolean): number!! {
       const id = ++serial
       captures.set(id, media)
@@ -376,7 +378,7 @@ const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit 
     return
   }
   const newest = latest === null ? 0 : try held.store(latest, false)
-  try tell({ type: "lastSeen", visit, previous, newest })
+  if (try tell({ type: "lastSeen", visit, previous, newest }) && latest === null) try held.clearNewest(previous)
 })
 
 effect function readVideoItem(native: PhotosClient, key: typeof MediaId.Type) {
@@ -529,15 +531,16 @@ type CaptureNeeds = Camera.Machine | CameraAssets | Shell.Machine | PhotosPort |
 /** An agent capture opens Camera before entering the viewfinder's own single review and returns its actual outcome. */
 export effect function requestCapture(lens?: "front" | "back", offer?: CapturedPhotoOffer): CaptureAnswer!!CaptureNeeds {
   const machine = try Camera.Machine
+  const before = try machine.get()
   if (!(try openView("Camera"))) return { result: "Blocked", cause: "Left" }
   try uncover()
   const shell = try Shell.Machine
   const route = (try shell.get()).route
-  let sawShowing = false
+  let sawShowing = before.showing
   const visible = Stream.filter(machine.changes, (state) => {
     if (state.showing) sawShowing = true
-    if (sawShowing && !state.showing) return true
-    return state.showing && (allows(state.permission) || state.permission.asked)
+    if (!state.showing && (sawShowing || state.visit > before.visit)) return true
+    return state.showing && (allows(state.permission) || state.permission.asked || state.permission.grant !== "Unasked")
   })
   const opened = timeout(Stream.runHead(visible), 90000) catch () => Option.none<Camera.Camera>()
   if (Option.isNone(opened)) return { result: "Expired", cause: "NoCause" }

@@ -94,7 +94,11 @@ effect function read(): void!!(LauncherUpdates | Names | Page.Machine | KnownAct
   const now = reply.value
   const number = Option.isSome(now.ids) ? try names.number(`activation:${now.ids.value.activationId}`) : (try page.get()).activation
   if (Option.isSome(now.ids)) cache.set(number, now.ids.value)
-  if (now.pending && number > 0) {
+  if (now.pending) {
+    if (number === 0) {
+      try contained(page.send({ type: "unreadable" }), "unreadable update activation")
+      return
+    }
     try contained(page.send({ type: "read", activation: number, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }), "reading update activation")
     return
   }

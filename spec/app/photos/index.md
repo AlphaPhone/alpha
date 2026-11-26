@@ -42,8 +42,8 @@ As in the existing app, the Library is headed by the day each item was
 taken, counted back from Alpha's time in the owner's zone: "Today",
 "Yesterday", then the short weekday and date ("Sat, Oct 31", with the year
 when it is not this year) for the rest of the last 30 days, and the month
-and year ("October 2026") before that. An album and Recently deleted are not
-headed.
+and year ("October 2026") before that, each heading with the number of items
+under it beside it. An album and Recently deleted are not headed.
 
 ```quint
 import permission as P from "../../kit/permission"

@@ -5,7 +5,7 @@ import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { Machine as Shell, showing as showingView } from "../../gen/app__shell.effect.vibe"
 import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Letters, policy } from "./composer.vibe"
+import { Letters, acceptable, policy } from "./composer.vibe"
 import { Mail } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
@@ -62,24 +62,22 @@ effect function startedWith(target: Target, account: number, message: number, te
   const card = message === 0 ? undefined : ledger.card(message)
   const sender = card === undefined ? "" : /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from.trim()
   const replying = target === "NewReply"
-  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || sender !== "", policy }
   const nextId = (try composer.get()).made + 1
-  const before = words.words(nextId)
   const subject = card === undefined ? "" : card.subject.toLowerCase().startsWith("re:") ? card.subject : `Re: ${card.subject}`
-  const drafted = {
+  const prepared = {
     to: replying ? [sender] : [], cc: [], bcc: [], subject, text: (try Offers).text(text), files: [],
-    answers: card?.id, mode: replying ? "reply" : "compose",
-  } as const
-  words.set(nextId, drafted)
+    answers: card?.id, mode: replying ? "reply" as const : "compose" as const,
+  }
+  words.set(nextId, prepared)
+  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || acceptable(sender), policy }
   const sent = try exit(composer.send(event, "Owner"))
   if (!Exit.isSuccess(sent) || !sent.value.state.open) {
-    words.set(nextId, before)
+    try words.forget([nextId])
     return
   }
-  const actual = sent.value.state.letter.id
-  if (actual !== nextId) {
-    words.set(nextId, before)
-    words.set(actual, drafted)
+  if (sent.value.state.letter.id !== nextId) {
+    try words.forget([nextId])
+    words.set(sent.value.state.letter.id, prepared)
   }
   try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
 }

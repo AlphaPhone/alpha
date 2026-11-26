@@ -3,7 +3,7 @@
 What a turn tells the agent about the phone besides the screen the
 [conversation](./index.md) tells it: the phone's last known location, the
 page open in Browser, a reviewed email or selected voice-note transcript flag,
-what Maps shows, the time zone, the phone actions this
+the assistant overlay height, what Maps shows, the time zone, the phone actions this
 phone can carry out, and whether the owner's words go to a hosted model.
 Eliza encodes the turn context (`encodeTurnContext` of
 `@elizaos/agent`) and drops what a peer does not declare; no wire
@@ -261,6 +261,58 @@ pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
     and not(carries(source, ViewClaim, false, direct))
 ```
 
+### A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields
+
+Each typed or spoken turn sent to a peer that takes optional turn-context
+fields reports `observation.chatHeight` (`hidden`, `bar`, `typing`, `sheet`
+or `full`) from the live shell detent and dock state at send time: `Full`
+reports `full`, `Sheet` reports `sheet`, `Typing` reports `typing`, and
+`Bar` reports `hidden` when Ask Alpha is not drawn over the active bar app
+(`Phone`, `Messages` or `Contacts`) or is collapsed to the compact pill
+(either tucked by swipe-down or resting inside a non-Browser app), and
+`bar` otherwise. Following this document's rule that a sensitive screen
+sends no optional field, `chatHeight` is omitted when the screen is
+sensitive or when the peer does not take optional turn-context fields.
+
+```quint
+type OverlayDetent = DetentBar | DetentTyping | DetentSheet | DetentFull
+type ChatHeight = ChatHidden | ChatBar | ChatTyping | ChatSheet | ChatFull
+type TurnChatHeight = NoChatHeight | ReportedChatHeight({ height: ChatHeight })
+
+pure def chatHeightOf(detent: OverlayDetent, drawn: bool, pill: bool): ChatHeight =
+  match detent {
+    | DetentFull => ChatFull
+    | DetentSheet => ChatSheet
+    | DetentTyping => ChatTyping
+    | DetentBar => if (not(drawn) or pill) ChatHidden else ChatBar
+  }
+
+pure def sendsChatHeight(notSensitive: bool, peerTakes: bool): bool =
+  notSensitive and peerTakes
+
+pure def chatHeightForTurn(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): TurnChatHeight =
+  if (sendsChatHeight(notSensitive, peerTakes)) ReportedChatHeight({ height: chatHeightOf(detent, drawn, pill) }) else NoChatHeight
+
+pure def lawOpenSheetOrFullAlwaysReportsOpenHeight(detent: OverlayDetent, drawn: bool, pill: bool): bool =
+  (detent == DetentSheet implies chatHeightOf(detent, drawn, pill) == ChatSheet)
+    and (detent == DetentFull implies chatHeightOf(detent, drawn, pill) == ChatFull)
+
+pure def lawHiddenHeightOccursOnlyAtBarWhenUndrawnOrPill(detent: OverlayDetent, drawn: bool, pill: bool): bool =
+  (chatHeightOf(detent, drawn, pill) == ChatHidden) == (detent == DetentBar and (not(drawn) or pill))
+
+pure def lawSensitiveScreenSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, peerTakes: bool): bool =
+  not(sendsChatHeight(false, peerTakes))
+    and chatHeightForTurn(source, detent, drawn, pill, false, peerTakes) == NoChatHeight
+
+pure def lawUnsupportedPeerSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool): bool =
+  not(sendsChatHeight(notSensitive, false))
+    and chatHeightForTurn(source, detent, drawn, pill, notSensitive, false) == NoChatHeight
+
+pure def lawSpokenAndTypedTurnsReportSameChatHeight(detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): bool =
+  chatHeightForTurn(Spoken, detent, drawn, pill, notSensitive, peerTakes)
+    == chatHeightForTurn(Typed, detent, drawn, pill, notSensitive, peerTakes)
+```
+
 ### A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it
 
 An agent older than the direct-request mode a turn asks for refuses the
@@ -351,14 +403,17 @@ When the owner sends a turn carrying a reviewed email from Inbox or a saved
 voice-note transcript attached from Notes, the turn's `text` carries strictly
 the owner's trimmed typed text (including `""` when the owner sent only the
 attachment), never email headers, email body JSON, or a synthetic voice-note
-instruction prefix. The revalidated, decoded email goes in structured turn
-context (`metadata.reviewedEmail`) and the voice-note transcript goes as
-`metadata.useSelectedVoiceNoteTranscript: true` bound to the non-sensitive
-selected `canonical-note` observation, both encoded through
-`encodeTurnContext` only for a peer that takes optional turn-context fields.
-When the peer does not take optional turn-context fields, Alpha refuses to
-post a turn carrying a reviewed email or voice-note transcript rather than
-concatenating untrusted data into `text` or silently dropping the attachment.
+instruction prefix. The reviewed email is normalized and validated against the
+agent's `ReviewedEmail` schema at review time and revalidated on send so it
+goes in structured turn context (`metadata.reviewedEmail`), while the
+voice-note transcript goes as `metadata.useSelectedVoiceNoteTranscript: true`
+bound to the non-sensitive selected `canonical-note` observation, both encoded
+through `encodeTurnContext` only for a peer that takes optional turn-context
+fields. When peer support has not yet loaded or failed transiently on this
+connection, Alpha re-checks `/api/status` before refusing; when the peer does
+not take optional turn-context fields, Alpha refuses to post a turn carrying a
+reviewed email or voice-note transcript rather than concatenating untrusted
+data into `text` or silently dropping the attachment.
 
 ```quint
 pure def sendsReviewedEmail(hasMail: bool, validMail: bool, peerTakes: bool): bool =
@@ -371,12 +426,11 @@ pure def turnContextCarriesAttachment(hasMail: bool, validMail: bool, hasTranscr
   (not(hasMail) or sendsReviewedEmail(hasMail, validMail, peerTakes))
     and (not(hasTranscript) or sendsVoiceNoteTranscript(hasTranscript, exactNote, sensitive, peerTakes))
 
-pure def lawReviewedEmailNeedsValidPeerContext(hasMail: bool, validMail: bool, peerTakes: bool): bool =
-  sendsReviewedEmail(hasMail, validMail, peerTakes) implies (hasMail and validMail and peerTakes)
+pure def lawInvalidReviewedEmailRefusesTurn(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(true, false, hasTranscript, exactNote, sensitive, peerTakes))
 
-pure def lawVoiceNoteTranscriptNeedsNonSensitiveCanonicalNoteAndPeer(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
-  sendsVoiceNoteTranscript(hasTranscript, exactNote, sensitive, peerTakes)
-    implies (hasTranscript and exactNote and not(sensitive) and peerTakes)
+pure def lawSensitiveScreenRefusesVoiceNoteTranscript(hasMail: bool, validMail: bool, exactNote: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(hasMail, validMail, true, exactNote, true, peerTakes))
 
 pure def lawUnsupportedPeerRefusesStructuredContextAttachment(hasMail: bool, hasTranscript: bool, validMail: bool, exactNote: bool, sensitive: bool): bool =
   (hasMail or hasTranscript) implies not(turnContextCarriesAttachment(hasMail, validMail, hasTranscript, exactNote, sensitive, false))

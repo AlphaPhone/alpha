@@ -9,7 +9,6 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import * as Build from "../../gen/app__workflows__builder.effect.vibe"
 import * as Generate from "../../gen/app__workflows__generate.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
-import { canFile } from "../../gen/app__workflows__request.effect.vibe"
 import type { When } from "../../gen/app__workflows__schedule.effect.vibe"
 import type { Operation, Step } from "../../gen/app__workflows__steps.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
@@ -247,12 +246,12 @@ effect function save(id: number, revision: number): Build.Event!!Needs {
   const key = saveKey(scope)
   const value = (store.get(key) catch () => "")
   const previous = value === undefined || value === "" ? undefined : (Schema.decodeUnknownEffect(Saved)(value) catch () => undefined)
-  if (state.save.again ? previous?.id !== id : value !== undefined) return lost
+  if (state.save.again ? previous?.id !== id : (value !== undefined && (previous === undefined || previous.id >= id))) return lost
   let dispatched = state.save.again
   const outcome = effect {
     const reviewed = try validatePhoneWorkflowSpec(specification(state, words))
     const { spec, specDigest } = try workflow.validatePhone(reviewed, catalog)
-    const expected: PhoneWorkflowSaveExpectation = previous?.expected ?? { mutationId: try workflowUuid(), specDigest, compilerRevision: catalog.compilerRevision }
+    const expected: PhoneWorkflowSaveExpectation = state.save.again && previous !== undefined ? previous.expected : { mutationId: try workflowUuid(), specDigest, compilerRevision: catalog.compilerRevision }
     if (expected.specDigest !== specDigest || expected.compilerRevision !== catalog.compilerRevision) return "unknown"
     if ((ownerAt() catch () => "") !== scope) return "refused"
     try store.set(key, JSON.stringify({ id, expected }))
@@ -534,21 +533,23 @@ export effect function backDraft(): boolean!!(Build.Machine | Generate.Machine) 
 const saving = following(Build.Machine, (state) => Build.canKeepDraft(state) && !state.unwritable ? state.draft.edits : 0,
   Build.Machine, (dirty): Build.Event | undefined => dirty > 0 ? { type: "keepDraft" } : undefined)
 
-const releaseSavedKey = applying(
-  Build.Machine,
-  (state) => ({ owner: state.owner, free: canFile(state.save) }),
-  effect ({ owner, free }: { owner: number; free: boolean }) => {
-    if (!free || owner <= 0) return
+const released = applying(Build.Machine,
+  (state) => ({ owner: state.owner, id: state.save.attempt.id, free: !state.save.offered && (state.save.attempt.outcome === "Unknown" || state.save.attempt.outcome === "Refused") }),
+  effect ({ owner, id, free }: { owner: number; id: number; free: boolean }) => {
+    if (!free || id <= 0) return
     const scope = ownerAt() catch () => ""
     if (!(try (try Rows).sameOwner(scope, owner))) return
-    try ignore((try KeyValueStore.KeyValueStore).remove(saveKey(scope)))
-  },
-)
+    const key = saveKey(scope)
+    const store = try KeyValueStore.KeyValueStore
+    const raw = store.get(key) catch () => undefined
+    const previous = raw === undefined ? undefined : (Schema.decodeUnknownEffect(Saved)(raw) catch () => undefined)
+    if (previous?.id === id) try ignore(store.remove(key))
+  })
 
 export const authoring = together(
   reacting(Build, { carry }),
   reacting(Generate, { carry: (fx) => answer("generate workflow", generated(fx.ticket), {
     type: "draftGenerated", ticket: fx.ticket, ok: false, steps: [], active: false, scheduled: false, revised: false, speaks: false, reminders: false, runDay: false,
   }) }),
-  words, visible, saving, releaseSavedKey,
+  words, visible, saving, released,
 )

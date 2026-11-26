@@ -58,11 +58,9 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
     }
   };
   const activate = (event: MouseEvent<HTMLButtonElement>) => {
-    if (suppressClickRef.current && event.detail !== 0) {
-      suppressClickRef.current = false;
-      return;
-    }
+    const suppressed = suppressClickRef.current;
     suppressClickRef.current = false;
+    if (suppressed && event.detail !== 0) return;
     if (selecting) onChosenChange?.(!chosen);
     else onOpen?.();
   };

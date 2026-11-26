@@ -130,6 +130,12 @@ pure def talking(v: Voice): bool = not(quiet(v)) and v.phase != Stopping
 
 pure def opened(m: Mic): bool = m == Opening or m == On
 
+pure def alphaResponds(v: Voice): bool = v.phase == Transcribing or v.phase == Thinking or v.phase == Speaking
+
+pure def hearsOverAlpha(v: Voice): bool = not(v.network)
+
+pure def mayListen(v: Voice): bool = v.phase == Listening or (v.phase == Speaking and hearsOverAlpha(v))
+
 pure def closedMic(m: Mic): Mic = if (opened(m)) Closing else if (m == Asking) Off else m
 
 pure def closeOut(v: Voice): List[Effect] =
@@ -370,7 +376,7 @@ pure def micClosed(v: Voice, session: int): Change =
   if (v.phase == Transcribing)
     { state: { ...v, phase: Thinking, mic: Off, sent: v.turn, heard: false },
       out: List(Send({ session: v.session, turn: v.turn, network: v.network })) }
-  else if ((v.phase == Listening or v.phase == Speaking) and not(v.muted))
+  else if (mayListen(v) and not(v.muted))
     { state: { ...v, mic: Opening }, out: List(Listen({ session: v.session, network: v.network })) }
   else { state: { ...v, mic: Off }, out: List() }
 
@@ -380,6 +386,21 @@ pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, 
         and x.session == before.session and x.turn == before.turn and after.sent == before.turn
     | _ => true
   })
+```
+
+### What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it
+
+When the owner finishes speaking, the words heard for that turn stay in the
+open conversation as the owner's own message, and three dots under it show
+Alpha at work, as the Sunday demo build did (v119,
+apps/app/src/prototype/template.html:4721-4726). They show while that turn
+is transcribed, thought about and spoken, and go the moment the recorded
+message and reply take their place, the turn ends unsent, or Talk leaves it.
+The words are not a draft and not history: only the recorded rows are kept.
+
+```quint
+pure def showsWhatWasSaid(v: Voice, session: int, turn: int): bool =
+  alphaResponds(v) and session == v.session and turn == v.turn
 ```
 
 ### A microphone that cannot be closed sends nothing, and shuts the conversation down
@@ -399,12 +420,21 @@ copied, quoted, emailed or spoken, and a reply still being written holds
 back what may become one"), and a streamed reply that ends in what may
 become one is not said past it until the next words decide.
 
+On the phone's own recognizer the first sentence opens the microphone
+again, so the owner speaking over Alpha interrupts it, as the Sunday demo
+build kept the phone's microphone open through the reply (v119
+apps/app/src/prototype/voice-adapter.ts:885-889). On the Cloud speech
+relay the microphone stays closed until the whole reply has been heard, as
+v119 held its Cloud streaming input closed through the reply
+(voice-adapter.ts:889 and 984-986): the relay has no way to interrupt Alpha,
+so nothing the owner says over the reply leaves the phone.
+
 ```quint
 pure def canSentence(v: Voice, session: int, turn: int): bool =
   (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)
 
 pure def sentence(v: Voice, session: int, turn: int): Change =
-  val reopen = not(v.muted) and v.mic == Off
+  val reopen = not(v.muted) and v.mic == Off and hearsOverAlpha(v)
   { state: { ...v, phase: Speaking, queued: v.queued + 1, playing: v.turn, retries: 0, mic: if (reopen) Opening else v.mic },
     out: List(Play({ session: v.session, turn: v.turn }))
       .concat(if (reopen) List(Listen({ session: v.session, network: v.network })) else List()) }
@@ -628,28 +658,57 @@ pure def alwaysPlaybackIsTheCurrentTurns(v: Voice): bool =
 
 ### Mute turns the microphone off, and unmuting opens it again only where Alpha listens
 
+The microphone control acts while Alpha listens, and whenever the
+microphone is open while Alpha answers. While Talk connects it waits,
+dimmed and unconfirmed. While Alpha answers a turn (transcribing, thinking
+or speaking) with the microphone really closed, it waits, dimmed, and shows
+the microphone paused, as the Sunday demo build held it ("Microphone paused
+while Alpha responds" only while its input was held closed, v119
+apps/app/src/prototype/voice-adapter.ts:1116-1118 and 1631-1633,
+phone.css:920; demo frames v89-064, v89-072, v89-076). On the Cloud speech
+relay that is the whole reply. Where the phone's own recognizer opens the
+microphone again while Alpha speaks, so that speaking over Alpha interrupts
+it, the control shows it open and mutes it, as v119 kept the phone's
+microphone open through the reply and offered Mute there
+(voice-adapter.ts:885-889, 1117 and 1631). The control never shows the
+microphone paused or off while it is open, and an open microphone can
+always be shut without ending Talk.
+Stop and the speaker stay available.
+
 ```quint
-pure def canMute(v: Voice): bool = talking(v) and not(v.muted) and v.mic != Asking
+pure def canMute(v: Voice): bool =
+  talking(v) and not(v.muted) and v.mic != Asking and (v.phase == Listening or (alphaResponds(v) and opened(v.mic)))
+
+pure def micHeld(v: Voice): bool = alphaResponds(v) and not(v.muted) and (v.mic == Off or v.mic == Closing)
 
 pure def mute(v: Voice): Change = { state: { ...v, muted: true, mic: closedMic(v.mic) }, out: closeOut(v) }
 
 pure def canUnmute(v: Voice): bool = talking(v) and v.muted
 
 pure def unmute(v: Voice): Change =
-  if ((v.phase == Listening or v.phase == Speaking) and v.mic == Off)
+  if (mayListen(v) and v.mic == Off)
     { state: { ...v, muted: false, mic: Opening }, out: List(Listen({ session: v.session, network: v.network })) }
   else { state: { ...v, muted: false }, out: List() }
 
 pure def alwaysMutedMeansTheMicrophoneIsOff(v: Voice): bool = v.muted implies (v.mic == Off or v.mic == Closing)
 
-pure def sometimesMutedWhileSpeaking(v: Voice): bool = v.muted and v.phase == Speaking
+pure def sometimesMutedWhileListening(v: Voice): bool = v.muted and v.phase == Listening
+
+pure def alwaysAnOpenMicrophoneCanBeShut(v: Voice): bool =
+  (alphaResponds(v) and not(v.muted) and opened(v.mic)) implies (canMute(v) and not(micHeld(v)))
+
+pure def alwaysTheRelayMicrophoneIsClosedWhileAlphaSpeaks(v: Voice): bool =
+  (v.phase == Speaking and not(hearsOverAlpha(v))) implies not(opened(v.mic) or v.mic == Asking)
 ```
 
 ### Speaker mute is offered after the current speech bridge confirms gain control
 
 The owner can silence Alpha without changing the microphone or interrupting
 the answer. The button waits for a receipt owned by the current session and
-request. The receipt says which gain the bridge confirmed. The phone retires
+request. While Talk connects and while that first receipt is awaited, the
+speaker control stands in its place, dimmed, as the Sunday demo build drew it
+(v119 apps/app/src/prototype/voice-adapter.ts:1121, the control disabled
+while starting or pending). The receipt says which gain the bridge confirmed. The phone retires
 its Talk gain before another conversation or reading can use local playback.
 
 ```quint

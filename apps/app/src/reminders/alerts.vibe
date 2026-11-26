@@ -11,7 +11,7 @@ import { Agent } from "../platform/agent.vibe"
 import { PhoneReminders } from "../platform/reminders.vibe"
 import { attemptedWith, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { alertInstantMs, civilDayFromString, civilDayNumber, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
 import { AlertBannerShelf, RemindersLedger, RemindersShelf } from "./shelf.vibe"
@@ -333,7 +333,22 @@ export effect function syncAlertsWithSnapshot(snapshot: RemindersSnapshot, nowMs
   try syncBannerFromMachine()
 }
 
+const rescheduleRecurring = started(effect {
+  const alerts = try Alerts.Machine
+  const store = (try RemindersShelf).store
+  const time = try Time
+  try Stream.runForEach(alerts.changes, effect (state) => {
+    const needsNext = state.entries.some((entry) => {
+      if (entry.phase !== "Completed" || entry.attempt.outcome === "Sent") return false
+      const item = store.findItemBySpecId(entry.id)
+      return item !== undefined && !item.completed && item.recurrence !== "none"
+    })
+    if (needsNext) try syncAlertsWithSnapshot(store.snapshot().snapshot, try time.now())
+  })
+}, "rescheduling recurring reminder alerts after banner completion")
+
 /** Resident due-time alerting layer, kept across restarts and armed via `Time.until`. */
 export const reminderAlerts = together(
   reacting(Alerts, { keep: 2, open: [{ type: "reopen" }], carry, timers }),
+  rescheduleRecurring,
 )

@@ -566,7 +566,10 @@ export const browserCamera = Layer.effect(CameraPort, effect {
         if (blob === undefined || blob === "failed") return blob
         const size = Effect.timeout(tryPromise((signal) => readVideoSize(blob, signal)), 2000) catch () => undefined
         return kept(blob, size?.width ?? 0, size?.height ?? 0)
-      }, sync(() => { if (film === running) film = undefined }))
+      }, sync(() => {
+        running.release()
+        if (film === running) film = undefined
+      }))
     },
     release: (asset: CameraMedia) => asset.blob === undefined ? Effect.void : sync(() => revoke(asset.source)),
   }

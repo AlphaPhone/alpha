@@ -182,7 +182,11 @@ export const linesOf = (contact: AddressBookContact): Lines => ({ name: contact.
 export function unchangedBy(operation: Asking | undefined, contact: AddressBookContact): boolean {
   const before = linesOf(contact)
   const after = afterOf(operation, before)
-  const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.length === b.length && a.every((value) => b.includes(value))
+  const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => {
+    const left = [...a].sort()
+    const right = [...b].sort()
+    return left.length === right.length && left.every((value, at) => value === right[at])
+  }
   return after.name === before.name && same(after.phones, before.phones) && same(after.emails, before.emails)
 }
 

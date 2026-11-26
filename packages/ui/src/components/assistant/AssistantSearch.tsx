@@ -45,7 +45,7 @@ export type AssistantSearchProps = Omit<ComponentProps<"div">, "children"> & {
 export function AssistantSearch({ words, hits, status = "idle", blocked = false, onWordsChange, onMore, onOpenHit, ...props }: AssistantSearchProps) {
   return (
     <div className="flex flex-col gap-4" {...props}>
-      <Input type="search" aria-label="Search chats" placeholder="Search messages" value={words} onChange={(event) => onWordsChange(event.target.value)} className="rounded-action border-0 px-4 text-base leading-normal [&::-webkit-search-cancel-button]:hidden" />
+      <Input type="search" aria-label="Search chats" placeholder="Search messages" value={words} onChange={(event) => onWordsChange(event.target.value)} className="rounded-action border-0 px-4 text-base leading-plain [&::-webkit-search-cancel-button]:hidden" />
       {blocked && hits.some((hit) => !hit.here) ? <Banner variant="info">Send or remove what you are writing to open another chat</Banner> : null}
       {hits.length ? (
         <section aria-label="Results">

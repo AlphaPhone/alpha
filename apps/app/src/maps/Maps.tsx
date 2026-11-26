@@ -18,9 +18,11 @@ import { badgeOnly, holding, needsSettings } from "../../gen/app__maps__connecti
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
 import { hasRoom, servedHere } from "../../gen/app__maps__places.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import { Atlas, type AtlasStore, type Coverage, type Seen, type Spot, type Way } from "./atlas.vibe";
-import { degreesOf, meters, normalizeLng, pointIn } from "./geometry.ts";
+import { degreesOf, normalizeLng, pointIn } from "./geometry.ts";
 import googleMaps from "./google-maps-attribution.svg";
+import { liftOver } from "./lift.ts";
 import { coverageOf, settled, tile } from "./maps.vibe";
 
 const ways: ReadonlyArray<{ travel: Travel; label: string; icon: LucideIcon }> = [
@@ -46,6 +48,7 @@ const notices: Record<SavedNotice, string> = {
   PlaceRenamed: "Saved place renamed.",
   PlaceRemoved: "Place removed from saved.",
   NotKept: "Saved places could not be changed.",
+  PinNamed: "Name updated. Tap Save to keep this place.",
 };
 
 const told: Record<GuideNotice, string> = {
@@ -82,22 +85,15 @@ const apart = (a: { lat: number; lng: number }, b: { lat: number; lng: number })
   return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
 };
 
-function waitMessage(state: State): string {
-  if (state.link.wait === "AllowanceSpent") {
-    return `You have used your Maps allowance for this period. It resets in ${Math.max(1, Math.ceil(state.link.held / 86400))} days.`;
-  }
-  if (state.link.wait === "Unnamed") return "Maps request limit reached. Try again later.";
-  return `Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`;
-}
-
 /** How a place is named on screen: a dropped pin, named by its coordinates, is "Selected location", as on develop. */
 const shown = (name: string) => (pointIn(name) === undefined ? name : "Selected location");
 
-/** A place's title: a pin not yet saved is "Dropped pin", as v119 named it (ui/maps/maps-screen.ts:658). */
-const titleOf = (spot: Spot, kept: Kept | undefined) => (kept === undefined && spot.id === "" && pointIn(spot.name) !== undefined ? "Dropped pin" : shown(kept?.name ?? spot.name));
+/** The name the owner gave the pin on the card before saving it, or none. */
+const pinNameOf = (state: State) => (state.place !== 0 && state.place === state.pin ? state.pinName : "");
 
-/** Where a place's pin stands above the centre: in the middle of the map left between the search field and the credits, as v119 placed it (maps/map-plane.ts:586-593, 770-776). */
-const liftOver = (bottom: number) => Math.max(0, (bottom + 46 - 100) / 2);
+/** A place's title: a pin not yet saved is the name the owner gave it, else "Dropped pin", as v119 named it (ui/maps/maps-screen.ts:658, 874-877). */
+const titleOf = (spot: Spot, kept: Kept | undefined, state: State) =>
+  kept === undefined && pinNameOf(state) !== "" ? pinNameOf(state) : kept === undefined && spot.id === "" && pointIn(spot.name) !== undefined ? "Dropped pin" : shown(kept?.name ?? spot.name);
 
 /** Where the world map first stands: North America, as develop opens it. */
 const northAmerica = { lat: 45, lng: -98 };
@@ -127,9 +123,15 @@ const statusTop: Record<string, string> = {
   Place: "top-21 in-data-[alpha-launcher]:top-32", Directions: "top-58", Navigating: "top-47 in-data-[alpha-launcher]:top-58",
 };
 
+function waitNotice(wait: State["link"]["wait"], held: number): string {
+  if (wait === "AllowanceSpent") return `You have used your Maps allowance for this period. It resets in ${Math.max(1, Math.ceil(held / 86_400))} days.`;
+  if (wait === "Unnamed") return "Maps request limit reached. Try again later.";
+  return `Maps request limit reached. Try again in ${Math.max(1, Math.ceil(held / 60))} minutes.`;
+}
+
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
 /** Where the camera goes for `state`, named so the map applies each aim once. */
-function cameraOf(state: State, seen: Seen, store: AtlasStore, following: boolean, recentered: number, bottom: number): MapCamera {
+function cameraOf(state: State, seen: Seen, store: AtlasStore, following: boolean, recentered: number, bottom: number, launcher: boolean): MapCamera {
   const now = mode(state);
   if (now === "Navigating" && !following) return { kind: "keep" };
   const way = now === "Directions" || now === "Navigating" ? store.way(state.trip.route, state.chosen) : undefined;
@@ -138,7 +140,7 @@ function cameraOf(state: State, seen: Seen, store: AtlasStore, following: boolea
   const aim = cameraAim(following, way !== undefined, true, spot !== undefined, true, true, results.length);
   if (aim === "FollowPhone" && seen.here !== undefined) return { kind: "follow", key: `here:${seen.here.at.lat}:${seen.here.at.lng}:${recentered}`, at: degreesOf(seen.here.at) };
   if (aim === "FitRoute" && way !== undefined) return { kind: "fit", key: `route:${state.trip.route}:${state.chosen}`, points: way.line.map(degreesOf), maxZoom: routeMaxZoom };
-  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom, lift: liftOver(bottom) };
+  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom, lift: liftOver(bottom, launcher) };
   if (aim === "FitResults") {
     const points = results.flatMap((place) => store.spot(place)?.at ?? []).map(degreesOf);
     return { kind: "fit", key: `results:${state.search.ticket}`, points, maxZoom: resultsMaxZoom };
@@ -196,6 +198,19 @@ function SheetGrabber({ screen, sheet, label }: { screen: Screen; sheet: Sheet; 
   );
 }
 
+function mapOverlays(state: State, store: AtlasStore, seen: Seen, now: ReturnType<typeof mode>) {
+  const saved: Kept[] = state.saved.flatMap((entry) => {
+    const found = store.spot(entry.place);
+    return found === undefined ? [] : [{ ...entry, spot: found }];
+  });
+  const shownPins = now === "Search" ? seen.results.slice(0, state.results) : state.place !== 0 ? [state.place] : [];
+  const pins = shownPins.flatMap((place) => {
+    const found = store.spot(place);
+    return found === undefined ? [] : [{ key: String(place), label: found.name, chosen: place === state.place, at: degreesOf(found.at) }];
+  });
+  return { saved, kept: saved.find((entry) => entry.place === state.place), pins };
+}
+
 /**
  * Maps: the map with its credits, the search and its results, a place's card, its directions and guidance along them,
  * the saved places and the agent's questions. Each control is offered exactly when its event is.
@@ -209,6 +224,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const [typed, setTyped] = useState("");
   const [syncedQuery, setSyncedQuery] = useState("");
   const [recentered, setRecentered] = useState(0);
+  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   const { state, can, send } = screen;
   if (state && state.query !== syncedQuery) {
     setSyncedQuery(state.query);
@@ -223,20 +239,11 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const coverage = coverageOf(state, store);
   const tiles = coverage?.available ? coverage.tiles : undefined;
   const googleMapMissing = state.link.google && tiles === undefined;
-  const saved: Kept[] = state.saved.flatMap((entry) => {
-    const found = store.spot(entry.place);
-    return found === undefined ? [] : [{ ...entry, spot: found }];
-  });
-  const kept = saved.find((entry) => entry.place === state.place);
+  const { saved, kept, pins } = mapOverlays(state, store, seen, now);
   const following = followsThePhone(state) && seen.here !== undefined;
   const style: MapStyle = state.link.basemap === "Cloud" && tiles !== undefined
     ? { kind: "raster", tileSize: tiles.tileSize, minZoom: tiles.minZoom, maxZoom: tiles.maxZoom, tile: (z, x, y, signal) => runtime.runPromise(tile(z, x, y, signal)) }
     : { kind: "vector", url: worldStyle };
-  const shownPins = now === "Search" ? seen.results.slice(0, state.results) : state.place !== 0 ? [state.place] : [];
-  const pins = shownPins.flatMap((place) => {
-    const found = store.spot(place);
-    return found === undefined ? [] : [{ key: String(place), label: found.name, chosen: place === state.place, at: degreesOf(found.at) }];
-  });
   const lift = () => { if (can({ type: "liftPress" })) void send({ type: "liftPress" }); };
   const submit = () => {
     const at = pointIn(typed);
@@ -246,15 +253,16 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   };
   const typing = (text: string) => {
     setTyped(text);
-    if (text === "") {
+    const trimmed = text.trim();
+    if (trimmed === "") {
       if (can({ type: "search", query: "", chars: 0 })) void send({ type: "search", query: "", chars: 0 });
       return;
     }
-    if (pointIn(text) !== undefined) {
+    if (pointIn(trimmed) !== undefined) {
       if (can({ type: "typeQuery", query: "", chars: 0, now: untimed })) void send({ type: "typeQuery", query: "", chars: 0, now: untimed });
       return;
     }
-    const query = recentOf(state.recent, text.trim());
+    const query = recentOf(state.recent, trimmed);
     if (can({ type: "typeQuery", query, chars: query.length, now: untimed })) void send({ type: "typeQuery", query, chars: query.length, now: untimed });
   };
   // spec/app/maps/index.md, "Story: Search for a place"
@@ -282,7 +290,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const opened = offer(screen, { type: "openSearch" });
   const openSearch = opened && (() => { setTyped(""); opened(); });
   const leave = back && (() => { if (now === "Search") setTyped(""); back(); });
-  const placeName = spot === undefined ? "" : titleOf(spot, kept);
+  const placeName = spot === undefined ? "" : titleOf(spot, kept, state);
   const inside = spot === undefined || !coverage?.available || coverage.regions.some(({ bounds: [west, south, east, north] }) => {
     const at = degreesOf(spot.at);
     const lng = normalizeLng(at.lng);
@@ -291,7 +299,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const retryMap = offer(screen, { type: "retryMap" });
   const refused = now === "Browse" && needsSettings(state.link);
   const myLocation = offer(screen, { type: "useMyLocation" });
-  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is not guiding, as on v119 (prototype/maps-adapter.ts:455), and does nothing while Maps is locating or Android's prompt is open
+  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is neither guiding nor showing directions, as on v119 (prototype/maps-adapter.ts:455, `showSearch` in ui/maps/maps-screen.ts), and does nothing while Maps is locating or Android's prompt is open
   const locate = () => myLocation?.();
   const disclosing = can({ type: "continueDisclosure" }) && now !== "Navigating";
   const hideFloatingForFullSheet = (now === "Search" || now === "Place" || now === "Directions") && state.sheet === "Full";
@@ -302,7 +310,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
     ...(retryMap ? ["Map rendering is unavailable. Retry the map or open a saved place."] : []),
     ...(refused ? ["Location permission was not granted. You can choose an origin manually.", "Allow location in Settings to show your position."] : []),
     ...(state.link.coverage.status === "Failed" && !holding(state.link) ? ["Maps could not be reached."] : []),
-    ...(holding(state.link) ? [waitMessage(state)] : []),
+    ...(holding(state.link) ? [waitNotice(state.link.wait, state.link.held)] : []),
     ...(state.link.known && state.link.account === 0 ? ["Sign in to Alpha Cloud to use Maps."] : []),
     ...(state.missedFix ? ["No location fix arrived."] : []),
     ...(!state.keepable ? ["Saved places could not be read. Existing data has not been replaced."] : []),
@@ -323,7 +331,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   return (
     <section aria-label="Maps" className="relative isolate flex flex-1 flex-col overflow-hidden">
       {googleMapMissing ? (
-        <div role="status" className="absolute inset-0 flex items-center justify-center bg-muted px-6 text-center text-sm text-muted-foreground">
+        <div role="status" className="absolute inset-0 grid place-items-center bg-background p-6 text-center text-sm text-muted-foreground">
           The Google map is missing.
         </div>
       ) : (
@@ -338,7 +346,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           pins={pins}
           here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
           line={now === "Directions" || now === "Navigating" ? way?.line.map(degreesOf) : undefined}
-          camera={cameraOf(state, seen, store, following, recentered, floatBottom)}
+          camera={cameraOf(state, seen, store, following, recentered, floatBottom, launcher)}
           compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
           onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
           onTrouble={(plane, trouble) => {
@@ -362,7 +370,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           aria-label="Search Maps"
           placeholder="Search"
           maxLength={300}
-          value={now === "Place" ? typed || placeName : now === "Search" ? typed : ""}
+          // spec/app/maps/index.md, "Story: Look at a place": a place's field holds the query or stays empty under "Search", never the place's name, which the card's title carries, as v119 live (prototype/maps-adapter.ts:456 `q`)
+          value={now === "Place" || now === "Search" ? typed : ""}
           readOnly={now === "Place"}
           onFocus={openSearch}
           onChange={(event) => typing(event.target.value)}
@@ -416,7 +425,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           actions={statusActions.length > 0 ? statusActions : undefined} />
       )}
 
-      {now !== "Navigating" && !hideFloatingForFullSheet && (
+      {now !== "Navigating" && now !== "Directions" && !hideFloatingForFullSheet && (
         <MapsRoundButton tone="float" size="md" aria-label="Recenter" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard motion-reduce:transition-none" style={{ bottom: `min(${floatBottom}px, calc(100% - 176px))` }} onClick={locate}><LocateFixed /></MapsRoundButton>
       )}
       {now === "Navigating" && can({ type: "recenter" }) && (
@@ -523,16 +532,19 @@ function SearchSheet({ screen, state, seen, store, saved, height, onRecent }: { 
 function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { screen: Screen; state: State; spot: Spot; kept: Kept | undefined; height: number | string; back: (() => void) | undefined; outside: boolean }) {
   const [name, setName] = useState("");
   const { can, send } = screen;
-  const saveName = kept?.name ?? spot.name;
+  // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": Save keeps the pin under the name the owner gave it, as v119's toggleSaved kept its label (ui/maps/maps-screen.ts:843-856)
+  const saveName = kept?.name ?? (pinNameOf(state) || spot.name);
+  const applied = name.trim() || (kept === undefined ? titleOf(spot, kept, state) : saveName);
+  const apply = kept === undefined ? { type: "namePin", name: applied } as const : { type: "namePlace", name: applied } as const;
   const pinned = spot.id === "" && pointIn(spot.name) !== undefined;
   return (
-    <MapsSheet aria-label={titleOf(spot, kept)} height={height} grows className="z-sheet">
+    <MapsSheet aria-label={titleOf(spot, kept, state)} height={height} grows className="z-sheet">
       <SheetGrabber screen={screen} sheet={state.sheet} label="Resize place sheet" />
       <div className={cn("min-h-0 flex-1 touch-pan-y overflow-y-auto px-5", dockClearance)}>
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <h2 className="font-display text-3xl font-light break-words">{titleOf(spot, kept)}</h2>
-            {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className={cn(focusRing, "min-h-12 rounded-md px-3 text-primary")} onClick={() => { setName(kept === undefined ? titleOf(spot, kept) : saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
+            <h2 className="font-display text-3xl font-light break-words">{titleOf(spot, kept, state)}</h2>
+            {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className={cn(focusRing, "min-h-12 rounded-md px-3 text-primary")} onClick={() => { setName(kept === undefined ? titleOf(spot, kept, state) : saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
             <div className="mt-1.5 text-sm text-muted-foreground">{pinned ? "Selected location" : spot.category || "Place"}</div>
             {spot.hours !== undefined && <div className="mt-1 text-sm"><span className="font-semibold">Hours</span><span className="text-muted-foreground">{` · ${spot.hours}`}</span></div>}
           </div>
@@ -555,8 +567,8 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
             {can({ type: "handOn", kind: "CopyNumber" }) && <button type="button" aria-label="Copy phone number" className={cn(focusRing, "min-h-12 rounded-md px-3 font-semibold text-primary")} onClick={() => void send({ type: "handOn", kind: "CopyNumber" })}>Copy</button>}
           </div>
         )}
-        {state.renaming && can({ type: "namePlace", name: name.trim() || saveName }) && (
-          <form className="mt-3.5 flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void send({ type: "namePlace", name: name.trim() || saveName }); setName(""); }}>
+        {state.renaming && can(apply) && (
+          <form className="mt-3.5 flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void send(apply); setName(""); }}>
             <Input aria-label="Place name" placeholder={saveName} maxLength={300} value={name} onChange={(event) => setName(event.target.value)}
               className="h-11 min-w-0 flex-1 rounded-full border-0 bg-secondary px-3.5" />
             <MapsPillButton tone="fill" size="md" type="submit" aria-label="Apply place name">Done</MapsPillButton>
@@ -573,6 +585,7 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
 function DirectionsCard({ screen, state, seen, store, spot, kept, saved, coverage, back, locate }: { screen: Screen; state: State; seen: Seen; store: AtlasStore; spot: Spot; kept: Kept | undefined; saved: Kept[]; coverage: Coverage | undefined; back: (() => void) | undefined; locate: (() => void) | undefined }) {
   const [start, setStart] = useState("");
   const { can, send } = screen;
+  const serving = coverage?.available ? coverage.providerId : "";
   const startAt = pointIn(start);
   const canSearchOrigin = can({ type: "findOrigin", query: "start" });
   const canPlanCoords = can({ type: "planFrom", origin: "Coordinates", lat: 0, lng: 0 });
@@ -587,7 +600,6 @@ function DirectionsCard({ screen, state, seen, store, spot, kept, saved, coverag
     const found = store.spot(place);
     return found === undefined || place === state.place ? [] : [{ place, name: found.name, spot: found }];
   }) : [];
-  const serving = coverage?.available ? coverage.providerId : "";
   const allowedSaved = saved.filter((entry) => servedHere(entry.spot.providerId, serving, state.link.google));
   const typed = start.trim().toLowerCase();
   const options = (typed === "" && starts.length === 0 ? [] : [...starts, ...allowedSaved.filter((entry) => entry.place !== state.place && !starts.some((found) => found.place === entry.place) && entry.name.toLowerCase().includes(typed))])
@@ -607,7 +619,7 @@ function DirectionsCard({ screen, state, seen, store, spot, kept, saved, coverag
               {locate && <MapsRoundButton tone="plain" size="sm" aria-label="Use my location" onClick={locate}><LocateFixed /></MapsRoundButton>}
             </form>
           )}
-          <div className="flex h-8 items-center gap-3 text-md font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{titleOf(spot, kept)}</span></div>
+          <div className="flex h-8 items-center gap-3 text-md font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{titleOf(spot, kept, state)}</span></div>
         </div>
         <MapsRoundButton tone="plain" aria-label="Swap starting point and destination" aria-disabled={!swappable} className="size-12 aria-disabled:pointer-events-auto aria-disabled:opacity-40"
           onClick={swappable ? () => void send({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng }) : undefined}><ArrowUpDown /></MapsRoundButton>
@@ -685,15 +697,12 @@ function DirectionsSheet({ screen, state, store, way, alternatives, height }: { 
 }
 
 /** Remaining route meters and seconds from the current turn onward. */
-function remainingMetrics(way: Way, turnIndex: number, here: Seen["here"]): { readonly metersLeft: number; readonly secondsLeft: number; readonly toTurn: number } {
+function remainingMetrics(way: Way, turnIndex: number): { readonly metersLeft: number; readonly secondsLeft: number; readonly toTurn: number } {
   const rest = way.turns.slice(turnIndex);
   const current = rest[0];
-  const nextTurnPoint = way.turns[turnIndex + 1]?.at ?? way.line.at(-1);
-  const toTurn = here !== undefined && nextTurnPoint !== undefined ? meters(here.at, nextTurnPoint) : current?.meters ?? 0;
-  const tailMeters = rest.slice(1).reduce((sum, step) => sum + step.meters, 0);
-  const metersLeft = Math.max(0, toTurn + tailMeters);
-  const ratio = way.meters > 0 ? Math.min(1, metersLeft / way.meters) : 1;
-  return { metersLeft, secondsLeft: Math.round(way.seconds * ratio), toTurn };
+  const metersLeft = turnIndex === 0 ? way.meters : rest.reduce((sum, step) => sum + step.meters, 0);
+  const secondsLeft = turnIndex === 0 || way.meters <= 0 ? way.seconds : Math.round(way.seconds * (metersLeft / way.meters));
+  return { metersLeft, secondsLeft, toTurn: current?.meters ?? 0 };
 }
 
 /** Guidance top bar: the next turn in Alpha blue and the upcoming turn pill. */
@@ -703,7 +712,7 @@ function GuidanceHeader({ state, seen, spot, kept, way }: { state: State; seen: 
   const arrived = state.trip.guidance === "Arrived";
   const imprecise = state.imprecise || (seen.here?.approximate ?? false);
   const precise = seen.here !== undefined && !imprecise && !state.trip.rerouting;
-  const remaining = way === undefined ? undefined : remainingMetrics(way, state.trip.turn, seen.here);
+  const remaining = way === undefined ? undefined : remainingMetrics(way, state.trip.turn);
   return (
     <>
       <div data-host-chrome="" role="status" className="absolute inset-x-3 top-12.5 z-dialog flex items-center gap-4 rounded-sheet bg-alpha px-5 py-4.5 text-alpha-foreground shadow-banner motion-safe:animate-drop in-data-[alpha-launcher]:top-23.5">
@@ -711,7 +720,7 @@ function GuidanceHeader({ state, seen, spot, kept, way }: { state: State; seen: 
         <div className="min-w-0">
           <div className="font-display text-figure-lg font-light">{arrived ? "Arrived" : precise && remaining !== undefined ? distance(remaining.toTurn) : state.trip.rerouting ? "Rerouting…" : "Locating…"}</div>
           <div className="mt-1 truncate text-lead font-semibold">
-            {arrived ? titleOf(spot, kept) : seen.here === undefined ? "Waiting for your location" : imprecise ? "Turn guidance needs a precise location" : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
+            {arrived ? titleOf(spot, kept, state) : seen.here === undefined ? "Waiting for your location" : imprecise ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
           </div>
         </div>
       </div>
@@ -725,10 +734,10 @@ function GuidanceHeader({ state, seen, spot, kept, way }: { state: State; seen: 
 }
 
 /** Guidance footer: End navigation and live remaining ETA/distance above the dock. */
-function GuidanceFooter({ screen, state, seen, way, clockNow }: { screen: Screen; state: State; seen: Seen; way: Way | undefined; clockNow: number }) {
+function GuidanceFooter({ screen, state, way, clockNow }: { screen: Screen; state: State; seen?: Seen; way: Way | undefined; clockNow: number }) {
   const { can, send } = screen;
   const arrived = state.trip.guidance === "Arrived";
-  const remaining = way === undefined ? undefined : remainingMetrics(way, state.trip.turn, seen.here);
+  const remaining = way === undefined ? undefined : remainingMetrics(way, state.trip.turn);
   return (
     <>
       {/* eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class. */}
@@ -740,6 +749,7 @@ function GuidanceFooter({ screen, state, seen, way, clockNow }: { screen: Screen
             ? <div className="mt-0.75 text-meta leading-tight text-muted-foreground">Destination reached</div>
             : remaining !== undefined && way !== undefined && <div role="status" aria-label="Remaining distance and time" className="mt-0.5 text-meta leading-tight text-foreground/70">{`${distance(remaining.metersLeft)} · arrive ${new Date(clockNow + remaining.secondsLeft * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${way.live === true ? "" : " · no live traffic"}`}</div>}
         </div>
+        {can({ type: "handOn", kind: "EtaShare" }) && <MapsRoundButton tone="nightFill" size="2xl" aria-label="Share arrival" onClick={() => void send({ type: "handOn", kind: "EtaShare" })}><Share2 /></MapsRoundButton>}
       </div>
     </>
   );

@@ -38,6 +38,7 @@ const cloudRoutes = [
   { method: "GET", path: "/api/v1/billing/invoices" },
   { method: "GET", path: "/api/v1/billing/invoices/{invoiceId}" },
   { method: "GET", path: "/api/v1/maps/capabilities" },
+  { method: "POST", path: "/api/v1/maps/geocode" },
   { method: "POST", path: "/api/v1/maps/places/search" },
   { method: "POST", path: "/api/v1/maps/places/details" },
   { method: "POST", path: "/api/v1/maps/routes" },

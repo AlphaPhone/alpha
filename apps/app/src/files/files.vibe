@@ -744,18 +744,18 @@ effect function restored(number: number, entries: ReadonlyArray<Bin.Entry>): Bin
 
 // spec/app/files/trash.md, "Confirming erases exactly the entries shown"
 effect function erased(number: number, entries: ReadonlyArray<Bin.Entry>): Bin.Event!!(Files | Handles) {
-  return effect {
-    const results: Bin.Entry[] = []
-    let known = true
-    for (const [volume, mine] of try idsOf(entries)) {
-      const ids: string[] = []
-      for (const entry of mine) ids.push(try idOf(entry))
-      const reply = try called("storageEmptyTrash", (plugin) => plugin.storageEmptyTrash({ volume, ids, confirmed: true }))
-      if (reply.status === "ready" && reply.count === ids.length) results.push(...mine)
-      else if (reply.status === "ready") known = false
-    }
-    return jobDone(number, results, known)
-  } catch () => jobDone(number, [], false)
+  const groups = try idsOf(entries)
+  const results: Bin.Entry[] = []
+  let known = true
+  for (const [volume, mine] of groups) {
+    const ids: string[] = []
+    for (const entry of mine) ids.push(try idOf(entry))
+    const reply = called("storageEmptyTrash", (plugin) => plugin.storageEmptyTrash({ volume, ids, confirmed: true })) catch () => undefined
+    if (reply === undefined) { known = false; continue }
+    if (reply.status === "ready" && reply.count === ids.length) results.push(...mine)
+    else if (reply.status === "ready") known = false
+  }
+  return jobDone(number, results, known)
 }
 
 function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine | Browser.Machine | Recent.Machine | Shown.Machine | Answers | Device | Shell | TrashFacts | Trashing, [by: Bin.Actor]> {

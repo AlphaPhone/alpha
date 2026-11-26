@@ -4,7 +4,7 @@ import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Contact } from "../../gen/app__contacts.effect.vibe"
 import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
-import { Machine as Composer, attachments as draftFiles, maxFiles } from "../../gen/app__assistant__composer.effect.vibe"
+import { Machine as Composer, maxFiles } from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
@@ -218,7 +218,7 @@ export effect function openAttachmentPicker(target: PickerTarget, room: number, 
     const draft = "about" in target ? (try Talk).board.snapshot().contactDraft : undefined
     const used = "about" in target
       ? draft !== undefined && sameContactFileTarget(draft.target, target) ? draft.files.length : 0
-      : draftFiles((try (try Composer).get()).editor)
+      : (try (try Composer).get()).editor.files
     const available = Math.min(room, maxFiles - used)
     if (!Picker.canOpenPicker(state, available) || !(try device.showing()) || !(try targetCurrent(target)) || (try shell.get()).route !== source.route) return false
     const previous = board.current()

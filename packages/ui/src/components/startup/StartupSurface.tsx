@@ -33,7 +33,7 @@ export type StartupSurfaceProps = {
  */
 export function StartupSurface({ presentation, known, connection, mocking = false, homeTakesInput, home, chat, onClose, onExitMock }: StartupSurfaceProps) {
   const alone = known && presentation === "AssistantOnly";
-  const marked = !known || (connection === "Pending" && !alone);
+  const marked = !alone && (!known || connection === "Pending");
   const homeShows = known && !marked && !alone;
   return (
     <div className="flex size-full min-h-0 flex-1 flex-col bg-background text-foreground">

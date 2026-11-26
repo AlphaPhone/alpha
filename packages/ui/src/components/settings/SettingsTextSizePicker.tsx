@@ -28,7 +28,7 @@ const sizes: { percent: Percent; sample: string }[] = [
  */
 export function SettingsTextSizePicker({ size, busy = false, onChoose }: SettingsTextSizePickerProps) {
   return (
-    <ListGroup heading="Text size" className="[&>h2]:leading-normal">
+    <ListGroup heading="Text size" className="[&>h2]:leading-plain">
       <div role="group" aria-label="Text size" aria-busy={busy || undefined} className="flex flex-col gap-1 px-2.5 py-2">
         <div className="flex flex-wrap items-center gap-1">
           {sizes.map(({ percent, sample }) => (

@@ -9,8 +9,9 @@ import { ask, attemptedWith } from "../platform/remote.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
-import { refreshes } from "../../gen/app__calendar__agent.ts"
+import { type AgentCalendar, refreshes } from "../../gen/app__calendar__agent.ts"
 import { Time } from "../runtime/time.vibe"
+import { asked } from "./asked.ts"
 import { readFeed } from "./calendar.vibe"
 import { type Request, complete, decodeRequest } from "./requests.ts"
 import type { Row } from "./shown.ts"
@@ -197,6 +198,23 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
   }, "Agent"), "proposing the agent's request")
 }
 
+// spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+/** Tell Ask Alpha what the card has to show there: a change under way, or how one a reply filed ended. */
+effect function tellAskAlpha(s: AgentCalendar): void!!Requests {
+  const id = (try Requests).find(s.filing)?.id
+  asked.show(Changes.inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)))
+}
+
+/** Read the agent's approvals list once a reply filed a Calendar request, so its card shows in Ask Alpha. */
+export const relistRequests = effect {
+  try listRequests()
+  try tellAskAlpha(try (try Changes.Machine).get())
+}
+
+const toldAskAlpha = started(effect {
+  try Stream.runForEach((try Changes.Machine).changes, (s) => tellAskAlpha(s))
+}, "telling Ask Alpha what the card shows")
+
 /** The request the card showed before a restart, decoded via Schema so a read back after it can still find the change. */
 const restored = started(effect {
   const kept = (try KeyValueStore.KeyValueStore).get(shownKey) catch () => undefined
@@ -238,4 +256,4 @@ const applied = following(Changes.Machine, (a) => (a.stage === "Idle" && refresh
   (write): View.Event | undefined => (write === 0 ? undefined : { type: "changeCommitted" }))
 
 /** The agent's changes to the owner's Google Calendar: kept across restarts, which end what was in flight. */
-export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, restored, expiring)
+export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, restored, expiring, toldAskAlpha)

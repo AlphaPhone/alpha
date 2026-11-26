@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { Machine as CalendarForm } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { Machine as Actions } from "../gen/app__notes__actions.effect.vibe";
 import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
 import { Machine as Trash } from "../gen/app__notes__trash.effect.vibe";
 import { Machine as Voice } from "../gen/app__notes__voice.effect.vibe";
@@ -20,13 +23,24 @@ import { agentOpen } from "../src/notes/agent.vibe";
 import { reviewNoteSchedule } from "../src/notes/calendar.vibe";
 import notes from "../src/notes/index.tsx";
 import { clock, dated, preview } from "../src/notes/present.ts";
+import { agentAt } from "../src/platform/agent.vibe";
+import { cloudAt } from "../src/platform/cloud.vibe";
+import { pagePlatform } from "../src/platform/platform.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
-import { note, prepared } from "./fakes/notes.ts";
+import { button, closeAll, drawn, fill, hardware, later, only, open, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { note, notesRoutes, prepared } from "./fakes/notes.ts";
+import { answering, fetched } from "./fakes/routes.ts";
+import type * as Ui from "@repo/ui";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
+
+const rowDrawn = vi.hoisted(() => vi.fn());
+vi.mock("@repo/ui", async (original) => {
+  const ui = await original<typeof Ui>();
+  return { ...ui, NoteRow: (props: Parameters<typeof ui.NoteRow>[0]) => { rowDrawn(); return <ui.NoteRow {...props} />; } };
+});
 
 const listed = () => [...document.querySelectorAll("[aria-label=Notes] button")].flatMap((row) => row.getAttribute("aria-label")?.startsWith("Open ") ? [row.getAttribute("aria-label")] : []);
 
@@ -107,6 +121,18 @@ async function openNotesFromHome(world: Scene) {
   return { alpha, runtime: notes.runtime(alpha) };
 }
 
+async function openRecentlyDeleted(alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof notes.runtime>, count: number) {
+  await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+  await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+  await control("Notes options");
+  await drawn(() => button("Notes options")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+  const entry = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")]
+    .find((one) => one.textContent?.trim() === "Recently deleted");
+  await rendered(() => expect(entry()).toBeDefined());
+  await drawn(() => entry()?.click());
+  await until(alpha, runtime, Trash, (state) => state.showing && state.read.status === "Loaded" && state.entries.length === count);
+}
+
 describe("Notes", () => {
   it.each([
     { row: "Enclave launch", kind: "event", destination: undefined, words: "Confirm attestation flow" },
@@ -128,10 +154,11 @@ describe("Notes", () => {
     await until(alpha, target, CalendarForm, (state) => state.shown && state.kept);
     const state = await target.runPromise(CalendarForm.use((form) => form.get()));
     const fields = await target.runPromise(kept(state.day, state.owner));
-    expect(fields.title).toBe(row);
-    expect(fields.notes).toContain(words);
-    expect(fields.noteOrigin).toMatchObject({ agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2 });
-    expect(typeof fields.noteOrigin?.revision).toBe("string");
+    const noted: unknown = expect.stringContaining(words);
+    const revision: unknown = expect.any(String);
+    expect(fields).toMatchObject({ title: row, notes: noted, noteOrigin: {
+      agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2, revision,
+    } });
     expect(fields.calendar).toBe(destination);
     expect(new Date(fields.begin).getHours()).toBe(9);
     expect(world.calendar.writes).toEqual([]);
@@ -258,6 +285,25 @@ describe("Notes", () => {
     await press("Done");
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1 && world.notes.notes.some((row) => row.body.includes("Monday")));
     expect(world.notes.notes.filter((row) => row.title === "Studio invoice").map((row) => row.body.trim())).toEqual(["Send by Monday"]);
+  });
+
+  it("A new note's editor stays as it is typed and saved, and the list under it is not drawn again (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await control("New note");
+    await press("New note");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
+    const title = document.querySelector("input[aria-label='Title']");
+    await fill("Title", "Studio invoice");
+    await until(alpha, runtime, Editor, (state) => waiting(state));
+    rowDrawn.mockClear();
+    await fill("Note", "Send by Friday");
+    await until(alpha, runtime, Editor, (state) => state.draft.edits > 1);
+    expect(rowDrawn).not.toHaveBeenCalled();
+    await later(alpha, 800);
+    await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0);
+    expect(title?.isConnected).toBe(true);
   });
 
   it("Write a note (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
@@ -479,15 +525,8 @@ describe("Notes", () => {
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe("Summarize this for me");
     expect(button("Remove Design sync")).toBeDefined();
     const question = "What did we decide about notifications in this transcript?";
-    await fill("Message Alpha", question);
-    await press("Remove Design sync");
-    await until(alpha, runtime, Composer, (state) => !state.editor.transcript);
-
-    // spec/app/assistant/composer.md, "Story: Attach, quote and edit again"
-    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-    await press("Ask Alpha about this transcript");
-    await drawn(async () => { expect((await runtime.runPromise(Shell.use((shell) => shell.get()))).assistant).toBe("Bar"); });
-    const reopenTranscriptQuestion = async () => {
+    /** Leave the open note, reopen Design sync and ask Alpha about its transcript again. */
+    const askAgainAboutSync = async () => {
       await press("Back to notes");
       await until(alpha, runtime, Voice, (state) => !state.showing);
       await control("Open Design sync");
@@ -496,14 +535,20 @@ describe("Notes", () => {
       await press("Ask Alpha about this transcript");
       await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
     };
-    const expectTranscriptContext = async (index: number) => {
-      expect(world.ask.metadata?.[index]).toMatchObject({
-        observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
-        useSelectedVoiceNoteTranscript: true,
-      });
-      await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
-    };
-    await reopenTranscriptQuestion();
+    /** The `turn`th question went with the selected Design sync note and its transcript flag. */
+    const expectTranscriptTurn = (turn: number) => expect(world.ask.metadata?.[turn]).toMatchObject({
+      observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
+      useSelectedVoiceNoteTranscript: true,
+    });
+    await fill("Message Alpha", question);
+    await press("Remove Design sync");
+    await until(alpha, runtime, Composer, (state) => !state.editor.transcript);
+
+    // spec/app/assistant/composer.md, "Story: Attach, quote and edit again"
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+    await press("Ask Alpha about this transcript");
+    await drawn(async () => { expect((await runtime.runPromise(Shell.use((shell) => shell.get()))).assistant).toBe("Bar"); });
+    await askAgainAboutSync();
     expect(button("Remove Design sync")).toBeDefined();
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe(question);
     await until(alpha, runtime, Conversation, (state) => state.ready && state.observing && state.context.selected);
@@ -512,18 +557,20 @@ describe("Notes", () => {
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question])));
     expect(world.ask.said[0]).not.toContain("Use the transcript");
     expect(world.ask.said[0]).not.toContain("Four heights");
-    await expectTranscriptContext(0);
+    expectTranscriptTurn(0);
+    await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
     expect(button("Remove Design sync")).toBeUndefined();
 
     // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
     await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-    await reopenTranscriptQuestion();
+    await askAgainAboutSync();
     await fill("Message Alpha", "");
     await until(alpha, runtime, Composer, (state) => state.away === "Free" && state.editor.transcript && !state.editor.text && state.draft.sync !== "Saving");
     await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected && state.observing);
     await press("Send");
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question, ""])));
-    await expectTranscriptContext(1);
+    expectTranscriptTurn(1);
+    await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
   });
 
   it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\"; spec/app/assistant/cards.md, \"The owner reviews the summary before it can be saved\")", async () => {
@@ -794,5 +841,71 @@ describe("Notes", () => {
     const bad = { ...note("bad", "", "", 0), updatedAt: "not-a-date" };
     expect(dated(bad, 1_700_000_000_000)).toBe("");
     expect(preview(bad)).toBe("");
+  });
+
+  it("Empties all notes in Recently deleted when confirmed (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {
+    const world = scene();
+    world.now = Date.now();
+    const first = world.notes.notes.pop();
+    const second = world.notes.notes.pop();
+    if (!first || !second) throw new Error("The fixture needs two notes");
+    world.notes.trash.push(
+      { note: first, deletedAt: new Date(world.now - 60_000).toISOString() },
+      { note: second, deletedAt: new Date(world.now - 30_000).toISOString() },
+    );
+
+    const answer = answering([
+      (request, url) => (request.method === "GET" && url.pathname === "/api/health" ? Response.json({ ready: true }) : undefined),
+      (request, url) => {
+        if (request.method !== "POST" || url.pathname !== "/api/notes/trash/erase") return undefined;
+        return request.json().then((body: { scope?: string; expectedRevision?: number }) => {
+          if (body.expectedRevision !== world.notes.revision) return Response.json({ error: "conflict" }, { status: 409 });
+          const count = world.notes.trash.length;
+          if (body.scope === "all") {
+            world.notes.trash = [];
+            world.notes.revision += 1;
+          }
+          return Response.json({
+            success: true,
+            data: { erased: count, recordingCleanup: [], state: { notes: world.notes.notes, revision: world.notes.revision, trash: world.notes.trash } },
+          });
+        });
+      },
+      ...notesRoutes(world.notes, () => world.now),
+    ]);
+    const http = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request, url, signal) => Effect.tryPromise({
+      try: () => fetched(answer, url, { method: request.method, headers: request.headers, body: request.body._tag === "Uint8Array" ? request.body.body : undefined, signal }),
+      catch: (cause) => new HttpClientError.HttpClientError({ reason: new HttpClientError.TransportError({ request, cause }) }),
+    }).pipe(Effect.map((response) => HttpClientResponse.fromWeb(request, response)))));
+    const platform = Layer.provideMerge(
+      pagePlatform(Layer.provide(agentAt("http://agent.test"), http), Layer.provide(cloudAt("http://cloud.test"), http)),
+      Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(world.now)), TestClock.layer()),
+    );
+    const { alpha } = await openOver(platform, only("view:Notes"));
+    const runtime = notes.runtime(alpha);
+    await openRecentlyDeleted(alpha, runtime, 2);
+
+    await press("Empty Recently deleted");
+    await until(alpha, runtime, Trash, (state) => state.question === "AskEmpty");
+    await press(/Delete all/);
+    await until(alpha, runtime, Trash, (state) => state.failed || state.attempt.outcome === "Confirmed");
+    expect((await runtime.runPromise(Trash.use((t) => t.get()))).attempt.outcome).toBe("Confirmed");
+    expect(world.notes.trash).toEqual([]);
+  });
+
+  it("Closes the Note Actions menu on hardware Back before closing the editor (spec/app/notes/actions.md, \"Back and leaving Notes close the menu, and so do a restart and another owner taking the phone\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openLoadedNotes(world);
+    await control("Open Enclave launch");
+    await press("Open Enclave launch");
+    await until(alpha, runtime, Editor, (state) => state.showing);
+
+    await control("More");
+    await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    await until(alpha, runtime, Actions, (state) => state.open);
+
+    await hardware("back");
+    expect((await runtime.runPromise(Actions.use((a) => a.get()))).open).toBe(false);
+    expect((await runtime.runPromise(Editor.use((e) => e.get()))).showing).toBe(true);
   });
 });

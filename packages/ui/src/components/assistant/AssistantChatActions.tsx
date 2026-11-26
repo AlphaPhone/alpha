@@ -1,4 +1,4 @@
-import { Camera, Clock, Paperclip, Plus, Search, Sparkles } from "lucide-react";
+import { Camera, Paperclip, Plus, Search, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -14,9 +14,6 @@ export interface AssistantChatActionsProps {
   disabled?: boolean;
   onAttach?: () => void;
   onSearch?: () => void;
-  onNew?: () => void;
-  making?: boolean;
-  onHistory?: () => void;
 }
 
 interface ChatActionsMenuProps {
@@ -43,15 +40,13 @@ function ChatActionsMenu({ placement, label, triggerId, disabled, children }: Ch
   );
 }
 
-/** The available Ask Alpha actions beside a composer. */
-export function AssistantChatActions({ placement, triggerId, disabled, onAttach, onSearch, onNew, making, onHistory }: AssistantChatActionsProps) {
-  const visible = Boolean(onAttach || onSearch || onNew || making || onHistory);
+/** The available Ask Alpha actions beside a composer, as v119 offered them (45f6bed30 template.html:59-67): Attach media and Search chat. */
+export function AssistantChatActions({ placement, triggerId, disabled, onAttach, onSearch }: AssistantChatActionsProps) {
+  const visible = Boolean(onAttach || onSearch);
   return (
     <ChatActionsMenu placement={placement} label="Chat actions" triggerId={triggerId} disabled={disabled || !visible}>
       {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
       {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
-      {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
-      {onHistory ? <MenuItem onSelect={onHistory}><Clock aria-hidden />Chat history</MenuItem> : null}
     </ChatActionsMenu>
   );
 }

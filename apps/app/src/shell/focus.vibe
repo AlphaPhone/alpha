@@ -221,15 +221,14 @@ effect function waitForOpener(waited: string): void!!Focus.Machine {
   if (ended && Focus.canWaitEnds(try focus.get())) try tell({ type: "waitEnds" })
 }
 
-effect function closed(layer: string, waiters: FiberMap.FiberMap<string>): void!!Focus.Machine {
+effect function closed(layer: string): (string | undefined)!!Focus.Machine {
   const focus = try Focus.Machine
   const before = try focus.get()
   const opener = before.openers.find((one) => one.layer === layer)?.opener ?? ""
   const after = try tell({ type: "layerClosed", layer, openerReady: shown(opener) })
-  if (after === undefined) return
+  if (after === undefined) return undefined
   if (after.restores > before.restores) give(after.lastRestore)
-  if (after.waiting === "") return
-  try FiberMap.run(waiters, layer, waitForOpener(after.waiting))
+  return after.waiting === "" ? undefined : after.waiting
 }
 
 const layering = started(Effect.scoped(effect {
@@ -237,7 +236,8 @@ const layering = started(Effect.scoped(effect {
   const layers = try Layers.Machine
   const shell = try Shell.Machine
   const outside = try OutsideFocus
-  const waiters = try FiberMap.make<string>()
+  const focusMachine = try Focus.Machine
+  const waits = try FiberMap.make<string>()
   const drawer = Stream.changes(Stream.map(shell.changes, (state) => state.drawer))
   let open: ReadonlyArray<string> = []
   try Stream.runForEach(Stream.zipLatest(layers.changes, drawer), effect ([l, apps]) => {
@@ -251,7 +251,11 @@ const layering = started(Effect.scoped(effect {
         if (focusedInApps()) try tell({ type: "blurred" })
         else try heardFocus()
       }
-      try closed(id, waiters)
+      const waiting = try closed(id)
+      if (waiting !== undefined) {
+        const work = effect { provide Focus.Machine = focusMachine { try waitForOpener(waiting) } }
+        try FiberMap.run(waits, "opener", work)
+      }
     }
     open = now
   })

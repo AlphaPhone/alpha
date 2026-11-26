@@ -9,7 +9,7 @@ import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { entryOf, registrationAt } from "./alpha.vibe"
 import { hostedClouds, hostedProfileProblems, type HostedCloudUnknown } from "./hosted.vibe"
 import { reconcileResources } from "./cloudflare.vibe"
-import { base64Bytes, base64Key, base64urlBytes, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexBytes, hexKey, isExampleEntitlementPublicKey, randomKey } from "./keys.ts"
+import { base64urlBytes, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexKey, isEntitlementKey, isExampleEntitlementPublicKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
 import { PROFILE_ASSET } from "./profile-asset.ts"
 import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResources } from "./wrangler.vibe"
 
@@ -59,39 +59,37 @@ function parseSecrets(text: string): Record<string, string> {
   return values
 }
 
-effect function canonicalPath(target: string): string!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
+/** Resolve `target` through any symlinks, including dangling ones, so containment checks cannot be bypassed. */
+effect function canonicalPath(target: string, depth = 0): string!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
+  if (depth > 16) throw new OperatorFailed({ problem: `${target} contains too many symbolic links` })
   const fs = try FileSystem.FileSystem
   const path = try Path.Path
-  let current = path.resolve(target)
-  const tail: string[] = []
-  for (;;) {
-    const exists = (fs.exists(current) catch () => false)
-    if (exists) {
-      const real = fs.realPath(current) catch effect () => { throw new OperatorFailed({ problem: `cannot resolve ${target}` }) }
-      return tail.length === 0 ? real : path.join(real, ...tail.reverse())
-    }
-    const parent = path.dirname(current)
-    if (parent === current) return path.resolve(target)
-    tail.push(path.basename(current))
-    current = parent
-  }
+  const resolved = path.resolve(target)
+  const real = (fs.realPath(resolved) catch () => undefined)
+  if (real !== undefined) return real
+  const linked = (fs.readLink(resolved) catch () => undefined)
+  if (linked !== undefined) return try canonicalPath(path.resolve(path.dirname(resolved), linked), depth + 1)
+  const parent = path.dirname(resolved)
+  if (parent === resolved) return resolved
+  return path.join(try canonicalPath(parent, depth + 1), path.basename(resolved))
 }
 
 /** The secrets file at `file`, refused inside the checkout or readable by anyone but its owner; nothing yet when it does not exist. */
 export effect function readSecrets(file: string): Record<string, string>!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
   const fs = try FileSystem.FileSystem
   const path = try Path.Path
-  const resolved = try canonicalPath(file)
+  const resolved = path.resolve(file)
+  const canonical = try canonicalPath(resolved)
   const checkout = try canonicalPath(path.resolve(try packageDirectory(), "../.."))
-  const exists = (fs.exists(resolved) catch () => false)
-  const info = exists ? (fs.stat(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }) : undefined
+  const exists = (fs.exists(canonical) catch () => false)
+  const info = exists ? (fs.stat(canonical) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }) : undefined
   if (info !== undefined && info.type !== "File") throw new OperatorFailed({ problem: `${resolved} must be a regular file` })
   const mode = info?.mode ?? 0o600
-  const inside = resolved === checkout || resolved.startsWith(checkout + path.sep)
-  if (!secretsFileAccepted(inside, (mode & 0o077) !== 0))
+  const insideCheckout = canonical === checkout || canonical.startsWith(checkout + path.sep)
+  if (!secretsFileAccepted(insideCheckout, (mode & 0o077) !== 0))
     throw new OperatorFailed({ problem: `${resolved} must lie outside the checkout and be readable by its owner alone (chmod 600)` })
   if (!exists) return {}
-  return parseSecrets((fs.readFileString(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
+  return parseSecrets((fs.readFileString(canonical) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
 }
 
 effect function writeSecrets(file: string, values: Readonly<Record<string, string>>): void!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
@@ -117,10 +115,10 @@ export function generated(values: Readonly<Record<string, string>>): Record<stri
   const next = { ...values }
   for (const name of internalSecrets) {
     if (next[name]) continue
-    if (name === "CLOUD_ENTITLEMENT_KEY") next[name] = entitlementKey()
-    else if (name === "GOOGLE_CONNECT_TOKEN_KEY") next[name] = hexKey()
-    else if (name === "CLOUD_SEALING_KEY") next[name] = base64Key()
-    else next[name] = randomKey()
+    next[name] = name === "CLOUD_ENTITLEMENT_KEY" ? entitlementKey()
+      : name === "CLOUD_SEALING_KEY" ? sealingKey()
+      : name === "GOOGLE_CONNECT_TOKEN_KEY" ? hexKey()
+      : randomKey()
   }
   return next
 }
@@ -132,17 +130,10 @@ export function secretProblems(values: Readonly<Record<string, string>>, environ
   if (stripe && (!/^(sk|rk)_(live|test)_/.test(stripe) || !paymentKeyFits(environment === "production", /^(sk|rk)_live_/.test(stripe))))
     problems.push(environment === "production" ? "STRIPE_SECRET_KEY must be a live key in production" : "STRIPE_SECRET_KEY must be a test key in staging")
   if (values.DATABASE_URL && !/^postgres(ql)?:\/\//.test(values.DATABASE_URL)) problems.push("DATABASE_URL must be a postgres:// URL")
-  if (values.CLOUD_DIGEST_KEY && base64urlBytes(values.CLOUD_DIGEST_KEY) < 32) problems.push("CLOUD_DIGEST_KEY must hold at least 32 bytes")
-  if (values.EMAIL_CODE_SECRET && base64urlBytes(values.EMAIL_CODE_SECRET) < 32) problems.push("EMAIL_CODE_SECRET must hold at least 32 bytes")
-  if (values.CLOUD_SEALING_KEY && base64Bytes(values.CLOUD_SEALING_KEY) !== 32) problems.push("CLOUD_SEALING_KEY must hold 32 bytes in standard base64")
-  if (values.GOOGLE_CONNECT_TOKEN_KEY && hexBytes(values.GOOGLE_CONNECT_TOKEN_KEY) !== 32) problems.push("GOOGLE_CONNECT_TOKEN_KEY must hold 64 hex characters")
-  if (values.CLOUD_ENTITLEMENT_KEY) {
-    try {
-      entitlementPublicKey(values.CLOUD_ENTITLEMENT_KEY)
-    } catch {
-      problems.push("CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key")
-    }
-  }
+  if (values.CLOUD_ENTITLEMENT_KEY && !isEntitlementKey(values.CLOUD_ENTITLEMENT_KEY)) problems.push("CLOUD_ENTITLEMENT_KEY must be a PKCS #8 EC P-256 private key")
+  if (values.CLOUD_SEALING_KEY && sealingKeyBytes(values.CLOUD_SEALING_KEY) !== 32) problems.push("CLOUD_SEALING_KEY must hold exactly 32 base64 bytes")
+  if (values.GOOGLE_CONNECT_TOKEN_KEY && !isHexKey(values.GOOGLE_CONNECT_TOKEN_KEY)) problems.push("GOOGLE_CONNECT_TOKEN_KEY must be 64 hex characters")
+  for (const name of ["CLOUD_DIGEST_KEY", "EMAIL_CODE_SECRET"] as const) if (values[name] && base64urlBytes(values[name]) < 32) problems.push(`${name} must hold at least 32 bytes`)
   for (const [name, value] of Object.entries(values)) if (leakedElizaHost(value) !== undefined) problems.push(`${name} names a deployed Eliza Cloud host`)
   return problems
 }
@@ -161,9 +152,9 @@ export effect function settledSecrets(file: string, environment: CloudEnvironmen
   const read = try rollout.send({ type: "readSecrets", internalMissing, providedFit: provided.length === 0 })
   const settled = read.generated ? generated(values) : values
   if (read.generated) try writeSecrets(file, settled)
-  const signingKey = settled.CLOUD_ENTITLEMENT_KEY
-  const publicKey = signingKey ? (Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }) : undefined
   if (read.vault !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
+  const signingKey = settled.CLOUD_ENTITLEMENT_KEY ?? ""
+  const publicKey = Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }
   return { values: settled, entitlementPublicKey: publicKey }
 }
 

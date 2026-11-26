@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { readTurnContext, type DeviceOperation } from "@elizaos/agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
@@ -22,7 +22,7 @@ import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, reviewF
 import type { Place } from "../src/areas.ts";
 import browser from "../src/browser/index.tsx";
 import files from "../src/files/index.tsx";
-import { called } from "../src/platform/files.vibe";
+import { called, Files } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview, type TextReviewScene } from "./fakes/text-review.ts";
@@ -477,11 +477,18 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
+    /** v119 live rows read size · date with no leading type word (files-browser-adapter.ts:1315-1324); the kind stays for screen readers. */
+    const notesRow = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === "notes.txt");
+    const notesDetail = notesRow?.querySelector("span.text-muted-foreground")?.textContent ?? "";
+    expect([notesDetail.startsWith("Document"), notesDetail.split(" · ").length, notesRow?.getAttribute("aria-description")]).toEqual([false, 2, `Document · ${notesDetail}`]);
     // spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it"
     // spec/app/files/preview.md, "What was read of a file is shown only in its own viewer, while it can be read"
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
+    /** v119 live left the 18px slot before the facts empty (selection-adapter.ts:282 `d: ''`): no kind icon, the words keep their place. */
+    const facts = document.querySelector("[data-facts-slot]")?.parentElement;
+    expect([facts?.querySelector("svg"), facts?.querySelector("[data-facts-slot]")?.childNodes.length, facts?.textContent?.startsWith("Text · ")]).toEqual([null, 0, true]);
 
     // spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
     await choose("Details", "File actions");
@@ -510,6 +517,7 @@ describe("Files on a phone", () => {
     world.files.texts[updated.path] = "These are the revised notes";
     await choose("Ask Alpha", "File actions");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    expect([document.querySelector("[data-alpha-subview=files-preview]") !== null, document.querySelector("pre")?.textContent]).toEqual([true, "These are the revised notes"]);
     await press("Remove notes.txt");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
@@ -530,7 +538,7 @@ describe("Files on a phone", () => {
     // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
     const [leaseSelection] = [...world.files.selections].find(([, selection]) => selection.path === "Download/lease.pdf") ?? [];
     if (!leaseSelection) throw new Error("the phone did not authorize the PDF preview");
-    await choose("Open elsewhere", "File actions");
+    await choose("Open in Android", "File actions");
     await vi.waitFor(() => expect(world.files.opened).toContain(leaseSelection));
     // spec/app/files/preview.md, "Forget removes the file from Recent, with or without access, and closes the viewer"
     await choose("Forget", "File actions");
@@ -546,7 +554,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
     await openMenu("File actions");
     expect(menuItem("Ask Alpha")).toBeUndefined();
-    await drawn(() => menuItem("Open elsewhere")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await drawn(() => menuItem("Open in Android")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     await press("Close");
 
     // spec/app/files/recent.md, "Opening a row again asks the phone first: it opens, moves to the front and is the document open, or its access has ended and it must be selected again, or its provider cannot be reached and it stays"
@@ -1189,7 +1197,7 @@ describe("Files on a phone", () => {
     await hardware("home");
   });
 
-  it("Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/files/index.md, \"Story: Change my files\")", async () => {
+  it("Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/trash.md, \"Story: Delete into the Trash\")", async () => {
     const { alpha, runtime, world } = await onDownloads();
 
     const hiddenCheck = document.querySelector<HTMLElement>("[aria-label='Select lease.pdf']");
@@ -1218,6 +1226,31 @@ describe("Files on a phone", () => {
     await pressOnTop("Delete");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.binned.length === 2);
     expect(world.files.trash.map((one) => one.was.path).toSorted()).toEqual(["Documents/notes.txt", "Download/lease.pdf"]);
+  });
+
+  it("Preserves confirmed volume erasures when a later volume throws during Empty Trash (spec/app/files/trash.md, \"A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown\")", async () => {
+    const { alpha, runtime, world } = await onFiles();
+    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+    world.files.trash.push(
+      { id: "30", was: { volume: "primary", path: "Download/gone.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+      { id: "31", was: { volume: "card", path: "stuck.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+    );
+    const plugin = Option.getOrThrow(runtime.runSync(Effect.map(Files, (service) => service.plugin)));
+    const original = plugin.storageEmptyTrash.bind(plugin);
+    vi.spyOn(plugin, "storageEmptyTrash").mockImplementation((input) => {
+      if (input.volume === "card") return Promise.reject(new Error("card unavailable"));
+      return original(input);
+    });
+
+    await press("Trash");
+    await until(alpha, runtime, Bin, (s) => s.open && s.listing.status === "Loaded" && s.entries.length === 2);
+    await press("Empty");
+    await until(alpha, runtime, Bin, (s) => s.erasing.showing && s.doomed.length === 2);
+    await pressOnTop("Empty");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Unknown" && s.listing.status === "Loaded");
+    const state = runtime.runSync(Bin.use((machine) => machine.get()));
+    expect(state.done.map((entry) => entry.name)).toEqual(["gone.txt"]);
+    expect(state.entries.map((entry) => entry.name)).toEqual(["stuck.txt"]);
   });
 });
 

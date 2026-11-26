@@ -11,7 +11,7 @@ import { Agent } from "../platform/agent.vibe"
 import { Device, native, registered } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
 import { civilDay, dayStart, localDate } from "../calendar/time.ts"
-import { type Job, answer, contained, due, following, hearing, reacting, run, untimed, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
 import { Time } from "../runtime/time.vibe"
 import { homeInput } from "./home.vibe"
@@ -89,6 +89,10 @@ export const named = {
   snapshot: (): number => titleShelf.snapshot().version,
   subscribe: titleShelf.subscribe,
   title: (origin: Origin, id: number): string => titleShelf.snapshot().map.get(`${origin}:${id}`) ?? "",
+}
+
+function bump() {
+  titleShelf.update((current) => ({ ...current, version: current.version + 1 }))
 }
 
 function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>) {
@@ -194,11 +198,12 @@ effect function readAgent(ticket: number, day: number): Event!!(Agent | Cards.Ma
     const to = event.isAllDay ? localDate(event.endAt) : Date.parse(event.endAt)
     return Number.isFinite(from) && Number.isFinite(to) ? [{ title: event.title, begin: from, end: to, allDay: event.isAllDay }] : []
   })
+  const source: Cards.Source = feed.state === "complete" ? "Ready" : "Unavailable"
   const event: Event = {
-    type: "agentRead", ticket, source: feed.state === "complete" ? "Ready" : "Unavailable",
+    type: "agentRead", ticket, source,
     events: events.map((entry, at) => ({ id: at + 1, origin: "AgentCalendar", calendar: 0, begin: entry.begin, end: entry.end, allDay: entry.allDay, overdue: false, done: false })),
   }
-  if (Cards.enabled(try (try Cards.Machine).get(), event)) {
+  if (source === "Ready" && Cards.enabled(try (try Cards.Machine).get(), event)) {
     titled("AgentCalendar", events)
   }
   return event
@@ -273,6 +278,34 @@ effect function restarted(): Event!!Time {
   return { type: "restart", day: civilDay(try (try Time).now()) }
 }
 
+// spec/app/home/cards.md, "An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled"
+const advancing = started(Effect.scoped(effect {
+  const device = try Device
+  const shell = try Shell.Machine
+  const cards = try Cards.Machine
+  const time = try Time
+  const wake = Stream.merge(
+    Stream.filter(device.visible, (shown) => shown),
+    Stream.changes(Stream.map(shell.changes, (state) => state.trail.length === 0)),
+  )
+  try fork.scoped Stream.runForEach(wake, effect () => {
+    try time.now()
+    bump()
+  })
+  try Stream.runDrain(Stream.switchMap(cards.changes, (state) => Stream.fromEffect(effect {
+    for (;;) {
+      const now = try time.now()
+      const ends = [...state.calendar.items, ...state.agent.items]
+        .filter((item) => !item.overdue)
+        .map((item) => (item.allDay ? item.end : item.end + 1))
+        .filter((at) => at > now)
+      if (ends.length === 0) return
+      try time.until(Math.min(...ends))
+      bump()
+    }
+  })))
+}), "advancing the agenda card as events end")
+
 /** The cards, kept across restarts for their tickets: looked at when Home shows and when Alpha comes back to the front, and read again at each of the owner's midnights. */
 export const cards = together(
   reacting(Cards, {
@@ -288,4 +321,5 @@ export const cards = together(
   shelfCleanup,
   following(Shell.Machine, (shell) => shell.trail.length === 0, Cards.Machine, (bare) => (bare ? { type: "look", now: untimed } as const : undefined)),
   hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Cards.Machine, () => ({ type: "look", now: untimed } as const)),
+  advancing,
 )

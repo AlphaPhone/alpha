@@ -286,11 +286,8 @@ function admitRemoteRecord(
   seenRemoteIds: Set<string>,
   remoteDeleted: ReadonlySet<string>,
   localDeleted: ReadonlySet<string>,
-  metaSnap: ClockMetaState,
-  remoteVersion: number,
 ): boolean {
-  if (id === "" || seenRemoteIds.has(id) || remoteDeleted.has(id)) return false
-  if (localDeleted.has(id) && (metaSnap.dirty || remoteVersion <= metaSnap.version)) return false
+  if (id === "" || seenRemoteIds.has(id) || remoteDeleted.has(id) || localDeleted.has(id)) return false
   seenRemoteIds.add(id)
   return true
 }
@@ -312,7 +309,7 @@ function mergeAlarms(
   const localDeleted = new Set(metaSnap.deletedAlarmIds)
 
   for (const record of remote.alarms) {
-    if (!admitRemoteRecord(record.id, seenRemoteIds, remoteDeleted, localDeleted, metaSnap, remote.version)) continue
+    if (!admitRemoteRecord(record.id, seenRemoteIds, remoteDeleted, localDeleted)) continue
 
     const existingLocalId = existingAlarmByRemote.get(record.id)
     const localItem = existingLocalId !== undefined ? currentAlarms.items.find((item) => item.id === existingLocalId) : undefined
@@ -365,9 +362,7 @@ function mergeAlarms(
     }
   }
 
-  const nextDeletedAlarms = metaSnap.dirty
-    ? [...new Set([...metaSnap.deletedAlarmIds, ...remote.deletedAlarmIds])]
-    : [...new Set(remote.deletedAlarmIds)]
+  const nextDeletedAlarms = [...new Set([...metaSnap.deletedAlarmIds, ...remote.deletedAlarmIds])]
 
   return { nextAlarms, nextAlarmIssued, nextAlarmMeta, nextDeletedAlarms }
 }
@@ -389,7 +384,7 @@ function mergeTimers(
   const localDeleted = new Set(metaSnap.deletedTimerIds)
 
   for (const record of remote.timers) {
-    if (!admitRemoteRecord(record.id, seenRemoteIds, remoteDeleted, localDeleted, metaSnap, remote.version)) continue
+    if (!admitRemoteRecord(record.id, seenRemoteIds, remoteDeleted, localDeleted)) continue
 
     const existingLocalId = existingTimerByRemote.get(record.id)
     const localItem = existingLocalId !== undefined ? currentTimers.items.find((item) => item.id === existingLocalId) : undefined
@@ -441,9 +436,7 @@ function mergeTimers(
     }
   }
 
-  const nextDeletedTimers = metaSnap.dirty
-    ? [...new Set([...metaSnap.deletedTimerIds, ...remote.deletedTimerIds])]
-    : [...new Set(remote.deletedTimerIds)]
+  const nextDeletedTimers = [...new Set([...metaSnap.deletedTimerIds, ...remote.deletedTimerIds])]
 
   return { nextTimers, nextTimerIssued, nextTimerMeta, nextDeletedTimers }
 }
@@ -465,7 +458,7 @@ export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers
     const remoteVersion = finiteNonNegative(remote.version, 0)
     const remoteEmpty = remoteVersion === 0 && remote.alarms.length === 0 && remote.timers.length === 0 && remote.world.length === 0
 
-    if (metaSnap.dirty && remoteVersion <= metaSnap.version) {
+    if (remoteVersion < metaSnap.version || (metaSnap.dirty && remoteVersion <= metaSnap.version)) {
       return try pushClockSnapshotLocked(coordinator, records)
     }
     if (remoteEmpty && metaSnap.version === 0 && !metaSnap.dirty) {

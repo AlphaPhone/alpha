@@ -327,18 +327,21 @@ const presented = started(effect {
 
 const shelfReset = Layer.effectDiscard(Effect.addFinalizer(() => sync(() => { toldShelf.reset(); catalog.reset(); homeWaiting.reset() })))
 
-/** Clear inline Home failure notices whenever the surface they belonged to closes. */
+// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing"
+/** Clear inline Home failure notices whenever the surface closes or the failed action succeeds. */
 const shelfLifecycle = started(effect {
+  toldShelf.reset()
   const home = try Home.Machine
   const shell = try Shell.Machine
   const canvas = try Canvas
-  const places = Stream.changes(Stream.map(
-    Stream.zipLatest(Stream.zipLatest(home.changes, shell.changes), canvas.changes),
-    ([[h, s], c]) => Home.noticeAt(h, s, Home.besideHomeSheet(s, landscapeHomeInput(c))),
-  ))
-  try Stream.runForEach(places, (place) => sync(() => {
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(home.changes, shell.changes), canvas.changes), ([[h, s], c]) => sync(() => {
     const current = toldShelf.get()
-    if (current !== undefined && current.place !== place) toldShelf.reset()
+    if (current === undefined) return
+    const beside = Home.besideHomeSheet(s, landscapeHomeInput(c))
+    if (Home.noticeAt(h, s, beside) !== current.place) toldShelf.reset()
+    else if (current.place === "InEditBar" && h.tiles.save.outcome === "Confirmed") toldShelf.reset()
+    else if (current.place === "InDrawer" && current.notice.tag === "TellAppsUnread" && h.installed.read.status === "Loaded") toldShelf.reset()
+    else if (current.place === "InDrawer" && current.notice.tag === "TellNotOpened" && h.handoff.attempt.outcome === "Confirmed") toldShelf.reset()
   }))
 }, "clearing retired Home notices")
 

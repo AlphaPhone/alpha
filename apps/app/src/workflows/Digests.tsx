@@ -176,20 +176,24 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
       The agent didn’t confirm the change.
       <Button size="sm" variant="secondary" onClick={() => tell({ type: "checkChange" })}>Check change</Button>
     </Alert>}
-    <div className="flex flex-wrap gap-2">
-      {model.can({ type: "retry" }) && <Button variant="secondary" onClick={() => tell({ type: "retry" })}>Retry</Button>}
-      {model.can({ type: "discard" }) && <Button variant="ghost" onClick={() => tell({ type: "discard" })}>Discard</Button>}
-      {model.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow a different change</Button>}
-    </div>
+    {(model.can({ type: "retry" }) || model.can({ type: "discard" }) || model.can({ type: "letGo" })) && (
+      <div className="flex flex-wrap gap-2">
+        {model.can({ type: "retry" }) && <Button variant="secondary" onClick={() => tell({ type: "retry" })}>Try again</Button>}
+        {model.can({ type: "discard" }) && <Button variant="ghost" onClick={() => tell({ type: "discard" })}>Discard</Button>}
+        {model.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow a different change</Button>}
+      </div>
+    )}
     {state.runNow.live && <Spinner aria-label="Running missed digest" />}
     {model.can({ type: "checkRunNow" }) && <Alert role="status" variant="warn">
       The agent didn’t confirm whether it ran the missed digest.
       <Button size="sm" variant="secondary" onClick={() => tell({ type: "checkRunNow" })}>Check run</Button>
     </Alert>}
-    <div className="flex flex-wrap gap-2">
-      {model.can({ type: "resendRunNow" }) && <Button variant="secondary" onClick={() => tell({ type: "resendRunNow" })}>Send again</Button>}
-      {model.can({ type: "letGoRunNow" }) && <Button variant="secondary" onClick={() => tell({ type: "letGoRunNow" })}>Allow another run</Button>}
-    </div>
+    {(model.can({ type: "resendRunNow" }) || model.can({ type: "letGoRunNow" })) && (
+      <div className="flex flex-wrap gap-2">
+        {model.can({ type: "resendRunNow" }) && <Button variant="secondary" onClick={() => tell({ type: "resendRunNow" })}>Send again</Button>}
+        {model.can({ type: "letGoRunNow" }) && <Button variant="secondary" onClick={() => tell({ type: "letGoRunNow" })}>Allow another run</Button>}
+      </div>
+    )}
     <ConfirmDialog open={state.review.showing}
       title={state.proposed === "Create" ? "Schedule a digest?" : `${titles[state.proposed]} “${selection?.name ?? "Digest"}”?`}
       confirmLabel={titles[state.proposed]} destructive={state.proposed === "Remove"}

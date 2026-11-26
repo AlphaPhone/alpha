@@ -1,8 +1,7 @@
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useState } from "react";
 import { ChevronLeft, ChevronRight, Ellipsis, Repeat } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { CalendarHeaderAction } from "./CalendarHeader.tsx";
 
 export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
@@ -146,21 +145,33 @@ export interface CalendarEventMenuItem {
 }
 
 /** The event's actions, behind the "…" at the top end: a small list that opens under it. */
-export function CalendarEventMenu({ items, className, ...props }: Omit<ComponentProps<"div">, "children"> & { items: ReadonlyArray<CalendarEventMenuItem> }) {
+export function CalendarEventMenu({ items, className, onKeyDown, ...props }: Omit<ComponentProps<"div">, "children"> & { items: ReadonlyArray<CalendarEventMenuItem> }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className={cn("relative z-10", className)} {...props}>
-      <Menu>
-        <MenuTrigger asChild>
-          <CalendarHeaderAction aria-label="Event actions" className="size-11"><Ellipsis aria-hidden /></CalendarHeaderAction>
-        </MenuTrigger>
-        <MenuContent align="end">
-          {items.map((item) => (
-            <MenuItem key={item.label} aria-label={item.name} onSelect={item.onSelect}>
-              {item.label}
-            </MenuItem>
-          ))}
-        </MenuContent>
-      </Menu>
+    <div
+      className={cn("relative z-10", className)}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (open && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+      {...props}
+    >
+      <CalendarHeaderAction aria-label="Event actions" aria-haspopup="menu" aria-expanded={open} className="size-11" onClick={() => setOpen(!open)}><Ellipsis aria-hidden /></CalendarHeaderAction>
+      {open ? (
+        <>
+          <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 cursor-default" />
+          <div role="menu" className="absolute top-full right-0 w-max rounded-lg border border-border/60 bg-popover p-1 text-popover-foreground shadow-md dark:border-border">
+            {items.map((item) => (
+              <button key={item.label} type="button" role="menuitem" aria-label={item.name} onClick={() => { setOpen(false); item.onSelect(); }}
+                className={cn(focusRing, "block min-h-11 w-full px-3.5 text-start active:bg-accent")}>{item.label}</button>
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 // spec/app/notices/collection.md, "Story: Manage collection in Settings"
-import { Banner, Button, ConfirmDialog, ListGroup, ListRow, NotificationAccessRow, SettingsNavRow, SettingsSwitchRow } from "@repo/ui";
+import { Banner, Button, ConfirmDialog, ListGroup, ListRow, NotificationAccessRowContext, SettingsNavRow, SettingsSwitchRow } from "@repo/ui";
 import { ChevronUp, Play, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { use } from "react";
 import type { PolicyCommand, PolicySelection } from "../../gen/app__notices__collection.ts";
@@ -32,7 +32,7 @@ function reviewCopy(selection: PolicySelection, label?: string): { title: string
  */
 function SettingsCollection({ runtime }: Shown<Machine | Resident>) {
   const { state, can, send } = useMachine(runtime);
-  const access = use(NotificationAccessRow);
+  const access = use(NotificationAccessRowContext);
   const panel = state?.panel;
   if (!panel) return access ? <ListGroup>{access}</ListGroup> : null;
   const policy = panel.report;

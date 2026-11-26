@@ -62,14 +62,15 @@ const unsecured = (security: SettingsNetworkSecurity) => security === "open" || 
  * @model spec/app/settings/network.md
  */
 export function SettingsNetworkPage({ online, reading = false, scan, scanning = false, networks, joined, joining = false, fits, onJoin, onRescan, told, onBack, starting, onAndroid }: SettingsNetworkPageProps) {
-  const [chosen, setChosen] = useState<SettingsNearbyNetwork | undefined>(undefined);
-  const [passphrase, setPassphrase] = useState("");
+  const [selection, setSelection] = useState<{ name: string; security: SettingsNetworkSecurity; passphrase: string } | undefined>(undefined);
+  const chosen = selection === undefined ? undefined : networks.find((network) => network.name === selection.name);
+  if (selection !== undefined && (chosen === undefined || chosen.security !== selection.security)) {
+    setSelection(chosen === undefined ? undefined : { name: chosen.name, security: chosen.security, passphrase: "" });
+  }
+  const passphrase = chosen !== undefined && !unsecured(chosen.security) && selection?.security === chosen.security ? selection.passphrase : "";
   const said = scans[scan];
   const android = { starting, onAndroid };
-  const selected = chosen
-    ? networks.find((network) => network.name === chosen.name && network.security === chosen.security) ?? (joining ? chosen : undefined)
-    : undefined;
-  const ready = selected !== undefined && onJoin !== undefined && !joining && (fits?.(selected, passphrase) ?? false);
+  const ready = chosen !== undefined && onJoin !== undefined && !joining && (fits?.(chosen, passphrase) ?? false);
   return (
     <SettingsPage title="Network" told={told} onBack={onBack} backLabel="Back to General" actions={onRescan ? <Button variant="ghost" size="sm" onClick={onRescan}>Scan again</Button> : undefined}>
       {said ? <Banner variant="warn">{said}</Banner> : null}
@@ -86,31 +87,33 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
               leading={unsecured(network.security) ? <LockOpen /> : <Lock />}
               title={network.name}
               detail={securities[network.security]}
-              selected={selected?.name === network.name && selected.security === network.security}
+              selected={chosen?.name === network.name && chosen.security === network.security}
               onClick={() => {
-                setChosen(network);
-                setPassphrase("");
+                setSelection({ name: network.name, security: network.security, passphrase: "" });
               }}
             />
           ))}
         </ListGroup>
       ) : null}
-      {selected ? (
+      {chosen ? (
         <form
           className="flex flex-col gap-2 px-4"
           onSubmit={(event) => {
             event.preventDefault();
             if (!ready) return;
-            onJoin(selected, passphrase);
-            setPassphrase("");
+            onJoin(chosen, passphrase);
+            setSelection(undefined);
           }}
         >
-          {unsecured(selected.security) ? null : (
-            <Input type="password" autoComplete="off" placeholder="Password" aria-label={`Password for ${selected.name}`} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+          {unsecured(chosen.security) ? null : (
+            <Input type="password" autoComplete="off" placeholder="Password" aria-label={`Password for ${chosen.name}`} value={passphrase} onChange={(event) => {
+              const next = event.target.value;
+              setSelection((current) => current && { ...current, passphrase: next });
+            }} />
           )}
           <div className="flex gap-2">
-            {!joining ? <Button variant="secondary" onClick={() => { setChosen(undefined); setPassphrase(""); }}>Cancel</Button> : null}
-            <Button type="submit" className="flex-1" disabled={!ready} loading={joining}>{`Join ${selected.name}`}</Button>
+            {!joining ? <Button variant="secondary" onClick={() => setSelection(undefined)}>Cancel</Button> : null}
+            <Button type="submit" className="flex-1" disabled={!ready} loading={joining}>{`Join ${chosen.name}`}</Button>
           </div>
         </form>
       ) : null}

@@ -10,6 +10,7 @@ import type { View } from "../gen/app__shell.ts";
 import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.vibe";
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
+import { CalendarReviews } from "./calendar/reviews.vibe";
 import { ScanExports } from "./files/scanEntry.vibe";
 import { InboxCardEntry } from "./home/cards.vibe";
 import { homeFrame } from "./home/firstFrame.ts";
@@ -211,6 +212,12 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       await files.runtime(alpha).runPromise(retainScanExport(selection));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
+  const calendarReviews = Layer.succeed(CalendarReviews, {
+    relist: () => Effect.tryPromise(async () => {
+      const [{ default: calendar }, { relistRequests }] = await Promise.all([import("./calendar/index.tsx"), import("./calendar/agent.vibe")]);
+      await calendar.runtime(alpha).runPromise(relistRequests);
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  });
   /** Late-bound StartupSignIn forwarded to the resident layer while the root is being built. */
   let builtSignIn: Context.Service.Shape<typeof StartupSignIn> | undefined;
   const signedIn = () => {
@@ -234,7 +241,7 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
   });
   const signIn = Layer.tap(startupSignIn(requireNativeSignIn), (context) => Effect.sync(() => { builtSignIn = Context.get(context, StartupSignIn); }));
   const startup = Layer.provideMerge(startupAccessLifecycle(requireNativeSignIn), Layer.provideMerge(signIn, Layer.provideMerge(resident, lateSignIn)));
-  const root = rooted(Layer.provideMerge(startup, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, inboxCard, scans)));
+  const root = rooted(Layer.provideMerge(startup, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, inboxCard, scans, calendarReviews)));
   const placed = new Map<Place, ReactElement[]>();
   /** The runtimes `over` makes while a screen is being opened. */
   let making: Array<{ context: () => Promise<unknown> }> | undefined;

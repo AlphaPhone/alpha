@@ -20,20 +20,20 @@ const action = "h-auto min-h-11 min-w-0 shrink grow basis-[10.625rem] whitespace
 
 /** The public Browser excerpt to edit and hear using local speech. */
 export function BrowserReadAloud({ origin, excerpt, pending, reading, blocked, status, onExcerpt, onRead, onStop, onClose }: BrowserReadAloudProps) {
-  const focusRef = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent onOpenAutoFocus={(event) => { event.preventDefault(); focusRef.current?.focus(); }}
+      <DialogContent onOpenAutoFocus={(event) => { event.preventDefault(); fieldRef.current?.focus(); }}
         onInteractOutside={(event) => event.preventDefault()} aria-describedby={undefined}
         overlayClassName="bg-foreground/10 dark:bg-background/10"
-        className="inset-0 m-auto h-fit max-h-[calc(100dvh-2.375rem)] w-[min(27.5rem,calc(100vw-2.375rem))] max-w-none overflow-hidden rounded-action border border-border bg-background px-4 pt-7 pb-4 font-sans text-md leading-chat text-foreground motion-safe:animate-none">
+        className="inset-0 m-auto h-fit max-h-[calc(100dvh-2.375rem)] w-[min(27.5rem,calc(100vw-2.375rem))] max-w-none overflow-hidden rounded-action border border-border bg-background px-4 pt-7 pb-4 text-md leading-chat text-foreground motion-safe:animate-none">
         <section tabIndex={0} aria-label="Read page excerpt content" className="min-h-0 overflow-auto overscroll-contain wrap-anywhere">
-          <DialogTitle className="mb-3 font-sans text-lead leading-chat font-bold">Read page excerpt</DialogTitle>
+          <DialogTitle className="mb-3 font-sans text-xl leading-chat font-bold">Read page excerpt</DialogTitle>
           <p className="my-4">{origin}</p>
           <p className="my-4">On device · not saved</p>
           <label>
             Excerpt to read
-            <Textarea ref={focusRef} aria-label="Excerpt to read" className="h-46.5 w-full field-sizing-fixed resize rounded-frame border-border p-2 leading-chat focus:outline-2 focus:-outline-offset-2 focus:outline-solid focus:[outline-color:-webkit-focus-ring-color]"
+            <Textarea ref={fieldRef} aria-label="Excerpt to read" className="h-46.5 w-full field-sizing-fixed resize rounded-frame border-border p-2 leading-chat focus:outline-2 focus:-outline-offset-2 focus:outline-solid focus:[outline-color:-webkit-focus-ring-color]"
               rows={7} maxLength={5000} disabled={reading || blocked} value={excerpt} onChange={(event) => onExcerpt(event.currentTarget.value)} />
           </label>
           <p aria-label="Characters" className="text-right text-xs leading-chat">{excerpt.length.toLocaleString()}/5,000</p>

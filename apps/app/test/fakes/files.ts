@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesAccess, StorageEntry, StorageVolume, TrashEntry, SelectedDocumentsPlugin } from "@elizaos/os-bridges";
 import type { StorageAttachmentRow, StorageAttachmentTarget } from "../../src/platform/documents.vibe";
-import { type Faked, plugin } from "./phone.ts";
+import { answered, type Faked, plugin } from "./phone.ts";
 
 /** One file or folder the fake storage holds, by its volume and its path from that volume's root. */
 export interface Stored {
@@ -304,23 +304,23 @@ export function selectedDocuments(scene: FilesScene): Faked {
           : btoa(raw);
         return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64 });
       },
-      reviewStorageAttachment(input) {
+      reviewStorageAttachment: (input) => answered(() => {
         const file = storedAttachment(input);
         if (!file || leaf(file.path) !== input.name || file.mimeType !== input.mimeType || file.size !== input.size || file.modified !== input.modified) {
-          return Promise.reject(new Error("The listed file changed"));
+          throw new Error("The listed file changed");
         }
         const receipt = crypto.randomUUID().padEnd(43, "_");
         reviewed.set(receipt, { file, revision: file.modified });
-        return Promise.resolve({ reviewed: receipt });
-      },
-      readStorageAttachment(input) {
+        return { reviewed: receipt };
+      }),
+      readStorageAttachment: (input) => answered(() => {
         const review = reviewed.get(input.reviewed);
         const file = storedAttachment(input);
-        if (!file || !review || review.file !== file || review.revision !== file.modified) return Promise.reject(new Error("The reviewed file changed"));
+        if (!file || !review || review.file !== file || review.revision !== file.modified) throw new Error("The reviewed file changed");
         const text = scene.texts[file.path];
-        if (text === undefined || text.length !== file.size) return Promise.reject(new Error("Fixture attachment bytes unavailable"));
-        return Promise.resolve({ name: leaf(file.path), mimeType: file.mimeType, dataBase64: btoa(text) });
-      },
+        if (text === undefined || text.length !== file.size) throw new Error("Fixture attachment bytes unavailable");
+        return { name: leaf(file.path), mimeType: file.mimeType, dataBase64: btoa(text) };
+      }),
       describeSelected({ selectionId }) {
         const found = held(selectionId);
         return Promise.resolve(found ? described(selectionId, found) : { status: "unavailable", message: "" });

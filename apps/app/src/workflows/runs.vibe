@@ -90,7 +90,7 @@ effect function start(id: number, version: number, owner: number): Event!!Needs 
   const previous = (store.get(key) catch () => "")
   const kept = previous === undefined || previous === "" ? undefined : (Schema.decodeUnknownEffect(Retained)(previous) catch () => undefined)
   if (state.request.again && (kept === undefined || kept.id !== id || kept.version !== target.versionId || kept.workflow !== target.id)) return lost
-  if (!state.request.again && previous !== undefined) return lost
+  if (!state.request.again && previous !== undefined && (kept === undefined || kept.id >= id)) return lost
   let dispatched = state.request.again
   const hold = effect (submission: string) => {
     store.set(key, JSON.stringify({ id, submission, workflow: target.id, version: target.versionId }))
@@ -98,7 +98,7 @@ effect function start(id: number, version: number, owner: number): Event!!Needs 
     dispatched = true
   }
   const answer = effect {
-    const run = kept !== undefined ? try workflow.resubmit(target.id, target.versionId, kept.submission) : try workflow.run(target.id, target.versionId, hold)
+    const run = state.request.again && kept !== undefined ? try workflow.resubmit(target.id, target.versionId, kept.submission) : try workflow.run(target.id, target.versionId, hold)
     return { kind: "accepted", run } as const
   } catch (failure) => ({
     kind: !dispatched || failure instanceof WorkflowAdmissionRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
@@ -212,4 +212,18 @@ const ended = applying(Model.Machine, (state) => Model.ended(state.latest.status
   if (id > 0) try refreshHistory(false)
 })
 
-export const runs = together(reacting(Model, { carry }), references, opened, sending, polling, ended)
+const released = applying(Model.Machine,
+  (state) => ({ owner: state.owner, workflow: state.workflow, id: state.request.attempt.id, free: !state.request.offered && (state.request.attempt.outcome === "Unknown" || state.request.attempt.outcome === "Refused") }),
+  effect ({ owner, workflow, id, free }: { owner: number; workflow: number; id: number; free: boolean }) => {
+    if (!free || id <= 0) return
+    const exact = try (try DefinitionWords).read(workflow)
+    const scope = ownerAt() catch () => ""
+    if (exact === undefined || !(try (try Rows).sameOwner(scope, owner))) return
+    const key = retainedKey(scope, exact.workflow.id)
+    const store = try KeyValueStore.KeyValueStore
+    const raw = store.get(key) catch () => undefined
+    const kept = raw === undefined ? undefined : (Schema.decodeUnknownEffect(Retained)(raw) catch () => undefined)
+    if (kept?.id === id) try ignore(store.remove(key))
+  })
+
+export const runs = together(reacting(Model, { carry }), references, opened, sending, polling, ended, released)

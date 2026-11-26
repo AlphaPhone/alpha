@@ -32,7 +32,7 @@ export function Toast({ onUndo, undoLabel = "Undo", className, children, ...prop
     <div
       data-host-chrome=""
       className={cn(
-        "pointer-events-auto flex min-h-12 w-fit max-w-full items-center gap-3.5 rounded-panel bg-foreground pl-4.5 text-sm leading-normal font-semibold text-background shadow-md motion-safe:animate-drop dark:shadow-md-dark",
+        "pointer-events-auto flex min-h-12 w-fit max-w-full items-center gap-3.5 rounded-panel bg-foreground pl-4.5 text-sm leading-plain font-semibold text-background shadow-md motion-safe:animate-drop dark:shadow-md-dark",
         onUndo ? "pr-1.25" : "pr-4.5",
         className,
       )}

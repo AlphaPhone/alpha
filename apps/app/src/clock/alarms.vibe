@@ -140,12 +140,14 @@ export effect function deleteAlarmWithUndo(id: number): boolean!!(Alarms.Machine
   const machine = try Alarms.Machine
   const records = try activeClockRecords()
   const now = try (try Time).now()
+  const before = try machine.get()
   records.markAlarmDeleted(id)
   const sent = try contained(machine.send({ type: "requestDelete", id, now: untimed }), "deleting an alarm")
   if (!sent) {
     records.unmarkAlarmDeleted(id)
     return false
   }
+  if (before.hasHidden) try withdraw(undoArea, before.hidden.id)
   records.markDirty()
   try persistClockMeta()
   const store = try KeyValueStore.KeyValueStore
@@ -257,7 +259,7 @@ const autoSilenceWatch = started(Effect.scoped(effect {
     for (const [id, item] of ringing) {
       if (armed.get(id) === item.fireAt && Option.isSome(FiberMap.getUnsafe(fibers, id))) continue
       armed.set(id, item.fireAt)
-      try FiberMap.run(fibers, id, silenceWhenDue(id, item.fireAt), { startImmediately: false })
+      try FiberMap.run(fibers, id, silenceWhenDue(id, item.fireAt))
     }
   })
 }), "auto-silencing ringing alarms")

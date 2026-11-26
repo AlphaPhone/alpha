@@ -1,7 +1,8 @@
+import { createRoot } from "react-dom/client";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { AssistantCard } from "./AssistantCard.tsx";
-import type { AssistantTranscriptProps } from "./AssistantTranscript.tsx";
+import { AssistantTranscript, type AssistantTranscriptProps } from "./AssistantTranscript.tsx";
 
 const onRetry = fn();
 const long = Array.from({ length: 12 }, (_, at) => ({ id: `long-${at}`, author: at % 2 === 0 ? "owner" as const : "alpha" as const, text: `Message ${at + 1}: what was said, long enough to wrap onto a second line in a narrow sheet.` }));
@@ -10,6 +11,32 @@ const scrollOf = (log: HTMLElement) => ({ top: log.scrollTop, below: log.scrollH
 /** More text arriving at the end of the log, as a reply growing does. */
 const arrive = (log: HTMLElement) => log.firstElementChild?.append(Object.assign(document.createElement("div"), { style: "height: 300px; flex-shrink: 0" }));
 const onReturnToOriginal = fn();
+/** A reply long enough to fill the 160-point log several times over, to the one question of a new conversation. */
+const replyText = Array.from({ length: 14 }, (_, at) => `Line ${at + 1} of the reply, long enough to wrap in a narrow sheet.`).join(" ");
+const asked = [{ id: "asked", author: "owner" as const, text: "Tell me a long story." }];
+/**
+ * A transcript of its own, drawn as a reply finishes: the streamed words leave in one change and the stored message
+ * arrives in the next, with the page measured between them as the app's own reads of layout do. Between them the
+ * question alone fits the log, so the browser has no place to keep; the size the observer sees at the end is the size
+ * it saw before, so it never reports the moment between.
+ */
+function finishingReply(canvasElement: HTMLElement) {
+  const host = canvasElement.appendChild(Object.assign(document.createElement("div"), { style: "height: 160px; display: flex; flex-direction: column" }));
+  const root = createRoot(host);
+  const draw = (props: Partial<AssistantTranscriptProps>) => root.render(<AssistantTranscript messages={asked} className="h-full" {...props} />);
+  draw({ liveMessages: [{ id: "reply", author: "alpha", text: replyText, streaming: true }] });
+  return {
+    host,
+    async finish(log: HTMLElement) {
+      draw({ liveMessages: [] });
+      await waitFor(() => expect(within(host).queryByText(replyText)).toBeNull());
+      void log.scrollTop;
+      draw({ messages: [...asked, { id: "stored", author: "alpha", text: replyText }] });
+      await waitFor(() => expect(within(host).queryByText(replyText)).not.toBeNull());
+    },
+    done: () => { root.unmount(); host.remove(); },
+  };
+}
 
 export const meta: ComponentMeta<AssistantTranscriptProps> = {
   args: {
@@ -36,6 +63,7 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
     Failed: { messages: [], status: "failed", onRetry },
     Empty: { messages: [] },
     "Following the end": { messages: long },
+    "A reply finishing": { messages: [] },
   },
   play: {
     // spec/app/assistant/chats.md, "The conversation keeps its newest message in view until the owner scrolls up from it"
@@ -57,6 +85,28 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
       arrive(log);
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
+    },
+    // spec/app/assistant/chats.md, "The conversation keeps its newest message in view until the owner scrolls up from it": a finished reply swapped for its stored message neither leaves the end nor moves the owner
+    "A reply finishing": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const following = finishingReply(canvasElement);
+      const followingLog = await within(following.host).findByRole("log");
+      if (followingLog.clientHeight === 0) {
+        following.done();
+        return;
+      }
+      await waitFor(() => expect(scrollOf(followingLog).below).toBeLessThan(2));
+      await following.finish(followingLog);
+      await waitFor(() => expect(scrollOf(followingLog).below).toBeLessThan(2));
+      following.done();
+      const reading = finishingReply(canvasElement);
+      const readingLog = await within(reading.host).findByRole("log");
+      await waitFor(() => expect(scrollOf(readingLog).below).toBeLessThan(2));
+      readingLog.scrollTop -= 200;
+      await waitFor(() => expect(scrollOf(readingLog).below).toBeGreaterThan(150));
+      const place = readingLog.scrollTop;
+      await reading.finish(readingLog);
+      await waitFor(() => expect(readingLog.scrollTop).toBe(place));
+      reading.done();
     },
     Failed: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRetry.mockClear();

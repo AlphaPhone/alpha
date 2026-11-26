@@ -25,9 +25,13 @@ export type SettingsPageProps = {
   children?: ReactNode;
 };
 
-/** Gives the Back control focus when the page appears with nothing focused, as a page opened from a row does. */
+/**
+ * Gives the Back control focus as the page appears, when focus is nowhere or was left on a page now covered: a page
+ * opened from a row leaves that row focused, and inert, under it.
+ */
 const focusOnEntry = (back: HTMLButtonElement | null) => {
-  if (back && (document.activeElement === null || document.activeElement === document.body)) back.focus();
+  const focused = document.activeElement;
+  if (back && (focused === null || focused === document.body || focused.closest("[inert]") !== null)) back.focus();
 };
 
 /**

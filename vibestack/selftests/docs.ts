@@ -153,6 +153,8 @@ describe("the documents name what exists", () => {
     assert.deepEqual(fs.readdirSync(path.join(project, ".github/workflows")).filter((flow) => /\bdevelop\b/.test(read(`.github/workflows/${flow}`).replace(/^ +branches: \[[\w, -]+\]$/gm, ""))), [], "develop is named only where a workflow lists the branches that trigger it");
   });
 
+  test("CI simulation seed polling stops when an in-progress baseline run completes without an artifact", () => verifyCiSeedPolling());
+
   test("tasks wait for the root's gen where needed; selftest edits keep the CLI build cached, and Studio only reacts to its inputs", async (context) => {
     const scripts = { build: "true", typecheck: "true", test: 'node -p "process.env.QUINT_HOME"', "test:browser": "true" };
     const turbo = bin("turbo", project);
@@ -260,7 +262,7 @@ describe("the documents name what exists", () => {
         assert.equal((await exec("git", ["add", "-A"], root)).status, 0);
       }),
     }, {
-      notWaiting: ["//#build", "//#lint:css", "//#selftest:docs", "//#selftest:examples", "@repo/design-system#build", "@repo/ui#typecheck", "vibestack-studio#build", "vibestack-studio#dev", "vibestack-studio#test", "vibestack-studio#typecheck"],
+      notWaiting: ["//#build", "//#lint:css", "//#selftest:docs", "//#selftest:examples", "@repo/cli#test", "@repo/cli#typecheck", "@repo/design-system#build", "@repo/ui#typecheck", "vibestack-studio#build", "vibestack-studio#dev", "vibestack-studio#test", "vibestack-studio#typecheck"],
       analyzeWaitsFor: ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
       lintWaitsFor: vibeDeclared, devWaitsFor: tasks.get("vibestack-studio#build")!.dependencies.toSorted(), prose: [[], true, true], readme: [["//#selftest:docs", "//#selftest:tools:rest"], false], selftest: [[], false, true],
       fixture: { studio: ["vibestack-studio#test"], build: false, selftest: true },
@@ -354,4 +356,72 @@ async function verifyGenerationInputs(root: string) {
     fs.rmdirSync(standalone);
   }
 
+}
+
+async function verifyCiSeedPolling() {
+  const ci = read(".github/workflows/ci.yml");
+  const block = ci.match(/python3 - <<'PYTHON' &\n([\s\S]*?)\n +PYTHON\n/)?.[1];
+  assert.ok(block, "expected simulation seed Python script in .github/workflows/ci.yml");
+  const indent = block.match(/^( +)/)?.[1].length ?? 0;
+  const script = block.split("\n").map((line) => line.slice(indent)).join("\n");
+  const harness = `
+import http.server, json, os, tempfile, threading, time
+from pathlib import Path
+
+state = {"artifact_polls": 0, "run_polls": 0, "sleeps": 0}
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args): pass
+    def do_GET(self):
+        if "/workflows/ci.yml/runs?" in self.path:
+            body = {"workflow_runs": [{"id": 7, "event": "push", "path": ".github/workflows/ci.yml",
+                "head_branch": "main", "head_sha": "abc", "status": "in_progress",
+                "head_repository": {"id": 42}, "repository": {"id": 42}}]}
+        elif "/runs/7/artifacts?" in self.path:
+            state["artifact_polls"] += 1
+            body = {"artifacts": []}
+        elif self.path.endswith("/runs/7"):
+            state["run_polls"] += 1
+            body = {"id": 7, "status": "completed"}
+        else:
+            self.send_response(404); self.end_headers(); return
+        raw = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+clock = {"t": 0.0}
+def fake_sleep(seconds):
+    state["sleeps"] += 1
+    clock["t"] += seconds
+time.sleep = fake_sleep
+time.monotonic = lambda: clock["t"]
+
+with tempfile.TemporaryDirectory() as tmp:
+    os.chdir(tmp)
+    (Path(tmp) / "gen/traces/probe").mkdir(parents=True)
+    event_file = Path(tmp) / "event.json"
+    event_file.write_text(json.dumps({"pull_request": {"base": {"ref": "main", "sha": "abc", "repo": {"id": 42}}}}))
+    os.environ.update({
+        "GITHUB_EVENT_PATH": str(event_file),
+        "GITHUB_REPOSITORY_ID": "42",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_API_URL": f"http://127.0.0.1:{server.server_port}",
+        "GH_TOKEN": "tok",
+        "SHARD": "1",
+    })
+    ns = {}
+    exec(${JSON.stringify(script.replace(/\ntry:\n\s+receive\(\)[\s\S]*$/, "\n"))}, ns)
+    ns["receive"]()
+server.shutdown()
+print(json.dumps(state))
+`;
+  const res = await exec("python3", ["-c", harness], project);
+  assert.equal(res.status, 0, res.stderr);
+  const result = JSON.parse(res.stdout.trim()) as { artifact_polls: number; run_polls: number; sleeps: number };
+  assert.ok(result.run_polls >= 1 && result.sleeps <= 3, `expected loop to refresh run status and exit promptly, got ${JSON.stringify(result)}`);
 }

@@ -100,9 +100,7 @@ effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore
   for (const row of found.value.rows) releases.push(try releaseOf(row))
   const signed = Option.isSome(digest) && hex64.test(digest.value) ? try (try Names).number(digest.value) : 0
   const feed: Feed = { index: found.value.index, releases, manifest: signed }
-  if (Updates.complete(feed) && Updates.canAnswer(try updates.get(), ticket)) {
-    try ignore(store.set(kept, manifest.value))
-  }
+  if (Updates.complete(feed) && Updates.canAnswer(try updates.get(), ticket)) try ignore(store.set(kept, manifest.value))
   return { type: "answer", ticket, reply: { tag: "Answered", ...feed }, now: untimed }
 }
 
@@ -157,7 +155,7 @@ const shown = started(effect {
 
 /** What the owner's activity is read from: the shell, what covers or holds the phone, a call, Alpha in front, a field with focus and the other areas' reports. */
 interface Facts {
-  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly assistant: string }
+  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly drawer: boolean; readonly assistant: string }
   readonly layers: { readonly open: ReadonlyArray<{ readonly kind: string }>; readonly holds: ReadonlyArray<string>; readonly steps: ReadonlyArray<string> }
   readonly call: boolean
   readonly front: boolean
@@ -170,7 +168,7 @@ function activityOf({ shell, layers, call, front, typing, reported }: Facts): Ac
   const held = layers.holds.some((id) => id !== holder)
   return Updates.withSignIn({
     home: shell.trail.length === 0,
-    open: shell.trail.length > 0 || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
+    open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
     typing: reported.card !== "Resting" && (typing || shell.assistant === "Typing"), voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
     busy: reported.connecting, recording: reported.recording, front, call, audio: !call,
   }, reported.card)

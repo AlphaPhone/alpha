@@ -14,6 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
+import { Found } from "../src/settings/phone.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account, checkoutSession, checkoutUrl, type CheckoutScene, type RedemptionScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
@@ -87,6 +88,18 @@ describe("Settings", () => {
     await until(alpha, machines, Pages.Machine, (s) => s.page === "Notifications");
     await press("Back to General");
     await until(alpha, machines, Pages.Machine, (s) => s.page === "General");
+  });
+
+  it("A page opened from a row takes focus on its Back, off the row left under it (spec/app/shell/focus.md, \"A new screen is given focus within twelve frames, unless the owner has already moved it there\")", async () => {
+    const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
+    await drawn(() => button("Privacy")?.focus());
+    await press("Privacy");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Privacy");
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Back to Settings")));
+    await drawn(() => button("Permissions")?.focus());
+    await press("Permissions");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Permissions");
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Back to Privacy")));
   });
 
   it("Recovers an unavailable browser account only after Try again", async () => {
@@ -293,8 +306,8 @@ describe("Settings", () => {
     await press("Continue to Stripe");
     await vi.waitFor(() => expect(checkout.opened).toEqual([checkoutUrl]));
     expect(checkout.starts).toHaveLength(1);
-    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile" });
-    expect(typeof checkout.starts[0]?.key).toBe("string");
+    const key: unknown = expect.any(String);
+    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile", key });
     await seen(false);
     checkout.returned = "cs_test_other";
     await seen(true);
@@ -323,9 +336,8 @@ describe("Settings", () => {
     await press("Redeem");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Code redeemed"));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
-    expect(redemption.calls).toHaveLength(1);
-    expect(redemption.calls[0]?.code).toBe("ABCD2345EFGH6789");
-    expect(typeof redemption.calls[0]?.key).toBe("string");
+    const key: unknown = expect.any(String);
+    expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key }]);
   });
 
   it('Checks the same cancellation after a lost reply and keeps the plan only once (spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in")', async () => {
@@ -905,6 +917,16 @@ describe("Settings", () => {
     // spec/app/settings/network.md, "Leaving the page retires what it asked and forgets what it found; a join in flight is Android's and goes on"
     await hardware("back");
     await until(alpha, machines, Network.Machine, (s) => s.found === 0 && s.scan === "NotScanned");
+
+    let finishScan = () => {};
+    world.settings.wifiScanGate = new Promise<void>((done) => { finishScan = done; });
+    await press("Network");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Loading");
+    await hardware("back");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Idle" && s.found === 0);
+    finishScan();
+    await later(alpha, 50);
+    expect(await machines.runPromise(Found.use((found) => found.get()))).toEqual([]);
   });
 
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {

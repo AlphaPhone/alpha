@@ -1,7 +1,7 @@
 // The Components & Layout Viewer: zero-config embedded preview (with Storybook and structured fallback),
 // adaptive Layout Stage + Element Inspector for model-bound/composite components, and a consolidated
 // headered Props & Controls table for isolated primitives.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Effect, ManagedRuntime } from "effect";
 import { Button, Checkbox, EmptyState, Input, cn, focusRing } from "@repo/ui";
 import { Machine, machine } from "../../gen/components.effect.vibe";
@@ -430,12 +430,6 @@ export function LivePreviewStage({
     theme,
   });
 
-  const onSelectRef = useRef(onSelectComponent);
-  const onActionRef = useRef(onAction);
-  useEffect(() => {
-    onSelectRef.current = onSelectComponent;
-    onActionRef.current = onAction;
-  }, [onSelectComponent, onAction]);
   const previewOrigin = (() => {
     if (!preview.url) return null;
     try { return new URL(preview.url).origin; } catch { return null; }
@@ -456,6 +450,8 @@ export function LivePreviewStage({
     }
   }, [target.source.file, target.name, args, propNames, allChildren, inspect, theme, previewOrigin]);
 
+  const selectComponent = useEffectEvent((name: string) => onSelectComponent?.(name));
+  const sendAction = useEffectEvent((prop: string, actionArgs: unknown[]) => onAction?.(prop, actionArgs));
   useEffect(() => {
     if (preview.mode !== "embedded" || !preview.url || !previewOrigin) return;
     const onMsg = (ev: MessageEvent) => {
@@ -467,9 +463,9 @@ export function LivePreviewStage({
         readyRef.current = true;
         win.postMessage({ type: "studio:preview", ...payloadRef.current }, previewOrigin);
       } else if (data.type === "studio:select" && typeof data.componentName === "string") {
-        onSelectRef.current?.(data.componentName);
+        selectComponent(data.componentName);
       } else if (data.type === "studio:action" && typeof data.prop === "string") {
-        onActionRef.current?.(data.prop, Array.isArray(data.args) ? data.args : []);
+        sendAction(data.prop, Array.isArray(data.args) ? data.args : []);
       }
     };
     window.addEventListener("message", onMsg);

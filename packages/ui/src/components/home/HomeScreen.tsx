@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode, type Ref, useCallback, useRef } from "react";
+import { isValidElement, type ReactNode, type Ref, useCallback } from "react";
 import { cn } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
 import { AddToHomeSheet } from "./AddToHomeSheet.tsx";
@@ -79,14 +79,11 @@ export function HomeScreen({
   cards = [], cardsAwaited = false, appCards, tiles, editing = false, covered = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onPressTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, addInFrame, hidden = [], onAddToHome, onCloseAdding = noop, className,
 }: HomeScreenProps) {
-  const first = cards.find(isValidElement)?.key ?? null;
-  const lastFirstRef = useRef<string | null>(first);
-  const rowRef = useCallback((node: HTMLElement | null) => {
-    if (!node) return;
-    if (lastFirstRef.current !== first) {
-      lastFirstRef.current = first;
-      node.scrollLeft = 0;
-    }
+  const first = String(cards.find(isValidElement)?.key ?? "");
+  const startAtFirstCard = useCallback((row: HTMLElement | null) => {
+    if (!row || row.dataset.homeFirstCard === first) return;
+    row.dataset.homeFirstCard = first;
+    row.scrollTo({ left: 0 });
   }, [first]);
   return (
     <div inert={covered || undefined} className={cn("@container flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
@@ -96,7 +93,7 @@ export function HomeScreen({
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
         {cards.length > 0 ? (
-          <HomeCardRow ref={rowRef} inert={cardsInert || undefined}>{cards}</HomeCardRow>
+          <HomeCardRow ref={startAtFirstCard} inert={cardsInert || undefined}>{cards}</HomeCardRow>
         ) : cardsAwaited ? (
           <div aria-hidden data-home-cards-awaited="" className="h-49 shrink-0" />
         ) : null}
@@ -108,7 +105,7 @@ export function HomeScreen({
             if (id) onPressTile(id);
           } : undefined}>
           <HomeTileGrid
-            key={tileGestureScope}
+            tileGestureScope={tileGestureScope}
             tiles={tiles}
             editing={editing}
             onOpen={onOpenTile}

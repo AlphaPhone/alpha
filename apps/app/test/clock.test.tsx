@@ -181,8 +181,6 @@ describe("Clock journeys", () => {
     await drawn(() => deleteButtons[0]?.click());
     await waitFor(Alarms.Machine, (s) => s.items.length === 1 && s.hasHidden);
     await waitFor(Toasts.Machine, (s) => s.showing && s.current.undo);
-    const remainingDelete = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Delete alarm"));
-    expect(remainingDelete?.disabled).toBe(true);
 
     await press("Undo");
     await waitFor(Alarms.Machine, (s) => s.items.length === 2 && !s.hasHidden);
@@ -219,7 +217,7 @@ describe("Clock journeys", () => {
     await press("Dismiss");
     await waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Idle" && s.items[0]?.enabled === true);
 
-    // spec/app/clock/alarms.md, "A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed"
+    // spec/app/clock/alarms.md, "A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed": the ten-minute snooze ends at 7:10, so this one-off alarm is set for 7:11, a minute ahead.
     await press("Add alarm");
     for (let step = 0; step < 11; step++) await pressOnTop("Increase minute");
     await fill("Alarm label", "One-off tea");
@@ -490,16 +488,20 @@ describe("Clock journeys", () => {
     expect(document.querySelector("[role=alertdialog][aria-label='Ringing timer']")).not.toBeNull();
   });
 
-  it("Reopen settles timed-out repeating alarms into the future and missed Idle alarms without re-ringing (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing\")", async () => {
-    const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
+  async function mountWithDailyAlarm(startMs: number, label: string) {
     const remote = emptyRemote(startMs);
     const first = await mountClock(startMs, remote);
-
     await press("Add alarm");
-    await fill("Alarm label", "Daily ring");
+    await fill("Alarm label", label);
     await pressOnTop("Every day");
     await pressOnTop("Save");
     await first.waitFor(Alarms.Machine, (s) => s.items.length === 1);
+    return { remote, first };
+  }
+
+  it("Reopen settles timed-out repeating alarms into the future and missed Idle alarms without re-ringing (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing\")", async () => {
+    const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
+    const { first } = await mountWithDailyAlarm(startMs, "Daily ring");
 
     await press("Add alarm");
     for (let step = 0; step < 5; step++) await pressOnTop("Increase minute");
@@ -568,5 +570,103 @@ describe("Clock journeys", () => {
     expect(store.alarm(1).label).toBe("Valid");
     store.restore(JSON.stringify({ alarms: [["bad", {}]], version: "oops" }));
     expect(store.alarm(1).label).toBe("Valid");
+  });
+
+  it("Settles timed-out repeating alarms across restart without double-firing and auto-silences after clock jumps (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing\"; spec/app/clock/alarms.md, \"A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed\")", async () => {
+    const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
+    const { remote, first } = await mountWithDailyAlarm(startMs, "Daily standup");
+    await first.advance(60_000);
+    await first.waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Ringing");
+    await first.close();
+
+    const reopenMs = startMs + 60_000 + 15 * 60_000;
+    const second = await mountClock(reopenMs, remote);
+    await second.advance(1_000);
+    const afterReopen = await second.runtime.runPromise(Alarms.Machine.use((m) => m.get()));
+    expect(afterReopen.items[0]).toMatchObject({ enabled: true, phase: "Idle", missed: true });
+    expect(afterReopen.items[0]?.fireAt).toBeGreaterThan(reopenMs);
+
+    const nextDue = afterReopen.items[0]?.fireAt ?? 0;
+    await drawn(() => second.runtime.runPromise(TestClock.setTime(nextDue)));
+    await second.advance(1_000);
+    await second.waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Ringing");
+    const jumpedTo = nextDue + 30 * 3_600_000;
+    await drawn(() => second.runtime.runPromise(TestClock.setTime(jumpedTo)));
+    await second.advance(1_000);
+    await second.waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Idle" && s.items[0]?.missed === true);
+    const afterJump = await second.runtime.runPromise(Alarms.Machine.use((m) => m.get()));
+    expect(afterJump.items[0]?.fireAt).toBeGreaterThan(jumpedTo);
+  });
+
+  it("Preserves timer tombstones and never lets a stale empty remote overwrite newer local clock state (spec/app/clock/alarms.md, \"Syncing from the resident agent admits only valid, unique, bounded alarm lists\")", async () => {
+    const startMs = new Date(2026, 10, 24, 9, 0, 0, 0).getTime();
+    const remote = emptyRemote(startMs);
+    const session = await mountClock(startMs, remote);
+
+    const alarmPushed = remote.waitForPut();
+    await press("Add alarm");
+    await fill("Alarm label", "Keep me");
+    await pressOnTop("Save");
+    await session.waitFor(Alarms.Machine, (s) => s.items.length === 1);
+    await alarmPushed;
+
+    await clickTab("Timers");
+    await session.waitFor(ClockView.Machine, (s) => s.tab === "Timers");
+    const timerPushed = remote.waitForPut();
+    await press("Start 1m timer");
+    await session.waitFor(Timers.Machine, (s) => s.items.length === 1);
+    await timerPushed;
+    const remoteTimer = remote.snapshot.timers[0];
+    if (!remoteTimer) throw new Error("expected synced remote timer");
+
+    await press("Delete 1m timer");
+    await session.waitFor(Timers.Machine, (s) => s.items.length === 0);
+
+    remote.snapshot = {
+      ...remote.snapshot,
+      version: remote.snapshot.version + 1,
+      timers: [remoteTimer],
+      deletedTimerIds: [],
+    };
+    await drawn(() => session.runtime.runPromise(syncClockNow()));
+    expect((await session.runtime.runPromise(Timers.Machine.use((m) => m.get()))).items).toHaveLength(0);
+
+    remote.snapshot = {
+      version: 0,
+      updatedAtMs: startMs,
+      alarms: [],
+      timers: [],
+      world: [],
+      deletedAlarmIds: [],
+      deletedTimerIds: [],
+    };
+    await drawn(() => session.runtime.runPromise(syncClockNow()));
+    expect((await session.runtime.runPromise(Alarms.Machine.use((m) => m.get()))).items).toHaveLength(1);
+  });
+
+  it("Commits the previous pending alarm deletion when deleting a second alarm inside the Undo window (spec/app/clock/alarms.md, \"Deleting an alarm holds it for a five-second Undo window before committing removal\")", async () => {
+    const startMs = new Date(2026, 10, 24, 8, 0, 0, 0).getTime();
+    const remote = emptyRemote(startMs);
+    const session = await mountClock(startMs, remote);
+
+    await press("Add alarm");
+    await fill("Alarm label", "First alarm");
+    await pressOnTop("Save");
+    await session.waitFor(Alarms.Machine, (s) => s.items.length === 1);
+
+    await press("Add alarm");
+    await fill("Alarm label", "Second alarm");
+    await pressOnTop("Save");
+    await session.waitFor(Alarms.Machine, (s) => s.items.length === 2);
+
+    const deleteButtons = () => [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .filter((b) => (b.getAttribute("aria-label") ?? "").startsWith("Delete alarm"));
+    await drawn(() => deleteButtons()[0]?.click());
+    await session.waitFor(Alarms.Machine, (s) => s.items.length === 1 && s.hasHidden);
+
+    await drawn(() => deleteButtons()[0]?.click());
+    const afterSecond = await session.runtime.runPromise(Alarms.Machine.use((m) => m.get()));
+    expect(afterSecond.items).toHaveLength(0);
+    expect(afterSecond.hasHidden).toBe(true);
   });
 });

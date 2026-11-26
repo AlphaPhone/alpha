@@ -73,8 +73,8 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Hom
   if (!state || !shell) return { cards: [], settled: false };
   const answered = state.calendar.source !== "Unanswered" && state.agent.source !== "Unanswered";
   const told = others(given, shell.image, messagingStateOf(messaging.cards.Telegram), messagingStateOf(messaging.cards.Slack));
-  const now = Math.max(state.calendar.since, state.agent.since, dayStart(state.today));
-  const latest = Math.max(now, runtime.runSync(latestTime));
+  const now = Math.max(runtime.runSync(latestTime), state.calendar.since, state.agent.since, dayStart(state.today));
+  const latest = now;
   const open = (kind: Cards.Kind) => {
     if (kind === "MailCard" || beside) {
       const admitted = kind === "MailCard"

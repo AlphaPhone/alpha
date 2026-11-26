@@ -19,11 +19,13 @@ export type HomeTileProps = Omit<ComponentProps<"button">, "children"> & {
   hold?: LauncherHold;
   /** Opens Home editing after a stationary press or the context menu key. */
   onHold?: () => void;
+  /** Resets in-flight hold state when the owning frame or route changes without unmounting the tile. */
+  gestureScope?: string;
 };
 
 /** One tile on Home: the app it opens, and while Home is being edited, its remove control. */
-export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, onHold, onClick, className, ...props }: HomeTileProps) {
-  const activation = useLauncherPress(hold, onHold, onClick);
+export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, onHold, gestureScope, onClick, className, ...props }: HomeTileProps) {
+  const activation = useLauncherPress(hold, onHold, onClick, gestureScope);
   return (
     <div data-home-cell="" className={cn("group/home-cell relative flex justify-center data-[home-dragging]:z-10", className)}>
       <div className="relative w-full">

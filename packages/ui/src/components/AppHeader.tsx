@@ -20,7 +20,8 @@ export type AppHeaderProps = Omit<ComponentProps<"header">, "title"> & {
 /**
  * The top of a screen: where the owner is, the way back and what can be done here. Its icon buttons are 52px. On the
  * launcher (`data-alpha-launcher`, the phone's Home) the title is the serif display title, as Alpha's earlier build drew
- * it on the phone: `3xl` on an app's first page and `home-display` on a screen inside it. Above 150% text
+ * it on the phone: `3xl` on an app's first page and `home-display` on a screen inside it, both at Denton's largest
+ * optical size (`opsz` 144). Above 150% text
  * (`data-alpha-title-row`) the title, on the launcher or not, takes a row of its own under the buttons and wraps there,
  * never cut; off the launcher it is set in a further 8px with 6px under it, as Alpha's earlier build drew it. On the
  * launcher a first page's title is drawn no larger than lets a 4.4em word fit that row, so one word is never split.
@@ -37,7 +38,7 @@ export function AppHeader({ title, leading, titleControl, detail = false, classN
     )} {...props}>
       {leading}
       <h1 className={titleControl ? "sr-only" : cn(
-        "min-w-0 flex-1 text-xl font-semibold break-words in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:font-light",
+        "min-w-0 flex-1 text-xl font-semibold break-words in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:font-light in-data-[alpha-launcher]:[font-variation-settings:'opsz'_144]",
         "in-data-[alpha-title-row]:order-1 in-data-[alpha-title-row]:basis-full in-data-[alpha-title-row]:wrap-anywhere in-data-[alpha-title-row]:not-in-data-[alpha-launcher]:px-2 in-data-[alpha-title-row]:not-in-data-[alpha-launcher]:pb-1.5",
         detail
           ? "in-data-[alpha-launcher]:truncate in-data-[alpha-launcher]:text-home-display in-data-[alpha-launcher]:tracking-tight in-data-[alpha-title-row]:overflow-visible in-data-[alpha-title-row]:whitespace-normal"

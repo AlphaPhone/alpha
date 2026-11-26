@@ -23,7 +23,7 @@ export function SettingsFactRow({ title, icon, reading, description }: SettingsF
     <div className="flex min-h-14.5 items-stretch gap-3.5 px-4.5 py-3 text-foreground">
       {icon ? <span aria-hidden className="flex shrink-0 items-center [&_svg:not([class*='size-'])]:size-5.5">{icon}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
-        <span className="text-md leading-normal break-words">
+        <span className="text-md leading-plain break-words">
           {title}
           {description ? <span className="mt-0.5 block text-sm leading-normal text-muted-foreground">{description}</span> : null}
         </span>

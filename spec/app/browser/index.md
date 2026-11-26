@@ -493,13 +493,15 @@ pure def sometimesPrivateTabsOutliveAClearing(s: Browser): bool =
 
 ## Story: Let the agent open a page
 
-> As the owner, I want the agent to open a page I approved in a tab of its
-> own, and to take that tab back whenever I like.
+> As the owner, I want the agent to open a page I asked for or approved in
+> a tab of its own, and to take that tab back whenever I like.
 
 ### The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time
 
-The approval comes from the approvals area. The tab gets its native tab at
-once and does not take the place of the tab the owner is on.
+The owner's request or approval comes from the approvals area, or from the
+Browser's own card for a page the agent handed to this screen (next rule).
+The tab gets its native tab at once and does not take the place of the tab
+the owner is on.
 
 ```quint
 pure def canAgentOpen(s: Browser, secure: bool, userInfo: bool): bool =
@@ -509,6 +511,38 @@ pure def agentOpen(s: Browser, secure: bool, userInfo: bool): Step =
   val tab = s.issued + 1
   { state: { ...s, open: s.open.union(Set(tab)), native: s.native.union(Set(tab)), issued: tab, agent: tab, untouched: false, stale: true },
     out: List(Create({ tab: tab, kind: Normal })) }
+```
+
+### A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open
+
+As on Sunday's v119 demo phone, where "Open https://www.alphacompute.ai/ in
+Browser." loaded the site with no card, typed or said in Talk. The phone
+runs `browser.open-direct.v1` (eliza's `spec/browser/control.md`): a
+`browser_navigate` step the agent offers as asked by the owner's whole
+message runs at once, after the reply, through the same approvals path and
+journal as an approved one, and a page the agent hands to this screen marked
+to open at once opens with no card. Whether the message asked for that
+address is the agent's grounding; the phone reads nothing of the owner's
+words. Any other page, such as a link of the page or an address the agent
+proposed, waits for the owner's Open on its card, in Ask Alpha or on the
+Browser's card, as before. While the owner has "Ask before Alpha acts" on,
+or the phone has not read that preference or is still reading or saving it
+(`asksBeforeActing(WebAction)` in [Preferences](../settings/preferences.md)),
+even a page the whole message asked for waits for the owner's Open on its
+card, as v119 asked first for every direct run. Every page still opens only
+under the rule above.
+
+```quint
+pure val directOpenCapability: str = "browser.open-direct.v1"
+pure def opensWithoutCard(askedWhole: bool, asksFirst: bool): bool = askedWhole and not(asksFirst)
+pure def pageOpens(askedWhole: bool, asksFirst: bool, ownerChoseOpen: bool, secure: bool, userInfo: bool): bool =
+  (opensWithoutCard(askedWhole, asksFirst) or ownerChoseOpen) and secure and not(userInfo)
+pure def lawAPageNotAskedWholeWaitsForTheOwner(asksFirst: bool, secure: bool, userInfo: bool): bool =
+  not(pageOpens(false, asksFirst, false, secure, userInfo))
+pure def lawAskingFirstWaitsForTheOwner(askedWhole: bool, secure: bool, userInfo: bool): bool =
+  not(pageOpens(askedWhole, true, false, secure, userInfo))
+pure def lawNoPageOpensOutsideHttps(askedWhole: bool, asksFirst: bool, ownerChoseOpen: bool, userInfo: bool): bool =
+  not(pageOpens(askedWhole, asksFirst, ownerChoseOpen, false, userInfo))
 ```
 
 ### "Stop and take over" stops the agent and gives its tab to the owner

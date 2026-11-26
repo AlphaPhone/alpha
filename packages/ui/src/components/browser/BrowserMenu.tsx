@@ -47,7 +47,7 @@ export function BrowserMenu({ items, onClose }: BrowserMenuProps) {
         role="dialog"
         aria-label="Browser menu"
         onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
+          if (event.key !== "Escape" || event.defaultPrevented) return;
           event.preventDefault();
           event.stopPropagation();
           onClose();

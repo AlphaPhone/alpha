@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, dockClearance, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
-import { useCallback, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { memo, useCallback, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
@@ -449,6 +449,45 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   />;
 }
 
+/**
+ * The rows of the list, drawn again only when the list, the notes or the waiting draft change, never as the open
+ * note is typed. `hidden` is the note whose unsaved draft waits above the list; `covered` says a draft waits at all.
+ */
+const ListedNotes = memo(function ListedNotes({ runtime, collection, covered, hidden }: {
+  readonly runtime: Runtime; readonly collection: Collection; readonly covered: boolean; readonly hidden: number | undefined;
+}) {
+  const list = useNotes(runtime);
+  const state = list.state;
+  if (state === undefined) return null;
+  const listEvent = (event: Notes.Event) => void list.send(event, "Owner");
+  const can = (event: Notes.Event) => list.can(event, "Owner");
+  const selecting = state.selection !== "NoSelection";
+  const shown = Notes.shown(state).filter((item) => item.id !== hidden);
+  const first = shown[0];
+  const canOpen = first !== undefined && can({ type: "openRow", id: first.id, covered });
+  const row = (entry: Notes.Row) => {
+    const note = collection.noteByNumber.get(entry.id);
+    if (note === undefined) return null;
+    const open = { type: "openRow", id: entry.id, covered } as const;
+    const toggle = { type: "toggleSelection", id: entry.id } as const;
+    return <NoteRow key={entry.id} className="[contain-intrinsic-size:auto_4rem] [content-visibility:auto]" title={titleOf(note)}
+      aria-label={`${selecting ? "Select" : "Open"} ${titleOf(note)}`}
+      aria-pressed={selecting ? state.selected.includes(entry.id) : undefined}
+      date={dated(note, collection.readAt)} preview={preview(note)} voice={entry.kind === "Voice"}
+      disabled={selecting && !can(toggle)}
+      onClick={selecting ? () => listEvent(toggle) : canOpen ? () => listEvent(open) : undefined} />;
+  };
+  return <NoteRows
+    state={state.read.status === "Failed" || state.owner === 0 ? "unavailable" : state.read.status === "Loaded" || state.rows.length > 0 ? "listed" : "loading"}
+    message="Notes unavailable"
+    pinned={shown.filter((item) => item.pinned).map(row)}
+    others={shown.filter((item) => !item.pinned).map(row)}
+    filter={state.folders.find((item) => item.id === state.filter)?.name}
+    onClearFilter={can({ type: "clearFilter" }) ? () => listEvent({ type: "clearFilter" }) : undefined}
+    onRetry={can({ type: "refresh" }) ? () => void runtime.runPromise(enter()) : undefined}
+  />;
+});
+
 function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Runtime }) {
   const list = useNotes(runtime);
   const editor = useEditor(runtime);
@@ -502,7 +541,6 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     || mic.can({ type: "showBrowserDenial", available, covered: draftWaiting }, "Owner")
     || mic.can({ type: "openSettings" }, "Owner")
   );
-  const shown = Notes.shown(state).filter((item) => item.id !== writing.note || writing.showing || !draftWaiting);
   const selecting = state.selection !== "NoSelection";
   const busy = state.selection === "Deleting";
   const selected = state.selected.length;
@@ -511,20 +549,6 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const closeSelection = () => listEvent({ type: "back" });
   const selectionNotice = state.selectionResult === "UnknownSelection" ? "Alpha couldn’t confirm every deletion. Check Recently deleted before trying again."
     : state.selectionResult === "RefusedSelection" ? "The remaining notes couldn’t be moved to Recently deleted." : undefined;
-  const first = shown[0];
-  const canOpen = first !== undefined && can({ type: "openRow", id: first.id, covered: draftWaiting });
-  const row = (entry: Notes.Row) => {
-    const note = collection.noteByNumber.get(entry.id);
-    if (note === undefined) return null;
-    const open = { type: "openRow", id: entry.id, covered: draftWaiting } as const;
-    const toggle = { type: "toggleSelection", id: entry.id } as const;
-    return <NoteRow key={entry.id} className="[contain-intrinsic-size:auto_4rem] [content-visibility:auto]" title={titleOf(note)}
-      aria-label={`${selecting ? "Select" : "Open"} ${titleOf(note)}`}
-      aria-pressed={selecting ? state.selected.includes(entry.id) : undefined}
-      date={dated(note, collection.readAt)} preview={preview(note)} voice={entry.kind === "Voice"}
-      disabled={selecting && !can(toggle)}
-      onClick={selecting ? () => listEvent(toggle) : canOpen ? () => listEvent(open) : undefined} />;
-  };
   const folder = state.folders.find((item) => item.id === state.filter);
   const folderChange = (op: "AddFolder" | "RenameFolder" | "RemoveFolder", key: number, name: string): Notes.Event =>
     ({ type: "change", c: { ...Notes.nothing, op, folder: key, name, base: state.shelf }, covered: draftWaiting });
@@ -550,8 +574,6 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const canRemoveFolder = folder !== undefined && can(folderChange("RemoveFolder", folder.id, ""));
   const canImport = hasDocuments && transfer.can(importText, "Owner");
   const hasOptionsMenu = canSelect || canOpenTrash || canShowPrevious || canAddFolder || canRenameFolder || canRemoveFolder;
-  const pinned = shown.filter((item) => item.pinned);
-  const rest = shown.filter((item) => !item.pinned);
   return <Layers>
     <Under covered={over !== undefined}>
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
@@ -601,15 +623,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
         {state.writing.outcome === "Unknown" && <Alert variant="warn" className="mb-2">Alpha couldn't confirm the last change</Alert>}
         {state.writing.outcome === "Refused" && <Alert variant="warn" className="mb-2">The note or folder couldn't be changed</Alert>}
       </div>
-      <NoteRows
-        state={state.read.status === "Failed" || state.owner === 0 ? "unavailable" : state.read.status === "Loaded" || state.rows.length > 0 ? "listed" : "loading"}
-        message="Notes unavailable"
-        pinned={pinned.map(row)}
-        others={rest.map(row)}
-        filter={folder?.name}
-        onClearFilter={can({ type: "clearFilter" }) ? () => listEvent({ type: "clearFilter" }) : undefined}
-        onRetry={can({ type: "refresh" }) ? () => void runtime.runPromise(enter()) : undefined}
-      />
+      <ListedNotes runtime={runtime} collection={collection} covered={draftWaiting} hidden={!writing.showing && draftWaiting ? writing.note : undefined} />
       {!selecting && canImport && (
         <div className={cn("px-4 pt-2", dockClearance)}>
           <Button size="sm" aria-label="Import text note" className="h-12 px-3.5 text-sm font-normal" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><Download /> Import</Button>

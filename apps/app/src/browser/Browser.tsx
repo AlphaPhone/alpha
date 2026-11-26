@@ -61,7 +61,7 @@ export function Browser({ runtime, alpha }: BrowserProps) {
   return <Tab key={state.selected} runtime={runtime} alpha={alpha} tabs={state} page={page} />;
 }
 
-function BrowserPagePlace({ runtime, finding }: Pick<BrowserProps, "runtime"> & { finding: boolean }) {
+function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
   // spec/app/browser/index.md, "Story: Open, pick and close tabs"
   useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
   const attach = useCallback((place: HTMLDivElement | null) => {
@@ -81,8 +81,8 @@ function BrowserPagePlace({ runtime, finding }: Pick<BrowserProps, "runtime"> & 
       if (typeof window !== "undefined") window.removeEventListener("resize", notify);
     };
   }, [runtime]);
-  // spec/app/browser/address.md, "The find bar opens over a shown page": the phone draws the page above Alpha, so while finding the page starts at the find bar's foot (BrowserFindBar: 2px into the bar, 52px tall), not over the bar.
-  return <div data-alpha-browser-page="" aria-hidden ref={attach} className={`absolute inset-x-0 bottom-0 ${finding ? "top-12.5" : "top-0"}`} />;
+  // spec/app/browser/address.md, "The find bar opens over a shown page": the page keeps its full place and the find bar is drawn over it.
+  return <div data-alpha-browser-page="" aria-hidden ref={attach} className="absolute inset-x-0 top-0 bottom-0" />;
 }
 
 function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page: PageRuntime }) {
@@ -103,6 +103,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const cannotRead = useSyncExternalStore(support.subscribe, support.snapshot, support.snapshot) === "unavailable";
   if (!state) return null;
   const tab = tabs.selected;
+  const findShown = state.finding && tabs.layer === "Uncovered";
   const tabHost = runtime.runSync(TabHost);
   const shown = tabHost.web === undefined ? tabHost.session.info(idOf(tab)) : tabHost.web.info(idOf(tab));
   const shownAddress = shown?.url;
@@ -243,11 +244,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
           ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={browser.can({ type: "cover", layer: "Address" }) ? edit : undefined} />
-          : <BrowserPagePlace runtime={runtime} finding={state.finding && tabs.layer === "Uncovered"} />}
+          : <BrowserPagePlace key={findShown ? "finding" : "page"} runtime={runtime} />}
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-32.5 bg-linear-to-b from-transparent to-background to-70%" />
       {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} privateNotice={privateNotice} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
-      {state.finding && tabs.layer === "Uncovered" && (
+      {findShown && (
         <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
           onPrevious={can({ type: "findNext", forward: false }) ? () => void send({ type: "findNext", forward: false }) : undefined}
           onNext={can({ type: "findNext", forward: true }) ? () => void send({ type: "findNext", forward: true }) : undefined}

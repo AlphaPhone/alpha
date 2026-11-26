@@ -182,6 +182,7 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
       {state.change.live && <p role="status">Waiting for the agent…</p>}
       {model.can({ type: "checkChange" }) && <Alert variant="warn" role="status">The agent didn’t confirm the change.
         <Button size="sm" variant="secondary" onClick={() => send({ type: "checkChange" })}>Check change</Button>
+        <Button size="sm" variant="secondary" onClick={() => send({ type: "readAutomations" })}>Refresh</Button>
       </Alert>}
       {model.can({ type: "resendChange" }) && (
         <Button variant="secondary" onClick={() => send({ type: "resendChange" })}>Send again</Button>

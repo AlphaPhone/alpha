@@ -9,7 +9,8 @@ import type * as Alerts from "../../gen/app__reminders__alerts.effect.vibe";
 import { useMachine as useAlertsMachine } from "../../gen/app__reminders__alerts.react.ts";
 import { native } from "../platform/device.vibe";
 import { useTimed } from "../runtime/react.ts";
-import type { Time } from "../runtime/time.vibe";
+import { untimed } from "../runtime/reactor.vibe";
+import { Time } from "../runtime/time.vibe";
 import { snoozeAlertFromBanner } from "./alerts.vibe";
 import { formatRelativeDue, snoozeTargetMs } from "./recurrence.ts";
 import { AlertBannerShelf, RemindersNowShelf } from "./shelf.vibe";
@@ -27,16 +28,17 @@ export function AlertBanner({
   const nowShelf = runtime.runSync(Effect.map(RemindersNowShelf, (service) => service.shelf));
   const banner = useSyncExternalStore(bannerShelf.subscribe, bannerShelf.snapshot);
   const nowMs = useSyncExternalStore(nowShelf.subscribe, nowShelf.snapshot);
+  const liveNow = runtime.runSync(Time.use((time) => time.latest()));
   const browserAlerts = useBrowserAlerts(runtime).state;
   if (!state || state.bannerId === 0 || banner === undefined || (!native() && browserAlerts?.status === "Disabled")) return null;
   const { item, specId, revision } = banner;
-  const displayNow = nowMs > 0 ? nowMs : item.updatedAtMs;
+  const displayNow = liveNow > 0 ? liveNow : nowMs > 0 ? nowMs : item.updatedAtMs;
   const dueText = formatRelativeDue(item.dueDate, item.dueMinute, displayNow, false);
   const completeEvent = { type: "completeFromBanner" as const, id: specId, expectedRevision: revision };
   const dismissEvent = { type: "dismissFromBanner" as const, id: specId, expectedRevision: revision };
-  const canSnooze10 = can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTargetMs(displayNow, "10m"), now: displayNow });
-  const canSnooze60 = can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTargetMs(displayNow, "1h"), now: displayNow });
-  const canSnoozeTomorrow = can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTargetMs(displayNow, "tomorrow"), now: displayNow });
+  const canSnooze10 = can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTargetMs(displayNow, "10m"), now: untimed });
+  const canSnooze60 = can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTargetMs(displayNow, "1h"), now: untimed });
+  const canSnoozeTomorrow = can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTargetMs(displayNow, "tomorrow"), now: untimed });
 
   return (
     <div
