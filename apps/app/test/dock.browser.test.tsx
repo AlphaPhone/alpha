@@ -273,9 +273,14 @@ describe("Ask Alpha dock", () => {
       .map((field) => field.value || field.placeholder);
     /** The words the fading copy of the sheet still shows in its fields, whatever its opacity. */
     const ghostWords = () => [...document.querySelectorAll<HTMLTextAreaElement>("[data-alpha-ghost] textarea")].map((field) => field.value || field.placeholder).filter(Boolean);
+    /** The fields, and the filled buttons below its header such as the black Talk, that the fading copy of the sheet still draws. */
+    const ghostComposer = () => [...document.querySelectorAll<HTMLElement>("[data-alpha-ghost] textarea, [data-alpha-ghost] button")]
+      .filter((control) => control instanceof HTMLTextAreaElement || (!control.closest("[data-alpha-chat-header]") && !/rgba\([^)]*,\s*0\)$|transparent/.test(getComputedStyle(control).backgroundColor))).length;
     const watch = async (ms: number) => {
-      const frames: { words: string[]; fading: boolean; ghost: string[] }[] = [];
-      for (const until = performance.now() + ms; performance.now() < until; await pause(8)) frames.push({ words: worded(), fading: document.querySelector("[data-alpha-ghost]") !== null, ghost: ghostWords() });
+      const frames: { words: string[]; fading: boolean; ghost: string[]; composer: number }[] = [];
+      for (const until = performance.now() + ms; performance.now() < until; await pause(8)) {
+        frames.push({ words: worded(), fading: document.querySelector("[data-alpha-ghost]") !== null, ghost: ghostWords(), composer: ghostComposer() });
+      }
       return frames;
     };
     const open = async () => {
@@ -290,6 +295,7 @@ describe("Ask Alpha dock", () => {
     const tapFrames = await tapped;
     expect(tapFrames.filter(({ words }) => words.length > 1)).toEqual([]);
     expect(tapFrames.at(-1)?.words).toEqual(["Ask Alpha"]);
+    expect(tapFrames.some(({ composer }) => composer > 0)).toBe(true);
 
     const dragClose = async () => {
       const handle = section()?.querySelector("[aria-label='Resize chat']");
@@ -313,6 +319,8 @@ describe("Ask Alpha dock", () => {
     const dragFrames = await dragClose();
     expect(dragFrames.filter(({ words }) => words.length > 1)).toEqual([]);
     expect(dragFrames.filter(({ ghost }) => ghost.length > 0)).toEqual([]);
+    // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet a drag put away falls with no composer, so no second Talk or + shows over the bar or under it
+    expect(dragFrames.filter(({ composer }) => composer > 0)).toEqual([]);
     expect(dragFrames.some(({ fading, words }) => fading && words.join() === "Ask Alpha")).toBe(true);
     expect(dragFrames.at(-1)?.words).toEqual(["Ask Alpha"]);
 
@@ -323,6 +331,55 @@ describe("Ask Alpha dock", () => {
     expect(draftFrames.filter(({ ghost }) => ghost.length > 0)).toEqual([]);
     expect(draftFrames.some(({ fading, words }) => fading && words.join() === "Hello")).toBe(true);
     expect(draftFrames.at(-1)?.words).toEqual(["Hello"]);
+  });
+
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v119's (45f6bed30 chat-overlay-motion-adapter.ts:261-272, 1037-1039), an open sheet pulled down fades by how far it is into the zone above a floor of 62 and 28 points, where no bar is drawn at the press, and a flick down lets its header slide down onto the bar as it fades
+  it("Flick an open sheet down onto the bar as v119 drew it (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Home" });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
+    const seen = (element: Element) => {
+      let opacity = 1;
+      for (let at: Element | null = element; at; at = at.parentElement) opacity *= Number(getComputedStyle(at).opacity);
+      return opacity;
+    };
+    await page.getByRole("button", { name: "Open conversation" }).click();
+    await shellReaches(runtime, (s) => s.assistant === "Sheet");
+    await pause(600);
+    const handle = section()?.querySelector("[aria-label='Resize chat']");
+    const box = handle?.getBoundingClientRect();
+    const y = Math.round((box?.top ?? 0) + (box?.height ?? 0) / 2);
+    const finger = (type: string, clientY: number) => (handle?.isConnected ? handle : section())?.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientY, pointerId: 13, pointerType: "touch", isPrimary: true }));
+    const header = () => section()?.querySelector("[data-alpha-chat-header]")?.getBoundingClientRect().top ?? 0;
+    const opened = section()?.getBoundingClientRect().height ?? 0;
+    const floor = 62 + 28;
+    const v119Opacity = (height: number) => 1 - Math.min(1, Math.max(0, (floor + 120 - height) / 120));
+
+    const drawn: { height: number; opacity: number; v119: number }[] = [];
+    finger("pointerdown", y);
+    let by = 0;
+    while (opened - by > 170) {
+      by += 20;
+      await pause(10);
+      finger("pointermove", y + by);
+      const height = section()?.getBoundingClientRect().height ?? 0;
+      drawn.push({ height: Math.round(height), opacity: Number(getComputedStyle(section() as HTMLElement).opacity), v119: v119Opacity(height) });
+    }
+    const inZone = drawn.filter(({ height }) => height < floor + 120);
+    expect(inZone.length).toBeGreaterThan(0);
+    expect(drawn.filter(({ opacity, v119 }) => Math.abs(opacity - v119) > 0.02)).toEqual([]);
+
+    const released = header();
+    finger("pointerup", y + by);
+    const falling: { top: number; seen: number }[] = [];
+    for (const until = performance.now() + 700; performance.now() < until; await pause(8)) {
+      const fading = document.querySelector("[data-alpha-ghost] [data-alpha-chat-header]");
+      if (fading) falling.push({ top: Math.round(fading.getBoundingClientRect().top), seen: seen(fading) });
+    }
+    await shellReaches(runtime, (s) => s.assistant === "Bar");
+    expect(falling.length).toBeGreaterThan(0);
+    expect(falling.some(({ top, seen }) => seen > 0.1 && top >= released + 80)).toBe(true);
   });
 
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
