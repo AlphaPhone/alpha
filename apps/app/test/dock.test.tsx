@@ -2,6 +2,7 @@
 import { Effect, Stream } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -34,7 +35,8 @@ async function showAttachments() {
 describe("Ask Alpha dock and shell navigation", () => {
   // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
-    await mountDock({ view: "Home", flush: underAct });
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    await underAct(() => runtime.runPromise(Effect.flatMap(Conversation, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.context.revision > 0)))).then(() => undefined));
     const file = new File(["notes for the appointment"], "appointment.txt", { type: "text/plain" });
     const pick = async () => {
       const source = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Attachment sources"] button')].find((item) => item.textContent === "Files");
@@ -77,6 +79,7 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     const { alpha } = await open(world, only("home", "assistant", "notice"));
     await until(alpha, assistant.runtime(alpha), Composer, (state) => state.slot === "Open");
+    await until(alpha, assistant.runtime(alpha), Conversation, (state) => state.context.revision > 0);
     await showAttachments();
     await expect.poll(() => [button(changedPhoto.name) !== undefined, button(keptPhoto.name) !== undefined, button("More photos") !== undefined])
       .toEqual([true, true, true]);
