@@ -3,12 +3,13 @@ import { DeviceExecution } from "@elizaos/agent";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine } from "../gen/app__camera.effect.vibe";
+import * as CameraModel from "../gen/app__camera.ts";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { MediaReview } from "../src/assistant/media-review.vibe";
 import type { Place } from "../src/areas.ts";
-import { requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
+import { CameraAssets, requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
 import camera from "../src/camera/index.tsx";
 import photosArea from "../src/photos/index.tsx";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
@@ -118,7 +119,9 @@ describe("Camera on a phone", () => {
 
     await press("Back to apps");
     await hardware("back");
+    await until(alpha, runtime, Machine, (state) => state.showing && state.film.stage === "StopWhenOpened");
     expect(button("Viewfinder. Tap to focus or pinch to zoom")).toBeDefined();
+    expect([Boolean(button("Back to apps")), button("Start recording")?.getAttribute("aria-busy")]).toEqual([true, "true"]);
     expect(world.camera.savedVideos).toHaveLength(0);
     await drawn(recorderOpened);
     await expectSavedVideo(cameraSession);
@@ -138,6 +141,15 @@ describe("Camera on a phone", () => {
     expect(button("Switch camera")).toBeDefined();
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => !state.showing);
+  });
+
+  it("Camera has no scan of its own, as v119 drew none, and its shutter still takes a photo (spec/app/camera/index.md, \"Story: Open the camera\")", async () => {
+    expect(Object.keys(CameraModel).filter((name) => /scan/i.test(name))).toEqual([]);
+    const session = await onCamera();
+    expect(button("Scan document")).toBeUndefined();
+    expect(document.querySelector("[role='dialog']")).toBeNull();
+    await takeCapture(session, "photo");
+    expect(button("Switch camera")).toBeDefined();
   });
 
   it("Volume stays with Android while Camera asks about the microphone (spec/app/camera/index.md, \"Volume keys fire the available shutter while Camera is ready for the owner\")", async () => {
@@ -419,5 +431,31 @@ describe("Camera on a phone", () => {
     await expect.poll(() => review.receipts).toStrictEqual([{ outcome: "applied", operationId: id, result: wireEvidence }]);
     await expect.poll(() => review.journal.get(id)).toMatchObject({ acknowledged: true, evidence: { result: evidence } });
     expect(world.camera.photos).toHaveLength(0);
+  });
+
+  it("Returns Blocked Denied immediately when agent capture runs with camera permission denied (spec/app/camera/agent.md, \"Story: Take a photo for Alpha\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.camera.permission = "denied";
+    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(alpha);
+    let settled: CaptureAnswer | undefined;
+    await drawn(() => { void runtime.runPromise(requestCapture()).then((answer) => { settled = answer; }); });
+    await until(alpha, runtime, Machine, (state) => state.showing && state.permission.grant === "Denied");
+    await later(alpha, 1000);
+    expect(settled).toEqual({ result: "Blocked", cause: "Denied" });
+  });
+
+  it("Forgets a deleted last capture across Camera visits (spec/app/camera/index.md, \"An older library read never replaces a photo taken while it was pending\")", async () => {
+    const world = { ...scene(), phone: true };
+    const running = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(running.alpha);
+    await press("Camera");
+    await until(running.alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last > 0);
+    world.photos.rows.splice(0, world.photos.rows.length, ...world.photos.rows.filter((item) => !item.owned));
+    await hardware("back");
+    await until(running.alpha, runtime, Machine, (state) => !state.showing);
+    await press("Camera");
+    await until(running.alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last === 0);
+    expect(await runtime.runPromise(Effect.flatMap(CameraAssets, (assets) => assets.newest()))).toBe(0);
   });
 });

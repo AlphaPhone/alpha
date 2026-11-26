@@ -18,7 +18,7 @@ export interface FakeCloudflare {
   stop(): Promise<void>;
 }
 
-const envelope = (result: unknown) => JSON.stringify({ success: true, errors: [], result, result_info: { page: 1, per_page: 50 } });
+const envelope = (result: unknown, totalPages = 1) => JSON.stringify({ success: true, errors: [], result, result_info: { page: 1, per_page: 50, total_pages: totalPages } });
 
 /** Start the fake: `account` owns `zone`, and only `token` is admitted. */
 export async function startCloudflare(at: { readonly account: string; readonly zone: string; readonly token: string; readonly hyperdrives?: Hyperdrive[] }): Promise<FakeCloudflare> {

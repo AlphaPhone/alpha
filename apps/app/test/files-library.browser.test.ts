@@ -2,6 +2,7 @@ import { createScanPdf } from "@elizaos/plugin-files-client";
 import { Effect, ManagedRuntime, Option } from "effect";
 import { expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
+import { changeDraft, readDraft, type StoredPage } from "../src/files/scanStore.vibe";
 import { Documents } from "../src/platform/documents.vibe";
 import { Files } from "../src/platform/files.vibe";
 import { browserLibrary } from "../src/platform/library.vibe";
@@ -132,4 +133,51 @@ it('Reorder pages after the clock advances (spec/app/files/scan.md, "Story: Arra
       removed.onerror = () => reject(new Error("Could not remove the test scan draft", { cause: removed.error }));
     });
   }
+});
+
+// spec/app/files/scanDraft.md, "Story: Keep the scan as I work"
+it("deletes scan drafts without conflicting on the next edit and clears damaged drafts", async () => {
+  const pixel = new Uint8Array([
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196,
+    137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 255, 255, 63, 0, 5, 254, 2, 254, 167, 53, 129, 132, 0, 0, 0,
+    0, 73, 69, 78, 68, 174, 66, 96, 130,
+  ]);
+  const samplePage: StoredPage = {
+    blob: new Blob([pixel], { type: "image/png" }),
+    width: 1,
+    height: 1,
+    page: { image: 1, camera: false, text: 0, blank: false, edits: 0, links: 0 },
+  };
+  await new Promise<void>((resolve, reject) => {
+    const req = indexedDB.deleteDatabase("alpha-scan-pages");
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(new Error(String(req.error ?? "deleteDatabase failed")));
+  });
+
+  const saved = await changeDraft(0, [samplePage]);
+  expect(saved).toEqual({ landed: true, revision: 1 });
+
+  const cleared = await changeDraft(1, undefined);
+  expect(cleared).toEqual({ landed: true, revision: 1 });
+
+  const nextSave = await changeDraft(1, [samplePage]);
+  expect(nextSave).toEqual({ landed: true, revision: 2 });
+
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const opened = indexedDB.open("alpha-scan-pages", 1);
+    opened.onsuccess = () => resolve(opened.result);
+    opened.onerror = () => reject(new Error(String(opened.error ?? "open failed")));
+  });
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("scan", "readwrite");
+    tx.objectStore("scan").put({ revision: "corrupt", pages: "bad" }, "current");
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(new Error(String(tx.error ?? "put aborted")));
+  });
+  db.close();
+
+  expect(await Effect.runPromise(readDraft())).toBe("damaged");
+  await expect(changeDraft(0, undefined)).resolves.toEqual({ landed: true, revision: 0 });
+  const afterDiscard = await Effect.runPromise(readDraft());
+  expect(afterDiscard).not.toBe("damaged");
 });

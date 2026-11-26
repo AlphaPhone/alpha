@@ -64,16 +64,16 @@ const notices = Layer.sync(Notices, () => {
 })
 
 // spec/app/settings/licences.md, "A load ends with the licences it found, or as one that could not load"
-effect function loaded(load: number): Licences.Event!!Notices {
+effect function loaded(load: number): Licences.Event!!(Notices | Licences.Machine) {
   return effect {
     const found = try Schema.decodeUnknownEffect(Schema.Array(Notice))(try tryPromise(shipped))
-    try (try Notices).set(found)
+    if (Licences.canLoaded(try (try Licences.Machine).get(), load, true, found.length)) try (try Notices).set(found)
     return { type: "loaded", load, ok: true, found: found.length }
   } catch () => ({ type: "loaded", load, ok: false, found: 0 })
 }
 
 const licencesMachine = reacting(Licences, {
-  carry: (fx): Job<Licences.Event, Notices, []> => answer("load", loaded(fx.load), { type: "giveUpOnLoad", now: untimed }),
+  carry: (fx): Job<Licences.Event, Notices | Licences.Machine, []> => answer("load", loaded(fx.load), { type: "giveUpOnLoad", now: untimed }),
   timers: (state) => (state.load.read.status === "Loading" ? [due<Licences.Event, []>("load", state.load.due, { type: "giveUpOnLoad", now: untimed })] : []),
 })
 

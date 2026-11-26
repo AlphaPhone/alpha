@@ -148,7 +148,7 @@ interface Painted {
 
 /** Bring `map` to what `props` shows: only the pins, position, route or camera that changed. */
 function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key: string) => void): void {
-  const pins = JSON.stringify(props.pins.map((pin) => [pin.key, pin.at, pin.chosen === true]));
+  const pins = JSON.stringify(props.pins.map((pin) => [pin.key, pin.at, pin.label, pin.chosen === true]));
   if (pins !== painted.pins) {
     for (const marker of painted.markers.splice(0)) marker.remove();
     const accent = mapAccent(map.getContainer());

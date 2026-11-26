@@ -27,6 +27,11 @@ calendar area); the password vault (the passwords area); the conversations (Ask 
 approvals area). Browser, Files and Messages on the Apps page open the app itself
 through the [shell](../shell/). Messages is listed on an Alpha image.
 
+Each page rises over the one it was opened from, as Alpha's earlier build
+drew it, and the pages on the way to it stay under it; Back takes the page
+away at once and shows its parent at the row the owner left. Before Settings
+knows its page, it shows the first page's header, never a blank screen.
+
 ## Story: Find a setting and come back
 
 > As the owner, I want every setting on a page I can reach in a few taps,

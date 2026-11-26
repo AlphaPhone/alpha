@@ -14,6 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
+import { Found } from "../src/settings/phone.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account, checkoutSession, checkoutUrl, type CheckoutScene, type RedemptionScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
@@ -34,8 +35,8 @@ vi.stubGlobal("fetch", fetchWithNotices);
 
 const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/notification-collection", "overlay"));
 
-/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its decorative icon or its value beside it. */
-const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span:not([aria-hidden]) > span")?.textContent === title);
+/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its decorative icon or its value beside it, and never a row on a page covered by the one open over it. */
+const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => !found.closest("[inert]") && found.querySelector("span:not([aria-hidden]) > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
 const tap = (title: string) => drawn(() => {
@@ -842,7 +843,7 @@ describe("Settings", () => {
     expect(report).toEqual(expect.objectContaining({
       format: "alpha-diagnostics/v1",
       roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }],
-      permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true },
+      permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true, PhotosAccess: false },
       talk: { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     }));
     expect([text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\"")]).toEqual([false, false, false]);
@@ -901,6 +902,16 @@ describe("Settings", () => {
     // spec/app/settings/network.md, "Leaving the page retires what it asked and forgets what it found; a join in flight is Android's and goes on"
     await hardware("back");
     await until(alpha, machines, Network.Machine, (s) => s.found === 0 && s.scan === "NotScanned");
+
+    let finishScan = () => {};
+    world.settings.wifiScanGate = new Promise<void>((done) => { finishScan = done; });
+    await press("Network");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Loading");
+    await hardware("back");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Idle" && s.found === 0);
+    finishScan();
+    await later(alpha, 50);
+    expect(await machines.runPromise(Found.use((found) => found.get()))).toEqual([]);
   });
 
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {

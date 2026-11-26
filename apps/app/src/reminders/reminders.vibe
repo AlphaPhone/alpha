@@ -388,6 +388,8 @@ effect function saveReminderDraftNow(): (ReminderItemRecord | undefined)!!(Remin
     if (Editor.canLanded(after)) try contained(editor.send({ type: "landed" }), "landing reminder draft")
     else if (Editor.canClose(after)) try contained(editor.send({ type: "close" }), "closing reminder draft")
     try clearPersistedDraft()
+  } else {
+    try contained(editor.send({ type: "reopen" }), "releasing failed reminder save")
   }
   return saved
 }
@@ -646,6 +648,57 @@ effect function syncMachineFromSnapshot(snapshot: RemindersSnapshot, nowMs: numb
   const today = civilDayNumber(nowMs)
   const before = try machine.get()
   if (Reminders.canSetToday(before, today)) try contained(machine.send({ type: "setToday", day: today }), "advancing reminders today")
+  const view = remindersStore.snapshot()
+  const defaultId = view.snapshot.lists.find((list) => list.isDefault)?.id ?? DEFAULT_LIST_ID
+  const listIds = new Set<number>()
+  const specLists: Reminders.ListEntry[] = []
+  let maxListId = 1
+  for (const list of view.snapshot.lists) {
+    const id = remindersStore.specIdForList(list.id)
+    if (id < 1 || listIds.has(id)) continue
+    listIds.add(id)
+    if (id > maxListId) maxListId = id
+    specLists.push({ id, isDefault: id === 1 || list.id === defaultId, revision: 1 })
+  }
+  if (!listIds.has(1)) {
+    listIds.add(1)
+    specLists.unshift({ id: 1, isDefault: true, revision: 1 })
+  }
+  const itemIds = new Set<number>()
+  const specItems: Reminders.ItemEntry[] = []
+  let maxItemId = 0
+  for (const item of view.snapshot.items) {
+    const id = remindersStore.specIdForItem(item.id)
+    if (id < 1 || itemIds.has(id)) continue
+    const rawListId = remindersStore.specIdForList(item.listId)
+    const listId = listIds.has(rawListId) ? rawListId : 1
+    const dueDay = civilDayFromString(item.dueDate)
+    const hasDue = dueDay !== null
+    const hasDueTime = hasDue && item.dueMinute !== null && item.dueMinute >= 0 && item.dueMinute <= 1439
+    const repeat = hasDue ? recurrenceToSpec(item.recurrence) : "NoRepeat"
+    itemIds.add(id)
+    if (id > maxItemId) maxItemId = id
+    specItems.push({
+      id,
+      listId,
+      hasDue,
+      dueDay: dueDay ?? 0,
+      hasDueTime,
+      dueMinute: hasDueTime ? (item.dueMinute ?? 0) : 0,
+      repeat,
+      priority: priorityToSpec(item.priority),
+      flagged: item.flagged,
+      completed: item.completed,
+      snoozedUntil: item.snoozedUntilMs ?? 0,
+      revision: Math.max(0, Math.floor(item.revision)),
+    })
+  }
+  const current = try machine.get()
+  const nextListId = Math.max(current.nextListId, maxListId + 1)
+  const nextItemId = Math.max(current.nextItemId, maxItemId + 1)
+  if (Reminders.canApplySync(current, specLists, nextListId, specItems, nextItemId)) {
+    try contained(machine.send({ type: "applySync", lists: specLists, nextListId, items: specItems, nextItemId }), "syncing reminders state")
+  }
 }
 
 /** A typed read of the owner’s current resident reminders without changing the Reminders screen. */

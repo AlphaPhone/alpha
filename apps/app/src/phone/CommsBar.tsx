@@ -84,7 +84,8 @@ export function CommsBar({ runtime, closed, filter, person, actions }: CommsBarP
   const placeholder = phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
   return (
     <div data-alpha-comms-dock="" data-host-chrome="" className={cn("sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-dock bg-secondary py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark",
-      person && !closed && "ring-[1.5px] ring-primary ring-inset")}>
+      // v119 (45f6bed30) prototype/phone.css:419: the person's dock has only its 1.5px accent outline, no drop shadow.
+      person && !closed && "shadow-none ring-[1.5px] ring-primary ring-inset dark:shadow-none")}>
       <Button ref={holdButton} size="icon" aria-label="Open Alpha" className="size-11 shrink-0 touch-none overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening}
         onPointerDown={(event) => {
           if (!event.isPrimary || event.button !== 0) return;
@@ -121,7 +122,7 @@ function CommsQuery({ runtime, phone, filter, placeholder, onAsk, onTalk }: { ru
   const machine = usePhone(runtime);
   const [draft, setDraft] = useState("");
   const phoneFilter: QueryFilter | undefined = phone && machine.can({ type: "search", typed: true }) ? {
-    value: runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.get())).sought,
+    value: machine.state?.sought ? runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.get())).sought : "",
     onChange: (sought) => {
       runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.set({ sought, filterLabel: "" })));
       const search = { type: "search", typed: sought.trim() !== "" } as const;

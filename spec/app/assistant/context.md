@@ -2,7 +2,8 @@
 
 What a turn tells the agent about the phone besides the screen the
 [conversation](./index.md) tells it: the phone's last known location, the
-page open in Browser, what Maps shows, the time zone, the phone actions this
+page open in Browser, a reviewed email or selected voice-note transcript flag,
+what Maps shows, the time zone, the phone actions this
 phone can carry out, and whether the owner's words go to a hosted model.
 Eliza encodes the turn context (`encodeTurnContext` of
 `@elizaos/agent`) and drops what a peer does not declare; no wire
@@ -335,6 +336,52 @@ pure def lawASensitiveScreenSendsNoPage(handed: bool, peer: Peer): bool = not(se
 pure def lawOffBrowserNoPageIsSent(handed: bool, peer: Peer): bool = not(sendsPage(true, false, handed, peer))
 
 pure def lawAPageBrowserWithheldIsNeverSent(peer: Peer): bool = not(sendsPage(true, true, false, peer))
+```
+
+## Story: Keep reviewed email and voice-note context out of my request words
+
+> As the owner, when I ask Alpha about an email I reviewed or a saved voice
+> note transcript, I want my typed request text to hold only the words I wrote,
+> so that untrusted email contents or synthetic transcript instructions never
+> mix into my authored request words.
+
+### A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text
+
+When the owner sends a turn carrying a reviewed email from Inbox or a saved
+voice-note transcript attached from Notes, the turn's `text` carries strictly
+the owner's trimmed typed text (including `""` when the owner sent only the
+attachment), never email headers, email body JSON, or a synthetic voice-note
+instruction prefix. The reviewed email is normalized and validated against the
+agent's `ReviewedEmail` schema at review time and revalidated on send so it
+goes in structured turn context (`metadata.reviewedEmail`), while the
+voice-note transcript goes as `metadata.useSelectedVoiceNoteTranscript: true`
+bound to the non-sensitive selected `canonical-note` observation, both encoded
+through `encodeTurnContext` only for a peer that takes optional turn-context
+fields. When peer support has not yet loaded or failed transiently on this
+connection, Alpha re-checks `/api/status` before refusing; when the peer does
+not take optional turn-context fields, Alpha refuses to post a turn carrying a
+reviewed email or voice-note transcript rather than concatenating untrusted
+data into `text` or silently dropping the attachment.
+
+```quint
+pure def sendsReviewedEmail(hasMail: bool, validMail: bool, peerTakes: bool): bool =
+  hasMail and validMail and peerTakes
+
+pure def sendsVoiceNoteTranscript(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  hasTranscript and exactNote and not(sensitive) and peerTakes
+
+pure def turnContextCarriesAttachment(hasMail: bool, validMail: bool, hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  (not(hasMail) or sendsReviewedEmail(hasMail, validMail, peerTakes))
+    and (not(hasTranscript) or sendsVoiceNoteTranscript(hasTranscript, exactNote, sensitive, peerTakes))
+
+pure def lawInvalidReviewedEmailRefusesTurn(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(true, false, hasTranscript, exactNote, sensitive, peerTakes))
+
+pure def lawSensitiveScreenRefusesVoiceNoteTranscript(hasMail: bool, validMail: bool, exactNote: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(hasMail, validMail, true, exactNote, true, peerTakes))
+
+pure def lawUnsupportedPeerRefusesStructuredContextAttachment(hasMail: bool, hasTranscript: bool, validMail: bool, exactNote: bool, sensitive: bool): bool =
+  (hasMail or hasTranscript) implies not(turnContextCarriesAttachment(hasMail, validMail, hasTranscript, exactNote, sensitive, false))
 ```
 
 ## Story: Let my agent see the Telegram or Slack chat I have open

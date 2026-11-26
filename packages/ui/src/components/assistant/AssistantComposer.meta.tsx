@@ -47,7 +47,7 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
       await userEvent.type(within(canvasElement).getByRole("textbox", { name: "Message Alpha" }), "Hi");
       await expect([onValueChange.mock.calls.length, onFocusField.mock.calls.length]).toEqual([2, 1]);
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Chat actions" }));
-      await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat", "New chat", "Chat history"]);
+      await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat"]);
       await userEvent.keyboard("{Escape}");
       await waitFor(() => expect(canvasElement.ownerDocument.querySelector("[data-aria-hidden]")).toBeNull());
     },
