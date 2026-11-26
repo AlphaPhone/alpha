@@ -668,8 +668,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const calendarCard = calendarReview !== undefined && !talking.context.sensitive && shownInAskAlpha(calendar.shown, bound !== undefined, latestFiled)
     ? [{ id: `calendar review ${bound ?? ""}`, author: "alpha" as const, text: "",
       children: <AskedRequest.Provider value={bound}>{calendarReview}</AskedRequest.Provider> }] : [];
-  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": how a change ended draws under the reply that filed it, as v119 kept each reply's own card, so it never reads as a later reply's.
-  // A filing reply that draws no row here, blank or off this page, keeps the outcome at the foot, so it is never lost.
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": how a change ended draws under the reply that filed it, as v119 kept each reply's own card, so it never reads as a later reply's; a filing reply that draws no row here keeps the outcome at the foot so it is never lost.
   const filer = calendar.shown === "ChangeEnded" ? filedBy(calendar, shown.chosen) : undefined;
   const endedUnder = filer !== undefined && [...rows.messages, ...(rows.messagesAfterLater ?? [])].some((row) => row.id === filer) ? filer : undefined;
   const under = (placed: typeof rows.messages) => endedUnder === undefined ? placed
