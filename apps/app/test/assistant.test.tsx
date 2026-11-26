@@ -11,19 +11,28 @@ import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
 import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import type { Detent } from "../gen/app__shell.ts";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, typeInto, underAct, until } from "./alpha.tsx";
+import type { Alpha } from "../src/runtime/area.tsx";
+import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, seen, typeInto, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
-/** Ask Alpha in full, alone at its place: the journeys draw no other screen. */
-const mounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
+/**
+ * Ask Alpha in full at its place, and Settings with the Agent activity page, where the owner lists, restores and
+ * starts conversations as in Alpha's Sunday v119 build (45f6bed30, settings-adapter.ts:1038-1043).
+ */
+const mounts: Mount[] = [
+  { at: "assistant", load: () => import("../src/assistant/index.tsx") },
+  { at: "view:Settings", load: () => import("../src/settings/index.tsx") },
+  { at: "settings/activity", load: () => import("../src/assistant/settingsActivity.tsx") },
+];
 
 const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span:not([aria-hidden])")?.textContent);
 const rows = (list: string) => document.querySelector(`section[aria-label='${list}'] > div`)?.children.length ?? 0;
@@ -51,13 +60,38 @@ function onMessage(text: string, item: string) {
   });
 }
 
-const chatsSheet = () => [...document.querySelectorAll("[role='dialog']")].find((dialog) =>
-  document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent === "Chats");
+/** The saved conversations Agent activity lists, by title. */
+const restorable = () => [...document.querySelectorAll("button[aria-label^='Restore conversation: ']")].map((found) => found.getAttribute("aria-label")?.slice("Restore conversation: ".length));
 
-/** Open the list of conversations, from the chat actions. */
-async function chatsList() {
-  chatAction("Chat history");
-  await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeDefined()));
+/** Open Settings at About, then Agent activity, as the owner does. */
+async function agentActivity(alpha: Alpha) {
+  const shown = await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.get()));
+  if (shown.trail.at(-1) !== "Settings") await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" })));
+  await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "openSection", page: "About" })));
+  await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "Activity" })));
+  await until(alpha, alpha.runtime, Pages.Machine, (s) => s.page === "Activity");
+  await drawn(() => vi.waitFor(() => expect(button(/^Load(ing)? conversations$/)).toBeDefined()));
+}
+
+/** Open the list of conversations: History on Agent activity in Settings. */
+async function chatsList(alpha: Alpha) {
+  await agentActivity(alpha);
+  await press(/^Load(ing)? conversations$/);
+}
+
+/** Back, as the owner presses it, until Settings has closed, and Ask Alpha raised again to `detent`. */
+async function leaveSettings(alpha: Alpha, detent: Detent) {
+  const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+  for (let presses = 0; presses < 5 && ((await shell()).trail.length > 0 || (await shell()).assistant !== "Bar"); presses++) await hardware("back");
+  expect([(await shell()).trail, (await shell()).assistant]).toEqual([[], "Bar"]);
+  if (detent !== "Bar") await alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent })));
+  await until(alpha, alpha.runtime, Shell, (s) => s.assistant === detent);
+}
+
+/** Restore the saved conversation titled `title` from Agent activity, which raises Ask Alpha onto it. */
+async function restore(title: string) {
+  await drawn(() => vi.waitFor(() => expect(restorable()).toContain(title)));
+  await press(`Restore conversation: ${title}`);
 }
 
 /** Click the row of the list named `list` whose text starts with `text`. */
@@ -105,9 +139,9 @@ it("Keeps my phone draft through restart and leaves it with my account (spec/app
   world.ask.kept.set("c1", { roomId: "r1", title: "Shared fixture ID", messages: [] });
 
   const selectConversation = async (alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof assistant.runtime>) => {
-    await chatsList();
+    await chatsList(alpha);
     await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
-    row("Chats", "Shared fixture ID");
+    await restore("Shared fixture ID");
     await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
   };
 
@@ -232,10 +266,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    await chatsList();
+    const raised = (await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.get()))).assistant;
+    await chatsList(alpha);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    expect(rows("Chats")).toBe(2);
-    await drawn(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await drawn(() => vi.waitFor(() => expect(restorable()).toHaveLength(2)));
+    await leaveSettings(alpha, raised);
 
     // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing carrier identifiers is a sensitive screen (on a phone).
     if (phone) {
@@ -250,7 +285,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
       await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
-      expect(button("Send")?.disabled).toBe(false);
+      // General, drawn again, focuses the row the owner left, which ends typing; the draft stays for the next Type.
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+      await press("Type");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Typing");
+      expect([button("Send")?.disabled, composerText()]).toEqual([false, "my password is hunter2"]);
       await hardware("home");
       await until(alpha, runtime, Conversation, (s) => s.context.showing.tag === "Home");
       await press("Open conversation");
@@ -516,15 +555,20 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(third.alpha, runtime, Chats, (s) => s.chosen > 1 && s.ids.length === 2 && s.page.status === "Loaded");
     expect([document.body.textContent?.includes("Messages did not load"), button("Try again"), lines()]).toEqual([false, undefined, ["Dinner at eight?"]]);
 
-    // spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown": Back closes the list and keeps the current conversation and draft.
+    // spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown": Back from Agent activity keeps the current conversation and draft.
     write("Ideas for dinner");
-    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
-    const detent = (await shellState()).assistant;
-    await chatsList();
+    await until(third.alpha, runtime, Composer, (s) => s.editor.text && s.draft.sync === "Kept");
+    const chosen = (await runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()))).chosen;
+    const detent = (await third.alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()))).assistant;
+    await chatsList(third.alpha);
+    await until(third.alpha, runtime, Chats, (s) => s.list.status === "Loaded");
+    await drawn(() => vi.waitFor(() => expect(restorable()).toEqual(["Dinner", "Lunch"])));
     await hardware("back");
-    await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeUndefined()));
-    expect([(await shellState()).assistant, composerText(), lines()]).toEqual([detent, "Ideas for dinner", ["Dinner at eight?"]]);
+    await until(third.alpha, third.alpha.runtime, Pages.Machine, (s) => s.page === "About");
+    const kept = await runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
+    expect([kept.chosen, composerText(), lines()]).toEqual([chosen, "Ideas for dinner", ["Dinner at eight?"]]);
     write("");
+    await leaveSettings(third.alpha, detent);
     await third.close();
 
     // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
@@ -585,18 +629,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     runtime = assistant.runtime(fifth.alpha);
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
     world.ask.holdLists = false;
-    await chatsList();
+    await chatsList(fifth.alpha);
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
     expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
     for (const release of world.ask.heldLists.splice(0)) release();
     await hardware("back");
-    await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeUndefined()));
+    await until(fifth.alpha, fifth.alpha.runtime, Pages.Machine, (s) => s.page === "About");
 
     // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
     world.ask.holdLists = true;
-    await chatsList();
+    await chatsList(fifth.alpha);
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
-    await pressOnTop("New chat");
+    await press("New conversation");
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
     const chats = () => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
     const made = (await chats()).chosen;
@@ -611,11 +655,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     write(carried);
     await until(fifth.alpha, runtime, Composer, (s) => s.binding.conversation === made && s.editor.text && s.draft.sync === "Kept");
     world.ask.kept.clear();
-    await chatsList();
+    await chatsList(fifth.alpha);
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.ids.length === 0 && s.list.status === "Loaded");
     await until(fifth.alpha, runtime, Composer, (s) => s.binding.conversation === 0 && s.slot === "Open" && s.editor.text && s.draft.sync === "Kept");
-    await hardware("back");
-    await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeUndefined()));
     expect(composerText()).toBe(carried);
     await press("Send");
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
@@ -631,9 +673,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const { alpha, runtime } = await openAssistant(world);
     await press("Open conversation");
     await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
-    await chatsList();
+    await chatsList(alpha);
     await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
-    row("Chats", "Earlier history");
+    await restore("Earlier history");
     await until(alpha, runtime, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
     await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
     await press("Earlier");
@@ -664,9 +706,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [] });
     world.ask.opened = 1;
     const { alpha, runtime } = await openAssistant(world);
-    await chatsList();
+    await chatsList(alpha);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    row("Chats", "Ask Alpha");
+    await restore("Ask Alpha");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
 
     // spec/app/assistant/index.md, "Stop reply ends a streaming reply, and takes back a message nothing was heard of"

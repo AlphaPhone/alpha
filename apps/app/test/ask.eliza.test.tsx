@@ -18,6 +18,7 @@ import { Machine as Preferences } from "../gen/app__settings__preferences.effect
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import * as Pages from "../gen/app__settings.effect.vibe";
 import type { Shell as ShellState } from "../gen/app__shell.ts";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
@@ -123,7 +124,7 @@ it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/k
 }, 300_000);
 
 it('Ask and stop a reply from Home through the real resident and cloud (spec/app/assistant/index.md, "Story: Ask Alpha something"); (spec/app/assistant/index.md, "Story: Stop a reply")', async () => {
-  const { alpha } = await openOver(elizaWorld(mine), only("home", "assistant"));
+  const { alpha } = await openOver(elizaWorld(mine), only("home", "assistant", "view:Settings", "settings/activity"));
   const runtime = assistant.runtime(alpha);
   const roomList = Schema.decodeUnknownSync(Schema.Struct({ conversations: Schema.Array(ConversationRecord) }));
   const rooms = async () => roomList(await mine.agentSays<unknown>("/api/conversations")).conversations;
@@ -142,16 +143,12 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   await raiseConversation(alpha, runtime);
   await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open");
 
-  await drawn(() => {
-    const trigger = button("Chat actions");
-    if (!trigger) throw new Error("Chat actions did not open from Home");
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  });
-  await drawn(() => {
-    const start = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "New chat");
-    if (!start) throw new Error("New chat was not offered");
-    start.click();
-  });
+  // spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown": as in v119 (45f6bed30, settings-adapter.ts:1038-1043), New conversation is on Agent activity in Settings.
+  await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" })));
+  await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "openSection", page: "About" })));
+  await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "Activity" })));
+  await waitForScreen(() => expect(button("New conversation")?.disabled).toBe(false));
+  await press("New conversation");
   await until(alpha, runtime, Chats, (state) => state.chosen > 0 && state.make.outcome === "Confirmed" && state.page.status === "Loaded");
   await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
   const opened = await rooms();
