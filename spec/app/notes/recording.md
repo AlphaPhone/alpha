@@ -20,6 +20,10 @@ transcript of them follows once the recording is kept.
 > that it is hearing me, pause and go on, and stop it to keep it, with
 > nothing I said lost to a crash, a call or an error.
 
+Voice note shows the elapsed time, recent microphone levels, and the
+recording status. Pause and Stop recording sit below the waveform.
+While paused, Resume takes the place of Pause.
+
 ### The recorder holds one recording, the audio written so far, what is waiting to be written, and the keeping of it as a voice note
 
 A recording has a number, and while the microphone is on, a capture under
@@ -421,6 +425,9 @@ pure val fair_noteFound = "weak"
 
 > As the owner, I want to throw away a recording I do not want, but only
 > after saying so twice, and never to have it come back half erased.
+
+The question appears above the recorder controls, where Keep closes it and
+Discard confirms it.
 
 ### The owner is asked before a paused, failed or damaged recording is discarded
 

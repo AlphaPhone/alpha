@@ -35,11 +35,11 @@ do next.
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
-  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
+  `text-title` a document's name over its preview and Notes' recorder and Recently deleted headers on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
   `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page; `text-panel-title` heads a panel that covers Ask Alpha, such as its chat search.
-  `text-speaker` is the initials of a speaker in a voice note's transcript.
+  `text-recorder-timer` is the elapsed time in the voice recorder and `text-speaker` is the initials of a speaker in a voice note's transcript.
   On Camera, `text-camera-badge` is the timer and flash badge, `text-camera-countdown` the self-timer digit and
   `leading-detail` the line under its access notice. `text-review-title` heads the scanner's dialogs.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
@@ -235,6 +235,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.figure-sm.leading` | 1.05 |
 | `text.figure-lg.size` | 2.5rem |
 | `text.figure-lg.leading` | 1 |
+| `text.recorder-timer.size` | 4.5rem |
+| `text.recorder-timer.leading` | 1 |
+| `text.recorder-timer.tracking` | -0.02em |
 | `text.keypad-letters.size` | 0.6875rem |
 | `text.keypad-letters.leading` | 1.1 |
 | `text.keypad-letters.tracking` | 0.12em |
