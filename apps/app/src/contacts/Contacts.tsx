@@ -159,7 +159,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   return (
     <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
       {header}
-      <TabsContent value="Contacts" className="min-h-0 flex-1 overflow-y-auto">{content}</TabsContent>
+      <TabsContent value="Contacts" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</TabsContent>
     </Tabs>
   );
 }

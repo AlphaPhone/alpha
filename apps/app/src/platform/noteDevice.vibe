@@ -4,8 +4,13 @@ import type { Command } from "../../gen/app__notes__recording.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { fresh } from "../runtime/attempts.vibe"
 import { registered } from "./device.vibe"
+import { Agent } from "./agent.vibe"
+import { ownerAt } from "./owner.vibe"
+import { noteClientFor } from "./notes.vibe"
 import { type SavedNoteWindow, readSavedNote } from "./voice.vibe"
 import { browserNoteDevice, browserNotesSupported } from "./noteBrowser.vibe"
+import { browserNotesRecognitionAvailable, requestBrowserNoteTranscription } from "./noteTranscription.vibe"
+import { Base64 } from "effect/encoding"
 
 module native {
   import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
@@ -91,9 +96,12 @@ export service NoteDevice {
   retain(recordingId: string, noteId: string): Recorded!RecordingUnavailable
   discard(recordingId: string): void!RecordingUnavailable
   describe(audioId: string): Recorded!RecordingUnavailable
+  transcriptionReady(audioId: string, noteId: string): boolean!!
   transcribe(window: SavedNoteWindow): string!RecordingUnavailable
+  clearTranscriptAudio(): void!!
   play(audioId: string, noteId: string, offsetMs: number): boolean!!
   halt(): boolean!!
+  canPurge(audioId: string): boolean
   purge(receipt: NotesTrashRecordingCleanup): boolean!!
   consumeOpen(): boolean!!
   previousExists(): boolean!!
@@ -105,12 +113,20 @@ export service NoteDevice {
 const absent = () => new RecordingUnavailable()
 const noTape = (): Tape => ({ state: "idle" })
 
-export const noteDevice = Layer.sync(NoteDevice, () => {
+export const noteDevice = Layer.effect(NoteDevice, effect {
+  const agent = try Agent
   const api = registered("AlphaNotes") ? client() : undefined
-  const canTranscribe = api !== undefined && registered("AlphaVoiceCloud")
   const purges = Semaphore.makeUnsafe(1)
-  const browser = api === undefined && browserNotesSupported() ? browserNoteDevice() : undefined
+  const notes = noteClientFor(agent.runtime)
+  const browser = try sync(() => api === undefined && browserNotesSupported() ? browserNoteDevice() : undefined)
+  const browserRecognition = browser !== undefined && (try sync(browserNotesRecognitionAvailable))
+  const canTranscribe = api !== undefined && registered("AlphaVoiceCloud") || browserRecognition
+  effect function localReady(): boolean!! {
+    const status = timeout(tryPromise(requestBrowserNoteTranscription), "5 seconds") catch () => undefined
+    return typeof status === "object" && status !== null && "local" in status && status.local === true
+  }
   const available = api !== undefined || browser?.available === true
+  const canPurge = (audioId: string) => audioId.startsWith("browser-audio-") ? browser !== undefined : api !== undefined
   const web = <A>(call: () => Promise<A>) => tryPromise({ try: call, catch: absent })
   const asked = <A>(call: (native: NotesPlugin) => Promise<A>) => api === undefined ? Effect.fail(absent()) : tryPromise({ try: () => call(api), catch: absent })
   const decoded = <A>(schema: Schema.Decoder<A>, raw: unknown) => mapError(Schema.decodeUnknownEffect(schema)(raw), absent)
@@ -135,7 +151,7 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     (listener) => promise(() => listener.remove()),
   ))
   return {
-    available, onWeb: browser !== undefined, canPlay: api !== undefined || browser !== undefined, canTranscribe, changed, openAsked,
+    available, onWeb: browser !== undefined, canPurge, canPlay: api !== undefined || browser !== undefined, canTranscribe, changed, openAsked,
     permission: () => granted(browser === undefined ? read(Permission, (native) => native.permission()) : web(() => browser.permission())),
     request: () => granted(browser === undefined ? read(Permission, (native) => native.requestMicrophone()) : web(() => browser.request())),
     status: (ownerDigest?: string) => browser !== undefined ? web(() => browser.status(ownerDigest))
@@ -156,8 +172,24 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     describe: (audioId: string) => browser === undefined
       ? read(RecordedReply, (native) => native.describe({ audioId }))
       : tryPromise({ try: () => browser.describe(audioId), catch: absent }),
+    effect transcriptionReady(audioId: string, noteId: string) {
+      if (browser === undefined) return canTranscribe
+      if (!browserRecognition) return false
+      const audio = tryPromise(() => browser.describe(audioId)) catch () => undefined
+      return audio?.audioId === audioId && audio.noteId === noteId && (try localReady())
+    },
+    clearTranscriptAudio: () => sync(() => browser?.transcript.clear()),
     effect transcribe(window: SavedNoteWindow) {
       if (!canTranscribe) throw new RecordingUnavailable()
+      if (browser !== undefined && browserRecognition) {
+        if (window.offsetMs === 0 && !(try localReady())) throw new RecordingUnavailable()
+        const frames = try tryPromise({ try: (signal) => browser.transcript.read(window, transcriptWindowMs, signal), catch: absent })
+        if (frames.byteLength === 0) return ""
+        const request = tryPromise({ try: (signal) => requestBrowserNoteTranscription(signal, Base64.encode(frames)), catch: absent })
+        const returned = timeout(request, "120 seconds") catch effect () => { throw new RecordingUnavailable() }
+        const heard = try decoded(Heard, returned)
+        return heard.text
+      }
       const requestId = `notes-${fresh()}`
       const raw = try tryPromise({ try: (signal) => readSavedNote(window, requestId, signal), catch: absent })
       return (try decoded(Heard, raw)).text
@@ -169,6 +201,21 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
       ? Effect.catch(Effect.map(read(Played, (native) => native.halt()), ({ ok }) => ok), () => succeed(false))
       : sync(() => browser.halt()),
     purge: (receipt: NotesTrashRecordingCleanup) => Semaphore.withPermit(purges, effect {
+      if (!canPurge(receipt.audioId)) return false
+      if (browser !== undefined) {
+        const scope = Effect.provideService(ownerAt(), Agent, agent)
+        const before = scope catch () => undefined
+        if (before === undefined) return false
+        const gone = tryPromise(() => browser.purge(receipt)) catch () => false
+        if (!gone || (scope catch () => undefined) !== before) return false
+        const request = HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/alpha/notes/browser-cleanup"), receipt)
+        const returned = agent.call(request) catch () => undefined
+        if ((scope catch () => undefined) !== before) return false
+        if (typeof returned === "object" && returned !== null && "status" in returned && returned.status === "confirmed") return true
+        const pending = tryPromise((signal) => notes.readTrashRecordingCleanup(signal)) catch () => undefined
+        return pending !== undefined && !pending.some((row) => row.audioId === receipt.audioId || row.operationId === receipt.operationId)
+          && (scope catch () => undefined) === before
+      }
       const result = asked((native) => native.purge(receipt)) catch () => undefined
       return typeof result === "object" && result !== null && "status" in result && result.status === "purged"
         && "audioId" in result && result.audioId === receipt.audioId

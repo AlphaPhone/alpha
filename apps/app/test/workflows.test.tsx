@@ -434,7 +434,7 @@ describe("Workflows", () => {
       await press("Stop reading");
       await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceUnconfirmed");
       await vi.waitFor(() => expect(world.voice.hushCalls).toBeGreaterThan(hushes));
-      expect(proposal.receipts.some(({ outcome }) => outcome === "applied")).toBe(false);
+      expect(proposal.receipts).not.toContainEqual(expect.objectContaining({ outcome: "applied" }));
       return;
     }
     await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceAnswered");

@@ -403,10 +403,6 @@ effect function syncAlphaApps(actionResults: ReadonlyArray<{ readonly action: st
   }
 }
 
-effect function warmPlanner(): void!!Agent {
-  try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
-}
-
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
 /** Retiring the displayed archive also retires the picker's matching preview ticket. */
@@ -902,7 +898,6 @@ effect function newest(page: number, conversation: number): Chats.Event!!(Agent 
   return read.type === "listed" ? { type: "latest", page, ok: read.ok, ids: read.ids, conversation, ...free } : read
 }
 
-// The pinned resident returns at most this many rows on either side of an around anchor.
 const historyRadius = 100
 
 /** Prove the edges of a centered window, where a full side alone cannot say anything about the row past it. */
@@ -1432,12 +1427,9 @@ const submitted = started(effect {
 }, "asking what was typed on the communications dock")
 
 // spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
-function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
+function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   return match (fx) {
-    when { tag: "Raise", let detent }: run("raise", effect {
-      fork.detached warmPlanner()
-      try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha")
-    });
+    when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
     when { tag: "Lower", let steps }: run("lower", effect {
       const shell = try Shell
       for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
@@ -1446,10 +1438,7 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
       const shell = try Shell
       const current = try shell.get()
       for (const ask of Dock.focused(current.assistant)) {
-        if (ask.tag === "Raise") {
-          fork.detached warmPlanner()
-          try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
-        }
+        if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
       }
     });
   }
@@ -1565,8 +1554,32 @@ export const assistantBack = effect {
   if (previous !== undefined) {
     const shell = try Shell
     const view = commsViewOf(previous.app)
-    if (canReturnCommsView(try shell.get(), view) && (try contained(comms.send({ type: "stageReturned" }, "Owner"), "returning to the earlier communications stage"))) {
-      return try contained(shell.send({ type: "returnCommsView", previous: view }), "returning to the earlier communications app")
+    const where = try shell.get()
+    if (where.assistant === "Sheet" && canReturnCommsView(where, view)) {
+      const fromSameRoute = () => Effect.runSync(shell.get()).route === where.route
+      const returned = try contained(comms.send({ type: "stageReturned" }, "Owner", (state) => {
+        const entry = state.stage.at(-1)
+        return fromSameRoute() && entry?.app === previous.app && entry.subject === previous.subject && entry.key === previous.key
+      }), "returning to the earlier communications stage")
+      if (!returned) return true
+      const contacts = try Contacts.Machine
+      const contact = try contacts.get()
+      if (try contained(shell.send({ type: "returnCommsView", previous: view }, (state) => state.route === where.route), "returning to the earlier communications app")) {
+        // spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"
+        const prefix = "contacts:contact:"
+        if (view === "Contacts" && previous.subject === "ContactSubject" && previous.key === prefix + contact.contact) {
+          const device = try Device
+          const exactVisit = () => {
+            const current = Effect.runSync(shell.get())
+            return current.route === where.route + 1 && showing(current, "Contacts") && current.assistant === "Sheet" && Effect.runSync(device.showing())
+          }
+          const event = { type: "restoreStageContact", contact: contact.contact, ticket: contact.list.ticket } as const
+          if (exactVisit() && Contacts.canRestoreStageContact(contact, event.contact, event.ticket)) {
+            try contained(contacts.send(event, exactVisit), "reading the earlier Contacts card")
+          }
+        }
+      }
+      return true
     }
   }
   return false

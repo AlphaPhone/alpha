@@ -4,7 +4,6 @@ import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialI
 import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
-import { ask } from "./remote.vibe"
 
 export type VoiceGrant = "granted" | "denied" | "prompt"
 
@@ -185,7 +184,8 @@ export service VoiceBridge {
   available(): boolean!!
   checkPermission(): VoiceGrant!!
   requestPermission(): VoiceGrant!!
-  prewarm(network: boolean): void!!Agent
+  /** Warm speech only: on-device output and status, and the Cloud speech relay on the network route. The agent's model is warmed by Ask Alpha's warm-up alone (spec/app/assistant/index.md). */
+  prewarm(network: boolean): void!!
   streamTimings(): unknown!!
   probeStatus(ttsOnly: boolean): SpeechStatus!!
   invalidateCache(): void!!
@@ -754,11 +754,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     for (const emit of eventSubscribers) emit(event)
   }
 
-  effect function prewarm(network: boolean): void!!Agent {
-    const device = warmDevice()
-    const warmCloud = network
-      ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
-      : Effect.void
+  effect function prewarm(network: boolean): void!! {
     if (network && registered(CLOUD_STREAM_PLUGIN)) {
       const relay = relayPlugin()
       const accounts = signInAccounts()
@@ -768,7 +764,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         ignore(tryPromise(() => relay.prewarmCloudSpeech({ environment: CLOUD_ENVIRONMENT }))),
       ], { concurrency: "unbounded" }), RELAY_WARMUP_BOUND))
     }
-    try Effect.all([device, warmCloud], { concurrency: "unbounded" })
+    try warmDevice()
   }
 
   function clearCloudPreview(session: number): void {
@@ -1070,20 +1066,15 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
 })
 
 export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
-  let warmedCloud = false
   return {
     available: () => succeed(false),
     checkPermission: () => succeed<VoiceGrant>("granted"),
     requestPermission: () => succeed<VoiceGrant>("granted"),
-    effect prewarm(network: boolean): void!!Agent {
-      if (!network || warmedCloud) return
-      warmedCloud = true
-      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
-    },
+    prewarm: () => Effect.void,
     streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),
-    invalidateCache: () => sync(() => { warmedCloud = false }),
-    forgetAccount: () => sync(() => { warmedCloud = false }),
+    invalidateCache: () => Effect.void,
+    forgetAccount: () => Effect.void,
     holdEngine: () => succeed(false),
     releaseEngineHold: () => Effect.void,
     openMic: () => Effect.fail(new VoiceBridgeFailed({ method: "openMic", cause: "browser-no-native-voice" })),
