@@ -26,13 +26,19 @@ import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, only, open, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, notesRoutes, prepared } from "./fakes/notes.ts";
 import { answering, fetched } from "./fakes/routes.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
+
+const rowDrawn = vi.hoisted(() => vi.fn());
+vi.mock("@repo/ui", async (original) => {
+  const ui = await original<typeof import("@repo/ui")>();
+  return { ...ui, NoteRow: (props: Parameters<typeof ui.NoteRow>[0]) => { rowDrawn(); return <ui.NoteRow {...props} />; } };
+});
 
 const listed = () => [...document.querySelectorAll("[aria-label=Notes] button")].flatMap((row) => row.getAttribute("aria-label")?.startsWith("Open ") ? [row.getAttribute("aria-label")] : []);
 
@@ -268,6 +274,25 @@ describe("Notes", () => {
     await press("Done");
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1 && world.notes.notes.some((row) => row.body.includes("Monday")));
     expect(world.notes.notes.filter((row) => row.title === "Studio invoice").map((row) => row.body.trim())).toEqual(["Send by Monday"]);
+  });
+
+  it("A new note's editor stays as it is typed and saved, and the list under it is not drawn again (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await control("New note");
+    await press("New note");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
+    const title = document.querySelector("input[aria-label='Title']");
+    await fill("Title", "Studio invoice");
+    await until(alpha, runtime, Editor, (state) => waiting(state));
+    rowDrawn.mockClear();
+    await fill("Note", "Send by Friday");
+    await until(alpha, runtime, Editor, (state) => state.draft.edits > 1);
+    expect(rowDrawn).not.toHaveBeenCalled();
+    await later(alpha, 800);
+    await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0);
+    expect(title?.isConnected).toBe(true);
   });
 
   it("Write a note (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
