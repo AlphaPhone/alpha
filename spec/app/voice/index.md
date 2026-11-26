@@ -59,6 +59,7 @@ pure val initial: Voice = {
 pure val sessionValues = Set(1, 2, 3, 4, 5)
 pure val speakerTicketValues = Set(1, 2, 3, 4)
 pure val turnValues = Set(1, 2, 3, 4, 5)
+pure val playedValues = Set(0, 1, 2)
 pure val placeValues = Set(1, 2)
 pure val sourceRouteValues = Set(0, 1, 2)
 pure val arrivedRouteValues = Set(1, 2, 3)
@@ -541,25 +542,33 @@ shown again for that turn, with its Send and Decline; otherwise it leaves.
 
 Whether a spoken turn asks for a text is the model's to read: Talk matches
 nothing in the owner's words to route a turn, and a text review names the
-recipient the agent proposed, for the owner to check before Send. A review
-the reply proposed from a Messages chat that Talk cannot show ends the turn
-quietly: Talk says nothing of its own about it.
+recipient the agent proposed, for the owner to check before Send. A spoken
+turn from another screen such as Messages keeps the session's capabilities
+and non-Files review cards even when direct Files actions are allowed, and
+a direct Files result from Messages is still spoken aloud. A review the
+reply proposed from a Messages chat that Talk cannot show ends the turn
+quietly without setting the review notice: any queued speech is hushed and
+Talk says nothing of its own about it.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool, says: bool): bool =
   (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)
 
 pure def replyEnds(v: Voice, session: int, turn: int, asks: bool, says: bool): Change =
-  val listening = nextTurn(false, { ...v, reviewPending: true })
   val kept = { ...v, reviewPending: v.reviewPending or asks }
-  if (asks and not(says))
+  val listening = nextTurn(false, kept)
+  if (not(says))
     { state: listening.state, out: List(Hush({ turn: v.turn })).concat(listening.out) }
-  else if (v.queued == v.played) nextTurn(false, kept)
+  else if (v.queued == v.played) listening
   else { state: { ...kept, replied: true }, out: List() }
 
 pure def lawAReviewSaidBesideIsNeverHushed(session: int, played: int): bool =
   val ended = replyEnds({ ...initial, phase: Speaking, mic: Off, session: session, turn: 1, queued: 2, played: played }, session, 1, true, true)
   ended.out.every(e => match e { | Hush(_) => false | _ => true }) and ended.state.reviewPending
+
+pure def lawAQuietEndingHushesWithoutAReviewNotice(session: int, played: int): bool =
+  val ended = replyEnds({ ...initial, phase: Speaking, mic: Off, session: session, turn: 1, queued: 2, played: played }, session, 1, false, false)
+  ended.out.includes(Hush({ turn: 1 })) and not(ended.state.reviewPending) and ended.state.phase == Listening
 
 pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
 
