@@ -16,11 +16,13 @@ import { badgeOnly, holding, needsSettings } from "../../gen/app__maps__connecti
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
 import { hasRoom, servedHere } from "../../gen/app__maps__places.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import { type Coverage, type Seen, type Spot, type Way, atlas } from "./atlas.vibe";
 import { degreesOf, pointIn } from "./geometry.ts";
 import googleMaps from "./google-maps-attribution.svg";
 import { coverageOf, settled, tile } from "./maps.vibe";
 import { handedQuery, takeHandedQuery, watchHandoff } from "./handoff.ts";
+import { liftOver } from "./lift.ts";
 
 const ways: ReadonlyArray<{ travel: Travel; label: string; icon: LucideIcon }> = [
   { travel: "Drive", label: "Drive", icon: Car }, { travel: "Transit", label: "Transit", icon: Bus }, { travel: "Walk", label: "Walk", icon: Footprints }, { travel: "Bicycle", label: "Bike", icon: Bike },
@@ -45,6 +47,7 @@ const notices: Record<SavedNotice, string> = {
   PlaceRenamed: "Saved place renamed.",
   PlaceRemoved: "Place removed from saved.",
   NotKept: "Saved places could not be changed.",
+  PinNamed: "Name updated. Tap Save to keep this place.",
 };
 
 const told: Record<GuideNotice, string> = {
@@ -84,11 +87,12 @@ const apart = (a: { lat: number; lng: number }, b: { lat: number; lng: number })
 /** How a place is named on screen: a dropped pin, named by its coordinates, is "Selected location", as on develop. */
 const shown = (name: string) => (pointIn(name) === undefined ? name : "Selected location");
 
-/** A place's title: a pin not yet saved is "Dropped pin", as v119 named it (ui/maps/maps-screen.ts:658). */
-const titleOf = (spot: Spot, kept: Kept | undefined) => (kept === undefined && spot.id === "" && pointIn(spot.name) !== undefined ? "Dropped pin" : shown(kept?.name ?? spot.name));
+/** The name the owner gave the pin on the card before saving it, or none. */
+const pinNameOf = (state: State) => (state.place !== 0 && state.place === state.pin ? state.pinName : "");
 
-/** Where a place's pin stands above the centre: in the middle of the map left between the search field and the credits, as v119 placed it (maps/map-plane.ts:586-593, 770-776). */
-const liftOver = (bottom: number) => Math.max(0, (bottom + 46 - 100) / 2);
+/** A place's title: a pin not yet saved is the name the owner gave it, else "Dropped pin", as v119 named it (ui/maps/maps-screen.ts:658, 874-877). */
+const titleOf = (spot: Spot, kept: Kept | undefined, state: State) =>
+  kept === undefined && pinNameOf(state) !== "" ? pinNameOf(state) : kept === undefined && spot.id === "" && pointIn(spot.name) !== undefined ? "Dropped pin" : shown(kept?.name ?? spot.name);
 
 /** Where the world map first stands: North America, as develop opens it. */
 const northAmerica = { lat: 45, lng: -98 };
@@ -126,14 +130,14 @@ function waitNotice(wait: State["link"]["wait"], held: number): string {
 
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
 /** Where the camera goes for `state`, named so the map applies each aim once. */
-function cameraOf(state: State, seen: Seen, following: boolean, bottom: number): MapCamera {
+function cameraOf(state: State, seen: Seen, following: boolean, bottom: number, launcher: boolean): MapCamera {
   const way = atlas.way(state.trip.route, state.chosen);
   const spot = atlas.spot(state.place);
   const results = state.place === 0 && state.search.status === "Loaded" ? seen.results.slice(0, state.results) : [];
   const aim = cameraAim(following, way !== undefined, true, spot !== undefined, true, true, results.length);
   if (aim === "FollowPhone" && seen.here !== undefined) return { kind: "follow", key: `here:${seen.here.at.lat}:${seen.here.at.lng}`, at: degreesOf(seen.here.at) };
   if (aim === "FitRoute" && way !== undefined) return { kind: "fit", key: `route:${state.trip.route}`, points: way.line.map(degreesOf), maxZoom: routeMaxZoom };
-  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom, lift: liftOver(bottom) };
+  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom, lift: liftOver(bottom, launcher) };
   if (aim === "FitResults") {
     const points = results.flatMap((place) => atlas.spot(place)?.at ?? []).map(degreesOf);
     return { kind: "fit", key: `results:${state.search.ticket}`, points, maxZoom: resultsMaxZoom };
@@ -161,6 +165,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const credits = useCredits(runtime);
   const seen = useSyncExternalStore((wake) => atlas.subscribe(wake), () => atlas.snapshot(), () => atlas.snapshot());
   const [typed, setTyped] = useState("");
+  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   const { state, can, send } = screen;
   const handed = useSyncExternalStore(watchHandoff, handedQuery, handedQuery);
   const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length } as const;
@@ -233,7 +238,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const opened = offer(screen, { type: "openSearch" });
   const openSearch = opened && (() => { setTyped(""); opened(); });
   const leave = back && (() => { if (now === "Search") setTyped(""); back(); });
-  const placeName = spot === undefined ? "" : titleOf(spot, kept);
+  const placeName = spot === undefined ? "" : titleOf(spot, kept, state);
   const inside = spot === undefined || !coverage?.available || coverage.regions.some(({ bounds: [west, south, east, north] }) => {
     const at = degreesOf(spot.at);
     return at.lng >= west && at.lng <= east && at.lat >= south && at.lat <= north;
@@ -241,7 +246,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const retryMap = offer(screen, { type: "retryMap" });
   const refused = now === "Browse" && needsSettings(state.link);
   const myLocation = offer(screen, { type: "useMyLocation" });
-  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is not guiding, as on v119 (prototype/maps-adapter.ts:455), and does nothing while Maps is locating or Android's prompt is open
+  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is neither guiding nor showing directions, as on v119 (prototype/maps-adapter.ts:455, `showSearch` in ui/maps/maps-screen.ts), and does nothing while Maps is locating or Android's prompt is open
   const locate = () => myLocation?.();
   const disclosing = can({ type: "continueDisclosure" }) && now !== "Navigating";
   // spec/app/maps/index.md, "Story: Use my location": every state Maps reports stands in one card under the search field, as on develop.
@@ -283,7 +288,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
             pins={pins}
             here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
             line={way?.line.map(degreesOf)}
-            camera={cameraOf(state, seen, following, floatBottom)}
+            camera={cameraOf(state, seen, following, floatBottom, launcher)}
             compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
             onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
             onTrouble={(plane, trouble) => {
@@ -307,7 +312,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           aria-label="Search Maps"
           placeholder="Search"
           maxLength={300}
-          value={now === "Place" ? typed || placeName : now === "Search" ? typed : ""}
+          // spec/app/maps/index.md, "Story: Look at a place": a place's field holds the query or stays empty under "Search", never the place's name, which the card's title carries, as v119 live (prototype/maps-adapter.ts:456 `q`)
+          value={now === "Place" || now === "Search" ? typed : ""}
           readOnly={now === "Place"}
           onFocus={openSearch}
           onChange={(event) => typing(event.target.value)}
@@ -356,7 +362,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           actions={statusActions.length > 0 ? statusActions : undefined} />
       )}
 
-      {now !== "Navigating" && !(now === "Search" && state.sheet === "Full") && (
+      {now !== "Navigating" && now !== "Directions" && !(now === "Search" && state.sheet === "Full") && (
         <MapsRoundButton tone="float" size="md" aria-label="Recenter" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard" style={{ bottom: `min(${floatBottom}px, calc(100% - 176px))` }} onClick={locate}><LocateFixed /></MapsRoundButton>
       )}
       {now === "Navigating" && can({ type: "recenter" }) && (
@@ -463,14 +469,18 @@ function SearchSheet({ screen, state, seen, saved, height, onRecent }: { screen:
 function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { screen: Screen; state: State; spot: Spot; kept: Kept | undefined; height: number; back: (() => void) | undefined; outside: boolean }) {
   const [name, setName] = useState("");
   const { can, send } = screen;
-  const saveName = kept?.name ?? spot.name;
+  // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": Save keeps the pin under the name the owner gave it, as v119's toggleSaved kept its label (ui/maps/maps-screen.ts:843-856)
+  const saveName = kept?.name ?? (pinNameOf(state) || spot.name);
+  const applied = name.trim() || (kept === undefined ? titleOf(spot, kept, state) : saveName);
+  // an unsaved pin's name only names it, as v119's applyName (ui/maps/maps-screen.ts:880-893); a saved place's renames it
+  const apply = kept === undefined ? { type: "namePin", name: applied } as const : { type: "namePlace", name: applied } as const;
   const pinned = spot.id === "" && pointIn(spot.name) !== undefined;
   return (
-    <MapsSheet aria-label={titleOf(spot, kept)} height={height} grows className="px-5 pt-4.5">
+    <MapsSheet aria-label={titleOf(spot, kept, state)} height={height} grows className="px-5 pt-4.5">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="font-display text-3xl font-light break-words">{titleOf(spot, kept)}</h2>
-          {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className="min-h-12 px-3 text-primary" onClick={() => { setName(kept === undefined ? titleOf(spot, kept) : saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
+          <h2 className="font-display text-3xl font-light break-words">{titleOf(spot, kept, state)}</h2>
+          {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className="min-h-12 px-3 text-primary" onClick={() => { setName(kept === undefined ? titleOf(spot, kept, state) : saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
           <div className="mt-1.5 text-sm text-muted-foreground">{pinned ? "Selected location" : spot.category || "Place"}</div>
           {spot.hours !== undefined && <div className="mt-1 text-sm"><span className="font-semibold">Hours</span><span className="text-muted-foreground">{` · ${spot.hours}`}</span></div>}
         </div>
@@ -493,8 +503,8 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
           {can({ type: "handOn", kind: "CopyNumber" }) && <button type="button" aria-label="Copy phone number" className="min-h-12 px-3 font-semibold text-primary" onClick={() => void send({ type: "handOn", kind: "CopyNumber" })}>Copy</button>}
         </div>
       )}
-      {state.renaming && can({ type: "namePlace", name: name.trim() || saveName }) && (
-        <form className="mt-3.5 flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void send({ type: "namePlace", name: name.trim() || saveName }); setName(""); }}>
+      {state.renaming && can(apply) && (
+        <form className="mt-3.5 flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void send(apply); setName(""); }}>
           <Input aria-label="Place name" placeholder={saveName} maxLength={300} value={name} onChange={(event) => setName(event.target.value)}
             className="h-11 min-w-0 flex-1 rounded-full border-0 bg-secondary px-3.5" />
           <MapsPillButton tone="fill" size="md" type="submit" aria-label="Apply place name">Done</MapsPillButton>
@@ -539,7 +549,7 @@ function DirectionsCard({ screen, state, seen, spot, kept, saved, coverage, back
               {locate && <MapsRoundButton tone="plain" size="sm" aria-label="Use my location" onClick={locate}><LocateFixed /></MapsRoundButton>}
             </form>
           )}
-          <div className="flex h-8 items-center gap-3 text-md font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{titleOf(spot, kept)}</span></div>
+          <div className="flex h-8 items-center gap-3 text-md font-semibold"><MapPin aria-hidden className="size-4.5 text-primary" /><span className="truncate">{titleOf(spot, kept, state)}</span></div>
         </div>
         <MapsRoundButton tone="plain" aria-label="Swap starting point and destination" aria-disabled={!swappable} className="size-12 aria-disabled:pointer-events-auto aria-disabled:opacity-40"
           onClick={swappable ? () => void send({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng }) : undefined}><ArrowUpDown /></MapsRoundButton>
@@ -630,7 +640,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
         <div className="min-w-0">
           <div className="font-display text-figure-lg font-light">{arrived ? "Arrived" : precise && turn !== undefined ? distance(turn.meters) : state.trip.rerouting ? "Rerouting…" : "Locating…"}</div>
           <div className="mt-1 truncate text-lead font-semibold">
-            {arrived ? titleOf(spot, kept) : seen.here === undefined ? "Waiting for your location" : imprecise ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
+            {arrived ? titleOf(spot, kept, state) : seen.here === undefined ? "Waiting for your location" : imprecise ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
           </div>
         </div>
       </div>

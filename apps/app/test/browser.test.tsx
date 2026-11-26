@@ -8,6 +8,7 @@ import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { verdict } from "../gen/app__browser__address.ts";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
 import { Machine as Settings } from "../gen/app__settings.effect.vibe";
+import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Reader } from "../gen/app__browser__reading.effect.vibe";
 import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Site } from "../gen/app__browser__site.effect.vibe";
@@ -26,7 +27,7 @@ import { TabHost } from "../src/platform/browser.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, readInboxFirst, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
-import { textReview } from "./fakes/text-review.ts";
+import { askedPage, textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -34,7 +35,7 @@ afterEach(closeAll);
 type BrowserRuntime = ReturnType<typeof browser.runtime>;
 
 /** The tab the Browser shows. */
-const selectedTab = (runtime: BrowserRuntime) => runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+const selectedTab = (runtime: BrowserRuntime) => runtime.runSync(Effect.map(Effect.flatMap(Tabs, (m) => m.get()), (s) => s.selected));
 
 /** The page `tab` shows: by default the selected tab's. */
 const selectedPage = (runtime: BrowserRuntime, tab = selectedTab(runtime)) => runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
@@ -48,6 +49,13 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }, notic
   return { ...running, world, runtime };
 }
 
+/** The Browser opened from Home, once its tabs are read back. */
+async function onHydratedBrowser(world = { ...scene(), phone: true, image: true }) {
+  const opened = await onBrowser(world);
+  await until(opened.alpha, opened.runtime, Tabs, (s) => s.hydrated);
+  return opened;
+}
+
 /** Ask Alpha and the Browser on `world`, once Ask Alpha's composer is open and its conversation ready. */
 async function askingBeside(world: ReturnType<typeof scene>) {
   const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
@@ -58,10 +66,10 @@ async function askingBeside(world: ReturnType<typeof scene>) {
   return { alpha, ask, runtime };
 }
 
-/** The agent's BROWSER_OPEN of `url`, for the view that asked as `metadata` names it. */
-const openAction = (url: string, metadata: unknown) => ({
+/** The agent's BROWSER_OPEN of `url`, for the view that asked as `metadata` names it, marked to open at once when the owner's whole message asked for it. */
+const openAction = (url: string, metadata: unknown, atOnce = false) => ({
   action: "BROWSER_OPEN",
-  data: { actionName: "BROWSER_OPEN", mode: "open", operation: { type: "browser_navigate", url }, clientId: String((metadata as { viewClientId?: unknown }).viewClientId) },
+  data: { actionName: "BROWSER_OPEN", mode: "open", operation: { type: "browser_navigate", url }, clientId: String((metadata as { viewClientId?: unknown }).viewClientId), atOnce },
 });
 
 /** Send `text` from Ask Alpha's composer, and wait until its reply completes. */
@@ -193,9 +201,7 @@ const askClearAll = async (alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"]
 
 async function openHydratedPhoneBrowser() {
   const world = { ...scene(), phone: true, image: true };
-  const opened = await onBrowser(world);
-  await until(opened.alpha, opened.runtime, Tabs, (s) => s.hydrated);
-  return { ...opened, world };
+  return { ...(await onHydratedBrowser(world)), world };
 }
 
 describe("The Browser on a phone", () => {
@@ -377,11 +383,41 @@ describe("The Browser on a phone", () => {
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
   });
 
+  it("Draws the find bar over the full-size page (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    // Laid out as on the phone: the page's place (lower by the find bar's 50px if it moved under the bar) and the floating find bar.
+    const measure: unknown = Reflect.get(HTMLElement.prototype, "getBoundingClientRect");
+    if (typeof measure !== "function") throw new Error("The DOM fixture cannot measure elements");
+    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute("data-alpha-browser-page")) return this.classList.contains("top-12.5") ? new DOMRect(0, 154, 390, 600) : new DOMRect(0, 104, 390, 650);
+      if (this.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
+      const measured: unknown = Reflect.apply(measure, this, []);
+      if (!(measured instanceof DOMRect)) throw new Error("The DOM fixture measured an invalid rectangle");
+      return measured;
+    });
+    onTestFinished(() => laidOut.mockRestore());
+    const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
+    const full = { id: `tab${tab}`, x: 0, y: 104, width: 390, height: 650 };
+    await drawn(() => vi.waitFor(() => expect(world.browser.shown).toEqual(full)));
+    expect(world.browser.hostRects).toEqual([]);
+
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([{ x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 }])));
+    expect(world.browser.shown).toEqual(full);
+
+    await press("Close find in page");
+    await until(alpha, page, Page, (p) => !p.finding);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([])));
+    expect(world.browser.shown).toEqual(full);
+  });
+
   it("Explains unavailable Android page reading (spec/app/browser/reading.md, \"An explicit reading starts from the current committed HTTPS page\")", async () => {
     const world = { ...scene(), phone: true, image: true };
     world.browser.readingAvailable = false;
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (state) => state.hydrated);
+    const { alpha, runtime } = await onHydratedBrowser(world);
     await press("Menu");
     await drawn(() => vi.waitFor(() => expect(document.querySelector("[role='note'][aria-label='Page reading unavailable']")).not.toBeNull()));
     await pressOnTop("Read aloud");
@@ -417,7 +453,8 @@ describe("The Browser on a phone", () => {
     await until(alpha, speaking, Speaker, (state) => state.stage === "Silent" && !state.retiring);
     if (kind === "private") expect(world.browser.saved.history).not.toContain("https://example.test/article");
     expect(world.voice.spoken).toEqual([]);
-    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession, requestId: expect.any(String) }]);
+    const requestId: unknown = expect.any(String);
+    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession, requestId }]);
     expect(cancellations()).toBe(1);
 
     world.voice.holdPagePlayback = true;
@@ -481,7 +518,6 @@ describe("The Browser on a phone", () => {
   });
 
   it.each([false, true])("Opens Password manager and returns through Settings (spec/app/settings/index.md, \"The owner can open Password manager from the Browser menu\") on phone %s", async (phone) => {
-    // The web host keeps the Browser's session in the WebView's IndexedDB, which happy-dom does not draw.
     vi.stubGlobal("indexedDB", memoryIndexedDB());
     onTestFinished(() => { vi.unstubAllGlobals(); });
     const world = { ...scene(), phone, image: phone };
@@ -658,7 +694,7 @@ describe("The Browser on a phone", () => {
     // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
     const shown = await ask(running, "Summarize this page");
     expect(shown?.observation?.view).toBe("browser");
-    // eliza binds the page to the tab the observation selects: the same session-qualified tab id and revision.
+    /** eliza binds the page to the tab the observation selects: the same session-qualified tab id and revision. */
     const selected = shown?.observation?.selectedObject;
     expect(selected?.kind).toBe("browser-tab");
     expect(selected?.id).toMatch(new RegExp(`:tab${tab}$`));
@@ -724,7 +760,7 @@ describe("The Browser on a phone", () => {
     await asked("open the Wikipedia article about the Eiffel Tower", eiffel);
     await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
     await asked("open example.org", "https://example.org/");
-    // The owner's own words name example.org too: wait for the card itself to name the newer page.
+    /** The operation cards' text: the owner's own words name example.org too, so the test waits for a card itself to name the newer page. */
     const card = () => [...document.querySelectorAll("[aria-label='Operation details']")].map((details) => details.textContent ?? "");
     await drawn(() => vi.waitFor(() => expect(card().some((text) => text.includes("example.org"))).toBe(true)));
     expect(document.body.textContent).not.toContain("en.wikipedia.org/wiki/Eiffel_Tower");
@@ -806,6 +842,113 @@ describe("The Browser on a phone", () => {
     await press("Open");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "page-open" })]), { timeout: 10_000 });
     expect(showing(await alpha.runtime.runPromise(Effect.flatMap(Shell, (sh) => sh.get())), "Browser")).toBe(true);
+    await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
+  });
+
+  it("A page my whole message asked for opens at once, with no card, and Ask Alpha lowers to its bar over it; a page I did not ask for whole still waits for my Open (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/shell/index.md, \"A page the agent opens in Browser lowers Ask Alpha to its bar\"; spec/app/browser/index.md, \"The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha, ask, runtime } = await askingBeside(world);
+    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+    const front = () => committedAddress(runtime, world.browser.tabs);
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (sh) => sh.get()));
+    const asked = async (text: string, url: string, atOnce: boolean) => {
+      world.ask.nextReplyChunks = ["Opening it."];
+      world.ask.nextActions = (metadata) => [openAction(url, metadata, atOnce)];
+      await sendFromComposer(alpha, ask, text);
+    };
+    await asked("Open https://www.alphacompute.ai/ in Browser.", "https://www.alphacompute.ai/", true);
+    await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://www.alphacompute.ai/"), { timeout: 10_000 }));
+    expect(button("Open")).toBeUndefined();
+    await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Browser") && s.assistant === "Bar");
+
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    await asked("open the Wikipedia article about the Eiffel Tower", "https://en.wikipedia.org/wiki/Eiffel_Tower", false);
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await later(alpha, 500);
+    expect([await front(), (await shell()).assistant]).toEqual(["https://www.alphacompute.ai/", "Sheet"]);
+    await press("Open");
+    await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://en.wikipedia.org/wiki/Eiffel_Tower"), { timeout: 10_000 }));
+    await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Browser") && s.assistant === "Bar");
+  });
+
+  it("On an enrolled phone, a page proposal my whole message asked for opens at once through the approvals path, with no card, and Ask Alpha lowers to its bar (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/shell/index.md, \"A page the agent opens in Browser lowers Ask Alpha to its bar\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const url = "https://www.alphacompute.ai/";
+    const review = textReview(world.notes.owner, "page-asked", { type: "browser_navigate", url });
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+    const ask = assistant.runtime(alpha);
+    const runtime = browser.runtime(alpha);
+    await until(alpha, ask, Conversation, (s) => s.ready);
+    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    const front = () => committedAddress(runtime, world.browser.tabs);
+    world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
+    await fill("Message Alpha", "Open https://www.alphacompute.ai/ in Browser.");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "page-asked" })]), { timeout: 10_000 });
+    await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
+    expect(button("Open")).toBeUndefined();
+    await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Browser") && s.assistant === "Bar");
+  });
+
+  const askingFirst = [
+    { name: "Ask before Alpha acts is on", kept: JSON.stringify({ askFirst: true, images: true, shares: [] }), status: "Loaded" },
+    { name: "the phone could not read the preferences", kept: "not the owner's choices", status: "Failed" },
+  ] as const;
+
+  it.each(askingFirst)("While $name, a page my whole message asked for waits for my Open on the Browser's card and Ask Alpha stays up (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/settings/preferences.md, \"Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts\")", async ({ kept, status }) => {
+    localStorage.setItem("alpha.preferences", kept);
+    onTestFinished(() => localStorage.removeItem("alpha.preferences"));
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha, ask, runtime } = await askingBeside(world);
+    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === status && s.askFirst);
+    const url = "https://www.alphacompute.ai/";
+    const front = () => committedAddress(runtime, world.browser.tabs);
+    world.ask.nextReplyChunks = ["Opening it."];
+    world.ask.nextActions = (metadata) => [openAction(url, metadata, true)];
+    await sendFromComposer(alpha, ask, "Open https://www.alphacompute.ai/ in Browser.");
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await later(alpha, 500);
+    expect(await front()).not.toBe(url);
+    expect((await alpha.runtime.runPromise(Effect.flatMap(Shell, (sh) => sh.get()))).assistant).not.toBe("Bar");
+    await press("Open");
+    await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
+  });
+
+  it.each(askingFirst)("On an enrolled phone while $name, a page proposal my whole message asked for runs only on Open in Ask Alpha's card (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/settings/preferences.md, \"Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts\")", async ({ kept, status }) => {
+    localStorage.setItem("alpha.preferences", kept);
+    onTestFinished(() => localStorage.removeItem("alpha.preferences"));
+    const world = { ...scene(), phone: true, image: true };
+    const url = "https://www.alphacompute.ai/";
+    const review = textReview(world.notes.owner, "page-asked", { type: "browser_navigate", url });
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+    const ask = assistant.runtime(alpha);
+    const runtime = browser.runtime(alpha);
+    await until(alpha, ask, Conversation, (s) => s.ready);
+    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === status && s.askFirst);
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    const front = () => committedAddress(runtime, world.browser.tabs);
+    const reads = review.pendingReads;
+    world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
+    await fill("Message Alpha", "Open https://www.alphacompute.ai/ in Browser.");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await until(alpha, ask, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await later(alpha, 500);
+    expect(review.receipts).toEqual([]);
+    expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(false);
+
+    await press("Open");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "page-asked" })]), { timeout: 10_000 });
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
   });
 

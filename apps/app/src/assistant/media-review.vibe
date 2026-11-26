@@ -1,4 +1,4 @@
-// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
 // spec/app/camera/agent.md, "A capture is taken only when the phone saved a photo it names; any other answer, or the camera released first, is uncertain"
 import { DeviceExecution, NOT_DISPATCHED, RuntimeRequestError, type ConversationRecord, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
 import { mayRunDirectly, readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
@@ -12,6 +12,7 @@ import { Machine as Shell, type Detent, type View, agentOpenView, canAgentOpenFi
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { changeCard } from "../../gen/app__files.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
+import { directOpenCapability } from "../../gen/app__browser.effect.vibe"
 import type { FileActionReport, FileReview, FilesReadContext } from "../files/agent.vibe"
 import { latestSenderResult, sameVoicemail, selectedVoicemail, type VoicemailReadContext, type VoicemailTarget } from "../contacts/reads.vibe"
 import { sendShowing } from "../contacts/requests.vibe"
@@ -29,7 +30,7 @@ import { nativeReadingAvailable } from "../platform/voice.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Telephony } from "../platform/telephony.vibe"
 import { Talk } from "./talk.vibe"
-import { navigateFilesForReply } from "./views.vibe"
+import { navigateFilesForReply, opensAtOnce } from "./views.vibe"
 
 /** Area-owned equipment and approved executors. The resident protocol never receives a media bridge handle. */
 export service MediaExecutors {
@@ -223,9 +224,14 @@ function askedFiles(operation: DeviceOperation, place: FilesPlace): DirectFilesO
   return operation.type === "files_open" && (place === "InFiles" || "path" in operation) ? operation : undefined
 }
 
-/** The session's headers declaring only its Files capabilities, for a turn whose reply handles nothing but Files. */
-export function filesOnlyHeaders(opened: Session): RuntimeRequestHeaders {
-  return { ...opened.headers, "x-eliza-device-capabilities": filesCapabilities.filter((name) => opened.capabilities.has(name)).join(",") }
+/**
+ * The session's headers for one turn: its capabilities, or only its Files ones for a turn whose reply handles nothing but Files,
+ * declaring that a page the owner's whole message asked for opens at once only while `atOnce`.
+ */
+// spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+function turnHeaders(opened: Session, filesOnly: boolean, atOnce: boolean): RuntimeRequestHeaders {
+  const declared = filesOnly ? [...filesCapabilities, directOpenCapability].filter((name) => opened.capabilities.has(name)) : [...opened.capabilities]
+  return { ...opened.headers, "x-eliza-device-capabilities": declared.filter((name) => atOnce || name !== directOpenCapability).join(",") }
 }
 
 function sameTrail(expected: readonly View[], current: readonly View[]): boolean {
@@ -261,6 +267,11 @@ function repliedDeviceActions(actions: DeviceActionReply["actionResults"]): Read
   return kept
 }
 
+/** Whether the reply ran a device step at once, as the owner's own request, rather than for review. */
+export function ranDirect(actions: DeviceActionReply["actionResults"]): boolean {
+  return [...repliedDeviceActions(actions).values()].some((action) => action === "Direct")
+}
+
 function fromThisEnrollment(proposal: Proposal, opened: Session): boolean {
   return proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
 }
@@ -275,6 +286,17 @@ function directFromReply(proposal: Proposal, opened: Session, message: string, a
 
 function reviewFromReply(proposal: Proposal, opened: Session, actions: ReadonlyMap<string, ReplyAction>): boolean {
   return proposal.payload.requestMessageId === undefined && actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
+}
+
+/**
+ * The reply to `message` offered this page open as asked by the owner's whole message, to run at once on this enrollment
+ * while `atOnce`: the owner's preferences let Alpha act on the web without asking.
+ */
+function askedOpen(proposal: Proposal, opened: Session, message: string, actions: ReadonlyMap<string, ReplyAction>, at: number, atOnce: boolean): boolean {
+  const expires = Date.parse(proposal.expiresAt)
+  return atOnce && proposal.state === "pending" && proposal.payload.workflow === undefined && Number.isFinite(expires) && expires > at
+    && proposal.payload.requestMessageId === message && actions.get(proposal.id) === "Direct" && fromThisEnrollment(proposal, opened)
+    && readOperation(proposal.payload.operation)?.operation.type === "browser_navigate"
 }
 
 export function namedReviewQuery(operation: DeviceOperation): string | undefined {
@@ -329,7 +351,7 @@ function spokenOperation(proposal: Proposal, opened: Session, message: string, r
   if (reviewedRead(op)) return acceptsRead(opened, op) && exactReadOrigin(proposal, message, reply) !== undefined ? op : undefined
   if (op.type === "voicemail_delete_selected" && (reply.voicemail?.witness === undefined ||
     !opened.capabilities.has("voicemail.delete.v1"))) return undefined
-  return request === message || commsReview(op) || op.type.startsWith("files_") ? op : undefined
+  return request === message || commsReview(op) || op.type.startsWith("files_") || op.type === "browser_navigate" ? op : undefined
 }
 
 /** The exact Talk request that presented an addressed text in the already-open chat. */
@@ -500,9 +522,9 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "messages_read_selected": return { title: "Share open messages", detail: "Share up to 20 recent messages from the open conversation with the agent." }
     case "voicemail_read_selected": return { title: "Share open voicemail", detail: "Share this voicemail’s known caller name, date, duration and any transcript already shown with the agent." }
     case "voicemail_delete_selected": return { title: "Delete open voicemail", detail: "Review the deletion in Phone." }
-    case "sms_latest_sender": return { title: "Share the latest SMS sender", detail: "includeAddress" in value
-      ? "Share the latest incoming SMS sender’s number and Android thread ID with the agent."
-      : "Share the last four digits of the latest incoming SMS sender’s number with the agent." }
+    case "sms_latest_sender": return { title: "Read latest text sender", detail: "includeAddress" in value
+      ? "Read the phone number of your latest incoming text."
+      : "Share the last four digits of the newest incoming SMS sender." }
     case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}` }
     case "sms_compose": {
       const recipient = composeRecipient(value)
@@ -531,6 +553,8 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 /** Enrollment and the proposal protocol share the same live resident identity. */
 export service MediaReview {
   session(): (Session | undefined)!!
+  /** The headers of one turn from `session`, read from the owner's preferences as it is sent; only its Files capabilities while `filesOnly`. */
+  turnHeaders(session: Session, filesOnly: boolean): RuntimeRequestHeaders!!
   workflowDevice(): (WorkflowPhone | undefined)!!
   workflowOffers(runId: string, current: Effect.Effect<boolean>): readonly WorkflowDeviceOffer[]!!
   decideWorkflow(offer: WorkflowDeviceOffer, approve: boolean, current: Effect.Effect<boolean>, authorized: Effect.Effect<boolean>): boolean!!
@@ -541,6 +565,8 @@ export service MediaReview {
   hasSpokenReview(session: Session, message: string, reply: DeviceActionReply): boolean!!
   spokenFiles(session: Session, message: string, request: DirectFiles, actions: DeviceActionReply["actionResults"]): boolean!!
   spokenFilesFrom(session: Session, message: string, request: FilesContinuation, route: FilesRouteSteps, actions: DeviceActionReply["actionResults"]): boolean!!
+  /** Opens at once, through the approvals path, the one page the reply to `message` offered as asked by the owner's whole message, while `current`. */
+  openAsked(session: Session, message: string, actions: DeviceActionReply["actionResults"], current: Effect.Effect<boolean>): boolean!!
   messageTarget(): (MessageDraftTarget | undefined)!!
   voicemailTarget(): (VoicemailTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
@@ -605,6 +631,7 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
     ...(registered("ElizaFiles") ? filesCapabilities : []),
     ...(registered("AlphaNotes") ? ["notes.organize.v1"] : []),
     ...(image && registered("ElizaTelephony") ? phoneCapabilities : []),
+    directOpenCapability,
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
   if (capabilities.length === 0) throw new EnrollmentRefused({ reason: "Media operations are unavailable" })
   const headers = { "x-eliza-device-id": offer.agentId, "x-eliza-device-key": key, "x-eliza-device-capabilities": capabilities.join(",") }
@@ -832,6 +859,42 @@ function filesActions(context: FilesReviewContext) {
   return { methods: { filesContext, filesOrigin, spokenFiles, spokenFilesFrom }, actOnFiles, continueInFiles }
 }
 
+interface AskedOpenContext {
+  readonly preferences: Prefs.Machine.Shape
+  readonly lock: Semaphore.Semaphore
+  readonly scopes: Map<string, ApprovalScope>
+  readonly isLatest: (opened: Session) => boolean
+  readonly enrollmentIsCurrent: (opened: Session) => Effect.Effect<boolean>
+  readonly proposals: (opened: Session) => Effect.Effect<readonly Proposal[] | undefined>
+}
+
+// spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+function askedOpens(context: AskedOpenContext): MediaReview.Shape["openAsked"] {
+  const { preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals } = context
+  const atOnce = Effect.map(preferences.get(), opensAtOnce)
+  return effect (opened: Session, message: string, results: DeviceActionReply["actionResults"], current: Effect.Effect<boolean>) => {
+    const actions = repliedDeviceActions(results)
+    if (![...actions.values()].some((action) => action === "Direct") || !(try current) || !(try atOnce)) return false
+    const answer = try proposals(opened)
+    const at = try Clock.currentTimeMillis
+    const asked = answer?.filter((proposal) => askedOpen(proposal, opened, message, actions, at, true))
+    const offer = asked?.length === 1 ? asked[0] : undefined
+    const exact = offer === undefined ? undefined : readOperation(offer.payload.operation)
+    if (offer === undefined || exact === undefined || exact.operation.type !== "browser_navigate" || !mayRunDirectly(exact, "NoBinding", true)) return false
+    const { id, digest } = offer
+    const expiresAt = Date.parse(offer.expiresAt)
+    return try lock.withPermits(1)(effect {
+      const active = effect { return isLatest(opened) && (try current) && (try atOnce) && (try enrollmentIsCurrent(opened)) && (try Clock.currentTimeMillis) < expiresAt }
+      if (!(try active)) return false
+      scopes.set(id, { active })
+      const done = (tryPromise(() => opened.execute.approve({ id, digest, expiresAt, operation: exact.operation }, {
+          live: true, nonsensitive: true, exact: true, forceReview: false, requestEligible: true, reviewed: false,
+        })) |> ensuring(%, sync(() => { scopes.delete(id) }))) catch () => undefined
+      return done?.kind === "settled" && done.result.tag === "Applied"
+    })
+  }
+}
+
 interface PinnedFileReview {
   readonly digest: string
   readonly files: FileReview
@@ -851,11 +914,12 @@ interface PendingReviewContext {
   readonly pinnedFiles: Map<string, PinnedFileReview>
   readonly actOnFiles: ReturnType<typeof filesActions>["actOnFiles"]
   readonly continueInFiles: ReturnType<typeof filesActions>["continueInFiles"]
+  readonly preferences: Prefs.Machine.Shape
 }
 
 function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pending"] {
   const { proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles } = context
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences } = context
   return effect (opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) => {
     const view = try Conversation
     const spoken = reply.spoken
@@ -886,6 +950,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       outside.hold(Effect.asVoid(continueInFiles(opened, continued, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
     }
     for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
+    const atOnce = opensAtOnce(try preferences.get())
     const cards = try Effect.forEach(answer, effect (proposal) => {
       if (proposal.state !== "pending" || proposal.payload.workflow !== undefined) return undefined
       const op = spoken === undefined ? operation(proposal.payload.operation) : spokenOperation(proposal, opened, message, reply, actions, at)
@@ -893,7 +958,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
       const filesOperation = op.type.startsWith("files_")
       const request = proposal.payload.requestMessageId
-      if (proposal.id === continued?.id) return undefined
+      if (proposal.id === continued?.id || askedOpen(proposal, opened, message, actions, at, atOnce)) return undefined
       const readsContent = reviewedRead(op)
       const origin = readsContent ? exactReadOrigin(proposal, message, reply) : undefined
       if (readsContent && !acceptsRead(opened, op)) return undefined
@@ -1190,10 +1255,14 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   })
   const pending = pendingProposals({
     proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles,
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences,
   })
   return {
     session,
+    effect turnHeaders(opened, filesOnly) {
+      return turnHeaders(opened, filesOnly, opensAtOnce(try preferences.get()))
+    },
+    openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
     effect hasSpokenReview(opened, message, reply) {
       const source = reply.spoken
       const actions = repliedDeviceActions(reply.actionResults)

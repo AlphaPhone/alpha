@@ -19,7 +19,7 @@ const transcript = {
     },
   ],
 };
-const composer = { value: "", onValueChange: fn(), onAttach: fn(), onSearch: fn(), onNew: fn(), onHistory: fn(), onTalk: fn() };
+const composer = { value: "", onValueChange: fn(), onAttach: fn(), onSearch: fn(), onTalk: fn() };
 
 export const meta: ComponentMeta<AssistantConversationProps> = {
   args: { header, transcript, composer },

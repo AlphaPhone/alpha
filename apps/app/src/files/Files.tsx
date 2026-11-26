@@ -168,7 +168,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const summary = (item: Item, showFolder: boolean) => {
     if (item.kind === "Folder") return "";
     const folder = showFolder ? Option.map(parentOf(item), (path) => path || label(item.volume)) : Option.none();
-    return [kindOf(item).name, sized(item.bytes), changedOn(item.revision, today), Option.getOrUndefined(folder)].filter(Boolean).join(" · ");
+    return [sized(item.bytes), changedOn(item.revision, today), Option.getOrUndefined(folder)].filter(Boolean).join(" · ");
   };
   const row = (item: Item) => {
     const toggle = { type: "toggle", target: item.id } as const;
@@ -184,7 +184,7 @@ export function Files({ runtime, alpha }: FilesProps) {
         <FilesRow
           layout={grid ? "tile" : "row"}
           aria-label={item.name}
-          aria-description={detail || kind}
+          aria-description={[kind, detail].filter(Boolean).join(" · ")}
           name={item.name}
           detail={detail}
           icon={<Icon />}
@@ -297,7 +297,7 @@ export function Files({ runtime, alpha }: FilesProps) {
                   {state.search.hits.map((hit) => {
                     const { icon: Icon, name: kind } = kindOf(hit);
                     const detail = summary(hit, true);
-                    return <FilesRow key={hit.id} aria-label={hit.name} aria-description={detail || kind} name={hit.name} icon={<Icon />} detail={detail} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
+                    return <FilesRow key={hit.id} aria-label={hit.name} aria-description={[kind, detail].filter(Boolean).join(" · ")} name={hit.name} icon={<Icon />} detail={detail} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
                   })}
                 </div>
               )}

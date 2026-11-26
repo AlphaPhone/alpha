@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "turbo run dev //#studio",
     "studio": "node vibestack/spec.ts studio",
+    "cli": "node packages/cli/src/main.ts",
     "eliza": "pnpm --filter @repo/eliza-harness eliza",
     "cloud": "node vibestack/spec.ts tasks @repo/cloud#build && node apps/cloud/dist/src/main.js",
     "no-bun": "node packages/eliza-harness/scripts/no-bun.ts",

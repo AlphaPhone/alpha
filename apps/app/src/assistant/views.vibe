@@ -5,6 +5,8 @@ import { screenViews } from "../../gen/app__assistant.effect.vibe"
 import { resent } from "../../gen/app__assistant__context.effect.vibe"
 import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
 import { type Detent, Machine as Shell, type View, parseEvent } from "../../gen/app__shell.effect.vibe"
+import { opensWithoutCard } from "../../gen/app__browser.effect.vibe"
+import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import { readOperation } from "@elizaos/agent"
 import { Agent } from "../platform/agent.vibe"
 import { AgentPages, type AgentPage } from "../platform/browser.vibe"
@@ -36,8 +38,8 @@ schema Handoff {
 }
 
 schema Prepared { readonly values: Handoff }
-/** A page eliza's BROWSER_OPEN asked the screen `clientId` to show for the owner's Open. */
-schema PageAsked { readonly actionName: "BROWSER_OPEN"; readonly mode: "open"; readonly operation: Schema.Unknown; readonly clientId: string }
+/** A page eliza's BROWSER_OPEN asked the screen `clientId` to open: at once when `atOnce`, else for the owner's Open. */
+schema PageAsked { readonly actionName: "BROWSER_OPEN"; readonly mode: "open"; readonly operation: Schema.Unknown; readonly clientId: string; readonly atOnce?: boolean }
 const pageAskedOf = Schema.decodeUnknownOption(PageAsked)
 const Claimed = Schema.Struct({ claimId: Schema.String, target: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("saved-note"), noteId: Schema.String })) })
 schema Answered { readonly ok: boolean }
@@ -55,7 +57,7 @@ export interface PageHeld {
   readonly page: AgentPage
 }
 
-type TypedHeld = Held | PageHeld | { readonly asked: number; readonly continueFiles: Effect.Effect<void> }
+type TypedHeld = Held | PageHeld | { readonly asked: number; readonly continueFiles: Effect.Effect<void> } | { readonly asked: number; readonly openAsked: Effect.Effect<void> }
 
 /** Where an agent's view goes: Home, or one of Alpha's apps. */
 type Place = View | "Home"
@@ -165,13 +167,25 @@ export function preparedIn(results: ReadonlyArray<{ readonly action: string; rea
   return found?.navigationBinding.clientId === clientId ? found : undefined
 }
 
-/** The page this screen was asked to open: eliza's typed open of the reply's last `BROWSER_OPEN` that opened one, if any. */
+/** The page this screen was asked to open: eliza's typed open of the reply's last `BROWSER_OPEN` that opened one, and whether it opens at once, if any. */
 export function pageIn(results: ReadonlyArray<{ readonly action: string; readonly data: unknown }>, clientId: string): AgentPage | undefined {
   return results.flatMap((result): AgentPage[] => {
     const asked = result.action === "BROWSER_OPEN" ? Option.getOrUndefined(pageAskedOf(result.data)) : undefined
     const operation = asked?.clientId === clientId ? readOperation(asked.operation)?.operation : undefined
-    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation }] : []
+    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation, atOnce: asked.atOnce === true }] : []
   }).at(-1)
+}
+
+// spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+/** Whether a page the owner's whole message asked for may open with no card: the phone read and settled the owner's preferences, and Ask before Alpha acts is off. */
+export function opensAtOnce(prefs: Prefs.Preferences): boolean {
+  return Prefs.free(prefs) && opensWithoutCard(true, Prefs.asksBeforeActing(prefs, "WebAction"))
+}
+
+/** `page` as it may open now: at once only while the owner lets Alpha act on the web without asking, else on the Browser's card. */
+effect function asAllowed(page: AgentPage): AgentPage!!Prefs.Machine {
+  if (!page.atOnce || opensAtOnce(try (try Prefs.Machine).get())) return page
+  return { ...page, atOnce: false }
 }
 
 /** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
@@ -243,15 +257,16 @@ effect function carriedOut<R>(held: Held, front: boolean!!R) {
   try ignore(ask(Agent, HttpClientRequest.post("/api/views/interact-result") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, claimId: claim.claimId, success: done.switched, result }), Answered))
 }
 
-// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
+// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
 /** Carry out the view the complete reply of `ticket` prepared for this screen, if Alpha has that view or it is Home. */
 effect function openPrepared(ticket: number) {
   const views = try Views
   const held = try views.take(ticket)
   if (Option.isNone(held) || held.value.asked !== (try views.current())) return
   if ("continueFiles" in held.value) return try held.value.continueFiles
+  if ("openAsked" in held.value) return try held.value.openAsked
   if ("page" in held.value) {
-    if (try navigated(ticket, "Browser")) try (try AgentPages).open(held.value.page, Effect.map(views.current(), (now) => now === held.value.asked))
+    if (try navigated(ticket, "Browser")) try (try AgentPages).open(try asAllowed(held.value.page), Effect.map(views.current(), (now) => now === held.value.asked))
     return
   }
   const place = placeFor(held.value.handoff)
@@ -274,7 +289,7 @@ export const carriedAloud = started(effect {
     const held = work.held
     if (held.asked !== (try views.current()) || !(try work.current)) return
     if ("page" in held) {
-      if (try work.front("Browser")) try (try AgentPages).open(held.page, Effect.map(views.current(), (now) => now === held.asked))
+      if (try work.front("Browser")) try (try AgentPages).open(try asAllowed(held.page), Effect.map(views.current(), (now) => now === held.asked))
       return
     }
     const place = placeFor(held.handoff)

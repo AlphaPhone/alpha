@@ -543,6 +543,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
           className={covered ? "hidden" : split ? "h-full w-[clamp(300px,36%,400px)] shrink-0 border-r border-border" : "min-h-0 min-w-0 flex-1"}>
         <InboxListScreen
           onBack={firstPageBack}
+          launcher={canvas?.launcher ?? false}
           account={account === 0 ? undefined : mail.email(account)}
           folder={folderNames[folder]}
           unavailable={!state.searchable}

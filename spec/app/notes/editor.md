@@ -99,6 +99,11 @@ lost. A new note needs the
 owner's notes available (Notes,
 "Nothing new can be made while the notes are unavailable or storage has
 failed"), and is made in the folder the list is narrowed to (none is 0).
+A new note starts titled New note, the owner free to type over it; when a
+note or a note in Recently deleted is already titled New note, or New note
+and a number, it starts at the next number up, so the next is New note 2.
+Only that starting title is the phone's; every title the owner typed is
+left as it is.
 
 ```quint
 pure def free(e: Editor): bool = not(e.showing) and not(waiting(e)) and isOwner(e.owner)
@@ -269,6 +274,11 @@ pure def stepTheBaseNeverGoesBack(before: Editor, via: str, after: Editor): bool
 ```
 
 ### Closing the editor keeps an unsaved draft for later, and lets go of a saved one
+
+A new note that holds only the title it started with, with no words and no
+items, has nothing of the owner's: it is never saved, and closing it lets it
+go as Discard does, so no note titled only New note is made and no draft of
+it waits.
 
 ```quint
 pure def canClose(e: Editor): bool = e.showing and not(e.deleting)
