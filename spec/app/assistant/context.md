@@ -413,7 +413,9 @@ fields. When peer support has not yet loaded or failed transiently on this
 connection, Alpha re-checks `/api/status` before refusing; when the peer does
 not take optional turn-context fields, Alpha refuses to post a turn carrying a
 reviewed email or voice-note transcript rather than concatenating untrusted
-data into `text` or silently dropping the attachment.
+data into `text` or silently dropping the attachment. A turn sent with only
+the reviewed email or transcript draws no empty bubble of the owner's, live
+or read again from history.
 
 ```quint
 pure def sendsReviewedEmail(hasMail: bool, validMail: bool, peerTakes: bool): bool =
