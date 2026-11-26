@@ -1,0 +1,62 @@
+// spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"
+import type { ReminderItemRecord } from "@repo/launcher-records"
+import {
+  phoneWorkflowLocalDayBounds, type WorkflowReadResult, type WorkflowReminderReadOperation, type WorkflowReminderRow,
+  validateWorkflowReadResult, workflowReminderRevisionInput, workflowSha,
+} from "@elizaos/plugin-workflow-client"
+import type { Agent } from "../platform/agent.vibe"
+import { dueInstantMs } from "./recurrence.ts"
+import { readReminders } from "./reminders.vibe"
+
+type ReminderResult = Extract<WorkflowReadResult, { readonly kind: "reminders" }>
+type ReminderRow = Omit<WorkflowReminderRow, "revision">
+
+const validInstant = (value: number | null): value is number =>
+  value !== null && Number.isSafeInteger(value) && Math.abs(value) <= 8_640_000_000_000_000
+
+function reviewedRows(
+  items: readonly ReminderItemRecord[], start: number, end: number, maximum: number,
+): readonly ReminderRow[] | undefined {
+  const rows = new Map<string, ReminderRow>()
+  const add = (row: ReminderRow): boolean => {
+    rows.set(JSON.stringify([row.id, row.dueAt, row.status]), row)
+    return rows.size <= maximum
+  }
+  for (const item of items) {
+    if (item.id.startsWith("alarm_")) continue
+    const { id, title } = item
+    const due = dueInstantMs(item.dueDate, item.dueMinute)
+    if (validInstant(due)) {
+      const dueAt = new Date(due).toISOString()
+      const done = item.completedAtMs
+      if (!item.completed && due < end && !add({ id, title, dueAt, status: "open" })) return undefined
+      if (item.completed && validInstant(done) && done >= start && done < end &&
+          !add({ id, title, dueAt, status: "completed", completedAt: new Date(done).toISOString() })) return undefined
+    }
+    for (const { dueAtMs, completedAtMs } of item.history ?? []) {
+      if (!validInstant(dueAtMs) || !validInstant(completedAtMs) || completedAtMs < start || completedAtMs >= end) continue
+      if (!add({ id, title, dueAt: new Date(dueAtMs).toISOString(), status: "completed", completedAt: new Date(completedAtMs).toISOString() })) return undefined
+    }
+  }
+  return [...rows.values()].sort((left, right) => left.dueAt.localeCompare(right.dueAt) || left.id.localeCompare(right.id))
+}
+
+/** Share the exact reviewed day, including overdue and completed recurring occurrences. */
+export effect function readWorkflowReminders(
+  operation: WorkflowReminderReadOperation, current: boolean!!,
+): (ReminderResult | undefined)!!Agent {
+  const day = phoneWorkflowLocalDayBounds(operation.day, operation.timeZone) catch () => undefined
+  if (day === undefined || !(try current)) return undefined
+  const snapshot = readReminders() catch () => undefined
+  if (snapshot === undefined || !(try current)) return undefined
+  const rows = reviewedRows(snapshot.items, day.start, day.end, operation.maximumItems)
+  if (rows === undefined) return undefined
+  const reminders: WorkflowReminderRow[] = []
+  for (const row of rows) {
+    const revision = workflowSha(workflowReminderRevisionInput(row)) catch () => undefined
+    if (revision === undefined) return undefined
+    reminders.push({ ...row, revision })
+  }
+  const result = validateWorkflowReadResult(operation, { kind: "reminders", reminders }) catch () => undefined
+  return result?.kind === "reminders" && (try current) ? result : undefined
+}

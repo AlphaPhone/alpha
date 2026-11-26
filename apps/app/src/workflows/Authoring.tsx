@@ -30,7 +30,7 @@ const presets: readonly { key: Preset; label: string }[] = [
 ];
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-function StepInput({ options, prior, notes, calendars, list, calendarAccess, openSettings, loading, failed, zone, onAdd }: {
+function StepInput({ options, prior, notes, calendars, list, calendarAccess, openSettings, loading, failed, zone, runDay, onAdd }: {
   options: readonly DraftOperation[];
   prior: readonly { id: number }[];
   notes: readonly { id: string; title: string }[] | undefined;
@@ -41,7 +41,8 @@ function StepInput({ options, prior, notes, calendars, list, calendarAccess, ope
   loading: boolean;
   failed: boolean;
   zone: string;
-  onAdd: (operation: DraftOperation, source: number, text: string, suffix: string, selected: readonly string[]) => Promise<boolean>;
+  runDay: boolean;
+  onAdd: (operation: DraftOperation, source: number, text: string, suffix: string, selected: readonly string[], runDays?: number) => Promise<boolean>;
 }) {
   const [operation, setOperation] = useState<DraftOperation>("supplied_text");
   const [source, setSource] = useState(0);
@@ -49,19 +50,24 @@ function StepInput({ options, prior, notes, calendars, list, calendarAccess, ope
   const [suffix, setSuffix] = useState("");
   const [choices, setChoices] = useState<readonly string[]>([]);
   const [rejected, setRejected] = useState(false);
+  const [relative, setRelative] = useState(false);
+  const [days, setDays] = useState("1");
   const selected = options.find((item) => item === operation) ?? options[0];
   if (selected === undefined) return null;
   const from = prior.find((step) => step.id === source) ?? prior.at(-1);
-  const first = selected === "supplied_text" || selected === "selected_notes" || selected === "calendar_range";
+  const first = selected === "supplied_text" || selected === "selected_notes" || selected === "selected_reminders" || selected === "calendar_range";
+  const asksForNoText = selected === "selected_reminders" || selected === "read_aloud";
   const resources = selected === "selected_notes" || selected === "calendar_range";
   const calendar = selected === "calendar_range";
   const rows = calendar ? calendars : notes;
-  const missing = resources ? choices.length === 0 || (calendar && (!text || !suffix || suffix <= text))
-    : text.trim() === "" && selected !== "compose_draft";
+  const useRunDay = calendar && runDay && relative;
+  const dayCount = /^[1-7]$/.test(days) ? Number(days) : undefined;
+  const missing = resources ? choices.length === 0 || (calendar && (useRunDay ? dayCount === undefined : !text || !suffix || suffix <= text))
+    : !asksForNoText && text.trim() === "" && selected !== "compose_draft";
   return (
     <form className="flex flex-col gap-3" onSubmit={(event) => {
       event.preventDefault();
-      void onAdd(selected, first ? 0 : from?.id ?? 0, text, suffix, choices).then((added) => {
+      void onAdd(selected, first ? 0 : from?.id ?? 0, text, suffix, choices, useRunDay ? dayCount : undefined).then((added) => {
         setRejected(!added);
         if (!added) return;
         setText("");
@@ -109,15 +115,26 @@ function StepInput({ options, prior, notes, calendars, list, calendarAccess, ope
           </div>}
           {calendar && rows && (
             <div className="grid grid-cols-2 gap-2">
-              <label className="grid gap-1 text-sm">From<Input type="date" value={text} onChange={(event) => setText(event.currentTarget.value)} /></label>
-              <label className="grid gap-1 text-sm">Until<Input type="date" value={suffix} onChange={(event) => setSuffix(event.currentTarget.value)} /></label>
+              {runDay && <label className="col-span-2 grid gap-1 text-sm">Date range
+                <Select value={useRunDay ? "relative" : "fixed"} onValueChange={(value) => setRelative(value === "relative")}>
+                  <SelectTrigger aria-label="Date range" />
+                  <SelectContent><SelectItem value="fixed">Fixed dates</SelectItem><SelectItem value="relative">From the run day</SelectItem></SelectContent>
+                </Select>
+              </label>}
+              {useRunDay ? <label className="col-span-2 grid gap-1 text-sm">Days
+                <Input type="number" min={1} max={7} step={1} value={days} onChange={(event) => setDays(event.currentTarget.value)} />
+              </label> : <>
+                <label className="grid gap-1 text-sm">From<Input type="date" value={text} onChange={(event) => setText(event.currentTarget.value)} /></label>
+                <label className="grid gap-1 text-sm">Until<Input type="date" value={suffix} onChange={(event) => setSuffix(event.currentTarget.value)} /></label>
+              </>}
               <p className="col-span-2 text-sm text-muted-foreground">Up to seven days in {zone}.</p>
             </div>
           )}
         </fieldset>
-      ) : <label className="grid gap-1 text-sm">{selected === "compose_draft" ? "Prefix" : selected === "model_draft" ? "Instructions" : selected === "save_note" ? "Note title" : "Text"}
-        <Textarea value={text} maxLength={selected === "save_note" ? 256 : 4000} onChange={(event) => setText(event.currentTarget.value)} />
-      </label>}
+      ) : asksForNoText ? (selected === "selected_reminders" && <p className="text-sm text-muted-foreground">Read up to 50 open reminders due by the end of the run day, and reminders completed that day.</p>)
+        : <label className="grid gap-1 text-sm">{selected === "compose_draft" ? "Prefix" : selected === "model_draft" ? "Instructions" : selected === "save_note" ? "Note title" : selected === "app_notification" ? "Notification title" : "Text"}
+          <Textarea value={text} maxLength={selected === "save_note" ? 256 : selected === "app_notification" ? 120 : 4000} onChange={(event) => setText(event.currentTarget.value)} />
+        </label>}
       {selected === "compose_draft" && <label className="grid gap-1 text-sm">Suffix
         <Input value={suffix} maxLength={Math.max(0, 4000 - text.length)} onChange={(event) => setSuffix(event.currentTarget.value)} />
       </label>}
@@ -148,8 +165,8 @@ export function Authoring({ runtime, owner, offered = true }: AuthoringProps) {
   const review = { type: "reviewSave", unfinished: false } as const;
   const confirm: Event = state.save.offered ? { type: "confirmResend" } : { type: "confirmSave", unfinished: false };
   const clock = `${String(state.when.hour).padStart(2, "0")}:${String(state.when.minute).padStart(2, "0")}`;
-  const options = draft.catalog ? available(draft.catalog, draft.device !== undefined)
-    .filter((one) => state.steps.length > 0 || one === "supplied_text" || one === "selected_notes" || one === "calendar_range") : [];
+  const options = draft.catalog ? available(draft.catalog, draft.device)
+    .filter((one) => state.steps.length > 0 || one === "supplied_text" || one === "selected_notes" || one === "selected_reminders" || one === "calendar_range") : [];
   const choices = state.choices.status === "Loaded" ? draft.choices : undefined;
   const listSources = (op: "SelectedNotes" | "CalendarRange") => {
     const ask = { type: "askCalendarAccess" } as const;
@@ -167,13 +184,13 @@ export function Authoring({ runtime, owner, offered = true }: AuthoringProps) {
       <ol aria-label="Workflow steps" className="divide-y divide-border">
         {draft.steps.map((step) => <li key={step.id} className="py-2">{titles[step.operation]}</li>)}
       </ol>
-      {editable && <StepInput options={options} prior={state.steps} zone={draft.zone} list={listSources}
+      {editable && <StepInput options={options} prior={state.steps} zone={draft.zone} runDay={state.catalog.runDay} list={listSources}
         notes={choices?.tag === "SelectedNotes" ? choices.rows : undefined}
         calendars={choices?.tag === "CalendarRange" ? choices.rows : undefined}
         calendarAccess={state.access.grant === "Granted" || state.access.grant === "Limited"}
         openSettings={builder.can({ type: "openSettings" }) ? () => tell({ type: "openSettings" }) : undefined}
         loading={state.choices.status === "Loading"} failed={state.choices.status === "Failed"}
-        onAdd={(operation, source, text, suffix, selected) => runtime.runPromise(appendDraft(operation, source, text, suffix, selected)).catch(() => false)} />}
+        onAdd={(operation, source, text, suffix, selected, days) => runtime.runPromise(appendDraft(operation, source, text, suffix, selected, days)).catch(() => false)} />}
       {builder.can({ type: "removeStep" }) && <Button variant="ghost" onClick={() => void runtime.runPromiseExit(removeDraftStep())}>Remove last step</Button>}
       {generate.can(describe) && <Button variant="secondary" onClick={() => void generate.send(describe)}><Sparkles aria-hidden />Describe to Alpha</Button>}
       {state.schedules && <fieldset className="flex flex-col gap-2">
