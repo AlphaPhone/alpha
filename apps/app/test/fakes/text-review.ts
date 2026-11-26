@@ -61,7 +61,7 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     files_share: files,
     files_trash: files,
     files_folder_create: files,
-    browser_navigate: files,
+    browser_navigate: [...files, "browser.open-direct.v1"],
     camera_capture_photo: ["camera.capture-photo.v1", ...(review.cameraLibraryId ? ["camera.capture-library-id.v1"] : [])],
     create_note: files,
     post_notification: files,

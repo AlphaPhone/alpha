@@ -1,0 +1,6 @@
+// spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+
+/** Calendar's own machines, reached from Ask Alpha before Calendar was ever opened: they read the requests a reply filed. */
+export service CalendarReviews {
+  relist(): void!!
+}

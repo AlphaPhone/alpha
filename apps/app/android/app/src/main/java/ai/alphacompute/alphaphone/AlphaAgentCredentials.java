@@ -19,5 +19,6 @@ final class AlphaAgentCredentials implements AgentCredentials {
   return new Active(credential.version(), credential.value(), credential.keyExpiresAt(), new Account(credential.account().userId(), credential.account().organizationId()));
  }
 
- @Override public String storageKey(Account account) { return null; }
+ /** None: the agent service launches under DeviceCustody.agentCredentials, which releases the task storage key; this reader view is never registered with it. */
+ @Override public StorageKey storageKey(Account account, long epoch) { return null; }
 }
