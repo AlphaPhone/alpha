@@ -11,6 +11,8 @@ export type SettingsLicenceDetailProps = {
   version?: string;
   /** What the licence obliges, each by Alpha's name for its flag, or as written where Alpha has none. */
   flags?: string[];
+  /** The obligations published beside the flags in the shipped notice. */
+  obligations?: string[];
   /** The source location shipped in the notice. */
   source?: string;
   /** The licence text, as shipped. */
@@ -36,19 +38,22 @@ function Legal({ label, text }: { label: string; text: string }) {
  * own card.
  * @model spec/app/settings/licences.md
  */
-export function SettingsLicenceDetail({ name, licence, version, flags = [], source, text, onBack }: SettingsLicenceDetailProps) {
+export function SettingsLicenceDetail({ name, licence, version, flags = [], obligations = [], source, text, onBack }: SettingsLicenceDetailProps) {
+  const duties = flags.length ? [{ label: "Flagged", text: flags.join(" · ") }, ...obligations.map((note) => ({ label: "Obligation", text: note }))] : [];
   return (
     <SettingsPage title="License details" onBack={onBack} backLabel="Back to Licenses">
       <ListGroup>
         <SettingsFactRow title={name} reading={{ word: "reported", value: version ? `${version} · ${licence}` : licence }} />
       </ListGroup>
       {source ? <Legal label="Source" text={source} /> : null}
-      {flags.length ? (
+      {duties.length ? (
         <ListGroup aria-label="What it obliges">
-          <p className="flex gap-3 px-4.5 py-1.75 text-badge leading-normal tabular-nums">
-            <span className="whitespace-nowrap text-muted-foreground">Flagged</span>
-            <span className="min-w-0 break-words">{flags.join(" · ")}</span>
-          </p>
+          {duties.map(({ label, text }, index) => (
+            <p key={`${label}-${index}`} className="flex gap-3 px-4.5 py-1.75 text-badge leading-normal tabular-nums">
+              <span className="whitespace-nowrap text-muted-foreground">{label}</span>
+              <span className="min-w-0 break-words">{text}</span>
+            </p>
+          ))}
         </ListGroup>
       ) : null}
       <Legal label="License and notices" text={text || "License text missing"} />

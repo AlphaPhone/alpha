@@ -393,5 +393,5 @@ export function elizaNotices(scene: SettingsScene): Faked {
 export const notices = [
   { name: "effect", version: "4.1.1", license: "MIT", text: "MIT License", flags: [] },
   { name: "react", version: "19.2.0", license: "MIT", text: "MIT License", flags: [] },
-  { name: "mediabunny", version: "1.0.0", license: "MPL-2.0", text: "Mozilla Public License", flags: ["weak-copyleft"] },
+  { name: "mediabunny", version: "1.0.0", license: "MPL-2.0", text: "Mozilla Public License", flags: ["copyleft-weak"], obligations: [{ flag: "copyleft-weak", note: "Check this component’s attribution." }] },
 ];
