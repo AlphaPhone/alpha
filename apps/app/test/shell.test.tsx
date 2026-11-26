@@ -189,19 +189,20 @@ describe("the shell", () => {
   it("Move from one app to another with nothing of Home between them, and back at once (spec/app/shell/index.md, \"The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits\")", async () => {
     const { alpha } = await open({ ...scene(), phone: true });
     const home = () => document.querySelector("[data-alpha-home-layer]");
-    const shown = () => {
-      const app = home()?.nextElementSibling;
-      return { homeHidden: home()?.classList.contains("invisible"), rises: app?.classList.contains("motion-safe:animate-rise"), headings: document.querySelectorAll("h1").length };
-    };
+    let layer: Element | null | undefined;
+    const shown = () => ({ homeHidden: home()?.classList.contains("invisible"), sameLayer: home()?.nextElementSibling === layer, headings: document.querySelectorAll("h1").length });
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
-    expect(shown()).toEqual({ homeHidden: false, rises: true, headings: 1 });
+    layer = home()?.nextElementSibling;
+    expect([shown(), layer?.classList.contains("motion-safe:animate-rise")]).toEqual([{ homeHidden: false, sameLayer: true, headings: 1 }, true]);
     await drawn(() => alpha.runtime.runPromise(Shell.use((s) => s.send({ type: "openView", view: "Settings" }))));
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
-    expect(shown()).toEqual({ homeHidden: true, rises: true, headings: 1 });
+    expect(shown()).toEqual({ homeHidden: false, sameLayer: true, headings: 1 });
+    await drawn(() => layer?.dispatchEvent(new Event("animationend", { bubbles: true })));
+    expect(shown()).toEqual({ homeHidden: true, sameLayer: true, headings: 1 });
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes" && s.trail.length === 1);
-    expect(shown()).toEqual({ homeHidden: true, rises: false, headings: 1 });
+    expect(shown()).toEqual({ homeHidden: true, sameLayer: true, headings: 1 });
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
     expect([home()?.classList.contains("contents"), document.querySelectorAll("h1").length]).toEqual([true, 1]);
