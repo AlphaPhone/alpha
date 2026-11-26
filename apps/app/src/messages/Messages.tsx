@@ -1,7 +1,7 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, cn, Mark, Input, MessageAttachmentsMenu, MessagePictureChip, SearchField, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
@@ -22,6 +22,7 @@ import type { Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { dictateMessage, type voiceArea } from "./dictation.vibe";
+import { DeleteMessageDialog } from "./DeleteMessageDialog.tsx";
 import { NewMessageDock } from "./NewMessageDock.tsx";
 
 export interface MessagesProps {
@@ -41,7 +42,6 @@ const draftAction = "min-h-11 rounded-tile text-base focus-visible:outline-2 foc
 const notice = "mx-2 basis-full text-caption leading-detail text-muted-foreground";
 const textLink = "min-h-11 underline focus-visible:outline-2 focus-visible:outline-ring";
 const accessoryChip = "inline-flex min-h-11 items-center rounded-tile text-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50";
-const dialogAction = "min-h-11 px-3.5 text-base hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm font-semibold whitespace-nowrap transition-colors duration-fast hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 const contactRow = "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
 const messageURL = /\bhttps?:\/\/[^\s<>"']+/giu;
@@ -439,16 +439,9 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
       </div>
       {state.removal.outcome === "Unknown" && <p role="status" className={`${notice} px-3`}>Alpha cannot tell whether the message was deleted</p>}
       {state.removal.outcome === "Refused" && held.deleteTarget && <p role="status" className={`${notice} px-3`}>The message was not deleted</p>}
-      <Dialog open={state.confirming} onOpenChange={(open) => { if (!open && can({ type: "keep" })) void send({ type: "keep" }); }}>
-        <DialogContent container={view ?? undefined} overlayClassName="absolute z-10 bg-foreground/13 dark:bg-background/13" role="alertdialog" className="absolute inset-x-0 z-20 w-70 max-w-9/10 gap-0 bg-background shadow-none">
-          <DialogTitle className="sr-only">Delete message?</DialogTitle>
-          <DialogDescription className="mt-0 mb-4 text-lg text-foreground">Delete this message from this phone?</DialogDescription>
-          <div className="flex justify-end gap-2">
-            <button type="button" className={dialogAction} onClick={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Cancel</button>
-            <button type="button" className={`${dialogAction} text-destructive`} onClick={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}>Delete</button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DeleteMessageDialog open={state.confirming} container={view}
+        onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))}
+        onDelete={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))} />
       <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
     </>
   );
