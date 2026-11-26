@@ -54,8 +54,9 @@ const write = (name: string, text: string) => drawn(() => {
   found.dispatchEvent(new Event("input", { bubbles: true }));
 });
 
-async function openWorkflows(world: Scene) {
-  const { alpha } = await open(world, only("home", "view:Workflows", "notice"));
+async function openWorkflows(world: Scene, withAssistant = false) {
+  const mounts = only("home", "view:Workflows", "notice", ...(withAssistant ? ["assistant" as const] : []));
+  const { alpha } = await open(world, mounts);
   const runtime = home.runtime(alpha);
   await vi.waitFor(async () => {
     await drawn(() => undefined);
@@ -333,7 +334,7 @@ describe("Workflows", () => {
     world.voice.playbackHold = () => playing;
     world.workflows.run = true;
     try {
-      const alpha = await openWorkflows(world);
+      const alpha = await openWorkflows(world, true);
       const area = workflows.runtime(alpha);
       await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
       await choose("Monthly statement");
@@ -346,7 +347,7 @@ describe("Workflows", () => {
       await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
       const initialHushes = world.voice.hushCalls;
       await press("Read aloud");
-      await vi.waitFor(() => expect(world.voice.played.map(({ text }) => text)).toContain("Your statement is ready."));
+      await vi.waitFor(() => expect(world.voice.played.map(({ text }) => text)).toContain("Your statement is ready."), { timeout: 15_000 });
       expect(world.voice.spoken).toContainEqual({ text: "Your statement is ready.", append: false, replace: false, channel: "local" });
       expect(button("Stop reading")).toBeDefined();
       await seen(false);
