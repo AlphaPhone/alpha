@@ -38,7 +38,7 @@ async function restore(alpha: Alpha, title: string) {
 }
 
 describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Story: Understand why a reply did not finish\")", () => {
-  it("keeps no bubble for a reply stopped before any of its text settled, nor an empty one for a send of only a reviewed email", async () => {
+  it("keeps no bubble for a reply stopped before any of its text settled, only a notice for a dropped one, and none empty for a send of only a reviewed email", async () => {
     const world = { ...scene(), phone: true };
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [
       { id: "m1", role: "user", text: "Tell me a long story" },
@@ -59,10 +59,10 @@ describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Stor
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
     await until(alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
     await drawn(() => vi.waitFor(() => expect(bubbles().length).toBeGreaterThan(0)));
-    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": the provisional text of a stopped reply is never drawn, and a reply the runtime ended still says why.
+    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": the provisional text of an aborted reply is never drawn; a dropped stream and a reply the runtime ended still say why.
     // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text": the send of only the email draws no empty bubble.
     const shown = bubbles();
-    expect([shown.slice(0, 4), shown.length, shown.some((text) => text.includes("Once upon a") || text.includes("Then the")), shown.some((text) => text.trim() === "")])
-      .toEqual([["Tell me a long story", "Shorter please", "The email asks to move lunch to Friday.", "Thanks"], 5, false, false]);
+    expect([shown.map((text) => text.includes("The reply did not finish") ? "did not finish" : text), shown.some((text) => text.includes("Once upon a") || text.includes("Then the"))])
+      .toEqual([["Tell me a long story", "Shorter please", "did not finish", "The email asks to move lunch to Friday.", "Thanks", "did not finish"], false]);
   });
 });
