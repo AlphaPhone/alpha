@@ -4,7 +4,10 @@ The camera of the phone: a viewfinder that focuses where the owner taps,
 zooms by pinch or by its chips, flips between the lenses and lights the
 flash; it takes photos and records videos, and shows the last one taken. Its
 header holds back, flip and flash, as Alpha's approved build drew it; the
-self-timer, framing grid and photo aspect ratio have no header control.
+self-timer, framing grid, photo aspect ratio and document scan have no
+header control. Camera is a first page: on the launcher it draws no Back,
+and Android's Back still leaves it, as the [shell](../shell/) says for
+Settings and Workflows.
 Opened from the lock screen of an Alpha image it is the secure camera,
 which shows only what was taken there and opens nothing else. A video's
 timer, limits and ending are the [Recording](./recording.md); a photo taken
@@ -185,7 +188,9 @@ pure val weight_recordingVerified = 2
 ### Opening Camera starts a preview when it has access
 
 Each opening is a new visit. On the lock screen nothing taken before is
-shown as the last capture.
+shown as the last capture. Camera opens on black, as Alpha's approved build
+did: no light frame shows before the viewfinder, and its card for missing
+access holds only the title and its buttons.
 
 ```quint
 pure def starting(out: List[Effect], c: Camera): Done =
@@ -1165,7 +1170,9 @@ pure def sometimesEarlierRecordingFinishing(s: Camera): bool = s.secure and s.sh
 
 The unlocked owner holds the same shutter as a photo until the phone answers.
 A scan covers Camera during review and leaves the last photo alone. Leaving
-Camera releases that shutter and the later frame is discarded.
+Camera releases that shutter and the later frame is discarded. Camera's
+header draws no control for it, as Alpha's approved build did; Files' "Scan
+document" is where the owner starts a scan.
 
 ```quint
 pure def canScanDocument(s: Camera, by: Actor): bool =
