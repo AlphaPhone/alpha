@@ -33,7 +33,6 @@ export interface VoiceScene {
   warmSpeechOutputCalls: number;
   localSpeechStatusCalls: number;
   liveCaptureStatusCalls: number;
-  cloudWarmCalls: number;
   holdEngineCalls: number;
   releaseEngineHoldCalls: number;
   engineHeld: boolean;
@@ -87,7 +86,6 @@ export function voiceScene(): VoiceScene {
     warmSpeechOutputCalls: 0,
     localSpeechStatusCalls: 0,
     liveCaptureStatusCalls: 0,
-    cloudWarmCalls: 0,
     holdEngineCalls: 0,
     releaseEngineHoldCalls: 0,
     engineHeld: false,
