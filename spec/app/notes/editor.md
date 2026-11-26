@@ -401,11 +401,12 @@ v119 drew More over every note it held, a new one too, and its menu
 offered Share, Pin and Delete before the note's first save. Delete discards
 the new note ("Only the owner discards an unsaved draft, or a new note open
 in the editor, and never one being saved"). Pin or Unpin is part of the new
-note's draft, kept on the phone and saved with its words as any edit is
-("The owner types, adds or ticks an item, and each change is kept on the
-phone at once"), and saved at once, so its first save makes the note pinned,
-as v119 saved it pinned. Share saves the draft first: asking counts as an
-edit, the owner's save is sent at once, and once that save lands with
+note's draft, allowed only while the new note is open and editable and no
+save is on its way; it is kept on the phone and saved with its words as any
+edit is ("The owner types, adds or ticks an item, and each change is kept on
+the phone at once"), and saved at once, so its first save makes the note
+pinned, as v119 saved it pinned. Share saves the draft first: asking counts
+as an edit, the owner's save is sent at once, and once that save lands with
 nothing left unsaved, the phone opens the actions menu over the saved note
 with its share panel ([the actions menu](./actions.md), "The phone opens
 the share the owner asked for on a new note, once its first save lands"),
@@ -414,6 +415,15 @@ Closing or discarding the note, deleting it, a save that does not land, a
 restart or another owner taking the phone forgets the share asked for.
 
 ```quint
+pure def canPinNew(e: Editor, by: Actor): bool =
+  canEdit(e, by) and e.fresh and e.draft.sync != D::Saving and not(e.unreadable)
+
+pure def pinNew(e: Editor, kept: bool, by: Actor): Editor =
+  edit(e, kept, by)
+
+pure def stepPinningANewNoteLeavesItReadyToSave(before: Editor, via: str, after: Editor): bool =
+  via == "pinNew" implies (before.fresh and before.draft.sync != D::Saving and after.fresh and canSave(after, Owner))
+
 pure def canShareNew(e: Editor, by: Actor): bool =
   by == Owner and e.showing and e.fresh and not(e.asked) and not(e.unreadable)
 
