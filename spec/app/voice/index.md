@@ -364,6 +364,13 @@ pure def speechHeard(v: Voice, session: int): Voice = { ...v, heard: true }
 
 ### When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically
 
+Over Cloud streaming speech, the owner has finished speaking once 400 ms
+pass after the relay's final words with no new speech, as the Sunday demo
+build timed a Cloud turn (v119, apps/app/src/prototype/voice-adapter.ts:987,
+and its voice session's long gap). Speech that starts again within them
+continues the same turn: its words join the ones before, so a pause inside
+a sentence never sends half of it. Speech on the phone keeps its own timing.
+
 ```quint
 pure def canTurnEnded(v: Voice, session: int): bool =
   v.phase == Listening and v.mic == On and v.heard and session == v.session
@@ -389,15 +396,19 @@ pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, 
   })
 ```
 
-### What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it
+### What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it
 
 When the owner finishes speaking, the words heard for that turn stay in the
 open conversation as the owner's own message, and three dots under it show
 Alpha at work, as the Sunday demo build did (v119,
 apps/app/src/prototype/template.html:4721-4726). They show while that turn
-is transcribed, thought about and spoken, and go the moment the recorded
-message and reply take their place, the turn ends unsent, or Talk leaves it.
-The words are not a draft and not history: only the recorded rows are kept.
+is transcribed and thought about. Once the reply's text arrives to be
+spoken, that text takes the dots' place in the same moment, as the Sunday
+demo build set the spoken text and the chat text together (v119,
+apps/app/src/prototype/agent-adapter.ts:2253-2254). Words and reply go the
+moment the recorded message and reply take their place, the turn ends
+unsent, or Talk leaves it. They are not a draft and not history: only the
+recorded rows are kept.
 
 ```quint
 pure def showsWhatWasSaid(v: Voice, session: int, turn: int): bool =

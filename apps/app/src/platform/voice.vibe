@@ -5,6 +5,7 @@ import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
 import { pageMicrophone, pageSpeechBase, pageSpeechRelay } from "./pageSpeech.ts"
+import { TurnGap } from "./turnGap.ts"
 
 export type VoiceGrant = "granted" | "denied" | "prompt" | "unknown"
 
@@ -762,6 +763,8 @@ interface CloudVoiceSession {
   readonly stream: CloudStreamingSpeech
   readonly abort: AbortController
   capture: Awaited<ReturnType<CloudStreamingSpeech["listen"]>> | undefined
+  /** The utterance the current capture is hearing, sent once the relay's final is followed by the long gap. */
+  gap: TurnGap | undefined
 }
 
 interface CloudMicPreview {
@@ -804,6 +807,7 @@ function cloudMicController(config: CloudMicConfig) {
       session,
       abort: makeAbort(),
       capture: undefined,
+      gap: undefined,
       stream: createCloudStreamingSpeech({
         environment: CLOUD_ENVIRONMENT,
         credentialId,
@@ -811,7 +815,7 @@ function cloudMicController(config: CloudMicConfig) {
         onInterim: (text) => {
           const current = config.getPreview()
           if (config.currentSession() !== session || current?.session !== session) return
-          current.outlet?.show(text)
+          current.outlet?.show(owner.gap?.joined(text) ?? text)
         },
       }, relay),
     }
@@ -820,17 +824,36 @@ function cloudMicController(config: CloudMicConfig) {
     clearPreview(session)
     const previewOwner: CloudMicPreview = { session, outlet: preview }
     config.setPreview(previewOwner)
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": the relay's final waits out the long gap on Alpha's own clock, and speech before it ends joins the same turn (v119 45f6bed30 voice-adapter.ts:987).
+    owner.gap?.cancel()
+    const context = try Effect.context<never>()
+    const clock = {
+      set: (run: () => void, ms: number): unknown => runFork(Effect.provideContext(Effect.andThen(sleep(ms), sync(run)), context)),
+      clear: (fiber: unknown): void => { runFork(Fiber.interrupt(fiber as Fiber.Fiber<void>)) },
+    }
+    const gap = new TurnGap((text) => {
+      if (config.getPreview() === previewOwner) preview?.clear()
+      if (config.currentSession() === session && owner.gap === gap) config.publish({ kind: "speechEnd", session, text })
+    }, clock)
+    owner.gap = gap
     const capture = onInterrupt(
       tryPromise({
         try: () => owner.stream.listen({
           signal: owner.abort.signal,
-          onSpeechStart: () => config.publish({ kind: "speechStart", session }),
+          onSpeechStart: () => {
+            gap.speechStarted()
+            config.publish({ kind: "speechStart", session })
+          },
           onSpeechEnd: () => undefined,
           onSegment: (text) => {
-            if (config.getPreview() === previewOwner) preview?.clear()
-            if (text !== null && text !== "") config.publish({ kind: "speechEnd", session, text })
+            gap.segment(text)
+            if (config.getPreview() !== previewOwner) return
+            if (gap.held === "") preview?.clear()
+            else preview?.show(gap.held)
           },
           onEnd: (cause) => {
+            if (cause === undefined) gap.flush()
+            gap.cancel()
             if (config.getPreview() === previewOwner) clearPreview(session)
             if (cause === undefined) {
               config.publish({ kind: "ended", session, reason: "ended" })
@@ -844,8 +867,12 @@ function cloudMicController(config: CloudMicConfig) {
         }),
         catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
       }),
-      () => sync(() => owner.abort.abort()),
+      () => sync(() => {
+        gap.cancel()
+        owner.abort.abort()
+      }),
     ) catch effect (failure) => {
+      gap.cancel()
       if (config.getPreview() === previewOwner) clearPreview(session)
       if (config.getSpeech() === owner) {
         config.setSpeech(undefined)

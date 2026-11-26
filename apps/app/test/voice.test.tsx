@@ -7,6 +7,7 @@ import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
 import * as VoiceRoute from "../gen/app__voice__route.ts";
 import { VoiceBridge } from "../src/platform/voice.vibe";
+import { CLOUD_TURN_GAP_MS } from "../src/platform/turnGap.ts";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
 import { placeOf, VoiceWords, voicing } from "../src/voice/voice.vibe";
@@ -431,6 +432,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     const relay = world.voice.activeMicSession;
     world.voice.emitCloud?.({ type: "speech-start", sessionId: relay });
     world.voice.emitCloud?.({ type: "speech-end", sessionId: relay, text: "What's on tomorrow" });
+    await advance(runtime, CLOUD_TURN_GAP_MS);
     await untilCondition(runtime, () => world.voice.spoken.length === 1, () => world.voice.spoken);
     // spec/app/voice/index.md, "Story: Hold a spoken conversation": The relay's microphone stays closed while Alpha speaks; v119 held its Cloud streaming input through the reply.
     await until(runtime, Voice.Machine, (s) => (s.mic === "Off" && s.played === 1) || !Voice.talking(s));
@@ -1005,6 +1007,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
         world.voice.emitCloud?.({ type: "speech-start", sessionId });
         world.voice.emitCloud?.({ type: "speech-end", sessionId, text });
       });
+      await later(alpha, CLOUD_TURN_GAP_MS);
       await drawnUntil(alpha, area, Voice.Machine, (state) =>
         state.sent === index + 1 && state.turn === index + 2 && state.phase === "Listening" && state.mic === "On");
     }
@@ -1032,7 +1035,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
   });
 
-  // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
+  // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
   it("draws a Talk turn as the Sunday demo build did: the speaker dimmed while connecting, what was said with working dots at once, and the relay microphone really closed, and shown paused, while Alpha answers", async () => {
     const { world, alpha, area } = await openCloudVoiceSheet(false);
 
@@ -1063,6 +1066,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       world.voice.emitCloud?.({ type: "speech-start", sessionId });
       world.voice.emitCloud?.({ type: "speech-end", sessionId, text: asked });
     });
+    await later(alpha, CLOUD_TURN_GAP_MS);
     const mic = async () => {
       const control = button(/^(Mute microphone|Microphone paused while Alpha responds)$/);
       return { closed: (await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()))).mic !== "On", pressed: control?.getAttribute("aria-pressed") };
@@ -1083,15 +1087,58 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => [...world.ask.turns.values()][0]?.());
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Speaking" && s.network);
     for (let turn = 0; turn < 15; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
-    expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
+    // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it": once Alpha speaks, its reply's text has taken the dots' place, before the conversation records it (v119 45f6bed30 agent-adapter.ts:2253-2254).
+    const replying = () => document.querySelector("[data-alpha-voice-reply]")?.textContent;
+    expect([said(), dots() !== null, replying(), recorded()]).toEqual([asked, false, "Nothing is on your calendar today.", 0]);
     expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
     expect([await mic(), (await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()))).mic]).toEqual([{ closed: true, pressed: "true" }, "Off"]);
 
     done.resolve();
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.turn === 2 && s.mic === "On");
     await settleComposer(alpha, () => recorded() === 1);
-    expect([said(), dots(), world.ask.said]).toEqual([undefined, null, [asked]]);
+    expect([said(), dots(), replying(), world.ask.said]).toEqual([undefined, null, undefined, [asked]]);
     expect(row()).toEqual(["Mute speaker", "Mute microphone", "Stop voice conversation"]);
+
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
+  // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "What the owner says is shown as it is heard"
+  it("over the Cloud relay, a pause inside a sentence keeps it one turn, as v119's long gap did, and a finished sentence is sent once the gap passes", async () => {
+    const { world, alpha, area } = await openCloudVoiceSheet(false);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const sessionId = world.voice.activeMicSession;
+    const preview = () => document.querySelector('[aria-label="Heard so far, not sent"]')?.textContent;
+    const state = () => area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    const heard = (text: string) => drawn(() => {
+      world.voice.emitCloud?.({ type: "speech-start", sessionId });
+      world.voice.emitCloud?.({ type: "speech-end", sessionId, text });
+    });
+
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": the demo's D07 take, where the relay ends its turn at the pause after the checklist's name and the owner goes on.
+    const name = "Make a checklist called shoot day checklist.";
+    const items = "Pixel, pack the tripod plate, bring the blue notebook.";
+    await heard(name);
+    await later(alpha, CLOUD_TURN_GAP_MS - 100);
+    await settleComposer(alpha, () => preview() === name);
+    expect([(await state()).sent, (await state()).phase, (await state()).mic, world.ask.said]).toEqual([0, "Listening", "On", []]);
+    await heard(items);
+    await later(alpha, CLOUD_TURN_GAP_MS - 100);
+    expect([(await state()).sent, world.ask.said]).toEqual([0, []]);
+    await later(alpha, 100);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.turn === 2 && s.phase === "Listening" && s.mic === "On");
+    expect(world.ask.said).toEqual([`${name} ${items}`]);
+
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": a finished sentence is sent once the gap passes, and not before.
+    const asked = "What is on my calendar tomorrow?";
+    await heard(asked);
+    await later(alpha, CLOUD_TURN_GAP_MS - 1);
+    expect([(await state()).sent, world.ask.said.length]).toEqual([1, 1]);
+    await later(alpha, 1);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 2 && s.turn === 3 && s.phase === "Listening");
+    expect(world.ask.said).toEqual([`${name} ${items}`, asked]);
+
 
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
