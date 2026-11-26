@@ -615,12 +615,16 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const observed = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context) : undefined
   const recipient = addressedSms(spoken)
   const existing = chat?.snapshot().media
-  if (existing?.some((card) => card.spokenSms !== undefined && card.decision !== "Deciding")) {
-    chat?.change({ media: existing.filter((card) => card.spokenSms === undefined || card.decision === "Deciding") })
+  const withdrawn = existing?.filter((card) => card.spokenSms !== undefined && card.decision !== "Deciding") ?? []
+  if (withdrawn.length > 0) {
+    chat?.change({ media: existing?.filter((card) => !withdrawn.includes(card)) ?? [] })
   }
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": the text review this turn follows is drawn again, for this turn, when the agent's reply names that same pending proposal unchanged.
+  const followed = withdrawn.length === 1 ? withdrawn[0] : undefined
+  const smsTo = recipient ?? followed?.spokenSms?.recipient
   const room = chatPage?.chosen === lease.conversation && chatPage.page.status === "Loaded" ? record : undefined
   const selection = observed?.sms?.selection
-  const smsReview = recipient === undefined || selection === undefined || room === undefined ? undefined
+  const smsReview = smsTo === undefined || selection === undefined || room === undefined ? undefined
     : Option.getOrUndefined(try Effect.serviceOption(MediaReview))
   const handset = smsReview === undefined ? undefined : Option.getOrUndefined(try Effect.serviceOption(Phone))
   const smsCurrent = effect {
@@ -639,9 +643,11 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
       && Voice.talking(speech) && clear(try handset.get())
   }
   const smsSession = smsReview !== undefined && (try smsCurrent) ? try smsReview.session() : undefined
-  const sms = smsSession !== undefined && smsSession.capabilities.has("sms.send.v1") && (try smsCurrent)
-    && recipient !== undefined && selection !== undefined && room !== undefined && chatPage !== undefined && screen !== undefined
-    ? { opened: smsSession, recipient, selection, room, conversation: chatPage.chosen, revision: screen.context.revision } : undefined
+  const smsText = smsSession !== undefined && smsSession.capabilities.has("sms.send.v1") && (try smsCurrent)
+    && smsTo !== undefined && selection !== undefined && room !== undefined && chatPage !== undefined && screen !== undefined
+    ? { opened: smsSession, recipient: smsTo, selection, room, conversation: chatPage.chosen, revision: screen.context.revision } : undefined
+  const sms = recipient !== undefined ? smsText : undefined
+  const again = sms === undefined && followed !== undefined ? smsText : undefined
   let streamed = false
   const transport: TurnTransport = {
     request(path, body, headers) {
@@ -759,12 +765,13 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let smsShown = false
-  if (sms !== undefined && smsReview !== undefined && chat !== undefined && streamed && result?.kind === "Replied"
+  const text = sms ?? again
+  if (text !== undefined && smsReview !== undefined && chat !== undefined && streamed && result?.kind === "Replied"
     && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && (try smsCurrent)) {
-    const card = try smsReview.spokenSms(sms.opened, result.reply.userMessageId, result.reply.actionResults, {
-      recipient: sms.recipient, selection: sms.selection, conversation: sms.conversation, revision: sms.revision,
-      room: sms.room, current: smsCurrent, session, turn,
-    })
+    const card = try smsReview.spokenSms(text.opened, result.reply.userMessageId, result.reply.actionResults, {
+      recipient: text.recipient, selection: text.selection, conversation: text.conversation, revision: text.revision,
+      room: text.room, current: smsCurrent, session, turn,
+    }, sms === undefined ? followed : undefined)
     if (card !== undefined && (try smsCurrent) && (try shell.get()).assistant === "Bar"
       && (try contained(shell.send({ type: "raise", detent: "Sheet" }, (state) => state.route === smsRoute
         && state.assistant === "Bar" && Effect.runSync(lease.current)), "showing the text review from Talk"))) smsRoute += 1
