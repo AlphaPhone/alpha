@@ -31,7 +31,7 @@ import type { Event as DeletionEvent } from "../../gen/app__calendar__deletions.
 import {
   type ReplyWord, dayEmptiness, firstColumnDay, monthCells, replyWord, rowShown, showsOffsets, statusAction, timelineFirstHour, timelineLastHour,
 } from "../../gen/app__calendar__presentation.ts";
-import { type SaveBlock, goingOffered, managedDeleteOffered, maybeOffered, saveBlock } from "../../gen/app__calendar__writing.ts";
+import { type SaveBlock, goingOffered, managedDeleteOffered, maybeOffered, offeredOn, saveBlock } from "../../gen/app__calendar__writing.ts";
 import { type Deletions, type Reach, rowHidden } from "../../gen/app__calendar__deletions.ts";
 import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agent.ts";
 import { type Request, requests } from "./requests.ts";
@@ -787,6 +787,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, false, Editor.canKeepMyChanges(e), !e.titled)] : "";
   const choosesCalendar = reminder || e.form === "NewEvent";
   // v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on every new event; they need this phone's calendar.
+  // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
   const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
   const choosesRepeat = reminder || choosesOptions;
   const editingPhone = e.form === "EditEvent" && shown.find(e.target)?.source === "Phone";
@@ -794,6 +795,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   if (e.form === "NewEvent" && connected) destinations.push({ name: "Your agent's calendar", value: "Agent" });
   if (e.form === "NewEvent" && shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
+  const onAgent = destination === "Agent";
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   const submit = () => {
     if (!reminder) { void editor.send(save); return; }
@@ -893,7 +895,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
             <Video aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
             <span className="grow text-body leading-plain">Video link</span>
-            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain)} onCheckedChange={(video) => withExtras({ ...fields, video })} />
+            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain) || (fields.video !== true && !offeredOn(onAgent, false, false, true))} onCheckedChange={(video) => withExtras({ ...fields, video })} />
           </CalendarFormCard>
         ) : null}
         <CalendarFormCard className="gap-1 py-2.5 pr-3 pl-4">
@@ -929,7 +931,12 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-2">
                   {destinations.map(({ name, value }) => (
                     <CalendarChip key={value} label={name} chosen={destination === value} dot={value === "Phone" ? "foreground" : "primary"}
-                      onClick={() => withExtras({ ...fields, calendar: value, ...(value === "Agent" ? { repeat: "NoRepeat" } : {}) })} />
+                      onClick={() => {
+                        if (value !== "Agent") return withExtras({ ...fields, calendar: value });
+                        // The agent's calendar holds no repeat, alert or video link: choosing it sets them back, in view.
+                        const { alert: _alert, ...rest } = fields;
+                        withExtras({ ...rest, calendar: value, repeat: "NoRepeat", video: false });
+                      }} />
                   ))}
                 </div>
               </CalendarFormRow>
@@ -940,8 +947,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                   {reminder ? reminderRepeats.map(({ repeat, label }) => (
                     <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat}
                       onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
-                  )) : repeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} disabled={!editor.can(plain)}
-                    onClick={() => withExtras({ ...fields, repeat, ...(repeat !== "NoRepeat" && destination === "Agent" ? { calendar: "Phone" as const } : {}) })} />)}
+                  )) : repeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
+                    disabled={!editor.can(plain) || !offeredOn(onAgent, repeat !== "NoRepeat", false, false)} onClick={() => withExtras({ ...fields, repeat })} />)}
                 </div>
               </CalendarFormRow>
             ) : null}
@@ -949,7 +956,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
               <CalendarFormRow icon={<Bell />}>
                 <div role="group" aria-label="Alert" className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
                   {alerts.map(({ minutes, label }) => (
-                    <CalendarChip key={label} label={label} chosen={minutes === fields.alert} disabled={!editor.can(plain)} onClick={() => {
+                    <CalendarChip key={label} label={label} chosen={minutes === fields.alert} disabled={!editor.can(plain) || !offeredOn(onAgent, false, minutes !== undefined, false)} onClick={() => {
                       if (minutes !== undefined) withExtras({ ...fields, alert: minutes });
                       else {
                         const { alert: _alert, ...next } = fields;
