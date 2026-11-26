@@ -151,7 +151,7 @@ export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, 
       <div className="relative mx-4 mt-3 mb-2 shrink-0">
         <Search aria-hidden className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-muted-foreground" />
         <Input type="search" aria-label="Search apps" placeholder="Search apps" autoComplete="off" enterKeyHint="search"
-          value={query} onChange={(event) => onSearch(event.currentTarget.value)} className="rounded-panel border-0 pr-4 pl-11" />
+          value={query} onChange={(event) => onSearch(event.currentTarget.value)} className="rounded-panel border-0 pr-4 pl-11.5" />
       </div>
       {notice && <HomeNotice notice={notice} place="InDrawer" className="mx-5 mt-1" />}
       <div aria-busy={reading || undefined} className={cn(dockClearance, "min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 [scrollbar-width:none]")}>

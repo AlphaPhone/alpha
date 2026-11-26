@@ -48,8 +48,8 @@ export function SettingsLicenceDetail({ name, licence, version, flags = [], obli
       {source ? <Legal label="Source" text={source} /> : null}
       {duties.length ? (
         <ListGroup aria-label="What it obliges">
-          {duties.map(({ label, text }, index) => (
-            <p key={`${label}-${index}`} className="flex gap-3 px-4.5 py-1.75 text-badge leading-normal tabular-nums">
+          {duties.map(({ label, text }) => (
+            <p key={`${label}:${text}`} className="flex gap-3 px-4.5 py-1.75 text-badge leading-normal tabular-nums">
               <span className="whitespace-nowrap text-muted-foreground">{label}</span>
               <span className="min-w-0 break-words">{text}</span>
             </p>

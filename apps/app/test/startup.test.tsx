@@ -45,13 +45,13 @@ it("Shows recovery before the shell opens (spec/app/startup/recovery.md, \"Story
 
 it("Holds native Home until the phone confirms the signed-in account (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
   const world = { ...scene(), phone: true, signedIn: false, now: 1_700_000_000_000 };
-  const startEmail = vi.fn(async () => ({ request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 600_000, resendAt: world.now + 60_000 }));
-  const verify = vi.fn(async (input: { attempt: number; code: string }) => {
+  const startEmail = vi.fn(() => Promise.resolve({ request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 600_000, resendAt: world.now + 60_000 }));
+  const verify = vi.fn((input: { attempt: number; code: string }) => {
     if (input.code === "123456") {
       world.signedIn = true;
-      return { request: 3, attempt: input.attempt, verdict: "signed-in-as", credentialId: world.voice.credentialId, google: "not-requested" };
+      return Promise.resolve({ request: 3, attempt: input.attempt, verdict: "signed-in-as", credentialId: world.voice.credentialId, google: "not-requested" });
     }
-    return { request: 2, attempt: input.attempt, verdict: "try-again", retry: "wrong-code" };
+    return Promise.resolve({ request: 2, attempt: input.attempt, verdict: "try-again", retry: "wrong-code" });
   });
   world.voice.startupSignIn = { startEmail, verify };
   underAct();
