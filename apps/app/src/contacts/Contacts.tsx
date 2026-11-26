@@ -12,6 +12,7 @@ import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import { contactChatActionsId } from "../assistant/contact-chat-id.ts";
 import { attachFromContact, searchFromContact } from "../assistant/contact-search.ts";
 import { returnPhoneTab } from "../phone/back.vibe";
@@ -41,6 +42,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const returningRef = useRef<{ tab: Tab } | undefined>(undefined);
   const shell = useShell(runtime);
   const firstPageBack = useFirstPageBack(alpha);
+  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   const held = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const groups = useMemo(() => {
     const grouped = Object.groupBy(held.rows, ({ name }) => {
@@ -54,7 +56,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
   if (!state || !phone) return <section aria-label="Contacts" aria-busy className="flex min-h-0 flex-1 flex-col">
-    <AppHeader title="Contacts" className={telephonyHeader} leading={<AppBack alpha={alpha} firstPage />} />
+    <AppHeader title="Contacts" className={telephonyHeader} leading={<AppBack alpha={alpha} firstPage label="Back to apps" />} />
   </section>;
   const { searching } = state;
   const query = state.sought ? held.sought : "";
@@ -100,7 +102,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   );
   const searchHeader = searching ? (
     <form role="search" aria-label="Search contacts" data-host-chrome="" className={cn(telephonyHeader, "flex min-h-13 items-center gap-0.5 px-2")} onSubmit={(event) => event.preventDefault()}>
-      {can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" className="size-13 rounded-lg" onClick={() => void send({ type: "endSearch" })}><ChevronLeft /></Button>}
+      {!launcher && can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" className="size-13 rounded-lg" onClick={() => void send({ type: "endSearch" })}><ChevronLeft /></Button>}
       <SearchField autoFocus keepClear className="min-w-0 flex-1 [&_button]:size-13 [&_input]:focus-visible:outline-none" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} maxLength={128} />
     </form>
   ) : undefined;
@@ -108,7 +110,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     // v119 (45f6bed30) prototype/phone-adapter.ts:276-277: the pill on Contacts shows no unheard voicemail dot.
     <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={false} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
   ) : searchHeader ?? (
-    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} firstPage />}>{chip}{actions}</AppHeader>
+    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} firstPage label="Back to apps" />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
   const route = shell.state?.route;

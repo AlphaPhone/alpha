@@ -24,6 +24,7 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, seen, typeInto, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -39,6 +40,10 @@ const mounts: Mount[] = [
 ];
 
 const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span:not([aria-hidden])")?.textContent);
+/** Whether the foot of the conversation shows the dots of a reply being written. */
+const replying = () => document.querySelector("section[aria-label='Ask Alpha'] [role=status][aria-label='Replying']") !== null;
+/** The text of the reply being written, if any shows. */
+const writingReply = () => document.querySelector("section[aria-label='Ask Alpha'] [data-alpha-message-id='reply']")?.textContent ?? undefined;
 const rows = (list: string) => document.querySelector(`section[aria-label='${list}'] > div`)?.children.length ?? 0;
 
 /** Write `text` in the composer, as the owner types it. */
@@ -209,6 +214,34 @@ async function settled(alpha: Awaited<ReturnType<typeof open>>["alpha"], check: 
   for (let turn = 0; turn < 2_000 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
   if (!check()) throw new Error(`did not settle: ${JSON.stringify(detail())}`);
 }
+
+// spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
+it("Hear a brief acknowledgment and still get the whole answer: the replying dots leave with the settled reply while the turn still finishes on an enrolled phone (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
+  const world = { ...scene(), phone: true, image: true };
+  const review = textReview(world.notes.owner, "camera-shot", { type: "camera_capture_photo" });
+  const gate = Promise.withResolvers<void>();
+  review.proposalsGate = gate.promise;
+  world.telephony.textReview = review;
+  const { alpha, runtime } = await openAssistantWithPreferences(world);
+  await until(alpha, alpha.runtime, Shell, (s) => s.image);
+  world.ask.nextReplyChunks = ["Here you go."];
+  world.ask.nextReplyProvisional = true;
+  world.ask.noStatus = true;
+  try {
+    write("Say something");
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled");
+    await vi.waitFor(() => expect(review.pendingReads).toBeGreaterThan(0));
+    const finishing = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+    expect(finishing.turn.reply).toBe("Streaming");
+    await vi.waitFor(() => expect(lines()).toEqual(["Say something", "Here you go."]));
+    expect(replying()).toBe(false);
+  } finally {
+    gate.resolve();
+  }
+  await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+});
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"
@@ -441,20 +474,30 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 
   // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
-  it("Hear a brief acknowledgment and still get the whole answer: text that may still be taken back is never shown, and the settled reply is (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
+  it("Hear a brief acknowledgment and still get the whole answer: text that may still be taken back is never shown, the dots say Alpha is replying, and the settled reply is shown (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
     const world = { ...scene(), phone };
     const { alpha, runtime } = await openAssistantWithPreferences(world);
+    const ready = Promise.withResolvers<void>();
     const done = Promise.withResolvers<void>();
     world.ask.nextReplyChunks = ["I can't open the Camera", " for you."];
     world.ask.nextReplyProvisional = true;
+    world.ask.holdReady = ready.promise;
     world.ask.holdDoneAfterReady = done.promise;
+    world.ask.noStatus = true;
     try {
       write("Open the camera");
       await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
       await press("Send");
       await until(alpha, runtime, Reply, (s) => s.provisional && s.shown === 0);
       expect(document.body.textContent?.includes("I can't open the Camera")).toBe(false);
+      await vi.waitFor(() => expect(replying()).toBe(true));
+      // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": the reply the agent stored is settled text, shown before its last frame.
+      ready.resolve();
+      await until(alpha, runtime, Reply, (s) => s.status === "Streaming" && !s.provisional && s.shown === "I can't open the Camera for you.".length);
+      await vi.waitFor(() => expect(writingReply()).toBe("I can't open the Camera for you."));
+      expect(replying()).toBe(false);
     } finally {
+      ready.resolve();
       done.resolve();
     }
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "I can't open the Camera for you.".length);
@@ -738,6 +781,44 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(transcriptOrder().slice(-4)).toEqual(lastFour);
     expect(lines()[0]).toBe("History 1");
     expect(lines().slice(-2)).toEqual(["Question from here", "Reply from the current turn"]);
+  });
+
+  // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
+  it("Stop a reply: it keeps the settled text it reached, and never text that might still be taken back (spec/app/assistant/index.md, \"Story: Stop a reply\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistantWithPreferences(world);
+    world.ask.stalled = true;
+    world.ask.nextReplyChunks = ["I can't open", " the Camera"];
+    world.ask.nextReplyProvisional = true;
+    write("Open the camera");
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.provisional && s.shown === 0);
+    await press("Stop reply");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+    const nothingSettled = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
+    expect([nothingSettled.stopped, nothingSettled.shown, writingReply(), lines()]).toEqual([true, 0, undefined, ["Open the camera"]]);
+    expect(document.body.textContent?.includes("I can't open")).toBe(false);
+
+    world.ask.stalled = false;
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["I can't open the Camera", " for you."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.holdDoneAfterReady = done.promise;
+    try {
+      await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+      write("Open the camera now");
+      await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+      await press("Send");
+      await until(alpha, runtime, Reply, (s) => s.status === "Streaming" && !s.provisional && s.shown === "I can't open the Camera for you.".length);
+      await press("Stop reply");
+      await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+      const settled = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
+      expect([settled.stopped, settled.shown]).toEqual([true, "I can't open the Camera for you.".length]);
+      expect([writingReply(), lines()]).toEqual(["I can't open the Camera for you.", ["Open the camera", "Open the camera now", "I can't open the Camera for you."]]);
+    } finally {
+      done.resolve();
+    }
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"

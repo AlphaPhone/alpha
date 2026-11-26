@@ -147,13 +147,13 @@ pure def show(s: Messages): Moved = askThreads(false, { ...s, front: true, pane:
 
 ```quint
 pure def cleared(pane: Pane, s: Messages): Messages =
-  { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false, searching: false,
+  { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false,
     choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker), offeredPicture: 0,
     newDraft: { ...blankNew, visit: s.newDraft.visit } }
 
 pure def canLeave(s: Messages): bool = s.front
 
-pure def leave(s: Messages): Messages = { ...cleared(Threads, s), front: false }
+pure def leave(s: Messages): Messages = { ...cleared(Threads, s), front: false, searching: false }
 ```
 
 ### The filter chip and the search start a new list, and Retry reads it again
@@ -183,20 +183,26 @@ As in Sunday's v119, Search opens a search field in place of the list's
 title, and Back, Android's or the field's own where one is drawn, closes
 the field first and drops what it typed, so the whole list shows again. Only
 the next Back leaves Messages. While Alpha is the phone's launcher the field
-draws no Back of its own and runs the full width.
+draws no Back of its own and runs the full width. As on the live v119
+phone, the field opens empty, dropping a search the list still held, and a
+conversation opened from its results leaves the field open under it, so
+Back from the conversation returns to the same results and the next Back
+closes the field.
 
 ```quint
 pure def canOpenSearch(s: Messages): bool = showingPane(s, Threads) and readable(s) and not(s.searching)
 
-pure def openSearch(s: Messages): Messages = { ...s, searching: true }
+pure def openSearch(s: Messages): Moved =
+  val opened = { ...s, searching: true }
+  if (s.sought) search(opened, false) else { state: opened, out: List() }
 
-pure def canCloseSearch(s: Messages): bool = s.searching
+pure def canCloseSearch(s: Messages): bool = showingPane(s, Threads) and s.searching
 
 pure def closeSearch(s: Messages): Moved =
   val closed = { ...s, searching: false }
   if (s.sought and canSearch(s, false)) search(closed, false) else { state: closed, out: List() }
 
-pure def alwaysTheSearchOpensOverTheList(s: Messages): bool = s.searching implies showingPane(s, Threads)
+pure def alwaysTheSearchIsOpenOnlyInFront(s: Messages): bool = s.searching implies s.front
 ```
 
 ### "Older conversations" reads further only when the phone said there are more

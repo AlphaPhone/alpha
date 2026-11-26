@@ -21,8 +21,8 @@ inside the shell and moves through it.
 Home is the empty trail; the app showing is the last one on it. Ask Alpha
 rests as a bar, takes typing, opens as a sheet, or fills the screen. An app
 rises over Home, which stays where the owner left it and takes no input
-underneath; an app opened from another rises over that app, with nothing
-of Home between them; going back takes the app away at once.
+underneath; an app opened from another takes that app's place at once,
+with nothing of Home between them; going back takes the app away at once.
 
 ```quint
 type View = Phone | Messages | Inbox | Telegram | Slack | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
