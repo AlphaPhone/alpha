@@ -6,9 +6,10 @@ import { expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { Machine as Access } from "../gen/app__startup__access.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
-import { button, closeAll, drawn, hardware, only, openOver, press, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, openOver, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -185,6 +186,43 @@ it("Shows All set only for the account result that calls for it (spec/app/startu
     await vi.waitFor(() => expect(button("Settings")).toBeDefined());
   } finally {
     await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Shows chat at once on the assistant-only surface, and elsewhere a white cover until Home is whole (spec/app/startup/index.md, \"The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home\"; spec/app/startup/index.md, \"Until the connection has resolved, Home shows only the Alpha mark\")", async () => {
+  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
+  underAct();
+  try {
+    const alone = { ...scene(), phone: true };
+    alone.launcher.assistant = true;
+    let homeUncovered = false;
+    const watching = new MutationObserver(() => {
+      if (!cover() && (document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0) > 0) homeUncovered = true;
+    });
+    watching.observe(document.body, { subtree: true, childList: true, attributes: true });
+    const assistant = await openOver(fakeWorld(alone), only("home", "assistant"));
+    await until(assistant.alpha, assistant.alpha.runtime, Shell, () => true);
+    // spec/app/startup/index.md, "The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home": chat does not wait behind the cover for Home to settle, with no time passing, and no frame shows Home without the cover.
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-alpha-assistant-host]")?.childElementCount).toBeGreaterThan(0);
+      expect(cover()).toBeNull();
+    }, { timeout: 5_000 });
+    watching.disconnect();
+    expect([homeUncovered, document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0]).toEqual([false, 0]);
+    await closeAll();
+
+    // spec/app/startup/index.md, "Until the connection has resolved, Home shows only the Alpha mark": on the launcher an owner who keeps Dark sees the same white cover, and it stays until Home has drawn.
+    localStorage.setItem("alpha.appearance", JSON.stringify({ theme: "Dark", legible: false }));
+    const { alpha } = await openOver(fakeWorld({ ...scene(), phone: true }), only("home", "assistant"));
+    await until(alpha, alpha.runtime, Shell, () => true);
+    await vi.waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true), { timeout: 5_000 });
+    expect(cover()?.classList.contains("light")).toBe(true);
+    await later(alpha, 2500);
+    await vi.waitFor(() => expect(cover()).toBeNull());
+  } finally {
+    await closeAll();
+    document.documentElement.classList.remove("dark");
     react.IS_REACT_ACT_ENVIRONMENT = undefined;
   }
 });

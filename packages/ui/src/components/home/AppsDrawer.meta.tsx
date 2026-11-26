@@ -26,6 +26,9 @@ export const meta: ComponentMeta<AppsDrawerProps> = {
     "Already on Home": { menu: { ...menu, actions: { ...menu.actions, onHome: true } } },
   },
   play: {
+    // v119 starts the search text 46px into the pill: 16 padding, the 18px icon, a 10px gap and the input's own 2px.
+    Search: ({ canvasElement }: { canvasElement: HTMLElement }) =>
+      expect(within(canvasElement).getByRole("searchbox", { name: "Search apps" })).toHaveClass("pl-11.5"),
     "Reading apps": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onClose.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Close apps" }));
