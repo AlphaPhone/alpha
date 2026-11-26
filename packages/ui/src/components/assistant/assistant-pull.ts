@@ -3,10 +3,10 @@ import { type PointerEvent, useRef } from "react";
 import { KEPT_SAMPLES, releaseOf, type Sample, TAP_SLOP } from "./chat-overlay-motion.ts";
 
 type Press = { now: number };
-type Track = { pointer: number; start: Sample; samples: Sample[]; moved: boolean; onCancel?: AssistantPull["onCancel"] };
+type Track = { pointer: number; start: Sample; samples: Sample[]; moved: boolean; onCancel?: AssistantPull["onCancel"]; mark?: boolean };
 
 /**
- * One released drag, settled as v123 settled it (chat-overlay-motion-adapter.ts:1092-1108, use-pull-gesture.ts:380-479):
+ * One released drag, settled as v119 settled it (45f6bed30 chat-overlay-motion-adapter.ts:1108-1124, use-pull-gesture.ts:380-479):
  * the way it went (a flick's aim, else its travel), whether it was a flick, whether it was quick enough to count as a
  * pull, how far it travelled, where it ended and when.
  */
@@ -101,10 +101,12 @@ export type AssistantBarDrag = {
   onRelease?: (release: AssistantRelease) => void;
   /** The drag was taken away by the system, a resize or the window losing focus. */
   onCancel?: (press: Press) => void;
+  /** A press of Alpha's mark lifted without moving: as v119's mark (45f6bed30 chat-overlay-motion-adapter.ts:1044-1047, :783-792), a tap on its lift. */
+  onLift?: (press: Press & { y: number }) => void;
   /**
-   * Where the drag starts: the bar; the pill, where as on v123 a drag may start on any of its buttons, whose still press
-   * stays a tap; or the strip above a full-screen sheet, which as v123's strip (template.html:4150) drags from anywhere
-   * but its own actions.
+   * Where the drag starts: the bar; the pill, which as v119's (45f6bed30 template.html:4826) drags from anywhere on it,
+   * its buttons too, whose still press stays a tap; or the strip above a full-screen sheet, which as v119's strip
+   * (template.html:4449) drags from anywhere but its own actions.
    */
   from?: "bar" | "pill" | "strip";
 };
@@ -113,11 +115,13 @@ export type AssistantBarDrag = {
  * Pointer handlers that let the whole resting bar be dragged like its handle, as v121's bar and pill were. Nothing is
  * taken until the finger moves past a few pixels, so a tap on the bar or its field stays a tap; a press on the handle, or
  * on a field that pulls Ask Alpha itself, is left to it; on the bar a press on any other control (Send, Talk, Stop, the
- * chat actions) stays that control's, and a field with a draft in it scrolls instead, while on the pill every button
- * can start the drag. The press is seen on its way down, before a control keeps it for the field. A touch is held by the field it lands on until the bar
- * takes it, and that hand-over is not a loss.
+ * chat actions) stays that control's, and a field with a draft in it scrolls instead, while anywhere on the pill, its
+ * buttons too, can start the drag. The press is seen on its way down, before a control keeps it for the field. A touch is held by the field it lands on until the bar
+ * takes it, and that hand-over is not a loss. A mouse moves over whatever is under it, so until the slop the page's moves
+ * are watched, and the bar takes the pointer once the press is a drag, as v119's handle took it on its press
+ * (45f6bed30 use-pull-gesture.ts:233-243); taking it sooner would make a tap the bar's click, not its button's.
  */
-export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, from = "bar" }: AssistantBarDrag) {
+export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, onLift, from = "bar" }: AssistantBarDrag) {
   const track = useRef<Track | undefined>(undefined);
   const watching = useRef<(() => void) | undefined>(undefined);
   const lost = (event: PointerEvent<HTMLElement>) => {
@@ -146,15 +150,12 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, from
       if (!event.isPrimary || event.button !== 0 || !(event.target instanceof Element)) return;
       if (event.target.closest("[data-alpha-grabber]:not([data-alpha-input-drag-alpha]), [data-alpha-pull]")) return;
       // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
-      if (from === "pill" ? !event.target.closest("button")
+      if (from === "pill" ? !event.target.closest("[data-alpha-pill]")
         : from === "strip" ? event.target.closest("[data-alpha-strip-action]")
         : event.target.closest("button, a, [role=menuitem]") && !event.target.closest("[data-alpha-input-drag-alpha]")) return;
       if (event.target instanceof HTMLTextAreaElement && event.target.value !== "") return;
       const sample = { y: event.clientY, t: event.timeStamp };
-      track.current = { pointer: event.pointerId, start: sample, samples: [sample], moved: false };
-      // A touch stays with what it pressed, but a mouse moves over whatever is under it: v119's handle took the pointer
-      // on its press (use-pull-gesture.ts:233-243). Taking it before the slop would make a tap the bar's click, not its
-      // button's, so until then the page's moves are watched and the bar takes the pointer once the press is a drag.
+      track.current = { pointer: event.pointerId, start: sample, samples: [sample], moved: false, mark: event.target.closest("[data-alpha-input-drag-alpha]") !== null };
       watching.current?.();
       const owner = event.currentTarget;
       const pointer = event.pointerId;
@@ -181,8 +182,8 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, from
       const current = track.current;
       if (current?.pointer !== event.pointerId) return;
       track.current = undefined;
-      if (!current.moved) return;
-      onRelease?.(settle(current, event));
+      if (current.moved) return onRelease?.(settle(current, event));
+      if (current.mark) onLift?.({ now: event.timeStamp, y: event.clientY });
     },
     onPointerCancel: lost,
     onLostPointerCapture: lost,

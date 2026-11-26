@@ -1,5 +1,4 @@
 import { type ComponentProps, type ReactNode, memo, useCallback, useRef } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { EmptyState } from "../EmptyState.tsx";
@@ -52,6 +51,7 @@ function topIn(viewport: HTMLElement, row: HTMLElement) {
   return row.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
 }
 
+// spec/app/assistant/chats.md, "The conversation keeps its newest message in view until the owner scrolls up from it"
 function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
   if (selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode)) return;
@@ -108,9 +108,9 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
     if (status === "failed") return <EmptyState title="Messages did not load">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>;
     return (
       <>
-        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
+        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}>Earlier</Button> : null}
         <MessageRows messages={messages} hold={holdMessage} />
-        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}>Later</Button> : null}
         {messagesAfterLater?.length ? <MessageRows messages={messagesAfterLater} hold={holdMessage} /> : null}
         {briefing}
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
@@ -134,7 +134,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       {...props}
     >
       <div ref={placed} className="flex min-h-full flex-col gap-5">
-        {onReturnToOriginal ? <Button variant="ghost" size="sm" className="self-start" onClick={onReturnToOriginal}><ArrowLeft aria-hidden />Original chat</Button> : null}
+        {onReturnToOriginal ? <Button variant="ghost" size="sm" className="self-start" onClick={onReturnToOriginal}>Original chat</Button> : null}
         {body()}
       </div>
     </div>

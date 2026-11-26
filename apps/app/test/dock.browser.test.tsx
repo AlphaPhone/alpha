@@ -93,8 +93,8 @@ describe("Ask Alpha dock", () => {
 
     const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
     expect(grabber).not.toBeNull();
-    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
-    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
+    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch", isPrimary: true }));
+    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch", isPrimary: true }));
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     expect(document.activeElement).not.toBe(document.querySelector("textarea[data-alpha-composer]"));
   });
@@ -126,6 +126,103 @@ describe("Ask Alpha dock", () => {
     const still = await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
     expect(still.assistant).toBe("Bar");
   });
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen"; spec/app/assistant/dock.md, "A sheet keeps the share of the screen it was left at"; spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"
+  it("Reach every v119 height in order, up and down, by drag and by flick (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Home" });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const height = () => Math.round(section()?.getBoundingClientRect().height ?? 0);
+    const shell = async () => (await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant;
+    const reaches = (detent: "Bar" | "Sheet" | "Full") => runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
+    const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
+    const finger = (type: string, target: Element | null | undefined, clientY: number) =>
+      target?.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientY, pointerId: 11, pointerType: "touch", isPrimary: true }));
+    /** A drag of `by` points from the middle of `from`, its moves `gap` ms apart; a slow one is held still before it lifts, so it is not a flick. */
+    const swipe = async (from: () => Element | null | undefined, by: number, { flick = false } = {}) => {
+      const start = from();
+      const box = start?.getBoundingClientRect();
+      const y = Math.round((box?.top ?? 0) + (box?.height ?? 0) / 2);
+      finger("pointerdown", start, y);
+      for (let step = 1; step <= 6; step++) {
+        await pause(flick ? 10 : 25);
+        finger("pointermove", from() ?? section(), y + Math.round((by * step) / 6));
+      }
+      if (!flick) await pause(120);
+      finger("pointerup", from() ?? section(), y + by);
+    };
+    const mark = () => document.querySelector("section[aria-label='Ask Alpha'] [aria-label='Open conversation']");
+    const handle = () => document.querySelector("section[aria-label='Ask Alpha'] [aria-label='Resize chat']");
+    const near = async (target: number) => expect.poll(() => Math.abs(height() - target) <= 3, { timeout: 3000 }).toBe(true);
+
+    // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled up from the bar and let go between the zones, the sheet stays at the height it was let go at
+    const floor = (document.querySelector<HTMLElement>("[data-alpha-input-bar]")?.clientHeight ?? 62) + 28;
+    await swipe(mark, -300);
+    await reaches("Sheet");
+    await near(floor + 300);
+    // spec/app/assistant/dock.md, "A sheet keeps the share of the screen it was left at": dragged down and let go between the zones, it stays lower, and a second drag down takes it lower again
+    await swipe(handle, 100);
+    await near(floor + 200);
+    expect(await shell()).toBe("Sheet");
+    await swipe(handle, 60);
+    await near(floor + 140);
+    expect(await shell()).toBe("Sheet");
+    // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": near the top it fills the screen, and shrinking it again returns to the height it was left at
+    await swipe(handle, -560);
+    await reaches("Full");
+    await near(844);
+    await page.getByRole("button", { name: "Shrink chat" }).click();
+    await reaches("Sheet");
+    await near(floor + 140);
+    // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": near the floor it goes to the bar
+    await swipe(handle, 120);
+    await reaches("Bar");
+    await expect.poll(() => section()?.getAttribute("data-alpha-detent")).toBe("bar");
+
+    // spec/app/assistant/dock.md, "A flick of an open sheet goes by its direction alone": flicked up from the bar it opens at its fitted height, flicked up again it fills the screen, and flicked down it rests on the bar
+    await swipe(mark, -160, { flick: true });
+    await reaches("Sheet");
+    await expect.poll(() => section()?.getAttribute("data-alpha-detent")).toBe("sheet");
+    await pause(500);
+    await swipe(handle, -120, { flick: true });
+    await reaches("Full");
+    await page.getByRole("button", { name: "Shrink chat" }).click();
+    await reaches("Sheet");
+    await pause(500);
+    await swipe(handle, 120, { flick: true });
+    await reaches("Bar");
+  });
+
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet put away never carries its black Talk onto the bar, whose own Talk is drawn in its own colours from the first frame
+  it("Put the sheet away without a black mic on the bar (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Home", speech: { onTalk: () => undefined } });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    /** How opaque a computed colour is: its alpha, or 1 when it names none. */
+    const alphaOf = (color: string) => color === "transparent" ? 0 : Number(/(?:rgba\([^)]*,|\/)\s*([\d.]+)\)$/.exec(color)?.[1] ?? 1);
+    await page.getByRole("button", { name: "Open conversation" }).click();
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await Effect.runPromise(Effect.sleep("600 millis"));
+    const sheetTalk = section()?.querySelector("button[aria-label='Talk']");
+    expect(alphaOf(getComputedStyle(sheetTalk as Element).backgroundColor)).toBe(1);
+    const blackOnTheBar: string[] = [];
+    const watch = async () => {
+      for (const until = performance.now() + 1200; performance.now() < until; await Effect.runPromise(Effect.sleep("8 millis"))) {
+        const shown = section();
+        if (shown?.getAttribute("data-alpha-detent") !== "bar") continue;
+        for (const talk of shown.querySelectorAll<HTMLElement>("button[aria-label='Talk']")) {
+          const color = getComputedStyle(talk).backgroundColor;
+          if (alphaOf(color) > 0) blackOnTheBar.push(color);
+        }
+      }
+    };
+    const watched = watch();
+    await page.getByRole("button", { name: "Minimize chat" }).click();
+    await watched;
+    expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
+    expect(section()?.querySelector("button[aria-label='Talk']")).not.toBe(sheetTalk);
+    expect(blackOnTheBar).toEqual([]);
+  });
+
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
   it("The resting bar's controls keep their presses and a written field scrolls (spec/app/assistant/dock.md, \"A press does one thing: a tap is never also a drag, and a late click never taps\")", async () => {
     await page.viewport(390, 844);

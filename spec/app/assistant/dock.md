@@ -6,6 +6,12 @@ chooses where it lands, and asks the shell to raise it there or to go back
 by a step or two. The dock keeps one gesture at a time, the moment until
 which a stray click is ignored, and the height a sheet was left at.
 
+The sheet draws only the arrows Alpha's Sunday v119 build drew (old-line
+Alpha 45f6bed30, template.html:4447-4740): Minimize's chevron down, the
+chevron of a card that opens, and Send's arrow up while there is text. The
+way back to a call or a conversation, the strip above them, the way back
+to a fork's original, Earlier, Later and a digest's rows have no arrow.
+
 ## Story: Drag Ask Alpha where I want it
 
 > As the owner, I want a drag or a flick of Ask Alpha to land where my
@@ -13,12 +19,15 @@ which a stray click is ignored, and the height a sheet was left at.
 > away, with one press doing one thing, and the composer never hidden by
 > the keyboard.
 
-As in Alpha before VibeStack (v123 on the owner's phone, old-line Alpha
-dafa839684, which keeps v121's overlay and which the owner asked to match
-on 2026-11-26), the sheet follows the finger while its handle, the strip
-above a full-screen call or conversation, or the resting bar is dragged
-(the bar's background, Alpha's mark, an empty field, or anywhere on the
-pill), and lands where the release says. A finger counts as a drag once it
+As in Alpha before VibeStack (the Sunday v119 demo build, old-line Alpha
+45f6bed30, which the owner named the reference on 2026-11-26), the sheet
+follows the finger while its handle, the strip above a full-screen call or
+conversation, or the resting bar is dragged (the bar's background, Alpha's
+mark, an empty field, or anywhere on the pill, its buttons too), and lands
+where the release says. Each height is reached in order both ways: the
+bar, a sheet at any height between the zones, and the full screen; a sheet
+dragged down and let go between the zones stays there, so a second drag
+down takes it lower again. A finger counts as a drag once it
 has moved 8 points. While the sheet rises from the bar or the pill, the
 bar or pill is hidden and the sheet shows its own composer; while an open
 sheet is pulled down it fades by how far it has gone into the floor's zone
@@ -26,9 +35,12 @@ and the bar or pill it will rest on shows through it. A release is a flick
 when the finger rose or fell at 1 point a millisecond over the last 100
 milliseconds before it lifted, and was not held still for 80 milliseconds;
 a flick goes the way it was aimed. Once released, the sheet moves to where
-it landed over 420 milliseconds on v123's curve, and a tap that opens or
+it landed over 420 milliseconds on v119's curve, and a tap that opens or
 closes it from the bar grows it from the bar or shrinks it onto the bar the
-same way, keeping its composer until the bar shows. A tap or a drag on the
+same way, keeping its composer until the bar shows. A sheet put away
+shrinks and fades over the bar or pill already drawn under it, which then
+stays in place with its own controls in their own colours: no control of
+the sheet's, such as its black Talk, is carried onto the bar. A tap or a drag on the
 page outside an open sheet lowers Ask Alpha when it ends; outside the bar
 being typed in, it only leaves the field, which rests the bar once.
 
@@ -128,11 +140,11 @@ pure def lawAKeptHeightLiesBetweenTheZones(start: S::Detent, direction: Directio
 
 ### A short, slow pull of the bar or the pill leaves Ask Alpha where it was
 
-As v123 settled a release: a finger that ended within 8 points of where it
+As v119 settled a release: a finger that ended within 8 points of where it
 pressed goes nowhere; from the bar a pull that was not quick (half a point
 a millisecond, over the whole pull or its last move) and travelled less
 than 24 points goes nowhere, and from the pill less than 56 (the pull
-distance every v123 gesture shared). The gesture is dropped as a shifted
+distance every v119 gesture shared). The gesture is dropped as a shifted
 one is: nothing is asked and its late click is ignored. An open sheet
 moved past the 8 points always settles.
 
@@ -155,7 +167,7 @@ pure def lawAQuickPullAlwaysSettles(start: S::Detent, pill: bool, travel: int): 
 
 ### A sheet keeps the share of the screen it was left at
 
-As v123 remembered it, the height a sheet was left at is kept as its share
+As v119 remembered it, the height a sheet was left at is kept as its share
 of the full height, in thousandths, so it keeps its place on a screen that
 changes size.
 
@@ -269,7 +281,7 @@ pure def shift(d: Dock, now: int): Moved =
 
 ### While voice owns Ask Alpha nothing drags it, a drag under way is let go, and it is dragged again once voice ends
 
-As on v123, while Talk or dictation holds the chat no drag starts from the
+As on v119, while Talk or dictation holds the chat no drag starts from the
 bar, the pill or the sheet, so the voice controls stay where they are; a
 press on them still taps.
 

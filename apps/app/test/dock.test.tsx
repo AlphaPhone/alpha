@@ -292,9 +292,25 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect([section()?.style.height, section()?.style.opacity]).toEqual(["0px", "0"]);
     await at("pointerup", 740, handle ?? window);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
-    // As v119's retire did (45f6bed30 chat-overlay-motion-adapter.ts:603-640), the sheet shrinks onto the bar over 420 ms before the bar takes its place.
-    await act(async () => { await new Promise((done) => setTimeout(done, 700)); });
+    // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v119's retire did (45f6bed30 chat-overlay-motion-adapter.ts:613-651), the bar is Ask Alpha at once while the sheet fades over it
+    await act(async () => { await Effect.runPromise(Effect.sleep("700 millis")); });
     expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
+  });
+
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet put away hands over to the bar at once, whose Talk is its own button and never the sheet's black one
+  it("puts the sheet away onto a bar whose Talk was never the sheet's (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const settled = (detent: "Sheet" | "Bar") => act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent)))); });
+    await underAct(() => { named<HTMLButtonElement>("Open conversation")?.click(); });
+    await settled("Sheet");
+    const sheetTalk = section()?.querySelector<HTMLButtonElement>("button[aria-label='Talk']");
+    expect(sheetTalk?.className).toContain("bg-foreground");
+    await underAct(() => { named<HTMLButtonElement>("Minimize chat")?.click(); });
+    await settled("Bar");
+    const barTalk = section()?.querySelector<HTMLButtonElement>("button[aria-label='Talk']");
+    expect([section()?.getAttribute("data-alpha-detent"), barTalk === sheetTalk, barTalk?.className.includes("bg-foreground")]).toEqual(["bar", false, false]);
+    expect(section()?.hasAttribute("inert")).toBe(false);
   });
 
   // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v121's chat scrim did, a tap or a drag on the page outside the open sheet lowers it when it ends

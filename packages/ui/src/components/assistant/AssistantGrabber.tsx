@@ -17,8 +17,8 @@ export type AssistantGrabberProps = Omit<ComponentProps<"button">, keyof Assista
 /**
  * The handle of Ask Alpha: it reports a finger pressing, dragging, lifting or released as plain facts with their time;
  * the dock's rules choose where Ask Alpha lands. Alpha's mark on the bar or the pill only taps: a drag from it is the
- * bar's, which keeps the finger as the sheet replaces the mark, as v123's pill and bar did
- * (chat-overlay-motion-adapter.ts:1028, :1081-1082).
+ * bar's, which keeps the finger as the sheet replaces the mark, as v119's pill and bar did
+ * (45f6bed30 chat-overlay-motion-adapter.ts:1040, :1096-1097).
  * @model spec/app/assistant/dock.md
  */
 export function AssistantGrabber({ variant = "handle", onPress, onDrag, onRelease, onLift, onCancel, onTap, className, ...props }: AssistantGrabberProps) {

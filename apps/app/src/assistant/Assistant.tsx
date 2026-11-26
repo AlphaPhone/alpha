@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTranscriptProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { ChevronLeft, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import { type FormEvent, type ReactNode, type RefObject, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
@@ -64,7 +64,7 @@ import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
-import { type DictationKeyboard, type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
+import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | ContactMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | MessagingBridge | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | NoteStore | NotesMachine | Backs, unknown>;
@@ -72,8 +72,7 @@ export interface AssistantProps {
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
     interim?: ReactNode;
-    keyboard?: TalkStopReceipt;
-    voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
+    voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
   };
   canReadAloud?: boolean;
   onBack?: () => void;
@@ -438,7 +437,7 @@ function useExternal<T>(store: { readonly subscribe: (listener: () => void) => (
   return useSyncExternalStore(bound.subscribe, bound.snapshot);
 }
 
-/** The route and draft that own the composer during a Talk-to-keyboard request. */
+/** The route and draft that own the composer during a dictation-to-keyboard request. */
 function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
   const held = runtime.runSyncExit(Effect.gen(function* () {
     const route = yield* ShellMachine.use((machine) => machine.get());
@@ -612,9 +611,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const seen = useExternal(board);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
-  const { voice: renderVoice, voicePanel: renderDictation, interim, keyboard, ...speechProps } = speech ?? {};
+  const { voice: renderVoice, voicePanel: renderDictation, interim, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
-  const { onKeyboard, onDictationKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
+  const { onDictationKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner);
   const voicePanel = renderDictation?.(onDictationKeyboard);
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
@@ -730,7 +729,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         underlay={underlay && !onComms ? currentView !== undefined && currentView !== "Browser" ? "pill" : "bar" : undefined}
         inert={leaving || undefined}
-        barDrag={shell.state ? { onStart: gesture.onPress, onDrag: gesture.onDrag, onRelease: gesture.onRelease, onCancel: gesture.onCancel, from: compact ? "pill" : "bar" } : undefined}
+        barDrag={shell.state ? { onStart: gesture.onPress, onDrag: gesture.onDrag, onRelease: gesture.onRelease, onCancel: gesture.onCancel, from: compact ? "pill" : "bar",
+          onLift: () => { void dock.send({ type: "press", detent: assistantDetent, now: untimed }).then(() => dock.send({ type: "lift", now: untimed })); } } : undefined}
         className={onComms ? "relative w-full" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms && !live && assistantDetent === "Full" ? { ...sheetStyle, height: "calc(100dvh - 52px)" } : sheetStyle}
         header={{
@@ -753,7 +753,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             <div className="flex shrink-0 px-3 pb-1">
               <Button variant="secondary" className="h-11 gap-1 px-3.5 text-sm font-semibold"
                 data-alpha-stage-return="" aria-label={`Return to ${returnTo}`} onClick={onBack}>
-                <ChevronLeft aria-hidden className="size-3.5" />{returnTo}
+                {returnTo}
               </Button>
             </div>
           ) : undefined}
@@ -761,7 +761,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         transcript={{ ...transcript, briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} /> }}
         composer={{
           ...speechProps,
-          voice: voicePanel ?? renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
+          voice: voicePanel ?? renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar" }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openSheet();
             speech.onDictate?.();

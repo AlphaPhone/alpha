@@ -163,6 +163,31 @@ pure def canScroll(c: Chats, around: int): bool =
 pure def scroll(c: Chats, around: int): Moved = shown(c.chosen, around, c.origin, c)
 ```
 
+### The conversation keeps its newest message in view until the owner scrolls up from it
+
+As in Alpha before VibeStack, a reply
+arriving, or the sheet growing or shrinking under the finger, keeps the
+end of the conversation in view while the owner reads there: within 80
+points of the end it follows. A scroll that the conversation's own
+movement makes, staying at or below where it was last brought to its end,
+does not stop that; only the owner scrolling up past that point does, and
+from then on nothing moves the conversation under the owner until they
+scroll back to its end. A page of history or a search hit opens where it
+was read, not at the end.
+
+```quint
+pure val followReach = 80
+
+pure def followsEnd(following: bool, belowView: int, top: int, end: int): bool =
+  belowView < followReach or (following and top >= end)
+
+pure def lawScrollingUpFromTheEndStopsFollowing(following: bool, belowView: int, top: int, end: int): bool =
+  (belowView >= followReach and top < end) implies not(followsEnd(following, belowView, top, end))
+
+pure def lawTheEndInViewIsFollowed(following: bool, belowView: int, top: int, end: int): bool =
+  belowView < followReach implies followsEnd(following, belowView, top, end)
+```
+
 ### A reply that finished after it was stopped is read again into the conversation showing
 
 ```quint

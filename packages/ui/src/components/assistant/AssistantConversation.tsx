@@ -25,7 +25,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   barDrag?: AssistantBarDrag;
   /**
    * The bar, or the pill, Ask Alpha will rest on, drawn under a sheet that is being pulled down onto it or shrinking onto
-   * it after a tap, as v123 drew them (chat-overlay-motion-adapter.ts:955-958, 976-981). It takes no input.
+   * it after a tap, as v119 drew them (45f6bed30 chat-overlay-motion-adapter.ts:968-973, 990-996). It takes no input.
    */
   underlay?: "bar" | "pill";
 };

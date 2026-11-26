@@ -79,10 +79,6 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
     onBack={() => void alpha.back()}
     messageActions={messageActions}
     speech={{
-      keyboard: voice.state && {
-        session: voice.state.session,
-        confirmed: quiet(voice.state) ? voice.state.phase === "Idle" && !voice.state.latched && recorder?.stage === "Closed" : undefined,
-      },
       showUnavailableTalk: !available,
       voicePanel: dictating ? (onKeyboard) => <DictationControls runtime={runtime} onKeyboard={onKeyboard} playback={preview} /> : undefined,
       interim: <VoiceInterim runtime={runtime} />,
