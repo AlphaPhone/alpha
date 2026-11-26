@@ -1396,7 +1396,10 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]), { timeout: 10_000 }));
     await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
     await drawn(() => vi.waitFor(() => expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true)));
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending);
+    expect(document.body.textContent).toContain("Review in chat");
+    expect(button("Open")).toBeDefined();
+    expect(decline()).toHaveLength(1);
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

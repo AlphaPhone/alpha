@@ -710,7 +710,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const readyToSend = review !== undefined && (files !== undefined ? sameFiles(files, try review.filesContext())
     : origin !== undefined && (try review.filesOrigin(true))?.route === origin.route)
   const direct = enrolled !== undefined && readyToSend && (try atSource) ? enrolled : undefined
-  const refused: VoiceCompletion = { type: "replyEnds", session, turn, asks: false }
+  const refused: VoiceCompletion = { type: "replyEnds", session, turn, asks: false, says: false }
   if (!(try lease.verified) || !(try currentRequest)) return refused
   if (sms !== undefined && !(try smsCurrent)) return refused
   const admittedScreen = direct === undefined ? sameScreen : try atSource
@@ -834,10 +834,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     }
   }
   memory.lastReply = finalText
-  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a direct Files result is said even beside a page's card.
-  const says = !asks || filesReport !== undefined
-  if (says) output.finishSpeech(finalText)
-  return { type: "replyEnds", session, turn, asks: !says }
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a direct Files result is said even beside a page's card, whose notice Talk still shows.
+  const says = filesReport !== undefined
+  if (!asks || says) output.finishSpeech(finalText)
+  return { type: "replyEnds", session, turn, asks, says }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
@@ -850,7 +850,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const spoken = heard?.session === session && heard.turn === turn ? heard.text.trim() : ""
     // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": every spoken turn goes to the agent, and a review is decided only by the owner's touch on it.
     const finishLocally = () => {
-      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false, says: false })
       Queue.endUnsafe(queue)
     }
     const state = try voice.get()
@@ -862,7 +862,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const carried = try shared.writer.withPermitsIfAvailable(1)(effect {
       const abandoned = Effect.as(Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn))), undefined)
       const lease = try Effect.raceFirst(shared.begin(session, turn, current), abandoned)
-      if (lease === undefined) return { type: "replyEnds", session, turn, asks: false } as const
+      if (lease === undefined) return { type: "replyEnds", session, turn, asks: false, says: false } as const
       return try postVoiceTurn({ session, turn, queue, lease, spoken })
     })
     if (Option.isNone(carried)) { finishLocally(); return }
@@ -878,7 +878,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     memory.heardText = undefined
     memory.retireSaid(session, turn)
-    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false, says: false })
     Queue.endUnsafe(queue)
   })
 }
@@ -982,7 +982,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const closed = effect { try (try VoiceBridge).closeMic(session); return true } catch () => false
       return closed ? { type: "micClosed", session } : { type: "micCloseFailed", session }
     }, { type: "micCloseFailed", session });
-    when { tag: "Send", let session, let turn }: stream("send", sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false });
+    when { tag: "Send", let session, let turn }: stream("send", sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false, says: false });
     when { tag: "Play", let session, let turn }: answer(`play ${session}:${turn}:${fresh()}`, effect {
       const { memory } = try VoiceWords
       const bridge = try VoiceBridge
