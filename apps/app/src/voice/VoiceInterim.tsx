@@ -13,9 +13,9 @@ const bubble = "max-w-4/5 self-end rounded-tile rounded-br-box bg-alpha px-4 py-
 /**
  * Only this transcript tail reads the words of Talk's current turn. They have no message actions or history ID.
  * While the owner speaks: what is heard so far. Once the turn ends: what was said, as the owner's message, with the
- * working dots under it, as the Sunday demo build drew a sent voice turn (v119 template.html:4721-4726), and in the
- * dots' place, from the moment it is queued to be spoken, the acknowledgment as the turn's label and then the reply's
- * text (v119 agent-adapter.ts:2253-2254), until the recorded message and reply take their place.
+ * working dots under it, as the Sunday demo build drew a sent voice turn (v119 template.html:4721-4726), through a
+ * spoken acknowledgment (v119 voice-adapter.ts:778 only spoke it), and in the dots' place, from the moment it is queued
+ * to be spoken, the reply's text (v119 agent-adapter.ts:2253-2254), until the recorded message and reply take their place.
  */
 export function VoiceInterim({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<Machine | VoiceWords, unknown> }) {
   const { state } = useMachine(runtime);
@@ -36,7 +36,7 @@ export function VoiceInterim({ runtime }: { runtime: ManagedRuntime.ManagedRunti
       <>
         <div data-alpha-voice-said="" className={bubble}>{said.text}</div>
         {reply !== "" ? <AssistantMessage data-alpha-voice-reply="" author="alpha" text={reply} />
-          : <AssistantTurnNote status="sending" label={said.cue === undefined || said.cue === "" ? undefined : said.cue} />}
+          : <AssistantTurnNote status="sending" />}
       </>
     );
   }
