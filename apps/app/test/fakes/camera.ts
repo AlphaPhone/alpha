@@ -92,7 +92,8 @@ export function elizaCamera(world: CameraScene): Faked {
       const id = world.galleryVolume === undefined ? `image-${row}` : `m:${world.galleryVolume}:i:${row}`;
       return {
         thumbnail: boardingPass, format: "jpeg", width: 1280, height: 720,
-        path: `content://media/${world.galleryVolume ?? "external"}/images/media/${row}`, libraryId: id,
+        // As ElizaCamera answers: the item's URI in MediaStore.Images.Media.EXTERNAL_CONTENT_URI, and its library ID on its own volume.
+        path: `content://media/external/images/media/${row}`, libraryId: id,
       };
     },
     async startRecording() {

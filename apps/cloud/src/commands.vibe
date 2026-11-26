@@ -112,13 +112,13 @@ effect function database(found: Flags, command: "migrate" | "register" | "prices
   const values = try readSecrets(try required(found, "env-file"))
   const { profile } = try profiled(try required(found, "profile"))
   const store = values.DATABASE_URL
-  if (command !== "prices" && !store) throw new UsageInvalid({ message: "the secrets file has no DATABASE_URL" })
+  if (!store) throw new UsageInvalid({ message: "the secrets file has no DATABASE_URL" })
   return try scoped(effect {
     const written = try registrationInto(try privateDirectory(), profile, environment)
-    const at = ["--profile", written.profileFile, "--environment", environment]
+    const at = ["--profile", written.profileFile, "--environment", environment, "--store", store]
     switch (command) {
-      case "migrate": try elizaosCloud(["migrate", ...at, "--store", store], values); break
-      case "register": try elizaosCloud(["client", "apply", "--file", written.file, ...at, "--store", store], values); break
+      case "migrate": try elizaosCloud(["migrate", ...at], values); break
+      case "register": try elizaosCloud(["client", "apply", "--file", written.file, ...at], values); break
       case "prices": try elizaosCloud(["prices", "check", ...at], values); break
     }
     return { environment, command, clientId: written.clientId }

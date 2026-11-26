@@ -17,7 +17,7 @@ import { sha256Hex } from "../src/digest.ts"
 import edgeWorker, { edgeRouteOf, type EdgeEnv } from "../src/edge.vibe"
 import { EdgeHeaders, EdgeRequest, EdgeResponse, forwardedHeaders } from "../src/edge-platform.ts"
 import { entitlementPublicKey } from "../src/keys.ts"
-import { generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
+import { elizaosCloud, generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
 import { PROFILE_ASSET, readProfileAsset } from "../src/profile-asset.ts"
 import { elizaCloudRoutes, tableProblems } from "../src/routes.vibe"
 import { smoke } from "../src/smoke.vibe"
@@ -441,18 +441,31 @@ describe(`Provisioning creates only what is missing (spec/cloud/rollout.md, "Sto
 })
 
 describe(`A deployed environment is ready when every public gate passes (spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready")`, () => {
-  it.live("serves the candidate's staging profile from eliza's own cloud command, and every gate passes through the API host and the web host Worker", () => effect {
+  it.live(`checks the candidate's staged prices and serves every public gate through the API host and web host Worker (spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command")`, () => effect {
     const files = try FileSystem.FileSystem
     const cloud = try Effect.try(() => prepared().cloud)
     const profile = try profileNamed("candidate")
     const settings = profile.environments.staging
     const prices = try acquireRelease(tryPromise(() => catalog(settings.billing!.plans)), (opened) => promise(() => opened.close()))
     const run = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-candidate-" })
-    const local = { ...settings, mail: { kind: "loopback" as const }, billing: { ...settings.billing!, apiUrl: prices.origin } }
+    const priced = { ...settings, billing: { ...settings.billing!, apiUrl: prices.origin } }
+    const local = { ...priced, mail: { kind: "loopback" as const } }
     try files.writeFileString(`${run}/profile.json`, JSON.stringify({ ...profile, environments: { ...profile.environments, staging: local } }))
     try files.writeFileString(`${run}/seed.json`, JSON.stringify({ clients: [entryOf(registrationOn(profile, "staging"))] }))
     const fixture = try files.readFileString(`${cloud}/test/fixtures/secrets.env`)
-    try files.writeFileString(`${run}/secrets.env`, [fixture, ...Object.entries({ ...provided, STRIPE_SECRET_KEY: "sk_test_local" }).filter(([name]) => name !== "DATABASE_URL").map(([name, value]) => `${name}=${value}`)].join("\n") + "\n")
+    const profileFile = `${run}/operator-profile.json`
+    const secretsFile = `${run}/secrets.env`
+    const store = `pglite:${run}/cloud.pglite`
+    const values = { ...provided, DATABASE_URL: store, STRIPE_SECRET_KEY: "sk_test_local" }
+    const flags = ["--environment", "staging", "--profile", profileFile, "--env-file", secretsFile]
+    try files.writeFileString(profileFile, JSON.stringify({ ...profile, environments: { ...profile.environments, staging: priced } }))
+    try files.writeFileString(secretsFile, [fixture, ...Object.entries(values).map(([name, value]) => `${name}=${value}`)].join("\n") + "\n", { mode: 0o600 })
+    try operate("migrate", flags)
+    const secrets = try readSecrets(secretsFile)
+    for (const model of settings.inference!.models) {
+      try elizaosCloud(["prices", "set", "--model", model.id, "--input-per-1k", "150", "--output-per-1k", "600", "--profile", profileFile, "--environment", "staging", "--store", store], secrets)
+    }
+    try operate("prices", flags)
     const origin = try serving(cloud, run)
     const reach = hosting(origin, { api: settings.api, web: settings.web })
     const gates = try (smoke("staging", { api: settings.api, web: settings.web }, settings.name) |> Effect.provide(%, FetchHttpClient.layer) |> Effect.provideService(%, FetchHttpClient.Fetch, reach))
