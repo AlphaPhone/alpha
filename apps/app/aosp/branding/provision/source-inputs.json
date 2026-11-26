@@ -23,6 +23,13 @@
       "url": "https://android.googlesource.com/platform/packages/apps/Provision/+/b371531cac22752f5135471688e5924ce225414b/Android.bp"
     },
     {
+      "project": "frameworks/base",
+      "revision": "94b4c163b7dfe5ce3607f7bb8456f9573f7de57d",
+      "path": "data/etc/com.android.provision.xml",
+      "sha256": "84acd1e425b17d5a0368b49eb21b1785d058b06a9f5509ae31568e603007d4a5",
+      "url": "https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/data/etc/com.android.provision.xml"
+    },
+    {
       "project": "packages/modules/Permission",
       "revision": "1093eca7407576c72e51b1a88550ee0667a6e5dc",
       "path": "framework-s/java/android/app/role/RoleManager.java",

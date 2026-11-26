@@ -14,11 +14,20 @@ assert hashlib.sha256((ROOT / manifest['patch']).read_bytes()).hexdigest() == ma
 for row in manifest['files']:
     path = Path(row['path'])
     assert not path.is_absolute() and '..' not in path.parts
-    url = 'https://android.googlesource.com/platform/packages/apps/Launcher3/+/' + manifest['revision'] + '/' + row['path']
     target = data / 'baseline' / path
-    for candidate in [target, *target.parents]:
-        if candidate == data.parent: break
-        assert not candidate.is_symlink(), 'Symlink in source input path'
+    staged = data / 'staged' / path
+    for member in (target, staged):
+        for candidate in [member, *member.parents]:
+            if candidate == data.parent: break
+            assert not candidate.is_symlink(), 'Symlink in source input path'
+    if row['beforeSha256'] is None:
+        assert not target.exists(), 'Unexpected new-file baseline'
+        if staged.exists():
+            assert hashlib.sha256(staged.read_bytes()).hexdigest() == row['afterSha256'], 'Staged output drift'
+            staged.unlink()
+        continue
+    url = 'https://android.googlesource.com/platform/packages/apps/Launcher3/+/' + manifest['revision'] + '/' + row['path']
+    assert row['url'] == url
     if not target.exists():
         with urllib.request.urlopen(url + '?format=TEXT', timeout=30) as response:
             assert response.geturl() == url + '?format=TEXT'
@@ -29,10 +38,6 @@ for row in manifest['files']:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
     assert hashlib.sha256(target.read_bytes()).hexdigest() == row['beforeSha256'], 'Input drift'
-    staged = data / 'staged' / path
-    for candidate in [staged, *staged.parents]:
-        if candidate == data.parent: break
-        assert not candidate.is_symlink(), 'Symlink in staged input path'
     staged.parent.mkdir(parents=True, exist_ok=True)
     staged.write_bytes(target.read_bytes())
 subprocess.run(['git', 'apply', '--check', str(ROOT / manifest['patch'])], cwd=data / 'staged', check=True)
