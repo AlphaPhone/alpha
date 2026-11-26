@@ -1523,6 +1523,12 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(observedReviewPending).not.toContain(true);
     expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual([]);
     expect([review.decisions, review.claims, review.confirmations, review.receipts, world.telephony.sent]).toEqual([[], [], [], [], []]);
+
+    world.ask.nextReplyChunks = ["They usually meet upstairs."];
+    world.ask.nextActions = () => [];
+    await drawn(() => speakUtterance(world, "Where do they usually meet?"));
+    await drawn(() => vi.waitFor(() => expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(["They usually meet upstairs."])));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening" && state.mic === "On" && !state.reviewPending);
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
@@ -1620,6 +1626,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(world.ask.metadata?.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
     expect(button("Send this text")).toBeDefined();
     expect(document.body.textContent).toContain(operation.body);
+    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": the recipient by the name Messages gives its number, with the number.
+    expect(document.body.textContent).toContain("To: Maya Chen (415) 555-0100");
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
 
     const propose = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
@@ -1663,6 +1671,38 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual(outcome === "send" ? [
       [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
     ] : outcome === "decline" ? [[review.proposal.id], [], []] : [[], [], []]);
+    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": the decision shows as v119's result chip under the review, and is never spoken.
+    await drawn(() => vi.waitFor(() => expect(document.querySelector("[data-alpha-device-receipt]")?.textContent)
+      .toBe(outcome === "send" ? "Android accepted the text request." : outcome === "decline" ? "Declined" : undefined)));
+  });
+
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"
+  it("with Ask before Alpha acts on, sends nothing for what I say and exactly one text for my tap on Send", async () => {
+    const { world, operation, review, alpha, area } = await talkOnMessages();
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.askFirst);
+    const propose = () => [kept(review.proposal.id)];
+    world.ask.nextReplyChunks = ["Review the text on your phone."];
+    world.ask.nextActions = propose;
+    await drawn(() => speakUtterance(world, "Text +14155550100 saying Meet upstairs. Bring the keys."));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
+    for (const [at, answer] of ["Yes.", "Send it.", "Yes, send it now."].entries()) {
+      world.ask.nextReplyChunks = ["Tap Send when you are ready."];
+      world.ask.nextActions = propose;
+      await drawn(() => speakUtterance(world, answer));
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === at + 2 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
+      expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+      expect(button("Send this text")).toBeDefined();
+    }
+    try {
+      await press("Send this text");
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
+      await drawn(() => review.confirmations[0]?.confirm());
+      await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: review.proposal.id })]));
+    } finally {
+      for (const confirmation of review.confirmations) confirmation.confirm();
+    }
+    expect(world.telephony.sent).toEqual([{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }]);
   });
 
   async function openSpokenBrowserWorld(url: string) {
@@ -1696,6 +1736,37 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]);
     await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
     expect(button("Open")).toBeUndefined();
+  });
+
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+  it.each([false, true])("away from Messages, says nothing of a text the agent prepared that Talk shows no card for (askFirst: %s)", async (askFirst) => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.", subscriptionId: 1 } as const;
+    const review = textReview(world.notes.owner, "unshown-text", operation);
+    world.telephony.textReview = review;
+    const { alpha, area } = await onComposer(world, { at: "view:Browser", load: () => import("../src/browser/index.tsx") });
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded");
+    if (askFirst) {
+      await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+      await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.askFirst);
+    }
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    world.ask.nextReplyChunks = ["I've prepared the text. Tap Send to send it."];
+    world.ask.nextActions = () => [kept("unshown-text")];
+    const from = world.voice.spoken.length;
+    await drawn(() => speakUtterance(world, "Text +1 415 555 0100 to meet upstairs."));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening" && s.mic === "On" && !s.reviewPending);
+    await later(alpha, 500);
+    expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual([]);
+    expect(button("Send this text")).toBeUndefined();
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
+
+    world.ask.nextReplyChunks = ["It is sunny today."];
+    world.ask.nextActions = () => [];
+    await drawn(() => speakUtterance(world, "What is the weather?"));
+    await drawn(() => vi.waitFor(() => expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(["It is sunny today."])));
   });
 
   // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"

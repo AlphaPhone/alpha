@@ -27,11 +27,18 @@ function seenOf(element: Element | null | undefined) {
   return { top: Math.round(top), left: Math.round(left), width: Math.round(right - left), height: Math.round(bottom - top) };
 }
 
-// spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/photos/viewer.md, "The owner pans a zoomed photo within its frame and shows or hides the controls from the media surface"
-it("Zoom and pan a photo in its frame (spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+const viewer = () => document.querySelector("[data-alpha-subview=photos-viewer]");
+
+/** Alpha at 412 by 915 with Photos open on `name`, from the launcher or as an app of its own, with a video in the place of the first photo. */
+async function viewing(name: string, launcher: boolean) {
   await page.viewport(412, 915);
   const world = { ...scene(), phone: true };
-  world.settings.roles = world.settings.roles.map((r) => ({ ...r, held: r.role === "home" ? true : r.held }));
+  if (launcher) world.settings.roles = world.settings.roles.map((r) => ({ ...r, held: r.role === "home" ? true : r.held }));
+  world.photos.rows.splice(0, 1, {
+    id: "m:external_primary:v:9", name: "Clip.mp4", owned: true, kind: "video",
+    image: world.photos.rows[0]?.image ?? "", width: 1280, height: 720, size: 10_000,
+    date: 1795400500000, revision: "rev-video-9", duration: 5, path: "https://localhost/_alpha_video_/clip.mp4",
+  });
   const { alpha } = await open(world, only("home", "view:Photos", "notice"));
   const runtime = photosArea.runtime(alpha);
   await coverLifted(alpha);
@@ -41,15 +48,21 @@ it("Zoom and pan a photo in its frame (spec/app/photos/viewer.md, \"Story: Look 
   await expect.poll(() => button("Allow access")).toBeDefined();
   await press("Allow access");
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Granted");
-  await expect.poll(() => button("Camera.jpg")).toBeDefined();
-  await press("Camera.jpg");
+  await expect.poll(() => button(name)).toBeDefined();
+  await press(name);
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");
-  const viewer = () => document.querySelector("[data-alpha-subview=photos-viewer]");
-  const photo = () => viewer()?.querySelector("img[alt]");
-  await expect.poll(() => box(photo()).width).toBe(412);
+  await expect.poll(() => box(viewer()?.querySelector("img[alt], video")).width).toBe(412);
   await Promise.all(document.getAnimations().map((animation) => animation.finished));
+  return { alpha, runtime };
+}
 
-  expect([box(button("Back from photo")), box(viewer()?.querySelector("header h1")).left]).toEqual([{ top: 50, left: 8, width: 44, height: 44 }, 58]);
+const backAndTitle = () => [box(button("Back from photo")), box(viewer()?.querySelector("header h1")).left];
+
+// spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/photos/viewer.md, "The owner pans a zoomed photo within its frame and shows or hides the controls from the media surface"
+it("Zoom and pan a photo in its frame (spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+  const { alpha, runtime } = await viewing("Camera.jpg", true);
+  const photo = () => viewer()?.querySelector("img[alt]");
+  expect(backAndTitle()).toEqual([{ top: 50, left: 8, width: 44, height: 44 }, 58]);
   const frame = { top: 129, left: 0, width: 412, height: 549 };
   const surface = page.getByRole("group", { name: /^Photo\. Zoom/u });
   viewer()?.querySelector<HTMLElement>("[role=group][tabindex='0']")?.focus();
@@ -66,7 +79,20 @@ it("Zoom and pan a photo in its frame (spec/app/photos/viewer.md, \"Story: Look 
   await expect.poll(() => box(photo()).top).toBe(frame.top - 40);
   expect(seenOf(photo())).toEqual(frame);
 
+  const letterboxed = { top: 0, left: Math.round((915 - 228) / 2), width: 228, height: 304 };
   await page.viewport(915, 412);
   await expect.poll(() => seenOf(photo()).height).toBe(412 - 108);
-  expect(seenOf(photo())).toEqual({ top: 0, left: Math.round((915 - 228) / 2), width: 228, height: 304 });
+  expect(seenOf(photo())).toEqual(letterboxed);
+  await press("Back from photo");
+  await until(alpha, runtime, Viewer, (state) => state.open === 0);
+  await expect.poll(() => button("Clip.mp4")).toBeDefined();
+  await press("Clip.mp4");
+  await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.kind === "Clip");
+  await expect.poll(() => seenOf(viewer()?.querySelector("video"))).toEqual(letterboxed);
+});
+
+// spec/app/photos/viewer.md, "Story: Look at a photo or video"
+it("Look at a photo in Photos as an app of its own (spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+  await viewing("Camera.jpg", false);
+  expect([document.querySelector("main")?.hasAttribute("data-alpha-launcher"), ...backAndTitle()]).toEqual([false, { top: 0, left: 8, width: 52, height: 52 }, 62]);
 });

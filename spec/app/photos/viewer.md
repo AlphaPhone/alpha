@@ -159,7 +159,8 @@ frame stands in the middle of the space it has. A zoomed photo is cut to
 that frame and pans within it, so it never runs under the header or the
 controls. The header and the controls float over it, and on the launcher
 the header sits below the phone's status bar, with a 44px Back 8px from the
-edge and the title 6px after it. The editor keeps its own layout. Its
+edge and the title 6px after it; as an app of its own, Back is 52px and the
+title 2px after it. The editor keeps its own layout. Its
 controls carry v119's names: Back from photo, Edit photo or Edit video, and
 a viewer that says how to zoom, pan and browse.
 
