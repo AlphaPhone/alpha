@@ -1,7 +1,8 @@
-// spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+// spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/platform/adoption.md, "The earlier store is brought in only for the account that signed in to the earlier Alpha"; spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.os.agent.AgentConfig;
+import ai.eliza.os.agent.AgentCredentials;
 import ai.eliza.os.agent.AgentService;
 import ai.eliza.os.agent.inference.InferenceHost;
 import ai.eliza.voice.LocalInferenceHost;
@@ -27,11 +28,20 @@ public final class AlphaAgentService extends AgentService {
 
   private record SpeechHost(String name, InferenceHost host) {}
 
+  private AgentCredentials.Account launchAccount() {
+    try {
+      AgentCredentials.Active active = credentials().current();
+      return active == null ? null : active.account();
+    } catch (Exception unavailable) {
+      return null;
+    }
+  }
+
   @Override protected void configureLaunch(Map<String, String> variables) {
     synchronized (speechLock) {
       if (retiring) return;
     }
-    AlphaLegacyAgentArchive.prepareLaunch(this, variables);
+    AlphaLegacyAgentArchive.prepareLaunch(this, launchAccount(), variables);
     synchronized (speechLock) {
       if (retiring) return;
       if (speech != null) {
