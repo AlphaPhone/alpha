@@ -380,8 +380,12 @@ pure def lawEveryTabHasTheSameHint(p: Page): bool = addressHint(p) == addressHin
 
 On Android, choosing Find with no shown page keeps the menu open and asks
 the owner to load a page. As on Sunday's v119 phone, the page keeps its full
-size while the find bar is open, and the find bar is drawn over it: the phone
-leaves the find bar's place to Alpha, so the page never covers it.
+size while the find bar is open, and the phone draws it below Alpha, so the
+find bar is drawn over it with its ring and its shadow. Only Alpha's controls
+drawn over the page are Alpha's to touch: the find bar and the rest of Alpha's
+chrome over the page, such as Ask Alpha's bar, and all of the page while Ask
+Alpha is raised over it. A touch anywhere else on the page reaches the page.
+Once the find bar closes, the phone draws the page above Alpha again.
 
 ```quint
 pure def canOpenFind(p: Page): bool = p.phase == Shown and not(p.finding)

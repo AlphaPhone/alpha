@@ -312,7 +312,7 @@ export function App({ alpha }: AppProps) {
         onKeyDownCapture={(event) => choosing(event, false)}
         onFocusCapture={(event) => choosing(event, true)}
         style={frameStyle}
-        className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", showing === "Camera" && "bg-camera-panel", !phone && "sm:pointer-fine:max-w-103 sm:pointer-fine:border-x sm:pointer-fine:border-border/60", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
+        className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent in-data-[alpha-browser-under]:bg-transparent in-data-[alpha-browser-under]:bg-[linear-gradient(to_bottom,var(--background)_var(--alpha-browser-under-top),transparent_0_var(--alpha-browser-under-bottom),var(--background)_0),linear-gradient(to_right,var(--background)_var(--alpha-browser-under-left),transparent_0_var(--alpha-browser-under-right),var(--background)_0)] has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", showing === "Camera" && "bg-camera-panel", !phone && "sm:pointer-fine:max-w-103 sm:pointer-fine:border-x sm:pointer-fine:border-border/60", side && "flex-row", nativeHomeSide && "gap-4 [--alpha-home-ask-width:min(400px,46%)]", preview && "absolute m-0 rounded-panel")}
       >
         <div
           data-alpha-shell-page=""
@@ -350,7 +350,7 @@ export function App({ alpha }: AppProps) {
                 <div
                   ref={holdLayer}
                   onAnimationEnd={(event) => { if (event.target === event.currentTarget) risenOver(); }}
-                  className={cn("relative flex min-h-0 flex-1 flex-col motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent", showing === "Camera" ? "bg-camera-panel" : "bg-background")}
+                  className={cn("relative flex min-h-0 flex-1 flex-col motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent in-data-[alpha-browser-under]:bg-transparent", showing === "Camera" ? "bg-camera-panel" : "bg-background")}
                 >
                   {!viewHasHeader(showing) && <AppHeader
                     title={views[showing].label}
