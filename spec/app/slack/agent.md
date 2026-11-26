@@ -188,7 +188,7 @@ pure def workspaceRevoked(s: AgentSlack, workspace: int, by: Actor): AgentSlack 
     review: if (dropPending) V::dismiss(s.review) else s.review,
     pending: if (dropPending) noProposal else s.pending,
     attempt: if (dropCarry and s.attempt.outcome == A::Sent) A::conclude(s.attempt, false, false) else s.attempt,
-    readback: if (dropCarry) { ...s.readback, status: R::Idle } else s.readback,
+    readback: if (dropCarry) R::drop(s.readback) else s.readback,
   }
 
 pure def canScreenUpdated(s: AgentSlack, shareAllowed: bool, screen: Screen, by: Actor): bool =
@@ -260,11 +260,6 @@ pure def proposeMutation(s: AgentSlack, turn: int, target: MutationTarget, by: A
   val presented = V::present(rev)
   val p = { turn: turn, workspace: target.workspace, channel: target.channel, ts: target.ts, tool: target.tool, revision: presented.revision }
   { state: { ...s, review: presented, pending: p }, out: List(ProposeMutation({ proposal: p })) }
-
-pure def canMessageChanged(s: AgentSlack, by: Actor): bool = by == Device and s.review.showing
-
-pure def messageChanged(s: AgentSlack, by: Actor): AgentSlack =
-  { ...s, review: V::revise(s.review) }
 
 pure def canApproveMutation(s: AgentSlack, turn: int, revision: int, by: Actor): bool =
   by == Owner and not(busy(s)) and s.review.showing
@@ -350,7 +345,6 @@ pure def leadsToMutationEnds(s: AgentSlack, later: AgentSlack): bool =
 pure val fair_answered = "weak"
 
 pure def sometimesMutationConfirmed(s: AgentSlack): bool = s.told == Done and s.attempt.outcome == A::Confirmed
-pure def sometimesMutationStale(s: AgentSlack): bool = s.told == Stale
 pure def sometimesUnknownReadBackDone(s: AgentSlack): bool = s.told == Done and s.attempt.outcome == A::Unknown and s.readbacks == 1
 pure def sometimesThreadContextActive(s: AgentSlack): bool =
   s.connectedWorkspaces.contains(s.activeWorkspace) and not(s.sensitive) and s.shareAllowed and s.pane == ThreadPane and s.activeThreadTs > 0

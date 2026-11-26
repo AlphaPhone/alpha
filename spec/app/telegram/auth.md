@@ -23,7 +23,6 @@ in public state.
 ```quint
 type SecretCode = str
 type SecretPassword = str
-type SecretQrToken = str
 type SecretSession = str
 
 type AuthKind = UserAccount | BotToken
@@ -32,7 +31,6 @@ type Step =
   | PhoneEntry
   | CodePending
   | QrPending
-  | QrScanned
   | TwoFactorRequired
   | Authenticated
   | SessionExpired
@@ -65,7 +63,6 @@ type Effect =
   | VerifyPhoneCode({ ticket: int, code: SecretCode })
   | CheckCloudPassword({ ticket: int, password: SecretPassword })
   | StartQrLogin({ ticket: int })
-  | SubmitQrToken({ ticket: int, token: SecretQrToken })
   | StoreSession({ credentialRev: int, session: SecretSession })
   | LogOutRemote({ ticket: int, account: int })
   | WipeLocal({ credentialRev: int })
@@ -80,13 +77,12 @@ pure val initial: Auth = {
 pure val phoneValues = Set("", "+15550100")
 pure val codeValues = Set("12345")
 pure val passwordValues = Set("cloud-pass")
-pure val tokenValues = Set("qr-token-1")
 pure val sessionValues = Set("session-1")
 pure val ticketValues = 1.to(20)
-pure val nowValues = Set(0, 30, 60)
+pure val nowValues = Set(0, 30000, 60000)
 pure val sendOutcomeValues = Set(
   CodeDelivered,
-  SendFailed({ trouble: FloodWait, wait: 30 }),
+  SendFailed({ trouble: FloodWait, wait: 30000 }),
   SendFailed({ trouble: Unreachable, wait: 0 }),
 )
 pure val authOutcomeValues = Set(
@@ -95,7 +91,7 @@ pure val authOutcomeValues = Set(
   AuthBot,
   AuthFailed({ trouble: WrongCode, wait: 0 }),
   AuthFailed({ trouble: ExpiredCode, wait: 0 }),
-  AuthFailed({ trouble: FloodWait, wait: 30 }),
+  AuthFailed({ trouble: FloodWait, wait: 30000 }),
 )
 pure val weight_codeSent = 2
 pure val weight_codeVerified = 2
@@ -225,10 +221,10 @@ pure def passwordChecked(s: Auth, ticket: int, authOutcome: AuthOutcome, session
   }
 ```
 
-### QR login offers an alternate user-account path with expiry, optional two-factor check and secret token
+### QR login offers an alternate user-account path with expiry and optional two-factor check
 
 ```quint
-pure val qrLifetime = 30
+pure val qrLifetime = 30000
 
 pure def canStartQr(s: Auth, now: int, online: bool): bool =
   (s.step == PhoneEntry or s.step == QrPending) and s.work == Idle and online and now >= s.clock and now >= s.floodUntil
@@ -238,16 +234,6 @@ pure def startQr(s: Auth, now: int, online: bool): Moved =
   {
     state: { ...s, step: QrPending, work: PollingQr, ticket: ticket, qrExpiresAt: now + qrLifetime, clock: now, trouble: Fine },
     out: List(StartQrLogin({ ticket: ticket })),
-  }
-
-pure def canScanQr(s: Auth, now: int): bool =
-  s.step == QrPending and s.work == PollingQr and now >= s.clock and now < s.qrExpiresAt
-
-pure def scanQr(s: Auth, token: SecretQrToken, now: int): Moved =
-  val ticket = s.ticket + 1
-  {
-    state: { ...s, step: QrScanned, work: PollingQr, ticket: ticket, clock: now, trouble: Fine },
-    out: List(SubmitQrToken({ ticket: ticket, token: token })),
   }
 
 pure def canQrAnswered(s: Auth, ticket: int): bool =
@@ -273,7 +259,7 @@ pure def qrAnswered(s: Auth, ticket: int, authOutcome: AuthOutcome, session: Sec
   }
 
 pure def canBackToPhone(s: Auth): bool =
-  (s.step == CodePending or s.step == QrPending or s.step == QrScanned or s.step == TwoFactorRequired) and s.work == Idle
+  (s.step == CodePending or s.step == QrPending or s.step == TwoFactorRequired) and s.work == Idle
 
 pure def backToPhone(s: Auth): Auth = { ...s, step: PhoneEntry, trouble: Fine }
 ```
@@ -325,7 +311,7 @@ pure def alwaysWorkFitsStep(s: Auth): bool = and {
   s.work == SendingCode implies s.step == PhoneEntry,
   s.work == VerifyingCode implies s.step == CodePending,
   s.work == CheckingPassword implies s.step == TwoFactorRequired,
-  s.work == PollingQr implies (s.step == QrPending or s.step == QrScanned),
+  s.work == PollingQr implies s.step == QrPending,
   s.work == LoggingOut implies s.step == SignedOut,
 }
 
@@ -361,7 +347,7 @@ pure val fair_loggedOut = "weak"
 ```quint
 pure def sometimesAuthenticated(s: Auth): bool = s.step == Authenticated
 pure def sometimesTwoFactorAsked(s: Auth): bool = s.step == TwoFactorRequired
-pure def sometimesQrScanned(s: Auth): bool = s.step == QrScanned
+pure def sometimesQrPending(s: Auth): bool = s.step == QrPending
 pure def sometimesFloodWaited(s: Auth): bool = s.trouble == FloodWait
 pure def sometimesRevoked(s: Auth): bool = s.step == SessionExpired and s.trouble == SessionRevoked
 pure def sometimesBotTokenRejected(s: Auth): bool = s.trouble == BotTokenRejected

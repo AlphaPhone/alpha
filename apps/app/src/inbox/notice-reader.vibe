@@ -19,7 +19,7 @@ function sameTap(left: MailNoticeTap, right: MailNoticeTap | null | undefined): 
     && left.messageId === right.messageId && left.threadId === right.threadId
 }
 
-// spec/app/inbox/notices.md, "A tapped notice opens its message in Inbox for the account watched, which the list selects first, and only a notice that is up"
+// spec/app/inbox/notices.md, "Ask Alpha from a notice checks the same email again before spending the tap"
 effect function openTap(tap: MailNoticeTap) {
   const { messageId, threadId, grantId } = tap
   if (messageId === undefined || threadId === undefined) return false

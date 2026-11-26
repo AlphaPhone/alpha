@@ -587,9 +587,8 @@ pure def sometimesASaveIsCancelledAndOfferedAgain(s: MessageView): bool =
 The shell raises Ask Alpha with it. The assistant area reviews with the
 owner exactly what of it goes to Alpha, sends the revalidated email in
 structured turn context (`metadata.reviewedEmail`) rather than concatenating
-it into the owner's typed request text, refuses one too long to send in
-full or one that changed since, and decides what Alpha may do next with
-[what it may do with mail](./agent.md).
+it into the owner's typed request text, and refuses one too long to send in
+full or one that changed since.
 
 ```quint
 pure def canAskAlpha(s: MessageView): bool = s.body.status == R::Loaded and s.message != 0

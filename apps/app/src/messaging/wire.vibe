@@ -14,8 +14,9 @@ import { Unreachable, Unsent } from "../platform/remote.vibe"
 import { Slack } from "../platform/slack.vibe"
 import { Telegram } from "../platform/telegram.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
-import { SlackLedger, slackSessionKey } from "../slack/ledger.vibe"
+import { SlackLedger, handleSlackFailure, slackSessionKey } from "../slack/ledger.vibe"
 import { slackAmbientSnapshot, slackHomeCard } from "../slack/resident.vibe"
+import { reportSessionRevoked } from "../telegram/auth.vibe"
 import { telegramAmbientSnapshot, telegramHomeCard } from "../telegram/resident.vibe"
 import {
   TelegramStore,
@@ -23,6 +24,7 @@ import {
   currentSessionToken,
   dialogTitle,
   isDialogMuted,
+  isRevokedFailure,
   upsertHistoryMessage,
 } from "../telegram/store.vibe"
 import {
@@ -261,14 +263,27 @@ const messagingHandlers = started(effect {
   const telegram = try Telegram
   const slack = try Slack
   const sessions = try MessagingSessions
+  const tgAuth = try TelegramAuth.Machine
   const tgStore = try TelegramStore
   const tgConv = try TelegramConversation.Machine
+  const slackAuth = try SlackAuth.Machine
   const slackLedger = try SlackLedger
   const slackWorkspaces = try SlackWorkspaces.Machine
   const slackConv = try SlackConversation.Machine
   const shell = try Shell.Machine
 
   const sendTelegramDraft = (draft: MessagingDraftProposal) => effect {
+    if (draft.targetId === "" || draft.body.trim() === "") {
+      return { status: "failed" as const, error: "Message cannot be empty" }
+    }
+    if ((try tgAuth.get()).step !== "Authenticated") {
+      return { status: "failed" as const, error: "Sign in to Telegram first" }
+    }
+    const snap = try tgStore.get()
+    const dialog = snap.dialogs.find((item) => item.peer_key === draft.targetId)
+    if (dialog !== undefined && !dialog.can_post) {
+      return { status: "failed" as const, error: "This Telegram channel is read-only" }
+    }
     const tokenOpt = try currentSessionToken().pipe(Effect.provideService(MessagingSessions, sessions))
     if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Sign in to Telegram first" }
     const replyTo = draft.replyToMessageId ? Number(draft.replyToMessageId) : undefined
@@ -281,7 +296,16 @@ const messagingHandlers = started(effect {
       },
       `alpha-card-${draft.id}-r${draft.revision}`,
     ) catch (failure) => ({ failed: failure })
-    if ("failed" in res) return sendFailureOutcome("Telegram", res.failed)
+    if ("failed" in res) {
+      if (isRevokedFailure(res.failed)) {
+        try reportSessionRevoked().pipe(
+          Effect.provideService(TelegramAuth.Machine, tgAuth),
+          Effect.provideService(MessagingSessions, sessions),
+          Effect.provideService(TelegramStore, tgStore),
+        )
+      }
+      return sendFailureOutcome("Telegram", res.failed)
+    }
     try upsertHistoryMessage(draft.targetId, res.message, res.pts).pipe(Effect.provideService(TelegramStore, tgStore))
     return { status: "sent" as const }
   }
@@ -305,11 +329,16 @@ const messagingHandlers = started(effect {
   }
 
   const sendSlackDraft = (draft: MessagingDraftProposal) => effect {
+    if (draft.targetId === "" || draft.body.trim() === "") {
+      return { status: "failed" as const, error: "Message cannot be empty" }
+    }
     const wsState = try slackWorkspaces.get()
     const meta = draft.workspaceId
       ? slackLedger.workspaceByTeamId(draft.workspaceId)
       : slackLedger.workspaceMeta(wsState.selected.workspace)
-    if (meta === undefined) return { status: "failed" as const, error: "Connect a Slack workspace first" }
+    if (meta === undefined || !(try slackAuth.get()).connected.some((item) => item.workspace === meta.num)) {
+      return { status: "failed" as const, error: "Connect a Slack workspace first" }
+    }
     const tokenOpt = try sessions.get(slackSessionKey(meta.teamId))
     if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Reconnect your Slack workspace" }
     const res = slack.postMessage(
@@ -321,7 +350,13 @@ const messagingHandlers = started(effect {
       },
       `alpha-card-${draft.id}-r${draft.revision}`,
     ) catch (failure) => ({ failed: failure })
-    if ("failed" in res) return sendFailureOutcome("Slack", res.failed)
+    if ("failed" in res) {
+      try handleSlackFailure(meta.num, res.failed).pipe(
+        Effect.provideService(SlackAuth.Machine, slackAuth),
+        Effect.provideService(SlackLedger, slackLedger),
+      )
+      return sendFailureOutcome("Slack", res.failed)
+    }
     slackLedger.upsertMessage(meta.num, res.channel, res.message, false)
     return { status: "sent" as const }
   }

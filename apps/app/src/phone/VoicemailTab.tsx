@@ -5,6 +5,7 @@ import { Effect, Exit } from "effect";
 import { Phone as Handset, Play, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
+import { clear } from "../../gen/app__phone.ts";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { PhoneProps } from "./Phone.tsx";
@@ -47,6 +48,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
   const pause = { type: "pause" } as const;
   const message = { type: "reach", how: "Message" } as const;
   const call = { type: "reach", how: "CallBack" } as const;
+  const isClear = clear(phone.state);
   const canCall = phone.can({ type: "dialVoicemail", number: row.number });
   return (
     <section aria-label="Open voicemail" data-alpha-phone-voicemail-open="" className="mx-4 my-2 flex flex-col gap-3.5 rounded-panel bg-secondary p-3.5">
@@ -78,8 +80,8 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
         <div role="group" aria-label="Delete voicemail" className="flex gap-2">
           <Button variant="ghost" size="icon" className={cn(action, "w-auto basis-0")} disabled={!can({ type: "keep" }) || busy}
             aria-label="Keep" onClick={() => void send({ type: "keep" })}><Close className="size-5" /></Button>
-          <Button className="h-11 flex-2 basis-0 bg-hangup px-0 text-md font-semibold text-alpha-foreground hover:bg-hangup/90 active:bg-hangup/80" disabled={!can({ type: "confirmDelete" }) || busy}
-            data-alpha-phone-voicemail-confirm="" onClick={() => void send({ type: "confirmDelete" })}>Delete</Button>
+          <Button className="h-11 flex-2 basis-0 bg-hangup px-0 text-md font-semibold text-alpha-foreground hover:bg-hangup/90 active:bg-hangup/80" disabled={!can({ type: "confirmDelete", clear: isClear }) || busy}
+            data-alpha-phone-voicemail-confirm="" onClick={() => void send({ type: "confirmDelete", clear: isClear })}>Delete</Button>
         </div>
       ) : (
         <div className="flex gap-2">

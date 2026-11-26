@@ -87,7 +87,7 @@ pure def sessionChanged(c: Composer, authenticated: bool, by: Actor): Composer =
   else {
     ...initial, clock: c.clock, sendChat: c.sendChat,
     sendOp: if (sendingBusy(c)) A::conclude(c.sendOp, false, false) else c.sendOp,
-    readback: { ...c.readback, status: R::Idle },
+    readback: R::drop(c.readback),
   }
 ```
 
@@ -278,7 +278,7 @@ pure def restart(c: Composer): Composer = {
   ...initial, authenticated: c.authenticated, saved: c.saved, clock: c.clock,
   sendChat: c.sendChat,
   sendOp: if (sendingBusy(c)) A::conclude(c.sendOp, false, false) else c.sendOp,
-  readback: { ...c.readback, status: R::Idle },
+  readback: R::drop(c.readback),
   alphaRequests: c.alphaRequests,
 }
 ```

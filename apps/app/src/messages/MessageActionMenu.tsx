@@ -21,7 +21,7 @@ const CopiedGlyph = createLucideIcon({ name: "MessageCopied", node: [["path", { 
 
 const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm leading-normal font-semibold whitespace-nowrap transition-colors duration-fast pointer-fine:hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 
-// spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+// spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
 export function MessageActionMenu({ actions, focusOnOpen, close, ref }: MessageActionMenuProps) {
   const [copy, setCopy] = useState<Parameters<CopyReport>[0] | "pending">();
   const copyAttemptRef = useRef(0);

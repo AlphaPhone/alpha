@@ -9,8 +9,7 @@ What is opened from it has its own:
 - [Drafts](./drafts.md): what the owner is writing, kept on the phone, with [what one draft holds](./letter.md), [the shelf](./shelf.md), [adding](./adding.md) and [text offered into an email](./suggestion.md)
 - [Operations](./sending.md): sending, saving to Gmail, deleting a Gmail draft, archiving, moving to Trash and restoring, each reviewed
 - [Marking](./marking.md): marking read or unread
-- [What Alpha may do with my mail](./agent.md): reading directly, changing only what the owner approved
-- [Notices](./notices.md): new mail noticed in the background
+- [Notices](./notices.md): opening and asking about a mail notice
 
 Whether the owner is signed in to the cloud, and the session, come from
 the identity area and are told here as `sessionChanged`. The connected
@@ -521,8 +520,6 @@ pure def sometimesTheListMayBeOutOfDate(s: Mailbox): bool = s.doubtful and s.pag
 > there is none, to choose among several, to see only what my grant
 > allows, and to see nothing once I withdraw it.
 
-### The owner authorizes Gmail in Google and Inbox checks access on return
-
 Connect Gmail, Give access and Reconnect open Google's authorization for
 the same signed-in Cloud owner. The request covers reading, sending,
 saving drafts and organizing mail. Reconnecting keeps the selected
@@ -568,11 +565,12 @@ wait for the mail lease, as it ends a withdrawal.
 pure def keptOutlived(connected: List[Linked], s: Mailbox): bool =
   s.keptPages > 0 and linkOf(connected, s.kept.account).credential != s.keptCredential
 
-pure def withoutKept(s: Mailbox): Mailbox = {
-  ...s, kept: nowhere, keptPages: 0, keptTotal: 0, keptCredential: 0,
-  pages: if (s.saved) 0 else s.pages, total: if (s.saved) 0 else s.total, saved: false,
-  count: if (s.saved) noCount else s.count,
-}
+pure def dropOutlivedKept(connected: List[Linked], s: Mailbox): Mailbox =
+  if (keptOutlived(connected, s)) {
+    ...s, kept: nowhere, keptPages: 0, keptTotal: 0, keptCredential: 0,
+    pages: if (s.saved) 0 else s.pages, total: if (s.saved) 0 else s.total, saved: false,
+    count: if (s.saved) noCount else s.count,
+  } else s
 
 pure def canAccountsAnswered(s: Mailbox, ticket: int): bool = R::canAnswer(s.accounts, ticket) and s.signedIn
 
@@ -584,7 +582,7 @@ pure def accountsAnswered(s: Mailbox, ticket: int, ok: bool, connected: List[Lin
   val previous = if (known != 0) known else if (s.kept.account == account) s.keptCredential else 0
   val rotated = stays and previous != 0 and linkOf(connected, account).credential != previous
   val was = readable(s) and stays and not(rotated)
-  val stamped = if (keptOutlived(connected, s)) withoutKept(told) else told
+  val stamped = dropOutlivedKept(connected, told)
   val fresh = { ...stamped, connected: connected, checked: ticket, failure: if (s.failure == Revoked or s.failure == LeaseNeeded) Fine else s.failure }
   val placed =
     if (rotated) {

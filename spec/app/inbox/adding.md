@@ -116,7 +116,7 @@ pure def leaveOut(s: Adding): Adding = { ...s, thing: 0, mib: 0, into: 0, accoun
 pure def canPickContact(s: Adding, draft: int, admitted: bool, contacts: P::Permission): bool =
   draft != 0 and admitted and P::allows(contacts)
 
-pure def readPeople(s: Adding, draft: int, query: str, further: bool): Added =
+pure def readPeople(draft: int, s: Adding, query: str, further: bool): Added =
   val people = R::ask(s.people)
   {
     state: { ...s, contactDraft: draft, contacts: Usable, people: people, query: query,
@@ -125,13 +125,13 @@ pure def readPeople(s: Adding, draft: int, query: str, further: bool): Added =
   }
 
 pure def pickContact(s: Adding, draft: int, admitted: bool, contacts: P::Permission): Added =
-  readPeople(s, draft, "", false)
+  readPeople(draft, s, "", false)
 
 pure def canWantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Permission): bool =
   draft != 0 and not(admitted and P::allows(contacts))
 
 pure def wantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Permission): Added =
-  val gone = clearPeople(s)
+  val gone = closePeople(s)
   if (not(admitted)) { state: { ...gone, contacts: NotOnThisPhone }, out: List() }
   else if (P::canAsk(contacts)) { state: { ...gone, contacts: Asked, contactDraft: draft }, out: List(AskForContacts({ draft: draft })) }
   else { state: { ...gone, contacts: InSettings, contactDraft: draft }, out: List(OpenContactsSettings) }
@@ -149,12 +149,12 @@ draft, or a new owner retires the picker and refuses a late answer.
 pure def canFindPeople(s: Adding, draft: int, query: str): bool =
   draft != 0 and draft == s.contactDraft and s.contacts == Usable and s.people.status != R::Idle
 
-pure def findPeople(s: Adding, draft: int, query: str): Added = readPeople(s, draft, query, false)
+pure def findPeople(s: Adding, draft: int, query: str): Added = readPeople(draft, s, query, false)
 
 pure def canMorePeople(s: Adding, draft: int): bool =
   draft != 0 and draft == s.contactDraft and s.people.status == R::Loaded and s.morePeople
 
-pure def morePeople(s: Adding, draft: int): Added = readPeople(s, draft, s.query, true)
+pure def morePeople(s: Adding, draft: int): Added = readPeople(draft, s, s.query, true)
 
 pure def canPeopleRead(s: Adding, draft: int, ticket: int, addresses: int): bool =
   draft != 0 and draft == s.contactDraft and s.contacts == Usable and R::canAnswer(s.people, ticket) and addresses >= 0
@@ -169,18 +169,16 @@ pure def canChooseContact(s: Adding, draft: int, ticket: int, address: int): boo
 pure def chooseContact(s: Adding, draft: int, ticket: int, address: int): Added =
   { state: s, out: List(AddContact({ draft: draft, ticket: ticket, address: address })) }
 
-pure def clearPeople(s: Adding): Adding =
-  { ...s, contactDraft: 0, people: { ...s.people, status: R::Idle }, query: "", addresses: 0, morePeople: false }
-
 pure def canClosePeople(s: Adding): bool = s.contactDraft != 0
 
-pure def closePeople(s: Adding): Adding = clearPeople(s)
+pure def closePeople(s: Adding): Adding =
+  { ...s, contactDraft: 0, people: R::drop(s.people), query: "", addresses: 0, morePeople: false }
 
 pure def canContactsReported(s: Adding, draft: int): bool =
   draft != 0 and draft == s.contactDraft and s.contacts == Asked
 
 pure def contactsReported(s: Adding, draft: int, allowed: bool): Added =
-  if (allowed) readPeople(s, draft, "", false)
+  if (allowed) readPeople(draft, s, "", false)
   else { state: { ...s, contacts: InSettings }, out: List() }
 ```
 
@@ -206,12 +204,12 @@ pure def stepNothingJoinsUnseen(before: Adding, via: str, after: Adding, out: Li
 
 ```quint
 pure def draftClosed(s: Adding, draft: int): Adding =
-  val cleared = if (draft == s.contactDraft) clearPeople(s) else s
+  val cleared = if (draft == s.contactDraft) closePeople(s) else s
   if (draft == s.draft or draft == s.into) {
-    ...cleared, picker: { ...cleared.picker, status: R::Idle }, refused: Accepted, thing: 0, mib: 0, into: 0, account: 0, contacts: Usable,
+    ...cleared, picker: R::drop(cleared.picker), refused: Accepted, thing: 0, mib: 0, into: 0, account: 0, contacts: Usable,
   } else cleared
 
-pure def sessionChanged(s: Adding): Adding = { ...initial, picker: { ...s.picker, status: R::Idle }, people: { ...s.people, status: R::Idle } }
+pure def sessionChanged(s: Adding): Adding = { ...initial, picker: R::drop(s.picker), people: R::drop(s.people) }
 
 pure def restart(s: Adding): Adding = sessionChanged(s)
 ```

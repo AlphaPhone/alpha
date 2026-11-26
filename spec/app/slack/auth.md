@@ -46,7 +46,6 @@ type Effect =
   | OpenOAuthBrowser({ ticket: int, nonce: int })
   | ExchangeOAuthCode({ ticket: int, nonce: int, code: SecretOAuthCode, verifier: SecretPkceVerifier })
   | StoreWorkspaceToken({ workspace: int, credentialRev: int, token: SecretUserToken, refresh: SecretRefreshToken })
-  | RevokeRemoteToken({ workspace: int })
   | WipeWorkspace({ workspace: int, credentialRev: int })
   | StopWorkspaceSync({ workspace: int })
 type Moved = { state: Auth, out: List[Effect] }
@@ -184,24 +183,9 @@ pure def signOutWorkspace(s: Auth, workspace: int): Moved =
       trouble: Fine,
     },
     out: List(
-      RevokeRemoteToken({ workspace: workspace }),
       WipeWorkspace({ workspace: workspace, credentialRev: rev }),
       StopWorkspaceSync({ workspace: workspace }),
     ),
-  }
-
-pure def canSignOutAll(s: Auth): bool = s.step == Idle and s.connected.length() > 0
-
-pure def signOutAll(s: Auth): Moved =
-  val rev = s.nextRev + 1
-  {
-    state: { ...s, nextRev: rev, connected: List(), revokedWorkspace: 0, trouble: Fine },
-    out: s.connected.foldl(List(), (acc, w) =>
-      acc.concat(List(
-        RevokeRemoteToken({ workspace: w.workspace }),
-        WipeWorkspace({ workspace: w.workspace, credentialRev: rev }),
-        StopWorkspaceSync({ workspace: w.workspace }),
-      ))),
   }
 
 pure def restart(s: Auth): Auth = { ...s, step: Idle, trouble: Fine }

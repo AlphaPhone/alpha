@@ -189,7 +189,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
     await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
 
-    // spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+    // spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
     const actions = () => document.querySelector('[data-alpha-sms-actions]');
     await bubble("See you at five");
     await press("Copy");

@@ -137,7 +137,6 @@ function carry(
       answer("oauth-exchange", exchangeCode(ticket, code, verifier), { type: "exchanged", ticket, reply: { tag: "ExchangeErr" }, token: "", refresh: "" });
     when { tag: "StoreWorkspaceToken", let workspace, let credentialRev, let token, let refresh }:
       run(`store-${workspace}`, storeWorkspaceToken(workspace, credentialRev, token, refresh));
-    when { tag: "RevokeRemoteToken", let workspace }: run(`revoke-${workspace}`, Effect.void);
     when { tag: "WipeWorkspace", let workspace }: run(`wipe-${workspace}`, wipeWorkspaceFromState(workspace));
     when { tag: "StopWorkspaceSync", let workspace }:
       run(`stop-sync-${workspace}`, effect {

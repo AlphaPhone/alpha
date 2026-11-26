@@ -15,8 +15,7 @@ export function commsViewOf(app: Comms.CommsApp): "Phone" | "Messages" | "Contac
   return app === "PhoneApp" ? "Phone" : app === "MessagesApp" ? "Messages" : "Contacts"
 }
 
-// spec/app/phone/comms.md, "A proposal kept across a restart is shown, never approved, until Alpha proposes it again"
-const machine = reacting(Comms, { keep: 1, open: [{ type: "reopen" }, "Device"] })
+const machine = reacting(Comms, { keep: 1, open: [{ type: "voiceChanged", on: false }, "Device"] })
 
 /** A request handed from owner-side search to the open Ask Alpha sheet. */
 export interface CommsPrompt {
@@ -53,7 +52,7 @@ export effect function commsHeld(held: () => void): void!! {
 // spec/app/phone/comms.md, "End is above the view when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCall: liveCall(phone) && !clear(phone) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
 
-// spec/app/phone/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"
+// spec/app/phone/comms.md, "A ring shows its card in the stage and clears when the ring ends"
 const rings = following(Strip, (strip) => (strip.calls.some((call) => call.phase === "Ringing") ? shownCall(strip.calls).id : ""), Comms.Machine, (ring): Event => (ring === "" ? { type: "ringEnded" } : { type: "ringStarted", ring }), "Device")
 
 // spec/app/phone/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"

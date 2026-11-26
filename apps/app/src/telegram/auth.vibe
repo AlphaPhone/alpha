@@ -211,11 +211,6 @@ function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore
       pollQrLogin(ticket),
       { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed },
     );
-    when { tag: "SubmitQrToken", let ticket, let token }: answer(
-      "auth",
-      pollQrLogin(ticket, token),
-      { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed },
-    );
     when { tag: "StoreSession", let session }: run("store-session", effect {
       const valid = Option.getOrUndefined(try Effect.option(assertTelegramUserToken(session)))
       if (valid !== undefined) try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(valid))

@@ -260,7 +260,7 @@ function PictureGlyph() {
   );
 }
 
-// spec/app/messages/index.md, "A tap toggles message actions and a stationary hold opens them"
+// spec/app/messages/index.md, "Story: Act on a message"
 const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLink }: { row: MessageRow; now: number; choose: (id: string, toggle?: boolean) => void; actions?: MessageActions | undefined; hold: (held: () => void) => () => void; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const triggerRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<{ id: number; x: number; y: number; cancel: () => void } | undefined>(undefined);

@@ -104,6 +104,6 @@ lemma signOutWorkspace_ensures(s: Auth, workspace: int)
     forall w | w in after.connected ensures w in s.connected && w.workspace != workspace {
       ProofLib.FilterMember((w: WorkspaceAuth) => (w.workspace != workspace), s.connected, w);
     }
-    assert moved.out[1] in moved.out && moved.out[2] in moved.out;
+    assert moved.out[0] in moved.out && moved.out[1] in moved.out;
   }
 }

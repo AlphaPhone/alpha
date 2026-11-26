@@ -358,12 +358,15 @@ pure def canKeep(s: Voicemail): bool = s.confirming
 pure def keep(s: Voicemail): Voicemail = { ...s, confirming: false }
 ```
 
-### Confirming removes the open voicemail under a new number
+### Confirming removes the open voicemail under a new number, never during a call that may be an emergency call
+
+`clear` is Phone's fact that no call which may be an emergency call is
+live.
 
 ```quint
-pure def canConfirmDelete(s: Voicemail): bool = s.confirming and not(removing(s))
+pure def canConfirmDelete(s: Voicemail, clear: bool): bool = s.confirming and not(removing(s)) and clear
 
-pure def confirmDelete(s: Voicemail): Moved =
+pure def confirmDelete(s: Voicemail, clear: bool): Moved =
   val removal = A::dispatch(A::record(A::plan(s.removal.id + 1)))
   { state: { ...s, confirming: false, removal: removal, undo: NoUndo }, out: removeOne(removal.id) }
 ```
