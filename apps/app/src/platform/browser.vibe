@@ -93,13 +93,14 @@ export service InboxBrowserLinks {
   open(href: string, current: Effect.Effect<boolean>): boolean!!
 }
 
-/** A page the agent's reply asked the Browser to open: eliza's typed open, which waits for the owner's Open on the Browser's card. */
+/** A page the agent's reply asked the Browser to open: eliza's typed open, at once when the owner's whole message asked for it (`atOnce`), else after the owner's Open on the Browser's card. */
 export interface AgentPage {
   readonly operation: Extract<DeviceOperation, { readonly type: "browser_navigate" }>
+  readonly atOnce: boolean
 }
 
-// spec/app/browser/index.md, "Story: Let the agent open a page"
-/** Hand a page the agent asked for to the Browser, which shows it on its card for the owner's Open while `current` says the request that asked for it is still the owner's latest: whether the Browser took it. */
+// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+/** Hand a page the agent asked for to the Browser, which opens it at once or shows it on its card for the owner's Open while `current` says the request that asked for it is still the owner's latest: whether the Browser took it. */
 export service AgentPages {
   open(page: AgentPage, current: Effect.Effect<boolean>): boolean!!
 }
