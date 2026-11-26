@@ -197,10 +197,18 @@ deploy: the app's sign-in callback and App Link host come from them.
   test webhook returns 200 and that Cloudflare Email Sending records the
   delivered code. Sign in, chat, talk and subscribe with a test card on a
   staging build.
-- **From GitHub:** the Cloud deploy workflow, `.github/workflows/cloud-deploy.yml`,
-  runs the same steps from `main`, dispatched with the environment, `check`
-  or `deploy`, and the component; its header names the GitHub environments
-  and their secrets.
+- **From GitHub:** Cloud release changes pushed to `vibestack-develop` deploy
+  both Workers in staging, check its public gates, and then deploy the same
+  commit in production. An active rollout finishes before the latest queued
+  deploy runs. For a manual bundle or component deploy, dispatch
+  `.github/workflows/cloud-deploy.yml` from a branch admitted by the selected
+  GitHub environment. `bundle` needs only `ALPHA_CLOUD_PROFILE`. `deploy`
+  also needs `ALPHA_CLOUD_ENV`, `CLOUDFLARE_API_TOKEN` and
+  `ALPHA_CLOUD_DB_CA`, the dedicated PostgreSQL CA certificate for that
+  environment. The database commands verify the server certificate against
+  that CA. Railway's TCP proxy passes through the database certificate, whose
+  name is `localhost`. Resource preflight and Worker deployment use the
+  original database origin from `ALPHA_CLOUD_ENV`.
 - **Later:** a new eliza pin is a rebuild, then `check`, `preflight`,
   `migrate`, `deploy`, `prices` and `smoke`; changed operator inputs are
   another `deploy`.
