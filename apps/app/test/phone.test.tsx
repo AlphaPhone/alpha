@@ -230,10 +230,8 @@ describe("Phone on an Alpha image", () => {
     await draftKept();
 
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
-    await drawn(async () => {
-      await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openCommsView", view: "Contacts" })));
-    });
-    await contactsFront();
+    await tab("Contacts");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone,Contacts" && state.assistant === "Sheet");
     await contactsListed();
     await until(alpha, alpha.runtime, Comms, (state) => state.app === "ContactsApp" && state.stage.at(-1)?.app === "PhoneApp");
     await tab("Keypad");
