@@ -1010,7 +1010,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
 }
 
 // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number"; spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"
-function Proposal({ runtime }: CalendarProps) {
+/** The agent's change waiting for the owner, under way, or how it ended: over the days, and in Ask Alpha (sheet.tsx) with `className` placing it there. */
+export function Proposal({ runtime, className = "mx-4 mb-2" }: CalendarProps & { className?: string }) {
   const agent = useChanges(runtime);
   const a = agent.state;
   if (!a) return null;
@@ -1021,7 +1022,7 @@ function Proposal({ runtime }: CalendarProps) {
   const start = f ? Date.parse(f.startAt) : NaN;
   const end = f ? Date.parse(f.endAt) : NaN;
   return (
-    <section aria-label="Calendar change" className="mx-4 mb-2 shrink-0 rounded-chip bg-secondary px-5 py-4.5 text-base leading-normal">
+    <section aria-label="Calendar change" className={`${className} shrink-0 rounded-chip bg-secondary px-5 py-4.5 text-base leading-normal`}>
       <strong>{`${changes[a.change]}${a.reply === "NoReply" ? "" : `: ${replies[a.reply]}`}${a.updated ? " (updated)" : ""}`}</strong>
       <p className="text-meta text-muted-foreground">{statuses[requestStatus(request !== undefined, a.complete, "RequestPending")]}</p>
       {row ? <p>{`${a.change === "Update" ? "Now: " : ""}${row.title || "Untitled event"} · ${shortDate.format(row.begin)} · ${interval(row)}`}</p> : null}

@@ -21,7 +21,8 @@ inside the shell and moves through it.
 Home is the empty trail; the app showing is the last one on it. Ask Alpha
 rests as a bar, takes typing, opens as a sheet, or fills the screen. An app
 rises over Home, which stays where the owner left it and takes no input
-underneath; going back takes the app away at once.
+underneath; an app opened from another rises over that app, with nothing
+of Home between them; going back takes the app away at once.
 
 ```quint
 type View = Phone | Messages | Inbox | Telegram | Slack | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
@@ -290,6 +291,22 @@ pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell
     or via == "agentOpenSpoken" or via == "agentHomeSpoken") implies (after.assistant == before.assistant)
 
 pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
+```
+
+### A page the agent opens in Browser lowers Ask Alpha to its bar
+
+When the page the agent asked for opens in Browser, at once or after the
+owner's Open, Ask Alpha lowers to its bar so the page fills the screen, as
+on Sunday's v119 demo phone. Only a page opening does this; any other
+agent navigation keeps Ask Alpha where it is (above).
+
+```quint
+pure def canAgentShowPage(s: Shell): bool = s.textAsk == NoTextAsk and showing(s, Browser) and s.assistant != Bar
+
+pure def agentShowPage(s: Shell): Shell = recordRoute({ before: s, after: { ...s, assistant: Bar } })
+
+pure def stepAnAgentsPageLowersAskAlpha(before: Shell, via: str, after: Shell): bool =
+  via == "agentShowPage" implies (after.assistant == Bar and after.trail == before.trail and showing(after, Browser))
 ```
 
 ### Only a spoken move from its exact source route is marked as Talk's navigation

@@ -14,7 +14,7 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
 export { placeOf, viewOfPlace }
-import { filesOnlyHeaders, type MediaCard, MediaReview, sameFiles, spokenText } from "../assistant/media-review.vibe"
+import { filesOnlyHeaders, type MediaCard, MediaReview, ranDirect, sameFiles, spokenText } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { composeRecipient } from "../messages/agent.vibe"
@@ -771,6 +771,12 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
       try review.spokenFilesFrom(direct, message, { origin, current: stillTalking, report },
         { view: conversation, revision: screen.context.revision, moved: succeed(true), open, changes }, result.reply.actionResults)
     }
+  }
+  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+  const opener = output.usedDirect ? direct : enrolled
+  if (sms === undefined && review !== undefined && opener !== undefined && streamed && result?.kind === "Replied"
+    && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && ranDirect(result.reply.actionResults)) {
+    try ignore(review.openAsked(opener, result.reply.userMessageId, result.reply.actionResults, atSource))
   }
   if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let smsShown = false

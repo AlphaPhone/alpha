@@ -143,7 +143,6 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <HomeScreen
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
-      cardsAwaited={Home.showsCards(h) && !settled}
       appCards={Home.showsCards(h) && alpha.slot("home/cards")}
       tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => ({
         ...tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing),
@@ -153,6 +152,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       appCardsInert={s.assistant !== "Bar"}
       drawerInert={s.assistant !== "Bar" && !alongside}
       covered={h.editing && !editVisible}
+      held={s.trail.length > 0}
       editing={editing || (h.editing && addLayer !== undefined)}
       tileGestureScope={`${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}`}
       onPressTile={(id) => { if (id.startsWith("view:")) homeFrame.want(id as `view:${View}`); }}

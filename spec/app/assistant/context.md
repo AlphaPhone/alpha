@@ -3,7 +3,7 @@
 What a turn tells the agent about the phone besides the screen the
 [conversation](./index.md) tells it: the phone's last known location, the
 page open in Browser, a reviewed email or selected voice-note transcript flag,
-what Maps shows, the time zone, the phone actions this
+the assistant overlay height, what Maps shows, the time zone, the phone actions this
 phone can carry out, and whether the owner's words go to a hosted model.
 Eliza encodes the turn context (`encodeTurnContext` of
 `@elizaos/agent`) and drops what a peer does not declare; no wire
@@ -259,6 +259,58 @@ pure def lawASpokenTurnCarriesWhatATypedTurnDoes(part: Part, observed: bool, dir
 pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
   not(carries(source, Observation, false, direct)) and not(carries(source, Page, false, direct))
     and not(carries(source, ViewClaim, false, direct))
+```
+
+### A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields
+
+Each typed or spoken turn sent to a peer that takes optional turn-context
+fields reports `observation.chatHeight` (`hidden`, `bar`, `typing`, `sheet`
+or `full`) from the live shell detent and dock state at send time: `Full`
+reports `full`, `Sheet` reports `sheet`, `Typing` reports `typing`, and
+`Bar` reports `hidden` when Ask Alpha is not drawn over the active bar app
+(`Phone`, `Messages` or `Contacts`) or is collapsed to the compact pill
+(either tucked by swipe-down or resting inside a non-Browser app), and
+`bar` otherwise. Following this document's rule that a sensitive screen
+sends no optional field, `chatHeight` is omitted when the screen is
+sensitive or when the peer does not take optional turn-context fields.
+
+```quint
+type OverlayDetent = DetentBar | DetentTyping | DetentSheet | DetentFull
+type ChatHeight = ChatHidden | ChatBar | ChatTyping | ChatSheet | ChatFull
+type TurnChatHeight = NoChatHeight | ReportedChatHeight({ height: ChatHeight })
+
+pure def chatHeightOf(detent: OverlayDetent, drawn: bool, pill: bool): ChatHeight =
+  match detent {
+    | DetentFull => ChatFull
+    | DetentSheet => ChatSheet
+    | DetentTyping => ChatTyping
+    | DetentBar => if (not(drawn) or pill) ChatHidden else ChatBar
+  }
+
+pure def sendsChatHeight(notSensitive: bool, peerTakes: bool): bool =
+  notSensitive and peerTakes
+
+pure def chatHeightForTurn(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): TurnChatHeight =
+  if (sendsChatHeight(notSensitive, peerTakes)) ReportedChatHeight({ height: chatHeightOf(detent, drawn, pill) }) else NoChatHeight
+
+pure def lawOpenSheetOrFullAlwaysReportsOpenHeight(detent: OverlayDetent, drawn: bool, pill: bool): bool =
+  (detent == DetentSheet implies chatHeightOf(detent, drawn, pill) == ChatSheet)
+    and (detent == DetentFull implies chatHeightOf(detent, drawn, pill) == ChatFull)
+
+pure def lawHiddenHeightOccursOnlyAtBarWhenUndrawnOrPill(detent: OverlayDetent, drawn: bool, pill: bool): bool =
+  (chatHeightOf(detent, drawn, pill) == ChatHidden) == (detent == DetentBar and (not(drawn) or pill))
+
+pure def lawSensitiveScreenSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, peerTakes: bool): bool =
+  not(sendsChatHeight(false, peerTakes))
+    and chatHeightForTurn(source, detent, drawn, pill, false, peerTakes) == NoChatHeight
+
+pure def lawUnsupportedPeerSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool): bool =
+  not(sendsChatHeight(notSensitive, false))
+    and chatHeightForTurn(source, detent, drawn, pill, notSensitive, false) == NoChatHeight
+
+pure def lawSpokenAndTypedTurnsReportSameChatHeight(detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): bool =
+  chatHeightForTurn(Spoken, detent, drawn, pill, notSensitive, peerTakes)
+    == chatHeightForTurn(Typed, detent, drawn, pill, notSensitive, peerTakes)
 ```
 
 ### A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it
