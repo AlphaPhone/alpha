@@ -733,8 +733,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const sent = effect (files: typeof direct) => {
     output.beginAttempt(files !== undefined)
     const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, files === undefined ? undefined : "direct-files-only-v1")) } : {}
+    const offered = sms !== undefined || review === undefined ? undefined
+      : files === undefined ? ((try atSource) ? enrolled?.headers : undefined) : filesOnlyHeaders(files)
     const headers = sms === undefined
-      ? (files === undefined ? ((try atSource) ? enrolled?.headers : undefined) : filesOnlyHeaders(files))
+      ? (offered === undefined || review === undefined ? undefined : try review.turnHeaders(offered))
       : { ...sms.opened.headers, "x-eliza-device-capabilities": "sms.send.v1" }
     return tryPromise(() => controller.send({
       text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),

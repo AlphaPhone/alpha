@@ -20,7 +20,7 @@ import { Machine as Speaker } from "../gen/app__voice__output.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
 import { Machine as Files } from "../gen/app__files.effect.vibe";
 import { Machine as FilePreview } from "../gen/app__files__preview.effect.vibe";
-import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
+import { Machine as Preferences, free as prefsFree } from "../gen/app__settings__preferences.effect.vibe";
 import * as Timers from "../gen/app__clock__timers.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import { dictate } from "../src/assistant/dictation.vibe";
@@ -1258,6 +1258,41 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]);
     await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
     expect(button("Open")).toBeUndefined();
+  });
+
+  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+  it.each([
+    { name: "with Ask before Alpha acts off, offers the direct open and opens the page at once", askFirst: false },
+    { name: "with Ask before Alpha acts on, offers no direct open, so the page waits for its card in chat", askFirst: true },
+  ])("a spoken page request $name", async ({ askFirst }) => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const url = "https://www.alphacompute.ai/";
+    const review = textReview(world.notes.owner, "spoken-page", { type: "browser_navigate", url });
+    world.telephony.textReview = review;
+    world.ask.turnCapabilities = [];
+    const { alpha, area } = await onComposer(world, { at: "view:Browser", load: () => import("../src/browser/index.tsx") });
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded");
+    if (askFirst) await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.askFirst === askFirst && prefsFree(s));
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+    world.ask.nextReplyChunks = ["Here is alphacompute.ai."];
+    // As eliza does: a turn offering browser.open-direct.v1 gets the direct step, any other turn the page for review.
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: world.ask.turnCapabilities?.at(-1)?.split(",").includes("browser.open-direct.v1")
+      ? { proposalId: "spoken-page", state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false }
+      : { proposalId: "spoken-page", state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+    speakUtterance(world, "Visit alphacompute.ai.");
+    const opened = () => [...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url);
+    if (!askFirst) {
+      await vi.waitFor(() => expect(opened()).toBe(true), { timeout: 10_000 });
+      expect([world.ask.turnCapabilities.at(-1)?.split(",").includes("browser.open-direct.v1"), review.receipts.length]).toEqual([true, 1]);
+      return;
+    }
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.reviewPending);
+    expect(world.ask.turnCapabilities.at(-1)?.split(",").includes("browser.open-direct.v1")).toBe(false);
+    expect([review.receipts, opened()]).toEqual([[], false]);
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

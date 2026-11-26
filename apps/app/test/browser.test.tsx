@@ -877,6 +877,7 @@ describe("The Browser on a phone", () => {
     const url = "https://www.alphacompute.ai/";
     const review = textReview(world.notes.owner, "page-asked", { type: "browser_navigate", url });
     world.telephony.textReview = review;
+    world.ask.turnCapabilities = [];
     const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
     const ask = assistant.runtime(alpha);
     const runtime = browser.runtime(alpha);
@@ -896,6 +897,7 @@ describe("The Browser on a phone", () => {
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "page-asked" })]), { timeout: 10_000 });
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
     expect(button("Open")).toBeUndefined();
+    expect(world.ask.turnCapabilities.at(-1)?.split(",")).toContain("browser.open-direct.v1");
     await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Browser") && s.assistant === "Bar");
   });
 
@@ -930,6 +932,7 @@ describe("The Browser on a phone", () => {
     const url = "https://www.alphacompute.ai/";
     const review = textReview(world.notes.owner, "page-asked", { type: "browser_navigate", url });
     world.telephony.textReview = review;
+    world.ask.turnCapabilities = [];
     const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
     const ask = assistant.runtime(alpha);
     const runtime = browser.runtime(alpha);
@@ -951,6 +954,7 @@ describe("The Browser on a phone", () => {
     await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
     await later(alpha, 500);
     expect(review.receipts).toEqual([]);
+    expect(world.ask.turnCapabilities.at(-1)?.split(",")).not.toContain("browser.open-direct.v1");
     expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(false);
 
     await press("Open");

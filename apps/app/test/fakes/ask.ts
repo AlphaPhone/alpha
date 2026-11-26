@@ -55,6 +55,8 @@ export interface AskScene {
   /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
   canRespond: boolean;
   warmUps: Record<string, string>[];
+  /** The device capabilities each streamed turn declared, in order, where a test records them. */
+  turnCapabilities?: string[];
   warmUpFails: boolean;
   statusReads: number;
 }
@@ -253,6 +255,7 @@ export function askRoutes(scene: AskScene): Route[] {
         if (scene.knowsNoActionMode === true && JSON.stringify(body.metadata ?? {}).includes('"agentActionMode"')) return Response.json({ error: "VOICE_UI_CONTEXT_INVALID" }, { status: 400 });
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
+        scene.turnCapabilities?.push(request.headers.get("x-eliza-device-capabilities") ?? "");
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
         if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });

@@ -529,8 +529,11 @@ Browser's card, as before. While the owner has "Ask before Alpha acts" on,
 or the phone has not read that preference or is still reading or saving it
 (`asksBeforeActing(WebAction)` in [Preferences](../settings/preferences.md)),
 even a page the whole message asked for waits for the owner's Open on its
-card, as v119 asked first for every direct run. Every page still opens only
-under the rule above.
+card, as v119 asked first for every direct run. So that a spoken request
+still reaches a card then, a turn sent while Alpha must ask does not offer
+`browser.open-direct.v1`, as v119 offered no direct request while asking
+first: the agent proposes the page for review, and its card shows. Every
+page still opens only under the rule above.
 
 ```quint
 pure val directOpenCapability: str = "browser.open-direct.v1"

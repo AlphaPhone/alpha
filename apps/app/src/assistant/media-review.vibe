@@ -263,6 +263,19 @@ function repliedDeviceActions(actions: DeviceActionReply["actionResults"]): Read
   return kept
 }
 
+// spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+/**
+ * A turn's device `headers`, offering `browser.open-direct.v1` only while a page the owner's whole message asked for may open
+ * at once (`atOnce`); a turn left declaring nothing is sent with no device headers.
+ */
+export function offeredHeaders(headers: RuntimeRequestHeaders, atOnce: boolean): RuntimeRequestHeaders {
+  const declared = headers["x-eliza-device-capabilities"]
+  if (atOnce || declared === undefined) return headers
+  const kept = declared.split(",").filter((name) => name !== directOpenCapability)
+  if (kept.length > 0) return { ...headers, "x-eliza-device-capabilities": kept.join(",") }
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => !name.startsWith("x-eliza-device-")))
+}
+
 /** Whether the reply ran a device step at once, as the owner's own request, rather than for review. */
 export function ranDirect(actions: DeviceActionReply["actionResults"]): boolean {
   return [...repliedDeviceActions(actions).values()].some((action) => action === "Direct")
@@ -556,6 +569,8 @@ export service MediaReview {
   filesContext(): (FilesReadContext | undefined)!!
   spokenSms(session: Session, message: string, actions: DeviceActionReply["actionResults"], source: SpokenSmsReview): (MediaCard | undefined)!!
   /** Checks for a matching pending proposal while Talk is compact, without staging a review. */
+  /** `headers` for a turn, offering the direct page open only while the owner lets Alpha act on the web without asking. */
+  turnHeaders(headers: RuntimeRequestHeaders): RuntimeRequestHeaders!!
   hasSpokenReview(session: Session, message: string, reply: DeviceActionReply): boolean!!
   spokenFiles(session: Session, message: string, request: DirectFiles, actions: DeviceActionReply["actionResults"]): boolean!!
   spokenFilesFrom(session: Session, message: string, request: FilesContinuation, route: FilesRouteSteps, actions: DeviceActionReply["actionResults"]): boolean!!
@@ -1254,6 +1269,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   return {
     session,
     openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
+    effect turnHeaders(headers) { return offeredHeaders(headers, opensAtOnce(try preferences.get())) },
     effect hasSpokenReview(opened, message, reply) {
       const source = reply.spoken
       const actions = repliedDeviceActions(reply.actionResults)
