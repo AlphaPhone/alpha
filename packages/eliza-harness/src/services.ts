@@ -522,7 +522,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
   const port = await freePort();
   const home = owned(path.join(state, "agent"));
   const child = spawn(node, [pack.bundle, "serve", "--launch", launch, "--state", home, "--http", `127.0.0.1:${port}`], {
-    env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, TZ: "UTC", NODE_EXTRA_CA_CERTS: cloud.caFile },
+    env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, TZ: timeZone ?? "UTC", NODE_EXTRA_CA_CERTS: cloud.caFile },
     stdio: ["pipe", "ignore", "pipe"],
   });
   children.add(child);
@@ -542,8 +542,8 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
  * `real`, and whose agent is the pack's with the phone's own character, so a real model is given the phone's system
  * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
  * directory to keep both in instead, so a restart over it signs the same owner in again and reopens the agent's store.
- * The agent keeps the owner's time zone, the dev server's own, as the phone keeps its owner's; the journeys' agents
- * keep UTC.
+ * The agent runs in the owner's time zone, the dev server's own, as the phone's does (its launch and its process
+ * clock), so "6 PM" is the owner's 6 PM; the journeys' agents keep UTC.
  */
 export async function startEliza(keep?: string, real?: RealModel, speech?: RealSpeech) {
   const { character } = await builtPack();
