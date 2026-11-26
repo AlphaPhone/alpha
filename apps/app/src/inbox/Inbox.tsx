@@ -429,7 +429,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   });
   const connectGmail = route === undefined ? undefined : () => {
     const popup = gmailAuthorizationWindow();
-    void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.connect(route, popup)));
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.consent({ kind: "Connect", route }, popup)));
   };
   const reconnect = state.failure === "Revoked" ? connectGmail : signIn;
   const hidden = new Set(changes.state ? aside(changes.state) : []);

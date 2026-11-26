@@ -340,7 +340,7 @@ describe("Messages on an Alpha image", () => {
     await press("Ben Ortiz");
     await ready(alpha.runtime, Messages, "Ben addressed in New", (s) => s.pane === "New" && s.newDraft.recipient > 0);
     expect(message()?.value).toBe(body);
-    expect(message()?.getAttribute("aria-label")).toBe("Text Ben");
+    await vi.waitFor(() => expect(message()?.getAttribute("aria-label")).toBe("Text Ben"), { timeout: 12_000 });
     await press("Choose contacts");
     await ready(alpha.runtime, Messages, "Recipient picker open", (s) => s.newDraft.picking);
     await press("Dictate a text to Ben");
@@ -363,6 +363,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Messages, "New draft restored", (s) => s.pane === "New" && s.picker.status === "Loaded" && s.newDraft.recipient > 0);
     expect(message()?.value).toBe(dictated);
     await fill("To", "+14155550100, +14155550122");
+    await vi.waitFor(() => expect(message()?.getAttribute("aria-label")).toBe("Text Maya Chen, Ben Ortiz"), { timeout: 12_000 });
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     expect(world.telephony.sent).toEqual([]);
     await press("Send");

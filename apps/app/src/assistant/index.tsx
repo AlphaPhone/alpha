@@ -76,7 +76,7 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
   return <Assistant
     runtime={runtime}
     canReadAloud={readingAllowed}
-    onCloseTextAsk={() => void alpha.back()}
+    onBack={() => void alpha.back()}
     messageActions={messageActions}
     speech={{
       keyboard: voice.state && {
