@@ -789,6 +789,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, false, Editor.canKeepMyChanges(e), !e.titled)] : "";
   const choosesCalendar = reminder || e.form === "NewEvent";
   // v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on every new event; they need this phone's calendar.
+  // The live v119 adapter hid them on the agent's calendar (45f6bed30 prototype/agent-calendar-adapter.ts:312, :328), so here they are dimmed there.
   // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
   const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
   const choosesRepeat = reminder || choosesOptions;
@@ -798,6 +799,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   if (e.form === "NewEvent" && shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const onAgent = destination === "Agent";
+  // A repeat, alert or video link is picked on the calendar shown chosen; keeping that calendar in the draft stops a later Google connection from moving it to the agent's.
+  const picked = (next: Fields) => withExtras({ ...next, calendar: destination });
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   const submit = () => {
     if (!reminder) { void editor.send(save); return; }
@@ -897,7 +900,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
             <Video aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
             <span className="grow text-body leading-plain">Video link</span>
-            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain) || (fields.video !== true && !offeredOn(onAgent, false, false, true))} onCheckedChange={(video) => withExtras({ ...fields, video })} />
+            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain) || (fields.video !== true && !offeredOn(onAgent, false, false, true))} onCheckedChange={(video) => (video ? picked : withExtras)({ ...fields, video })} />
           </CalendarFormCard>
         ) : null}
         <CalendarFormCard className="gap-1 py-2.5 pr-3 pl-4">
@@ -950,7 +953,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                     <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat}
                       onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
                   )) : repeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
-                    disabled={!editor.can(plain) || !offeredOn(onAgent, repeat !== "NoRepeat", false, false)} onClick={() => withExtras({ ...fields, repeat })} />)}
+                    disabled={!editor.can(plain) || !offeredOn(onAgent, repeat !== "NoRepeat", false, false)} onClick={() => (repeat === "NoRepeat" ? withExtras : picked)({ ...fields, repeat })} />)}
                 </div>
               </CalendarFormRow>
             ) : null}
@@ -959,7 +962,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                 <div role="group" aria-label="Alert" className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
                   {alerts.map(({ minutes, label }) => (
                     <CalendarChip key={label} label={label} chosen={minutes === fields.alert} disabled={!editor.can(plain) || !offeredOn(onAgent, false, minutes !== undefined, false)} onClick={() => {
-                      if (minutes !== undefined) withExtras({ ...fields, alert: minutes });
+                      if (minutes !== undefined) picked({ ...fields, alert: minutes });
                       else {
                         const { alert: _alert, ...next } = fields;
                         withExtras(next);

@@ -240,6 +240,39 @@ describe("Calendar without a connected account", () => {
     expect(button("Open Calendar settings")).toBeUndefined();
   });
 
+  it("Keeps a draft's repeat on this phone's calendar when Google connects before it is resumed (spec/app/calendar/writing.md, \"The form offers with the agent's calendar only what it holds, and keeps the calendar chosen\"; spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    world.calendar.down = true;
+    const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.owner > 0 && !state.connected && state.phoneRows === 1);
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.shown && state.form === "NewEvent" && state.receipts.status === "Loaded");
+    await fill("Title", "Piano");
+    expect([Boolean(button("Your agent's calendar")), button("This phone's calendar")?.getAttribute("aria-pressed")]).toEqual([false, "true"]);
+    await press("Weekly");
+    await until(alpha, runtime, Editor, (state) => state.titled && state.kept);
+    await press("Back to calendar");
+    await until(alpha, runtime, Editor, (state) => !state.shown && state.banner === "Available");
+
+    // Google connects while the draft waits; Calendar reads it when it comes forward again.
+    world.calendar.down = false;
+    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" })));
+    await until(alpha, runtime, View, (state) => !state.front);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.connected);
+    await press("Resume event draft");
+    await until(alpha, runtime, Editor, (state) => state.shown && state.receipts.status === "Loaded");
+    const pressed = (name: string) => button(name)?.getAttribute("aria-pressed");
+    expect([pressed("This phone's calendar"), pressed("Your agent's calendar"), pressed("Weekly")]).toEqual(["true", "false", "true"]);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NoForm" && state.write.outcome === "Confirmed");
+    expect(world.calendar.phoneEvents.find(({ title }) => title === "Piano")).toMatchObject({ recurring: true });
+    expect(world.calendar.events.some(({ title }) => title === "Piano")).toBe(false);
+  });
+
   it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
     const { alpha, runtime } = await onDisconnected();
     await widen(alpha, runtime);
