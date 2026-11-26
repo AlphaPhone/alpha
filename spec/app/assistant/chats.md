@@ -94,8 +94,10 @@ pure val weight_listed = 3
 
 ### The list of conversations is read whenever it is shown
 
-Chat history opens as a sheet over Ask Alpha. Back closes that sheet before
-it lowers Ask Alpha.
+As in Alpha's Sunday v119 build (old-line Alpha 45f6bed30,
+settings-adapter.ts:1038-1043), the owner lists the conversations, restores
+one and starts a new one from Agent activity in Settings. Ask Alpha's own
+chat actions offer only Attach media and Search chat (template.html:59-67).
 
 ```quint
 pure def browse(c: Chats): Moved =

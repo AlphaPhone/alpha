@@ -12,7 +12,6 @@ import { useMachine as useConversation } from "../../gen/app__assistant.react.ts
 import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
-import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
@@ -32,7 +31,6 @@ import type { Machine as ContactMachine } from "../../gen/app__contacts.effect.v
 import { useMachine as useContact } from "../../gen/app__contacts.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
-import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
@@ -603,7 +601,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const search = useSearch(runtime);
   const reply = useReply(runtime);
   const shell = useShell(runtime);
-  const layers = useLayers(runtime);
   const dock = useDock(runtime);
   const comms = useComms(runtime);
   const contact = useContact(runtime).state;
@@ -642,7 +639,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     if (origin?.tag !== "ContactDock") returnChatFocus();
     else if (origin.route === searchRoute) document.getElementById(contactChatActionsId(origin.route, origin.person))?.focus();
   };
-  const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
+  const history = useHistorySheets(chats, search, seen, free, beginSearch, returnSearchFocus);
   const subject = onComms ? comms.state?.key : undefined;
   const priorStage = comms.state?.stage.at(-1);
   const returnTo = priorStage === undefined ? undefined : commsViewOf(priorStage.app);
@@ -825,10 +822,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu'], [role='dialog'], [role='alertdialog']"))) return;
             void runtime.runPromise(restTyping);
           } : undefined,
-          onHistory: history.browse,
           onSearch: history.search,
-          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
-          making: making(shown),
           onRemoveAttachment: onComms ? contactDraft === undefined || inFlight(talking.turn) ? undefined : (id) => {
             void runtime.runPromise(removeContactFile(contactDraft.target, id));
           } : (id) => {

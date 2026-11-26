@@ -15,8 +15,6 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     onAttach,
     onTalk: fn(),
     onSearch: fn(),
-    onNew: fn(),
-    onHistory: fn(),
     onFocusField,
     onSend: undefined,
     onStop: undefined,
