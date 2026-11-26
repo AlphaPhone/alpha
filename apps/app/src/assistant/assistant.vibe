@@ -329,7 +329,7 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
     const empty = (writing: Composer.Composer) =>
       writing.binding.owner === seat.number && writing.binding.conversation === 0 && writing.slot === "Open"
       && writing.away === "Free" && !writing.unsettled && writing.draft.sync === "Kept" && !Composer.content(writing.editor)
-      && !Composer.attached(writing.editor) && board.snapshot().typed === "" && !board.sendWhenMade
+      && !Composer.attached(writing.editor) && board.snapshot().typed === "" && board.sendWhenMade === 0
       && board.waitingRequest === undefined && board.postingRequest === undefined
     if (!empty(try composer.get())) return undefined
     const begin = { type: "start", replying: false, holding: false } as const
@@ -865,6 +865,21 @@ effect function settled(hold: number, sent: boolean): void!!(Talk | Composer.Mac
   }
 }
 
+effect function arrived(recorded: boolean): void!!(Composer.Machine | Talk) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  const before = try composer.get()
+  if (!Composer.canArrived(before, recorded)) return
+  const { typed, saved } = board.snapshot()
+  if (!recorded) board.change({ typed: saved === "" ? typed : typed === "" ? saved : `${saved}\n${typed}`, saved: "" })
+  const accepted = try contained(composer.send({ type: "arrived", recorded }), "telling the composer")
+  if (!accepted) {
+    if (!recorded) board.change({ typed, saved })
+    return
+  }
+  if (recorded) board.change({ saved: "" })
+}
+
 function giveBack(board: Board) {
   const { typed } = board.snapshot()
   board.change({ typed: typed === "" ? board.outgoing : `${board.outgoing}\n${typed}` })
@@ -886,7 +901,7 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
     when { tag: "Prompted" }: run("prompted", Effect.void);
     when { tag: "Kept", let messages }: run("kept", effect { try contained((try Chats.Machine).send({ type: "kept", messages }), "counting kept messages") });
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
-    when { tag: "Arrived", let recorded }: run("arrived", effect { try contained((try Composer.Machine).send({ type: "arrived", recorded }), "telling the composer") });
+    when { tag: "Arrived", let recorded }: run("arrived", arrived(recorded));
     when { tag: "Navigate", let turn, let view }: answer("navigate", effect {
       const shell = try Shell
       const shown = showing(try shell.get(), view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view the agent named"))
@@ -1407,13 +1422,34 @@ const opening = following(Composer.Machine, (composer) => (composer.slot === "Cl
 // spec/app/assistant/composer.md, "Edits are saved while no send is in hand and storage has not failed"
 const saving = following(Composer.Machine, (composer) => (Composer.canSave(composer) ? composer.draft.edits : undefined), Composer.Machine, (edits): Composer.Event | undefined => (edits === undefined ? undefined : { type: "save" }))
 
-// spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"; spec/app/assistant/composer.md, "A typed draft in a conversation that vanished moves into the new chat"
+// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"; spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"; spec/app/assistant/composer.md, "A typed draft in a conversation that vanished moves into the new chat"
 const bound = started(effect {
   const chats = try Chats.Machine
   const composer = try Composer.Machine
   const conversation = try Conversation.Machine
   const { board } = try Talk
+  let leftAt: number | undefined
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(chats.changes, composer.changes), conversation.changes), effect ([[shown, writing], talking]) => {
+    if (shown.chosen !== leftAt) {
+      if (!(try contained(conversation.send({ type: "leave" }), "leaving the previous conversation"))) return
+      leftAt = shown.chosen
+    }
+    const live = try chats.get()
+    const turn = (try conversation.get()).turn
+    const stagedContact = board.staged
+    if (stagedContact?.contactDraft !== undefined && (stagedContact.ticket !== turn.send.id || !Conversation.inFlight(turn))) {
+      board.staged = undefined
+      if (stagedContact.key !== undefined) try dropFiles(stagedContact.key)
+    }
+    const posting = board.postingRequest
+    if (posting?.request.contact !== undefined && (turn.send.id > posting.ticket
+      || (turn.send.id === posting.ticket && !Conversation.inFlight(turn)))) board.postingRequest = undefined
+    if (board.sendWhenMade > 0 && !Chats.making(live) && live.chosen === 0 && live.make.id >= board.sendWhenMade) board.sendWhenMade = 0
+    const request = board.waitingRequest
+    if (request !== undefined && !Chats.making(live) && ((live.chosen === 0 && live.make.id >= request.ticket) || (live.chosen !== 0 && live.chosen === leftAt))) {
+      board.waitingRequest = undefined
+      if (live.chosen !== 0) try postRequest(request)
+    }
     if (board.draftSeat === undefined || writing.binding.owner !== board.draftSeat.number) return
     const offered = board.snapshot().transcript
     if (offered !== undefined && offered.binding.owner !== writing.binding.owner) board.change({ transcript: undefined })
@@ -1440,9 +1476,9 @@ const bound = started(effect {
       }
       return
     }
-    if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
+    if (board.sendWhenMade > 0 && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
       if (writing.slot !== "Open" || writing.draft.sync === "Saving") return
-      board.sendWhenMade = false
+      board.sendWhenMade = 0
       const event: Composer.Event = { type: "hold", askable: Conversation.askable(talking) }
       if (Composer.enabled(writing, event)) board.outgoing = board.snapshot().typed
       if (try contained(composer.send(event), "sending what waited for its conversation")) board.change({ typed: "" })
@@ -1475,7 +1511,7 @@ effect function postRequest(request: CommsRequest): void!!ContactAttachmentScope
 export effect function askComms(request: CommsRequest): void!!(Chats.Machine | Composer.Machine | ContactAttachmentScope) {
   const { board } = try Talk
   const conversation = try (try Conversation.Machine).get()
-  if (request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade) return
+  if (request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade > 0) return
   const contact = request.contact
   if (contact === undefined && request.text.trim() === "") return
   if (contact !== undefined && (board.snapshot().contactDraft !== contact.draft || contact.draft.target.about !== request.about
@@ -1485,39 +1521,36 @@ export effect function askComms(request: CommsRequest): void!!(Chats.Machine | C
     try postRequest(request)
     return
   }
-  board.waitingRequest = request
+  const ticket = (try chats.get()).make.id + 1
   const free = freedom(conversation, try (try Composer.Machine).get(), 0)
-  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request")) && board.waitingRequest === request) board.waitingRequest = undefined
+  board.waitingRequest = { ...request, ticket }
+  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request")) && board.waitingRequest?.ticket === ticket) {
+    board.waitingRequest = undefined
+  }
 }
 
-// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
-const requested = started(effect {
+export effect function startAndSend(start: Chats.Event): void!!(Chats.Machine | Talk) {
   const chats = try Chats.Machine
-  const conversation = try Conversation.Machine
   const { board } = try Talk
-  let leftFor: number | undefined
-  try Stream.runForEach(Stream.zipLatest(chats.changes, conversation.changes), effect () => {
-    const shown = try chats.get()
-    if (leftFor !== shown.chosen) {
-      if (!(try contained(conversation.send({ type: "leave" }), "leaving the previous conversation"))) return
-      leftFor = shown.chosen
-      if ((try chats.get()).chosen !== shown.chosen) return
-    }
-    const turn = (try conversation.get()).turn
-    const staged = board.staged
-    if (staged?.contactDraft !== undefined && (staged.ticket !== turn.send.id || !Conversation.inFlight(turn))) {
-      board.staged = undefined
-      if (staged.key !== undefined) try dropFiles(staged.key)
-    }
-    const posting = board.postingRequest
-    if (posting?.request.contact !== undefined && (turn.send.id > posting.ticket
-      || (turn.send.id === posting.ticket && !Conversation.inFlight(turn)))) board.postingRequest = undefined
-    const request = board.waitingRequest
-    if (request === undefined || Chats.making(shown)) return
-    board.waitingRequest = undefined
-    if (shown.chosen !== 0) try postRequest(request)
-  })
-}, "leaving the previous conversation before sending its replacement's request")
+  const ticket = (try chats.get()).make.id + 1
+  board.queueSend(ticket)
+  if (!(try contained(chats.send(start), "starting a conversation to send")) && board.sendWhenMade === ticket) {
+    board.sendWhenMade = 0
+  }
+}
+
+export effect function holdAndSend(hold: Composer.Event): void!!(Composer.Machine | Talk) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  const text = board.snapshot().typed
+  board.hold(text)
+  board.type("")
+  if (!(try contained(composer.send(hold), "holding a message to send")) && board.outgoing === text) {
+    const current = board.snapshot().typed
+    board.type(current === "" ? text : `${text}\n${current}`)
+    board.outgoing = ""
+  }
+}
 
 // spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows"
 const reviewedInFiles = started(effect {
@@ -1531,7 +1564,6 @@ const reviewedInFiles = started(effect {
     try review.reviewInFiles()
   })
 }, "building the Files cards that waited for Files to be opened")
-
 const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
 }, "asking what was typed on the communications dock")
@@ -1593,12 +1625,23 @@ const steppingBack = started(effect {
   const composer = try Composer.Machine
   const voice = try Voice.Machine
   const attachments = try Attachments.Machine
+  const mail = try MailQuestions
+  const comms = try Comms.Machine
+  const shell = try Shell
   const layers = try Layers
   let offered = false
+  const mailChanges = Stream.callback<boolean>((queue) => effect {
+    Queue.offerUnsafe(queue, Boolean(mail.snapshot().question))
+    const stop = mail.subscribe(() => { Queue.offerUnsafe(queue, Boolean(mail.snapshot().question)) })
+    try addFinalizer(() => sync(stop))
+  })
   const composing = Stream.zipLatest(search.changes, composer.changes)
   const media = Stream.zipLatest(voice.changes, attachments.changes)
-  try Stream.runForEach(Stream.zipLatest(composing, media), effect ([[finding, writing], [speech, picker]]) => {
-    const has = finding.open || writing.editor.quote > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker) || Attachments.canCancel(picker)
+  const overlays = Stream.zipLatest(mailChanges, Stream.zipLatest(comms.changes, shell.changes))
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(composing, media), overlays), effect ([[[finding, writing], [speech, picker]], [hasMail, [stage, shown]]]) => {
+    const previous = stage.stage.at(-1)
+    const hasStage = previous !== undefined && canReturnCommsView(shown, commsViewOf(previous.app))
+    const has = finding.open || writing.editor.quote > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker) || Attachments.canCancel(picker) || hasMail || hasStage
     if (has === offered) return
     if (try contained(layers.send({ type: has ? "offerStep" : "withdrawStep", place: "assistant" }), "offering Back")) offered = has
   })
@@ -1756,7 +1799,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     picker,
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, retireContactAttachments, carried, carriedAloud, agentWarmUp,
+    reached, looked, opening, saving, bound, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, retireContactAttachments, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

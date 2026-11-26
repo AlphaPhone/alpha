@@ -32,6 +32,8 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
   onBeginEditing?: () => void;
   /** Schedules and cancels a stationary press on a tile. */
   hold?: LauncherHold;
+  /** Replaces each app tile's gesture surface when its owning frame or route changes without unmounting the Apps opener. */
+  tileGestureScope?: string;
   /** While editing, takes a tile off Home, by its control or Delete; left out while a change is being saved. */
   onRemove?: (id: string) => void;
   /** While editing, moves a tile, by dragging it onto another or with the arrow keys; left out while a change is being saved. */
@@ -58,16 +60,16 @@ type Drag = {
  * removed with Delete; keyboard focus stays on the tile it moved.
  * @model spec/app/home/tiles.md
  */
-export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, drawerInert, onBeginEditing, hold, onRemove, onMove, className, ...props }: HomeTileGridProps) {
+export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, drawerInert, onBeginEditing, hold, tileGestureScope, onRemove, onMove, className, ...props }: HomeTileGridProps) {
   const draggingRef = useRef<Drag | undefined>(undefined);
-  const movedRef = useRef<string | null>(null);
+  const movedRef = useRef<{ id: string; from: number } | null>(null);
 
   const keys = (event: KeyboardEvent, index: number, id: string) => {
     const step = steps[event.key];
     const onto = step === undefined ? undefined : tiles[index + step];
     if (onto && onMove) {
       event.preventDefault();
-      movedRef.current = id;
+      movedRef.current = { id, from: index };
       onMove({ id, onto: onto.id, behind: step === 1 });
     } else if ((event.key === "Delete" || event.key === "Backspace") && onRemove) {
       event.preventDefault();
@@ -141,6 +143,7 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, dra
       {tiles.map((tile, index) => (
         <HomeTile
           key={tile.id}
+          gestureScope={tileGestureScope}
           data-home-tile={tile.id}
           label={tile.label}
           icon={tile.icon}
@@ -149,7 +152,12 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, dra
           editing={editing}
           aria-keyshortcuts={editing ? "ArrowLeft ArrowRight ArrowUp ArrowDown Delete" : undefined}
           ref={(button: HTMLButtonElement | null) => {
-            if (button && movedRef.current === tile.id && document.activeElement !== button) button.focus();
+            if (!editing) { movedRef.current = null; return; }
+            const moved = movedRef.current;
+            if (button && moved?.id === tile.id && index !== moved.from) {
+              movedRef.current = null;
+              if (document.activeElement !== button) button.focus();
+            }
           }}
           {...(editing
             ? {

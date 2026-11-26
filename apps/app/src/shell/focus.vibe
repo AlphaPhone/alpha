@@ -105,7 +105,15 @@ import type { Heard } from page
 const frame = Effect.sleep("16 millis")
 
 /** The control the owner last focused outside a sheet, menu or dialog: the opener of the next layer. */
-let outside = ""
+service Outside {
+  get(): string!!
+  set(key: string): void!!
+}
+
+const outsideStore = Layer.sync(Outside, () => {
+  let key = ""
+  return { get: () => sync(() => key), set: (next: string) => sync(() => { key = next }) }
+})
 
 /** What the screen showing gives focus to: the Apps drawer, Home's first control, or the app's title. */
 function targetFor(s: Shown): Target {
@@ -117,9 +125,9 @@ effect function tell(event: Event): (Focus.Focus | undefined)!!Focus.Machine {
 }
 
 // spec/app/shell/focus.md, "Focus is told as it moves"
-effect function heardFocus(): void!!Focus.Machine {
+effect function heardFocus(): void!!(Focus.Machine | Outside) {
   const key = active()
-  if (key !== "" && !layeredNow()) outside = key
+  if (key !== "" && !layeredNow()) try (try Outside).set(key)
   const now = try (try Focus.Machine).get()
   if (key === now.active) return
   try tell(key === "" ? { type: "blurred" } : { type: "focused", key })
@@ -157,15 +165,8 @@ const watching = started(effect {
 }, "focus")
 
 // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it"
-effect function closed(layer: string): void!!Focus.Machine {
+effect function waitForOpener(waited: string): void!!Focus.Machine {
   const focus = try Focus.Machine
-  const before = try focus.get()
-  const opener = before.openers.find((one) => one.layer === layer)?.opener ?? ""
-  const after = try tell({ type: "layerClosed", layer, openerReady: shown(opener) })
-  if (after === undefined) return
-  if (after.restores > before.restores) give(after.lastRestore)
-  if (after.waiting === "") return
-  const waited = after.waiting
   const returned = effect {
     while (!shown(waited)) try frame
     const now = try focus.get()
@@ -176,35 +177,52 @@ effect function closed(layer: string): void!!Focus.Machine {
   if (ended && Focus.canWaitEnds(try focus.get())) try tell({ type: "waitEnds" })
 }
 
-const layering = started(effect {
+effect function closed(layer: string): (string | undefined)!!Focus.Machine {
+  const focus = try Focus.Machine
+  const before = try focus.get()
+  const opener = before.openers.find((one) => one.layer === layer)?.opener ?? ""
+  const after = try tell({ type: "layerClosed", layer, openerReady: shown(opener) })
+  if (after === undefined) return undefined
+  if (after.restores > before.restores) give(after.lastRestore)
+  return after.waiting === "" ? undefined : after.waiting
+}
+
+const layering = started(Effect.scoped(effect {
   if (!paged()) return
   const layers = try Layers.Machine
   const shell = try Shell.Machine
+  const outside = try Outside
+  const focusMachine = try Focus.Machine
+  const waits = try FiberMap.make<string>()
   const drawer = Stream.changes(Stream.map(shell.changes, (state) => state.drawer))
   let open: ReadonlyArray<string> = []
   try Stream.runForEach(Stream.zipLatest(layers.changes, drawer), effect ([l, apps]) => {
     const now = [...(apps ? ["apps-drawer"] : []), ...l.open.map((layer) => layer.id)]
     if (now.some((id) => !open.includes(id))) try heardFocus()
-    for (const id of now) if (!open.includes(id)) try tell({ type: "layerOpened", layer: id, opener: id === "apps-drawer" ? "home-apps" : outside })
+    for (const id of now) if (!open.includes(id)) try tell({ type: "layerOpened", layer: id, opener: id === "apps-drawer" ? "home-apps" : try outside.get() })
     for (const id of open) {
       if (now.includes(id)) continue
       if (id === "apps-drawer") {
         if (focusedInApps()) try tell({ type: "blurred" })
         else try heardFocus()
       }
-      try closed(id)
+      const waiting = try closed(id)
+      if (waiting !== undefined) {
+        const work = effect { provide Focus.Machine = focusMachine { try waitForOpener(waiting) } }
+        try FiberMap.run(waits, "opener", work)
+      }
     }
     open = now
   })
-}, "focus")
+}), "focus")
 
 /** Focus, in memory: given to each new screen, back to a layer's opener, told as it moves, and marked on the page while the owner moves by keyboard. */
-export const focus = together(
+export const focus = Layer.provideMerge(together(
   reacting(Focus, {}),
   following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? (s.drawer ? "apps-drawer" : "home"), target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
   framed,
   watching,
   layering,
   applying(Focus.Machine, (f) => f.keyboard, effect (keyboard) => { try (try Device).mark("keyboard", keyboard ? "" : undefined) }),
-)
+), outsideStore)
 

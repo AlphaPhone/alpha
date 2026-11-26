@@ -166,15 +166,15 @@ export interface Board {
   type(text: string): void
   /** Hold `text` as the outgoing message for the send in hand. */
   hold(text: string): void
-  /** Mark a send waiting for the new conversation to be made. */
-  queueSend(): void
-  /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
+  /** Mark a send waiting for the new conversation to be made under `ticket`. */
+  queueSend(ticket: number): void
+  /** The text a send in hand carries, the last text sent, and the make ticket of a send waiting for its conversation. */
   outgoing: string
   lastSent: string
   lastPost: PostedMessage | undefined
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   readonly lastSentId: string
-  sendWhenMade: boolean
+  sendWhenMade: number
   staged: StagedFiles | undefined
   lastTranscriptOffer: number
   previewFile(file: Attached): number
@@ -185,7 +185,7 @@ export interface Board {
   forgetPosition(): void
   /** The remembered position for `ticket`, if the locator still holds that ticket. */
   positionFor(ticket: number): Sighting | undefined
-  waitingRequest: CommsRequest | undefined
+  waitingRequest: (CommsRequest & { readonly ticket: number }) | undefined
   postingRequest: { readonly ticket: number; readonly request: CommsRequest } | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
@@ -273,12 +273,12 @@ export const talk = Layer.effect(Talk, effect {
     },
     type: (text) => board.change({ typed: text }),
     hold: (text) => { board.outgoing = text },
-    queueSend: () => { board.sendWhenMade = true },
+    queueSend: (ticket) => { board.sendWhenMade = ticket },
     outgoing: "",
     lastSent: "",
     lastPost: undefined,
     get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? "" },
-    sendWhenMade: false,
+    sendWhenMade: 0,
     staged: undefined,
     lastTranscriptOffer: 0,
     previewFile: (file) => {
@@ -440,7 +440,7 @@ export const talk = Layer.effect(Talk, effect {
     board.outgoing = ""
     board.lastSent = ""
     board.lastPost = undefined
-    board.sendWhenMade = false
+    board.sendWhenMade = 0
     board.waitingRequest = undefined
     board.postingRequest = undefined
     board.change({

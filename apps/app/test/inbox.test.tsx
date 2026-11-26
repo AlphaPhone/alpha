@@ -6,7 +6,7 @@ import { Machine as List } from "../gen/app__inbox.effect.vibe";
 import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
 import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Changes } from "../gen/app__inbox__sending.effect.vibe";
-import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
+import { Machine as Writing, letterNamed } from "../gen/app__inbox__drafts.effect.vibe";
 import { Machine as Adding } from "../gen/app__inbox__adding.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
@@ -16,12 +16,15 @@ import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import assistant from "../src/assistant/index.tsx";
 import { openInboxAccount } from "../src/account/profile.vibe";
-import { useInEmail } from "../src/inbox/suggestion.vibe";
+import { handOver } from "../src/inbox/adding.vibe";
+import { Offers, useInEmail } from "../src/inbox/suggestion.vibe";
+import { linkOf } from "../src/inbox/links.ts";
 import inbox from "../src/inbox/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
-import { Effect } from "effect";
-import { Letters, nothing } from "../src/inbox/composer.vibe";
+import { asleep, button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { Effect, Exit } from "effect";
+import { Letters, begin, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
+import { Cloud } from "../src/platform/cloud.vibe";
 import { type InboxNoticeScene, letter } from "./fakes/inbox.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -980,4 +983,195 @@ it("keeps attacker URLs and phone numbers from a reviewed email out of owner tex
   const unsupported = await runCase(true);
   expect(unsupported.said).toEqual([]);
   expect(unsupported.metadata).toEqual([]);
+});
+
+async function openInboxWorld(world = scene()) {
+  const running = await open(world, only("home", "view:Inbox", "view:Settings"));
+  const runtime = inbox.runtime(running.alpha);
+  await until(running.alpha, home.runtime(running.alpha), Home, (s) => s.tiles.load.status === "Loaded");
+  await openInboxFromHome(running.alpha);
+  await until(running.alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
+  return { ...running, world, runtime };
+}
+
+async function flushDraft(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>) {
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+}
+
+async function openSaveReview(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>, kind: "SaveDraft" | "ReplaceDraft" = "SaveDraft") {
+  await flushDraft(alpha, runtime);
+  await menu("Save to Gmail", "Draft actions");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === kind);
+}
+
+async function loseNextSave(alpha: Alpha, world: ReturnType<typeof scene>, runtime: ReturnType<typeof inbox.runtime>, kind: "SaveDraft" | "ReplaceDraft", buttonName: "Save" | "Replace") {
+  await openSaveReview(alpha, runtime, kind);
+  world.inbox.rejectDraftReply = true;
+  await confirm(buttonName);
+  await until(alpha, runtime, Changes, (s) => s.kind === kind && s.attempt.outcome === "Unknown");
+  await until(alpha, runtime, Writing, (s) => s.letter.unsure);
+}
+
+async function saveReplyDraft(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>, body: string) {
+  await row("Standup notes");
+  await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+  await menu("Reply");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply");
+  await fill("Message", body);
+  await openSaveReview(alpha, runtime);
+  await confirm("Save");
+  await until(alpha, runtime, Changes, (s) => s.kind === "SaveDraft" && s.attempt.outcome === "Confirmed");
+  await until(alpha, runtime, Writing, (s) => s.letter.gmail !== 0);
+}
+
+it("Distinguishes prose colons from bare-domain phishing labels in linkOf (spec/app/inbox/message.md, \"Only an https link without credentials in it can be reviewed and opened; any other link stays text\")", () => {
+  expect([
+    linkOf("https://northpoint.test/room", "Meeting: 3pm").mismatch,
+    linkOf("https://evil.example/steal", "bank.example/login").mismatch,
+    linkOf("https://bank.example/login", "bank.example/login").mismatch,
+  ]).toEqual([false, true, false]);
+});
+
+it("Refuses oversized file handoffs into a new draft with NoRoom (spec/app/inbox/adding.md, \"A file handed over from Files or Photos is shown to the owner before it joins the draft open, or starts a new message from the account given, and only where it fits\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  expect(await runtime.runPromise(handOver({ name: "huge.jpg", mimeType: "image/jpeg", size: 6 * 1024 * 1024, data: "" }, "Photos"))).toBe(true);
+  await until(alpha, runtime, Adding, (s) => s.thing !== 0 && s.into === 0);
+  await confirm("New email");
+  await until(alpha, runtime, Adding, (s) => s.thing === 0);
+  const addingState = await runtime.runPromise(Adding.use((m) => m.get()));
+  expect([addingState.refused, (await runtime.runPromise(Writing.use((m) => m.get()))).open]).toEqual(["NoRoom", false]);
+});
+
+it("Deduplicates ReplyAll recipients case-insensitively and drops invalid addresses (spec/app/inbox/drafts.md, \"A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  expect(await runtime.runPromise(begin({
+    kind: "ReplyAll",
+    account: 1,
+    message: { id: "g4", from: "Sam <Sam@okafor.example>", others: ["sam@okafor.example", "alex@okafor.example", "ALEX@okafor.example", "not-an-email"], subject: "Standup notes", body: "", historyId: null, files: [] },
+  }))).toBe(true);
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "ReplyAll");
+  const replyState = await runtime.runPromise(Writing.use((m) => m.get()));
+  const replyWords = await runtime.runPromise(Letters.use((l) => Effect.sync(() => l.words(replyState.letter.id))));
+  expect([replyState.letter.recipients, replyWords.to, replyWords.cc]).toEqual([2, ["Sam@okafor.example"], ["alex@okafor.example"]]);
+});
+
+it("Invalidates an open draft send review when the draft changes (spec/app/inbox/sending.md, \"A change to what is under review, or to a draft whose operation is recorded and not yet sent, stops it and says it must be looked at again\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open);
+  await fill("Message", "First revision");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+  await press("Send email");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  await fill("Message", "Edited during review");
+  await vi.waitFor(async () => {
+    const ops = await runtime.runPromise(Changes.use((m) => m.get()));
+    expect([ops.review.showing, ops.changed]).toEqual([false, true]);
+  }, { timeout: 3_000 });
+});
+
+it("Recovers from an externally deleted 404 Gmail draft copy and an unsure draft save (spec/app/inbox/letter.md, \"A Gmail copy read unchanged since the revision it was made on lets the draft be saved over it; one changed is a clash; one gone is saved anew\"; spec/app/inbox/drafts.md, \"Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read\")", async () => {
+  const { alpha, world, runtime } = await openInboxWorld();
+  await saveReplyDraft(alpha, runtime, "Draft for copy check");
+  await fill("Message", "Edited after Gmail deleted copy");
+  await flushDraft(alpha, runtime);
+  world.inbox.drafts.clear();
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => s.lookup.status !== "Loading");
+  const afterGone = await runtime.runPromise(Writing.use((m) => m.get()));
+  expect([afterGone.lookup.status, afterGone.letter.gmail]).toEqual(["Loaded", 0]);
+
+  await loseNextSave(alpha, world, runtime, "SaveDraft", "Save");
+  await flushDraft(alpha, runtime);
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => !s.letter.unsure && s.lookup.status === "Loaded");
+  expect(told()).toContain("Your save did not reach Gmail");
+});
+
+it("Reports SaveNotFound when an unsure ReplaceDraft did not change Gmail's copy (spec/app/inbox/drafts.md, \"What the read finds settles an unsure draft, and the owner is told whether the lost save was found; it lets a draft be saved over a copy unchanged since it was made, or stops it at a clash; nothing is saved over either until the owner chooses\")", async () => {
+  const { alpha, world, runtime } = await openInboxWorld();
+  await saveReplyDraft(alpha, runtime, "Original Gmail copy");
+  await fill("Message", "Updated copy whose replace is lost");
+  await flushDraft(alpha, runtime);
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => s.lookup.status === "Loaded" && s.letter.verified === s.letter.revision);
+  await loseNextSave(alpha, world, runtime, "ReplaceDraft", "Replace");
+  await flushDraft(alpha, runtime);
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => !s.letter.unsure && s.lookup.status === "Loaded");
+  const settled = await runtime.runPromise(Writing.use((m) => m.get()));
+  expect([settled.notice, settled.letter.draft.sync, settled.letter.gmail !== 0, told().includes("Your save did not reach Gmail")])
+    .toEqual(["SaveNotFound", "Edited", true, true]);
+});
+
+it("Sends a draft saved in Gmail with its draftId (spec/app/inbox/sending.md, \"A draft's operation is reviewed as the draft is, on its From account, once it is wholly kept on the phone, while nothing else is under way and no unknown outcome is unseen\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  await saveReplyDraft(alpha, runtime, "Send with Gmail draft id");
+  const cloud = await runtime.runPromise(Cloud);
+  const sendProposals: Array<{ kind?: string; draftId?: string; expectedDigest?: string }> = [];
+  const prepare = cloud.client.gmailPrepare.bind(cloud.client);
+  const spy = vi.spyOn(cloud.client, "gmailPrepare").mockImplementation((args, opts) => {
+    if (args.proposal.kind === "send") sendProposals.push(args.proposal);
+    return prepare(args, opts);
+  });
+  try {
+    await press("Send email");
+    await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+    await confirm("Send");
+    await until(alpha, runtime, Changes, (s) => s.kind === "Send" && s.attempt.outcome === "Confirmed");
+    await until(alpha, runtime, Writing, (s) => !s.open);
+  } finally {
+    spy.mockRestore();
+  }
+  expect([Boolean(sendProposals[0]?.draftId), Boolean(sendProposals[0]?.expectedDigest)]).toEqual([true, true]);
+});
+
+it("Persists a suggestion inserted into a shelved draft across restart (spec/app/inbox/suggestion.md, \"What goes in is the text shown, where it was aimed, as the owner confirmed it, once\")", async () => {
+  const { alpha, world, close, runtime } = await openInboxWorld();
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open);
+  const shelvedId = (await runtime.runPromise(Writing.use((m) => m.get()))).letter.id;
+  await fill("Message", "Initial note.");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+  await hardware("back");
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.includes(shelvedId));
+  const offered = await runtime.runPromise(Effect.gen(function* () {
+    const state = yield* (yield* Writing).get();
+    const letter = letterNamed(state, shelvedId);
+    const text = (yield* Offers).add("Appended from Alpha.", undefined);
+    return Exit.isSuccess(yield* Effect.exit((yield* Offering).send({ type: "suggest", text, draft: shelvedId, revision: letter.revision }, "Agent")));
+  }));
+  expect(offered).toBe(true);
+  await press("Review email suggestion");
+  await until(alpha, runtime, Offering, (s) => s.review.showing && s.draft === shelvedId);
+  await confirm("Add");
+  await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
+  await close();
+
+  const reopened = await open(world, only("home", "view:Inbox", "view:Settings"));
+  const restored = inbox.runtime(reopened.alpha);
+  await until(reopened.alpha, restored, Writing, (s) => s.shelf.shelved.includes(shelvedId));
+  const persistedWords = await restored.runPromise(Letters.use((l) => Effect.sync(() => l.words(shelvedId).text)));
+  expect(persistedWords).toBe("Initial note.\n\nAppended from Alpha.");
+});
+
+it("Dispatches a held Archive after restart once accounts restore its grant (spec/app/inbox/sending.md, \"A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed\")", async () => {
+  const { alpha, world, close, runtime } = await openInboxWorld();
+  await choose("Standup notes");
+  await menu("Archive", "Mail options");
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (s) => s.kind === "Archive" && s.undo.holding === "Held");
+  await close();
+
+  asleep(world, 15_000);
+  const reopened = await open(world, only("home", "view:Inbox", "view:Settings"));
+  const restored = inbox.runtime(reopened.alpha);
+  await until(reopened.alpha, restored, List, (s) => s.accounts.status === "Loaded");
+  await vi.waitFor(async () => {
+    const ops = await restored.runPromise(Changes.use((m) => m.get()));
+    expect([ops.kind, ops.attempt.outcome, world.inbox.changes.at(-1)]).toEqual(["Archive", "Confirmed", "archive g4"]);
+  }, { timeout: 5_000 });
 });
