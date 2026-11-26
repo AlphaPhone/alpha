@@ -21,13 +21,10 @@ import home from "../src/home/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { placeOf } from "../src/voice/voice.vibe";
 import { button, chatAction, closeAll, drawn, fill, filledPhoneKeypad, hardware, later, only, open as openAlpha, press, underAct, until } from "./alpha.tsx";
-import { type Scene, scene } from "./fakes/scene.ts";
+import { alphaImage as image, type Scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
-
-/** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
-const image = () => ({ ...scene(), phone: true, image: true });
 
 const mounts = [
   ...only("home", "view:Contacts", "view:Phone", "view:Messages", "assistant", "phone/stage", "notice"),
