@@ -123,6 +123,7 @@ export const workflowNoticesHost = (scene: NativeApprovalNotices | undefined, sc
     workflowPresentationCapabilities: () => Promise.resolve({ protocol: 2 }),
     noticeOwner: () => Promise.resolve({ withdrawn: 0, suspended: [] }),
     postWorkflowApproval: (notice: PostApprovalNotice) => {
+      if (!/^[a-f0-9]{64}$/.test(notice.route.scope)) return Promise.reject(rejection("Invalid notice scope"));
       if (!scene.posted.some(({ id }) => id === notice.id)) scene.posted.push(notice);
       return Promise.resolve({ status: "succeeded" });
     },

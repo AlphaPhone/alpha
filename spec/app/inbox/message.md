@@ -22,6 +22,7 @@ fetch on its own, raises Ask Alpha and opens a link in Alpha's Browser.
 ### The message view holds the account and message open, its place in the thread, the read of its body or the copy saved on the phone, why it could not be read, and what is under review
 
 Message 0 is none. Positions in the thread count from 0, the oldest.
+Position -1 means the selected message was outside the provider page first read.
 Once the shell finds the open message's place, the reader can move
 through the thread. Ask Alpha uses the message and history revision of
 the body on screen.
@@ -32,7 +33,7 @@ import attempt as A from "../../kit/attempt"
 import access.* from "./access"
 
 type Handling = Opening | Saving
-type ReadPlace = SelectedMessage | ThreadPosition | NewestMessage
+type ReadPlace = SelectedMessage | ThreadPosition | ThreadPage | NewestMessage
 type Fault = Fine | Unreachable | Revoked | Gone | Stale | TooLarge | Moved
 type Held = { account: int, message: int, attachment: int }
 type Pdf = { page: int, pages: int, drawing: R::Read }
@@ -64,7 +65,7 @@ pure val accountValues = Set(0, 1, 2)
 pure val revisionValues = Set(1, 2)
 pure val messageValues = Set(0, 1, 2)
 pure val threadValues = Set(0, 1, 3)
-pure val positionValues = Set(0, 1, 2)
+pure val positionValues = Set(-1, 0, 1, 2)
 pure val ticketValues = Set(1, 2, 3)
 pure val linkValues = Set(0, 1, 2)
 pure val attachmentValues = Set(0, 1, 2)
@@ -116,7 +117,7 @@ pure def open(s: MessageView, access: Access, account: int, message: int, remote
 
 pure def canThreadLocated(s: MessageView, ticket: int, access: Access, message: int, position: int, thread: int): bool =
   s.message != 0 and s.message == message and s.body.status == R::Loaded and s.body.ticket == ticket and s.thread == 1
-    and allowsFor(access, s.account, Reading) and thread > 1 and 0 <= position and position < thread
+    and allowsFor(access, s.account, Reading) and thread > 1 and -1 <= position and position < thread
 
 pure def threadLocated(s: MessageView, ticket: int, access: Access, message: int, position: int, thread: int): MessageView =
   { ...s, position: position, thread: thread }
@@ -138,9 +139,29 @@ pure def canEarlier(s: MessageView, access: Access): bool =
 pure def earlier(s: MessageView, access: Access, remote: bool): Shown = reading(s.position - 1, remote, ThreadPosition, s)
 
 pure def canNewer(s: MessageView, access: Access): bool =
-  s.message != 0 and s.body.status == R::Loaded and s.position < s.thread - 1 and allowsFor(access, s.account, Reading)
+  s.message != 0 and s.body.status == R::Loaded and 0 <= s.position and s.position < s.thread - 1 and allowsFor(access, s.account, Reading)
 
 pure def newer(s: MessageView, access: Access, remote: bool): Shown = reading(s.position + 1, remote, ThreadPosition, s)
+```
+
+### A thread control selects an exact position from the message and thread currently shown
+
+The control names the body ticket and known thread length it was drawn
+for, and an absolute position in that thread. The account still needs
+read access. A sibling can use the page already read. Earlier or More
+requests a provider page at the chosen position under the thread
+revision already read. If the shell cannot establish that revision, it
+reports a changed conversation and offers to reopen it.
+
+```quint
+pure def canSelectThreadPosition(s: MessageView, ticket: int, access: Access, thread: int, position: int): bool =
+  s.message != 0 and s.body.status == R::Loaded and not(s.fromPhone)
+    and ticket == s.body.ticket and thread == s.thread and thread > 1
+    and 0 <= position and position < thread and position != s.position
+    and allowsFor(access, s.account, Reading)
+
+pure def selectThreadPosition(s: MessageView, ticket: int, access: Access, thread: int, position: int, paging: bool, remote: bool): Shown =
+  reading(position, remote, if (paging) ThreadPage else ThreadPosition, s)
 ```
 
 ### Only the newest read's answer is shown, while its account may still be read; a read that fails says why
@@ -195,6 +216,8 @@ pure def sometimesAMessageChangedInGmail(s: MessageView): bool = s.message != 0 
 
 ### Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer
 
+The shell closes the message when the list switches account, folder, or
+search. Refreshing or paging the same selection keeps the message open.
 A save still in flight is then given up as unknown, and that is kept
 through a restart; nothing else of the view is.
 
@@ -214,12 +237,13 @@ pure def sessionChanged(s: MessageView): MessageView = { ...close(s), unsure: Li
 pure def restart(s: MessageView): MessageView = close(s)
 ```
 
-### The place shown is always inside the thread, and with no message open nothing is read
+### A located place is inside the thread, and with no message open nothing is read
 
 ```quint
 pure def alwaysThePlaceIsInsideTheThread(s: MessageView): bool =
   if (s.message == 0) s.thread == 0 and s.body.status == R::Idle and not(s.fromPhone) and s.account == 0
-  else 0 <= s.position and s.position < s.thread and s.account != 0
+  else s.account != 0 and ((0 <= s.position and s.position < s.thread) or
+    (s.position == -1 and s.thread > 1 and s.body.status == R::Loaded))
 ```
 
 ### Every read asks for the place on screen of the account open, under the newest ticket
@@ -248,19 +272,22 @@ pure def sometimesAMessageFailedToLoad(s: MessageView): bool = s.message != 0 an
 ## Story: Read a saved message offline
 
 > As the owner, I want to read a message of my saved list while Alpha is
-> still checking Gmail access, marked as saved.
+> still checking Gmail access or cannot reach it, marked as saved.
 
-### While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved
+### While the list shows its saved copy and access is being checked or offline, a message saved on the phone opens from there, marked as saved
 
-The saved copy is not read from Gmail and offers no links or
-attachments. It goes when access is known: read afresh if the account may
-be read, closed otherwise, and with the saved list.
+The shell shows only the plain text of a previously opened message for
+up to 30 days, while it can identify the owner and match the exact
+account, grant, message and history revision of the saved row. It keeps
+no image, link or attachment action with that text. The saved copy goes
+when access is known: read afresh if the account may be read, closed
+otherwise, and with the saved list.
 
 ```quint
-pure def canOpenSaved(s: MessageView, account: int, message: int, checking: bool, kept: bool): bool =
-  account != 0 and message != 0 and checking and kept
+pure def canOpenSaved(s: MessageView, account: int, message: int, checkingOrOffline: bool, kept: bool): bool =
+  account != 0 and message != 0 and checkingOrOffline and kept
 
-pure def openSaved(s: MessageView, account: int, message: int, checking: bool, kept: bool): MessageView =
+pure def openSaved(s: MessageView, account: int, message: int, checkingOrOffline: bool, kept: bool): MessageView =
   { ...close(s), account: account, message: message, thread: 1, fromPhone: true }
 
 pure def canAccessKnown(s: MessageView): bool = s.fromPhone

@@ -22,27 +22,31 @@ access; the conversation list as last read, with its search, filter chip and
 "Older conversations"; the unread count the phone reports; the open
 conversation's messages as last read; a "Delete message?" question and the
 last removal; whether Alpha is the phone's SMS app; and the recipient
-picker's choices. A page counts the messages read, those whose send failed,
-and those whose content Alpha cannot show.
+picker's choices. A New visit holds its own draft revision and recipient,
+independently of any existing conversation. A page counts the messages read,
+those whose send failed, and those whose content Alpha cannot show.
 
 ```quint
 import read as R from "../../kit/read"
 import permission as P from "../../kit/permission"
 import attempt as A from "../../kit/attempt"
 
-type Pane = Threads | Conversation | Picker
+type Pane = Threads | Conversation | Picker | New
 type Filter = AllThreads | UnreadThreads
 type Need = SmsAccess | ContactsAccess
 type Page = { rows: int, failed: int, partial: int }
+type NewDraft = { visit: int, revision: int, recipient: int, picking: bool }
 type Messages = {
   front: bool, pane: Pane, sms: P::Permission, book: P::Permission,
   list: R::Read, threads: int, moreThreads: bool, sought: bool, chip: Filter, unread: int,
   thread: int, page: R::Read, shown: Page, earlier: bool, smsApp: bool,
   confirming: bool, removal: A::Attempt,
   picker: R::Read, choices: int, moreChoices: bool, offeredPicture: int,
+  newDraft: NewDraft,
 }
 
 pure val blankPage: Page = { rows: 0, failed: 0, partial: 0 }
+pure val blankNew: NewDraft = { visit: 0, revision: 0, recipient: 0, picking: false }
 
 pure val initial: Messages = {
   front: false, pane: Threads, sms: P::unasked, book: P::unasked,
@@ -50,6 +54,7 @@ pure val initial: Messages = {
   thread: 0, page: R::unread, shown: blankPage, earlier: false, smsApp: false,
   confirming: false, removal: A::plan(0),
   picker: R::unread, choices: 0, moreChoices: false, offeredPicture: 0,
+  newDraft: blankNew,
 }
 ```
 
@@ -90,6 +95,8 @@ pure def removeMessage(id: int): List[Effect] = List(RemoveMessage({ id: id }))
 pure val ticketValues = Set(1, 2, 3)
 pure val idValues = Set(1, 2, 3)
 pure val threadValues = Set(0, 1, 2)
+pure val visitValues = Set(1, 2, 3)
+pure val revisionValues = Set(0, 1, 2, 3)
 pure val onlyValues = Set(0, 1)
 pure val countValues = Set(-1, 0, 1, 2)
 pure val seenValues = Set(
@@ -120,6 +127,8 @@ pure val weight_removed = 3
 ```quint
 pure def showingPane(s: Messages, pane: Pane): bool = s.front and s.pane == pane
 
+pure def holdsChoices(s: Messages): bool = showingPane(s, Picker) or showingPane(s, New)
+
 pure def readable(s: Messages): bool = P::allows(s.sms)
 
 pure def idle(r: R::Read): R::Read = { ...r, status: R::Idle }
@@ -138,7 +147,8 @@ pure def show(s: Messages): Moved = askThreads(false, { ...s, front: true, pane:
 ```quint
 pure def cleared(pane: Pane, s: Messages): Messages =
   { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false,
-    choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker), offeredPicture: 0 }
+    choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker), offeredPicture: 0,
+    newDraft: { ...blankNew, visit: s.newDraft.visit } }
 
 pure def canLeave(s: Messages): bool = s.front
 
@@ -225,10 +235,13 @@ pure def smsNeeded(s: Messages): bool = s.front and not(readable(s))
 
 ### What the phone said is held only in the pane showing it, with the access it needs
 
-Conversations are held only on the list, messages only in their
-conversation, and the picker's choices only in the picker; "Older
-conversations", earlier messages and more choices are offered only under
-rows.
+Conversations are held only on the list and messages only in their
+conversation. Contacts are held only on the foreground recipient picker
+or the New message that owns its own recipient choices. A New visit can
+show contacts inline before the owner picks To and can keep them while
+the owner writes or closes the expanded chooser. Leaving the visit
+forgets its choices and retires its read. "Older conversations", earlier
+messages and more choices are offered only under rows.
 
 ```quint
 pure def alwaysRowsOnlyWhileShowing(s: Messages): bool = and {
@@ -237,7 +250,7 @@ pure def alwaysRowsOnlyWhileShowing(s: Messages): bool = and {
   s.moreThreads implies s.threads > 0,
   (s.shown.rows > 0 or s.earlier) implies (showingPane(s, Conversation) and readable(s)),
   s.earlier implies s.shown.rows > 0,
-  (s.choices > 0 or s.moreChoices) implies (showingPane(s, Picker) and P::allows(s.book)),
+  (s.choices > 0 or s.moreChoices) implies (holdsChoices(s) and P::allows(s.book)),
   s.moreChoices implies s.choices > 0,
 }
 ```
@@ -268,7 +281,7 @@ pure def granted(need: Need, p: P::Permission, s: Messages): Messages =
   if (need == SmsAccess) { ...s, sms: p } else { ...s, book: p }
 
 pure def canAllow(s: Messages, need: Need): bool =
-  s.front and P::canAsk(permission(need, s)) and (need == SmsAccess or s.pane == Picker)
+  s.front and P::canAsk(permission(need, s)) and (need == SmsAccess or holdsChoices(s))
 
 pure def allow(s: Messages, need: Need): Moved =
   { state: granted(need, P::ask(permission(need, s)), s), out: List(Prompt({ need: need })) }
@@ -296,7 +309,7 @@ pure def accessReported(s: Messages, need: Need, grant: P::Grant): Moved =
   if (not(P::allows(p))) { state: forgotten(need, told), out: List() }
   else if (arrived and need == SmsAccess and showingPane(s, Threads)) askThreads(false, told)
   else if (arrived and need == SmsAccess and showingPane(s, Conversation)) askPage(false, told)
-  else if (arrived and need == ContactsAccess and showingPane(s, Picker)) askChoices(false, told)
+  else if (arrived and need == ContactsAccess and holdsChoices(s)) askChoices(false, told)
   else { state: told, out: List() }
 ```
 
@@ -354,10 +367,15 @@ pure def stepNoticeOpensItsConversation(before: Messages, via: str, after: Messa
 
 ### Back returns from a conversation or the picker to the list, and reads it again
 
+In a New message the first Back closes its recipient picker. The next
+returns to the list, keeping the owner's unsent New draft.
+
 ```quint
 pure def canBack(s: Messages): bool = s.front and s.pane != Threads and not(s.confirming)
 
-pure def back(s: Messages): Moved = askThreads(false, cleared(Threads, s))
+pure def back(s: Messages): Moved = if (s.pane == New and s.newDraft.picking)
+  { state: { ...s, newDraft: { ...s.newDraft, picking: false } }, out: List() }
+  else askThreads(false, cleared(Threads, s))
 ```
 
 ### Earlier messages are read only when the phone said there are more
@@ -398,16 +416,20 @@ pure def pageRead(s: Messages, ticket: int, ok: bool, grant: P::Grant, seen: Pag
 The rows already shown stay until the new read answers.
 
 ```quint
-pure def canArrived(s: Messages): bool = s.front and s.pane != Picker and readable(s)
+pure def canArrived(s: Messages): bool = s.front and (s.pane == Threads or s.pane == Conversation) and readable(s)
 
 pure def arrived(s: Messages): Moved = if (s.pane == Threads) askThreads(false, s) else askPage(false, s)
 ```
 
 ### A conversation is open only in its pane, and a page holds no more failed or unreadable messages than it has
 
+The selected thread is positive in Conversation and zero in every other
+pane. The New draft has its own recipient, separate from the selected thread.
+
 ```quint
 pure def alwaysAConversationIsOpenOnlyInItsPane(s: Messages): bool =
-  (s.pane == Conversation iff s.thread > 0) and (s.pane != Threads implies s.front) and fitsPage(s.shown)
+  (if (s.pane == Conversation) s.thread > 0 else s.thread == 0)
+    and (s.pane != Threads implies s.front) and fitsPage(s.shown)
 ```
 
 ### Messages are marked read only from the open conversation's newest read that showed them, and only where Alpha is the SMS app
@@ -556,9 +578,9 @@ pure def sometimesDeleteAsked(s: Messages): bool = s.confirming and s.shown.fail
 ## Story: Start a new message
 
 > As the owner, I want to pick a recipient from my contacts, or type a
-> number, and land in that conversation.
+> number, and keep writing the same New message while addressing it.
 
-### New message opens the picker, which reads the contacts that have a number
+### New message reads the contacts that have a number and brings back the owner's unsent New draft
 
 ```quint
 pure def askChoices(further: bool, s: Messages): Moved =
@@ -568,16 +590,79 @@ pure def askChoices(further: bool, s: Messages): Moved =
 pure def canNewMessage(s: Messages): bool = showingPane(s, Threads)
 
 pure def newMessage(s: Messages): Moved = askChoices(false, cleared(Picker, s))
+
+pure def canStartNewDraft(s: Messages, revision: int, thread: int): bool = canNewMessage(s) and revision >= 0 and thread >= 0
+
+pure def startNewDraft(s: Messages, revision: int, thread: int): Moved =
+  val draft = { visit: s.newDraft.visit + 1, revision: revision, recipient: thread, picking: false }
+  askChoices(false, { ...cleared(New, s), newDraft: draft })
+
+pure def holdsNewDraft(s: Messages, visit: int): bool = showingPane(s, New) and s.newDraft.visit == visit
+```
+
+### A current Android text request opens New only when its saved draft is empty
+
+Opening Messages from Android can fill To and the text of the next New
+draft. It takes the request only while that request and the Messages list
+are still in front, the saved New draft was read and is empty, and the
+address names the prepared recipients. An earlier request or a draft
+already in use changes nothing. The filled draft opens in New, leaving
+Send to the owner.
+
+```quint
+pure def canOpenAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): bool =
+  requestCurrent and empty and canStartNewDraft(s, revision, thread) and revision > s.newDraft.revision and thread > 0
+
+pure def openAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): Moved =
+  startNewDraft(s, revision, thread)
+
+pure def stepAndroidDraftOpensItsNewVisit(before: Messages, via: str, after: Messages): bool =
+  via == "openAndroidDraft" implies (before.front and before.pane == Threads and after.front and after.pane == New
+    and after.newDraft.visit == before.newDraft.visit + 1 and after.newDraft.revision > before.newDraft.revision
+    and after.newDraft.recipient > 0 and not(after.newDraft.picking))
+
+pure val eval_witness_canOpenAndroidDraft = ("show", ("openAndroidDraft", true, true, 1, 1))
+```
+
+### The owner can write before choosing To, then adjust To without moving or losing the message
+
+The New draft's bytes and address are held together on the phone. The
+view names the exact visit when editing it. An older view cannot displace
+the current selection, mutate the draft, or close its recipient picker.
+
+```quint
+pure def canEditNewDraft(s: Messages, visit: int, revision: int, thread: int, closePicker: bool): bool =
+  holdsNewDraft(s, visit) and revision > s.newDraft.revision and thread >= 0 and (closePicker implies thread > 0)
+
+pure def editNewDraft(s: Messages, visit: int, revision: int, thread: int, closePicker: bool): Messages =
+  { ...s, newDraft: { ...s.newDraft, revision: revision, recipient: thread, picking: s.newDraft.picking and not(closePicker) } }
+
+pure def canOpenNewContacts(s: Messages, visit: int): bool = holdsNewDraft(s, visit) and not(s.newDraft.picking)
+
+pure def openNewContacts(s: Messages, visit: int): Moved =
+  askChoices(false, { ...s, newDraft: { ...s.newDraft, picking: true } })
+
+pure def canFinishNewDraft(s: Messages, visit: int, revision: int, thread: int): bool =
+  holdsNewDraft(s, visit) and s.newDraft.revision == revision and thread > 0 and s.newDraft.recipient == thread
+
+pure def finishNewDraft(s: Messages, visit: int, revision: int, thread: int): Moved =
+  askThreads(false, cleared(Threads, s))
+
+pure def alwaysOnlyNewHoldsItsDraft(s: Messages): bool =
+  s.newDraft.visit >= 0 and (s.pane != New implies s.newDraft == { ...blankNew, visit: s.newDraft.visit })
+
+pure def stepNewAddressStaysInTheDraft(before: Messages, via: str, after: Messages): bool =
+  via == "editNewDraft" implies (after.pane == New and after.thread == 0 and after.newDraft.visit == before.newDraft.visit)
 ```
 
 ### A search starts the choices afresh, and more are read only when the phone said there are more
 
 ```quint
-pure def canFindChoices(s: Messages): bool = showingPane(s, Picker) and P::allows(s.book)
+pure def canFindChoices(s: Messages): bool = holdsChoices(s) and P::allows(s.book)
 
 pure def findChoices(s: Messages): Moved = askChoices(false, { ...s, choices: 0, moreChoices: false })
 
-pure def canLoadMoreChoices(s: Messages): bool = showingPane(s, Picker) and s.moreChoices and s.picker.status == R::Loaded
+pure def canLoadMoreChoices(s: Messages): bool = holdsChoices(s) and s.moreChoices and s.picker.status == R::Loaded
 
 pure def loadMoreChoices(s: Messages): Moved = askChoices(true, s)
 ```
@@ -586,7 +671,7 @@ pure def loadMoreChoices(s: Messages): Moved = askChoices(true, s)
 
 ```quint
 pure def canChoicesRead(s: Messages, ticket: int, count: int): bool =
-  showingPane(s, Picker) and R::canAnswer(s.picker, ticket) and count >= 0
+  holdsChoices(s) and R::canAnswer(s.picker, ticket) and count >= 0
 
 pure def choicesRead(s: Messages, ticket: int, ok: bool, grant: P::Grant, count: int, further: bool): Messages =
   val book = P::observe(s.book, grant)

@@ -27,13 +27,13 @@ type Way = Address | Query | Again | Backward | Onward
 type Effect = Go({ load: int, way: Way }) | Halt({ load: int }) | Visit({ load: int }) | Find({ ticket: int }) | FindNext({ forward: bool }) | ClearFind
 type Page = {
   kind: Kind, phase: Phase, load: int, secure: bool, behind: int, ahead: int, refused: bool,
-  finding: bool, find: R::Read, matches: int,
+  finding: bool, find: R::Read, matches: int, position: int,
 }
 type Step = { state: Page, out: List[Effect] }
 
 pure val initial: Page = {
   kind: Normal, phase: Blank, load: 0, secure: false, behind: 0, ahead: 0, refused: false,
-  finding: false, find: R::unread, matches: 0,
+  finding: false, find: R::unread, matches: 0, position: 0,
 }
 
 pure def forget(r: R::Read): R::Read = { ...r, status: R::Idle }
@@ -47,6 +47,7 @@ pure def isGo(e: Effect): bool = match e { | Go(g) => true | _ => false }
 pure val loadValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2)
 pure val countValues = Set(0, 3)
+pure val positionValues = Set(0, 1, 2, 3)
 pure val iValues = Set(
   { blank: false, tooLong: false, userInfo: false, web: true, spaced: false, colon: false, host: true, numeric: false, mail: false },
   { blank: false, tooLong: false, userInfo: false, web: false, spaced: false, colon: false, host: true, numeric: false, mail: false },
@@ -97,7 +98,7 @@ bar. A refusal leaves the page as it was and says why under the address bar.
 
 ```quint
 pure def started(p: Page): Page =
-  { ...p, phase: Loading, load: p.load + 1, secure: false, refused: false, finding: false, find: forget(p.find), matches: 0 }
+  { ...p, phase: Loading, load: p.load + 1, secure: false, refused: false, finding: false, find: forget(p.find), matches: 0, position: 0 }
 
 pure def canSubmit(p: Page, i: Input): bool = not(i.blank)
 
@@ -352,10 +353,13 @@ pure def sometimesPrivatePage(p: Page): bool = p.kind == Private and p.phase == 
 
 ### The find bar opens over a shown page
 
+On Android, choosing Find with no shown page keeps the menu open and asks
+the owner to load a page.
+
 ```quint
 pure def canOpenFind(p: Page): bool = p.phase == Shown and not(p.finding)
 
-pure def openFind(p: Page): Page = { ...p, finding: true, matches: 0 }
+pure def openFind(p: Page): Page = { ...p, finding: true, matches: 0, position: 0 }
 ```
 
 ### Typing searches the page, and clearing the text clears the search
@@ -365,8 +369,8 @@ pure def canTypeFind(p: Page, empty: bool): bool = p.finding
 
 pure def typeFind(p: Page, empty: bool): Step =
   val asked = R::ask(p.find)
-  if (empty) { state: { ...p, find: forget(p.find), matches: 0 }, out: List(ClearFind) }
-  else { state: { ...p, find: asked, matches: 0 }, out: List(Find({ ticket: asked.ticket })) }
+  if (empty) { state: { ...p, find: forget(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
+  else { state: { ...p, find: asked, matches: 0, position: 0 }, out: List(Find({ ticket: asked.ticket })) }
 ```
 
 ### Only the answer to the latest search counts
@@ -374,17 +378,30 @@ pure def typeFind(p: Page, empty: bool): Step =
 An answer for text since changed, or for a page since left, is refused.
 
 ```quint
-pure def canFound(p: Page, ticket: int, count: int): bool = R::canAnswer(p.find, ticket) and count >= 0
+pure def validPosition(count: int, position: int): bool =
+  (count == 0 and position == 0) or (position > 0 and position <= count)
 
-pure def found(p: Page, ticket: int, count: int): Page = { ...p, find: R::answer(p.find, true), matches: count }
+pure def canFound(p: Page, ticket: int, count: int, position: int): bool =
+  R::canAnswer(p.find, ticket) and validPosition(count, position)
+
+pure def found(p: Page, ticket: int, count: int, position: int): Page =
+  { ...p, find: R::answer(p.find, true), matches: count, position: position }
 ```
 
 ### Next and previous move between the matches there are
+
+The displayed position follows the current search's native match selection.
 
 ```quint
 pure def canFindNext(p: Page, forward: bool): bool = p.finding and p.matches > 0
 
 pure def findNext(p: Page, forward: bool): Step = { state: p, out: List(FindNext({ forward: forward })) }
+
+pure def canMatchSelected(p: Page, ticket: int, count: int, position: int): bool =
+  p.find.status == R::Loaded and p.find.ticket == ticket and p.matches > 0 and p.matches == count
+    and validPosition(count, position)
+
+pure def matchSelected(p: Page, ticket: int, count: int, position: int): Page = { ...p, position: position }
 ```
 
 ### Closing the find bar clears the search
@@ -392,7 +409,7 @@ pure def findNext(p: Page, forward: bool): Step = { state: p, out: List(FindNext
 ```quint
 pure def canCloseFind(p: Page): bool = p.finding
 
-pure def closeFind(p: Page): Step = { state: { ...p, finding: false, find: forget(p.find), matches: 0 }, out: List(ClearFind) }
+pure def closeFind(p: Page): Step = { state: { ...p, finding: false, find: forget(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
 ```
 
 ### The find bar is open only over a shown page, and matches are only counted while it is open
@@ -401,7 +418,8 @@ Loading another page closes it.
 
 ```quint
 pure def alwaysFindIsOverAShownPage(p: Page): bool =
-  (p.finding implies p.phase == Shown) and (p.matches > 0 implies p.finding) and p.matches >= 0
+  (p.finding implies p.phase == Shown) and (p.matches > 0 implies p.finding)
+    and validPosition(p.matches, p.position)
 ```
 
 ### A search of the page is under way only while the find bar is open

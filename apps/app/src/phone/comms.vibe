@@ -49,7 +49,7 @@ export effect function commsHeld(held: () => void): void!! {
   try sync(held)
 }
 
-// spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
+// spec/app/phone/comms.md, "End is above the view when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCall: liveCall(phone) && !clear(phone) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
 
 // spec/app/phone/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"
@@ -86,7 +86,9 @@ const subjects = started(effect {
       : top === "Messages"
         ? texts.pane === "Conversation"
           ? { type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: `messages:thread:${texts.thread}` }
-          : { type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: texts.pane === "Picker" ? "messages:new:" : "messages:list:" }
+          : { type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: texts.pane === "New"
+            ? `messages:new:${texts.newDraft.visit}`
+            : texts.pane === "Picker" ? "messages:new:" : "messages:list:" }
         : undefined
     if (event === undefined || event.type !== "subjectShown" || event.key === told) return
     told = event.key

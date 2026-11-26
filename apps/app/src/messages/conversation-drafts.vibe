@@ -1,0 +1,237 @@
+// spec/app/messages/composer.md, "Story: Keep my draft"
+import type { Author } from "../../gen/app__messages__composer.effect.vibe"
+import type { Telephony } from "../platform/telephony.vibe"
+import type { Vault } from "../platform/vault.vibe"
+import { encodeDraftRecord, sameDraftSource, type DraftPicture, type DraftRecord, type DraftSource } from "./draft-record.vibe"
+import { openDraftRecord, readLegacySmsDraft, recoverLegacySmsDraft, retireLegacySmsDraft, writeDraftRecord, type HeldDraft } from "./draft-store.vibe"
+
+export type ConversationSource = Exclude<DraftSource, { readonly kind: "new" }>
+export type ProvisionalSource = Extract<ConversationSource, { readonly kind: "recipients" }>
+
+export interface DraftContent {
+  readonly body: string
+  readonly pictures: readonly DraftPicture[]
+}
+
+export interface DraftStage {
+  readonly thread: number
+  readonly edits: number
+  readonly content: DraftContent
+  readonly previous: DraftContent
+}
+
+interface SavedDraft {
+  readonly revision: number
+  readonly author: Author
+  readonly pictures: number
+}
+
+type Unavailable = { readonly kind: "failed" } | { readonly kind: "stale" }
+export type DraftOpened = ({ readonly kind: "opened"; readonly adoptedPlaintext: boolean } & SavedDraft)
+  | { readonly kind: "pending-legacy-send" } | Unavailable
+export type DraftPersisted = { readonly kind: "saved"; readonly revision: number }
+  | ({ readonly kind: "conflict" } & SavedDraft) | Unavailable
+
+export interface ConversationDrafts {
+  open(thread: number, source: ConversationSource, legacyPlaintext?: string, previousAuthor?: Author, provisional?: ProvisionalSource): DraftOpened!!(Vault | Telephony)
+  close(thread: number): void
+  current(thread: number): DraftContent | undefined
+  reference(thread: number): { readonly source: ConversationSource; readonly revision: number } | undefined
+  adoptSettlement(thread: number, held: HeldDraft): boolean
+  stage(thread: number, edits: number, change: Partial<DraftContent>): DraftStage | undefined
+  rollback(stage: DraftStage): boolean
+  persist(thread: number, base: number, edits: number, author: Author, pictures: number): DraftPersisted!!Vault
+  takeSaved(thread: number): boolean
+}
+
+interface Opening {
+  readonly kind: "opening"
+  readonly thread: number
+}
+
+interface Opened {
+  readonly kind: "opened"
+  readonly thread: number
+  readonly source: ConversationSource
+  readonly snapshots: Map<number, DraftContent>
+  content: DraftContent
+  held: HeldDraft
+  edits: number
+  writing: number | undefined
+  conflicted: boolean
+}
+
+const empty: DraftContent = { body: "", pictures: [] }
+
+function summary(held: HeldDraft): SavedDraft {
+  return { revision: held.record?.revision ?? 0, author: held.record?.author ?? "Nobody", pictures: held.record?.pictures.length ?? 0 }
+}
+
+function sameRecord(held: HeldDraft, record: DraftRecord): boolean {
+  return held.raw !== null && Redacted.value(held.raw) === encodeDraftRecord(record)
+}
+
+function settled(opened: Opened): boolean {
+  return opened.writing === undefined && !opened.conflicted && opened.snapshots.size === 0
+}
+
+export function makeConversationDrafts(): ConversationDrafts {
+  let active: Opening | Opened | undefined
+
+  function openedFor(thread: number): Opened | undefined {
+    return active?.kind === "opened" && active.thread === thread ? active : undefined
+  }
+
+  function failOpen(opening: Opening, kind: "failed" | "pending-legacy-send" = "failed"): Unavailable | { readonly kind: "pending-legacy-send" } {
+    if (active !== opening) return { kind: "stale" }
+    active = undefined
+    return { kind }
+  }
+
+  return {
+    effect open(thread: number, source: ConversationSource, legacyPlaintext?: string, previousAuthor?: Author, provisional?: ProvisionalSource): DraftOpened!!(Vault | Telephony) {
+      if (!Number.isSafeInteger(thread) || thread <= 0 || active?.kind === "opened") return { kind: "failed" }
+      if (provisional !== undefined && (source.kind !== "thread" || !sameDraftSource(provisional, { kind: "recipients", recipients: source.recipients }))) {
+        return { kind: "failed" }
+      }
+      const opening: Opening = { kind: "opening", thread }
+      active = opening
+      const initial = openDraftRecord(source) catch () => undefined
+      if (initial === undefined || initial.record?.revision === 0) return failOpen(opening)
+      let held: HeldDraft = initial
+      if (active !== opening) return { kind: "stale" }
+
+      const plain: DraftRecord | undefined = legacyPlaintext === undefined || legacyPlaintext === "" ? undefined : {
+        source, revision: 1, author: previousAuthor === "AlphaWrote" ? "AlphaWrote" : "OwnerWrote", body: legacyPlaintext, pictures: [],
+      }
+      const legacy = held.record === null || held.record.revision <= 2
+        ? readLegacySmsDraft(source) catch () => undefined
+        : undefined
+      if (active !== opening) return { kind: "stale" }
+      if (held.record === null && legacy === undefined) return failOpen(opening)
+      if (legacy !== undefined && legacy !== null && legacy.pending !== null) {
+        const recovered = recoverLegacySmsDraft(held, legacy, sync(() => active === opening)) catch (failure) => failure
+        if (active !== opening) return { kind: "stale" }
+        if ("reason" in recovered) {
+          if (recovered.reason !== "conflict") return failOpen(opening)
+          const other = openDraftRecord(source) catch () => undefined
+          if (other === undefined || other.record === null || other.record.revision === 0) return failOpen(opening)
+          held = other
+        } else if (recovered.kind === "pending") return failOpen(opening, "pending-legacy-send")
+        else held = recovered.draft
+      }
+
+      let promoted: DraftRecord | undefined
+      if (held.record === null && legacy === null && provisional !== undefined) {
+        const earlier = openDraftRecord(provisional) catch () => undefined
+        if (earlier === undefined || earlier.record?.revision === 0) return failOpen(opening)
+        if (active !== opening) return { kind: "stale" }
+        if (earlier.record !== null) {
+          const { revision, author, body, pictures } = earlier.record
+          promoted = { source, revision, author, body, pictures }
+        }
+      }
+      const previous = legacy?.record ?? promoted ?? plain
+      if (held.record === null && previous !== undefined) {
+        const saved = writeDraftRecord(held, previous) catch (failure) => failure
+        if (active !== opening) return { kind: "stale" }
+        if ("reason" in saved) {
+          if (saved.reason !== "conflict") return failOpen(opening)
+          const other = openDraftRecord(source) catch () => undefined
+          if (other === undefined || other.record === null || other.record.revision === 0) return failOpen(opening)
+          held = other
+        } else {
+          held = saved
+        }
+      }
+      if (active !== opening) return { kind: "stale" }
+      if (legacy !== undefined && legacy !== null && legacy.pending === null && sameRecord(held, legacy.record)) {
+        try ignore(retireLegacySmsDraft(legacy))
+      }
+      if (active !== opening) return { kind: "stale" }
+
+      active = { kind: "opened", thread, source, held, content: held.record ?? empty, edits: 0, snapshots: new Map(), writing: undefined, conflicted: false }
+      return { kind: "opened", ...summary(held), adoptedPlaintext: plain !== undefined && sameRecord(held, plain) }
+    },
+    close(thread) {
+      if (active?.thread === thread) active = undefined
+    },
+    current(thread) {
+      return openedFor(thread)?.content
+    },
+    reference(thread) {
+      const opened = openedFor(thread)
+      if (opened === undefined || opened.held.record === null || !settled(opened)) return undefined
+      return { source: opened.source, revision: opened.held.record.revision }
+    },
+    adoptSettlement(thread, held) {
+      const opened = openedFor(thread)
+      if (opened === undefined || opened.held.raw === null || held.raw === null) return false
+      const record = held.record
+      if (record.completedOperation === undefined
+        || record.author !== "Nobody" || record.body !== "" || record.pictures.length !== 0
+        || !sameDraftSource(opened.source, held.source) || !settled(opened)) return false
+      const previous = opened.held.record.revision
+      if (previous === record.revision) return Redacted.value(opened.held.raw) === Redacted.value(held.raw)
+      if (previous + 1 !== record.revision) return false
+      opened.held = held
+      opened.content = record
+      return true
+    },
+    stage(thread, edits, change) {
+      const opened = openedFor(thread)
+      if (opened === undefined || !Number.isSafeInteger(edits) || edits !== opened.edits + 1) return undefined
+      const previous = opened.content
+      const content = { body: change.body ?? previous.body, pictures: change.pictures === undefined ? previous.pictures : [...change.pictures] }
+      opened.content = content
+      opened.edits = edits
+      opened.snapshots.set(edits, content)
+      return { thread, edits, content, previous }
+    },
+    rollback(stage) {
+      const opened = openedFor(stage.thread)
+      if (opened === undefined || opened.edits !== stage.edits || opened.content !== stage.content || opened.writing === stage.edits) return false
+      opened.edits -= 1
+      opened.content = stage.previous
+      opened.snapshots.delete(stage.edits)
+      return true
+    },
+    effect persist(thread: number, base: number, edits: number, author: Author, pictures: number): DraftPersisted!!Vault {
+      const opened = openedFor(thread)
+      if (opened === undefined) return { kind: "stale" }
+      const content = opened.snapshots.get(edits)
+      const held = opened.held
+      if (content === undefined || content.pictures.length !== pictures || opened.writing !== undefined
+        || (held.record?.revision ?? 0) !== base) return { kind: "failed" }
+
+      opened.writing = edits
+      return try ensuring(effect {
+        const saved = writeDraftRecord(held, { source: opened.source, revision: base + 1, author, ...content }) catch (failure) => failure
+        if (active !== opened) return { kind: "stale" } as const
+        if ("reason" in saved) {
+          if (saved.reason !== "conflict") return { kind: "failed" } as const
+          const other = openDraftRecord(opened.source) catch () => undefined
+          if (active !== opened) return { kind: "stale" } as const
+          if (other === undefined || other.record?.revision === 0 || (other.record?.revision ?? 0) === base) return { kind: "failed" } as const
+          opened.held = other
+          opened.conflicted = true
+          return { kind: "conflict", ...summary(other) } as const
+        }
+        opened.held = saved
+        opened.conflicted = false
+        for (const index of opened.snapshots.keys()) {
+          if (index <= edits) opened.snapshots.delete(index)
+        }
+        return { kind: "saved", revision: base + 1 } as const
+      }, sync(() => { opened.writing = undefined }))
+    },
+    takeSaved(thread) {
+      const opened = openedFor(thread)
+      if (opened === undefined || !opened.conflicted || opened.writing !== undefined) return false
+      opened.content = opened.held.record ?? empty
+      opened.conflicted = false
+      opened.snapshots.clear()
+      return true
+    },
+  }
+}

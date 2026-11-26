@@ -100,8 +100,10 @@ export function App({ alpha }: AppProps) {
   useEffect(() => {
     if (enrolled) alpha.runtime.runFork(openStartupAccess(accessCovered));
   }, [alpha, enrolled, accessCovered]);
-  const accessHolding = enrolled && !accessCovered && (!access || !access.begun || !accessCompleted(access));
-  const accessShowing = accessHolding && access !== undefined && accessPanel(access) === "Walkthrough";
+  const accessHolding = enrolled && (!access || !access.begun || !accessCompleted(access) || access.finish.allSet);
+  const accessMayShow = accessHolding && !accessCovered;
+  const accessStage = access !== undefined && accessPanel(access);
+  const accessShowing = accessMayShow && (accessStage === "Walkthrough" || accessStage === "AllSet");
   if (!state) {
     if (updating) return <>{alpha.slot("overlay")}</>;
     return cause
@@ -185,7 +187,7 @@ export function App({ alpha }: AppProps) {
   const fullScreen = state.assistant === "Full" && !side;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
-  const canGoBack = String(!shellFailed && (accessHolding || (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
+  const canGoBack = String(!shellFailed && (accessMayShow || (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
     : back || state.textAsk.tag === "TextAskVisit" || (layers !== undefined && takesBack(layers)))));
   const frameStyle = preview
     ? { left: preview.left, top: preview.top, width: preview.width, height: preview.height, transform: `scale(${preview.scale})`, transformOrigin: "top left" }
@@ -203,7 +205,7 @@ export function App({ alpha }: AppProps) {
       onTouchEnd={touchEnded}
       onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
       style={frameStyle}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(env(safe-area-inset-top)_+_4rem)] sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)] sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
     >
       <div
         data-alpha-shell-page=""
@@ -212,11 +214,11 @@ export function App({ alpha }: AppProps) {
           const document = node?.ownerDocument.documentElement;
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
-        className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
+        className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
         inert={signingIn ? updating : inert || fullScreen}
       >
         {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
-        {accessHolding && !accessShowing ? <StartupMark /> : null}
+        {accessMayShow && !accessShowing ? <StartupMark /> : null}
         {!signingIn && !accessHolding && comms && alpha.slot("phone/stage")}
         {signingIn || accessHolding || page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")

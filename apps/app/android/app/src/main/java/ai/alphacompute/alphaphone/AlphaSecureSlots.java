@@ -10,12 +10,13 @@ import java.util.regex.Pattern;
 
 final class AlphaSecureSlots {
  private static final SecureSlotPolicy POLICY = SecureSlotPolicy.parse(Map.of(
-  "nativeOnly", List.of("action-journal", "device-execution", InboxNoticeDelivery.SLOT),
+  "nativeOnly", List.of("action-journal", "device-execution", InboxNoticeDelivery.SLOT, AlphaLegacySms.LEDGER),
   "slots", List.of(Map.of(
    "pattern", Pattern.quote(DeviceExecutionJournal.SLOT),
    "access", "nativeOnly",
    "limit", DeviceExecutionJournal.SLOT_BYTES
-  ), Map.of("pattern", Pattern.quote(InboxNoticeDelivery.SLOT), "access", "nativeOnly", "limit", 1_048_576))
+  ), Map.of("pattern", Pattern.quote(InboxNoticeDelivery.SLOT), "access", "nativeOnly", "limit", 1_048_576),
+   Map.of("pattern", Pattern.quote(AlphaLegacySms.LEDGER), "access", "nativeOnly", "limit", AlphaLegacySms.LEDGER_BYTES))
  ));
  private static AlphaSecureSlots shared;
  private final NativeSecureStore store;

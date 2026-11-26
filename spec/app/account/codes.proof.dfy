@@ -17,7 +17,7 @@ lemma redeemed_ensures(c: Codes, attempt: int, ok: bool, known: bool)
 lemma lawAnUnknownRedemptionIsNeverSentUnderANewNumber_ensures(code: string)
   ensures (lawAnUnknownRedemptionIsNeverSentUnderANewNumber(code) == true)
 {
-  var sent := redeem(initial, code, 1, app__account__outside_Origin.ByOwner, false).state;
+  var sent := redeem(bind(initial, "credential"), code, 1, app__account__outside_Origin.ByOwner, false).state;
   reveal Std.Collections.Seq.Filter();
   var lost := planAnswered(redeemed(sent, sent.redeem.id, false, false).state);
   assert code in lost.unknown;
@@ -52,4 +52,14 @@ lemma restart_ensures(c: Codes)
     assert forall y :: y in once ==> y in after.state.unknown;
     assert c.apply.outcome.Sent? ==> c.applyCode in after.state.unknown;
   }
+}
+
+lemma lawTheSameCredentialDoesNotRebind_ensures(before: Codes)
+  ensures (lawTheSameCredentialDoesNotRebind(before) == true)
+{
+}
+
+lemma lawChangingTheCredentialRetiresCodes_ensures(before: Codes, authority: string)
+  ensures (lawChangingTheCredentialRetiresCodes(before, authority) == true)
+{
 }

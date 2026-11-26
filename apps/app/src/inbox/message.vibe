@@ -22,6 +22,7 @@ import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
 import { backFromDraft } from "./composer.vibe"
+import { InboxAhead, aheadKey, bodyPart } from "./ahead.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { prepareMessage } from "./mail-html.ts"
 import { type ThreadPages, locateThread, threadFault, threadMessage, threadPages } from "./thread.vibe"
@@ -38,21 +39,35 @@ import { visit } from web
 const failedRead = (ticket: number, access: ReturnType<typeof accessOf>, fault: Message.Fault): Event =>
   ({ type: "loaded", ticket, access, ok: false, fault, revision: 0, message: 0, position: 0, thread: 0 })
 
+const selectionOf = ({ selected }: Inbox.Mailbox) => JSON.stringify([selected.account, selected.folder, selected.query])
+
 // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why"
-effect function read(ticket: number, account: number, message: number, position: number, place: Message.ReadPlace): (Event | undefined)!!(Cloud | Mail | Inbox.Machine | Message.Machine | ThreadPages) {
+effect function read(ticket: number, account: number, message: number, position: number, place: Message.ReadPlace): (Event | undefined)!!(Cloud | Mail | Inbox.Machine | InboxAhead | Message.Machine | ThreadPages) {
   const ledger = try Mail
   const list = try Inbox.Machine
   const view = try Message.Machine
   const generation = ledger.generation(account)
   const current = (state: Message.MessageView) =>
     state.account === account && state.message === message && state.body.ticket === ticket && state.body.status === "Loading"
-  if (!current(try view.get()) || (try list.get()).selected.account !== account) return undefined
+  const before = try list.get()
+  if (!current(try view.get()) || before.selected.account !== account) return undefined
+  const selection = selectionOf(before)
   const anchor = ledger.card(message)
+  const prepared = effect {
+    if (place !== "SelectedMessage" || anchor === undefined || anchor.metadata.historyId === null || before.list.status !== "Loaded") return undefined
+    const key = aheadKey(before, ledger, before.list.ticket)
+    const part = bodyPart(anchor)
+    for (const slot of (try InboxAhead).bodies) {
+      const warmed = try slot.take(key, part)
+      if (warmed !== undefined && warmed.message.id === anchor.id && warmed.message.metadata.historyId === anchor.metadata.historyId) return warmed
+    }
+    return undefined
+  }
   const found = place === "SelectedMessage" || anchor === undefined
-    ? (Effect.map(body(account, message), (loaded) => ({ body: loaded, position: 0, thread: 1 })) catch (cause) => faultOf(cause))
-    : (threadMessage(account, anchor, position, place === "NewestMessage") catch (cause) => threadFault(cause))
+    ? (Effect.map(effect { return (try prepared) ?? (try body(account, message)) }, (loaded) => ({ body: loaded, position: 0, thread: 1 })) catch (cause) => faultOf(cause))
+    : (threadMessage(account, anchor, position, place) catch (cause) => threadFault(cause))
   const mailbox = try list.get()
-  if (!current(try view.get()) || mailbox.selected.account !== account || ledger.generation(account) !== generation) return undefined
+  if (!current(try view.get()) || selectionOf(mailbox) !== selection || ledger.generation(account) !== generation) return undefined
   const access = accessOf(mailbox, account)
   if (typeof found === "string") return failedRead(ticket, access, found)
   const number = try ledger.remember(account, found.body.message)
@@ -143,7 +158,7 @@ export const questionAbout = (account: number, message: number, revision: number
   try ignore(shell.send({ type: "raise", detent: "Sheet" }))
 }
 
-function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxAttachmentFiles | InboxBrowserLinks | Toasts | Said, []> {
+function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | InboxAhead | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxAttachmentFiles | InboxBrowserLinks | Toasts | Said, []> {
   return match (fx) {
     when { tag: "ReadMessage", let ticket, let account, let message, let position, let place }:
       stream("read", Stream.filter(Stream.fromEffect(read(ticket, account, message, position, place)), (event): event is Event => event !== undefined),
@@ -184,15 +199,29 @@ function carryMark(fx: MarkOut): Job<MarkEvent, Cloud | Mail | Inbox.Machine, [b
 const access = started(effect {
   const list = try Inbox.Machine
   const view = try Message.Machine
-  const grants = Stream.zipLatest(list.changes, view.changes) |> Stream.map(%, ([mailbox, shown]) => ({ shown, access: accessOf(mailbox, shown.account), known: mailbox.accounts.status === "Loaded" }))
-  try Stream.runForEach(Stream.changesWith(grants, (a, b) => JSON.stringify(a.access) === JSON.stringify(b.access) && a.known === b.known && a.shown.account === b.shown.account), effect ({ shown, access, known }) => {
+  let selection: string | undefined
+  const grants = Stream.zipLatest(list.changes, view.changes) |> Stream.map(%, ([mailbox, shown]) => ({
+    shown, access: accessOf(mailbox, shown.account), known: mailbox.accounts.status === "Loaded", selection: selectionOf(mailbox),
+    saved: mailbox.saved && mailbox.signedIn && mailbox.selected.account === shown.account && mailbox.failure !== "Revoked",
+  }))
+  try Stream.runForEach(Stream.changesWith(grants, (a, b) => JSON.stringify(a.access) === JSON.stringify(b.access) && a.known === b.known &&
+    a.saved === b.saved && a.selection === b.selection && a.shown.account === b.shown.account && a.shown.fromPhone === b.shown.fromPhone), effect ({ shown, access, known, saved, selection: next }) => {
+    const changed = selection !== undefined && selection !== next
+    selection = next
     if (shown.account === 0) return
-    try contained(view.send({ type: "accessChanged", access }), "the grant of the message open")
-    // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved"
-    if (known && shown.fromPhone) {
-      const remote = (try (try Preferences).get()).images
-      try contained(view.send({ type: "accessKnown", access, remote }), "access known")
+    if (changed) {
+      try contained(view.send({ type: "close" }), "the mailbox selection changed")
+      return
     }
+    // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked or offline, a message saved on the phone opens from there, marked as saved"
+    if (shown.fromPhone) {
+      if (known) {
+        const remote = (try (try Preferences).get()).images
+        try contained(view.send({ type: "accessKnown", access, remote }), "access known")
+      } else if (!saved) try contained(view.send({ type: "close" }), "closing the saved message")
+      return
+    }
+    try contained(view.send({ type: "accessChanged", access }), "the grant of the message open")
   })
 }, "the grant of the message open")
 
@@ -214,8 +243,10 @@ const openedUnread = started(effect {
   try Stream.runForEach(Stream.changesWith(loaded, (a, b) => a.body.ticket === b.body.ticket), effect (state) => {
     const mailbox = try list.get()
     const current = try view.get()
-    if (current.body.ticket !== state.body.ticket || current.body.status !== "Loaded" || mailbox.selected.account !== state.account ||
-      ledger.body(state.body.ticket)?.message.isUnread !== true) return
+    const body = ledger.body(state.body.ticket)
+    if (current.body.ticket !== state.body.ticket || current.body.status !== "Loaded" || mailbox.selected.account !== state.account || body === undefined) return
+    try ignore(forkChild(ledger.keepBody(mailbox, body)))
+    if (!body.message.isUnread) return
     try ignore(marks.send({
       type: "openedUnread", access: accessOf(mailbox, state.account), account: state.account, message: state.message,
     }, "World"))
@@ -234,9 +265,9 @@ const threadPosition = started(effect {
     if (state.body.ticket !== ticket) return
     const { account, message } = state
     const generation = mail.generation(account)
-    const card = mail.body(ticket)?.message
-    if (!card) return
-    const found = locateThread(account, card) catch () => undefined
+    const original = mail.body(ticket)
+    if (!original) return
+    const found = locateThread(account, original) catch () => undefined
     const mailbox = try list.get()
     if (!found || mail.generation(account) !== generation || mailbox.selected.account !== account) return
     try contained(reader.send({ type: "threadLocated", ticket, message, access: accessOf(mailbox, account), ...found }), "finding the message in its thread")

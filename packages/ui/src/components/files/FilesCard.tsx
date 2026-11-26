@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
-import { Dialog, DialogClose, DialogContent, DialogTitle } from "../Dialog.tsx";
+import { Dialog, DialogClose, DialogContent, type DialogContentProps, DialogTitle } from "../Dialog.tsx";
 
 export type FilesCardProps = {
   /** Whether the card is showing; the parent keeps it. */
@@ -21,6 +21,10 @@ export type FilesCardProps = {
   confirmDisabled?: boolean;
   /** Called by the accent button. */
   onConfirm?: () => void;
+  /** Custom initial focus when the card needs to preserve a text selection. */
+  onOpenAutoFocus?: DialogContentProps["onOpenAutoFocus"];
+  /** Returns focus to the control that opened a card without its own trigger. */
+  onCloseAutoFocus?: DialogContentProps["onCloseAutoFocus"];
   className?: string;
 };
 
@@ -33,10 +37,10 @@ export const filesCardCancel = cn(focusRing, "min-h-11 rounded-full px-4.5 text-
  * A Files question or set of facts, as a `Dialog` card resting above Ask Alpha at the foot of the screen: a serif heading,
  * an optional muted line, its content, then Cancel and an accent pill at the end.
  */
-export function FilesCard({ open, onOpenChange, title, message, children, cancelLabel, confirmLabel, confirmDisabled = false, onConfirm, className }: FilesCardProps) {
+export function FilesCard({ open, onOpenChange, title, message, children, cancelLabel, confirmLabel, confirmDisabled = false, onConfirm, onOpenAutoFocus, onCloseAutoFocus, className }: FilesCardProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent aria-describedby={undefined} className={cn("gap-0", className)}>
+      <DialogContent aria-describedby={undefined} onOpenAutoFocus={onOpenAutoFocus} onCloseAutoFocus={onCloseAutoFocus} className={cn("gap-0", className)}>
         <DialogTitle className="mb-1.5 leading-field">{title}</DialogTitle>
         {message ? <p className="mb-3 text-base leading-chat wrap-anywhere text-muted-foreground">{message}</p> : null}
         {children}

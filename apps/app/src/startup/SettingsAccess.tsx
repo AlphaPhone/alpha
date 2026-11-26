@@ -1,5 +1,5 @@
 // spec/app/startup/access.md, "Story: Look at access again"
-import { StartupAccessPanel, type StartupAccessRowState } from "@repo/ui";
+import { StartupAccessPanel, StartupAllSet, type StartupAccessRowState } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { Machine } from "../../gen/app__startup__access.effect.vibe";
 import { useMachine } from "../../gen/app__startup__access.react.ts";
@@ -14,20 +14,30 @@ type AccessRuntime = ManagedRuntime.ManagedRuntime<Machine | Time, unknown>;
 
 function AccessView({ runtime, review }: { runtime: AccessRuntime; review: boolean }) {
   const { state, can, send } = useTimed(runtime, useMachine);
-  if (!state || panel(state) !== (review ? "Review" : "Walkthrough")) return null;
+  if (!state) return null;
+  const showing = panel(state);
+  if (!review && showing === "AllSet") {
+    const done = { type: "done" } as const;
+    return <StartupAllSet
+      trouble={state.finish.trouble === "NoTrouble" ? undefined : state.finish.trouble}
+      notSaved={state.notice === "NotSaved"}
+      onDone={can(done, "Owner") ? () => void send(done, "Owner") : undefined}
+    />;
+  }
+  if (showing !== (review ? "Review" : "Walkthrough")) return null;
   const current = review ? state.look === "AtOne" ? state.target : undefined : nextKey(state);
   const act = { type: "act", now: untimed } as const;
   const proceed = { type: "proceed", now: untimed } as const;
   const skip = { type: "skip", now: untimed } as const;
   const mayAct = can(act, "Owner");
   const rows: StartupAccessRowState[] = ordered.filter((key) => offered(state, key)).map((key) => {
-    const showing = flow(state, key);
+    const step = flow(state, key);
     return {
       access: key,
-      word: word(key, showing, grantOf(state, key)),
+      word: word(key, step, grantOf(state, key)),
       busy: current === key && busy(state),
-      action: current === undefined ? "Settings" : current === key && mayAct && (review || showing !== "Ready")
-        ? state.stalled ? "Check" : showing === "Unavailable" ? "Try again" : showing === "CanRequest" ? "Allow" : "Settings"
+      action: current === undefined ? "Settings" : current === key && mayAct && (review || step !== "Ready")
+        ? state.stalled ? "Check" : step === "Unavailable" ? "Try again" : step === "CanRequest" ? "Allow" : "Settings"
         : undefined,
     };
   });

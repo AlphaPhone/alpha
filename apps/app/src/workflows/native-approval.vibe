@@ -1,6 +1,6 @@
 // spec/app/workflows/approvals.md, "A running run may ask for one approval at a time, each asking with a higher number and a deadline, and a notice is wanted for it"; spec/app/workflows/approvals.md, "An approval stops waiting when its run ends or its deadline passes, and its notice goes with it"
 import { noticeOwnerOf, resolveNoticeTap, type NoticeOwnerIdentity, type SuspendedApprovalNotice } from "@elizaos/os-bridges"
-import { type WorkflowApproval, type WorkflowApprovalOffer, type WorkflowRun, type WorkflowNoticeRoute, openWorkflowNotice, revalidateWorkflowApprovalNotice, workflowApprovalNoticeIdentity, workflowApprovalOffers, workflowApprovalProposalId, workflowNoticeReads } from "@elizaos/plugin-workflow-client"
+import { type WorkflowApproval, type WorkflowApprovalOffer, type WorkflowRun, type WorkflowNoticeRoute, openWorkflowNotice, revalidateWorkflowApprovalNotice, workflowApprovalNoticeIdentity, workflowApprovalOffers, workflowApprovalProposalId, workflowNoticeReads, workflowSha } from "@elizaos/plugin-workflow-client"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
@@ -21,7 +21,7 @@ const Scope = Schema.Union([
     agentId: Schema.NonEmptyString, epoch: Schema.Int.check(Schema.isGreaterThan(0)) }),
 ])
 
-interface Session { readonly epoch: number; readonly owner: NoticeOwnerIdentity }
+interface Session { readonly epoch: number; readonly owner: NoticeOwnerIdentity; readonly scope: string }
 interface Presented { readonly session: Session; readonly id: string }
 
 effect function sessionForWorkflowNotices(): (Session | null | undefined)!! {
@@ -31,7 +31,9 @@ effect function sessionForWorkflowNotices(): (Session | null | undefined)!! {
     const scope = try Schema.decodeUnknownEffect(Scope)(raw)
     if (scope.kind === "signedOut") return null
     const owner = noticeOwnerOf(scope, scope.agentId)
-    return owner === null ? undefined : { epoch: scope.epoch, owner }
+    if (owner === null) return undefined
+    const digest = try workflowSha(["alpha-phone/workflow-notices", owner.origin, owner.ownerId, owner.agentId])
+    return { epoch: scope.epoch, owner, scope: digest }
   } catch () => undefined
 }
 
@@ -60,7 +62,7 @@ export effect function offerApprovalNotice<R>(digest: number, run: WorkflowRun, 
   if (approval.status !== "pending" || approval.expiresAt === undefined || !(try current)) return
   const session = try sessionForWorkflowNotices()
   if (session == null) return
-  const route: WorkflowNoticeRoute = { ...session.owner, scope: "alpha-phone", workflowId: run.workflowId, runId: run.id, versionId: run.versionId }
+  const route: WorkflowNoticeRoute = { ...session.owner, scope: session.scope, workflowId: run.workflowId, runId: run.id, versionId: run.versionId }
   const proposalId = workflowApprovalProposalId(approval)
   const { id } = try workflowApprovalNoticeIdentity(route, proposalId)
   const bridge = noticesOf()
@@ -109,7 +111,7 @@ export effect function currentTap(tap: ApprovalTap): boolean!! {
   if (!sameSession(tap.session, try sessionForWorkflowNotices())) return false
   const bridge = noticesOf()
   const current = tryPromise(() => bridge.pendingTap()) catch () => undefined
-  return current?.token === tap.token && current.runId === tap.route.runId && current.versionId === tap.route.versionId && current.workflowId === tap.route.workflowId
+  return current?.token === tap.token && current.scope === tap.session.scope && current.runId === tap.route.runId && current.versionId === tap.route.versionId && current.workflowId === tap.route.workflowId
 }
 
 export effect function settleApprovalTap(tap: ApprovalTap): boolean!!ApprovalTaps {
@@ -152,7 +154,7 @@ const opening = started(effect {
     const offered = tryPromise(() => bridge.pendingTap()) catch () => undefined
     if (offered?.question === true || typeof offered?.operationId !== "string" || !offered.operationId.startsWith("approval-") || typeof offered.token !== "string") return
     const offeredToken = offered.token
-    const scope = "alpha-phone"
+    const { scope } = session
     const at = try time.now()
     const resolved = tryPromise((signal) => resolveNoticeTap({
       pending: () => bridge.pendingTap(), binding: { ...session.owner, scope, current: () => !signal.aborted },
@@ -194,7 +196,7 @@ interface OfferedNotice { readonly proof: SuspendedApprovalNotice; readonly prop
 
 effect function offeredNotice(session: Session, source: WorkflowApprovalOffer): OfferedNotice!! {
   const { workflowId, runId, versionId, proposalId, expiresAt } = source
-  const route: WorkflowNoticeRoute = { ...session.owner, scope: "alpha-phone", workflowId, runId, versionId }
+  const route: WorkflowNoticeRoute = { ...session.owner, scope: session.scope, workflowId, runId, versionId }
   const identity = try workflowApprovalNoticeIdentity(route, proposalId)
   return { proof: { ...identity, route, expiresAt }, proposalId }
 }

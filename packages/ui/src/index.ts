@@ -1,5 +1,5 @@
 export * from "./lib/cn.ts";
-export { dockClearance } from "./lib/styles.ts";
+export { aboveDock, dockClearance } from "./lib/styles.ts";
 export { CalendarGlyph } from "./lib/icons.ts";
 export * from "./components/Alert.tsx";
 export * from "./components/AppHeader.tsx";
@@ -206,6 +206,7 @@ export * from "./components/calendar/CalendarNotice.tsx";
 export * from "./components/calendar/CalendarTimeline.tsx";
 export * from "./components/calendar/CalendarWeekStrip.tsx";
 export * from "./components/startup/StartupAccessPanel.tsx";
+export * from "./components/startup/StartupAllSet.tsx";
 export * from "./components/photos/PhotoAlbumCard.tsx";
 export * from "./components/photos/PhotoAlbumGrid.tsx";
 export * from "./components/photos/PhotoDaySection.tsx";

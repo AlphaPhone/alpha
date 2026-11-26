@@ -16,6 +16,7 @@ module held {
   export interface AlphaTabHost extends BrowserTabHostPlugin {
     pageContext(options: BrowserPageGuard): Promise<unknown>
     openFailedPage(options: BrowserPageGuard): Promise<void>
+    setDesktopSite(options: { readonly session: string; readonly id: string; readonly enabled: boolean }): Promise<unknown>
   }
 
   let made: AlphaTabHost | undefined

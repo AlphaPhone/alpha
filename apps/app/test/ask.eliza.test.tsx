@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { ConversationRecord } from "@elizaos/agent";
+import { ConversationRecord, type DeviceOperation } from "@elizaos/agent";
 import { Effect, Schema } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
@@ -7,16 +7,23 @@ import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
+import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
+import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
+import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
+import { Machine as Library } from "../gen/app__photos.effect.vibe";
+import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
+import inbox from "../src/inbox/index.tsx";
+import photos from "../src/photos/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
-import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, underAct, until } from "./alpha.tsx";
+import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
 import type { Answering } from "./fakes/routes.ts";
-import { scene } from "./fakes/scene.ts";
+import { scene, services } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
 let mine: Awaited<ReturnType<typeof owned>>;
@@ -176,6 +183,122 @@ function forward(origin: string, token: string): Answering {
   };
 }
 
+it('Send one reviewed email as context to my resident agent (spec/app/inbox/message.md, "Story: Ask Alpha about a message")', async () => {
+  const world = scene();
+  const source = world.inbox.mail.find(({ card }) => card.id === "g4");
+  if (!source) throw new Error("The test mailbox has no review email");
+  const mailbox = services(world).cloud;
+  const cloud = forward(mine.cloud.local, mine.key.token);
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: forward(mine.agent.origin, mine.agent.token),
+    cloud: (request) => new URL(request.url).pathname.startsWith("/api/v1/eliza/google/") ? mailbox(request) : cloud(request),
+  }), only("home", "view:Inbox", "assistant", "notice"));
+  const mail = inbox.runtime(alpha);
+  const chat = assistant.runtime(alpha);
+  await drawn(() => vi.waitFor(() => expect(button("Inbox")).toBeDefined()));
+  await press("Inbox");
+  await until(alpha, mail, Mailbox, (state) => state.list.status === "Loaded");
+  await press(/Standup notes/u);
+  await until(alpha, mail, Message, (state) => state.body.status === "Loaded");
+  await drawn(() => button("More actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  await drawn(() => {
+    const action = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Ask Alpha");
+    if (!action) throw new Error("Ask Alpha was not offered for the email");
+    action.click();
+  });
+  const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
+  await drawn(() => vi.waitFor(() => expect(review()).toContain(source.body)));
+  const before = (await mine.asked()).length;
+  await pressOnTop("Add to chat");
+  await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
+  expect(await mine.asked()).toHaveLength(before);
+
+  const prompt = "Who owns the onboarding copy?";
+  const reply = "Maya owns the onboarding copy.";
+  await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
+  await fill("Message Alpha", prompt);
+  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await press("Send");
+  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
+  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  const requests = (await mine.asked()).slice(before);
+  const received = requests[0]?.findLast((message) => message.role === "user")?.content;
+  expect([requests.length, received, world.inbox.changes]).toEqual([1, expect.stringContaining(JSON.stringify({
+    from: source.card.from, to: [...source.card.to, ...source.card.cc], subject: source.card.subject, bodyText: source.body,
+  })), []]);
+  expect(received).toEqual(expect.stringContaining(prompt));
+}, 300_000);
+
+it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "Story: Share what I am looking at")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  world.photos.access = { scope: "full", images: "full", videos: "denied" };
+  const source = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/png;base64,"));
+  if (!source) throw new Error("The phone fixture has no PNG");
+  source.name = "Reviewed photo.png";
+  const prompt = "What should I look for in this photo?";
+  const reply = "Look for the landmarks near the center.";
+  const received: unknown[] = [];
+  const forwardAgent = forward(mine.agent.origin, mine.agent.token);
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: async (request) => {
+      if (request.method === "POST" && /^\/api\/conversations\/[^/]+\/messages(?:\/stream)?$/u.test(new URL(request.url).pathname)) {
+        const body: unknown = await request.clone().json();
+        received.push(body);
+      }
+      return forwardAgent(request);
+    },
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "view:Photos", "assistant", "notice"));
+  const library = photos.runtime(alpha);
+  const chat = assistant.runtime(alpha);
+  await until(alpha, chat, Conversation, (state) => state.ready);
+  await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
+  await press("Photos");
+  await until(alpha, library, Library, (state) => state.library.status === "Loaded");
+  const openPhoto = async () => {
+    await press(source.name);
+    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+  };
+  const askAbout = async () => {
+    await drawn(() => button("Photo actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    await drawn(() => {
+      const action = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Ask Alpha");
+      if (!action) throw new Error("Ask Alpha was not offered for the photo");
+      action.click();
+    });
+  };
+  await openPhoto();
+  const priorReads = world.photos.readCount;
+  const gate = Promise.withResolvers<void>();
+  world.photos.readGate = gate.promise;
+  try {
+    await askAbout();
+    await drawn(() => vi.waitFor(() => expect(world.photos.readCount).toBe(priorReads + 1)));
+    await press("Back to photos");
+    await until(alpha, library, Viewer, (state) => state.open === 0);
+  } finally {
+    delete world.photos.readGate;
+    await drawn(async () => { gate.resolve(); await gate.promise; });
+  }
+  expect([button(`Remove ${source.name}`), received]).toEqual([undefined, []]);
+  await openPhoto();
+  await askAbout();
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  expect(received).toEqual([]);
+
+  await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
+  await fill("Message Alpha", prompt);
+  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await press("Send");
+  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
+  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  expect(received).toEqual([expect.objectContaining({
+    text: expect.stringContaining(prompt),
+    images: [{ data: source.image.slice(source.image.indexOf(",") + 1), mimeType: "image/png", name: source.name }],
+  })]);
+}, 300_000);
+
 it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.camera.galleryVolume = "external_primary";
@@ -229,4 +352,52 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   });
   await press("Open last photo");
   await waitForScreen(() => expect(document.querySelector('[data-alpha-subview="photos-viewer"] img[alt="Agent capture.jpg"]')).not.toBeNull());
+}, 300_000);
+
+it('Filter Files from Home and open the named file with the resident agent (spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"); (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  const path = "Documents/notes.txt";
+  const contents = "This exact file is open on the phone.";
+  world.files.texts[path] = contents;
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: forward(mine.agent.origin, mine.agent.token),
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "assistant", "view:Files", "notice"));
+  const runtime = assistant.runtime(alpha);
+  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    assertScreen();
+  }, { timeout: 30_000 });
+  const receipts = () => [...(world.telephony.enrollment?.journal.values() ?? [])].filter((entry) => entry.acknowledged);
+  const send = async (prompt: string, operation: DeviceOperation) => {
+    await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
+    await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation } }, prompt);
+    await mine.script({ kind: "text", parts: ["[answer] I’ll look in Files."] }, prompt);
+    await fill("Message Alpha", prompt);
+    await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+  };
+
+  await until(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded" && !state.askFirst);
+  await until(alpha, runtime, Conversation, (state) => state.ready);
+  await press("Open conversation");
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0 && state.assistant === "Sheet");
+
+  const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
+  await send("Show PDFs in Download", filter);
+  await waitForScreen(() => {
+    const found = document.querySelector('[role="group"][aria-label="Found"]');
+    expect(Array.from(found?.querySelectorAll("button") ?? [], (row) => row.getAttribute("aria-label"))).toEqual(["lease.pdf"]);
+    expect(document.body.textContent).toContain("Showing 1 item in Files.");
+    expect(button("Approve")).toBeUndefined();
+    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter]);
+  });
+
+  const open = { type: "files_open", path } as const;
+  await send("Open Documents/notes.txt", open);
+  await waitForScreen(() => {
+    expect(document.querySelector('[role="dialog"][aria-label="Preview"] pre')?.textContent).toBe(contents);
+    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter, open]);
+  });
+  expect(receipts().map(({ evidence }) => evidence.result)).toEqual([undefined, undefined]);
 }, 300_000);

@@ -68,7 +68,7 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
     <SettingsPage title="General" told={told} onBack={onBack} backLabel="Back to Settings" actions={actions}>
       {said ? <SettingsResetNotice said={said} /> : null}
       <ListGroup>
-        <SettingsNavRow title="Carrier & SIM setup" detail="IMEI, SIM status and activation" icon={<span className="size-5.5" />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
+        <SettingsNavRow title="Carrier & SIM setup" detail="IMEI, SIM status and activation" className="pl-13.5" onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
       </ListGroup>
       <ListGroup>
         <SettingsNavRow title="Display" icon={<Sun />} value={theme ? <span className="mr-1.5">{themes[theme]}</span> : undefined} onOpen={onOpen && (() => onOpen("display"))} {...at(0)} />

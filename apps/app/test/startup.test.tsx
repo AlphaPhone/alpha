@@ -4,6 +4,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
+import { Machine as Access } from "../gen/app__startup__access.effect.vibe";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
 import { button, closeAll, drawn, hardware, only, openOver, press, underAct } from "./alpha.tsx";
@@ -97,6 +99,12 @@ it("Shows native Access after sign-in and keeps the owner's place through restar
     await step(1);
     expect(button("Settings")).toBeUndefined();
     expect(world.settings.permissionRequests).toEqual([]);
+    await drawn(() => first.alpha.runtime.runPromise(Layers.use((work) =>
+      work.send({ type: "openLayer", id: "covered-startup", kind: "DialogLayer", covers: true }))));
+    await vi.waitFor(() => expect(dialog()?.textContent ?? "").not.toContain("Step 1 of 7"));
+    expect(button("Settings")).toBeUndefined();
+    await hardware("back");
+    await step(1);
     await hardware("back");
     await step(1);
     await vi.waitFor(() => expect(button("Allow")).toBeDefined());
@@ -123,6 +131,58 @@ it("Shows native Access after sign-in and keeps the owner's place through restar
     await vi.waitFor(() => expect(button("Settings")).toBeDefined());
     expect(dialog()).toBeNull();
     expect(world.settings.permissionRequests).toEqual(["notifications", "camera"]);
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Stops the Alpha image Access walkthrough at its first ungranted permission (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
+  const world = { ...scene(), phone: true, image: true, signedIn: true };
+  world.settings.hostFacts.startupPermissionDefaults = true;
+  world.settings.permissionStates.notifications = "granted";
+  world.settings.permissionStates.camera = "prompt";
+  world.voice.permission = "granted";
+  underAct();
+  try {
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    const dialog = () => document.querySelector('[role="dialog"]');
+    await vi.waitFor(() => {
+      expect(dialog()?.textContent).toContain("Step 3 of 7");
+      expect(dialog()?.querySelector('[aria-current="step"]')?.textContent).toContain("Camera");
+    });
+    expect(button("Allow")).toBeDefined();
+    expect(button("Settings")).toBeUndefined();
+    expect(world.settings.permissionRequests).toEqual([]);
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Shows All set only for the account result that calls for it (spec/app/startup/access.md, \"Story: Hear that all is set\")", async () => {
+  const world = { ...scene(), phone: true, signedIn: true };
+  underAct();
+  try {
+    localStorage.setItem("alpha:startup-permission-walkthrough:v1", JSON.stringify({ version: 4, status: "completed", step: 7 }));
+    const { alpha } = await openOver(fakeWorld(world), only("home", "overlay"), true);
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+    const finishForNewAccount = () => drawn(() => alpha.runtime.runPromise(Access.use((walkthrough) => Effect.gen(function* () {
+      yield* walkthrough.send({ type: "signedOut" }, "Owner");
+      yield* walkthrough.send({ type: "welcome", created: true, now: world.now }, "Owner");
+    }))));
+    const heading = () => document.querySelector('[role="dialog"] h2');
+    await finishForNewAccount();
+    await vi.waitFor(() => expect(heading()?.textContent).toBe("All set"));
+    expect(heading()).toBe(document.activeElement);
+    expect(button("Settings")).toBeUndefined();
+    await press("Done");
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+
+    await finishForNewAccount();
+    await vi.waitFor(() => expect(heading()?.textContent).toBe("All set"));
+    await hardware("back");
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
   } finally {
     await closeAll();
     react.IS_REACT_ACT_ENVIRONMENT = undefined;

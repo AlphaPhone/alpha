@@ -69,20 +69,20 @@ export effect function readPage(page: PageSpeech): boolean!!(Speaker.Machine | V
   const reading = try speaker.get()
   if (reading.stage !== "Silent" || reading.retiring || !Speaker.canRead(reading, "Page", page.item)) return false
   memory.pageReading = page
-  const accepted = try contained(speaker.send({ type: "read", text: "Page", which: page.item }, (state) => state.ticket === reading.ticket), "reading the current Browser page")
+  const accepted = try contained(speaker.send({ type: "read", text: "Page", which: page.item }, (state) => state.ticket === reading.ticket), "reading the selected text")
   if (!accepted && memory.pageReading === page) memory.pageReading = undefined
   return accepted
 }
 
-export effect function stopPage(item: number): void!!(Speaker.Machine | VoiceWords) {
+export effect function stopPage(item: number, source?: PageSpeech["source"]): void!!(Speaker.Machine | VoiceWords) {
   const { memory } = try VoiceWords
   const page = memory.pageReading
-  if (page?.item !== item) return
+  if (page?.item !== item || page.source !== source) return
   memory.pageReading = undefined
   const speaker = try Speaker.Machine
   const reading = try speaker.get()
   if (reading.text === "Page" && reading.item === item && Speaker.canStop(reading)) {
-    try contained(speaker.send({ type: "stop" }, (state) => state.ticket === reading.ticket), "stopping the current Browser page")
+    try contained(speaker.send({ type: "stop" }, (state) => state.ticket === reading.ticket), "stopping the selected text")
   }
   try page.retire()
 }

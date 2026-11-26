@@ -124,6 +124,7 @@ describe("Workflows", () => {
     await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
 
     const alarm = document.querySelector('[role="dialog"][aria-label="Clock alarms"]');
+    expect(opener?.closest("[inert]")).not.toBeNull();
     expect(alarm?.querySelector("h2")?.textContent).toBe("Alarms");
     expect(alarm?.querySelector('input[aria-label="Alarm time"]')).toBeInstanceOf(HTMLInputElement);
     await vi.waitFor(() => expect(document.activeElement).toBe(button("Close Clock")));
@@ -273,6 +274,7 @@ describe("Workflows", () => {
     if (first === undefined) throw new Error("The phone received no approval notice");
     expect(first.route).toMatchObject({ workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" });
     expect(Object.keys(first).sort()).toEqual(["bindingHash", "expiresAt", "id", "route"]);
+    expect(first.route.scope).toMatch(/^[a-f0-9]{64}$/);
     await drawn(() => notices.tap(first));
     await until(alpha, area, Approvals, (state) => state.opened === "Ready" && state.sheet);
     expect(document.querySelector('[aria-label="Workflow approval"]')?.textContent).toContain("Review the statement preview");
@@ -320,6 +322,40 @@ describe("Workflows", () => {
         activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
       });
     });
+  });
+
+  it('Reads the exact run on Android and stops it when Alpha goes into the background (spec/app/workflows/sheet.md, "Story: Read a run’s sheet")', async () => {
+    const world = scene();
+    world.phone = true;
+    world.voice.onDevice = true;
+    let endPlayback: () => void = () => {};
+    const playing = new Promise<void>((resolve) => { endPlayback = resolve; });
+    world.voice.playbackHold = () => playing;
+    world.workflows.run = true;
+    try {
+      const alpha = await openWorkflows(world);
+      const area = workflows.runtime(alpha);
+      await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+      await choose("Monthly statement");
+      await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown > 0);
+      await drawn(() => {
+        const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
+        if (!row) throw new Error("No finished run");
+        row.click();
+      });
+      await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
+      const initialHushes = world.voice.hushCalls;
+      await press("Read aloud");
+      await vi.waitFor(() => expect(world.voice.played.map(({ text }) => text)).toContain("Your statement is ready."));
+      expect(world.voice.spoken).toContainEqual({ text: "Your statement is ready.", append: false, replace: false, channel: "local" });
+      expect(button("Stop reading")).toBeDefined();
+      await seen(false);
+      await until(alpha, area, Sheet, (state) => state.speech.outcome !== "Sent");
+      await vi.waitFor(() => expect(world.voice.hushCalls).toBeGreaterThan(initialHushes));
+      expect(world.voice.startCloudSpeechCalls).toBe(0);
+    } finally {
+      endPlayback();
+    }
   });
 
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
