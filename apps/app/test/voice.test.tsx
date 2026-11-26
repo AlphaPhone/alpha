@@ -589,7 +589,6 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
-    // Asked for Home with the sheet over Home: Talk's own move lowers it, so Home shows, and Talk keeps listening.
     const route = (await getShell(runtime)).route;
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Here is Home."];
     speakUtterance(world, "Go home");
@@ -597,7 +596,6 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Bar", spokenRoute: route + 1 });
 
-    // Full over Home hides any destination, so opening Calendar lowers it in the same move.
     await sendShell(runtime, { type: "raise", detent: "Full" });
     world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
     speakUtterance(world, "Open my calendar");
