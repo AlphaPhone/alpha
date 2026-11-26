@@ -328,7 +328,6 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       if (ghostRef.current === ghost) dropGhost();
     };
     fade.finished.then(gone, gone);
-    // v119's one field stayed in a sheet a drag put away until it had gone (retire, :613-651; :1356-1360): the bar's own words show only then.
     setHanding(!handed.tap);
     finish();
   }, [growing, handed]);

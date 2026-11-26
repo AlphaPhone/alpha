@@ -24,7 +24,9 @@ const asked = [{ id: "asked", author: "owner" as const, text: "Tell me a long st
 function finishingReply(canvasElement: HTMLElement) {
   const host = canvasElement.appendChild(Object.assign(document.createElement("div"), { style: "height: 160px; display: flex; flex-direction: column" }));
   const root = createRoot(host);
-  const draw = (props: Partial<AssistantTranscriptProps>) => flushSync(() => root.render(<AssistantTranscript messages={asked} className="h-full" {...props} />));
+  const draw = (props: Partial<AssistantTranscriptProps>) =>
+    // eslint-disable-next-line @eslint-react/dom-no-flush-sync -- each change of a finishing reply is drawn before the next, as the app's two updates are
+    flushSync(() => root.render(<AssistantTranscript messages={asked} className="h-full" {...props} />));
   draw({ liveMessages: [{ id: "reply", author: "alpha", text: replyText, streaming: true }] });
   const log = within(host).getByRole("log");
   return {
@@ -92,17 +94,19 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
       const following = finishingReply(canvasElement);
       await waitFor(() => expect(scrollOf(following.log).below).toBeLessThan(2));
       following.finish();
-      await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
+      following.log.dispatchEvent(new Event("scroll"));
       await expect(scrollOf(following.log).below).toBeLessThan(2);
+      arrive(following.log);
+      await waitFor(() => expect(scrollOf(following.log).below).toBeLessThan(2));
       following.done();
       const reading = finishingReply(canvasElement);
       await waitFor(() => expect(scrollOf(reading.log).below).toBeLessThan(2));
       reading.log.scrollTop -= 200;
       await waitFor(() => expect(scrollOf(reading.log).below).toBeGreaterThan(150));
-      await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
+      reading.log.dispatchEvent(new Event("scroll"));
       const place = reading.log.scrollTop;
       reading.finish();
-      await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
+      reading.log.dispatchEvent(new Event("scroll"));
       await expect(reading.log.scrollTop).toBe(place);
       reading.done();
     },
