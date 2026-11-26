@@ -588,10 +588,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       if (board.draftSeat !== seat) return
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
       heard = true
-      board.change({ reply: written, label: "" })
+      // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": text that may still be taken back keeps the working label.
+      if (!provisional) board.change({ reply: written, label: "" })
       show({ type: "token", turn: ticket, units: written.length, provisional })
     }
-    // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once the acknowledgment is taken it stays the label until text or the reply arrives.
+    // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": once the acknowledgment is taken it stays the label until text or the reply arrives.
     let acknowledged = false
     let toolRan = false
     const labelled = () => !acknowledged && board.snapshot().reply === ""
