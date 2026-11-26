@@ -901,7 +901,8 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         if (origin === undefined || (request !== undefined && request !== message) || !fromThisEnrollment(proposal, opened)
           || !(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try reviewContext(revision, view))) return undefined
       } else if (request === undefined) {
-        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate") || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
+        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate" || op.type === "camera_capture_photo")
+          || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
       } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
         || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
       const selected = needsMessage(op)

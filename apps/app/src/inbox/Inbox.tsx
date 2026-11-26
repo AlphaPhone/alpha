@@ -599,7 +599,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
           onCompose={selectingDrafts ? undefined : onBegin({ kind: "Fresh", account })}
           accounts={accounts}
           onChooseAccount={chooseAccount}
-          aside={shelved.map(({ id, onOpen }) => ({ id, onOpen }))}
+          aside={!draftsFolder && !can({ type: "chooseFolder", folder: "DraftsFolder" })
+            ? shelved.flatMap(({ id, onOpen }) => onOpen ? [{ id, onOpen }] : []) : undefined}
           rows={draftsFolder ? [...shelved, ...letters.map(row)] : letters.map(row)}
           loading={state.list.status === "Loading" && !state.further}
           onLoadMore={can({ type: "loadMore" }) ? () => void send({ type: "loadMore" }) : undefined}

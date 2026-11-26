@@ -9,6 +9,7 @@ import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
@@ -19,6 +20,7 @@ import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
+import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import photos from "../src/photos/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
@@ -219,8 +221,22 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   }), only("home", "view:Inbox", "assistant", "notice"));
   const mail = inbox.runtime(alpha);
   const chat = assistant.runtime(alpha);
-  await drawn(() => vi.waitFor(() => expect(button("Inbox")).toBeDefined()));
-  await press("Inbox");
+  const inboxTile = () => document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+  const waitForScreen = (check: () => void | Promise<void>) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    await check();
+  }, { timeout: 120_000 });
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+  await waitForScreen(async () => {
+    const state = await home.runtime(alpha).runPromise(Home.use((machine) => machine.get()));
+    expect(state.tiles.load.status).toBe("Loaded");
+    expect(inboxTile()).not.toBeNull();
+  });
+  await drawn(() => {
+    const tile = inboxTile();
+    if (!tile) throw new Error("The Inbox tile was not shown on Home");
+    tile.click();
+  });
   await until(alpha, mail, Mailbox, (state) => state.list.status === "Loaded");
   await press(/Standup notes/u);
   await until(alpha, mail, Message, (state) => state.body.status === "Loaded");
@@ -231,7 +247,7 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
     action.click();
   });
   const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
-  await drawn(() => vi.waitFor(() => expect(review()).toContain(source.body)));
+  await waitForScreen(() => expect(review()).toContain(source.body));
   const before = (await mine.asked()).length;
   await pressOnTop("Add to chat");
   await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
@@ -241,10 +257,10 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   const reply = "Maya owns the onboarding copy.";
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
   await fill("Message Alpha", prompt);
-  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
-  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  await waitForScreen(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply));
   const requests = (await mine.asked()).slice(before);
   const received = requests[0]?.findLast((message) => message.role === "user")?.content;
   expect([requests.length, received, world.inbox.changes]).toEqual([1, expect.stringContaining(JSON.stringify({
@@ -279,13 +295,28 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   }), only("home", "view:Photos", "assistant", "notice"));
   const library = photos.runtime(alpha);
   const chat = assistant.runtime(alpha);
+  const readViewer = () => library.runPromise(Viewer.use((machine) => machine.get()));
+  const readDraft = () => chat.runPromise(Composer.use((machine) => machine.get()));
+  const readShell = () => alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
+  const waitForScreen = (check: () => void | Promise<void>) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    await check();
+  }, { timeout: 30_000 });
   await until(alpha, chat, Conversation, (state) => state.ready);
   await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
   await press("Photos");
   await until(alpha, library, Library, (state) => state.library.status === "Loaded");
   const openPhoto = async (name = source.name) => {
+    const previous = (await readViewer()).read.ticket;
     await press(name);
-    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+    await waitForScreen(async () => {
+      const view = await readViewer();
+      expect(view.open).toBeGreaterThan(0);
+      expect(view.read).toMatchObject({ status: "Loaded" });
+      expect(view.read.ticket).toBeGreaterThan(previous);
+      const openImage = [...document.querySelectorAll<HTMLImageElement>('[data-alpha-subview="photos-viewer"] img')];
+      expect(openImage.map((image) => image.alt)).toContain(name);
+    });
   };
   const askAbout = async () => {
     await drawn(() => button("Photo actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
@@ -295,13 +326,28 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
       action.click();
     });
   };
+  const offerPhoto = async (name: string, files: number) => {
+    const [opened, draft] = await Promise.all([readViewer(), readDraft()]);
+    await askAbout();
+    await waitForScreen(async () => {
+      const [shell, view, current] = await Promise.all([readShell(), readViewer(), readDraft()]);
+      expect([shell.assistant, shell.trail.at(-1)]).toEqual(["Sheet", "Photos"]);
+      expect(view).toMatchObject({
+        open: opened.open,
+        revision: opened.revision,
+        read: { status: "Loaded", ticket: opened.read.ticket },
+      });
+      expect([current.binding, current.read.ticket, current.editor.files]).toEqual([draft.binding, draft.read.ticket, files]);
+      expect(button(`Remove ${name}`)?.disabled).toBe(false);
+    });
+  };
   await openPhoto();
   const priorReads = world.photos.readCount;
   const gate = Promise.withResolvers<void>();
   world.photos.readGate = gate.promise;
   try {
     await askAbout();
-    await drawn(() => vi.waitFor(() => expect(world.photos.readCount).toBe(priorReads + 1)));
+    await waitForScreen(() => expect(world.photos.readCount).toBe(priorReads + 1));
     await press("Back to photos");
     await until(alpha, library, Viewer, (state) => state.open === 0);
   } finally {
@@ -310,20 +356,17 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   }
   expect([button(`Remove ${source.name}`), received]).toEqual([undefined, []]);
   await openPhoto();
-  await askAbout();
-  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  await offerPhoto(source.name, 1);
   await press(`Remove ${source.name}`);
   await until(alpha, library, Viewer, (state) => state.open === 0);
   await until(alpha, chat, Composer, (state) => state.editor.files === 0);
   await hardware("back");
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
   await openPhoto();
-  await askAbout();
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  await offerPhoto(source.name, 1);
   chatAction("Attach media");
   const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Select photos"]');
-  await drawn(() => vi.waitFor(() => expect(input()).not.toBeNull()));
+  await waitForScreen(() => expect(input()).not.toBeNull());
   await drawn(() => {
     const picker = input();
     if (!picker) throw new Error("The photo file input did not open");
@@ -331,7 +374,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
     Object.defineProperty(picker, "files", { value: [new File([bytes], ordinary, { type: "image/png" })] });
     picker.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${ordinary} from the selection`)).toBeDefined()));
+  await waitForScreen(() => expect(button(`Remove ${ordinary} from the selection`)).toBeDefined());
   await press("Attach selected files");
   await until(alpha, chat, Composer, (state) => state.editor.files === 2);
   await fill("Message Alpha", prompt);
@@ -340,21 +383,19 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await press("Back to photos");
   await until(alpha, library, Viewer, (state) => state.open === 0);
   await openPhoto(replacement.name);
-  await askAbout();
-  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
-  await drawn(() => vi.waitFor(() => expect(button(`Remove ${replacement.name}`)).toBeDefined()));
-  const writing = await chat.runPromise(Composer.use((composer) => composer.get()));
+  await offerPhoto(replacement.name, 2);
+  const writing = await readDraft();
   const text = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Alpha"]')?.value;
   expect([button(`Remove ${source.name}`), Boolean(button(`Remove ${ordinary}`)), writing.editor.files, text, received])
     .toEqual([undefined, true, 2, prompt, []]);
 
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
-  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
-  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
-  expect(received[0]).toHaveProperty("text", expect.stringContaining(prompt));
+  await waitForScreen(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply));
   expect(received).toEqual([expect.objectContaining({
+    text: expect.stringContaining(prompt),
     images: [
       { data: replacement.image.slice(replacement.image.indexOf(",") + 1), mimeType: "image/jpeg", name: replacement.name },
       { data: ordinaryData, mimeType: "image/png", name: ordinary },
@@ -365,6 +406,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
 it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo"); (spec/app/camera/agent.md, "A confirmed capture can be offered in the same draft for the owner to send")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.camera.galleryVolume = "external_primary";
+  world.telephony.enrollment = { journal: new Map() };
   let outgoing = 0;
   const forwardAgent = forward(mine.agent.origin, mine.agent.token);
   const { alpha } = await openOver(fakeWorld(world, {
@@ -391,7 +433,10 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
 
-  await waitForScreen(() => expect(button("Approve")?.disabled).toBe(false));
+  await waitForScreen(() => {
+    expect(document.querySelector('[role="log"]')?.textContent).toContain("Open the rear camera to review the shot");
+    expect(button("Approve")?.disabled).toBe(false);
+  });
   expect(world.camera.photos).toHaveLength(0);
   await press("Approve");
 
@@ -458,7 +503,8 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
   await drawn(() => messages()?.click());
   await until(alpha, alpha.runtime, Messages, (state) => state.pane === "Threads" && state.list.status === "Loaded");
   await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Messages");
-  await press("Open conversation");
+  await onScreen(() => expect(button("Open Alpha")?.disabled).toBe(false));
+  await press("Open Alpha");
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
   await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
 
@@ -466,7 +512,7 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
   const prompt = "Send an SMS to +14155550100 saying Meet at the front door";
   await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation } }, prompt);
   await mine.script({ kind: "text", parts: ["[answer] Review this send on your phone."] }, prompt);
-  await fill("Message Alpha", prompt);
+  await fill("Ask Alpha", prompt);
   await onScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
 
@@ -518,6 +564,7 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
 
 it('Filter Files from Home and open the named file with the resident agent (spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"); (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  world.telephony.enrollment = { journal: new Map() };
   const path = "Documents/notes.txt";
   const contents = "This exact file is open on the phone.";
   world.files.texts[path] = contents;

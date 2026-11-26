@@ -46,9 +46,9 @@ function realModel(): RealModel | undefined {
 
 /**
  * eliza's agent, cloud, and external messaging providers at the dev server's `/agent`, `/cloud`, `/slack`, and `/telegram`:
- * the processes the journeys start (services.ts), over state of this run alone; the agent's is kept in the directory
- * `ALPHA_ELIZA_STATE` names, where one is named. The cloud's model is the scripted one, or the real one `ALPHA_DEV_MODEL`
- * names. When `ALPHA_SLACK_URL` or `ALPHA_TELEGRAM_URL` is set, the proxy forwards to that external URL instead of starting
+ * the processes the journeys start (services.ts), over state of this run alone; the agent's and the cloud's are kept
+ * in the directory `ALPHA_ELIZA_STATE` names, where one is named, so a restart reopens the same owner's chats. The
+ * cloud's model is the scripted one, or the real one `ALPHA_DEV_MODEL` names. When `ALPHA_SLACK_URL` or `ALPHA_TELEGRAM_URL` is set, the proxy forwards to that external URL instead of starting
  * a local provider server. The proxy adds the agent's token, so the page never holds it, as on the phone. `apply` keeps it
  * out of every build.
  */

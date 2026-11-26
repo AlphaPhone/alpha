@@ -293,6 +293,11 @@ const opening = started(effect {
   const visible = Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible))
   try Stream.runForEach(Stream.zipLatest(changes, visible), effect ([shown, front]) => {
     if (shown && front) try enter()
+    if (!shown || !front) {
+      const menu = try Actions.Machine
+      const actions = try menu.get()
+      if (actions.open || actions.awaiting) try ignore(menu.send({ type: "left" }, phone))
+    }
     if (!shown) {
       try ignore((try Mic.Machine).send({ type: "left" }, phone))
       const list = try Notes.Machine
@@ -336,6 +341,11 @@ effect function took() {
   }
   if (Trash.canBack(try trash.get())) {
     try ignore(trash.send({ type: "back" }, "Owner"))
+    return true
+  }
+  const menu = try Actions.Machine
+  if (Actions.canBack(try menu.get())) {
+    try ignore(menu.send({ type: "back" }, "Owner"))
     return true
   }
   if (Editor.canBack(try editor.get())) {

@@ -1,28 +1,32 @@
-// spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Nothing is sent or scheduled from Notes: only the note open under the menu is handed over, as a draft, once per choice"
+// spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Only one handoff can leave the menu for the exact note and revision reviewed"
 import { noteShareText } from "@elizaos/plugin-notes-client"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import { Machine as Transfer } from "../../gen/app__notes__transfer.effect.vibe"
 import * as Actions from "../../gen/app__notes__actions.effect.vibe"
-import { Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Editor as EditorState, Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Inbox } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Composer } from "../../gen/app__inbox__drafts.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import { Letters, begin } from "../inbox/composer.vibe"
 import type { Mail } from "../inbox/gmail.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Device, native, shareSystemText } from "../platform/device.vibe"
 import { NoteDevice } from "../platform/noteDevice.vibe"
 import { downloadText } from "../platform/noteDocuments.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { NoteStore } from "../platform/notes.vibe"
-import { ownerAt } from "../platform/owner.vibe"
-import { type Job, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { launchOwnerAt, ownerAt, sameResidentOwner } from "../platform/owner.vibe"
+import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { type NotesSelection, savedVoiceRecord } from "./selection.vibe"
 import { NoteContent, numberOf } from "./content.vibe"
 
 const phone: Actor = "Phone"
 
-type Scope = Agent | NoteStore | Editor | NoteContent | NoteDevice | Inbox | Composer | Mail | Letters | Shell
+type SharePorts = Device | Transfer | Inbox | Composer | Mail | Letters | Shell
+type Scope = Agent | NoteStore | Editor | NoteContent | NoteDevice | Layers | SharePorts
 
 effect function email(title: string, text: string): boolean!!(Inbox | Composer | Letters | Mail | Shell) {
   const mail = try (try Inbox).get()
@@ -55,13 +59,66 @@ effect function share(fx: Extract<Actions.Effect, { readonly tag: "Hands" }>): v
   try ignore((try NoteDevice).share(fx.channel, title, text))
 }
 
+/** The destination receives text only from its explicit row. Email still opens a draft. */
+effect function handText(destination: Actions.Destination, note: number, revision: number, title: string, text: string): Actions.ShareNotice!!SharePorts {
+  if (destination === "EmailText") return (try email(title, text)) ? "OpenedOrSaved" : "ShareUnavailable"
+  if (destination === "SystemShare") return (try shareSystemText(title, text)) ? "OpenedOrSaved" : "ShareUnavailable"
+  if (destination === "CopyText") {
+    const copied = !text.includes("\0") && new TextEncoder().encode(text).length <= 65536 && (try (try Device).copyText(text))
+    return copied ? "Copied" : "ShareUnavailable"
+  }
+  if (native()) {
+    const queued = (try Transfer).send({ type: "exportNote", note, revision }, "Owner") catch () => undefined
+    return queued === undefined ? "ShareUnavailable" : "OpenedOrSaved"
+  }
+  const name = `${title.replace(/[^\p{L}\p{N} ._-]+/gu, "_").trim().slice(0, 140) || "Note"}.txt`
+  return (try downloadText(name, text)) ? "OpenedOrSaved" : "ShareUnavailable"
+}
+
+type TextShare = Extract<Actions.Effect, { readonly tag: "Presents" }>
+
+function textShared(ticket: number, answer: Actions.ShareNotice): Actions.Event {
+  return { type: "textShared", ticket, answer }
+}
+
+function sameSavedEditor(editor: EditorState, shown: { readonly owner: number; readonly note: number; readonly revision: number }): boolean {
+  return editor.showing && !editor.deleting && editor.draft.sync === "Kept"
+    && editor.owner === shown.owner && editor.note === shown.note && editor.draft.base === shown.revision
+}
+
+effect function currentText(fx: TextShare, route: number): boolean!!(Actions.Machine | Editor | Shell | Layers | Device) {
+  const where = try (try Shell).get()
+  const editor = try (try Editor).get()
+  return where.route === route && showing(where, "Notes") && !where.drawer && where.assistant !== "Sheet" && where.assistant !== "Full"
+    && (try (try Device).showing()) && !pageInert(try (try Layers).get())
+    && Actions.canTextShared(try (try Actions.Machine).get(), fx.ticket, "ShareUnavailable", phone)
+    && sameSavedEditor(editor, fx) && editor.link.tie === "NoLink"
+}
+
+// spec/app/notes/actions.md, "Share reviews the saved note before an explicit destination receives its text"
+effect function shareText(fx: TextShare): Actions.Event!!(Scope | Actions.Machine) {
+  const unavailable = textShared(fx.ticket, "ShareUnavailable")
+  const route = (try (try Shell).get()).route
+  if (!(try currentText(fx, route))) return unavailable
+  const selected = try (try NoteContent).collection()
+  const owner = launchOwnerAt() catch () => undefined
+  if (owner === undefined || owner.agentId !== selected.owner || numberOf("owner", owner.agentId) !== fx.owner) return unavailable
+  const snapshot = (try NoteStore).read() catch () => undefined
+  if (snapshot === undefined || snapshot.revision + 1 !== fx.revision) return unavailable
+  const confirmed = launchOwnerAt() catch () => undefined
+  if (!sameResidentOwner(owner, confirmed) || !(try currentText(fx, route))) return unavailable
+  const saved = snapshot.notes.find((note) => numberOf("note", note.id) === fx.note)
+  if (saved === undefined) return unavailable
+  const { title, text } = noteShareText(saved)
+  return textShared(fx.ticket, try handText(fx.destination, fx.note, fx.revision, title, text))
+}
+
 type VoiceShare = Extract<Voice.Effect, { readonly tag: "Shares" }>
 export type VoiceSharePorts = NotesSelection | NoteStore | Transfer | Inbox | Composer | Mail | Letters
 
 // spec/app/notes/voice.md, "Story: Share the text of a saved voice note"
 export effect function shareVoice(fx: VoiceShare): Voice.Event!!VoiceSharePorts {
   const unavailable: Voice.Event = { type: "textShared", ticket: fx.ticket, notice: "ShareUnavailable" }
-  const done: Voice.Event = { ...unavailable, notice: "NoShareNotice" }
   const voice = try Voice.Machine
   if (!Voice.canTextShared(try voice.get(), fx.ticket, "ShareUnavailable", phone)) return unavailable
   const shown = (try (try NoteContent).collection()).noteByNumber.get(fx.note)
@@ -70,25 +127,35 @@ export effect function shareVoice(fx: VoiceShare): Voice.Event!!VoiceSharePorts 
     record: { kind: "canonical-note", id: shown.id, revision: String(fx.revision - 1) } })
   if (saved === undefined || !Voice.canTextShared(try voice.get(), fx.ticket, "ShareUnavailable", phone)) return unavailable
   const { title, text } = noteShareText(saved)
-  if (fx.destination === "EmailText") return (try email(title, text)) ? done : unavailable
-  if (fx.destination === "SystemShare") return (try shareSystemText(title, text)) ? done : unavailable
-  if (fx.destination === "CopyText") {
-    const copied = !text.includes("\0") && new TextEncoder().encode(text).length <= 65536 && (try (try Device).copyText(text))
-    return copied ? { ...done, notice: "Copied" } : unavailable
-  }
-  if (native()) {
-    const queued = (try Transfer).send({ type: "exportNote", note: fx.note, revision: fx.revision }, "Owner") catch () => undefined
-    return queued === undefined ? unavailable : done
-  }
-  const name = `${title.replace(/[^\p{L}\p{N} ._-]+/gu, "_").trim().slice(0, 140) || "Note"}.txt`
-  return (try downloadText(name, text)) ? done : unavailable
+  const notice = try handText(fx.destination, fx.note, fx.revision, title, text)
+  return { ...unavailable, notice: notice === "OpenedOrSaved" ? "NoShareNotice" : notice }
 }
 
-function carry(fx: Actions.Effect): Job<Actions.Event, Scope, [Actor]> {
+effect function reportShare(fx: Extract<Actions.Effect, { readonly tag: "ReportShare" }>) {
+  const menu = try (try Actions.Machine).get()
+  if (!menu.open || menu.ticket !== fx.ticket || !showing(try (try Shell).get(), "Notes") || !(try (try Device).showing())) return
+  if (!sameSavedEditor(try (try Editor).get(), fx)) return
+  try say(fx.result === "Copied" ? "Note text copied." : "Sharing is unavailable.", fx.result !== "Copied")
+}
+
+function carry(fx: Actions.Effect): Job<Actions.Event, Scope | Actions.Machine | Toasts | Said, [Actor]> {
   return match (fx) {
     when { tag: "Hands" }: run("draft a share", share(fx), phone);
     when { tag: "Drafts" }: run("prepare the schedule", Effect.void, phone);
+    when { tag: "Presents" }: answer("share the reviewed note", shareText(fx), textShared(fx.ticket, "ShareUnavailable"), phone);
+    when { tag: "ReportShare" }: run("report the note share", reportShare(fx), phone);
   }
 }
 
-export const actions = reacting(Actions, { carry })
+const retire = started(effect {
+  const editor = try Editor
+  const menu = try Actions.Machine
+  try Stream.runForEach(editor.changes, effect (state) => {
+    const reviewed = try menu.get()
+    if ((reviewed.open || reviewed.awaiting) && !sameSavedEditor(state, reviewed)) {
+      try ignore(menu.send({ type: "left" }, phone))
+    }
+  })
+}, "retire the note actions when the displayed draft changes")
+
+export const actions = together(reacting(Actions, { carry }), retire)

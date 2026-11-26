@@ -95,59 +95,59 @@ lemma addToHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_
   }
 }
 
-lemma removeFromHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, by_: Actor)
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysNothingIsToldBeforeTheStart(removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysTheTilesKeepTheirRules(removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysOffThePhoneNothingIsAsked(removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysTheInstalledAppsKeepTheirRules(removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysEditingIsAlone(removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepNumbersOnlyRise(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepARestartForgetsAllButItsNumbers(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepOnlyARefusalReadsQuietly(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepReadingsAreTicketed(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepNothingOpensWhileEditing(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepOneAskAtATime(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepEveryChangeIsSentToBeSaved(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepFailuresAreToldExactly(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepBackClosesOneLayer(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+lemma removeFromHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, beside: bool, by_: Actor)
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysNothingIsToldBeforeTheStart(removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysTheTilesKeepTheirRules(removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysOffThePhoneNothingIsAsked(removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysTheInstalledAppsKeepTheirRules(removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> alwaysEditingIsAlone(removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepNumbersOnlyRise(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepARestartForgetsAllButItsNumbers(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepOnlyARefusalReadsQuietly(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepReadingsAreTicketed(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepNothingOpensWhileEditing(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepOneAskAtATime(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepEveryChangeIsSentToBeSaved(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepFailuresAreToldExactly(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepBackClosesOneLayer(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, beside, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "removeFromHome", removeFromHome(h, tile, shell, beside, by_).state, removeFromHome(h, tile, shell, beside, by_).out))
 {
-  if inv(h) && canRemoveFromHome(h, tile, shell, by_) {
-    var after := removeFromHome(h, tile, shell, by_);
+  if inv(h) && canRemoveFromHome(h, tile, shell, beside, by_) {
+    var after := removeFromHome(h, tile, shell, beside, by_);
     app__home__tiles_removeTile_ensures(h.tiles, tile);
     assert after.out[0] in after.out;
   }
 }
 
-lemma moveTile_ensures(h: Home, tile: app__home__tiles_Tile, onto: app__home__tiles_Tile, behind: bool, shell: app__shell_Shell, by_: Actor)
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysNothingIsToldBeforeTheStart(moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysTheTilesKeepTheirRules(moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysOffThePhoneNothingIsAsked(moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysTheInstalledAppsKeepTheirRules(moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysEditingIsAlone(moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepNumbersOnlyRise(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepARestartForgetsAllButItsNumbers(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepOnlyARefusalReadsQuietly(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepReadingsAreTicketed(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepNothingOpensWhileEditing(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepOneAskAtATime(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepEveryChangeIsSentToBeSaved(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepFailuresAreToldExactly(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepBackClosesOneLayer(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+lemma moveTile_ensures(h: Home, tile: app__home__tiles_Tile, onto: app__home__tiles_Tile, behind: bool, shell: app__shell_Shell, beside: bool, by_: Actor)
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysNothingIsToldBeforeTheStart(moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysTheTilesKeepTheirRules(moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysOffThePhoneNothingIsAsked(moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysTheInstalledAppsKeepTheirRules(moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> alwaysEditingIsAlone(moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepNumbersOnlyRise(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepARestartForgetsAllButItsNumbers(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepOnlyARefusalReadsQuietly(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepReadingsAreTicketed(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepNothingOpensWhileEditing(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepOneAskAtATime(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepEveryChangeIsSentToBeSaved(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepFailuresAreToldExactly(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepBackClosesOneLayer(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, beside, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "moveTile", moveTile(h, tile, onto, behind, shell, beside, by_).state, moveTile(h, tile, onto, behind, shell, beside, by_).out))
 {
-  if inv(h) && canMoveTile(h, tile, onto, shell, by_) {
-    var after := moveTile(h, tile, onto, behind, shell, by_);
+  if inv(h) && canMoveTile(h, tile, onto, shell, beside, by_) {
+    var after := moveTile(h, tile, onto, behind, shell, beside, by_);
     app__home__tiles_moveTile_ensures(h.tiles, tile, onto, behind);
     assert after.out[0] in after.out;
   }

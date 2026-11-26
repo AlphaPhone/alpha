@@ -77,7 +77,7 @@ describe("Home on a phone", () => {
     });
     expect([button("Inbox3 unread") !== undefined, button("Telegram") !== undefined, button("Slack") !== undefined, button("Notes") !== undefined]).toEqual([true, false, false, true]);
 
-    // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
+    // spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerdown", 80, 330)));
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointermove", 80, 352)));
     await later(alpha, 450);
@@ -148,9 +148,9 @@ describe("Home on a phone", () => {
     expect([tiles(), localStorage.getItem(savedKey)]).toEqual([["view:Reminders", "view:Clock", "view:Notes"], chosen]);
   });
 
-  it("Opens an app or Apps beside the landscape Ask sheet (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\"; spec/app/shell/index.md, \"Apps can open beside the landscape Ask sheet and Close leaves Ask open\")", async () => {
+  it.each([false, true])("Opens an app or Apps beside the landscape Ask sheet with coarse pointer %s (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\"; spec/app/shell/index.md, \"Apps can open beside the landscape Ask sheet and Close leaves Ask open\")", async (coarse) => {
     const pointer = window.matchMedia("(pointer: coarse)");
-    Object.defineProperty(pointer, "matches", { configurable: true, value: true });
+    Object.defineProperty(pointer, "matches", { configurable: true, value: coarse });
     const originalMatch = window.matchMedia.bind(window);
     const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(pointer: coarse)" ? pointer : originalMatch(query));
     const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
@@ -161,7 +161,9 @@ describe("Home on a phone", () => {
       if (height) Object.defineProperty(window, "innerHeight", height);
     });
     const world = holdingHome({ ...scene(), phone: true });
-    const { alpha } = await open(world, only("home", "assistant", "view:Notes"));
+    const clock = "org.fixture.clock/org.fixture.clock.Main";
+    localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: clock }]));
+    const { alpha } = await open(world, only("home", "assistant", "view:Notes", "view:Workflows"));
     const rotate = async (landscape: boolean) => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: landscape ? 844 : 390 });
       Object.defineProperty(window, "innerHeight", { configurable: true, value: landscape ? 390 : 844 });
@@ -172,17 +174,26 @@ describe("Home on a phone", () => {
     const homes = home.runtime(alpha);
     const dialog = () => document.querySelector('[data-alpha-apps-drawer]');
     const chat = () => document.querySelector('[data-alpha-detent="sheet"]');
-    await until(alpha, homes, Home.Machine, (state) => state.tiles.load.status === "Loaded");
+    await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     expect(tileButton("view:Notes")?.closest("[inert]")).toBeNull();
     expect(button("Apps")?.closest("[inert]")).toBeNull();
+    // spec/app/home/index.md, "A favorite on bare Home or beside the landscape Ask sheet opens the installed app and leaves Ask where it is"
+    expect(tileButton(`app:${clock}`)?.closest("[inert]")).toBeNull();
+    await drawn(() => tileButton(`app:${clock}`)?.click());
+    await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
+    await until(alpha, homes, Home.Machine, (state) => state.handoff.attempt.outcome === "Confirmed");
+    expect(chat()).not.toBeNull();
 
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "openLayer", id: "review", kind: "DialogLayer", covers: true })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 1);
     expect(tileButton("view:Notes")?.closest("[inert]")).not.toBeNull();
+    expect(tileButton(`app:${clock}`)?.closest("[inert]")).not.toBeNull();
     await press("Notes");
     await press("Apps");
+    await drawn(() => tileButton(`app:${clock}`)?.click());
+    expect(world.launcher.opened).toEqual(["org.fixture.clock"]);
     expect(await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).toMatchObject({ trail: [], drawer: false, assistant: "Sheet" });
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "review" })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 0);
@@ -210,6 +221,17 @@ describe("Home on a phone", () => {
 
     await press("Apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
+    const search = dialog()?.querySelector("input");
+    expect(search).toBeInstanceOf(HTMLInputElement);
+    await drawn(() => {
+      search?.focus();
+      search?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(chat()).not.toBeNull();
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
     expect(dialog()?.getAttribute("aria-modal")).toBe("true");
@@ -218,9 +240,42 @@ describe("Home on a phone", () => {
 
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    // spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
+    await drawn(() => held("Notes"));
+    await vi.waitFor(() => expect(button("Done")).toBeDefined());
+    await rotate(false);
+    expect(button("Done")).toBeUndefined();
+    await rotate(true);
+    await vi.waitFor(() => expect(button("Done")).toBeDefined());
+    await press("Remove Clock");
+    await vi.waitFor(() => expect(tiles()).toEqual(["view:Notes"]));
+    expect(chat()).not.toBeNull();
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+    expect(button("Done")).toBeDefined();
+    await hardware("back");
+    await vi.waitFor(() => expect(button("Done")).toBeUndefined());
+
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
     expect(document.querySelector("[data-alpha-detent=sheet]")).toBeNull();
+
+    // spec/app/home/cards.md, "A Workflows or Brief card beside the landscape Ask sheet opens Workflows from the same Home visit"
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0 && state.assistant === "Bar");
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    const workflow = () => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")]
+      .find((card) => card.textContent?.startsWith("Desk check"));
+    await vi.waitFor(() => expect(workflow()?.disabled).toBe(false));
+    expect(workflow()?.closest("[inert]")).toBeNull();
+    await drawn(() => workflow()?.click());
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Workflows" && state.assistant === "Bar");
+    expect(chat()).toBeNull();
+    await vi.waitFor(() => expect(button("Add to Workflows")).toBeDefined());
+    expect(world.workflows.admissions).toEqual([]);
   });
 
   it('Find an installed app in Apps (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {

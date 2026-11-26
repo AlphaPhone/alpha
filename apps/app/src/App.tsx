@@ -1,13 +1,13 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { type PointerEvent, type TouchEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { type PointerEvent, type TouchEvent, useCallback, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
 import { useMachine as useAccess } from "../gen/app__startup__access.react.ts";
-import { completed as accessCompleted, panel as accessPanel } from "../gen/app__startup__access.ts";
+import { completed as accessCompleted, coveredAt as accessCoveredAt, panel as accessPanel } from "../gen/app__startup__access.ts";
 import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
@@ -22,7 +22,6 @@ import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
 import { canLeaveSignInStep, SignIn, useFirstRun } from "./startup/SignIn.tsx";
 import { AccessWalkthrough } from "./startup/SettingsAccess.tsx";
 import { reloadBeforeMount } from "./startup/recovery.vibe";
-import { openStartupAccess } from "./startup/settingsAccess.vibe";
 
 export interface AppProps {
   /** Alpha as boot.tsx opened it: the root runtime, and every screen at its place. */
@@ -85,11 +84,8 @@ export function App({ alpha }: AppProps) {
   const signingIn = alpha.requiresSignIn && signedIn?.stage !== "Admitted";
   const access = useAccess(alpha.runtime).state;
   const enrolled = alpha.requiresSignIn && signedIn?.accountConfirmed === true;
-  const accessCovered = !state || cause !== undefined || updating || (layers !== undefined && pageInert(layers))
-    || state.assistant === "Sheet" || state.assistant === "Full" || state.textAsk.tag === "TextAskVisit";
-  useEffect(() => {
-    if (enrolled) alpha.runtime.runFork(openStartupAccess(accessCovered));
-  }, [alpha, enrolled, accessCovered]);
+  const accessCovered = !state || cause !== undefined || !page || !layers
+    || accessCoveredAt(state, pageInert(layers), updating || !editorsMounted(page));
   const accessHolding = enrolled && (!access || !access.begun || !accessCompleted(access) || access.finish.allSet);
   const accessMayShow = accessHolding && !accessCovered;
   const accessStage = access !== undefined && accessPanel(access);
@@ -173,11 +169,12 @@ export function App({ alpha }: AppProps) {
   };
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
-  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarse;
+  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && (phone || coarse);
+  const nativeHomeSide = phone && side;
   const inboxLandscapeBar = !phone && showing === "Inbox" && state.assistant === "Bar" && state.textAsk.tag === "NoTextAsk"
     && canvas?.landscape === true && coarse;
   const fullScreen = state.assistant === "Full" && (phone || !side);
-  const sheetBeside = layers !== undefined && !inert && adjacentAskSheet(state, landscapeHomeInput(canvas, coarse));
+  const sheetBeside = layers !== undefined && !inert && adjacentAskSheet(state, landscapeHomeInput(canvas));
   const voiceOverHome = phone && side && canvas?.voice === true;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
@@ -199,7 +196,7 @@ export function App({ alpha }: AppProps) {
       onTouchEnd={touchEnded}
       onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
       style={frameStyle}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4", preview && "absolute m-0 rounded-panel")}
     >
       <div
         data-alpha-shell-page=""
@@ -208,7 +205,13 @@ export function App({ alpha }: AppProps) {
           const document = node?.ownerDocument.documentElement;
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
-        className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
+        className={cn(
+          "relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]",
+          showing !== undefined && "overflow-auto overscroll-contain",
+          strip && "overflow-hidden",
+          nativeHomeSide && "[--alpha-dock-overlap:0px]",
+          nativeHomeSide && !launcher && "[&_[data-alpha-apps-drawer]]:top-0",
+        )}
         inert={signingIn ? updating : inert || fullScreen || voiceOverHome}
       >
         {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
@@ -249,6 +252,11 @@ export function App({ alpha }: AppProps) {
             "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
             "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",
             "[&>[data-alpha-detent=full]]:inset-0",
+          ],
+          nativeHomeSide && [
+            "[&>[data-alpha-detent=bar]>[data-host-chrome]]:ml-0",
+            "[&>[data-alpha-detent]_[data-alpha-composer]]:min-h-[min(168px,28dvh)] [&>[data-alpha-detent]_[data-alpha-composer]]:rounded-none",
+            "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full! [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
           ],
         )}
         inert={shellFailed || (layers !== undefined && assistantInert(layers))}

@@ -121,11 +121,14 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   const ask = { ...tap, question: true, messageId: second.card.id, threadId: second.card.threadId };
   const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
   await drawn(() => enter({ ...ask, token: "dismissed" }));
-  await afterDraw(() => expect(review()).toContain(second.body));
+  await afterDraw(async () => {
+    const reader = await runtime.runPromise(Shown.use((machine) => machine.get()));
+    const shell = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
+    expect(review(), JSON.stringify({ title: title(), read: reader.body.status, assistant: shell.assistant, reads: world.inbox.bodyReads })).toContain(second.body);
+  });
   await confirm("Cancel");
   await afterDraw(() => expect(notices.released).toEqual(["dismissed"]));
   expect([notices.spent, world.ask.said]).toEqual([["ordinary"], []]);
-  await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
   await afterDraw(async () => {
     const state = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
     expect([state.assistant, showing(state, "Inbox")]).toEqual(["Bar", true]);
@@ -236,7 +239,7 @@ it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can 
   await until(alpha, runtime, Writing, (state) => state.shelf.shelved.length === 0 && state.shelfSelection.account === 0);
   expect(world.inbox.changes).toEqual([]);
   await first.close();
-  const restored = await openInbox(world);
+  const restored = await open(world, inboxMounts);
   await until(restored.alpha, inbox.runtime(restored.alpha), Writing, (state) => state.load.status === "Loaded" && state.shelf.shelved.length === 0);
 }, 90_000);
 
@@ -406,7 +409,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const history = String(world.inbox.history);
     await action("More messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
-    expect(title()).toBe("Revised term sheet");
+    expect([title(), told()]).toEqual(["Revised term sheet", expect.stringContaining(termSheet.body)]);
     await action("Earlier messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
     expect([title(), world.inbox.threadReads.slice(-2)]).toEqual(["Earlier lunch plan", [{ offset: 1, history }, { offset: 0, history }]]);
