@@ -269,7 +269,7 @@ function BubbleMenu({ actions, close }: { actions: BubbleActions; close: () => v
         setCopy("pending");
         actions.copy?.((outcome) => { if (attempt === newest.current) setCopy(outcome); });
       }}>{copy === "copied" ? "Copied!" : <><Copy aria-hidden className="size-4" />Copy</>}</button>}
-      {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
+      {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-hangup`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
       <span role="status" className={copy === "failed" ? "basis-full px-2 pb-1 text-caption text-destructive" : "sr-only"}>{copy === "copied" ? "Copied." : copy === "failed" ? "Copy failed" : ""}</span>
     </div>
   );
@@ -353,7 +353,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLin
           </>
         )}
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
-        {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
+        {failed && <CircleAlert className="size-4 text-hangup" role="img" aria-label="Message failed" />}
       </div>
       {actions && <BubbleMenu actions={actions} close={() => { choose(""); triggerRef.current?.focus(); }} />}
     </div>
@@ -440,12 +440,12 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
       {state.removal.outcome === "Unknown" && <p role="status" className={`${notice} px-3`}>Alpha cannot tell whether the message was deleted</p>}
       {state.removal.outcome === "Refused" && held.deleteTarget && <p role="status" className={`${notice} px-3`}>The message was not deleted</p>}
       <Dialog open={state.confirming} onOpenChange={(open) => { if (!open && can({ type: "keep" })) void send({ type: "keep" }); }}>
-        <DialogContent container={view ?? undefined} overlayClassName="absolute z-10 bg-foreground/13 dark:bg-background/13" role="alertdialog" className="absolute inset-x-0 z-20 w-70 max-w-9/10 gap-0 bg-background shadow-none">
+        <DialogContent container={view ?? undefined} overlayClassName="absolute z-10 bg-foreground/13 dark:bg-background/13" role="alertdialog" className="absolute inset-x-0 top-1/2 bottom-auto z-20 w-70 max-w-9/10 -translate-y-1/2 gap-0 rounded-tile bg-background p-5 shadow-none motion-safe:animate-none">
           <DialogTitle className="sr-only">Delete message?</DialogTitle>
           <DialogDescription className="mt-0 mb-4 text-lg text-foreground">Delete this message from this phone?</DialogDescription>
           <div className="flex justify-end gap-2">
             <button type="button" className={dialogAction} onClick={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Cancel</button>
-            <button type="button" className={`${dialogAction} text-destructive`} onClick={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}>Delete</button>
+            <button type="button" className={`${dialogAction} text-hangup`} onClick={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}>Delete</button>
           </div>
         </DialogContent>
       </Dialog>
@@ -589,7 +589,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {checking && <p role="status" data-alpha-messages-notice className={notice}>Alpha is still waiting for the send result</p>}
         {here && outgoing.denied && <p role="status" data-alpha-messages-notice className={notice}>The phone did not send the message</p>}
         {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <p role="status" data-alpha-messages-notice className={notice}>The message did not reach everyone</p>}
-        {here && (outgoing.denied || outgoing.op.outcome === "Refused" && outgoing.failed > 0) && <CircleAlert className="mx-2 size-4 text-destructive" role="img" aria-label="Message failed" />}
+        {here && (outgoing.denied || outgoing.op.outcome === "Refused" && outgoing.failed > 0) && <CircleAlert className="mx-2 size-4 text-hangup" role="img" aria-label="Message failed" />}
         {here && sentAll(outgoing) && <p role="status" data-alpha-messages-notice className={notice}>{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
         {pictures.map((picture, at) => (
           <button type="button" key={picture.name} aria-label={`Remove ${picture.name}`} disabled={!can({ type: "detach" })} className={`${accessoryChip} gap-1.5 bg-secondary px-3 font-normal text-foreground`} onClick={() => {

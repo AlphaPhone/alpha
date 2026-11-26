@@ -51,7 +51,7 @@ const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
       onClick={() => call(row.number)}>
       <CallAvatar name={title} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className={cn("truncate text-md font-semibold", took && "text-destructive")}>{title}</span>
+        <span className={cn("truncate text-md font-semibold", took && "text-hangup")}>{title}</span>
         <span className="flex items-center gap-1 text-sm text-muted-foreground"><Icon aria-hidden className="size-3.5" />{date}</span>
       </span>
     </button>
