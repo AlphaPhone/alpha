@@ -9,10 +9,12 @@ module browser {
   const key = "alpha.inbox.saved-bodies.v1"
 
   export function readSavedMail(): Promise<unknown> {
+    if (!globalThis.navigator?.locks) return Promise.resolve(undefined)
     return browserDocumentTransaction("readonly", [key], (_store, [row]) => row)
   }
 
   export function writeSavedMail(value: string | undefined): Promise<void> {
+    if (!globalThis.navigator?.locks) return Promise.resolve()
     return browserDocumentTransaction("readwrite", [key], (store) => {
       if (value === undefined) store.delete(key)
       else store.put(value, key)
@@ -81,7 +83,14 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
   let active: string | undefined
   let wanted: string | undefined
   let kept: Envelope | undefined
-  let grants: ReadonlyArray<SavedGrant> = []
+  let grants: ReadonlyArray<SavedGrant> | undefined
+  const withdrawn = new Set<number>()
+  let pendingGrants: ReadonlyArray<SavedGrant> | undefined
+  const pendingWithdrawals = new Set<number>()
+  const matches = (readable: ReadonlyArray<SavedGrant>, read: SavedGrant) => readable.some((grant) => hasGrant(read, grant))
+  const mayRead = (read: SavedGrant) =>
+    !withdrawn.has(read.account) && !pendingWithdrawals.has(read.account) &&
+    (grants === undefined || matches(grants, read)) && (pendingGrants === undefined || matches(pendingGrants, read))
 
   effect function load(): (Envelope | undefined)!! {
     let raw: unknown
@@ -107,19 +116,23 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
 
   const locked = <A>(work: A!!) => gate.withPermit(Effect.uninterruptible(work))
 
-  effect function keep(rows: ReadonlyArray<Body>, owner: string, now: number): void!! {
-    const envelope = bounded(owner, rows, now)
+  function hold(envelope: Envelope): Envelope {
     kept = envelope
-    try store(envelope)
+    pendingGrants = undefined
+    pendingWithdrawals.clear()
+    return envelope
   }
 
-  function remove(predicate: (row: Body) => boolean): void!! {
-    return locked(effect {
-      const before = kept
-      if (before === undefined) return
-      const rows = before.bodies.filter((row) => !predicate(row))
-      if (rows.length !== before.bodies.length) try keep(rows, before.owner, wallTime())
-    })
+  effect function keep(rows: ReadonlyArray<Body>, owner: string, now: number): void!! {
+    try store(hold(bounded(owner, rows.filter(mayRead), now)))
+  }
+
+  effect function prune(): void!! {
+    const before = kept
+    if (before === undefined) return
+    const now = wallTime()
+    const after = hold({ ...before, bodies: before.bodies.filter((row) => mayRead(row) && fresh(row.at, now)) })
+    if (after.bodies.length !== before.bodies.length) try store(after)
   }
 
   return {
@@ -135,10 +148,9 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
         }
         const existing = try load()
         if (wanted !== owner) return
-        const restored = existing?.owner === owner ? bounded(owner, existing.bodies, wallTime()) : undefined
-        kept = restored ?? { version: 1, owner, bodies: [] }
+        const restored = hold(bounded(owner, (existing?.owner === owner ? existing.bodies : []).filter(mayRead), wallTime()))
         active = owner
-        if (existing !== undefined && (restored === undefined || restored.bodies.length !== existing.bodies.length)) try store(restored)
+        if (existing !== undefined && (existing.owner !== owner || restored.bodies.length !== existing.bodies.length)) try store(restored)
       })
     },
     conceal() { active = undefined; wanted = undefined },
@@ -146,7 +158,7 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
       const owner = active
       return locked(effect {
         if (owner === undefined || owner !== active || kept?.owner !== owner ||
-          !grants.some((grant) => hasGrant(read, grant)) || text.length > maximumBytes) return
+          grants === undefined || !mayRead(read) || text.length > maximumBytes) return
         const now = wallTime()
         const body = { ...read, at: now, text }
         if (!fits({ version: 1, owner, bodies: [body] })) return
@@ -154,22 +166,30 @@ export const savedBodies = Layer.effect(SavedBodies, effect {
       })
     },
     read(read: SavedRead) {
-      if (active === undefined || kept?.owner !== active) return undefined
+      if (active === undefined || kept?.owner !== active || !mayRead(read)) return undefined
       const now = wallTime()
       return kept.bodies.find((row) => sameMessage(row, read) && row.history === read.history && fresh(row.at, now))?.text
     },
-    effect retain(readable: ReadonlyArray<SavedGrant>) {
+    retain: (readable: ReadonlyArray<SavedGrant>) => Effect.uninterruptible(effect {
+      const pending = pendingGrants
+      pendingGrants = pending === undefined ? readable : pending.filter((grant) => matches(readable, grant))
       grants = readable
-      try remove((row) => !readable.some((grant) => hasGrant(row, grant)))
-    },
-    effect revoke(account: number) {
-      grants = grants.filter((grant) => grant.account !== account)
-      try remove((row) => row.account === account)
-    },
+      withdrawn.clear()
+      try gate.withPermit(prune())
+    }),
+    revoke: (account: number) => Effect.uninterruptible(effect {
+      if (grants === undefined) withdrawn.add(account)
+      else grants = grants.filter((grant) => grant.account !== account)
+      pendingWithdrawals.add(account)
+      try gate.withPermit(prune())
+    }),
     effect clear() {
       active = undefined
       wanted = undefined
-      grants = []
+      grants = undefined
+      withdrawn.clear()
+      pendingGrants = undefined
+      pendingWithdrawals.clear()
       try locked(effect {
         active = undefined
         kept = undefined

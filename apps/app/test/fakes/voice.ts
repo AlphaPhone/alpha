@@ -45,6 +45,7 @@ export interface VoiceScene {
   relayWarmupHangs: boolean;
   onDevice: boolean;
   credentialId: string;
+  organizationId: string;
   streamTiming: unknown;
   stopCloudSpeechCalls: number;
   hushCalls: number;
@@ -97,6 +98,7 @@ export function voiceScene(): VoiceScene {
     relayWarmupHangs: false,
     onDevice: true,
     credentialId: "cred-1",
+    organizationId: "org-1",
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
     hushCalls: 0,
@@ -307,7 +309,7 @@ export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: M
       status: ({ environment }) => Promise.resolve({
         environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
         account: signedIn()
-          ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
+          ? { signedIn: true, userId: "user-1", organizationId: voice.organizationId, credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
           : { signedIn: false },
       }),
       ...voice.startupSignIn,
