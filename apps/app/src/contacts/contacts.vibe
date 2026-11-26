@@ -1,13 +1,12 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
 import { type AddressBookContact, type ContactCursor, type ContactDetail, type ContactDraft, type ContactDraftProblem, contactDraftProblem, isContactId } from "@elizaos/os-bridges"
-import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone__comms.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Callers } from "../phone/voicemail.vibe"
@@ -268,9 +267,5 @@ const forget = applying(Contacts.Machine, (state) => ({
   })
 })
 
-// spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
-const subject = following(Contacts.Machine, (state) => (!state.front ? "" : state.opened ? `contacts:contact:${state.contact}` : "contacts:list:"), Comms,
-  (key): CommsEvent | undefined => (key === "" ? undefined : { type: "subjectShown", app: "ContactsApp", subject: key === "contacts:list:" ? "ListSubject" : "ContactSubject", key }), "Device")
-
 /** Contacts: resident, so that a form the owner was filling in waits while Contacts is not showing; it reads only while its view is in front. */
-export const contacts = together(machine, rows, shown, subject, forget)
+export const contacts = together(machine, rows, shown, forget)

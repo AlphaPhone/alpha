@@ -193,6 +193,7 @@ describe("Phone on an Alpha image", () => {
     await tab("Voicemail");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone");
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:recents:");
     await tab("Contacts");
     await contactsFront();
     await contactsListed();
@@ -207,10 +208,29 @@ describe("Phone on an Alpha image", () => {
     expect(document.querySelector("[data-alpha-shell-page]")?.hasAttribute("inert")).toBe(true);
     await press("Shrink chat");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    // spec/app/phone/comms.md, "Returning through an embedded Contacts tab follows the Phone stage without adding history"
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "ContactsApp" && state.stage.length === 0);
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:recents:" && state.stage.length === 0);
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:keypad:" && state.stage.length === 0);
+    expect(document.querySelector('[data-alpha-phone-tab="keypad"]')?.getAttribute("aria-selected")).toBe("true");
+    await draftKept();
+
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
+    await drawn(async () => {
+      await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openCommsView", view: "Contacts" })));
+    });
+    await contactsFront();
+    await contactsListed();
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "ContactsApp" && state.stage.at(-1)?.app === "PhoneApp");
     await tab("Keypad");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Sheet");
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
-    expect(document.querySelector('[data-alpha-phone-tab="keypad"]')?.getAttribute("aria-selected")).toBe("true");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:keypad:" && state.stage.length === 0);
     await draftKept();
 
     await hardware("back");
