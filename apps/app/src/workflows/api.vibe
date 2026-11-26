@@ -18,6 +18,21 @@ module zone {
 }
 export { localTimeZone } from zone
 
+/** Read and keep the reply only while the same owner still holds the request. */
+export function checkedWorkflowRequest(request: WorkflowRequest, current: boolean!!): WorkflowRequest {
+  return effect (path, body) => {
+    if (!(try current)) throw workflowHttpError(0, {})
+    const received = try request(path, body)
+    if (!(try current)) throw workflowHttpError(0, {})
+    return received
+  }
+}
+
+/** A ready model can send the change it has queued. */
+export function sendChangeWhenReady(ready: boolean): { readonly type: "sendChange" } | undefined {
+  return ready ? { type: "sendChange" } : undefined
+}
+
 export const workflowsApi = Layer.effect(WorkflowsApi, effect {
   const { runtime } = try Agent
   const inFlight = new Map<string, Promise<unknown>>()
@@ -68,10 +83,8 @@ export const PromptSchema = Schema.Union([
   Schema.Struct({ ...PromptFields, ...OnEvent }),
 ])
 export type Prompt = typeof PromptSchema.Type
-export type PromptTiming =
-  | { readonly triggerType: "once"; readonly scheduledAtIso: string }
-  | { readonly triggerType: "cron"; readonly cronExpression: string }
-  | { readonly triggerType: "event"; readonly eventKind: string }
+type TimingOf<Variant> = Variant extends Prompt ? Omit<Variant, keyof typeof PromptFields> : never
+export type PromptTiming = TimingOf<Prompt>
 
 export schema ScheduledTask {
   readonly taskId: Identifier
@@ -80,7 +93,6 @@ export schema ScheduledTask {
   readonly promptInstructions: string
   readonly state: { readonly status: string; readonly firedAt?: string }
   readonly trigger: { readonly kind: "once" | "cron" | "manual"; readonly atIso?: string; readonly expression?: string; readonly tz?: string }
-  readonly metadata: { readonly recordKey?: string }
 }
 
 const Triggers = Schema.Struct({ triggers: Schema.Array(PromptSchema) })

@@ -19,7 +19,7 @@ import {
 import { type Listening, type Wired, remoteAt } from "./remote.vibe"
 
 /** Default OAuth2 user scopes requested for first-class Slack user-account access (`user_scope`, never bot `scope`). */
-const SLACK_DEFAULT_USER_SCOPES = [
+export const SLACK_DEFAULT_USER_SCOPES = [
   "channels:read",
   "channels:history",
   "groups:read",

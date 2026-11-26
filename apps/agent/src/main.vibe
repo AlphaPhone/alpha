@@ -6,16 +6,16 @@ import { decodeLaunchDocument, defineRoutes } from "@elizaos/agent"
 import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
-  type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
-  hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
-  policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
+  type Environment, type Manifest, browserNotesCleanup, browserNotesTranscription, browserNotesTranscriptionLimit, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
+  hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeNotesCleanup, nativeNotesCleanupLimit, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
+  launchViews, policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, viewsAdmitted, walletSettings,
 } from "../gen/agent.effect.vibe"
 
 module node {
   import path from "node:path"
+  import type { buildAgentBundle } from "@elizaos/agent-host"
   import { pathToFileURL } from "node:url"
   import { isDeepStrictEqual } from "node:util"
-  import type * as AgentHost from "@elizaos/agent-host"
 
   /** @throws {never} */
   export const sameRules = (left: unknown, right: unknown): boolean => isDeepStrictEqual(left, right)
@@ -32,8 +32,8 @@ module node {
   }
 
   /** eliza's bundle builder of the clone at `dir`: the entry it ships imports that clone's agent, so the builder must be the same tree's. */
-  export function builderOf(dir: string): Promise<typeof AgentHost> {
-    return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<typeof AgentHost>
+  export function builderOf(dir: string): Promise<{ buildAgentBundle: typeof buildAgentBundle }> {
+    return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<{ buildAgentBundle: typeof buildAgentBundle }>
   }
 }
 import { builderOf, root, sameRules, words } from node
@@ -53,18 +53,21 @@ schema RouteLine {
 schema Character { name: string; system: string; bio: string[] }
 schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } }
 schema Notice { channel: string; title: string; text: string }
-schema Service { service: string; notification: { channel: string; title: string; text: string; failure: Notice } }
+schema Service { service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice } }
+schema View { id: string; label: string; path: string; aliases?: string[] }
 schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
 schema Host {
-  schema: 1; service: string; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
-  embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; privacy: { secretSwap: boolean; piiSwap: boolean }
+  schema: 1; service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
+  embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; views: View[]; privacy: { secretSwap: boolean; piiSwap: boolean }
   google: { gmailChanges: boolean; calendarEdits: boolean }
 }
 
 /** The export each hosted package builds its module with, as `runAgentCli`'s `hostModules` takes it. */
 const localSpeechModule = "@elizaos/plugin-local-inference"
+const walletModuleName = "@elizaos/plugin-wallet"
 const hostedExports: Readonly<Record<string, string>> = {
-  "@elizaos/plugin-notes": "notesModule",
+  "@elizaos/plugin-notes": "notesModuleWith",
+  [walletModuleName]: "walletModule",
   [localSpeechModule]: "localInferenceModule",
 }
 
@@ -82,22 +85,37 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
   const includesSpeech = hosted.some(({ name }) => name === localSpeechModule)
   const localScope = nativeSpeechRoutes.find(({ method }) => method === "Get")?.path ?? ""
   return [
+    'import { existsSync } from "node:fs"',
+    'import { dirname, join } from "node:path"',
+    'import { fileURLToPath, pathToFileURL } from "node:url"',
     `import { runAgentCli } from "../../packages/agent-host/dist/src/cli.js"`,
+    'import { startStore as openEarlierPGlite } from "../../packages/agent-host/dist/src/storage/migrate.js"',
+    'import { workflowDeviceOffer } from "../../packages/agent-host/dist/src/device-actions/workflow-offer.js"',
+    'import { Service } from "@elizaos/core"',
     'import { Effect } from "effect"',
     ...(includesSpeech ? [
       'import { androidInferenceEngine } from "../../packages/os/dist/src/inference/index.js"',
     ] : []),
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
-    ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
+    ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index}${name === product.name ? ", makeNativeNotesCleanup, notesTranscriptionRoutes" : name === localSpeechModule ? ", localInferenceProvider" : ""} } from ${JSON.stringify(name)}`),
+    `const notesCleanup = makeNativeNotesCleanup(${JSON.stringify(nativeNotesCleanup)})`,
+    'const earlierVectorPath = join(dirname(fileURLToPath(import.meta.url)), "vector.tar.gz")',
+    'const earlierVectorExtension = { name: "pgvector", setup: async (_pg, emscriptenOpts) => ({ emscriptenOpts, bundlePath: pathToFileURL(earlierVectorPath) }) }',
+    'const openEarlierStore = (dataDir) => openEarlierPGlite({ dataDir, ...(existsSync(earlierVectorPath) ? { extensions: { vector: earlierVectorExtension } } : {}) })',
     "",
     ...(includesSpeech ? [
       'const speechEngine = (context) => {',
-      '  const socket = context.launch.environment?.ALPHA_LOCAL_SPEECH_SOCKET',
+      '  const socket = context.launch.environment?.ALPHA_LOCAL_SPEECH_SOCKET ?? context.launch.environment?.ALPHA_BROWSER_NOTES_SPEECH_SOCKET',
       '  return socket === undefined ? undefined : androidInferenceEngine(socket)',
+      '}',
+      'const browserNoteRoutes = (context) => {',
+      '  const engine = speechEngine(context)',
+      '  return notesTranscriptionRoutes(context, localInferenceProvider, async (signal) =>',
+      '    engine !== undefined && (await Effect.runPromise(engine.speechReady(), { signal })).transcription === true)',
       '}',
       `const nativeSpeechScope = (context) => ({ method: "GET", path: ${JSON.stringify(localScope)}, handler: async ({ signal }) => {`,
       '  const account = context.launch.account',
-      '  const engine = speechEngine(context)',
+      '  const engine = context.launch.environment?.ALPHA_LOCAL_SPEECH_SOCKET === undefined ? undefined : speechEngine(context)',
       '  if (account === undefined || engine === undefined) return { status: 503, body: { error: "LOCAL_SPEECH_UNAVAILABLE" } }',
       '  try {',
       '    const ready = await Effect.runPromise(engine.speechReady(), { signal })',
@@ -113,7 +131,18 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     '  if (account === undefined) return { status: 503, body: { error: "RESIDENT_ACCOUNT_UNAVAILABLE" } }',
     '  return { status: 200, body: { epoch: context.epoch, agentId: context.runtime.agentId, userId: account.userId, organizationId: account.organizationId } }',
     '} })',
+    'class WorkflowDevice extends Service {',
+    '  static serviceType = "workflow-device"',
+    '  capabilityDescription = "Reviewed workflow steps on the enrolled Alpha phone"',
+    '  stopping = new AbortController()',
+    '  static async start(runtime) { return new WorkflowDevice(runtime) }',
+    '  constructor(runtime) { super(runtime); this.offer = workflowDeviceOffer(runtime) }',
+    '  enrollment() { return this.offer.enrollment() }',
+    '  perform(binding, target, operation) { return this.offer.perform(binding, target, operation, this.stopping.signal) }',
+    '  async stop() { this.stopping.abort() }',
+    '}',
     "runAgentCli({",
+    "  runtimeServices: () => [WorkflowDevice],",
     "  bundled: [",
     ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
     ...allHosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
@@ -121,7 +150,11 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     `  productPlugin: ${JSON.stringify(product.name)},`,
     `  hostModules: new Map([${allHosted.map(({ name }, index) => {
       let factory = `host${index}`
-      if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}(context); }`
+      if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}({ verifyRecordingCleanup: notesCleanup.verifyRecordingCleanup })(context); }`
+      if (name === walletModuleName) {
+        const settings = JSON.stringify(walletSettings.map(({ setting, held }) => [setting, held]))
+        factory = `(context) => { for (const [setting, held] of ${settings}) context.runtime.setSetting(setting, held); return host${index}(context); }`
+      }
       if (name === localSpeechModule) {
         const named = JSON.stringify(localSpeechModule)
         factory = `(context) => { const engine = speechEngine(context); return engine === undefined
@@ -129,9 +162,9 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
           : host${index}(engine)(context) }`
       }
       if (name === product.name) {
-        const privateRoutes = includesSpeech ? "nativeSpeechScope(context), nativeRuntimeScope(context)" : "nativeRuntimeScope(context)"
-        factory = `(context) => Effect.map(host${index}(context), (module) => ({
-          ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), ${privateRoutes}] }
+        const privateRoutes = includesSpeech ? "nativeSpeechScope(context), nativeRuntimeScope(context), ...browserNoteRoutes(context)" : "nativeRuntimeScope(context)"
+        factory = `(context) => Effect.map(host${index}({ openLegacyStore: openEarlierStore })(context), (module) => ({
+          ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), ${privateRoutes}, notesCleanup.route(context), notesCleanup.browserRoute(context, ${JSON.stringify(browserNotesCleanup)}, ${nativeNotesCleanupLimit})] }
         }))`
       }
       return `[${JSON.stringify(name)}, ${factory}]`
@@ -185,7 +218,13 @@ function queries(route: RouteLine, native = false) {
 }
 
 function routeBodyLimit(route: RouteLine, native: boolean): number | undefined {
-  return native && route.method === "POST" && route.path === nativeDigestAck ? nativeDigestAckLimit : undefined
+  if (route.method !== "POST") return undefined
+  if (!native) {
+    if (route.path === browserNotesTranscription) return browserNotesTranscriptionLimit
+    return route.path === browserNotesCleanup ? nativeNotesCleanupLimit : undefined
+  }
+  if (route.path === nativeDigestAck) return nativeDigestAckLimit
+  return route.path === nativeNotesCleanup ? nativeNotesCleanupLimit : undefined
 }
 
 /** Refuse a route list unless it matches its channel's policy and eliza admits each route. */
@@ -252,9 +291,13 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   if (written.embeddings !== expectedEmbeddings) throw new Refused({ message: `the launch embeddings must be ${expectedEmbeddings}` })
   if (written.persistMemory !== persistMemory) throw new Refused({ message: `the launch persistMemory must be ${String(persistMemory)}` })
   if (written.callerRole !== "owner") throw new Refused({ message: "the launch callerRole must be owner" })
+  if (!viewsAdmitted(written.views.map(({ id, label, path, aliases }) => ({ id, label, path, aliases: aliases ?? [] })))) {
+    throw new Refused({ message: "the launch must name Home and every Alpha app but Notes and Browser as a view, in the phone's order (spec/agent/index.md)" })
+  }
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
-    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy, google: written.google,
+    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole,
+    hostContextRevision: written.hostContextRevision, views: written.views, privacy: written.privacy, google: written.google,
     account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
   })
   decodeLaunchDocument(document) catch effect () => { throw new Refused({ message: "eliza's agent would refuse the launch the phone writes from these files" }) }
@@ -277,7 +320,7 @@ effect function build(name: string) {
   const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
   const unbuilt = hosted.filter(({ module }) => module === "")
   if (unbuilt.length > 0) throw new Refused({ message: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
-  const product = { name: productPluginName, module: "alphaAppsModule" }
+  const product = { name: productPluginName, module: "alphaAppsModuleWith" }
   const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted, product), { name: productPluginName, dir: `${at.app}/dist/src/plugins` }) catch effect (cause) => {
     throw new Refused({ message: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
   }
@@ -308,9 +351,11 @@ effect function build(name: string) {
     }
   })
   const host: Host = {
-    schema: 1, service: service.service, notification: service.notification, routes, nativeRoutes: native,
+    schema: 1, service: service.service, hostContextRevision: service.hostContextRevision, notification: service.notification, routes, nativeRoutes: native,
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
-    embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },
+    embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner",
+    views: launchViews.map(({ id, label, path, aliases }) => aliases.length === 0 ? { id, label, path } : { id, label, path, aliases: [...aliases] }),
+    privacy: { secretSwap, piiSwap: personalDetailSwap },
     google: { gmailChanges, calendarEdits },
   }
   try fs.writeFileString(`${at.host}/host.json`, `${JSON.stringify(host, null, 2)}\n`)

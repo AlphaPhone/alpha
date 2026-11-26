@@ -11,8 +11,8 @@ type CloudRoute = Awaited<ReturnType<CloudClient["mapsRoutes"]>>["routes"][numbe
 const attribution = "Map data from the test provider";
 
 /** A place as the fake Cloud Maps answers it, typed by eliza's own schema. */
-export function cloudPlace(id: string, name: string, latitude: number, longitude: number, phone?: string): CloudPlace {
-  return { providerId: "test-open", id, name, coordinate: { latitude, longitude }, attribution, fetchedAt: 1, ...(phone === undefined ? {} : { phone }) };
+export function cloudPlace(id: string, name: string, latitude: number, longitude: number, phone?: string, more: Pick<CloudPlace, "address" | "openingHours" | "website"> = {}): CloudPlace {
+  return { providerId: "test-open", id, name, coordinate: { latitude, longitude }, attribution, fetchedAt: 1, ...(phone === undefined ? {} : { phone }), ...more };
 }
 
 /** A route of `steps` steps along a straight line from `from` to `to`, `meters` long. */
@@ -20,7 +20,10 @@ export function cloudRoute(id: string, from: CloudPlace["coordinate"], to: Cloud
   const at = (share: number) => ({ latitude: from.latitude + (to.latitude - from.latitude) * share, longitude: from.longitude + (to.longitude - from.longitude) * share });
   return {
     providerId: "test-open", id, from, to, mode: "drive", geometry: [from, to], distanceMeters: meters, durationSeconds: meters / 10,
-    steps: Array.from({ length: steps }, (_, index) => ({ instruction: index === 0 ? "Head north" : index === steps - 1 ? "Arrive" : "Turn left", coordinate: at(index / Math.max(1, steps - 1)), distanceMeters: meters / steps })),
+    steps: Array.from({ length: steps }, (_, index) => ({
+      instruction: index === 0 ? "Head north" : index === steps - 1 ? "Arrive" : "Turn left", coordinate: at(index / Math.max(1, steps - 1)), distanceMeters: meters / steps,
+      maneuver: index === 0 ? "depart" : index === steps - 1 ? "arrive" : "left",
+    })),
     attribution, fetchedAt: 1, traffic: "none",
   };
 }
@@ -51,8 +54,9 @@ export interface MapsScene {
   readonly guidance: { session: string | undefined; title: string; text: string; arrivals: string[]; opened: boolean; stop?: (reason: string) => void };
 }
 
-export const harbour = cloudPlace("test:harbour", "Harbour Cafe", 43.7312, 7.4211, "+377 93 15 00 00");
-export const gallery = cloudPlace("test:gallery", "Harbour Gallery", 43.7333, 7.4167);
+export const harbour = cloudPlace("test:harbour", "Harbour Cafe", 43.7312, 7.4211, "+377 93 15 00 00",
+  { address: "6 Quai Antoine 1er, Monaco", openingHours: "Closed · opens 7:30 AM", website: "https://harbour-cafe.example/" });
+export const gallery = cloudPlace("test:gallery", "Harbour Gallery", 43.7333, 7.4167, undefined, { address: "11 Rue Grimaldi, Monaco" });
 
 export function mapsScene(): MapsScene {
   return {

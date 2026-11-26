@@ -22,6 +22,7 @@ final class AlphaNotificationChannels {
  };
  static final Row[] ROWS = {
   new Row("eliza-agent", 0, 0, ASSISTANT),
+  new Row(InboxNoticeDelivery.CHANNEL, R.string.alpha_gmail_channel_name, R.string.alpha_gmail_channel_description, MAIL_AND_BRIEFS),
  };
 
  static void describe(Context context) {

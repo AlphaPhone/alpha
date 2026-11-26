@@ -14,7 +14,10 @@ module web {
     setSystemBarAppearance(options: { dark: boolean }): Promise<void>
     setAgentGoogleConsent(options: { gmailChanges: boolean; calendarEdits: boolean }): Promise<void>
     diagnosticsFacts(): Promise<unknown>
+    textAsk(): Promise<{ readonly ticket: number }>
+    closeTextAsk(options: { readonly ticket: number }): Promise<{ readonly closed: boolean }>
     copyText(options: { text: string }): Promise<void>
+    takeBillingReturn(): Promise<unknown>
     shareText(options: { readonly title: string; readonly text: string }): Promise<{ readonly status: string }>
   }
   /** @throws {never} */
@@ -65,6 +68,20 @@ module web {
 import { alpha, copyToBrowser, marked, native, page, pages, registered, shareWords, showing, zoom } from web
 export { native, registered }
 
+const CheckoutReturn = Schema.Struct({ session: Schema.NullOr(Schema.String.check(Schema.isPattern(/^cs_[A-Za-z0-9_]{1,250}$/))) })
+
+/** A browser return is a hint about a checkout Alpha already opened. */
+export effect function takeBillingReturn(): (string | null)!! {
+  if (!registered("AlphaDevice")) return null
+  const raw = tryPromise(() => alpha().takeBillingReturn()) catch () => undefined
+  const returned = Schema.decodeUnknownOption(CheckoutReturn)(raw)
+  return Option.isSome(returned) ? returned.value.session : null
+}
+
+/** The host received a return while it already had an activity. */
+export const billReturned = Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), "alpha-billing-return"), true))
+
+
 /** Whether a text chooser opened or the owner cancelled it without a handoff. */
 export effect function shareSystemText(title: string, text: string): boolean!! {
   return tryPromise(() => shareWords(title, text)) catch () => false
@@ -106,6 +123,9 @@ export service Device {
   /** `data-alpha-<name>` on the page's root element, for what the whole page follows, such as its look; `undefined` takes it off. */
   mark(name: string, value: string | undefined): void!!
   readonly buttons: Stream.Stream<Button>
+  readonly textAskVisits: Stream.Stream<unknown>
+  textAsk(): number!!
+  closeTextAsk(ticket: number): boolean!!
   /** Each time the page is shown or hidden, and which: a page that was hidden may have slept. */
   readonly visible: Stream.Stream<boolean>
   /** Whether the page shows now. */
@@ -155,6 +175,7 @@ effect function paged() {
     },
     mark: (name: string, value: string | undefined) => sync(() => marked(name, value)),
     buttons,
+    textAskVisits: Stream.suspend(() => Stream.merge(Stream.fromEventListener(page(), "alpha-text-ask"), Stream.fromEventListener(page(), "focus"))),
     visible: Stream.suspend(() => Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => showing())),
     showing: () => sync(showing),
   }
@@ -181,6 +202,17 @@ export const phoneDevice = Layer.effect(Device, effect {
     timeoutScale: scaleOf,
     haptic: (kind: string) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().haptic({ kind }))) : Effect.void,
     feels: () => sync(() => registered(alphaDevice)),
+    effect textAsk() {
+      if (!registered(alphaDevice)) return 0
+      const reply = timeout(tryPromise(() => alpha().textAsk()), "5 seconds") catch () => undefined
+      const ticket = reply?.ticket ?? 0
+      return Number.isSafeInteger(ticket) && ticket > 0 ? ticket : 0
+    },
+    effect closeTextAsk(ticket: number) {
+      if (!registered(alphaDevice)) return false
+      const reply = timeout(tryPromise(() => alpha().closeTextAsk({ ticket })), "5 seconds") catch () => undefined
+      return reply?.closed === true
+    },
     bars: (dark: boolean) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().setSystemBarAppearance({ dark }))) : Effect.void,
     buildFacts: () => registered(alphaDevice) ? Effect.option(tryPromise(() => alpha().diagnosticsFacts())) : succeed(Option.none<unknown>()),
     agentConsent: (consent: GoogleConsent) => registered(alphaDevice) ? Effect.map(Effect.option(tryPromise(() => alpha().setAgentGoogleConsent(consent))), Option.isSome) : succeed(true),
@@ -200,6 +232,8 @@ export const browserDevice = Layer.effect(Device, effect {
     timeoutScale: () => succeed(Option.none<number>()),
     haptic: () => Effect.void,
     feels: () => succeed(false),
+    textAsk: () => succeed(0),
+    closeTextAsk: () => succeed(false),
     bars: () => Effect.void,
     buildFacts: () => succeed(Option.none<unknown>()),
     agentConsent: () => succeed(true),

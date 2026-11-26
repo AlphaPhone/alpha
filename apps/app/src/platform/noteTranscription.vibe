@@ -1,0 +1,72 @@
+// spec/app/notes/voice.md, "Story: Read and use the transcript"
+module browser {
+  import type { NotesAudioStore } from "@elizaos/plugin-notes-client"
+  import type { SavedNoteWindow } from "./voice.vibe"
+
+  export function browserNotesRecognitionAvailable(): boolean {
+    return typeof location !== "undefined" && typeof OfflineAudioContext !== "undefined" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)
+  }
+
+  export async function requestBrowserNoteTranscription(signal: AbortSignal, pcm?: string): Promise<unknown> {
+    if (!browserNotesRecognitionAvailable() || document.hidden || signal.aborted) throw Error("Local transcription is unavailable")
+    const response = await fetch("/agent/api/alpha/notes/transcription", {
+      method: pcm === undefined ? "GET" : "POST",
+      ...(pcm === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pcm }) }),
+      signal,
+      cache: "no-store",
+      credentials: "same-origin",
+      mode: "same-origin",
+      redirect: "error",
+    })
+    if (!response.ok || signal.aborted || document.hidden) throw Error("Local transcription is unavailable")
+    return response.json()
+  }
+
+  const sampleRate = 16_000
+
+  export function browserNoteTranscription(store: NotesAudioStore, connection: () => string | undefined) {
+    let generation = 0
+    let decoded: { owner: string; audio: string; note: string; samples: AudioBuffer } | undefined
+
+    async function read(window: SavedNoteWindow, windowMs: number, signal: AbortSignal) {
+      const owner = connection()
+      const ticket = generation
+      const current = () => connection() === owner && ticket === generation && !document.hidden && !signal.aborted
+      const { recordingId, noteId, offsetMs, durationMs } = window
+      if (owner === undefined || !current() || !Number.isSafeInteger(offsetMs) || !Number.isSafeInteger(durationMs) ||
+          offsetMs < 0 || offsetMs >= durationMs) throw Error("The reviewed recording changed")
+
+      if (decoded?.owner !== owner || decoded.audio !== recordingId || decoded.note !== noteId) {
+        const audio = await store.audioRecord(recordingId, owner)
+        if (!current() || audio.noteId !== noteId || audio.durationMs !== durationMs) {
+          throw Error("The reviewed recording changed")
+        }
+        const bytes = await audio.blob.arrayBuffer()
+        if (!current()) throw Error("The reviewed recording changed")
+        const input = await new OfflineAudioContext(1, 1, sampleRate).decodeAudioData(bytes)
+        if (!current()) throw Error("The reviewed recording changed")
+        decoded = { owner, audio: recordingId, note: noteId, samples: input }
+      }
+
+      const first = Math.round(offsetMs * sampleRate / 1_000)
+      const last = Math.min(decoded.samples.length, first + windowMs * sampleRate / 1_000)
+      if (first >= last) return new Uint8Array()
+      const samples = decoded.samples
+      const channels = Array.from({ length: samples.numberOfChannels }, (_, index) => samples.getChannelData(index))
+      const bytes = new Uint8Array((last - first) * 2)
+      const pcm = new DataView(bytes.buffer)
+      for (let sample = first; sample < last; sample++) {
+        let mixed = 0
+        for (const channel of channels) mixed += channel[sample]
+        const level = Math.max(-1, Math.min(1, mixed / channels.length))
+        pcm.setInt16((sample - first) * 2, level * (level < 0 ? 32_768 : 32_767), true)
+      }
+      return bytes
+    }
+
+    return { read, clear() { generation += 1; decoded = undefined } }
+  }
+}
+import { browserNoteTranscription, browserNotesRecognitionAvailable, requestBrowserNoteTranscription } from browser
+export { browserNoteTranscription, browserNotesRecognitionAvailable, requestBrowserNoteTranscription }

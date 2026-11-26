@@ -2,7 +2,7 @@
 import { TestClock } from "effect/testing"
 import { agentAt } from "../../src/platform/agent.vibe"
 import { cloudAt } from "../../src/platform/cloud.vibe"
-import { type Platform, pagePlatform, phonePlatform } from "../../src/platform/platform.vibe"
+import { type MessagingLayers, type Platform, pagePlatform, phonePlatform } from "../../src/platform/platform.vibe"
 import { slackAt } from "../../src/platform/slack.vibe"
 import { telegramAt } from "../../src/platform/telegram.vibe"
 import { plugIn } from "./phone.ts"
@@ -38,11 +38,18 @@ function clockAt(world: Scene) {
  * browser's fetch, answered by the fake services' routes, or, where `world.phone`, the plugins Android gives the page,
  * over the same routes.
  */
-export function fakeWorld(world: Scene): Layer.Layer<Platform | TestClock.TestClock> {
-  const { agent, cloud, slack, telegram } = services(world)
-  const messaging = {
-    slack: Layer.provide(slackAt("http://slack.test"), fetching(slack)),
-    ...(world.telegram.enabled ? { telegram: Layer.provide(telegramAt("http://telegram.test"), fetching(telegram)) } : {}),
+export function fakeWorld(world: Scene, options?: Partial<Pick<ReturnType<typeof services>, "agent" | "cloud">> & MessagingLayers): Layer.Layer<Platform | TestClock.TestClock> {
+  const defaults = services(world)
+  const agent = options?.agent ?? defaults.agent
+  const cloud = options?.cloud ?? defaults.cloud
+  const messaging: MessagingLayers = {
+    slack: options?.slack ?? Layer.provide(slackAt("http://slack.test"), fetching(defaults.slack)),
+    ...(options?.telegram !== undefined
+      ? { telegram: options.telegram }
+      : world.telegram.enabled
+        ? { telegram: Layer.provide(telegramAt("http://telegram.test"), fetching(defaults.telegram)) }
+        : {}),
+    ...(options?.sessions !== undefined ? { sessions: options.sessions } : {}),
   }
   const platform = world.phone
     ? Layer.provide(phonePlatform(messaging), Layer.effectDiscard(acquireRelease(sync(() => plugIn(plugins(world, { agent, cloud }))), (unplug) => sync(unplug))))

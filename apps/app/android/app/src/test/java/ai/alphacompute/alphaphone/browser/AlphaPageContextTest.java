@@ -10,7 +10,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 public final class AlphaPageContextTest {
- @Test public void theAgentSeesOnlyAPublicHttpsAddressAndAOneLineTitle() {
+ @Test public void theAgentSeesOnlyAPublicHttpsAddressAndAOneLineTitle() throws Exception {
   assertEquals("https://Example.com/a/b?q=1", AlphaPageContext.address("https://Example.com/a/b?q=1#frag"));
   assertEquals("https://example.com/", AlphaPageContext.address("HTTPS://example.com/"));
   for (String refused : new String[] {"http://example.com/", "https://user:pass@example.com/", "javascript:alert(1)", "file:///etc/passwd", "about:blank", "", null, "https://example.com/" + "a".repeat(2100)})

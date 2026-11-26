@@ -10,10 +10,11 @@ Everything is built on [the stack](AGENTS.md#the-stack): Node 26, pnpm, VibeLang
 |---|---|
 | `apps/` | deployable applications; `apps/app` is Alpha's page: Home, the built-in apps and Ask Alpha, over eliza's agent and cloud (`pnpm eliza` builds the pinned commit once) |
 | `apps/site` | `@repo/site`: Alpha's public page (`spec/site/`): `build` writes the static page its deploy uploads to Cloudflare Pages; operating it is in [README.md](README.md#operating-alpha) |
-| `apps/cloud` | `@repo/cloud`: Alpha's side of eliza's cloud (`spec/cloud/`): the profiles, the seed, the cloud route table the app hands eliza's `ElizaCloud` plugin (`elizaCloudRoutes` from `@repo/cloud`), and Alpha's own cloud on Cloudflare, the cut-over candidate: its API and web host Workers and `pnpm cloud`, the operator command that checks, renders, provisions, deploys and smoke-tests an environment from a private secrets file and the operator's completed `profile/candidate.example.json` (`apps/cloud/alpha-cloud.env.example`, `.github/workflows/cloud-deploy.yml`) |
+| `apps/cloud` | `@repo/cloud` owns the Alpha Cloud profiles, local seed, and `elizaCloudRoutes` for the phone's `ElizaCloud` plugin. `pnpm cloud` checks, renders, provisions, deploys, and smoke-tests the Cloudflare API and App Link Workers from the private secrets file and the operator's completed `profile/candidate.example.json`. See `spec/cloud/`, `apps/cloud/alpha-cloud.env.example`, and `.github/workflows/cloud-deploy.yml`. |
 | `packages/` | what applications share: `@repo/ui` (components), `@repo/design-system` (tokens) |
 | `packages/eliza-harness` | `@repo/eliza-harness`: the pinned eliza checkout (`pnpm eliza`, `pinnedCheckout()`), its cloud and agent started for journeys and `pnpm dev`, the run's owners, and `pnpm no-bun`; an app imports it from `test/` and its configs, and `pinned` from `src/` |
 | `packages/deployment` | `@repo/deployment`: `deployments.json`, the cloud origin, App Link host and profile of each environment (`local`, `staging`, `production`), read by `deployment(name)` |
+| `packages/launcher-records` | `@repo/launcher-records`: the Clock and Reminders records exchanged between the launcher and its resident agent |
 | `vibestack/` | the tools: the `spec` command, Studio, and what any project uses but does not own (`vibestack/testing`, `vibestack/design`, `vibestack/stories`) |
 | `vibestack/examples/` | standalone projects, each with its own install; never part of the workspace |
 
@@ -52,7 +53,9 @@ files and the `vibestack/fixtures/` they read, besides the tools every task is k
 as `@repo/app`'s are. `pnpm lint:js` on its own needs what `gen` and `typecheck` write (`gen/`, `.vibe/declarations`);
 `pnpm lint` runs them first.
 `pnpm all //#analyze` also runs or restores the application and Studio generators,
-the UI stories and the design theme before analysis reads their outputs.
+the UI stories, the design theme and the Eliza harness before analysis reads their outputs.
+The app's Knip configuration accounts for the Android Gradle module selected by
+`apps/app/android/host.json` and the OCR package files read by `apps/app/scripts/ocr-assets.ts`.
 
 The hosted VibeStack app build keys its `//#gen` dependency on `apps/app/gen/`.
 Its other inputs come from `apps/app/` and the declared workspace builds. Add any

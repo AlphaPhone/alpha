@@ -1,34 +1,27 @@
+import { createScanPdf } from "@elizaos/plugin-files-client";
 import { Effect, ManagedRuntime, Option } from "effect";
 import { expect, it } from "vitest";
+import { page, userEvent } from "vitest/browser";
 import { Documents } from "../src/platform/documents.vibe";
 import { Files } from "../src/platform/files.vibe";
 import { browserLibrary } from "../src/platform/library.vibe";
+import { closeAll, later, only, open } from "./alpha.tsx";
+import { scene } from "./fakes/scene.ts";
+import "../src/main.css";
 
-function makeTwoPagePdf(): Blob {
-  const encoder = new TextEncoder();
-  const chunks: string[] = ["%PDF-1.4\n"];
-  let size = encoder.encode(chunks[0]).length;
-  const offsets: number[] = [0];
-  const add = (body: string) => {
-    const id = offsets.length;
-    offsets.push(size);
-    const part = `${id} 0 obj\n${body}\nendobj\n`;
-    chunks.push(part);
-    size += encoder.encode(part).length;
-  };
-  const p1 = "0.1 0.2 0.8 rg 20 20 160 160 re f\n";
-  const p2 = "0.8 0.2 0.1 rg 40 40 120 120 re f\n";
-  add("<< /Type /Catalog /Pages 2 0 R >>");
-  add("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>");
-  add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 5 0 R >>");
-  add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 6 0 R >>");
-  add(`<< /Length ${p1.length} >>\nstream\n${p1}endstream`);
-  add(`<< /Length ${p2.length} >>\nstream\n${p2}endstream`);
-  const xref = size;
-  chunks.push(`xref\n0 ${offsets.length}\n0000000000 65535 f \n`);
-  for (const offset of offsets.slice(1)) chunks.push(`${String(offset).padStart(10, "0")} 00000 n \n`);
-  chunks.push(`trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
-  return new Blob(chunks, { type: "application/pdf" });
+function choose(input: HTMLInputElement, file: File): void {
+  const items = new DataTransfer();
+  items.items.add(file);
+  input.files = items.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async function scannedPage(width: number): Promise<Blob> {
+  const canvas = new OffscreenCanvas(width, 50);
+  const paint = canvas.getContext("2d");
+  if (!paint) throw new Error("The scan fixture has no canvas context");
+  paint.fillRect(0, 0, width, 50);
+  return canvas.convertToBlob({ type: "image/png" });
 }
 
 async function pick(file: File, runtime: ManagedRuntime.ManagedRuntime<Documents | Files, never>) {
@@ -36,10 +29,7 @@ async function pick(file: File, runtime: ManagedRuntime.ManagedRuntime<Documents
   await expect.poll(() => document.querySelector("input[type=file]")).toBeInstanceOf(HTMLInputElement);
   const chooser = document.querySelector<HTMLInputElement>("input[type=file]");
   if (!chooser) throw new Error("no browser file chooser");
-  const items = new DataTransfer();
-  items.items.add(file);
-  chooser.files = items.files;
-  chooser.dispatchEvent(new Event("change"));
+  choose(chooser, file);
   return Option.getOrThrow(await pending);
 }
 
@@ -81,10 +71,11 @@ it("imports a chosen file, opens its text, and finds it again in a new browser l
   }
 });
 
-
 // spec/app/files/preview.md, "A page is shown only when the worker drew it in isolation and handed it over unwritable"
 it("draws the selected PDF one page at a time", async () => {
-  const file = new File([makeTwoPagePdf()], `alpha-pdf-${crypto.randomUUID()}.pdf`, { type: "application/pdf" });
+  const images = await Promise.all([scannedPage(40), scannedPage(60)]);
+  const bytes = await Effect.runPromise(createScanPdf({ title: "Files preview", creator: "Alpha" }, images));
+  const file = new File([bytes], `alpha-pdf-${crypto.randomUUID()}.pdf`, { type: "application/pdf" });
   const runtime = ManagedRuntime.make(browserLibrary);
   try {
     const id = await pick(file, runtime);
@@ -101,5 +92,44 @@ it("draws the selected PDF one page at a time", async () => {
     await expect(fetch(second.imageUri)).rejects.toThrow();
   } finally {
     await runtime.dispose();
+  }
+});
+
+it('Reorder pages after the clock advances (spec/app/files/scan.md, "Story: Arrange the pages")', async () => {
+  const { alpha } = await open(scene(), only("home", "view:Files"));
+  try {
+    await page.getByRole("button", { name: "Files", exact: true }).click();
+    const tools = page.getByRole("button", { name: "Files tools", exact: true });
+    await expect.element(tools).toBeVisible();
+    const trigger = tools.element();
+    if (!(trigger instanceof HTMLButtonElement)) throw new Error("Files tools is not a button");
+    trigger.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    const menu = page.getByRole("menu", { name: "Files tools", exact: true });
+    await menu.getByRole("menuitem", { name: "Scan document", exact: true }).click();
+    const scanner = page.getByRole("dialog", { name: "Scan document", exact: true });
+    await expect.element(scanner).toBeVisible();
+    const image = (number: number) => scanner.getByRole("img", { name: `Document page ${number}`, exact: true });
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Add page"]');
+    if (!input) throw new Error("The scanner has no image picker");
+    for (const width of [40, 60]) {
+      const blob = await scannedPage(width);
+      choose(input, new File([blob], `scan-${width}.png`, { type: blob.type }));
+      await expect.element(image(width === 40 ? 1 : 2)).toBeVisible();
+    }
+    const first = image(1).element().getAttribute("src");
+    const second = image(2).element().getAttribute("src");
+    if (!first || !second || first === second) throw new Error("The scanner did not open two distinct pages");
+    await later(alpha, 10_000);
+    await scanner.getByRole("button", { name: "Move page 1 later", exact: true }).click();
+    await expect.element(image(1)).toHaveAttribute("src", second);
+    await expect.element(image(2)).toHaveAttribute("src", first);
+  } finally {
+    await closeAll();
+    await new Promise<void>((resolve, reject) => {
+      const removed = indexedDB.deleteDatabase("alpha-scan-pages");
+      removed.onsuccess = () => resolve();
+      removed.onerror = () => reject(new Error("Could not remove the test scan draft", { cause: removed.error }));
+    });
   }
 });

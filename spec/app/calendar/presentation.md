@@ -131,6 +131,12 @@ pure def windowLastMonth(month: int): int = month + 2
 pure def lawTheWindowHoldsItsMonth(month: int): bool = windowFirstMonth(month) < month and month < windowLastMonth(month)
 ```
 
+### Schedule shows upcoming events and reminders through the end of next month
+
+Schedule names the last included day. Later prefetched events remain available
+when their day is opened. An empty standalone Schedule without a connected
+calendar says Not connected.
+
 ## Story: Hide what I do not want to see
 
 > As the owner, I want a calendar I hid to stay out of Calendar and Home.

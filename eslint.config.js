@@ -40,19 +40,21 @@ const clocks = [
 ]
 const noReact = { patterns: [...imports.patterns, { regex: "^react(?:-dom)?(?:/|$)", message: `Tool and domain code does not import React: ${monorepo}.` }] }
 // What no tsconfig.json includes, so the type-aware rules cannot see it.
-const untyped = ["*.{js,ts}", "vibestack/studio/scripts/**", "**/.storybook/**", "packages/design-system/**", "vibestack/design/test/**", "vibestack/stories/test/**"]
+const untyped = ["*.{js,ts}", "apps/app/public/**/*.js", "vibestack/studio/scripts/**", "**/.storybook/**", "packages/design-system/**", "vibestack/design/test/**", "vibestack/stories/test/**"]
 // Every React interface: Studio's page is built on the same theme (vibestack/studio/vite.config.ts).
 const tsx = ["packages/ui/**/*.{ts,tsx}", "apps/**/*.{ts,tsx}", "vibestack/studio/src/page/**/*.{ts,tsx}"]
 const design = "packages/design-system"
 const writing = 'AGENTS.md, "Writing code"'
-const citation = String.raw`spec\/\S+\.md, "[^"]+"`
+const citation = String.raw`spec\/\S+\.md, "(?:[^"\\]|\\["\\])+"`
 const suppressible = String.raw`(?!code\/|barrel\/|no-console\b)[\w@/-]+`
 // AGENTS.md, "Writing code": a citation's line may end with `: ` and what the step shows, and a declaration keeps its doc comment.
 const cited = new RegExp(String.raw`^\s*${citation}(?:; ${citation})*(?:: \S.*)?\s*$`)
 const suppression = new RegExp(String.raw`^ eslint-disable(?:-next-line|-line)? ${suppressible}(?:, ${suppressible})* -- \S`)
 const configs = [suppression, /^ eslint-enable\b/]
 const throwsType = String.raw`[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`
-const throwsDirective = new RegExp(String.raw`^\*(?:[\s*]*@throws \{[ \t]*${throwsType}(?:[ \t]*\|[ \t]*${throwsType})*[ \t]*\})+[\s*]*$`)
+const throwsShape = String.raw`\{[ \t]*${throwsType}(?:[ \t]*\|[ \t]*${throwsType})*[ \t]*\}`
+const throwsDirective = new RegExp(String.raw`^\*(?:[\s*]*@throws ${throwsShape})+[\s*]*$`)
+const malformedThrows = new RegExp(String.raw`@throws\b(?![ \t]+${throwsShape})`)
 const directives = {
   Line: [cited, suppression, /^@ (?:backend|requires|ensures|invariant|decreases|assert|pure|type|ghost)(?: |$)/, /^\/ <reference /, /^ @vitest-environment [\w-]+$/],
   Block: [cited, ...configs, /^\*(?:[\s*]*@(?:model|design) \S+)+[\s*]*$/, throwsDirective],
@@ -68,8 +70,16 @@ const guarded = (parser) => ({
     return parsed
   },
 })
-const within = (node) => Boolean(node) && (/Function/.test(node.type) || within(node.parent))
-const documented = (context, comment) => context.options[0]?.jsdoc && comment.type === "Block" && comment.value.startsWith("*") && !within(context.sourceCode.getNodeByRangeIndex(comment.range[0]))
+const declaration = /(?:Declaration|Signature|PropertyDefinition|MethodDefinition|^Property|^TSEnumMember)$/
+const documented = (context, comment) => {
+  if (!context.options[0]?.jsdoc || comment.type !== "Block" || !comment.value.startsWith("*") || malformedThrows.test(comment.value)) return false
+  const start = context.sourceCode.getTokenAfter(comment)?.range[0]
+  if (start === undefined) return false
+  for (let node = context.sourceCode.getNodeByRangeIndex(start); node && node.range[0] === start; node = node.parent) {
+    if (declaration.test(node.type)) return true
+  }
+  return false
+}
 const left = { type: "object", additionalProperties: { type: "integer", minimum: 1 } }
 const excess = (context, found) => found.length > (context.options[0]?.left?.[relative(context.cwd, context.filename).split(sep).join("/")] ?? 0) && found.forEach((problem) => context.report(problem))
 const comments = {
@@ -141,6 +151,7 @@ export default withWorkspaceBarrels(defineConfig(
     },
   },
   { files: untyped, extends: [tseslint.configs.disableTypeChecked] },
+  { files: ["apps/app/public/voice/**/*.js"], languageOptions: { globals: { AudioWorkletProcessor: "readonly", registerProcessor: "readonly", sampleRate: "readonly" } } },
   // A ratchet at today's longest (Studio's server); a test's describe block holds its cases.
   { ignores: ["**/test/**", "vibestack/selftest.ts"], rules: { "max-lines-per-function": ["error", { max: 250, skipBlankLines: true, skipComments: true }] } },
   {

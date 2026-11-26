@@ -1,4 +1,4 @@
-// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Open a note"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/index.md, "Story: Another owner never sees my notes"
+// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Open a note"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/index.md, "Story: Select and delete notes"; spec/app/notes/index.md, "Story: Another owner never sees my notes"
 import * as Actions from "../../gen/app__notes__actions.effect.vibe"
 import * as Notes from "../../gen/app__notes.effect.vibe"
 import * as Editor from "../../gen/app__notes__editor.effect.vibe"
@@ -12,13 +12,17 @@ import * as Trash from "../../gen/app__notes__trash.effect.vibe"
 import type { Actor, Request } from "../../gen/app__notes__note.effect.vibe"
 import { unlinked } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
+import { Machine as Toasts, duration } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, offer, say, withdraw } from "../notices/toasts.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { NoteStore, noteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
 import { actions } from "./actions.vibe"
-import { NoteContent, formatChanged, fromSaved, noteContent, numberOf, savedVoice } from "./content.vibe"
+import { NoteContent, audioIdOf, formatChanged, fromSaved, noteContent, numberOf, savedVoice } from "./content.vibe"
 import { NoteEditor, editing } from "./editor.vibe"
 import { Opens, opens } from "./opens.vibe"
 import { ownerRecords, recording } from "./recording.vibe"
@@ -26,8 +30,114 @@ import { ownerEarlier, previous } from "./previous.vibe"
 import { transfers } from "./transfer.vibe"
 import { VoiceReview, sides } from "./sides.vibe"
 import { trashing } from "./trash.vibe"
+import { Recovery, voiceDeletion } from "./voiceDeletion.vibe"
 
 const phone: Actor = "Phone"
+type DeleteSelection = Extract<Notes.Effect, { readonly tag: "DeletesSelection" }>
+type SelectionDeleted = Extract<Notes.Event, { readonly type: "selectionDeleted" }>
+type DeletedNote = { readonly id: number; readonly record: string; readonly deletedAt: string }
+type SelectionUndo = Agent | NoteStore | Trash.Machine | Toasts | Said | Time
+
+effect function inFront(): boolean!!(Shell | Layers | Device) {
+  const view = try (try Shell).get()
+  return showing(view, "Notes") && !view.drawer && (try (try Device).showing()) && !pageInert(try (try Layers).get())
+}
+
+/** Confirm the visible selection while the notes list and Recently deleted still admit the move. */
+export effect function deleteSelection() {
+  if (!(try inFront())) return
+  const bin = try (try Trash.Machine).get()
+  const active = try (try Editor.Machine).get()
+  const available = !active.showing && !Editor.waiting(active) && !bin.showing && Trash.ready(bin)
+  if (available) try ignore((try Notes.Machine).send({ type: "deleteSelection", available }, "Owner"))
+}
+
+effect function trashOutcome(bin: Trash.Machine.Shape, owner: number, ticket: number) {
+  const concluded = try Stream.runHead(Stream.filter(bin.changes, (state) =>
+    state.owner !== owner || state.attempt.id !== ticket || (state.attempt.outcome !== "Recorded" && state.attempt.outcome !== "Sent")))
+  return Option.isNone(concluded) || concluded.value.owner !== owner || concluded.value.attempt.id !== ticket
+    ? "Unknown" : concluded.value.attempt.outcome
+}
+
+effect function selectedDeletion(fx: DeleteSelection) {
+  const list = try Notes.Machine
+  const bin = try Trash.Machine
+  const content = try NoteContent
+  const identity = ownerAt() catch () => ""
+  const first = try content.collection()
+  const removedIds: number[] = []
+  const result = (known: boolean): SelectionDeleted => ({ type: "selectionDeleted", turn: fx.turn, removedIds, known })
+  if (identity === "" || first.owner !== identity || first.version !== fx.revision || numberOf("owner", identity) !== fx.owner) return result(true)
+  let revision = fx.revision
+  for (const id of fx.ids) {
+    const active = try list.get()
+    if (active.owner !== fx.owner || active.selection !== "Deleting" || active.selectionTurn !== fx.turn ||
+      !(try inFront()) || (ownerAt() catch () => "") !== identity || (try bin.get()).owner !== fx.owner) return result(true)
+    const note = first.noteByNumber.get(id)
+    if (note === undefined) return result(true)
+    const audio = audioIdOf(note)
+    const event: Trash.Event = { type: "discardSelected", id, revision, recording: audio === "" ? 0 : numberOf("recording", audio), now: untimed }
+    const sent = bin.send(event, "Owner") catch () => undefined
+    if (sent === undefined) return result(true)
+    const outcome = try trashOutcome(bin, fx.owner, sent.state.attempt.id)
+    if (outcome !== "Confirmed") return result(outcome !== "Unknown")
+    removedIds.push(id)
+    revision += 1
+  }
+  return result(true)
+}
+
+effect function restoreSelection(identity: string, notes: ReadonlyArray<DeletedNote>, until: number): void!!SelectionUndo {
+  if ((try (try Time).now()) >= until) return
+  const bin = try Trash.Machine
+  const store = try NoteStore
+  const owner = numberOf("owner", identity)
+  let restored = 0
+  let unknown = false
+  for (const note of notes) {
+    if ((ownerAt() catch () => "") !== identity || (try bin.get()).owner !== owner) break
+    const latest = store.read() catch () => undefined
+    if (latest?.trash?.some((row) => row.note.id === note.record && row.deletedAt === note.deletedAt) !== true ||
+      (ownerAt() catch () => "") !== identity) break
+    const event: Trash.Event = { type: "recoverSelected", id: note.id, revision: latest.revision + 1, deletedAt: Date.parse(note.deletedAt), now: untimed }
+    const sent = bin.send(event, "Owner") catch () => undefined
+    if (sent === undefined) break
+    const outcome = try trashOutcome(bin, owner, sent.state.attempt.id)
+    if (outcome !== "Confirmed") {
+      unknown = outcome === "Unknown"
+      break
+    }
+    restored += 1
+  }
+  if ((ownerAt() catch () => "") !== identity) return
+  const count = restored === 1 ? "Restored 1 note." : `Restored ${restored} notes.`
+  if (restored === notes.length) try say(count)
+  else try say(`${restored > 0 ? `${count} ` : ""}${unknown ? "Alpha couldn’t confirm the next recovery." : "The remaining notes couldn’t be restored."}`, true)
+}
+
+effect function offerSelectionUndo(fx: DeleteSelection, result: SelectionDeleted): void!!SelectionUndo {
+  const count = result.removedIds.length
+  if (count === 0 || !result.known) return
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== fx.owner) return
+  const saved = (try NoteStore).read() catch () => undefined
+  if ((ownerAt() catch () => "") !== identity) return
+  const receipts = saved?.trash?.flatMap(({ note, deletedAt }) => {
+    const id = numberOf("note", note.id)
+    return result.removedIds.includes(id) && Date.parse(deletedAt) > 0 ? [{ id, record: note.id, deletedAt }] : []
+  })
+  const message = count === 1 ? "Deleted" : `Deleted ${count} notes`
+  if (saved?.revision !== fx.revision + count - 1 || receipts?.length !== count) {
+    if (count === fx.ids.length) try say(message)
+    return
+  }
+  const time = try Time
+  const until = (try time.now()) + duration(message.length, true, (try (try Toasts).get()).scale)
+  const services = try Effect.context<SelectionUndo>()
+  try offer(message, "notes", fx.turn, Effect.provideContext(restoreSelection(identity, receipts, until), services))
+  try time.until(until)
+  try withdraw("notes", fx.turn)
+}
 
 effect function listed(owner: number, ticket: number): Notes.Event!!(Agent | Notes.Machine | Editor.Machine | Link.Machine | NoteEditor | NoteStore | NoteContent) {
   const fail: Notes.Event = { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }
@@ -118,13 +228,18 @@ effect function shown(row: Notes.Row, by: Actor, req: Request) {
   try Effect.ensuring(openedForAgent(row, req), opens.settle(req.turn, false))
 }
 
-function carry(fx: Notes.Effect): Job<Notes.Event, Agent | Notes.Machine | Editor.Machine | NoteEditor | NoteStore | NoteContent | Shell | Link.Machine | Voice.Machine | Opens, [Actor]> {
+function carry(fx: Notes.Effect): Job<Notes.Event, SelectionUndo | Notes.Machine | Editor.Machine | NoteEditor | NoteContent | Shell | Layers | Device | Link.Machine | Voice.Machine | Opens, [Actor]> {
   return match (fx) {
     when { tag: "Lists" }: answer("list", listed(fx.owner, fx.ticket), { type: "listed", ticket: fx.ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, phone);
     when { tag: "Writes" }: answer(`write ${fx.ticket}`, written(fx.owner, fx.ticket, fx.change), { type: "changeWritten", ticket: fx.ticket, ok: false, known: false }, phone);
     when { tag: "Shows" }: run(fx.by === "Agent" ? `agent open ${fx.req.turn}` : "open", shown(fx.row, fx.by, fx.req), phone);
     when { tag: "OpensAccount" }: run("account", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, phone);
     when { tag: "NotOpened" }: run("not opened", effect { try (try Opens).settle(fx.turn, false) }, phone);
+    when { tag: "DeletesSelection" }: stream(`selection ${fx.turn}`, Stream.unwrap(effect {
+      const result = try selectedDeletion(fx)
+      return Stream.concat(Stream.succeed(result), Stream.fromEffectDrain(offerSelectionUndo(fx, result)))
+    }),
+      { type: "selectionDeleted", turn: fx.turn, removedIds: [], known: false }, phone);
   }
 }
 
@@ -156,6 +271,7 @@ export effect function enter() {
   try ignore(list.send({ type: "ownerChanged", owner }, phone))
   try ignore(editor.send({ type: "ownerChanged", owner }, phone))
   try ignore(trash.send({ type: "ownerChanged", owner }, phone))
+  try ignore((try Recovery.Machine).send({ type: "ownerChanged", owner }, phone))
   try ignore(link.send({ type: "ownerChanged", owner }, phone))
   try ignore(voice.send({ type: "ownerChanged", owner }, phone))
   try ignore((try Actions.Machine).send({ type: "ownerChanged", owner }, phone))
@@ -196,6 +312,7 @@ export effect function enter() {
   }
   try ignore(list.send({ type: "refresh" }, phone))
   try ignore(trash.send({ type: "resumeAction" }, phone))
+  try ignore(trash.send({ type: "maintain", now: untimed }, phone))
 }
 
 effect function leaveNotes() {
@@ -216,19 +333,32 @@ const opening = started(effect {
   const visible = Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible))
   let wasFront = false
   try Stream.runForEach(Stream.zipLatest(changes, visible), effect ([shown, front]) => {
-    const active = shown && front
-    if (active) {
+    if (shown && front) {
       wasFront = true
       try enter()
-    } else if (wasFront) {
-      wasFront = false
-      try leaveNotes()
+    } else if (!shown) {
+      if (wasFront) {
+        wasFront = false
+        try leaveNotes()
+      } else {
+        const menu = try Actions.Machine
+        const actions = try menu.get()
+        if (actions.open || actions.awaiting) try ignore(menu.send({ type: "left" }, phone))
+        try ignore((try Mic.Machine).send({ type: "left" }, phone))
+        const list = try Notes.Machine
+        const state = try list.get()
+        if (state.selection !== "NoSelection" || state.selectionResult !== "NotReported") try ignore(list.send({ type: "left" }, phone))
+      }
+    } else {
+      const menu = try Actions.Machine
+      const actions = try menu.get()
+      if (actions.open || actions.awaiting) try ignore(menu.send({ type: "left" }, phone))
     }
   })
 }, "enter Notes")
 
 /** The Notes view observes these resident machines. The agent's store is opened only when Notes is requested; Ask Alpha waits here on the agent's open of a note. */
-export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, actions, opening), Layer.mergeAll(noteStore, noteContent, opens))
+export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, voiceDeletion, sides, recording, previous, transfers, actions, opening), Layer.mergeAll(noteStore, noteContent, opens))
 
 effect function took() {
   const prior = try Previous.Machine
@@ -247,6 +377,11 @@ effect function took() {
     try ignore(recorder.send({ type: "back" }, "Owner"))
     return true
   }
+  const mic = try Mic.Machine
+  if (Mic.canCloseBrowserDenial(try mic.get(), "Owner")) {
+    try ignore(mic.send({ type: "closeBrowserDenial" }, "Owner"))
+    return true
+  }
   if (Link.canBack(try link.get())) {
     try ignore(link.send({ type: "back" }, "Owner"))
     return true
@@ -259,8 +394,8 @@ effect function took() {
     try ignore(trash.send({ type: "back" }, "Owner"))
     return true
   }
-  if (Actions.canCloseMenu(try actionsMachine.get())) {
-    try ignore(actionsMachine.send({ type: "closeMenu" }, "Owner"))
+  if (Actions.canBack(try actionsMachine.get())) {
+    try ignore(actionsMachine.send({ type: "back" }, "Owner"))
     return true
   }
   if (Editor.canBack(try editor.get())) {

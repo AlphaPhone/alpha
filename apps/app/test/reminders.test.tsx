@@ -1,13 +1,18 @@
 // @vitest-environment happy-dom
-// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/recurrence.md, "Story: Advance recurring reminder dates cleanly across months and leap years"
+// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
+import type { ReminderItemRecord, ReminderListRecord, RemindersSnapshot } from "@repo/launcher-records";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as AlertsMachine from "../gen/app__reminders__alerts.effect.vibe";
-import * as ShellMachine from "../gen/app__shell.effect.vibe";
+import { Machine as Editor } from "../gen/app__reminders__editor.effect.vibe";
+import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { at } from "../src/areas.ts";
+import home from "../src/home/index.tsx";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
@@ -31,10 +36,9 @@ import {
   computeSmartCounts,
   DEFAULT_LIST_ID,
   defaultSnapshot,
-  type ReminderItemRecord,
-  type ReminderListRecord,
-  type RemindersSnapshot,
+  remindersStore,
 } from "../src/reminders/store.ts";
+import workflows from "../src/workflows/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -42,12 +46,12 @@ underAct();
 
 interface AgentRecorder {
   snapshot: RemindersSnapshot;
-  readonly calls: { readonly method: string; readonly path: string; readonly body: Record<string, unknown> }[];
+  readonly calls: { readonly method: string; readonly path: string; readonly query: string; readonly key: string | undefined; readonly body: Record<string, unknown> }[];
 }
 
-function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: AgentRecorder; readonly layer: Layer.Layer<HttpClient.HttpClient> } {
+function makeFakeAgentReminders(initialNowMs: number, held: readonly ReminderItemRecord[] = []): { readonly recorder: AgentRecorder; readonly layer: Layer.Layer<HttpClient.HttpClient> } {
   const recorder: AgentRecorder = {
-    snapshot: defaultSnapshot(initialNowMs),
+    snapshot: { ...defaultSnapshot(initialNowMs), items: [...held] },
     calls: [],
   };
   const layer = Layer.succeed(
@@ -57,10 +61,13 @@ function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: Agen
       const method = request.method;
       const rawBody = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
       const parsed = rawBody ? JSON.parse(rawBody) as Record<string, unknown> : {};
-      recorder.calls.push({ method, path, body: parsed });
+      recorder.calls.push({ method, path, query: url.search, key: request.headers["idempotency-key"], body: parsed });
 
       if (path === "/api/health") {
         return HttpClientResponse.fromWeb(request, new Response(JSON.stringify({ ready: true }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/auth/me" && method === "GET") {
+        return HttpClientResponse.fromWeb(request, Response.json({ identity: { id: "local-agent", kind: "owner" }, access: { role: "OWNER", mode: "local" } }));
       }
       if (path === "/api/alpha/reminders" && method === "GET") {
         return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(recorder.snapshot), { status: 200, headers: { "content-type": "application/json" } }));
@@ -151,7 +158,7 @@ function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: Agen
 }
 
 const withReminders = [
-  ...only("home", "notice"),
+  ...only("home", "notice", "view:Workflows"),
   at("view:Reminders", () => Promise.resolve({ default: remindersArea })),
   at("overlay", () => Promise.resolve({ default: alertOverlayArea })),
 ];
@@ -177,6 +184,7 @@ function makePlatform(nowMs: number, agentHttp: Layer.Layer<HttpClient.HttpClien
     }),
     cancel: (input) => Effect.succeed({ id: input.id, status: "cancelled", mode: "inexact", message: "" }),
     list: () => Effect.succeed({ reminders: [], notificationsEnabled: true }),
+    operate: () => Effect.succeed({ status: "unknown" as const }),
     pendingTap: () => Effect.succeed({}),
     consumeTap: () => Effect.void,
   });
@@ -188,7 +196,7 @@ afterEach(async () => {
 });
 
 describe("Reminders recurrence laws", () => {
-  // spec/app/reminders/recurrence.md, "Story: Advance recurring reminder dates cleanly across months and leap years"
+  // spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
   it("advances daily, weekday, weekly, monthly (clamped) and yearly (leap-clamped) dates strictly later", () => {
     expect(advanceDueDate("2026-05-01", "daily")).toBe("2026-05-02");
     expect(advanceDueDate("2026-05-01", "weekdays")).toBe("2026-05-04");
@@ -204,18 +212,25 @@ describe("Reminders recurrence laws", () => {
 describe("Reminders full journeys", () => {
   const baseNow = Date.UTC(2026, 4, 15, 13, 0, 0);
 
-  async function launchReminders(nowMs: number, options?: { readonly armed?: ArmedCall[]; readonly seed?: (snap: RemindersSnapshot) => RemindersSnapshot }) {
+  async function launchReminders(
+    nowMs: number,
+    optionsOrHeld?: readonly ReminderItemRecord[] | { readonly armed?: ArmedCall[]; readonly seed?: (snap: RemindersSnapshot) => RemindersSnapshot },
+  ) {
+    const held: readonly ReminderItemRecord[] = Array.isArray(optionsOrHeld) ? optionsOrHeld : [];
+    const options = Array.isArray(optionsOrHeld)
+      ? undefined
+      : optionsOrHeld as { readonly armed?: ArmedCall[]; readonly seed?: (snap: RemindersSnapshot) => RemindersSnapshot } | undefined;
     const world = { ...scene(), now: nowMs };
-    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now);
+    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now, held);
     if (options?.seed) recorder.snapshot = options.seed(recorder.snapshot);
     const platform = makePlatform(world.now, agentHttp, options?.armed);
     const opened = await openOver(platform, withReminders);
     const runtime = remindersArea.runtime(opened.alpha);
-    const currentShell = await opened.alpha.runtime.runPromise(ShellMachine.Machine.use((m) => m.get()));
-    if (!ShellMachine.showing(currentShell, "Reminders")) {
-      await drawn(() => opened.alpha.runtime.runPromise(ShellMachine.Machine.use((m) => m.send({ type: "openView", view: "Reminders" }))));
+    const currentShell = await opened.alpha.runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    if (currentShell.trail.at(-1) !== "Reminders") {
+      await drawn(() => opened.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Reminders" }))));
     }
-    await until(opened.alpha, opened.alpha.runtime, ShellMachine.Machine, (s) => ShellMachine.showing(s, "Reminders"));
+    await until(opened.alpha, opened.alpha.runtime, Shell, (s) => s.trail.at(-1) === "Reminders");
     await until(opened.alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
     const storeView = () => runtime.runSync(Effect.map(RemindersShelf, (service) => service.store.snapshot()));
     const writeId = () => runtime.runPromise(RemindersMachine.Machine.use((m) => Effect.map(m.get(), (s) => s.write.id)));
@@ -226,11 +241,36 @@ describe("Reminders full journeys", () => {
   }
 
   // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
+  it("opens a phone reminder from Workflows' More options", async () => {
+    const world = { ...scene(), now: baseNow };
+    const { layer: agentHttp } = makeFakeAgentReminders(world.now);
+    const platform = makePlatform(world.now, agentHttp);
+    const { alpha } = await openOver(platform, withReminders);
+    const runtime = remindersArea.runtime(alpha);
+    await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
+    await press("Workflows");
+    await until(alpha, workflows.runtime(alpha), Listing, (s) => s.owner > 0);
+    await press("Add to Workflows");
+    expect(button(/^Phone reminder/)).toBeUndefined();
+    await press("More options");
+    await press(/^Phone reminder/);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
+    await until(alpha, runtime, Editor, (s) => s.open);
+    await pressOnTop("Cancel");
+  });
+
   it("organizes smart lists, custom lists (rename + reassign/cascade delete), search and editor creation", async () => {
-    const { world, recorder, runtime, storeView, writeId, waitConfirmedAfter } = await launchReminders(baseNow);
+    const { alpha, world, recorder, runtime, storeView, writeId, waitConfirmedAfter } = await launchReminders(baseNow);
     expect(document.body.textContent).toContain("Today");
     expect(document.body.textContent).toContain("Scheduled");
     expect(document.body.textContent).toContain("Reminders");
+
+    // spec/app/reminders/index.md, "Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview"
+    await press(/Today$/);
+    expect(button("All lists")).toBeDefined();
+    await press("Back");
+    expect(button("All lists")).toBeUndefined();
+    expect(document.querySelector('section[aria-label="Smart lists"]')).toBeTruthy();
 
     const today = formatCivilDate(civilDateAt(world.now));
     let prev = await writeId();
@@ -245,6 +285,11 @@ describe("Reminders full journeys", () => {
     prev = await writeId();
     await runtime.runPromise(updateReminderList(work!.id, "Deep Work", "violet", "bolt"));
     await waitConfirmedAfter(prev);
+
+    await press(/^Deep Work/);
+    expect(button("All lists")).toBeDefined();
+    await drawn(() => alpha.back());
+    expect(document.querySelector('section[aria-label="Smart lists"]')).toBeTruthy();
 
     prev = await writeId();
     const dueItem = await runtime.runPromise(createReminderItem({
@@ -351,6 +396,50 @@ describe("Reminders full journeys", () => {
     expect(recorder.calls.some((c) => c.method === "DELETE" && c.path.includes(`/items/${recurring!.id}`))).toBe(true);
   });
 
+  // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made"; spec/app/reminders/index.md, "Once the five-second window expires, a held deletion is committed and a held completion settles"
+  it("completes and deletes a reminder made in chat, and its Undo goes when the five seconds do", async () => {
+    const today = formatCivilDate(civilDateAt(baseNow));
+    const plumber: ReminderItemRecord = {
+      id: "rem-task-plumber", listId: DEFAULT_LIST_ID, title: "Call the plumber", notes: "", dueDate: today, dueMinute: 18 * 60, alertMinutes: 0,
+      recurrence: "none", priority: "none", flagged: false, subtasks: [], completed: false, completedAtMs: null, snoozedUntilMs: null,
+      notifiedAtMs: null, agentTaskId: "plumber-task", revision: 1, createdAtMs: baseNow, updatedAtMs: baseNow,
+    };
+    const { recorder, alpha, runtime } = await launchReminders(baseNow, [plumber]);
+
+    await drawn(() => runtime.runPromise(toggleReminderComplete(plumber.id)));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Held" && s.write.outcome === "Confirmed");
+    expect(recorder.calls.some((c) => c.method === "POST" && c.path === `/api/alpha/reminders/items/${plumber.id}/complete`)).toBe(true);
+    expect(Boolean(button("Undo"))).toBe(true);
+    await later(alpha, 5_100);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released");
+    expect(Boolean(button("Undo"))).toBe(false);
+
+    await drawn(() => runtime.runPromise(toggleReminderComplete(plumber.id)));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    await drawn(() => runtime.runPromise(deleteReminderItem(plumber.id)));
+    expect(remindersStore.snapshot().hiddenIds.has(plumber.id)).toBe(true);
+    await later(alpha, 5_100);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
+    const deleted = recorder.calls.find((c) => c.method === "DELETE" && c.path === `/api/alpha/reminders/items/${plumber.id}`);
+    expect({ query: deleted?.query, keyed: (deleted?.key ?? "") !== "" }).toEqual({ query: "", keyed: true });
+    expect(recorder.snapshot.items.some((item) => item.id === plumber.id)).toBe(false);
+    expect(Boolean(button("Undo"))).toBe(false);
+
+    // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made": two quick deletes both happen
+    const first = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Water plants" }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    const second = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Take out trash" }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    await drawn(() => runtime.runPromise(deleteReminderItem(first!.id)));
+    const queued = runtime.runPromise(deleteReminderItem(second!.id));
+    await later(alpha, 5_100);
+    await drawn(() => queued);
+    expect({ hidden: [...remindersStore.snapshot().hiddenIds], undo: Boolean(button("Undo")) }).toEqual({ hidden: [second!.id], undo: true });
+    await later(alpha, 5_100);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
+    expect(recorder.snapshot.items.filter((item) => item.id === first!.id || item.id === second!.id)).toEqual([]);
+  });
+
   // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
   it("fires due reminder alert on time (never early), snoozes 10m and completes from banner, and syncs chat updates across restarts", async () => {
     const armed: ArmedCall[] = [];
@@ -423,7 +512,7 @@ describe("Reminders full journeys", () => {
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded" && !s.again && s.items.length >= 2);
     expect(storeView().snapshot.items.some((i) => i.id === "rem_chat_1")).toBe(true);
 
-    // spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+    // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
     prev = await writeId();
     await press("New reminder");
     await fill("Title", "Pack passport");
@@ -509,11 +598,11 @@ describe("Reminders full journeys", () => {
 
     // spec/app/reminders/index.md, "Switching smart views, custom lists, sort, filter, search and item selection keeps every reference valid"
     await press(/^Groceries/);
-    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.drilledIn && s.view.tag === "CustomList");
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.view.tag === "CustomList");
     expect(document.body.textContent).toContain("Buy oat milk");
     await hardware("back");
-    await until(alpha, runtime, RemindersMachine.Machine, (s) => !s.drilledIn);
-    expect((await alpha.runtime.runPromise(ShellMachine.Machine.use((m) => m.get()))).trail).toEqual(["Reminders"]);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.view.tag === "Overview");
+    expect((await alpha.runtime.runPromise(Shell.use((m) => m.get()))).trail).toEqual(["Reminders"]);
 
     // spec/app/reminders/index.md, "Creating, updating, flagging and moving a reminder validates its list, due time and recurrence and sends one write at a time"
     let prev = await writeId();

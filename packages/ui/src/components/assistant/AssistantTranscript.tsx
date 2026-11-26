@@ -1,4 +1,4 @@
-import { type ComponentProps, memo, useCallback, useRef } from "react";
+import { type ComponentProps, type ReactNode, memo, useCallback, useRef } from "react";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
@@ -6,16 +6,24 @@ import { EmptyState } from "../EmptyState.tsx";
 import { Skeleton } from "../Skeleton.tsx";
 import { AssistantMessage, type AssistantMessageProps } from "./AssistantMessage.tsx";
 import { AssistantTurnNote, type AssistantTurnNoteProps } from "./AssistantTurnNote.tsx";
+import type { MessageHold } from "./messagePress.ts";
 
 type TranscriptMessage = AssistantMessageProps & { id: string };
 
 export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> & {
   /** The messages of the conversation showing, oldest first, each with a key that stays its own. */
   messages: readonly TranscriptMessage[];
+  /** Messages from a new turn shown after the Later boundary of an older page. */
+  messagesAfterLater?: readonly TranscriptMessage[];
+  /** Arms a hold on recorded message text. */
+  holdMessage?: MessageHold;
+  /** Facts from the current screen shown in the transcript without Alpha's signature. */
+  briefing?: ReactNode;
   /** The reply being written or its failure, after recorded messages. */
   liveMessages?: readonly TranscriptMessage[];
+  interim?: ReactNode;
   /** The page being read, with the message that a history or search request opened it around. */
-  position?: { page: string; around?: string };
+  position?: { page: string; around?: string; earlier?: string; later?: string };
   /** Whether the transcript is laid out in the open conversation. */
   visible?: boolean;
   /** Whether the page of messages is being read, was read, or could not be. */
@@ -32,7 +40,8 @@ export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> &
   onReturnToOriginal?: () => void;
 };
 
-type TranscriptScroll = { page?: string; follows: boolean; height?: number; paging?: { id: string; offset: number } };
+/** Where the conversation is read from: whether it follows the end, and the end it was last brought to, below which only the owner scrolls. */
+type TranscriptScroll = { page?: string; follows: boolean; end: number; height?: number; paging?: { id: string; offset: number } };
 
 function messageRow(content: HTMLElement, id: string) {
   return Array.from(content.querySelectorAll<HTMLElement>("[data-alpha-message-id]"))
@@ -43,15 +52,16 @@ function topIn(viewport: HTMLElement, row: HTMLElement) {
   return row.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
 }
 
-function followEnd(viewport: HTMLElement) {
+function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
   if (selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode)) return;
   viewport.scrollTop = viewport.scrollHeight;
+  reading.end = viewport.scrollTop;
 }
 
-const MessageRows = memo(function MessageRows({ messages }: { messages: readonly TranscriptMessage[] }) {
+const MessageRows = memo(function MessageRows({ messages, hold }: { messages: readonly TranscriptMessage[]; hold?: MessageHold }) {
   return messages.map(({ id, ...message }) => (
-    <div key={id} data-alpha-message-id={id}><AssistantMessage {...message} /></div>
+    <div key={id} data-alpha-message-id={id}><AssistantMessage {...message} hold={hold} /></div>
   ));
 });
 
@@ -60,8 +70,8 @@ const MessageRows = memo(function MessageRows({ messages }: { messages: readonly
  * hit opens around the message requested.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantTranscript({ messages, liveMessages, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
-  const scrollRef = useRef<TranscriptScroll>({ follows: true });
+export function AssistantTranscript({ messages, messagesAfterLater, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
+  const scrollRef = useRef<TranscriptScroll>({ follows: true, end: 0 });
   const contentRef = useRef<HTMLDivElement | null>(null);
   const page = position?.page;
   const around = position?.around;
@@ -82,7 +92,7 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
     }
     const follow = () => {
       reading.height = viewport.clientHeight;
-      if (reading.follows) followEnd(viewport);
+      if (reading.follows) followEnd(viewport, reading);
     };
     follow();
     if (typeof ResizeObserver === "undefined") return;
@@ -103,10 +113,13 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
     if (status === "failed") return <EmptyState title="Messages did not load">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>;
     return (
       <>
-        {onEarlier ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
-        <MessageRows messages={messages} />
+        {onEarlier ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(position?.earlier ?? messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
+        <MessageRows messages={messages} hold={holdMessage} />
+        {onLater ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(position?.later ?? messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {messagesAfterLater?.length ? <MessageRows messages={messagesAfterLater} hold={holdMessage} /> : null}
+        {briefing}
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
-        {onLater ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {interim}
         {turn ? <AssistantTurnNote {...turn} /> : null}
       </>
     );
@@ -121,7 +134,7 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
         const viewport = event.currentTarget;
         const reading = scrollRef.current;
         if (visible && status === "loaded" && (reading.height === undefined || viewport.clientHeight === reading.height)) {
-          reading.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+          reading.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80 || (reading.follows && viewport.scrollTop >= reading.end);
         }
         onScroll?.(event);
       }}

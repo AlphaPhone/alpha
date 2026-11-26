@@ -160,10 +160,11 @@ page has no secure mark, as it never committed.
 pure def pageFailed(s: Share, failure: Failure, https: bool): Share = { ...s, stranded: failure == Unreachable and https }
 ```
 
-### "Open externally" is offered where the page needs another browser: a page that asked for a passkey, from the menu, or a normal tab's page that could not be reached at an HTTPS address, beside its failure message
+### "Open externally" is offered for a committed HTTPS page from the phone Browser menu, or beside a normal tab's unreachable HTTPS page
 
-A page that asked for a passkey leaves only as an HTTPS page, and a private
-tab's page asks the owner first. A failed page has already shown that its
+The phone Browser does not support passkeys. The owner can open another
+browser before starting a sign-in. A private tab asks first. A failed page has
+already shown that its
 address is an HTTPS one, so it leaves without a secure mark; a private
 tab's failed page is not offered another browser.
 
@@ -171,12 +172,26 @@ tab's failed page is not offered another browser.
 pure def leavesFailed(s: Share, kind: Kind): bool = s.stranded and kind == Normal
 
 pure def canOpenExternally(s: Share, kind: Kind, secure: bool): bool =
-  (s.passkey or leavesFailed(s, kind)) and not(busy(s))
+  (secure or leavesFailed(s, kind)) and not(busy(s))
 
 pure def openExternally(s: Share, kind: Kind, secure: bool): Step =
   if (not(secure or leavesFailed(s, kind))) { state: { ...s, notice: NoPage }, out: List() }
   else if (kind == Private) { state: { ...s, privately: true, confirmed: false, handoff: V::present(s.handoff) }, out: List() }
   else { state: { ...s, privately: false, confirmed: false, launching: true }, out: List(Elsewhere({ confirmed: false })) }
+```
+
+### The owner can review opening a shown private web frame in another browser
+
+The button offers the currently visible private frame at its requested
+HTTPS address. The enclosing browser gives the address the owner entered,
+without claiming that the opaque frame's connection was verified. The exact
+page stays bound to the review until the owner confirms or cancels.
+
+```quint
+pure def canReviewPrivateFrame(s: Share, ready: bool): bool = ready and not(busy(s))
+
+pure def reviewPrivateFrame(s: Share, ready: bool): Share =
+  { ...s, privately: true, confirmed: false, handoff: V::present(s.handoff), notice: Quiet }
 ```
 
 ### The owner confirms the private page as shown, or cancels
@@ -223,9 +238,9 @@ A certificate that was refused, any other failure and an http address keep
 the page in the tab, whatever the shell says of its secure mark.
 
 ```quint
-pure def lawAFailedPageLeavesOnlyWhenAnotherBrowserMayReachIt(kind: Kind, secure: bool, failure: Failure, https: bool): bool =
+pure def lawAFailedPageLeavesOnlyWhenAnotherBrowserMayReachIt(kind: Kind, failure: Failure, https: bool): bool =
   val s = pageFailed(initial, failure, https)
-  (canOpenExternally(s, kind, secure) iff (failure == Unreachable and https and kind == Normal)) and
+  (canOpenExternally(s, kind, false) iff (failure == Unreachable and https and kind == Normal)) and
     (openExternally(s, kind, false).out.length() > 0 iff (failure == Unreachable and https and kind == Normal))
 ```
 
@@ -234,8 +249,8 @@ pure def lawAFailedPageLeavesOnlyWhenAnotherBrowserMayReachIt(kind: Kind, secure
 So a reload, or going to another address, never sends the page that failed.
 
 ```quint
-pure def lawTheNextLoadEndsTheOffer(kind: Kind, secure: bool): bool =
-  not(canOpenExternally(pageChanged(pageFailed(initial, Unreachable, true)), kind, secure))
+pure def lawTheNextLoadEndsTheOffer(kind: Kind): bool =
+  not(canOpenExternally(pageChanged(pageFailed(initial, Unreachable, true)), kind, false))
 ```
 
 ### Only a failure marks the page as one another browser may reach, and every load clears it

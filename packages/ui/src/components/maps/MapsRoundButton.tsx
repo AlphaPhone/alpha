@@ -7,7 +7,7 @@ const round = cva(
   {
     variants: {
       tone: {
-        float: "bg-background text-foreground shadow-md ring-1 ring-border active:bg-accent",
+        float: "bg-background text-foreground shadow-float ring-1 ring-border active:bg-accent dark:shadow-float-dark",
         fill: "bg-secondary text-foreground active:bg-accent",
         plain: "text-foreground active:bg-accent",
         // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class.

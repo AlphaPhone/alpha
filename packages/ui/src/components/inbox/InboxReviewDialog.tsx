@@ -26,7 +26,8 @@ export type InboxReviewDialogProps = {
 const choice = cn(focusRing, "min-h-11 rounded-lg px-4 py-2.5 disabled:opacity-50");
 
 /**
- * A question Inbox asks before it changes mail: a card low on the dimmed page with No and Yes.
+ * A question Inbox asks before it changes mail: a card low on the dimmed page with No and Yes; the resting Ask Alpha
+ * dock is hidden while it is asked.
  *
  * @model spec/app/inbox/sending.md
  */
@@ -39,6 +40,7 @@ export function InboxReviewDialog({ open, title, children, noLabel = "No", yesLa
         <AlertDialogPrimitive.Overlay className="fixed inset-0 z-alert bg-foreground/45 motion-safe:animate-fade dark:bg-background/70" />
         <AlertDialogPrimitive.Content
           ref={layerRef}
+          data-covers-dock=""
           {...(children ? {} : { "aria-describedby": undefined })}
           className="fixed inset-x-4 bottom-[max(--spacing(18),calc(var(--alpha-safe-bottom)+--spacing(4)))] z-alert mx-auto max-h-[calc(var(--alpha-viewport-height,100dvh)-5.5rem)] max-w-md overflow-auto rounded-tile border border-border/60 bg-popover p-5 text-popover-foreground shadow-md outline-none motion-safe:animate-rise dark:border-border"
         >

@@ -1,0 +1,108 @@
+// spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
+import {
+  commandFromResponse, type PlanChangeReview, pathOf, paymentFromResponse, reviewFromResponse,
+  routesByName, type SnapshotSubscription, type SubscriptionCommand,
+} from "@elizaos/cloud"
+import type { Tier } from "../../gen/app__account__plan.effect.vibe"
+import type { Result } from "../../gen/app__account__change.effect.vibe"
+import { type Account } from "../platform/cloud.vibe"
+import { type Failure, outcomeOf, type Remote } from "../platform/remote.vibe"
+import type { Buyer } from "./profile.vibe"
+
+module commandIdentity {
+  /** Cloud names a subscription command from the signed-in owner and request's idempotency key. */
+  export async function commandIdOf(organization: string, user: string, key: string): Promise<string> {
+    const bytes = new TextEncoder().encode(`${organization}\n${user}\n${key}`)
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
+    return `cmd_${Array.from(hash.subarray(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")}`
+  }
+}
+import { commandIdOf } from commandIdentity
+
+export type PlanDirection = "upgrade" | "downgrade"
+
+export interface ReviewedQuote {
+  readonly buyer: Buyer
+  readonly subscription: SnapshotSubscription
+  readonly direction: PlanDirection
+  readonly answer: PlanChangeReview
+}
+
+export type PlanAction =
+  | { readonly tag: "Change"; readonly quote: ReviewedQuote }
+  | { readonly tag: "Cancel" | "Keep"; readonly buyer: Buyer; readonly subscription: SnapshotSubscription }
+
+export const planTier = (subscription: SnapshotSubscription): Tier | undefined =>
+  subscription.planKey === "pro_monthly" ? "Pro" : subscription.planKey === "plus_monthly" ? "Plus" : undefined
+
+export const CommandBindingSchema = Schema.Struct({
+  owner: Schema.NonEmptyString,
+  commandId: Schema.String.check(Schema.isPattern(/^cmd_[a-f0-9]{32}$/)),
+  subscriptionId: Schema.NonEmptyString,
+  expectedRevision: Schema.Int.check(Schema.isGreaterThan(0)),
+  kind: Schema.Literals(["upgrade", "downgrade", "cancel", "undo"]),
+})
+export type CommandBinding = typeof CommandBindingSchema.Type
+
+export effect function bindCommand(action: PlanAction, buyer: Buyer, key: string): CommandBinding!! {
+  const subscription = action.tag === "Change" ? action.quote.subscription : action.subscription
+  const kind = action.tag === "Change" ? action.quote.direction : action.tag === "Cancel" ? "cancel" : "undo"
+  const commandId = try promise(() => commandIdOf(buyer.organizationId, buyer.userId, key))
+  return { owner: buyer.credentialId, commandId, subscriptionId: subscription.id, expectedRevision: subscription.revision, kind }
+}
+
+export function matchesCommand(command: SubscriptionCommand, binding: CommandBinding): boolean {
+  return command.commandId === binding.commandId && command.kind === binding.kind &&
+    command.subscriptionId === binding.subscriptionId && command.expectedRevision === binding.expectedRevision
+}
+
+type Receipt = { readonly result: Result; readonly command?: SubscriptionCommand }
+
+export const failureResult = (failure: Failure): Result =>
+  failure._tag === "Refused" && (failure.status === 401 || failure.status === 428) ? "NotAuthorized"
+    : failure._tag === "Garbled" || !outcomeOf(failure).known ? "NotKnown" : "NotMade"
+
+const sent = (path: string, body: unknown) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), body)
+
+export effect function readQuote(cloud: Account, buyer: Buyer, subscription: SnapshotSubscription, direction: PlanDirection) {
+  const route = direction === "upgrade" ? routesByName.upgradeReview : routesByName.downgradeReview
+  const requested = direction === "upgrade" ? "pro_monthly" : "plus_monthly"
+  const body = try cloud.callBillingFor(sent(pathOf(route), {
+    targetPlanKey: requested, subscriptionId: subscription.id, expectedSubscriptionRevision: subscription.revision,
+  }), buyer.credentialId)
+  const answer = try reviewFromResponse(body)
+  const review = answer.review
+  const now = try Clock.currentTimeMillis
+  if (review.targetPlanKey !== requested || review.expiresAt <= now || review.expiresAt > subscription.periodEnd ||
+      (direction === "upgrade" ? review.kind !== "upgrade_estimate"
+        : review.kind !== "downgrade_estimate" || review.effectiveAt !== subscription.periodEnd || review.dueNow.amountDueCents !== 0)) return undefined
+  return { buyer, subscription, direction, answer } satisfies ReviewedQuote
+}
+
+export effect function sendPlanAction(call: Remote["call"], action: PlanAction, idempotencyKey: string, binding: CommandBinding): Receipt!! {
+  const subscription = action.tag === "Change" ? action.quote.subscription : action.subscription
+  const expectedSubscriptionRevision = subscription.revision
+  const request = action.tag === "Change" ? sent(pathOf(action.quote.direction === "upgrade" ? routesByName.upgradeConfirm : routesByName.downgradeConfirm), {
+    quoteId: action.quote.answer.quoteId, expectedSubscriptionRevision, idempotencyKey,
+  }) : sent(pathOf(action.tag === "Cancel" ? routesByName.cancel : routesByName.cancelUndo), {
+    subscriptionId: subscription.id, expectedSubscriptionRevision, idempotencyKey,
+  })
+  const received = try exit(call(request))
+  if (Exit.isFailure(received)) {
+    const failed = Cause.findErrorOption(received.cause)
+    return { result: Option.isSome(failed) ? failureResult(failed.value) : "NotKnown" }
+  }
+  const command = commandFromResponse(received.value) catch () => undefined
+  if (command === undefined || !matchesCommand(command, binding)) return { result: "NotKnown" }
+  if (command.status === "succeeded" && (command.resultRevision ?? 0) > expectedSubscriptionRevision) return { result: "Applied", command }
+  if (command.status === "awaiting_payment" && binding.kind === "upgrade") return { result: "PayNeeded", command }
+  if (command.status === "rejected") return { result: "NotMade", command }
+  return { result: "NotKnown", command }
+}
+
+export effect function readInvoice(cloud: Account, buyer: Buyer, command: SubscriptionCommand) {
+  if (command.kind !== "upgrade" || command.status !== "awaiting_payment") return undefined
+  const raw = cloud.callBillingFor(sent(pathOf(routesByName.upgradePayment, { commandId: command.commandId }), {}), buyer.credentialId) catch () => undefined
+  const invoice = paymentFromResponse(raw) catch () => undefined
+  return invoice?.url
+}

@@ -1,0 +1,200 @@
+// spec/app/inbox/message.md, "Story: Read a saved message offline"
+import { utf8Length } from "@elizaos/plugin-inbox-client"
+import { native } from "../platform/device.vibe"
+import { Vault } from "../platform/vault.vibe"
+
+module browser {
+  import { browserDocumentTransaction } from "../platform/browserDocuments.ts"
+
+  const key = "alpha.inbox.saved-bodies.v1"
+
+  export function readSavedMail(): Promise<unknown> {
+    if (!globalThis.navigator?.locks) return Promise.resolve(undefined)
+    return browserDocumentTransaction("readonly", [key], (_store, [row]) => row)
+  }
+
+  export function writeSavedMail(value: string | undefined): Promise<void> {
+    if (!globalThis.navigator?.locks) return Promise.resolve()
+    return browserDocumentTransaction("readwrite", [key], (store) => {
+      if (value === undefined) store.delete(key)
+      else store.put(value, key)
+    })
+  }
+
+  /** Read the retention clock even when Alpha's renderer has no other work. @throws {never} */
+  export function wallTime(): number {
+    return Date.now()
+  }
+}
+import { readSavedMail, wallTime, writeSavedMail } from browser
+
+const slot = "inbox-saved-bodies"
+const maximumBytes = 2 * 1024 * 1024
+const maximumBodies = 16
+const retentionMs = 30 * 24 * 60 * 60 * 1000
+
+const BodySchema = Schema.Struct({
+  account: Schema.Number,
+  credential: Schema.Number,
+  grant: Schema.NonEmptyString,
+  message: Schema.NonEmptyString,
+  history: Schema.NonEmptyString,
+  at: Schema.Number,
+  text: Schema.String,
+})
+const EnvelopeSchema = Schema.Struct({ version: Schema.Literal(1), owner: Schema.NonEmptyString, bodies: Schema.Array(BodySchema) })
+type Envelope = typeof EnvelopeSchema.Type
+type Body = typeof BodySchema.Type
+export type SavedRead = Pick<Body, "account" | "credential" | "grant" | "message" | "history">
+export type SavedGrant = Pick<Body, "account" | "credential" | "grant">
+
+const fresh = (at: number, now: number) => Number.isSafeInteger(at) && at > 0 && at <= now && now - at < retentionMs
+const hasGrant = (a: SavedGrant, b: SavedGrant) => a.account === b.account && a.credential === b.credential && a.grant === b.grant
+const sameMessage = (a: SavedRead, b: SavedRead) => hasGrant(a, b) && a.message === b.message
+
+function fits(value: Envelope): boolean {
+  return utf8Length(JSON.stringify(JSON.stringify(value))) <= maximumBytes
+}
+
+function bounded(owner: string, bodies: ReadonlyArray<Body>, now: number): Envelope {
+  const kept: Body[] = []
+  for (const body of bodies) {
+    if (!fresh(body.at, now) || kept.some((prior) => sameMessage(prior, body))) continue
+    if (fits({ version: 1, owner, bodies: [...kept, body] })) kept.push(body)
+    if (kept.length >= maximumBodies) break
+  }
+  return { version: 1, owner, bodies: kept }
+}
+
+/** Body text only, held for one identified owner. Nothing here is a Gmail read receipt. */
+export service SavedBodies {
+  confirm(owner: string): void!!
+  conceal(): void
+  remember(read: SavedRead, text: string): void!!
+  read(read: SavedRead): string | undefined
+  retain(grants: ReadonlyArray<SavedGrant>): void!!
+  revoke(account: number): void!!
+  clear(): void!!
+}
+
+export const savedBodies = Layer.effect(SavedBodies, effect {
+  const vault = try Vault
+  const gate = try Semaphore.make(1)
+  let active: string | undefined
+  let wanted: string | undefined
+  let kept: Envelope | undefined
+  let grants: ReadonlyArray<SavedGrant> | undefined
+  const withdrawn = new Set<number>()
+  let pendingGrants: ReadonlyArray<SavedGrant> | undefined
+  const pendingWithdrawals = new Set<number>()
+  const matches = (readable: ReadonlyArray<SavedGrant>, read: SavedGrant) => readable.some((grant) => hasGrant(read, grant))
+  const mayRead = (read: SavedGrant) =>
+    !withdrawn.has(read.account) && !pendingWithdrawals.has(read.account) &&
+    (grants === undefined || matches(grants, read)) && (pendingGrants === undefined || matches(pendingGrants, read))
+
+  effect function load(): (Envelope | undefined)!! {
+    let raw: unknown
+    if (native()) {
+      const found = vault.read(slot) catch () => undefined
+      if (found === undefined || Option.isNone(found)) return undefined
+      raw = Redacted.value(found.value)
+    } else raw = tryPromise(readSavedMail) catch () => undefined
+    if (typeof raw !== "string" || raw.length > maximumBytes) return undefined
+    return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(EnvelopeSchema))(raw))
+  }
+
+  effect function store(value: Envelope | undefined): void!! {
+    const raw = value === undefined || value.bodies.length === 0 ? undefined : JSON.stringify(value)
+    if (!native()) {
+      try ignore(tryPromise(() => writeSavedMail(raw)))
+    } else if (raw === undefined) {
+      try ignore(vault.remove(slot))
+    } else {
+      try ignore(vault.write(slot, Redacted.make(raw)))
+    }
+  }
+
+  const locked = <A>(work: A!!) => gate.withPermit(Effect.uninterruptible(work))
+
+  function hold(envelope: Envelope): Envelope {
+    kept = envelope
+    pendingGrants = undefined
+    pendingWithdrawals.clear()
+    return envelope
+  }
+
+  effect function keep(rows: ReadonlyArray<Body>, owner: string, now: number): void!! {
+    try store(hold(bounded(owner, rows.filter(mayRead), now)))
+  }
+
+  effect function prune(): void!! {
+    const before = kept
+    if (before === undefined) return
+    const now = wallTime()
+    const after = hold({ ...before, bodies: before.bodies.filter((row) => mayRead(row) && fresh(row.at, now)) })
+    if (after.bodies.length !== before.bodies.length) try store(after)
+  }
+
+  return {
+    effect confirm(owner: string) {
+      if (owner === "") return
+      wanted = owner
+      if (active !== owner) active = undefined
+      try locked(effect {
+        if (wanted !== owner) return
+        if (kept?.owner === owner) {
+          active = owner
+          return
+        }
+        const existing = try load()
+        if (wanted !== owner) return
+        const restored = hold(bounded(owner, (existing?.owner === owner ? existing.bodies : []).filter(mayRead), wallTime()))
+        active = owner
+        if (existing !== undefined && (existing.owner !== owner || restored.bodies.length !== existing.bodies.length)) try store(restored)
+      })
+    },
+    conceal() { active = undefined; wanted = undefined },
+    remember: (read: SavedRead, text: string) => {
+      const owner = active
+      return locked(effect {
+        if (owner === undefined || owner !== active || kept?.owner !== owner ||
+          grants === undefined || !mayRead(read) || text.length > maximumBytes) return
+        const now = wallTime()
+        const body = { ...read, at: now, text }
+        if (!fits({ version: 1, owner, bodies: [body] })) return
+        try keep([body, ...kept.bodies.filter((row) => !sameMessage(row, read))], owner, now)
+      })
+    },
+    read(read: SavedRead) {
+      if (active === undefined || kept?.owner !== active || !mayRead(read)) return undefined
+      const now = wallTime()
+      return kept.bodies.find((row) => sameMessage(row, read) && row.history === read.history && fresh(row.at, now))?.text
+    },
+    retain: (readable: ReadonlyArray<SavedGrant>) => Effect.uninterruptible(effect {
+      const pending = pendingGrants
+      pendingGrants = pending === undefined ? readable : pending.filter((grant) => matches(readable, grant))
+      grants = readable
+      withdrawn.clear()
+      try gate.withPermit(prune())
+    }),
+    revoke: (account: number) => Effect.uninterruptible(effect {
+      if (grants === undefined) withdrawn.add(account)
+      else grants = grants.filter((grant) => grant.account !== account)
+      pendingWithdrawals.add(account)
+      try gate.withPermit(prune())
+    }),
+    effect clear() {
+      active = undefined
+      wanted = undefined
+      grants = undefined
+      withdrawn.clear()
+      pendingGrants = undefined
+      pendingWithdrawals.clear()
+      try locked(effect {
+        active = undefined
+        kept = undefined
+        try store(undefined)
+      })
+    },
+  }
+})

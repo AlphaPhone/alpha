@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Ellipsis } from "lucide-react";
+import { ChevronLeft, ChevronRight, Ellipsis, Repeat } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -17,6 +17,8 @@ export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
   day: string;
   /** Which calendar it is in, after its calendar's dot. */
   source?: string;
+  /** How it repeats, such as "Repeats every weekday", under its calendar. */
+  repeat?: string;
   /** The color of its calendar's dot. */
   dot?: "primary" | "foreground";
   /** Its notes, under a rule at the end. */
@@ -26,7 +28,7 @@ export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
 };
 
 /** An event, over the days: Back and its actions, its title, time, day and calendar, then what it holds. */
-export function CalendarEventPage({ title, onBack, actions, when, day, source, dot = "primary", notes, className, children, ...props }: CalendarEventPageProps) {
+export function CalendarEventPage({ title, onBack, actions, when, day, source, repeat, dot = "primary", notes, className, children, ...props }: CalendarEventPageProps) {
   const dotClass = cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : "bg-foreground");
   return (
     <div data-alpha-subview="calendar-detail" className={cn("absolute inset-0 z-20 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
@@ -40,6 +42,7 @@ export function CalendarEventPage({ title, onBack, actions, when, day, source, d
         <div className="mt-3.5 text-lg leading-plain">{when}</div>
         <div className="mt-1 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{day}</div>
         {source ? <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{source}</div> : null}
+        {repeat ? <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><Repeat aria-hidden className="size-4.5 shrink-0" />{repeat}</div> : null}
         {children}
         {notes ? <div className="mt-4.5 border-t border-border pt-4.5 text-prose whitespace-pre-wrap">{notes}</div> : null}
       </div>

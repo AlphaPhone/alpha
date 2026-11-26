@@ -1,17 +1,14 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/timers.md, "Story: Run multiple countdown timers"
+import type { ClockSound } from "@repo/launcher-records";
 import { Option, Schema } from "effect";
 import { createShelf } from "../runtime/store.ts";
 
-/** Supported alarm and timer chime profiles. */
-export type AlarmSound = "radar" | "chime" | "pulse" | "gentle" | "classic";
+const ClockSoundSchema = Schema.Literals(["radar", "chime", "pulse", "gentle", "classic"]);
 
-/** Runtime schema for alarm sound profiles. */
-export const AlarmSoundSchema = Schema.Literals(["radar", "chime", "pulse", "gentle", "classic"]);
-
-const decodeAlarmSound = Schema.decodeUnknownOption(AlarmSoundSchema);
+const decodeClockSound = Schema.decodeUnknownOption(ClockSoundSchema);
 
 /** Selectable alarm sound metadata. */
-export const ALARM_SOUNDS: ReadonlyArray<{ readonly id: AlarmSound; readonly label: string }> = [
+export const ALARM_SOUNDS: ReadonlyArray<{ readonly id: ClockSound; readonly label: string }> = [
   { id: "radar", label: "Radar" },
   { id: "chime", label: "Chime" },
   { id: "pulse", label: "Pulse" },
@@ -32,63 +29,10 @@ export const TIMER_PRESETS: ReadonlyArray<{ readonly label: string; readonly dur
 /** Selectable snooze minute options. */
 export const SNOOZE_OPTIONS: ReadonlyArray<number> = [1, 5, 9, 10, 15, 20, 30, 45, 60];
 
-/** Shared wire contract for one alarm synced with `/api/alpha/clock`. */
-export interface ClockAlarmRecord {
-  readonly id: string;
-  readonly hour: number;
-  readonly minute: number;
-  readonly daysMask: number;
-  readonly label: string;
-  readonly sound: AlarmSound;
-  readonly vibrate: boolean;
-  readonly enabled: boolean;
-  readonly snoozeMinutes: number;
-  readonly phase: "idle" | "ringing" | "snoozed";
-  readonly fireAtMs: number | null;
-  readonly snoozeUntilMs: number | null;
-  readonly missed: boolean;
-  readonly revision: number;
-  readonly updatedAtMs: number;
-}
-
-/** Shared wire contract for one countdown timer synced with `/api/alpha/clock`. */
-export interface ClockTimerRecord {
-  readonly id: string;
-  readonly label: string;
-  readonly durationMs: number;
-  readonly remainingMs: number;
-  readonly status: "ready" | "running" | "paused" | "ringing";
-  readonly startedAtMs: number | null;
-  readonly endAtMs: number | null;
-  readonly ringStartedAtMs: number | null;
-  readonly revision: number;
-  readonly updatedAtMs: number;
-}
-
-/** Shared wire contract for one world city synced with `/api/alpha/clock`. */
-export interface WorldCityRecord {
-  readonly id: string;
-  readonly city: string;
-  readonly region: string;
-  readonly timeZone: string;
-  readonly order: number;
-}
-
-/** Full Clock sync snapshot exchanged with `/api/alpha/clock`. */
-export interface ClockSnapshot {
-  readonly version: number;
-  readonly updatedAtMs: number;
-  readonly alarms: ReadonlyArray<ClockAlarmRecord>;
-  readonly timers: ReadonlyArray<ClockTimerRecord>;
-  readonly world: ReadonlyArray<WorldCityRecord>;
-  readonly deletedAlarmIds: ReadonlyArray<string>;
-  readonly deletedTimerIds: ReadonlyArray<string>;
-}
-
 /** Rich UI metadata kept outside the integer/enum Quint state for one alarm. */
 export interface AlarmMeta {
   readonly label: string;
-  readonly sound: AlarmSound;
+  readonly sound: ClockSound;
   readonly remoteId: string;
   readonly updatedAtMs: number;
 }
@@ -154,24 +98,24 @@ const PersistedMetaSchema = Schema.fromJsonString(
 const decodePersistedMeta = Schema.decodeUnknownOption(PersistedMetaSchema);
 
 /**
- * Type guard verifying an untrusted value is a valid AlarmSound.
+ * Type guard verifying an untrusted value is a valid ClockSound.
  * @throws {never}
  */
-export function isAlarmSound(value: unknown): value is AlarmSound {
-  return Option.isSome(decodeAlarmSound(value));
+export function isAlarmSound(value: unknown): value is ClockSound {
+  return Option.isSome(decodeClockSound(value));
 }
 
 /**
- * Coerce an untrusted sound string to a valid AlarmSound.
+ * Coerce an untrusted sound string to a valid ClockSound.
  * @throws {never}
  */
-export function normalizeSound(value: unknown): AlarmSound {
-  const decoded = decodeAlarmSound(value);
+export function normalizeSound(value: unknown): ClockSound {
+  const decoded = decodeClockSound(value);
   return Option.isSome(decoded) ? decoded.value : "radar";
 }
 
-/** Label of an AlarmSound for display. */
-export function soundLabel(sound: AlarmSound): string {
+/** Label of a ClockSound for display. */
+export function soundLabel(sound: ClockSound): string {
   return ALARM_SOUNDS.find((item) => item.id === sound)?.label ?? "Radar";
 }
 

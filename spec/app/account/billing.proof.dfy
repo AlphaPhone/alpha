@@ -1,15 +1,15 @@
 // Proofs for spec/app/account/billing.md.
 
-lemma returned_ensures(b: Billing, visit: int, now: int)
-  ensures (inv(b) ==> canReturned(b, visit, now) ==> alwaysTheVisitIsWellFormed(returned(b, visit, now).state))
-  ensures (inv(b) ==> canReturned(b, visit, now) ==> stepAReturnIsCheckedNotTrusted(b, "returned", returned(b, visit, now).state, returned(b, visit, now).out))
-  ensures (inv(b) ==> canReturned(b, visit, now) ==> stepACheckoutIsConfirmedOnceForEachReturn(b, "returned", returned(b, visit, now).state, returned(b, visit, now).out))
-  ensures (inv(b) ==> canReturned(b, visit, now) ==> stepNothingIsBoughtWhileAnOutcomeIsUnknown(b, returned(b, visit, now).state, returned(b, visit, now).out))
-  ensures (inv(b) ==> canReturned(b, visit, now) ==> stepOnlyCloudSaysACheckoutWasPaid(b, "returned", returned(b, visit, now).state))
-  ensures (inv(b) ==> canReturned(b, visit, now) ==> stepANewSignInLeavesNothingUnderWay(b, "returned", returned(b, visit, now).state))
+lemma returned_ensures(b: Billing, visit: int, signIn: int, session: string, now: int)
+  ensures (inv(b) ==> canReturned(b, visit, signIn, session, now) ==> alwaysTheVisitIsWellFormed(returned(b, visit, signIn, session, now).state))
+  ensures (inv(b) ==> canReturned(b, visit, signIn, session, now) ==> stepAReturnIsCheckedNotTrusted(b, "returned", returned(b, visit, signIn, session, now).state, returned(b, visit, signIn, session, now).out))
+  ensures (inv(b) ==> canReturned(b, visit, signIn, session, now) ==> stepACheckoutIsConfirmedOnceForEachReturn(b, "returned", returned(b, visit, signIn, session, now).state, returned(b, visit, signIn, session, now).out))
+  ensures (inv(b) ==> canReturned(b, visit, signIn, session, now) ==> stepNothingIsBoughtWhileAnOutcomeIsUnknown(b, returned(b, visit, signIn, session, now).state, returned(b, visit, signIn, session, now).out))
+  ensures (inv(b) ==> canReturned(b, visit, signIn, session, now) ==> stepOnlyCloudSaysACheckoutWasPaid(b, "returned", returned(b, visit, signIn, session, now).state))
+  ensures (inv(b) ==> canReturned(b, visit, signIn, session, now) ==> stepANewSignInLeavesNothingUnderWay(b, "returned", returned(b, visit, signIn, session, now).state))
 {
-  if inv(b) && canReturned(b, visit, now) {
-    var after := returned(b, visit, now);
+  if inv(b) && canReturned(b, visit, signIn, session, now) {
+    var after := returned(b, visit, signIn, session, now);
     CheckedNotTrusted(now, b.(visit := app__account__outside_back(b.visit)));
   }
 }
@@ -53,6 +53,19 @@ lemma resumed_ensures(b: Billing, now: int)
   if inv(b) && canResumed(b, now) {
     var after := resumed(b, now);
     CheckedNotTrusted(now, b.(resumedFor := b.visit.number));
+  }
+}
+
+lemma checkPayment_ensures(b: Billing, now: int)
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> alwaysTheVisitIsWellFormed(checkPayment(b, now).state))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepAReturnIsCheckedNotTrusted(b, "checkPayment", checkPayment(b, now).state, checkPayment(b, now).out))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepACheckoutIsConfirmedOnceForEachReturn(b, "checkPayment", checkPayment(b, now).state, checkPayment(b, now).out))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepNothingIsBoughtWhileAnOutcomeIsUnknown(b, checkPayment(b, now).state, checkPayment(b, now).out))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepOnlyCloudSaysACheckoutWasPaid(b, "checkPayment", checkPayment(b, now).state))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepANewSignInLeavesNothingUnderWay(b, "checkPayment", checkPayment(b, now).state))
+{
+  if inv(b) && canCheckPayment(b, now) {
+    CheckedNotTrusted(now, b);
   }
 }
 

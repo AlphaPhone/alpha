@@ -2,10 +2,13 @@ import { type Context, Effect, type Layer, type ManagedRuntime, Stream } from "e
 import { TestClock } from "effect/testing";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
+import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { App } from "../src/App.tsx";
 import { type Mount, type Place, mounts as every } from "../src/areas.ts";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
+import type inbox from "../src/inbox/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { pressButton } from "./fakes/phone.ts";
 import type { Scene } from "./fakes/scene.ts";
@@ -26,6 +29,16 @@ export function underAct() {
 
 /** Alpha's screens at `places` alone: what a journey passes `open`, so that it loads only what it draws. */
 export const only = (...places: Place[]) => every.filter((mount) => places.includes(mount.at));
+
+/** Mount the worked example in place of the launcher's full assistant. */
+export const askExample: readonly Mount[] = [{ at: "assistant", load: () => import("../src/ask/index.tsx") }];
+
+/** The lines the worked example displays to the owner. */
+export const askExampleLines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((line) => line.textContent);
+
+/** Wait for the reviewed number to appear in the open Phone keypad. */
+export const filledPhoneKeypad = (alpha: Alpha, digits: number) =>
+  until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad" && state.digits === digits);
 
 const closing: (() => Promise<void>)[] = [];
 /** What each open Alpha was opened with: the world a journey moves, and the screens its `until` loads. */
@@ -63,8 +76,20 @@ export async function open(world: Scene, mounts: readonly Mount[] = every) {
 }
 
 /** Alpha over `platform`, which a journey with real services builds itself (test/eliza/world.vibe). */
-export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every, world?: Scene) {
-  const alpha = boot(platform, mounts);
+export async function openOver(
+  platform: Layer.Layer<Platform>,
+  mounts: readonly Mount[] = every,
+  options?: Scene | boolean | { readonly world?: Scene; readonly requireNativeSignIn?: boolean },
+) {
+  const world: Scene | undefined = typeof options === "object" && options !== null
+    ? ("world" in options || "requireNativeSignIn" in options ? options.world : options as Scene)
+    : undefined;
+  const requireNativeSignIn = typeof options === "boolean"
+    ? options
+    : typeof options === "object" && options !== null && "requireNativeSignIn" in options
+      ? options.requireNativeSignIn === true
+      : false;
+  const alpha = boot(platform, mounts, requireNativeSignIn);
   opened.set(alpha, { world, mounts });
   const host = document.body.appendChild(document.createElement("div"));
   const root = createRoot(host);
@@ -116,6 +141,20 @@ export const press = (name: string | RegExp) => drawn(() => {
   found.click();
 });
 
+/** Choose an item from Chat actions as a keyboard user does. */
+export function chatAction(item: string) {
+  act(() => {
+    const trigger = button("Chat actions");
+    if (!trigger) throw new Error("no chat actions");
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  act(() => {
+    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
+    if (!(chosen instanceof HTMLElement)) throw new Error(`no chat action ${item}`);
+    chosen.click();
+  });
+}
+
 /** Press the button named `name` on the sheet or dialog on top, where the page behind it may hold one of the same name. */
 export const pressOnTop = (name: string) => drawn(() => {
   const top = [...document.querySelectorAll("[role=dialog], [role=alertdialog]")].at(-1);
@@ -124,12 +163,31 @@ export const pressOnTop = (name: string) => drawn(() => {
   found.click();
 });
 
+/** Set `field` to `text` as typing does, so React hears the input event. */
+export function typeInto(field: HTMLInputElement | HTMLTextAreaElement, text: string) {
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field) as object, "value")?.set?.call(field, text);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** Press the Home tile that opens `view`. */
+const pressTile = (view: string) => drawn(() => {
+  const tile = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+  if (!tile) throw new Error(`No ${view} home tile`);
+  tile.click();
+});
+
+/** Open Inbox from Home, wait until `letters`, its runtime, has read the owner's mail, and go back Home. */
+export async function readInboxFirst(alpha: Alpha, letters: ReturnType<typeof inbox.runtime>) {
+  await pressTile("Inbox");
+  await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
+  await hardware("back");
+}
+
 /** Type `text` into the field whose accessible name is `name`, as a person does: React hears the input event. */
 export const fill = (name: string, text: string) => drawn(() => {
   const found = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")].find((field) => field.getAttribute("aria-label") === name);
   if (!found) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
+  typeInto(found, text);
 });
 
 /** The page is hidden, as when the owner leaves Alpha, or shown again: what `Device.visible` tells. */

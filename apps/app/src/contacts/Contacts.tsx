@@ -1,8 +1,8 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
+import { Alert, AppHeader, AssistantChatActions, Avatar, Banner, Button, Chip, Input, ListGroup, ListRow, SearchField, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
 import { Effect, Exit, type ManagedRuntime } from "effect";
-import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os-bridges";
-import { ArrowLeft, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
+import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER, type ContactDetail } from "@elizaos/os-bridges";
+import { Check, ChevronDown, ChevronLeft, MessageSquare, Minus, Pencil, Plus, Search, Trash2, X, createLucideIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
@@ -13,11 +13,14 @@ import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { contactChatActionsId } from "../assistant/contact-chat-id.ts";
+import { attachFromContact, searchFromContact } from "../assistant/contact-search.ts";
 import { returnPhoneTab } from "../phone/back.vibe";
-import { PhoneTabs } from "../phone/PhoneTabs.tsx";
+import { PhoneTabs, telephonyHeader } from "../phone/PhoneTabs.tsx";
 import { callerInitials, displayNumber } from "../phone/words.ts";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
-import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
+import { CommsBar, type CommsServices, useCommsDock } from "../phone/CommsBar.tsx";
+import { emailFieldLabel, emailLabel, emailRemoveLabel, phoneFieldLabel, phoneLabel, phoneRemoveLabel } from "./labels.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 
@@ -38,8 +41,15 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const voicemail = useVoicemail(runtime).state;
   const shell = useShell(runtime);
   const held = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
-  const groups = useMemo(() => Object.entries(Object.groupBy(held.rows, (row) =>
-    Array.from(row.name.trim())[0]?.toLocaleUpperCase() ?? "#")), [held.rows]);
+  const groups = useMemo(() => {
+    const grouped = Object.groupBy(held.rows, ({ name }) => {
+      const letter = name.trim().charAt(0).normalize("NFD").charAt(0).toUpperCase();
+      return /^[A-Z]$/.test(letter) ? letter : "#";
+    });
+    return Object.entries(grouped)
+      .sort(([left], [right]) => Number(left === "#") - Number(right === "#") || left.localeCompare(right))
+      .map(([letter, rows]) => [letter, rows?.toSorted((left, right) => left.name.localeCompare(right.name))] as const);
+  }, [held.rows]);
   const favourites = useMemo(() => held.rows.filter((row) => row.starred), [held.rows]);
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
@@ -50,10 +60,10 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const search = (typed: string) => {
     const event = { type: "search", typed: typed.trim() !== "" } as const;
     if (!can(event)) return;
-    const before = held.sought;
-    set({ sought: typed });
+    const before = { sought: held.sought, filteredBy: held.filteredBy };
+    set({ sought: typed, filteredBy: "Owner" });
     void send(event).then((outcome) => {
-      if (Exit.isFailure(outcome)) set({ sought: before });
+      if (Exit.isFailure(outcome)) set(before);
     });
   };
   const safe = clear(phone);
@@ -63,7 +73,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     void send({ type: "openContact", contact: id });
   };
   const canBack = shell.can({ type: "goBack" });
-  const phoneTabs = !searching && !state.opened && shell.state?.trail.at(-2) === "Phone";
+  const phoneTabs = !state.opened && shell.state?.trail.at(-2) === "Phone";
   const back = canBack ? () => void alpha.back() : undefined;
   const select = (tab: string) => {
     if (tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") return;
@@ -82,63 +92,71 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       {can({ type: "composeElsewhere" }) && <Button variant="ghost" size="icon" aria-label="New contact" onClick={() => void send({ type: "composeElsewhere" })}><Plus className="size-5" /></Button>}
     </>
   );
-  const header = searching ? (
-    <form role="search" aria-label="Search contacts" data-host-chrome="" className="flex min-h-14 items-center px-2" onSubmit={(event) => event.preventDefault()}>
-      {can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" onClick={() => void send({ type: "endSearch" })}><ArrowLeft className="size-5" /></Button>}
-      <SearchField autoFocus className="mr-2 flex-1" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} maxLength={128} />
-    </form>
-  ) : phoneTabs ? (
-    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back}>{actions}</PhoneTabs>
-  ) : (
-    <AppHeader title="Contacts" leading={<AppBack alpha={alpha} />}>{actions}</AppHeader>
+  const filtered = state.sought && !searching && held.filteredBy === "Alpha";
+  const chip = filtered && (
+    <>
+      <Chip className="min-w-0 [&>button:first-child]:min-w-0" onClear={can({ type: "endSearch" }) ? () => void send({ type: "endSearch" }) : undefined} clearLabel={`Clear filter ${query}`}><span className="truncate">{query} · {state.rows}</span></Chip>
+      <span className="flex-1" />
+    </>
   );
+  const searchHeader = searching ? (
+    <form role="search" aria-label="Search contacts" data-host-chrome="" className={cn(telephonyHeader, "flex min-h-13 items-center gap-0.5 px-2")} onSubmit={(event) => event.preventDefault()}>
+      {can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" className="size-13 rounded-lg" onClick={() => void send({ type: "endSearch" })}><ChevronLeft /></Button>}
+      <SearchField autoFocus keepClear className="min-w-0 flex-1 [&_button]:size-13 [&_input]:focus-visible:outline-none" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} maxLength={128} />
+    </form>
+  ) : undefined;
+  const header = phoneTabs ? (
+    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
+  ) : searchHeader ?? (
+    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
+  );
+  const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
+  const route = shell.state?.route;
   const bar = (
     <CommsBar runtime={runtime}
       person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-      filter={!state.opened && !searching && can({ type: "search", typed: true }) ? { value: query, onChange: search, maxLength: 128 } : undefined} />
+      actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="comms" triggerId={contactChatActionsId(route, state.contact)}
+        onAttach={() => attachFromContact(alpha, route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
+      filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />
   );
   const content = (
-    <section aria-label="Contacts" className="flex flex-1 flex-col gap-2">
+    <section aria-label="Contacts" className="flex flex-1 flex-col">
       {!state.opened && !phoneTabs && header}
-      {pending(state) && <Banner>Contact change pending</Banner>}
+      {pending(state) && <p role="status" className="sr-only">Contact change pending</p>}
       {uncertain(state) && <Banner variant="warn" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Refresh</Button>}>Outcome unknown: refresh</Banner>}
       {accessNeeded(state) && (
-        <Banner variant="warn" action={can({ type: "allow" }) ? <Button size="sm" onClick={() => void send({ type: "allow" })}>Allow</Button> : can({ type: "openSettings" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "openSettings" })}>Open Settings</Button>}>
-          Contacts needs access to your address book
-        </Banner>
+        <div className="flex shrink-0 justify-center">
+          <p role="status" className="sr-only">Contacts needs access to your address book</p>
+          {can({ type: "allow" }) ? <Button className={allow} onClick={() => void send({ type: "allow" })}>Allow</Button>
+            : can({ type: "openSettings" }) && <Button className={allow} onClick={() => void send({ type: "openSettings" })}>Open Settings</Button>}
+        </div>
       )}
-      {state.opened ? <Card runtime={runtime} safe={safe} /> : (
+      {state.opened ? <Card runtime={runtime} safe={safe} route={route} /> : (
         <>
-          {state.sought && !searching && <Chip className="mx-4 self-start" onClear={can({ type: "endSearch" }) ? () => void send({ type: "endSearch" }) : undefined} clearLabel="Clear the search">{query} · {state.rows}</Chip>}
-          {searching && <div className="flex gap-2 px-4" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "Everyone" ? "primary" : "outline"} aria-pressed={state.chip === "Everyone"} disabled={state.chip !== "Everyone" && !can({ type: "pick", chip: "Everyone" })} onClick={() => void (can({ type: "pick", chip: "Everyone" }) && send({ type: "pick", chip: "Everyone" }))}>All</Button>
-            <Button size="sm" variant={state.chip === "Favourites" ? "primary" : "outline"} aria-pressed={state.chip === "Favourites"} disabled={state.chip !== "Favourites" && !can({ type: "pick", chip: "Favourites" })} onClick={() => void (can({ type: "pick", chip: "Favourites" }) && send({ type: "pick", chip: "Favourites" }))}>Favourites</Button>
-          </div>}
-          {state.list.status === "Loading" && state.rows === 0 && <Spinner label="Reading contacts" />}
+          {can({ type: "loadMore" }) && <div className="flex shrink-0 justify-center"><Button variant="secondary" size="icon" aria-label="More contacts" onClick={() => void send({ type: "loadMore" })}><ChevronDown className="size-5" /></Button></div>}
+          {state.list.status === "Loading" && state.rows === 0 && <p role="status" className="sr-only">Reading contacts</p>}
           {listFailed(state) && <Banner variant="destructive" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Retry</Button>}>Contacts could not be read</Banner>}
-          {listedEmpty(state) && <p role="status" className="flex min-h-45 flex-1 items-center justify-center p-6 text-center text-muted-foreground">No contacts yet</p>}
-          {noMatches(state) && <p role="status" className="mx-5 my-3 text-muted-foreground">No matches</p>}
+          {(listedEmpty(state) || noMatches(state)) && <p role="status" className="flex min-h-45 items-center justify-center p-6 text-center text-base leading-normal text-muted-foreground">{noMatches(state) ? "No contacts found" : "No contacts yet"}</p>}
           {state.rows > 0 && (
             <ListGroup aria-label="Contacts" surface="plain">
-              {!state.sought && favourites.length > 0 && <div className="flex touch-pan-x gap-1.5 overflow-x-auto px-3.5 pt-2 pb-2.5" role="group" aria-label="Favourites">
+              {!searching && !state.sought && favourites.length > 0 && <div className="flex touch-pan-x gap-1.5 overflow-x-auto px-3.5 pt-2 pb-2.5" role="group" aria-label="Favourites">
                 {favourites.map((row) => (
-                  <Button key={row.id} variant="ghost" aria-label={`Open favourite ${row.name}`} className="h-auto w-18 flex-col gap-1.5 rounded-tile p-0" disabled={!can({ type: "openContact", contact: row.id })} onClick={() => open(row.id)}>
+                  <Button key={row.id} variant="ghost" aria-label={`Open favourite ${row.name}`} className="h-auto w-18 flex-col gap-1.75 rounded-tile p-0" disabled={!can({ type: "openContact", contact: row.id })} onClick={() => open(row.id)}>
                     <Avatar name={row.name} className="size-15 text-lg font-bold" />
-                    <span className="w-full truncate text-sm font-normal">{row.name.trim().split(/\s+/, 1)[0]}</span>
+                    <span className="w-full truncate text-caption font-normal">{row.name.trim().split(/\s+/, 1)[0]}</span>
                   </Button>
                 ))}
               </div>}
               {groups.map(([letter, rows]) => (
                 <div key={letter}>
-                  {state.rows >= 20 && <h2 className="px-6 pt-3 pb-0.5 text-sm font-semibold text-muted-foreground">{letter}</h2>}
+                  {state.rows >= 20 && <h2 className="px-6 pt-3 pb-0.5 text-caption font-semibold text-muted-foreground">{letter}</h2>}
                   {rows?.map((row) => <ListRow key={row.id} aria-label={row.name} title={<span className="block truncate font-semibold">{row.name}</span>}
-                    className="min-h-15 px-5 py-1.5" leading={<Avatar name={row.name} className="size-11 text-base font-bold" />}
+                    className="min-h-15 gap-3 px-5 py-1.5" leading={<Avatar name={row.name} className="size-11 text-base font-bold" />}
                     disabled={!can({ type: "openContact", contact: row.id })} onClick={() => open(row.id)} />)}
                 </div>
               ))}
             </ListGroup>
           )}
-          {can({ type: "loadMore" }) && <Button variant="secondary" size="icon" aria-label="More contacts" className="self-center" onClick={() => void send({ type: "loadMore" })}><ChevronDown /></Button>}
         </>
       )}
       {!phoneTabs && bar}
@@ -148,28 +166,44 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   return (
     <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
       {header}
-      <TabsContent value="Contacts" className="min-h-0 flex-1 overflow-y-auto">{content}</TabsContent>
+      <TabsContent value="Contacts" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</TabsContent>
       {bar}
     </Tabs>
   );
 }
 
-/** One contact as the phone holds it now. */
-function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
+/** The notes glyph of a contact's card, as Alpha's phone draws it. */
+const PhoneGlyph = createLucideIcon({ name: "ContactPhone", node: [["path", { key: "phone", d: "M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4" }]] });
+const MailGlyph = createLucideIcon({ name: "ContactMail", node: [["path", { key: "mail", d: "M3 5h18v14H3zM3 5l9 7 9-7" }]] });
+const NotesGlyph = createLucideIcon({ name: "NotesGlyph", node: [["path", { key: "page", d: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h5" }]] });
+
+/** One contact as the phone holds it now; compact while Alpha's sheet is open over it. */
+function Card({ runtime, safe, route }: ContactsProps & { safe: boolean; route: number | undefined }) {
   const { state, can, send } = useContacts(runtime);
+  const compact = useCommsDock(runtime).open;
   if (!state) return null;
   const card = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get())).card;
   const reach = (how: "Call" | "Message", number: string) => {
-    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ reach: number })));
+    if (route === undefined) return;
+    const request = { how, route, contact: state.contact, card: state.card.ticket, number };
+    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ reach: request })));
     void send({ type: "reach", how });
   };
   const field = "flex min-h-13.5 items-center gap-4 px-5 py-2";
+  const value = "min-w-0 flex-1 text-body leading-detail wrap-anywhere";
+  const sub = "shrink-0 text-sm text-muted-foreground";
+  const showing = shown(state) && card !== undefined;
+  const initials = card ? callerInitials(card.displayName) : "";
   return (
-    <div className="flex flex-1 flex-col">
-      <div data-host-chrome="" className="mt-[var(--alpha-safe-top)] flex min-h-14 items-center gap-1 px-2">
-        {can({ type: "closeContact" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "closeContact" })}><ChevronLeft /></Button>}
-        <span className="flex-1" />
-        {card && can({ type: "amend" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => {
+    <div data-alpha-contact-detail="" data-alpha-compact={compact} className="flex flex-1 flex-col">
+      <div data-host-chrome="" className="mt-[var(--alpha-safe-top)] flex min-h-11 items-center gap-1 px-2">
+        {can({ type: "closeContact" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" onClick={() => void send({ type: "closeContact" })}><ChevronLeft /></Button>}
+        {compact && showing && <>
+          <span aria-hidden className="mr-1 flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary font-display text-sm">{initials}</span>
+          <h1 className="min-w-0 flex-1 truncate font-display text-xl font-light">{card.displayName}</h1>
+        </>}
+        {!(compact && showing) && <span className="flex-1" />}
+        {card && can({ type: "amend" }) && <Button variant="ghost" size="icon" aria-label="Edit contact" onClick={() => {
           runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({
             editBase: card, problem: undefined,
             form: {
@@ -180,43 +214,44 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
           })));
           void send({ type: "amend" });
         }}><Pencil /></Button>}
-        {can({ type: "amendElsewhere" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => void send({ type: "amendElsewhere" })}><Pencil /></Button>}
-        {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className="text-record" aria-label="Delete" onClick={() => void send({ type: "askDelete" })}><Trash2 /></Button>}
+        {can({ type: "amendElsewhere" }) && <Button variant="ghost" size="icon" aria-label="Edit contact" onClick={() => void send({ type: "amendElsewhere" })}><Pencil /></Button>}
+        {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className="text-hangup" aria-label="Delete contact" onClick={() => void send({ type: "askDelete" })}><Trash2 /></Button>}
       </div>
-      {state.card.status === "Loading" && <Spinner label="Reading the contact" />}
+      {state.confirming && (
+        <div role="group" aria-label="Delete contact" data-alpha-contact-confirm="" className="flex shrink-0 gap-2 px-4 pb-2">
+          <Button variant="secondary" aria-label="Keep" className="h-11 flex-1 basis-0 px-0" disabled={!can({ type: "keep" })} onClick={() => void send({ type: "keep" })}><X className="size-5" /></Button>
+          <Button className="h-11 flex-2 basis-0 bg-hangup text-base text-alpha-foreground hover:bg-hangup/90 active:bg-hangup/80" disabled={!can({ type: "erase", clear: safe })} onClick={() => void send({ type: "erase", clear: safe })}>Delete</Button>
+        </div>
+      )}
+      {state.card.status === "Loading" && <p role="status" className="sr-only">Reading the contact</p>}
       {state.card.status === "Failed" && <Banner variant="destructive">The contact could not be read</Banner>}
-      {shown(state) && card && (
+      {showing && (
         <>
-          <span aria-hidden className="mt-2 flex size-28 items-center justify-center self-center rounded-full bg-secondary font-display text-contact-initials font-light">{callerInitials(card.displayName)}</span>
-          <h1 className="mt-4 px-4 text-center font-display text-contact-name font-light wrap-anywhere">{card.displayName}</h1>
-          {card.phoneNumbers.length > 0 && <div className="flex flex-wrap justify-center gap-3.5 px-4 pt-5.5 pb-1" role="group" aria-label="Contact actions">
+          {!compact && <>
+            <span aria-hidden className="mt-3 flex size-28 items-center justify-center self-center rounded-full bg-secondary font-display text-contact-initials font-light">{initials}</span>
+            <h1 className="mt-5 px-4 text-center font-display text-contact-name font-light wrap-anywhere">{card.displayName}</h1>
+          </>}
+          {card.phoneNumbers.length > 0 && <div className={cn("flex", compact ? "flex-wrap justify-start gap-2.5 pr-4 pb-2 pl-15" : "flex-wrap justify-center gap-3.5 px-4 pt-5.5 pb-1")} role="group" aria-label="Contact actions">
             {[...new Set(card.phoneNumbers.map(({ number }) => number))].flatMap((number) => [
-              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className="size-15" aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><Call /></Button>,
-              can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className="size-15" aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
+              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><PhoneGlyph /></Button>,
+              can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
             ])}
           </div>}
-          <div aria-label="Contact details" role="group" className="mx-4 mt-9 rounded-sheet bg-secondary py-1.5 select-text">
+          <div aria-label="Contact details" role="group" className="mx-4 mt-9 rounded-group bg-secondary py-1.5 select-text">
             {card.phoneNumbers.map((phone, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated number at distinct positions.
-              <div key={`${phone.number}-${at}`} className={field}><Call aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 text-body leading-field wrap-anywhere">{displayNumber(phone.number)}</span><span className="shrink-0 text-sm text-muted-foreground">{contactLabel(phone.type)}</span></div>
+              <div key={`${phone.number}-${at}`} className={field}><PhoneGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{displayNumber(phone.number)}</span><span className={sub}>{phoneLabel(phone.type)}</span></div>
             ))}
             {card.emailAddresses.map((email, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated address at distinct positions.
-              <div key={`${email.address}-${at}`} className={field}><Mail aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 text-body leading-field wrap-anywhere">{email.address}</span><span className="shrink-0 text-sm text-muted-foreground">{contactLabel(email.type)}</span></div>
+              <div key={`${email.address}-${at}`} className={field}><MailGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{email.address}</span><span className={sub}>{emailLabel(email.type)}</span></div>
             ))}
-            {card.notes && <div className={field}><NotebookText aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 text-body leading-field whitespace-pre-wrap wrap-anywhere">{card.notes}</span></div>}
+            {card.notes && <div className={field}><NotesGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={cn(value, "whitespace-pre-wrap")}>{card.notes}</span><span className={sub}>Notes</span></div>}
           </div>
-          {card.notes === undefined && <p className="mx-4 mt-3 text-sm text-muted-foreground">Notes are not available here</p>}
         </>
       )}
-      <ConfirmDialog open={state.confirming} title="Delete this contact?" confirmLabel="Delete" destructive
-        onConfirm={() => void (can({ type: "erase", clear: safe }) && send({ type: "erase", clear: safe }))} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))} />
     </div>
   );
-}
-
-function contactLabel(kind: string) {
-  return kind.startsWith("custom:") ? kind.slice("custom:".length) : kind.replaceAll("-", " ");
 }
 
 const problems: Record<NonNullable<Book["problem"]>, string> = {
@@ -231,31 +266,34 @@ const problems: Record<NonNullable<Book["problem"]>, string> = {
   "not-found": "This contact is no longer on this phone.",
 };
 
-const nameField = "min-h-14 rounded-tile border-0 bg-secondary px-4.5 text-lg";
+const nameField = "min-h-14 rounded-tile border-0 bg-secondary px-4.5 py-3 text-lg focus-visible:outline-none";
 
 interface ContactValuesProps {
   kind: "Phone" | "Email";
   values: readonly string[];
+  /** The contact as the phone holds it, whose number or address keeps its type when the form saves it. */
+  base: ContactDetail | undefined;
   locked: boolean;
   change: (values: readonly string[]) => void;
 }
 
-/** A phone or email field, with room for the owner to add and remove entries. */
-function ContactValues({ kind, values, locked, change }: ContactValuesProps) {
+/** A phone or email field, with room for the owner to add and remove entries, each named by the type it is saved with. */
+function ContactValues({ kind, values, base, locked, change }: ContactValuesProps) {
   const phone = kind === "Phone";
   return (
     <>
       {values.map((value, at) => {
-        const label = at === 0 ? kind : `${kind} ${at + 1}`;
+        const type = phone ? base?.phoneNumbers.find((one) => one.number === value)?.type ?? "mobile" : base?.emailAddresses.find((one) => one.address === value)?.type ?? "home";
+        const label = phone ? phoneFieldLabel(type, at === 0) : emailFieldLabel(type, at === 0);
         const remaining = values.filter((_, index) => index !== at);
         return (
           // eslint-disable-next-line @eslint-react/no-array-index-key -- The editor keeps focus on the slot when its value changes.
-          <div key={at} className="flex min-h-14 items-center gap-1 rounded-tile bg-secondary pl-4.5 pr-1.5">
-            <Input className="border-0 bg-transparent text-lg shadow-none" type={phone ? "tel" : "email"} autoComplete="off" disabled={locked}
+          <div key={at} className="flex min-h-14 items-center gap-2 rounded-tile bg-secondary pr-1.5 pl-4.5">
+            <Input className="h-14.5 border-0 bg-transparent px-0.5 py-px text-lg shadow-none focus-visible:outline-none" type={phone ? "tel" : "email"} autoComplete="off" disabled={locked}
               maxLength={phone ? CONTACT_MAX_NUMBER : CONTACT_MAX_ADDRESS} aria-label={label} placeholder={label} value={value}
               onChange={(event) => change(values.map((one, index) => index === at ? event.target.value : one))} />
-            {(value !== "" || values.length > 1) && <Button type="button" size="icon" variant="ghost" disabled={locked}
-              aria-label={`Remove ${label.toLowerCase()}`} onClick={() => change(remaining.length === 0 ? [""] : remaining)}><Minus /></Button>}
+            {(value !== "" || values.length > 1) && <Button type="button" size="icon" variant="ghost" disabled={locked} className="text-muted-foreground"
+              aria-label={phone ? phoneRemoveLabel(type) : emailRemoveLabel(type)} onClick={() => change(remaining.length === 0 ? [""] : remaining)}><Minus className="size-4.5" /></Button>}
           </div>
         );
       })}
@@ -269,7 +307,7 @@ function Editor({ runtime }: ContactsProps) {
   const phone = usePhone(runtime).state;
   const [slotVersion, setSlotVersion] = useState(0);
   if (!state || !phone) return null;
-  const { form, problem } = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
+  const { form, problem, editBase } = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const safe = clear(phone);
   const locked = pending(state);
   const canSave = problem !== "stale" && problem !== "not-found" && can({ type: "save", clear: safe });
@@ -289,26 +327,35 @@ function Editor({ runtime }: ContactsProps) {
     });
   };
   const title = state.form === "Adding" ? "New contact" : "Edit contact";
+  const add = "h-11 flex-[1_1_140px] justify-start rounded-lg p-2 text-sm font-normal text-muted-foreground";
   return (
-    <form aria-label={title} data-slot-version={slotVersion} noValidate className="flex flex-1 flex-col gap-2.5 px-4 pb-8" onSubmit={(event) => {
-      event.preventDefault();
-      if (canSave) void send({ type: "save", clear: safe });
-    }}>
-      <AppHeader title={title} className="-mx-4 [&_h1]:sr-only" leading={<Button type="button" variant="ghost" size="icon" aria-label="Cancel" disabled={!can({ type: "discard" })} onClick={() => void send({ type: "discard" })}><X /></Button>}>
-        <Button type="submit" aria-label="Save" className="min-w-16" disabled={!canSave}><Check /></Button>
-      </AppHeader>
-      {locked && <Banner>Contact change pending</Banner>}
-      {refused(state) && <Banner variant="destructive">{problem === undefined ? "The phone did not save the contact" : problems[problem]}</Banner>}
-      <Input className={nameField} aria-label="First name" placeholder="First name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.givenName} onChange={(event) => update({ ...form, givenName: event.target.value }, "Names")} />
-      <Input className={nameField} aria-label="Last name" placeholder="Last name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.familyName} onChange={(event) => update({ ...form, familyName: event.target.value }, "Names")} />
-      <ContactValues kind="Phone" locked={locked} values={form.phones} change={(phones) => update({ ...form, phones }, "Phones")} />
-      <ContactValues kind="Email" locked={locked} values={form.emails} change={(emails) => update({ ...form, emails }, "Emails")} />
-      {state.sheet.notable ? <Textarea className="min-h-24 rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
-        : <p className="rounded-tile bg-secondary px-4.5 py-3.5 text-muted-foreground">Use Android Contacts to change notes for this contact.</p>}
-      <div className="flex flex-wrap gap-2">
-        {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className="flex-1 text-muted-foreground" onClick={() => addBlankSlot({ ...form, phones: [...form.phones, ""] })}>Add another phone</Button>}
-        {form.emails.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className="flex-1 text-muted-foreground" onClick={() => addBlankSlot({ ...form, emails: [...form.emails, ""] })}>Add another email</Button>}
-      </div>
-    </form>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <form aria-label={title} data-slot-version={slotVersion} noValidate className="flex min-h-0 flex-1 flex-col pt-[max(3.25rem,calc(var(--alpha-safe-top)+0.5rem))]" onSubmit={(event) => {
+        event.preventDefault();
+        if (canSave) void send({ type: "save", clear: safe });
+      }}>
+        <div data-host-chrome="" className="flex shrink-0 items-center px-2 pb-3">
+          <Button type="button" variant="ghost" size="icon" aria-label="Cancel" disabled={!can({ type: "discard" })} onClick={() => void send({ type: "discard" })}><X /></Button>
+          <h1 className="sr-only">{title}</h1>
+          <span className="flex-1" />
+          <Button type="submit" aria-label="Save" className="mr-2 h-11 w-16 min-w-16 px-0" disabled={!canSave}><Check /></Button>
+        </div>
+        <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-2.5 overflow-y-auto px-4 pb-4">
+          {locked && <p role="status" className="sr-only">Contact change pending</p>}
+          {refused(state) && <p role="alert" data-alpha-contact-notice="" className="mx-2 text-sm leading-detail">{problem === undefined ? "The phone did not save the contact" : problems[problem]}</p>}
+          <Input className={nameField} aria-label="First name" placeholder="First name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.givenName} onChange={(event) => update({ ...form, givenName: event.target.value }, "Names")} />
+          <Input className={nameField} aria-label="Last name" placeholder="Last name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.familyName} onChange={(event) => update({ ...form, familyName: event.target.value }, "Names")} />
+          <ContactValues kind="Phone" locked={locked} base={editBase} values={form.phones} change={(phones) => update({ ...form, phones }, "Phones")} />
+          <ContactValues kind="Email" locked={locked} base={editBase} values={form.emails} change={(emails) => update({ ...form, emails }, "Emails")} />
+          {state.sheet.notable ? <Textarea className="field-sizing-fixed min-h-24 resize-y rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg leading-normal focus-visible:outline-none" rows={3} autoComplete="off" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
+            : <p data-alpha-contact-notes-unavailable="" className="rounded-tile bg-secondary px-4.5 py-3.5 text-base leading-normal text-muted-foreground">Notes can’t be edited here. Use Android Contacts to change them.</p>}
+          <div className="flex flex-wrap gap-2.5">
+            {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => addBlankSlot({ ...form, phones: [...form.phones, ""] })}>Add another phone</Button>}
+            {form.emails.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => addBlankSlot({ ...form, emails: [...form.emails, ""] })}>Add another email</Button>}
+          </div>
+        </div>
+      </form>
+      <CommsBar runtime={runtime} person={state.form === "Changing" && editBase !== undefined ? { label: editBase.displayName, initials: callerInitials(editBase.displayName) } : undefined} />
+    </div>
   );
 }

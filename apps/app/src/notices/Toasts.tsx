@@ -25,7 +25,7 @@ function Toasts({ runtime }: Shown<Resident>) {
       data-dialog={state.shownIn || undefined}
       className={dialog
         ? "top-[max(--spacing(12),calc(var(--alpha-safe-top)+--spacing(3)))]"
-        : "absolute top-[max(--spacing(2),min(max(calc(var(--alpha-safe-top)+--spacing(3)),calc(var(--alpha-header-clearance,0px)+--spacing(2))),calc(100%_-_var(--alpha-dock-overlap,0px)_-_--spacing(16))))]"}
+        : "absolute top-[max(--spacing(2),min(max(--spacing(12),calc(var(--alpha-safe-top)+--spacing(3)),calc(var(--alpha-header-clearance,0px)+--spacing(2))),calc(100%_-_var(--alpha-dock-overlap,0px)_-_--spacing(17))))]"}
     >
       {state.showing && words ? (
         <Toast

@@ -1,13 +1,13 @@
 // spec/app/workflows/automations.md, "Story: Act on an automation"; spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule"
-import { Alert, Button, ConfirmDialog, Input, ListRow, Switch, Textarea } from "@repo/ui";
-import { ChevronRight, Clock } from "lucide-react";
+import { Alert, Button, ConfirmDialog, Input, Switch, Textarea, WorkflowAction, WorkflowActions, WorkflowChoice, cn, focusRing } from "@repo/ui";
+import { Play, Repeat } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import { type Event, type Change, maxText } from "../../gen/app__workflows__automations.ts";
 import { useMachine } from "../../gen/app__workflows__automations.react.ts";
 import type { Machine } from "../../gen/app__workflows__automations.effect.vibe";
 import type { Preset, When } from "../../gen/app__workflows__schedule.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, rowOffers } from "./automations.vibe";
+import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, reviewPromptPower, rowOffers } from "./automations.vibe";
 import type { Prompt } from "./api.vibe";
 import type { WorkflowRow } from "./list.vibe";
 
@@ -20,6 +20,17 @@ const actions = [
   ["Fire", "Run now"], ["Snooze", "Snooze 10 minutes"], ["Complete", "Mark done"], ["Dismiss", "Dismiss"],
   ["Skip", "Skip"], ["Reopen", "Reopen"], ["Remove", "Remove"],
 ] as const satisfies readonly (readonly [Change, string])[];
+/** What a row's menu calls each action, as develop words it for each kind. */
+function menuLabel(row: WorkflowRow, wanted: Change): string {
+  switch (wanted) {
+    case "Snooze": return "10 min";
+    case "Complete": return "Complete";
+    case "Remove": return row.kind === "Prompt" ? "Delete prompt" : row.kind === "Reminder" ? "Cancel reminder" : "Remove";
+    default: return actions.find(([kind]) => kind === wanted)?.[1] ?? wanted;
+  }
+}
+const editLabels = { Prompt: "Edit prompt", Reminder: "Edit reminder", Schedule: "Edit schedule", Routine: "Edit" } as const;
+const sources = { Prompt: "Agent automation", Reminder: "Agent reminder", Schedule: "Agent schedule", Routine: "Workflow" } as const;
 const schedules = [["Daily", "Every day"], ["Weekdays", "Weekdays"], ["Weekends", "Weekends"], ["Custom", "Custom"]] as const satisfies readonly (readonly [Preset, string])[];
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -62,7 +73,29 @@ function eventFor(wanted: Change): Event {
 }
 
 function reviewLabel(action: Change): string {
+  if (action === "Enable") return "Enable";
+  if (action === "Disable") return "Pause";
   return actions.find(([kind]) => kind === action)?.[1] ?? (action === "Edit" ? "Save changes" : "Save automation");
+}
+
+/** Where a row comes from and its standing, as the detail's first line says it. */
+export function automationSource(row: WorkflowRow): string {
+  return sources[row.kind];
+}
+
+/** The header switch opens a review for the current prompt and schedule. */
+export function AutomationPower({ runtime, row, owner }: AutomationProps & { readonly row: WorkflowRow }) {
+  const model = useMachine(runtime);
+  const wordsService = runtime.runSync(AutomationWords);
+  const snapshot = useSyncExternalStore(wordsService.subscribe, wordsService.snapshot, wordsService.snapshot);
+  const state = model.state;
+  if (!state || state.owner !== owner || state.row !== row.number || row.kind !== "Prompt" || !state.present) return null;
+  const toggle = { type: "reviewChange", wanted: state.on ? "Disable" : "Enable" } as const;
+  const current = snapshot.observed?.owner === owner && snapshot.observed.row === row.number && snapshot.observed.ticket === state.list.ticket
+    ? snapshot.observed.prompt
+    : undefined;
+  return <Switch checked={state.on} aria-label={`Turn ${row.title} on or off`} disabled={current === undefined || !model.can(toggle)}
+    className="ml-3" onCheckedChange={() => void runtime.runPromiseExit(reviewPromptPower(owner, row.number))} />;
 }
 
 /** Prompt and scheduled-task controls over the current owner and row. */
@@ -77,7 +110,6 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
   const send = (event: Event) => { if (model.can(event)) void model.send(event); };
   const draft = snapshot.editor;
   const editing = state.editing && draft.owner === owner && draft.row === number;
-  const toggle = state.on ? "Disable" : "Enable";
   const observed = row?.kind === "Prompt" && snapshot.observed?.owner === owner && snapshot.observed.row === number && snapshot.observed.ticket === state.list.ticket
     ? snapshot.observed.prompt
     : undefined;
@@ -88,28 +120,30 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
   const reviewEdit = state.proposed === "Edit" || state.proposed === "Create";
   const reviewedTitle = reviewEdit ? draft.title : row?.title ?? draft.title;
   const canSetCurrentTime = model.can({ type: "setTime", hour: state.when.hour, minute: state.when.minute });
+  const reviewedPower = state.review.showing && (state.proposed === "Enable" || state.proposed === "Disable")
+    ? snapshot.power : undefined;
   return (
     <section aria-label={row === undefined ? "Automation" : "Automation controls"} className="flex flex-col gap-3">
       {row === undefined && !editing && model.can({ type: "openEditor", kind: "PromptTask", zone: 0 }) && (
-        <ListRow title="Automation" leading={<Clock />} trailing={<ChevronRight aria-hidden />} onClick={editor} />
+        <WorkflowChoice label="Automation" icon={<Repeat />} onClick={editor} />
       )}
-      {row?.kind === "Prompt" && model.can(eventFor(toggle)) && (
-        <label className="flex items-center justify-between gap-3">
-          <span>{state.on ? "On" : "Off"}</span>
-          <Switch checked={state.on} disabled={!model.can(eventFor(toggle))} aria-label={`Turn ${row.title} on or off`} onCheckedChange={() => send(eventFor(toggle))} />
-        </label>
-      )}
-      {row !== undefined && !editing && (
-        <div className="flex flex-wrap gap-2">
-          {actions.map(([wanted, label]) => {
-            const event = eventFor(wanted);
-            return rowOffers(row, wanted) && model.can(event)
-              ? <Button key={wanted} variant={wanted === "Fire" ? "primary" : "secondary"} onClick={() => send(event)}>{label}</Button>
-              : null;
-          })}
-          {canEdit && <Button variant="secondary" onClick={editor}>Edit</Button>}
-        </div>
-      )}
+      {row !== undefined && !editing && !state.review.showing && (() => {
+        const offered = actions.filter(([wanted]) => wanted !== "Fire" && rowOffers(row, wanted) && model.can(eventFor(wanted)));
+        const fire = eventFor("Fire");
+        return (
+          <div className="flex items-center gap-2">
+            {row.kind !== "Reminder" && rowOffers(row, "Fire") && model.can(fire) && (
+              <button type="button" aria-label="Run now" title="Run now" onClick={() => send(fire)}
+                className={cn(focusRing, "grid size-11 shrink-0 place-items-center rounded-full bg-foreground text-background")}><Play aria-hidden className="size-5.5" /></button>
+            )}
+            {(offered.length > 0 || canEdit) && <WorkflowActions label="More automation actions">
+              {canEdit && <WorkflowAction onClick={editor}>{editLabels[row.kind]}</WorkflowAction>}
+              {offered.map(([wanted]) => <WorkflowAction key={wanted} aria-label={wanted === "Snooze" ? "Snooze 10 minutes" : undefined}
+                onClick={() => send(eventFor(wanted))}>{menuLabel(row, wanted)}</WorkflowAction>)}
+            </WorkflowActions>}
+          </div>
+        );
+      })()}
       {editing && <>
         {state.timingEditable ? <fieldset className="flex flex-col gap-2">
           <legend className="mb-2 text-sm">When</legend>
@@ -159,7 +193,21 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
         <Button variant="ghost" onClick={() => send({ type: "dismissRecovery" })}>Dismiss notice</Button>
       )}
       {state.change.attempt.outcome === "Refused" && state.fired === "NotFired" && <Alert variant="warn">The agent didn’t apply the change.</Alert>}
-      <ConfirmDialog open={state.review.showing} title={`${reviewLabel(state.proposed)} “${reviewedTitle}”?`}
+      {row !== undefined && !reviewEdit && state.review.showing && (
+        <div role="group" aria-label="Review workflow action" className="mt-6 border-t border-border pt-4">
+          <p className="leading-chat font-semibold">{reviewedPower ? `${reviewLabel(state.proposed)} “${reviewedPower.name}”?`
+            : state.proposed === "Remove" ? `${menuLabel(row, "Remove")}?` : `${reviewLabel(state.proposed)}?`}</p>
+          {reviewedPower && <p className="mt-2 text-meta text-muted-foreground">{reviewedPower.enabled
+            ? "The prompt can run on its schedule while your phone is on." : "The prompt stops running on its schedule."}</p>}
+          <div className="mt-6 flex flex-wrap gap-2.5">
+            <button type="button" onClick={() => send({ type: "confirmChange" })}
+              className={cn(focusRing, "min-h-11 rounded-full bg-primary px-4.5 py-2.5 text-base text-primary-foreground")}>Confirm {state.proposed === "Remove" ? menuLabel(row, "Remove") : reviewLabel(state.proposed)}</button>
+            <button type="button" onClick={() => send({ type: "cancelReview" })}
+              className={cn(focusRing, "min-h-11 rounded-full bg-secondary px-4.5 py-2.5 text-base")}>Cancel</button>
+          </div>
+        </div>
+      )}
+      <ConfirmDialog open={state.review.showing && (row === undefined || reviewEdit)} title={`${reviewLabel(state.proposed)} “${reviewedTitle}”?`}
         confirmLabel={reviewLabel(state.proposed)} destructive={state.proposed === "Remove"}
         onConfirm={() => send({ type: "confirmChange" })} onCancel={() => send({ type: "cancelReview" })}>
         {reviewEdit ? `${draft.text} · ${schedule}` : undefined}

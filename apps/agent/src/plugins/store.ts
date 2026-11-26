@@ -1,16 +1,18 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import type {
+  ClockAlarmPhase, ClockAlarmRecord, ClockSnapshot, ClockSound, ClockTimerRecord, ClockTimerStatus, WorldCityRecord,
+  ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority,
+  ReminderRecurrence, ReminderSubtaskRecord, RemindersSnapshot,
+} from "@repo/launcher-records";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type {
-  ClockAlarmPhase, ClockAlarmRecord, ClockSnapshot, ClockSound, ClockTimerRecord, ClockTimerStatus,
-  ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority,
-  ReminderRecurrence, RemindersSnapshot, ReminderSubtaskRecord, WorldCityRecord,
-} from "./types.ts";
 
 /** Default list identifier always present in Reminders. */
 export const DEFAULT_LIST_ID = "default";
 
+/** Snooze length for an alarm whose owner picked none: `defaultSnooze` in spec/app/clock/alarms.md (v121's ten minutes). */
+export const DEFAULT_SNOOZE_MINUTES = 10;
 const MAX_ALARMS = 64;
 const MAX_TIMERS = 16;
 const MAX_WORLD_CITIES = 24;
@@ -132,6 +134,23 @@ export function civilToEpochMs(dueDate: string, dueMinute: number | null, timeZo
   } catch {
     return targetUtc;
   }
+}
+
+/** The next repeat whose alert or unalerted due time has not elapsed in the device zone. */
+function nextFutureOccurrence(item: ReminderItemRecord, now: number, timeZone: string): { readonly dueDate: string; readonly skippedDates: number } | undefined {
+  if (item.dueDate === null) return undefined;
+  const elapsedAt = now + (item.alertMinutes ?? 0) * 60_000;
+  const elapsedDay = todayCivilDate(elapsedAt, timeZone);
+  let date = item.dueDate;
+  for (let skippedDates = 0; skippedDates < 40_000; skippedDates++) {
+    const next = advanceDueDate(date, item.recurrence);
+    if (next === null || next <= date) return undefined;
+    if (next > elapsedDay || (next === elapsedDay && (civilToEpochMs(next, item.dueMinute, timeZone) ?? 0) > elapsedAt)) {
+      return { dueDate: next, skippedDates };
+    }
+    date = next;
+  }
+  return undefined;
 }
 
 /** Compute the next epoch ms an alarm at `hour:minute` with `daysMask` (bit 0 = Sun .. bit 6 = Sat) will fire after `nowMs`. */
@@ -541,7 +560,7 @@ export class AlphaAppsStore {
       sound: normalizeSound(input.sound),
       vibrate: input.vibrate ?? true,
       enabled,
-      snoozeMinutes: clampInt(input.snoozeMinutes ?? 9, 1, 60),
+      snoozeMinutes: clampInt(input.snoozeMinutes ?? DEFAULT_SNOOZE_MINUTES, 1, 60),
       phase: "idle",
       fireAtMs: enabled ? computeNextAlarmFireAtMs(hour, minute, daysMask, nowMs, input.timeZone) : null,
       snoozeUntilMs: null,
@@ -660,15 +679,15 @@ export class AlphaAppsStore {
     return existing;
   }
 
-  createTimer(input: { readonly id?: string; readonly label?: string; readonly durationMs: number; readonly startImmediately?: boolean }): ClockTimerRecord {
+  /**
+   * Store a new timer, making room by forgetting the oldest finished (ready, not started) timers when Clock is full.
+   * Returns undefined, storing nothing, when every place holds a running, paused or ringing timer.
+   */
+  createTimer(input: { readonly id?: string; readonly label?: string; readonly durationMs: number; readonly startImmediately?: boolean }): ClockTimerRecord | undefined {
     const nowMs = this.now();
     const durationMs = clampInt(input.durationMs, 1000, 86_400_000);
     const startNow = input.startImmediately ?? true;
     const timerId = input.id?.trim() || `timer-${randomUUID().slice(0, 8)}`;
-    const replacing = this.clock.timers.some((entry) => entry.id === timerId);
-    if (!replacing && this.clock.timers.length >= MAX_TIMERS) {
-      throw new AlphaStoreCapacityError(`Maximum number of timers reached (${MAX_TIMERS}).`);
-    }
     const timer: ClockTimerRecord = {
       id: timerId,
       label: (input.label ?? "").trim().slice(0, 200),
@@ -681,8 +700,13 @@ export class AlphaAppsStore {
       revision: 1,
       updatedAtMs: nowMs,
     };
-    const timers = [...this.clock.timers.filter((entry) => entry.id !== timer.id), timer];
-    const deletedTimerIds = this.clock.deletedTimerIds.filter((id) => id !== timer.id);
+    const others = this.clock.timers.filter((entry) => entry.id !== timer.id);
+    const finished = others.filter((entry) => entry.status === "ready").sort((a, b) => a.updatedAtMs - b.updatedAtMs);
+    const pruned = new Set(finished.slice(0, Math.max(0, others.length + 1 - MAX_TIMERS)).map((entry) => entry.id));
+    const kept = others.filter((entry) => !pruned.has(entry.id));
+    if (kept.length + 1 > MAX_TIMERS) return undefined;
+    const timers = [...kept, timer];
+    const deletedTimerIds = [...pruned].reduce((ids, id) => appendTombstone(ids, id), this.clock.deletedTimerIds.filter((id) => id !== timer.id));
     this.saveClock({ ...this.clock, version: this.clock.version + 1, updatedAtMs: nowMs, timers, deletedTimerIds });
     return timer;
   }
@@ -928,39 +952,43 @@ export class AlphaAppsStore {
     return updated;
   }
 
-  completeItem(id: string): { readonly item: ReminderItemRecord; readonly nextItem: ReminderItemRecord | null; readonly previousAgentTaskId: string | null } | undefined {
-    const stashed = this.stashReminder(id);
-    if (stashed === undefined) return undefined;
-    const { existing, nowMs } = stashed;
-    const nextDate = existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : null;
-    if (nextDate !== null) {
-      let deletedAgentTaskIds = [...(this.reminders.deletedAgentTaskIds ?? [])];
-      if (existing.agentTaskId !== null) {
-        deletedAgentTaskIds = appendTombstone(deletedAgentTaskIds, existing.agentTaskId);
-      }
+  completeItem(id: string, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): { readonly item: ReminderItemRecord; readonly nextItem: ReminderItemRecord | null } | undefined {
+    const existing = this.reminders.items.find((item) => item.id === id);
+    if (existing === undefined) return undefined;
+    if (existing.completed) return { item: existing, nextItem: null };
+    const nowMs = this.now();
+    const recurring = existing.recurrence !== "none" && existing.dueDate !== null;
+    const next = recurring ? nextFutureOccurrence(existing, nowMs, timeZone) : undefined;
+    if (recurring && next === undefined) return undefined;
+    this.deletedItems.set(id, existing);
+    const dueAtMs = existing.dueDate === null ? null : civilToEpochMs(existing.dueDate, existing.dueMinute, timeZone);
+    const elapsed = next !== undefined && next.skippedDates > 0 ? { skippedDates: next.skippedDates } : {};
+    const history = dueAtMs === null ? {} : { history: [...(existing.history ?? []),
+      { revision: existing.revision, dueAtMs, completedAtMs: nowMs, ...elapsed }].slice(-32) };
+    if (next !== undefined) {
       const advanced: ReminderItemRecord = {
         ...existing,
-        dueDate: nextDate,
+        dueDate: next.dueDate,
         subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })),
         completed: false,
         completedAtMs: null,
+        ...history,
         snoozedUntilMs: null,
         notifiedAtMs: null,
-        agentTaskId: null,
         revision: existing.revision + 1,
         updatedAtMs: nowMs,
       };
       const items = this.reminders.items.map((entry) => (entry.id === id ? advanced : entry));
-      this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items, deletedAgentTaskIds });
-      return { item: advanced, nextItem: advanced, previousAgentTaskId: existing.agentTaskId };
+      this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items });
+      return { item: advanced, nextItem: advanced };
     }
     const completed: ReminderItemRecord = {
-      ...existing, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
+      ...existing, ...history, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
       revision: existing.revision + 1, updatedAtMs: nowMs,
     };
     const items = this.reminders.items.map((entry) => (entry.id === id ? completed : entry));
     this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items });
-    return { item: completed, nextItem: null, previousAgentTaskId: existing.agentTaskId };
+    return { item: completed, nextItem: null };
   }
 
   reopenItem(id: string): ReminderItemRecord | undefined {
@@ -1016,9 +1044,15 @@ export class AlphaAppsStore {
     const tombstoned = new Set(this.reminders.deletedAgentTaskIds ?? []);
     for (const task of tasks) {
       if (task.kind !== "personal-assistant.reminder") continue;
-      if (task.status === "Dismissed") continue;
-      if (tombstoned.has(task.taskId)) continue;
       const existingIdx = items.findIndex((item) => item.agentTaskId === task.taskId);
+      if (task.status === "Dismissed") {
+        if (existingIdx >= 0) {
+          items.splice(existingIdx, 1);
+          changed = true;
+        }
+        continue;
+      }
+      if (existingIdx < 0 && tombstoned.has(task.taskId)) continue;
       const completed = task.status === "Completed";
       if (existingIdx >= 0) {
         const current = items[existingIdx];

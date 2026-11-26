@@ -1,14 +1,21 @@
-// spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
+// spec/app/browser/share.md, "The owner can review opening a shown private web frame in another browser"; spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
 import { cn, focusRing } from "@repo/ui";
 import { ExternalLink } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { TabHost } from "../platform/browser.vibe";
-import { emptyFrames } from "../platform/browserWeb.vibe";
+import { emptyFrames, type FrameRequest } from "../platform/browserWeb.vibe";
 import type { Alpha } from "../runtime/area.tsx";
 import type { DesktopPreview } from "../shell/canvas.vibe";
 
 const noFrames = () => emptyFrames;
 const noChanges = () => () => {};
+const linkClass = cn("flex min-h-7.75 items-center justify-end gap-1.5 px-3 py-2 text-label underline", focusRing);
+const linkContent = <>Open in browser <ExternalLink aria-hidden className="size-3.5" /></>;
+
+async function reviewPrivateFrame(alpha: Alpha, frame: FrameRequest) {
+  const [{ default: browser }, { offerPrivateFrame }] = await Promise.all([import("./index.tsx"), import("./share.vibe")]);
+  await browser.runtime(alpha).runPromise(offerPrivateFrame(frame));
+}
 
 /** Web frames stay mounted under the Shell as its views and overlays change. */
 export function BrowserFrames({ alpha, preview }: { alpha: Alpha; preview?: DesktopPreview }) {
@@ -30,9 +37,9 @@ export function BrowserFrames({ alpha, preview }: { alpha: Alpha; preview?: Desk
       <section key={id} hidden={position === undefined} inert={position === undefined}
         data-alpha-browser-frame="" className="fixed flex flex-col overflow-hidden bg-background"
         style={style}>
-        {!privateTab && <a href={url} rel="noopener noreferrer" target="_blank" className={cn("flex min-h-7.75 items-center justify-end gap-1.5 px-3 py-2 text-label underline", focusRing)}>
-          Open in browser <ExternalLink aria-hidden className="size-3.5" />
-        </a>}
+        {privateTab
+          ? <button type="button" className={linkClass} disabled={status !== undefined} onClick={() => void reviewPrivateFrame(alpha, request)}>{linkContent}</button>
+          : <a href={url} rel="noopener noreferrer" target="_blank" className={linkClass}>{linkContent}</a>}
         {status !== undefined && <p role="status" className="m-0 p-3 font-sans text-sm leading-normal">{stopped ? "Stopped" : "Page blocked"}</p>}
         <iframe key={stopped ? "stopped" : load} title="Website" src={stopped ? "about:blank" : url} referrerPolicy="no-referrer"
           sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"

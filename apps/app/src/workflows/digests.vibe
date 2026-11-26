@@ -1,6 +1,6 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type WorkflowRequest, WorkflowAdmissionRejected, WorkflowHttpError, WorkflowLifecycleRejected, WorkflowResponseInvalid, workflowHttpError, type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestSourceState, hostedDigestProtocol, missedRunNowOffers } from "@elizaos/plugin-workflow-client"
+import { type WorkflowRequest, WorkflowAdmissionRejected, WorkflowHttpError, WorkflowLifecycleRejected, WorkflowResponseInvalid, type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestSourceState, hostedDigestProtocol, missedRunNowOffers } from "@elizaos/plugin-workflow-client"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import * as Plan from "../../gen/app__digests__schedules.effect.vibe"
 import type { Change, Effect as Out, Event, Template } from "../../gen/app__digests__schedules.effect.vibe"
@@ -12,7 +12,7 @@ import { type Job, answer, applying, following, reacting, started, together } fr
 import { Attempts } from "../runtime/attempts.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
 import { Time } from "../runtime/time.vibe"
-import { WorkflowsApi, localTimeZone } from "./api.vibe"
+import { WorkflowsApi, checkedWorkflowRequest, localTimeZone } from "./api.vibe"
 import { DigestHistory, digestScope } from "./brief.vibe"
 import { Rows } from "./list.vibe"
 
@@ -84,13 +84,7 @@ const words = Layer.sync(DigestWords, () => {
 
 /** Build a hosted digest protocol client that verifies `ownsRequest` before and after every request. */
 export function ownedDigestProtocol(request: WorkflowRequest, ownsRequest: boolean!!) {
-  const checked: WorkflowRequest = effect (path: string, body: unknown) => {
-    if (!(try ownsRequest)) throw workflowHttpError(0, {})
-    const received = try request(path, body)
-    if (!(try ownsRequest)) throw workflowHttpError(0, {})
-    return received
-  }
-  return hostedDigestProtocol(checked)
+  return hostedDigestProtocol(checkedWorkflowRequest(request, ownsRequest))
 }
 
 type Needs = Agent | Device | Rows | WorkflowsApi | DigestWords | DigestHistory | List.Machine | Plan.Machine | KeyValueStore.KeyValueStore | Time

@@ -41,7 +41,7 @@ export function SettingsAppearancePicker({ theme, keeping = false, onChoose }: S
           aria-label="Theme"
           aria-busy={keeping || undefined}
           orientation="horizontal"
-          className="flex shrink-0 gap-0.5 rounded-full bg-background p-0.75"
+          className="ml-auto flex shrink-0 gap-0.5 rounded-full bg-background p-0.75"
         >
           {choices.map(({ value, title }) => (
             <RadioGroupPrimitive.Item

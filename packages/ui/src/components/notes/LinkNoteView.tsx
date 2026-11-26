@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { Link } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
-import { renderNoteView } from "./noteFrame.tsx";
+import { noteViewFrame } from "./view.tsx";
 
 export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
   title: string;
@@ -21,7 +21,7 @@ export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
 
 /** An open link note: the page's title, its site to visit, and the passages kept from it. */
 export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisit, onBack, className, ...props }: LinkNoteViewProps) {
-  return renderNoteView({
+  return noteViewFrame({
     title,
     menu,
     onBack,
@@ -38,7 +38,7 @@ export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisi
         <div className="mt-7 flex flex-col gap-5">
           {clips.map((clip) => (
             <div key={clip} className="flex gap-3.5">
-              <span className="w-0.75 shrink-0 rounded-full bg-primary" />
+              <span className="w-0.75 shrink-0 rounded-clip bg-alpha" />
               <div className="font-display text-quote font-light">{clip}</div>
             </div>
           ))}

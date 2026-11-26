@@ -40,6 +40,8 @@ jobs:
         uses: ./.github/actions/setup
         with:
           job: ${{ matrix.name }}
+      - if: matrix.name == 'verify'
+        run: pnpm eliza
       - id: tool-selftest-cache
         if: startsWith(matrix.name, 'selftest-') && (env.TURBO_CACHE == 'local:rw' || github.event_name == 'push')
         continue-on-error: true

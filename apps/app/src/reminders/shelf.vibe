@@ -1,15 +1,12 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+import type { ReminderItemRecord, ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "@repo/launcher-records"
 import type { DeleteMode } from "../../gen/app__reminders.effect.vibe"
 import { type Shelf, createShelf } from "../runtime/shelf.vibe"
 import { together } from "../runtime/reactor.vibe"
-import type { ReminderRecurrence } from "./recurrence.ts"
 import {
   DEFAULT_LIST_ID,
-  type ReminderItemRecord,
-  type ReminderListRecord,
-  type ReminderPriority,
-  type ReminderSubtaskRecord,
   type RemindersStoreApi,
+  attachRemindersShelf,
   createRemindersStore,
   emptyStoreView,
 } from "./store.ts"
@@ -57,7 +54,7 @@ export function blankEditorFields(listId = DEFAULT_LIST_ID): ReminderEditorField
 
 /** Pending HTTP write request correlated by machine attempt id. */
 export type PendingRequest =
-  | { readonly kind: "createItem"; readonly item: ReminderItemRecord }
+  | { readonly kind: "createItem"; readonly item: ReminderItemRecord; readonly createOnly?: boolean }
   | { readonly kind: "updateItem"; readonly item: ReminderItemRecord }
   | { readonly kind: "completeItem"; readonly id: string; readonly item: ReminderItemRecord }
   | { readonly kind: "reopenItem"; readonly id: string }
@@ -75,6 +72,7 @@ export interface ActiveUndo {
   readonly itemId: string
   readonly prior: ReminderItemRecord
   readonly about: number
+  readonly until?: number
 }
 
 /** Native alarm metadata remembered when arming so cancellation passes exact identifiers. */
@@ -116,7 +114,11 @@ export service RemindersLedger {
 const remindersShelfLayer = Layer.effect(RemindersShelf, effect {
   const shelf = createShelf(emptyStoreView(), { reset: emptyStoreView })
   const store = createRemindersStore(shelf)
-  try Effect.addFinalizer(() => sync(() => { store.reset() }))
+  const detach = attachRemindersShelf(shelf)
+  try Effect.addFinalizer(() => sync(() => {
+    store.reset()
+    detach()
+  }))
   return { store }
 })
 

@@ -76,18 +76,45 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  }
 
  void cancelReadingSpeech(String requestId) {
-  if (requestId == null || requestId.isBlank()) return;
-  mainHandler().post(() -> {
-   if (!destroyed()) cancelSpeech(requestId);
-  });
+  cancelBrowserSpeech(requestId);
  }
 
- private boolean dictationInFront() {
+ private boolean speechInFront() {
   return AlphaDevicePlugin.shareForeground(getActivity()) && !PasswordSurfaces.visible();
  }
 
  @PluginMethod public void dictationForeground(PluginCall call) {
-  mainHandler().post(() -> call.resolve(new JSObject().put("available", dictationInFront())));
+  mainHandler().post(() -> call.resolve(new JSObject().put("available", speechInFront())));
+ }
+
+ @PluginMethod public void synthesizeLocalBrowserReading(PluginCall call) {
+  mainHandler().post(() -> {
+   if (!"device".equals(call.getString("execution")) || !speechInFront()) {
+    call.reject("Reading approval expired");
+    return;
+   }
+   if (speakerBusy()) {
+    call.reject("Speaker is in use", "playback-busy");
+    return;
+   }
+   try {
+    var browser = (AlphaBrowserPlugin) getBridge().getPlugin("AlphaBrowser").getInstance();
+    synthesizeReviewed(call, browser.consumeReading(call));
+   } catch (Exception unavailable) {
+    call.reject("Reading approval expired");
+   }
+  });
+ }
+
+ void cancelBrowserSpeech(String requestId) {
+  if (requestId == null || requestId.isBlank()) return;
+  Runnable stop = () -> {
+   if (destroyed()) return;
+   cancelSpeech(requestId);
+   notifyListeners("playbackStopped", new JSObject().put("requestId", requestId));
+  };
+  if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) stop.run();
+  else mainHandler().post(stop);
  }
 
  @Override @PluginMethod public void transcribeLocalRecording(PluginCall call) {
@@ -96,7 +123,7 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
    return;
   }
   mainHandler().post(() -> {
-   if (dictationInFront()) super.transcribeLocalRecording(call);
+   if (speechInFront()) super.transcribeLocalRecording(call);
    else call.reject("Open Alpha to transcribe the recording.", "dictation-obscured");
   });
  }
@@ -108,13 +135,13 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
   final String noteId = call.getString("noteId");
   final Long offset = noteMilliseconds(call, "offsetMs");
   final Long duration = noteMilliseconds(call, "durationMs");
-  if (!request.startsWith("notes-") || !dictationInFront()) {
+  if (!request.startsWith("notes-") || !speechInFront()) {
    call.reject("Open Notes to transcribe the recording.");
    return;
   }
   call.getData().put("replace", false);
   transcribeSuppliedWav(call, cancelled -> {
-   BooleanSupplier retired = () -> cancelled.getAsBoolean() || !dictationInFront();
+   BooleanSupplier retired = () -> cancelled.getAsBoolean() || !speechInFront();
    if (retired.getAsBoolean() || AlphaNotesPlugin.inCall(getContext())) throw new IOException();
    try (RecordingWindow window = RecordingWindow.open(AlphaNotesPlugin.recordings(getContext()), getContext().getCacheDir(),
        "noteId", recordingId, noteId, offset, duration, retired)) {

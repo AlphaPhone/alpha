@@ -8,7 +8,7 @@ export type SettingsReadingProps = {
   reading: Reading;
 };
 
-const dots: Record<StatusDotProps["status"], string> = { ok: "bg-ok", warn: "bg-warn", error: "bg-destructive", off: "bg-muted-foreground", busy: "bg-info" };
+const dots: Record<StatusDotProps["status"], string> = { ok: "bg-status-ok", warn: "bg-status-warn", error: "bg-status-error", off: "bg-muted-foreground", busy: "bg-info" };
 
 /**
  * What a row says about a fact of the phone: a placeholder while the answer is awaited, "Unavailable" when the phone
@@ -24,7 +24,9 @@ export function SettingsReading({ reading }: SettingsReadingProps) {
       </span>
     );
   }
-  if (reading.word === "unavailable") return <span>Unavailable</span>;
+  if (reading.word === "unavailable") return reading.compact
+    ? <span><span aria-hidden>—</span><span className="sr-only">Unavailable</span></span>
+    : <span>Unavailable</span>;
   return reading.status ? (
     <span className="inline-flex items-center gap-1.5">
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dots[reading.status])} />

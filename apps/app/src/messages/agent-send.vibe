@@ -1,15 +1,38 @@
 // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"; spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent"
 import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent"
 import type { DeviceOperation } from "@elizaos/agent"
-import { operationIdOf, type DirectSmsReview, type SmsSendResult } from "@elizaos/os-bridges"
+import { operationIdOf, type DirectSmsReview, type SmsSendResult, type TelephonySubscription } from "@elizaos/os-bridges"
 import { normalizePhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
+import { addressedSend } from "../../gen/app__messages__composer.effect.vibe"
+import type { SmsApproval } from "../platform/composerPort.vibe"
 import { Device } from "../platform/device.vibe"
-import { type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyAbsent, TelephonyRefused, telephony, textingDefault } from "../platform/telephony.vibe"
+import { currentPhoneContact, type ReviewedPhoneContact } from "../phone/named-review.vibe"
+import { composeDraftOnly, composeRecipient } from "./agent.vibe"
 import { activeSmsSelection, type SmsSelection } from "./agent-sim.vibe"
+import { sameSubscription } from "./composer.vibe"
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>
+type Compose = Extract<DeviceOperation, { type: "sms_compose" }>
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+
+/** The subscription shown by the card when a reviewed compose request actually sends. */
+export interface ComposeLine {
+  readonly subscription: TelephonySubscription
+  readonly fromMessages: boolean
+}
+
+export effect function composeLine(fromMessages: boolean, selection: SmsSelection | undefined): (ComposeLine | undefined)!!Telephony {
+  if (fromMessages && selection === undefined) return undefined
+  const status = timeout(telephony("reviewed compose line", (client) => client.messages.status()), "350 millis") catch () => undefined
+  if (status?.sendMode !== "direct" || status.permissions.sendSms !== "granted" || status.permissions.phoneState !== "granted") return undefined
+  const sims = status.subscriptions ?? []
+  if (selection !== undefined && !activeSmsSelection(selection, sims)) return undefined
+  const id = selection?.subscription.id ?? textingDefault(sims)
+  const subscription = sims.find((sim) => sim.id === id)
+  return subscription === undefined ? undefined : { subscription, fromMessages }
+}
 
 function binding(op: Sms, call: ExecutorCall) {
   if (call.proposalId !== call.operationId || !Number.isSafeInteger(call.attemptId) || call.attemptId <= 0) return undefined
@@ -30,7 +53,7 @@ function resultOf(receipt: SmsSendResult | undefined) {
 }
 
 /** A reviewed agent request uses the exact native SMS confirmation, never a fallback composer or a fresh send ID. */
-export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>, selection?: SmsSelection) {
+export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>, selection?: SmsSelection, approval?: Omit<SmsApproval, "attemptId">, line?: ComposeLine) {
   const wanted = binding(op, call)
   const device = try Device
   const phone = try Phone
@@ -40,13 +63,47 @@ export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () =
   const status = telephony("reviewed SMS status", (client) => client.messages.status()) catch () => undefined
   if (status?.sendMode !== "direct" || status.permissions.sendSms !== "granted" || !status.subscriptions?.some((sim) => sim.id === wanted.review.subscriptionId)) return refused
   if (selection !== undefined && (status.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || !activeSmsSelection(selection, status.subscriptions))) return refused
+  if (line !== undefined && !line.fromMessages && (textingDefault(status.subscriptions) !== line.subscription.id
+    || !status.subscriptions.some((sim) => sameSubscription(sim, line.subscription)))) return refused
   if (!(tryPromise(current) catch () => false) || !(try device.showing()) || !clear(try phone.get())) return refused
-  const receipt = telephony("sendSms", (client) => client.messages.sendSms(wanted.review, wanted.id)) catch (failure) => {
+  let receipt = telephony("sendSms", (client, signal) => approval === undefined || (selection === undefined && line === undefined)
+    ? client.messages.sendSms(wanted.review, wanted.id)
+    : client.approvedSms({ ...approval, attemptId: call.attemptId }, signal, current).sendSms(wanted.review, wanted.id)) catch (failure) => {
     if (failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
-      (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendRefused" || failure.tag === "SmsSendNotAttempted"))) return null
+      (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendRefused" || failure.tag === "SmsSendNotAttempted" || failure.code === "composer-not-started"))) return null
     return undefined
   }
-  return receipt === null ? refused : resultOf(receipt)
+  if (receipt === null) return refused
+  for (let read = 0; receipt?.status === "submitted" && read < 6; read += 1) {
+    try sleep("500 millis")
+    if (!(try device.showing())) break
+    const updated = timeout(telephony("smsSendResult", (client) => client.messages.smsSendResult(wanted.review, wanted.id)), "500 millis") catch () => undefined
+    if (updated === undefined) break
+    receipt = updated
+  }
+  return resultOf(receipt)
+}
+
+// spec/app/messages/composer.md, "An addressed send names the exact number, text and SIM before it can send"
+export effect function sendReviewedCompose(op: Compose, call: ExecutorCall, current: () => Promise<boolean>, line: ComposeLine | undefined,
+  selection: SmsSelection | undefined, contact: ReviewedPhoneContact | undefined, approval: Omit<SmsApproval, "attemptId"> | undefined) {
+  if (line === undefined || line.fromMessages !== (selection !== undefined)) return refused
+  const recipient = composeRecipient(op)
+  const number = normalizePhoneNumber(recipient.kind === "number" ? recipient.number : contact?.number)
+  if (number === null || !addressedSend(composeDraftOnly(op), number, op.body, line.subscription.id, selection?.subscription.id ?? line.subscription.id)
+    || (recipient.kind === "contact" && (contact === undefined || contact.query !== recipient.query.trim()))) return refused
+  const live = effect {
+    return (tryPromise(current) catch () => false) && (contact === undefined || (try currentPhoneContact(contact)))
+  }
+  const context = try Effect.context<Telephony>()
+  const checked = () => Effect.runPromise(Effect.provideContext(live, context))
+  const scope = approval === undefined ? undefined : contact === undefined ? approval : {
+    ...approval, contact: { id: contact.contact, lookup: contact.lookup, version: contact.version },
+  }
+  const sms: Sms = { type: "sms_send", recipients: [number], body: op.body, subscriptionId: line.subscription.id }
+  const sent = try reviewAgentSms(sms, call, checked, selection, scope, line)
+  if (sent === undefined || sent.kind !== "applied") return sent === undefined ? undefined : refused
+  return { kind: "applied", result: { kind: "sms-compose", status: sent.result.status } } as const
 }
 
 /** Recovery only reads the phone's receipt for the same body, recipients, operation ID and subscription. */
@@ -55,7 +112,7 @@ export effect function readAgentSms(op: Sms, call: ExecutorCall): unknown!!(Devi
   const device = try Device
   if (wanted === undefined || !(try device.capabilities()).image || !(try device.showing())) return undefined
   const receipt = telephony("smsSendResult", (client) => client.messages.smsSendResult(wanted.review, wanted.id)) catch () => undefined
-  if (!(try device.showing())) return undefined
+  if (!(try device.showing()) || receipt?.status === "submitted") return undefined
   const result = resultOf(receipt)
   return result?.kind === "applied" ? { kind: "found", result: result.result } : result
 }

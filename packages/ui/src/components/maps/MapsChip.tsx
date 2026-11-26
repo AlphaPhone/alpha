@@ -18,7 +18,7 @@ export function MapsChip({ label, icon, tone = "float", className, ...props }: M
       className={cn(
         focusRing,
         "flex min-h-11 shrink-0 items-center gap-2 rounded-full pr-4 pl-3 text-sm leading-snug font-semibold whitespace-nowrap active:bg-accent [&_svg]:size-4.5",
-        tone === "float" ? "bg-background shadow-md ring-1 ring-border" : "bg-secondary",
+        tone === "float" ? "bg-background shadow-chip ring-1 ring-border dark:shadow-chip-dark" : "bg-secondary",
         className,
       )}
       {...props}

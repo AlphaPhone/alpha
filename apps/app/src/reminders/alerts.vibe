@@ -1,27 +1,27 @@
 // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { AndroidReminderOperation } from "@elizaos/os-bridges"
+import type { ReminderItemRecord, RemindersSnapshot } from "@repo/launcher-records"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Alerts from "../../gen/app__reminders__alerts.effect.vibe"
 import type { AlertEffect as Out, Event } from "../../gen/app__reminders__alerts.effect.vibe"
-import { fromAreas } from "../home/cards.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { PhoneReminders } from "../platform/reminders.vibe"
-import { attemptedWith } from "../platform/remote.vibe"
-import type { Attempts } from "../runtime/attempts.vibe"
+import { attemptedWith, outcomeOf } from "../platform/remote.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { advanceDueDate, alertInstantMs, civilDayFromString, civilDayNumber, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
+import { alertInstantMs, civilDayFromString, civilDayNumber, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
 import { AlertBannerShelf, RemindersLedger, RemindersShelf } from "./shelf.vibe"
+import { persistReminderSnapshot } from "./snapshot.vibe"
 import {
-  type ReminderItemRecord,
-  type RemindersSnapshot,
-  isItemOverdue,
+  completeReminderOccurrence,
   priorityToSpec,
   recurrenceToSpec,
+  remindersStore,
 } from "./store.ts"
-
-
-const snapshotKey = "alpha.reminders.snapshot@1"
 
 effect function syncBannerFromMachine(): void!!(Alerts.Machine | AlertBannerShelf | RemindersShelf) {
   const state = try (try Alerts.Machine).get()
@@ -47,12 +47,40 @@ effect function armNative(id: number, at: number): void!!(PhoneReminders | Remin
   if (item === undefined) return
   const phone = try PhoneReminders
   if (phone.present) {
+    const dueAt = item.snoozedUntilMs === null ? dueInstantMs(item.dueDate, item.dueMinute) ?? at : at
     const occurrenceId = `${item.id}:${at}`
     const revision = String(item.revision)
     const bindingHash = `${item.id}:${revision}:${at}`
     ledger.armedNative.set(item.id, { occurrenceId, bindingHash, revision })
-    try ignore(phone.schedule({ id: item.id, title: item.title, body: item.notes, at, dueAt: at, alertMinutes: item.alertMinutes }))
+    try ignore(phone.schedule({ id: item.id, title: item.title, body: item.notes, at, dueAt, alertMinutes: item.alertMinutes }))
   }
+}
+
+module binding {
+  import type { AndroidReminderOperation } from "@elizaos/os-bridges"
+
+  /** Bind exactly the native operation the renderer is about to ask Android to make. */
+  export async function hash(operation: AndroidReminderOperation): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(operation)))
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+}
+import { hash } from binding
+
+effect function snoozeNative(id: number, at: number, itemRevision: number, attemptId: number): void!!(PhoneReminders | Attempts) {
+  const item = alertedItem(id, itemRevision)
+  const phone = try PhoneReminders
+  if (item === undefined || item.snoozedUntilMs !== at || !phone.present) return
+  const dueAt = dueInstantMs(item.dueDate, item.dueMinute)
+  const list = phone.list() catch () => undefined
+  const alarm = list?.reminders.find((row) => row.id === item.id && row.target.reminderId === item.id && row.target.occurrenceId === row.occurrenceId
+    && !row.undated && row.dueAt === dueAt && row.title === item.title && row.body === item.notes && row.alertMinutes === item.alertMinutes)
+  if (alarm === undefined) return
+  const operation: AndroidReminderOperation = { type: "reminder_snooze", target: alarm.target }
+  const operationId = try (try Attempts).key(attemptId)
+  const bindingHash = tryPromise(() => hash(operation)) catch () => undefined
+  if (bindingHash === undefined || alertedItem(id, itemRevision)?.snoozedUntilMs !== at) return
+  try ignore(phone.operate({ operationId, bindingHash, operation }))
 }
 
 effect function cancelNative(item: ReminderItemRecord): void!!(PhoneReminders | RemindersLedger) {
@@ -67,19 +95,6 @@ effect function cancelNative(item: ReminderItemRecord): void!!(PhoneReminders | 
     const target = { sourceId: item.id, sourceRevision: revision, reminderId: item.id, occurrenceId, revision }
     try ignore(phone.cancel({ id: item.id, target, operationId: `cancel-${item.id}-${revision}`, bindingHash }))
   }
-}
-
-/** Publish dated reminders to the Home agenda card bridge. */
-export function pushHomeFromSnapshot(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<string>, nowMs: number): void {
-  const dated = snapshot.items
-    .filter((item) => !hiddenIds.has(item.id) && item.dueDate !== null)
-    .map((item) => ({
-      due: dueInstantMs(item.dueDate, item.dueMinute) ?? nowMs,
-      overdue: isItemOverdue(item, nowMs),
-      done: item.completed,
-      title: item.title,
-    }))
-  fromAreas.reminders(dated)
 }
 
 /** Build a valid machine `applySync` payload from a normalized `RemindersStoreView`. */
@@ -130,7 +145,7 @@ export function buildMachineSyncArgs(
 effect function syncBannerAction(
   id: number,
   attemptId: number,
-  mutate: (row: ReminderItemRecord, now: number) => ReminderItemRecord,
+  mutate: (row: ReminderItemRecord, now: number) => ReminderItemRecord | undefined,
   build: (updated: ReminderItemRecord, now: number, key: string) => HttpClientRequest.HttpClientRequest,
 ): Event!!(Agent | Time | Attempts | KeyValueStore.KeyValueStore | RemindersShelf | Reminders.Machine | Alerts.Machine | AlertBannerShelf | PhoneReminders | RemindersLedger) {
   const store = (try RemindersShelf).store
@@ -138,6 +153,7 @@ effect function syncBannerAction(
   if (item === undefined) return { type: "syncAnswered", id, attemptId, confirmed: false, known: true }
   const now = try (try Time).now()
   const nextItem = mutate(item, now)
+  if (nextItem === undefined) return { type: "syncAnswered", id, attemptId, confirmed: false, known: true }
   const snap = store.snapshot().snapshot
   const nextSnapshot: RemindersSnapshot = {
     ...snap,
@@ -147,10 +163,8 @@ effect function syncBannerAction(
   }
   const machine = try Reminders.Machine
   const before = try machine.get()
-  const view = store.replace(nextSnapshot, null, before.nextListId, before.nextItemId)
-  const encoded = Effect.try(() => JSON.stringify(view.snapshot)) catch () => undefined
-  if (encoded !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(snapshotKey, encoded))
-  pushHomeFromSnapshot(view.snapshot, view.hiddenIds, now)
+  try persistReminderSnapshot(nextSnapshot, now)
+  const view = store.snapshot()
   const syncArgs = buildMachineSyncArgs(view, before.nextListId, before.nextItemId, now)
   if (Reminders.canApplySync(before, syncArgs.syncedLists, syncArgs.nextListId, syncArgs.syncedItems, syncArgs.nextItemId)) {
     try contained(machine.send({ type: "applySync", ...syncArgs }), "syncing banner action to reminders machine")
@@ -164,22 +178,7 @@ effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Tim
   return try syncBannerAction(
     id,
     attemptId,
-    (row, now) => {
-      if (row.recurrence !== "none" && row.dueDate !== null) {
-        return {
-          ...row,
-          dueDate: advanceDueDate(row.dueDate, row.recurrence),
-          subtasks: row.subtasks.map((sub) => ({ ...sub, done: false })),
-          completed: false,
-          completedAtMs: null,
-          snoozedUntilMs: null,
-          notifiedAtMs: null,
-          revision: row.revision + 1,
-          updatedAtMs: now,
-        }
-      }
-      return { ...row, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }
-    },
+    completeReminderOccurrence,
     (updated, _now, key) => HttpClientRequest.bodyJsonUnsafe(
       HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(updated.id)}/complete`),
       { item: updated, idempotencyKey: key },
@@ -197,6 +196,59 @@ effect function syncSnooze(id: number, until: number, attemptId: number): Event!
       { untilMs: until, idempotencyKey: key },
     ),
   )
+}
+
+function alertedItem(id: number, itemRevision: number): ReminderItemRecord | undefined {
+  const item = remindersStore.findItemBySpecId(id)
+  const view = remindersStore.snapshot()
+  return item !== undefined && item.revision === itemRevision && !view.hiddenIds.has(item.id)
+    && !item.completed && item.dueDate !== null && item.alertMinutes !== null ? item : undefined
+}
+
+/** Snooze only the active alerted reminder revision selected in Calendar. */
+export effect function snoozeSelectedReminder(itemId: string, itemRevision: number): void!!(Alerts.Machine | Time) {
+  const id = remindersStore.specIdForItem(itemId)
+  if (alertedItem(id, itemRevision)?.id !== itemId) return
+  const now = try (try Time).now()
+  const until = snoozeTargetMs(now, "10m")
+  const alerts = try Alerts.Machine
+  if (Alerts.canSnoozeFromCalendar(try alerts.get(), id, itemRevision, until, now)) {
+    try contained(alerts.send({ type: "snoozeFromCalendar", id, itemRevision, until, now }), "snoozing the selected reminder")
+  }
+}
+
+effect function storeCalendarSnooze(id: number, itemRevision: number, until: number, attemptId: number): Event!!(Agent | Time | Attempts | KeyValueStore.KeyValueStore | Toasts | Said) {
+  const declined: Event = { type: "calendarSnoozeSaved", id, attemptId, itemRevision, stored: false, confirmed: false, known: true }
+  const item = alertedItem(id, itemRevision)
+  if (item === undefined) return declined
+  const key = try (try Attempts).key(attemptId)
+  const agent = try Agent
+  const outcome = effect {
+    try agent.call(HttpClientRequest.bodyJsonUnsafe(
+      HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/snooze`),
+      { untilMs: until, expectedRevision: itemRevision, idempotencyKey: key },
+    ))
+    return { confirmed: true, known: true, changed: false }
+  } catch (failure) => ({
+    ...outcomeOf(failure),
+    changed: failure._tag === "Refused" && (failure.status === 404 || failure.status === 409),
+  })
+  const { confirmed, known } = outcome
+  const now = try (try Time).now()
+  if (outcome.changed) {
+    try say("Changed", true)
+    return { ...declined, confirmed, known }
+  }
+  if (until <= now || alertedItem(id, itemRevision)?.id !== item.id) return { ...declined, confirmed, known }
+  const snapshot = remindersStore.snapshot().snapshot
+  try persistReminderSnapshot({
+    ...snapshot, version: snapshot.version + 1, updatedAtMs: now,
+    items: snapshot.items.map((row) => row.id === item.id
+      ? { ...row, snoozedUntilMs: until, notifiedAtMs: null, revision: row.revision + 1, updatedAtMs: now }
+      : row),
+  }, now)
+  try say("Snoozed 10 minutes")
+  return { type: "calendarSnoozeSaved", id, attemptId, itemRevision: item.revision + 1, stored: true, confirmed, known }
 }
 
 effect function syncDismiss(id: number, attemptId: number): Event!!(Agent | Time | Attempts | KeyValueStore.KeyValueStore | RemindersShelf | Reminders.Machine | Alerts.Machine | AlertBannerShelf | PhoneReminders | RemindersLedger) {
@@ -226,20 +278,22 @@ export effect function snoozeAlertFromBanner(
   return true
 }
 
-function carry(fx: Out): Job<Event, Agent | Time | Attempts | KeyValueStore.KeyValueStore | RemindersShelf | Reminders.Machine | Alerts.Machine | AlertBannerShelf | PhoneReminders | RemindersLedger, []> {
+function carry(fx: Out): Job<Event, Agent | Time | Attempts | KeyValueStore.KeyValueStore | RemindersShelf | Reminders.Machine | Alerts.Machine | AlertBannerShelf | PhoneReminders | RemindersLedger | Toasts | Said, []> {
   return match (fx) {
     when { tag: "RingBanner" }: run("ring", syncBannerFromMachine());
     when { tag: "ClearBanner" }: run("clear", syncBannerFromMachine());
     when { tag: "Arm", let id, let at }: run(`arm ${id}`, armNative(id, at));
+    when { tag: "ArmCalendarSnooze", let id, let at, let itemRevision, let attemptId }: run(`arm ${id}`, snoozeNative(id, at, itemRevision, attemptId));
     when { tag: "SyncComplete", let id, let attemptId }: answer(`complete ${attemptId}`, syncComplete(id, attemptId), { type: "syncAnswered", id, attemptId, confirmed: false, known: false });
     when { tag: "SyncSnooze", let id, let until, let attemptId }: answer(`snooze ${attemptId}`, syncSnooze(id, until, attemptId), { type: "syncAnswered", id, attemptId, confirmed: false, known: false });
+    when { tag: "StoreCalendarSnooze", let id, let itemRevision, let until, let attemptId }: answer(`snooze selected ${attemptId}`, storeCalendarSnooze(id, itemRevision, until, attemptId), { type: "calendarSnoozeSaved", id, attemptId, itemRevision, stored: false, confirmed: false, known: false });
     when { tag: "SyncDismiss", let id, let attemptId }: answer(`dismiss ${attemptId}`, syncDismiss(id, attemptId), { type: "syncAnswered", id, attemptId, confirmed: false, known: false });
   }
 }
 
 function timers(state: Alerts.Alerts) {
   return state.entries
-    .filter((entry) => Alerts.isWaiting(entry))
+    .filter((entry) => Alerts.isWaiting(entry) && entry.requestedSnooze === 0)
     .map((entry) => due<Event, []>(`alert:${entry.id}`, entry.dueAt, { type: "fire", id: entry.id, now: untimed }))
 }
 
@@ -281,5 +335,5 @@ export effect function syncAlertsWithSnapshot(snapshot: RemindersSnapshot, nowMs
 
 /** Resident due-time alerting layer, kept across restarts and armed via `Time.until`. */
 export const reminderAlerts = together(
-  reacting(Alerts, { keep: 1, open: [{ type: "reopen" }], carry, timers }),
+  reacting(Alerts, { keep: 2, open: [{ type: "reopen" }], carry, timers }),
 )

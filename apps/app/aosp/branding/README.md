@@ -47,15 +47,18 @@ Never reset device provisioning or wipe the owner merely to preview the welcome 
 ## Home/Back and keyboard policy
 
 The Alpha OS welcome selects Android's standard gestural navigation overlay before
-completing fresh primary-user setup (treating AOSP's pre-setup three-button boot default as
-unselected while `USER_SETUP_COMPLETE == 0`). Any non-default enabled navigation mode is kept.
+presenting fresh primary-user setup (treating AOSP's pre-setup three-button boot default as
+unselected while `USER_SETUP_COMPLETE == 0`). Setup completion retries if the overlay service
+was unavailable at first. Any non-default enabled navigation mode is kept.
 Completed setup, managed profiles and secondary users keep their settings. Android owns the
 gesture regions and dimensions. Three-button navigation stays available in Settings
-and supplies the system fallback before setup or when gesture activation is unavailable.
-`home-back-keyboard.patch` defines two default-off Launcher3 product resources:
-`config_alpha_home_back_only` (left `false` in `AlphaNavigationOverlay` so Recents and quick-switch
-work as in AOSP) and `config_alpha_hide_navigation_handle` (set `true` in `AlphaNavigationOverlay`
-for `hidden-navigation-handle.patch`).
+and supplies the system fallback when gesture activation is unavailable.
+`home-back-keyboard.patch` keeps its default-off Launcher3 product resource
+(`config_alpha_home_back_only`); Alpha's overlay leaves it `false`, so Recents and
+quick-switch work as in AOSP. A separate product resource (`config_alpha_hide_taskbar_handle`,
+default `false` in `hidden-navigation-handle.patch` and `true` in `AlphaNavigationOverlay`)
+hides only the Launcher3 taskbar gesture handle. Standard Alpha image staging includes that
+render-only change.
 
 LatinIME's default-theme resource applies only without a saved theme choice. Input engines,
 languages, predictions, correction, emoji, dictation affordances and permission behavior remain

@@ -12,14 +12,42 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.provider.Settings;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 /** Device facts, allowlisted settings, explicit bounded text handoffs and verified app self-updates. */
-@CapacitorPlugin(name="AlphaDevice")
+@CapacitorPlugin(name = "AlphaDevice", permissions = {
+ @Permission(alias = "camera", strings = {Manifest.permission.CAMERA}),
+ @Permission(alias = "notifications", strings = {Manifest.permission.POST_NOTIFICATIONS})
+})
 public final class AlphaDevicePlugin extends Plugin {
+ @PluginMethod public void takeBillingReturn(PluginCall call) {
+  String session = BillingReturn.take();
+  call.resolve(new JSObject().put("session", session == null ? org.json.JSONObject.NULL : session));
+ }
+
+ @PluginMethod public void textAsk(PluginCall call) {
+  if (!(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("ticket", 0));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("ticket", activity.textAskTicket())));
+ }
+
+ @PluginMethod public void closeTextAsk(PluginCall call) {
+  Integer ticket = call.getInt("ticket");
+  if (ticket == null || !(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("closed", false));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("closed", activity.closeTextAsk(ticket))));
+ }
+
  /** Explicit bounded text handoff; chooser opening never claims a sent message. */
  static String boundedShareText(String text){
   if(text==null||text.isBlank()||text.indexOf('\0')>=0||text.length()>65536)throw new IllegalArgumentException();
@@ -100,6 +128,7 @@ public final class AlphaDevicePlugin extends Plugin {
  @PluginMethod public void settingsFacts(PluginCall call) {
   JSObject out=new JSObject();
   out.put("androidRelease",Build.VERSION.RELEASE);
+  out.put("startupPermissionDefaults", AlphaImageCapabilities.startupPermissionDefaults(getContext()));
   try {
    int boot=Settings.Global.getInt(getContext().getContentResolver(),Settings.Global.BOOT_COUNT,-1);
    if(boot>=0)out.put("bootCount",boot);
@@ -107,6 +136,58 @@ public final class AlphaDevicePlugin extends Plugin {
   putSettingsGrants(getContext(),out);
   call.resolve(out);
  }
+
+ /** Reads or requests exactly one permission from the Access walkthrough. */
+ private static String accessPermission(PluginCall call) {
+  String permission = call.getString("permission", "");
+  return "camera".equals(permission) || "notifications".equals(permission) ? permission : null;
+ }
+
+ private PermissionState accessPermissionState(String permission) {
+  if ("notifications".equals(permission) && Build.VERSION.SDK_INT < 33) return PermissionState.GRANTED;
+  return getPermissionState(permission);
+ }
+
+ @PluginMethod public void accessPermissionStatus(PluginCall call) {
+  String permission = accessPermission(call);
+  if (permission == null) {
+   call.reject("Unknown access permission");
+   return;
+  }
+  PermissionState state = accessPermissionState(permission);
+  if (state == null) call.reject("Android permission is unavailable");
+  else call.resolve(new JSObject().put("state", state.toString()));
+ }
+
+ @PluginMethod public void requestAccessPermission(PluginCall call) {
+  String permission = accessPermission(call);
+  android.app.Activity activity = getActivity();
+  if (permission == null || activity == null) {
+   call.reject("Android permission is unavailable");
+   return;
+  }
+  activity.runOnUiThread(() -> {
+   if (!shareForeground(activity)) {
+    call.reject("Open and unlock Alpha before asking for access");
+    return;
+   }
+   PermissionState state = accessPermissionState(permission);
+   if (state != PermissionState.PROMPT && state != PermissionState.PROMPT_WITH_RATIONALE) {
+    accessPermissionStatus(call);
+    return;
+   }
+   LateLaunch.ask(call, () -> requestPermissionForAlias(permission, call, "accessPermissionAnswered"));
+  });
+ }
+
+ @Override @PluginMethod public void requestPermissions(PluginCall call) {
+  requestAccessPermission(call);
+ }
+
+ @PermissionCallback private void accessPermissionAnswered(PluginCall call) {
+  accessPermissionStatus(call);
+ }
+
  private static void putSettingsGrants(Context context,JSObject out) {
   JSObject grants=new JSObject();
   boolean fine=context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
@@ -129,12 +210,22 @@ public final class AlphaDevicePlugin extends Plugin {
  }
  /** As HOME, an outside screen gets its own task, as stock launchers do, so HOME does not clear it. Never for a result start. */
  public static Intent handOff(Intent intent){return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
+ @PluginMethod public void passwordProviderStatus(PluginCall call) {
+  call.resolve(PasswordProviderSupport.status(getContext()));
+ }
+
  @PluginMethod public void openPasswordProvider(PluginCall call) {
-  String action=call.getString("action","");
-  android.app.Activity activity=getActivity();
-  if(activity==null){call.reject("Password provider setup could not be opened. No provider change is confirmed.");return;}
-  activity.runOnUiThread(()->{
-   if(activity.isFinishing()||activity.isDestroyed()){call.reject("Password provider setup could not be opened. No provider change is confirmed.");return;}
+  String action = call.getString("action", "");
+  android.app.Activity activity = getActivity();
+  if (activity == null) {
+    call.reject("Open and unlock Alpha before choosing a password provider.");
+    return;
+  }
+  activity.runOnUiThread(() -> {
+    if (!shareForeground(activity)) {
+      call.reject("Open and unlock Alpha before choosing a password provider.");
+      return;
+    }
    try {
     Intent target=PasswordProviderSupport.intent(getContext(),action);
     String destination=Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE.equals(target.getAction())?"provider-picker":"external";

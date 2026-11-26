@@ -38,17 +38,21 @@ export const meta: ComponentMeta<AssistantMessageProps> = {
     "Alpha actions": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onReadAloud.mockClear();
       onFork.mockClear();
-      const trigger = within(canvasElement).getByRole("button", { name: /Friday works/ });
-      await userEvent.click(trigger);
+      const trigger = within(canvasElement).getByRole("button", { name: "Message actions" });
+      trigger.focus();
+      await userEvent.keyboard("{Enter}");
       await expect(screen.queryByRole("menuitem", { name: "Edit and resend" })).toBeNull();
       await userEvent.click(await screen.findByRole("menuitem", { name: "Read aloud" }));
-      await waitFor(() => expect([onReadAloud.mock.calls.length, screen.queryByRole("menu"), document.activeElement]).toEqual([1, null, trigger]));
+      await waitFor(() => expect(onReadAloud.mock.calls.length).toBe(1));
+      await expect(screen.getByRole("menuitem", { name: "Read aloud" })).toHaveFocus();
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect([screen.queryByRole("menu"), document.activeElement]).toEqual([null, trigger]));
       await expect(onFork.mock.calls.length).toBe(0);
     },
     "Owner actions": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onEditAgain.mockClear();
-      const trigger = within(canvasElement).getByRole("button", { name: /What is on Friday/ });
-      await userEvent.click(trigger);
+      const trigger = within(canvasElement).getByRole("button", { name: "Message actions" });
+      await userEvent.click(within(canvasElement).getByText("What is on Friday?"));
       await expect(screen.queryByRole("menuitem", { name: "Read aloud" })).toBeNull();
       await userEvent.click(await screen.findByRole("menuitem", { name: "Edit and resend" }));
       await waitFor(() => expect([onEditAgain.mock.calls.length, screen.queryByRole("menu"), document.activeElement]).toEqual([1, null, trigger]));

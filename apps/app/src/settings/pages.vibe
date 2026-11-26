@@ -3,7 +3,6 @@ import * as Android from "../../gen/app__settings__android.effect.vibe"
 import * as Facts from "../../gen/app__settings__facts.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { type Machine as AccessReview } from "../../gen/app__startup__access.effect.vibe"
 import { type Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said } from "../notices/toasts.vibe"
 import { type Cloud } from "../platform/cloud.vibe"
@@ -13,20 +12,21 @@ import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { openReview } from "../startup/settingsAccess.vibe"
-import { development } from "./build.ts"
+import { type AccessStart, type AccessSurface, openReview } from "../startup/settingsAccess.vibe"
+import { developerTools } from "./build.ts"
+import { type VaultTurn, passwordProvider, vaultPresence, vaultTimers, vaultTurn, vaultWork } from "./passwords.vibe"
 
 const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
 
 // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
 const admitting = effect {
   const { image } = try (try Device).capabilities()
-  const admit: Pages.Event = { type: "admit", development: development(), phone: native(), image }
+  const admit: Pages.Event = { type: "admit", development: developerTools(), phone: native(), image }
   return [admit] as const
 }
 
 // spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; the other neighbours draw on the places Settings offers them.
-function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Layers | Device | Pages.Machine | AccessReview | Cloud | Toasts | Said, []> {
+function handed(fx: Pages.Effect): Job<Pages.Event, AccessSurface | AccessStart | Pages.Machine | Cloud | Toasts | Said, []> {
   return match (fx) {
     when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
       const shell = try Shell
@@ -35,8 +35,7 @@ function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Layers | Device | Pa
       if (neighbour === "CalendarAccount" || neighbour === "CalendarBackups") try ignore(shell.send({ type: "openView", view: "Calendar" }))
       if (neighbour === "Conversations") try ignore(shell.send({ type: "raise", detent: "Full" }))
     });
-    when { tag: "ReviewAccess", let access }: run("access review", openReview(access));
-    when { tag: "ReviewAllAccess" }: run("access review", openReview(undefined));
+    when { tag: "ReviewAllAccess" }: run("access review", openReview);
   }
 }
 
@@ -49,8 +48,8 @@ export const pages = together(
 
 // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"
 effect function readPhone(ticket: number): Facts.Event!!(SystemSettings | Pages.Machine) {
-  const { page } = try (try Pages.Machine).get()
-  const report = try (try SystemSettings).report({ autofill: page === "PasswordsPage" })
+  const { page, phone } = try (try Pages.Machine).get()
+  const report = try (try SystemSettings).report({ autofill: phone && Pages.passwordPage(page) })
   return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], alerts: [...report.alerts], home: report.home, assistant: report.assistant, launcher: report.launcher }
 }
 
@@ -70,10 +69,11 @@ effect function requestedHome(request: number): Facts.Event!!(SystemSettings | S
   return how === "ended" ? { type: "homeRequestEnded", request, at: untimed, showing: shown } : { type: "giveUpOnHome", now: untimed, at: untimed, showing: shown }
 }
 
-function readFacts(fx: Facts.Effect): Job<Facts.Event, SystemSettings | Shell | Pages.Machine | Facts.Machine | Time, []> {
+function readFacts(fx: Facts.Effect): Job<Facts.Event, SystemSettings | Shell | Pages.Machine | Facts.Machine | Layers | Device | Time | VaultTurn, []> {
   return match (fx) {
-    when { tag: "ReadPhone", let ticket }: answer("read", readPhone(ticket), { type: "answered", ticket, reported: [], grants: [], alerts: [], home: "NoSuchRole", assistant: "NoSuchRole", launcher: false });
-    when { tag: "RequestHome", let request }: answer("home", requestedHome(request), { type: "homeRequestEnded", request, at: untimed, showing: false });
+    when { tag: "ReadPhone", let ticket }: answer("read", readPhone(ticket), { type: "abandon", now: untimed });
+    when { tag: "WorkVault", let request, let work }: vaultWork(request, work);
+    when { tag: "RequestHome", let request }: answer("home", requestedHome(request), { type: "giveUpOnHome", now: untimed, at: untimed, showing: false });
   }
 }
 
@@ -82,7 +82,7 @@ function factTimers(state: Facts.Facts) {
   return state.read.read.status === "Loading" ? [due<Facts.Event, []>("abandon", state.read.due, { type: "abandon", now: untimed })] : []
 }
 
-const factsMachine = reacting(Facts, { carry: readFacts, timers: factTimers })
+const factsMachine = reacting(Facts, { carry: readFacts, timers: (state) => [...factTimers(state), ...vaultTimers(state)] })
 
 // spec/app/settings/facts.md, "Opening Settings and Refresh read the phone; Alpha coming back to the front reads it again if Settings is showing"; spec/app/settings/facts.md, "Leaving Settings retires the read in flight and forgets what was shown, so the next opening waits for a fresh answer"
 const factsShown = hearing(
@@ -121,10 +121,10 @@ const androidMachine = reacting(Android, { carry: startAndroid, timers: androidT
 
 const autofillShown = following(
   Pages.Machine,
-  (state) => state.page === "PasswordsPage",
+  (state) => state.phone && Pages.passwordPage(state.page),
   Facts.Machine,
   (showing): Facts.Event | undefined => showing ? { type: "refresh", at: untimed } : undefined,
 )
 
 /** What the Settings screen reads beside where the owner is: the phone's facts and the hand-overs to Android's own pages. */
-export const facts = together(factsMachine, factsShown, factsResumed, autofillShown, androidMachine)
+export const facts = together(factsMachine, factsShown, factsResumed, autofillShown, androidMachine, vaultTurn, vaultPresence, passwordProvider)

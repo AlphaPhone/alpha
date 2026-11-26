@@ -1,15 +1,35 @@
 name: Cloud deploy
-run-name: Alpha Cloud ${{ inputs.action }} (${{ inputs.environment }}) on ${{ github.sha }}
-# Deploys Alpha's own cloud (spec/cloud/rollout.md), the cut-over candidate: the API Worker (apps/cloud/src/worker.vibe)
-# and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Manual and main-only. Deploying the Cloud
-# never moves a phone: each environment's phones address the cloud packages/deployment names until the cutover.
+run-name: Alpha Cloud ${{ github.event_name == 'push' && 'staging then production' || format('{0} ({1})', inputs.action, inputs.environment) }} on ${{ github.sha }}
+# Deploys Alpha Cloud (spec/cloud/rollout.md): the API Worker (apps/cloud/src/worker.vibe)
+# and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Pushes on vibestack-develop promote the same
+# commit only after staging passes. Manual runs follow the selected environment's deployment branch policy. Deploying the Cloud
+# leaves the hosts bundled in each installed app in place.
 #
 # Each GitHub environment (alpha-cloud-staging, alpha-cloud-production) holds:
 #   secret CLOUDFLARE_API_TOKEN   Workers Scripts and Routes, Hyperdrive edit, and Zone DNS edit
 #   secret ALPHA_CLOUD_ENV        the completed secrets file of `pnpm cloud secrets` (run once locally)
 #   secret ALPHA_CLOUD_PROFILE    the operator's completed apps/cloud/profile/candidate.example.json
+#   secret ALPHA_CLOUD_DB_CA      the dedicated PostgreSQL server CA certificate for this environment
 # Account and resource ids come from the committed apps/cloud/resources.json.
 on:
+  push:
+    branches: [vibestack-develop]
+    paths:
+      - apps/cloud/**
+      - spec/cloud/**
+      - spec/index.md
+      - packages/deployment/**
+      - packages/eliza-harness/**
+      - eliza.lock.json
+      - vibestack/**
+      - .nvmrc
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
+      - turbo.json
+      - .github/actions/setup/**
+      - .github/workflows/cloud-deploy.yml
   workflow_dispatch:
     inputs:
       environment:
@@ -31,61 +51,135 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: alpha-cloud-${{ inputs.environment }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'bundle' && format('alpha-cloud-bundle-{0}', inputs.environment) || 'alpha-cloud-deploy' }}
   cancel-in-progress: false
 jobs:
-  cloud:
-    if: github.ref == 'refs/heads/main'
+  staging:
+    if: github.repository_id == '1396333361' && (github.event_name == 'push' || inputs.environment == 'staging')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    environment: alpha-cloud-${{ inputs.environment }}
+    environment: alpha-cloud-staging
     env:
-      E: ${{ inputs.environment }}
-    steps:
+      E: staging
+      COMPONENT: ${{ github.event_name == 'push' && 'all' || inputs.component }}
+    steps: &cloud-steps
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
       - uses: ./.github/actions/setup
         with:
           job: ""
           verification: "false"
       - run: pnpm eliza
-      - name: Write the private inputs
+      - name: Write the private profile
         env:
-          ALPHA_CLOUD_ENV: ${{ secrets.ALPHA_CLOUD_ENV }}
           ALPHA_CLOUD_PROFILE: ${{ secrets.ALPHA_CLOUD_PROFILE }}
         run: |
           umask 077
-          test -n "$ALPHA_CLOUD_ENV" || { echo "ALPHA_CLOUD_ENV is empty: store the completed file of pnpm cloud secrets" >&2; exit 1; }
-          printf '%s\n' "$ALPHA_CLOUD_ENV" > "$RUNNER_TEMP/alpha-cloud.env"
+          test -n "$ALPHA_CLOUD_PROFILE" || { echo "ALPHA_CLOUD_PROFILE is empty: store the completed operator profile" >&2; exit 1; }
           printf '%s\n' "$ALPHA_CLOUD_PROFILE" > "$RUNNER_TEMP/alpha-cloud-profile.json"
       - name: Render and bundle (dry run)
         run: pnpm cloud bundle --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --out "$RUNNER_TEMP/rendered"
+      - name: Prepare the deployment and PostgreSQL inputs
+        if: github.event_name == 'push' || inputs.action == 'deploy'
+        env:
+          ALPHA_CLOUD_ENV: ${{ secrets.ALPHA_CLOUD_ENV }}
+          ALPHA_CLOUD_DB_CA: ${{ secrets.ALPHA_CLOUD_DB_CA }}
+        run: |
+          node --input-type=module <<'JS'
+          import { X509Certificate } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { parseEnv } from 'node:util';
+
+          const reject = (message) => {
+            console.error(message);
+            process.exit(1);
+          };
+          const source = process.env.ALPHA_CLOUD_ENV;
+          const ca = process.env.ALPHA_CLOUD_DB_CA?.trim();
+          if (!source) reject('ALPHA_CLOUD_ENV is empty: store the completed file of pnpm cloud secrets');
+          if (!ca) reject('ALPHA_CLOUD_DB_CA is empty: store the dedicated PostgreSQL CA certificate');
+          try {
+            if (!/^-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----$/.test(ca) || !new X509Certificate(ca).ca) {
+              throw new Error();
+            }
+          } catch {
+            reject('ALPHA_CLOUD_DB_CA must contain one PEM CA certificate');
+          }
+
+          let database;
+          try {
+            database = new URL(parseEnv(source).DATABASE_URL);
+            if (!['postgres:', 'postgresql:'].includes(database.protocol) || !database.hostname || !database.username || !database.password || database.pathname.length < 2) {
+              throw new Error();
+            }
+          } catch {
+            reject('ALPHA_CLOUD_ENV must contain a PostgreSQL DATABASE_URL with credentials');
+          }
+
+          const temp = process.env.RUNNER_TEMP;
+          const caPath = join(temp, 'alpha-cloud-db-ca.pem');
+          database.searchParams.set('sslmode', 'verify-ca');
+          database.searchParams.set('uselibpqcompat', 'true');
+          database.searchParams.set('sslrootcert', caPath);
+          const databaseUrl = database.href;
+          const mask = databaseUrl.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+          process.stdout.write(`::add-mask::${mask}\n`);
+          const databaseEnv = source.split(/\r?\n/).filter((line) => !/^\s*DATABASE_URL\s*=/.test(line));
+          const privateFile = { mode: 0o600 };
+          writeFileSync(caPath, `${ca}\n`, privateFile);
+          writeFileSync(join(temp, 'alpha-cloud.env'), `${source}\n`, privateFile);
+          writeFileSync(join(temp, 'alpha-cloud-db.env'), [...databaseEnv, `DATABASE_URL=${databaseUrl}`, ''].join('\n'), privateFile);
+          JS
       - name: Verify the secrets, never generating one
-        if: inputs.action == 'deploy'
+        if: github.event_name == 'push' || inputs.action == 'deploy'
         run: pnpm cloud secrets --environment "$E" --env-file "$RUNNER_TEMP/alpha-cloud.env" --frozen
       - name: Check the Cloudflare resources
-        if: inputs.action == 'deploy'
+        if: github.event_name == 'push' || inputs.action == 'deploy'
         run: pnpm cloud preflight --environment "$E" --env-file "$RUNNER_TEMP/alpha-cloud.env"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Migrate the database
-        if: inputs.action == 'deploy'
-        run: pnpm cloud migrate --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+        if: github.event_name == 'push' || inputs.action == 'deploy'
+        run: pnpm cloud migrate --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud-db.env"
       - name: Register Alpha's native client
-        if: inputs.action == 'deploy'
-        run: pnpm cloud register --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+        if: github.event_name == 'push' || inputs.action == 'deploy'
+        run: pnpm cloud register --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud-db.env"
       - name: Check the payment catalogue
-        if: inputs.action == 'deploy'
-        run: pnpm cloud prices --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+        if: github.event_name == 'push' || inputs.action == 'deploy'
+        run: pnpm cloud prices --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud-db.env"
       - name: Deploy the Workers
-        if: inputs.action == 'deploy'
-        run: pnpm cloud deploy --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud.env" --component "${{ inputs.component }}"
+        if: github.event_name == 'push' || inputs.action == 'deploy'
+        run: pnpm cloud deploy --environment "$E" --profile "$RUNNER_TEMP/alpha-cloud-profile.json" --env-file "$RUNNER_TEMP/alpha-cloud.env" --component "$COMPONENT"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Public readiness
-        if: inputs.action == 'deploy'
-        run: pnpm cloud smoke --environment "$E"
+        if: github.event_name == 'push' || inputs.action == 'deploy'
+        timeout-minutes: 25
+        run: |
+          for ((attempt = 1; attempt < 8; attempt++)); do
+            if pnpm cloud smoke --environment "$E"; then
+              exit 0
+            fi
+            sleep 30
+          done
+          pnpm cloud smoke --environment "$E"
       - name: Remove the private inputs
         if: always()
-        run: rm -f "$RUNNER_TEMP/alpha-cloud.env" "$RUNNER_TEMP/alpha-cloud-profile.json"
+        run: rm -f "$RUNNER_TEMP/alpha-cloud.env" "$RUNNER_TEMP/alpha-cloud-profile.json" "$RUNNER_TEMP/alpha-cloud-db.env" "$RUNNER_TEMP/alpha-cloud-db-ca.pem"
+
+  production:
+    needs: staging
+    if: >-
+      ${{ !cancelled() && github.repository_id == '1396333361' &&
+      ((github.event_name == 'push' && needs.staging.result == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: alpha-cloud-production
+    env:
+      E: production
+      COMPONENT: ${{ github.event_name == 'push' && 'all' || inputs.component }}
+    steps: *cloud-steps

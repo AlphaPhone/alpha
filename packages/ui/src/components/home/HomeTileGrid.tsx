@@ -12,6 +12,7 @@ export type HomeTileItem = {
   icon: ReactNode;
   /** What waits in the app; given only for Phone, Messages and Inbox, and never while Home is being edited. */
   badge?: string;
+  inert?: boolean;
 };
 
 /** A tile moved to just before, or with `behind` just after, the tile `onto`. */
@@ -26,6 +27,7 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
   onOpen?: (id: string) => void;
   /** Opens the phone's installed Apps drawer after the saved icons. */
   onOpenDrawer?: () => void;
+  drawerInert?: boolean;
   /** Starts editing, from a long press or the context menu key on a tile; left out where editing may not start. */
   onBeginEditing?: () => void;
   /** Schedules and cancels a stationary press on a tile. */
@@ -57,7 +59,7 @@ type Drag = {
  * removed with Delete; keyboard focus stays on the tile it moved.
  * @model spec/app/home/tiles.md
  */
-export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, onBeginEditing, hold, onRemove, onMove, className, ...props }: HomeTileGridProps) {
+export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, drawerInert, onBeginEditing, hold, onRemove, onMove, className, ...props }: HomeTileGridProps) {
   const draggingRef = useRef<Drag | undefined>(undefined);
   const movedRef = useRef<string | null>(null);
 
@@ -156,6 +158,7 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, onB
           label={tile.label}
           icon={tile.icon}
           badge={tile.badge}
+          inert={tile.inert || undefined}
           editing={editing}
           aria-keyshortcuts={editing ? "ArrowLeft ArrowRight ArrowUp ArrowDown Delete" : undefined}
           ref={(button: HTMLButtonElement | null) => {
@@ -181,7 +184,7 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onOpenDrawer, onB
       ))}
       {onOpenDrawer && !editing && (
         <HomeTile label="Apps" icon={<LayoutGrid className="size-7.5" />}
-          aria-haspopup="dialog" data-focus-key="home-apps" onClick={onOpenDrawer} />
+          inert={drawerInert || undefined} aria-haspopup="dialog" data-focus-key="home-apps" onClick={onOpenDrawer} />
       )}
     </nav>
   );

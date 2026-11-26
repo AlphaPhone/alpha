@@ -1,11 +1,18 @@
 import { Toast } from "../Toast.tsx";
 
-const verbs = { archive: "Archived", trash: "Moved to Trash", unarchive: "Moved back to the Inbox", untrash: "Taken out of Trash" } as const;
+const verbs = {
+  archive: "Archived", trash: "Moved to Trash", unarchive: "Moved back to the Inbox", untrash: "Taken out of Trash",
+  star: "Starred", unstar: "Removed stars from", markRead: "Marked as read", markUnread: "Marked as unread",
+} as const;
 const refused = {
   archive: (many: string) => `Could not archive ${many}`,
   trash: (many: string) => `Could not move ${many} to Trash`,
   unarchive: (many: string) => `Could not move ${many} back to the Inbox`,
   untrash: (many: string) => `Could not take ${many} out of Trash`,
+  star: (many: string) => `Could not star ${many}`,
+  unstar: (many: string) => `Could not remove stars from ${many}`,
+  markRead: (many: string) => `Could not mark ${many} as read`,
+  markUnread: (many: string) => `Could not mark ${many} as unread`,
 } as const;
 
 export type InboxChangeToastProps = {

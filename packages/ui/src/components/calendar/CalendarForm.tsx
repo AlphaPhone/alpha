@@ -21,7 +21,7 @@ export type CalendarFormPageProps = ComponentProps<"div"> & {
 export function CalendarFormPage({ onBack, onSave, actions, saving = false, className, children, ...props }: CalendarFormPageProps) {
   return (
     <div data-alpha-subview="calendar-form" className={cn("absolute inset-0 z-50 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
-      <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 pr-2 pl-2">
+      <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 pr-4 pl-2">
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />
         {actions ?? (
@@ -59,14 +59,14 @@ export function CalendarFormDate({ label, inset = false, className, ...props }: 
     return (
       <label className={cn("flex flex-wrap items-center gap-2 py-2 pr-2 text-sm leading-plain", className)}>
         {label}
-        <input type="date" className={cn(focusRing, "h-15 min-w-0 flex-1 rounded-option border-0 bg-background p-2 text-foreground")} {...props} />
+        <input type="date" className={cn(focusRing, "h-15 min-w-0 flex-1 rounded-option border-0 bg-background p-2 text-foreground scheme-normal")} {...props} />
       </label>
     );
   }
   return (
     <label className={cn("mx-6 my-3 flex flex-wrap items-center gap-3 text-base leading-plain", className)}>
       {label}
-      <input type="date" className={cn(focusRing, "h-15 min-w-0 flex-1 rounded-sm border-0 bg-secondary p-2 text-foreground")} {...props} />
+      <input type="date" className={cn(focusRing, "h-15 min-w-0 flex-1 rounded-sm border-0 bg-secondary p-2 text-foreground scheme-normal")} {...props} />
     </label>
   );
 }
@@ -123,10 +123,10 @@ export function CalendarTimeRow({ icon, caption, label, value, onChange, earlier
   const step = cn(focusRing, "inline-flex size-13 shrink-0 items-center justify-center rounded-tile bg-background disabled:opacity-50");
   return (
     <div className="box-border flex min-h-14 items-center gap-3.5 py-1">
-      <span aria-hidden className="flex w-6 shrink-0 text-muted-foreground [&_svg]:size-5.5">{icon === undefined ? <Clock /> : icon}</span>
+      <span aria-hidden className={cn("flex shrink-0 text-muted-foreground [&_svg]:size-5.5", icon === null && "w-6")}>{icon === undefined ? <Clock /> : icon}</span>
       <span className="min-w-0 flex-[1_1_0] text-sm leading-plain">{caption}
         <input aria-label={label} type="time" step={60} value={value} onChange={(event) => onChange(event.target.value)}
-          className={cn(focusRing, "block min-h-11 w-full min-w-0 rounded-sm border-0 bg-transparent text-date text-foreground")} />
+          className={cn(focusRing, "block min-h-11 w-full min-w-0 rounded-sm border-0 bg-transparent pl-px text-date text-foreground scheme-normal")} />
       </span>
       <button type="button" aria-label={earlierLabel} disabled={!onEarlier} onClick={onEarlier} className={step}><Minus aria-hidden className="size-4.5" /></button>
       <button type="button" aria-label={laterLabel} disabled={!onLater} onClick={onLater} className={step}><Plus aria-hidden className="size-4.5" /></button>
@@ -175,19 +175,19 @@ export type CalendarSwitchProps = Omit<ComponentProps<"button">, "role" | "onCha
   "aria-label": string;
 };
 
-/** A switch of the form, such as All day: a 52px track that fills with the text color when on. */
+/** A switch of the form, such as All day: a 52px track that fills with Alpha blue when on, under a white thumb. */
 export function CalendarSwitch({ checked, onCheckedChange, className, ...props }: CalendarSwitchProps) {
   return (
     <button type="button" role="switch" aria-checked={checked} onClick={() => onCheckedChange(!checked)}
-      className={cn(focusRing, "flex h-11 w-13 shrink-0 items-center justify-center rounded-lg disabled:opacity-50", className)} {...props}>
-      <span aria-hidden className={cn("relative block h-8 w-13 rounded-lg transition-colors duration-base motion-reduce:transition-none", checked ? "bg-foreground" : "bg-accent")}>
-        <span className={cn("absolute top-0.75 left-0.75 size-6.5 rounded-full bg-background shadow-sm transition-transform duration-base ease-standard motion-reduce:transition-none", checked && "translate-x-5")} />
+      className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-lg disabled:opacity-50", className)} {...props}>
+      <span aria-hidden className={cn("relative block h-8 w-13 rounded-lg transition-colors duration-base motion-reduce:transition-none", checked ? "bg-alpha" : "bg-accent")}>
+        <span className={cn("absolute top-0.75 left-0.75 size-6.5 rounded-full bg-alpha-foreground shadow-sm transition-transform duration-base ease-standard motion-reduce:transition-none", checked && "translate-x-5")} />
       </span>
     </button>
   );
 }
 
-const bare = "min-w-0 grow border-0 bg-transparent text-body text-foreground outline-0 placeholder:text-muted-foreground disabled:opacity-50";
+const bare = "min-w-0 grow border-0 bg-transparent px-0.5 py-px text-body text-foreground outline-0 placeholder:text-muted-foreground disabled:opacity-50";
 const fieldFocus = "has-[>:focus-visible]:outline-solid has-[>:focus-visible]:outline-focus has-[>:focus-visible]:outline-offset-focus has-[>:focus-visible]:outline-ring";
 
 export type CalendarFieldRowProps = InputProps & {
@@ -216,7 +216,7 @@ export function CalendarNotesField({ icon, className, ...props }: CalendarNotesF
   return (
     <div className={cn(fieldFocus, "flex min-h-14 items-start gap-3.5 rounded-lg bg-secondary px-4 py-3", className)}>
       <span aria-hidden className="flex shrink-0 text-muted-foreground [&_svg]:size-5.5">{icon}</span>
-      <textarea rows={3} className={cn(bare, "resize-y leading-plain")} {...props} />
+      <textarea rows={3} className={cn(bare, "resize-y py-0.5 leading-plain")} {...props} />
     </div>
   );
 }
@@ -234,8 +234,8 @@ export function CalendarPickerField({ onDone, doneLabel, className, ...props }: 
   return (
     <div className={cn(fieldFocus, "mt-1.5 flex h-12 items-center gap-2 rounded-lg bg-background pr-1 pl-3.5", className)}>
       <Search aria-hidden className="size-4.5 shrink-0 text-muted-foreground" />
-      <input className={cn(bare, "h-11")} {...props} />
-      <button type="button" aria-label={doneLabel} onClick={onDone} className={cn(focusRing, "inline-flex size-11 shrink-0 items-center justify-center rounded-tile active:bg-accent")}><X aria-hidden className="size-4.5" /></button>
+      <input className={cn(bare, "h-11.5")} {...props} />
+      <button type="button" aria-label={doneLabel} onClick={onDone} className={cn(focusRing, "inline-flex size-13 shrink-0 items-center justify-center rounded-tile active:bg-accent")}><X aria-hidden className="size-4.5" /></button>
     </div>
   );
 }

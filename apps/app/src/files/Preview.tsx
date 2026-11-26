@@ -1,5 +1,5 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"; spec/app/files/preview.md, "The caption and Details show facts for the exact document held"
-import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner, cn, dockClearance } from "@repo/ui";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesCard, filesCardCancel, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner, cn, dockClearance } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
@@ -20,6 +20,11 @@ import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import { changedOn, folderLocation, parentPath, sized, validFileName } from "./entries.vibe";
 import { Handles } from "./handles.vibe";
 import { Opened, emailAccount, pictureFits } from "./preview.vibe";
+
+/** Develop's File actions: a 220px panel under the header, ringed, with 44px rows and 20px icons. */
+const actionsPanel = "w-55 min-w-0 rounded-tile p-1.5 ring-1 ring-border shadow-popup dark:shadow-popup-dark";
+const actionRow = "min-h-11 rounded-lg px-3.5 py-2 [&_svg]:size-5";
+const fully = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
@@ -47,6 +52,8 @@ export function Preview({ runtime, today }: PreviewProps) {
   const files = useFiles(runtime);
   const contentShelf = runtime.runSync(Effect.flatMap(Opened, (opened) => opened.contentShelf()));
   const content = useSyncExternalStore(contentShelf.subscribe, contentShelf.snapshot, contentShelf.snapshot);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const nameButtonRef = useRef<HTMLButtonElement>(null);
   const [details, setDetails] = useState<{ readonly viewer: number; readonly revision: number }>();
   const [rename, setRename] = useState<{ readonly viewer: number; readonly revision: number; readonly name: string }>();
   const mediaRef = useRef<HTMLMediaElement | null>(null);
@@ -95,6 +102,8 @@ export function Preview({ runtime, today }: PreviewProps) {
     : { type: "actOnStoredFile", operation: "RenameFile", name: nextName, stored: ownFile } as const;
   const renaming = (ownFile || pickedRename) && rename?.viewer === state.viewer && rename.revision === state.revision;
   const showRename = owner({ ...editName, name: "/" });
+  const renameTitle = ownFile && showRename;
+  const startRename = () => setRename({ viewer: state.viewer, revision: state.revision, name });
   const place = facts?.storage;
   const location = place === undefined ? undefined : folderLocation(place.label, parentPath(place.path));
   const revision = facts?.revision ?? 0;
@@ -106,33 +115,40 @@ export function Preview({ runtime, today }: PreviewProps) {
   const destination = inbox.state && drafts.state ? emailAccount(inbox.state, drafts.state) : undefined;
   const offer = { type: "useInEmail", account: destination?.account ?? 0 } as const;
   const email = file !== undefined && destination !== undefined && owner(offer);
+  const submitRename = () => {
+    if (!(owner(editName) && validFileName(editName.name) !== undefined && editName.name !== name)) return;
+    tell(editName);
+    setRename(undefined);
+  };
   return (
     <Dialog open onOpenChange={(open) => { if (!open && owner({ type: "close" })) tell({ type: "close" }); }}>
       <DialogContent aria-label="Preview" aria-describedby={undefined} className="inset-x-0 top-0 flex h-dvh max-h-none w-full max-w-none translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 text-foreground shadow-none sm:pointer-fine:max-w-103">
         <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[var(--alpha-safe-top)] [&_button]:size-13">
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}
           <div className="flex-1" />
-          {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || showRename || owner(move) || owner(trash)) && (
+          {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || (showRename && !renameTitle) || owner(move) || owner(trash)) && (
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="File actions"><Ellipsis /></Button></MenuTrigger>
-              <MenuContent>
-                {askAlpha && <MenuItem onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
-                {email && <MenuItem onSelect={() => tell(offer)}><Mail />Use in email</MenuItem>}
-                {owner(picture) && <MenuItem onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
-                {share && <MenuItem onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
-                {openElsewhere && <MenuItem onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
-                {showDetails && <MenuItem onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
-                {showRename && <MenuItem onSelect={() => setRename({ viewer: state.viewer, revision: state.revision, name })}><Pencil />Rename</MenuItem>}
-                {owner(move) && <MenuItem onSelect={() => tell(move)}><FolderInput />Move to</MenuItem>}
-                {owner(trash) && <MenuItem onSelect={() => tell(trash)}><Trash2 />Move to Trash</MenuItem>}
-                {forget && <MenuItem onSelect={() => tell({ type: "forget" })}><X />Forget</MenuItem>}
+              <MenuContent sideOffset={44} alignOffset={4} className={actionsPanel}>
+                {share && <MenuItem className={actionRow} onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
+                {owner(move) && <MenuItem className={actionRow} onSelect={() => tell(move)}><FolderInput />Add to folder</MenuItem>}
+                {email && <MenuItem aria-label="Use in email" className={actionRow} onSelect={() => tell(offer)}><Mail />Email</MenuItem>}
+                {askAlpha && <MenuItem className={actionRow} onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
+                {owner(picture) && <MenuItem className={actionRow} onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
+                {openElsewhere && <MenuItem className={actionRow} onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
+                {showRename && !renameTitle && <MenuItem className={actionRow} onSelect={startRename}><Pencil />Rename</MenuItem>}
+                {forget && <MenuItem className={actionRow} onSelect={() => tell({ type: "forget" })}><X />Forget</MenuItem>}
+                {showDetails && <MenuItem className={actionRow} onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
+                {owner(trash) && <MenuItem className={actionRow} onSelect={() => tell(trash)}><Trash2 />Delete</MenuItem>}
               </MenuContent>
             </Menu>
           )}
         </div>
         <div className={cn("min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pt-1", dockClearance)}>
-          <DialogTitle className="font-display text-title font-light break-words">{name}</DialogTitle>
-          {facts !== undefined && <p className="mt-2.5 mb-5 flex items-start gap-2.5 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5 shrink-0" /><span className="min-w-0 break-words">{caption}</span></p>}
+          <DialogTitle aria-label={renameTitle ? name : undefined} className="font-display text-title font-light break-words">
+            {renameTitle ? <button ref={nameButtonRef} type="button" aria-label={`Rename ${name}`} className="block w-full text-left" onClick={startRename}>{name}</button> : name}
+          </DialogTitle>
+          {facts !== undefined && <p className="mt-2.5 mb-5 ps-7 text-sm wrap-anywhere text-muted-foreground">{caption}</p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
@@ -142,41 +158,58 @@ export function Preview({ runtime, today }: PreviewProps) {
           {mine && state.kind === "Photo" && content.uri !== undefined && <img alt={name} src={content.uri} decoding="async" className="mx-auto w-full max-h-[55dvh] object-contain" />}
           {mine && state.kind === "Media" && content.uri !== undefined && (file?.mimeType.startsWith("audio/") ? <audio {...mediaProps} src={content.uri} className="w-full" /> : <video {...mediaProps} src={content.uri} className="mx-auto w-full max-h-[55dvh]" />)}
           {owner({ type: "play" }) && <Button variant="ghost" size="icon" aria-label={state.playing ? "Pause" : "Play"} className="mx-auto mt-2 flex" onClick={() => tell({ type: "play" })}>{state.playing ? <Pause /> : <Play />}</Button>}
-          {mine && state.kind === "Pdf" && state.drawing.status === "Loaded" && content.page !== undefined && <img alt={`Page ${state.page} of ${state.pages}`} src={content.page} decoding="async" className="w-full rounded-option shadow-md ring-1 ring-border" />}
+          {mine && state.kind === "Pdf" && state.drawing.status === "Loaded" && content.page !== undefined && <div className="overflow-hidden rounded-lg bg-alpha-foreground shadow-md ring-1 ring-border"><img alt={`Page ${state.page} of ${state.pages}`} src={content.page} decoding="async" className="block h-auto w-full" /></div>}
           {state.kind === "Pdf" && state.pages > 1 && (
             <div className="mt-3 flex items-center justify-between gap-2 text-muted-foreground">
-              {owner({ type: "turnTo", page: state.page - 1 }) ? <Button variant="ghost" size="icon" aria-label="Previous page" onClick={() => tell({ type: "turnTo", page: state.page - 1 })}><ChevronLeft /></Button> : <span className="size-11" />}
-              <span>{`Page ${state.page} of ${state.pages}`}</span>
-              {owner({ type: "turnTo", page: state.page + 1 }) ? <Button variant="ghost" size="icon" aria-label="Next page" onClick={() => tell({ type: "turnTo", page: state.page + 1 })}><ChevronRight /></Button> : <span className="size-11" />}
+              {owner({ type: "turnTo", page: state.page - 1 }) && <Button variant="ghost" size="icon" aria-label="Previous page" onClick={() => tell({ type: "turnTo", page: state.page - 1 })}><ChevronLeft /></Button>}
+              <span className="text-base">{`Page ${state.page} of ${state.pages}`}</span>
+              {owner({ type: "turnTo", page: state.page + 1 }) && <Button variant="ghost" size="icon" aria-label="Next page" onClick={() => tell({ type: "turnTo", page: state.page + 1 })}><ChevronRight /></Button>}
             </div>
           )}
           {owner({ type: "selectAgain" }) && <Button size="sm" className="mt-3" onClick={() => tell({ type: "selectAgain" })}>Select again</Button>}
         </div>
-        <Dialog open={renaming} onOpenChange={(open) => { if (!open) setRename(undefined); }}>
-          <DialogContent closeLabel="Cancel rename">
-            <DialogTitle>Rename</DialogTitle>
-            <form className="flex flex-col gap-3" onSubmit={(event) => {
-              event.preventDefault();
-              if (!owner(editName) || validFileName(editName.name) === undefined || editName.name === name) return;
-              tell(editName);
-              setRename(undefined);
-            }}>
-              <Input aria-label="Name" value={rename?.name ?? ""} onChange={(event) => setRename(rename && { ...rename, name: event.target.value })} />
-              <Button type="submit" disabled={!owner(editName) || validFileName(editName.name) === undefined || editName.name === name}>Rename</Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-        <Dialog open={detailsOpen} onOpenChange={(open) => { if (!open) setDetails(undefined); }}>
-          <DialogContent closeLabel="Close details">
-            <DialogTitle>{name}</DialogTitle>
-            <dl aria-label="File details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-              <dt>Type</dt><dd>{kind}</dd>
-              {bytes !== undefined && <><dt>Size</dt><dd>{new Intl.NumberFormat().format(bytes)} bytes</dd></>}
-              {modified !== undefined && <><dt>Modified</dt><dd><time dateTime={modified.toISOString()}>{modified.toLocaleString()}</time></dd></>}
-              {location !== undefined && <><dt>Location</dt><dd>{location}</dd></>}
-            </dl>
-          </DialogContent>
-        </Dialog>
+        <FilesCard
+          open={renaming}
+          onOpenChange={(open) => { if (!open) setRename(undefined); }}
+          title="Rename"
+          cancelLabel="Cancel"
+          confirmLabel="Rename"
+          confirmDisabled={!(owner(editName) && validFileName(editName.name) !== undefined && editName.name !== name)}
+          onConfirm={submitRename}
+          onOpenAutoFocus={(event) => {
+            const input = renameInputRef.current;
+            if (input === null) return;
+            event.preventDefault();
+            input.focus({ preventScroll: true });
+            const dot = input.value.lastIndexOf(".");
+            input.setSelectionRange(0, dot > 0 ? dot : input.value.length);
+          }}
+          onCloseAutoFocus={(event) => {
+            const trigger = nameButtonRef.current;
+            if (trigger === null || trigger.ownerDocument.activeElement !== trigger.ownerDocument.body) return;
+            event.preventDefault();
+            trigger.focus({ preventScroll: true });
+          }}
+        >
+          <form onSubmit={(event) => { event.preventDefault(); submitRename(); }}>
+            <Input
+              ref={renameInputRef}
+              aria-label="Name"
+              value={rename?.name ?? ""}
+              onChange={(event) => setRename(rename && { ...rename, name: event.target.value })}
+              className="rounded-md"
+            />
+          </form>
+        </FilesCard>
+        <FilesCard open={detailsOpen} onOpenChange={(open) => { if (!open) setDetails(undefined); }} title={name}>
+          <dl aria-label="File details" className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-base">
+            <dt className="text-muted-foreground">Type</dt><dd className="wrap-anywhere">{kind}</dd>
+            {bytes !== undefined && <><dt className="text-muted-foreground">Size</dt><dd className="wrap-anywhere">{bytes >= 1024 ? `${sized(bytes)} (${bytes.toLocaleString()} bytes)` : sized(bytes)}</dd></>}
+            {modified !== undefined && <><dt className="text-muted-foreground">Modified</dt><dd className="wrap-anywhere"><time dateTime={modified.toISOString()}>{fully.format(modified)}</time></dd></>}
+            {location !== undefined && <><dt className="text-muted-foreground">Location</dt><dd className="wrap-anywhere">{location}</dd></>}
+          </dl>
+          <div className="mt-4.5 flex justify-end"><button type="button" aria-label="Close details" className={filesCardCancel} onClick={() => setDetails(undefined)}>Close</button></div>
+        </FilesCard>
       </DialogContent>
     </Dialog>
   );

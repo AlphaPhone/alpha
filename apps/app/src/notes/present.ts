@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Pinned notes come first, then the rest, narrowed to the chosen folder"
 import { projectAuthoredNoteContent } from "@elizaos/plugin-notes-client";
 import type { StickyNote } from "@elizaos/plugin-notes-client";
-import { moment } from "./content.vibe";
+import { audioIdOf, moment } from "./content.vibe";
 
 /** The title shown when listing or opening a note. */
 export function titleOf(note: StickyNote): string {
@@ -26,10 +26,14 @@ export function preview(note: StickyNote): string {
       ? typeof data?.domain === "string" ? data.domain : ""
       : note.body.trim() !== "" ? note.body : (authored?.lines ?? []).map((line) => line.text).join(" ");
   const said = text.replace(/[ \t]+/g, " ").trim().slice(0, 240);
-  const legacy = data?.audio;
+  const seconds = typeof data?.dur === "number" ? data.dur : undefined;
+  if (kind !== "voice" || (seconds === undefined && audioIdOf(note) === "")) return said;
+  const audio = data?.audio;
   const ms = typeof data?.durationMs === "number" ? data.durationMs
-    : typeof legacy === "object" && legacy !== null && "durationMs" in legacy && typeof legacy.durationMs === "number" ? legacy.durationMs : undefined;
-  return kind !== "voice" || ms === undefined || !Number.isFinite(ms) || ms < 0 ? said : `${clock(ms / 1000)}${said === "" ? "" : ` · ${said}`}`;
+    : typeof audio === "object" && audio !== null && "durationMs" in audio && typeof audio.durationMs === "number" ? audio.durationMs : undefined;
+  const duration = seconds ?? (ms !== undefined ? ms / 1000 : undefined);
+  if (duration === undefined || !Number.isFinite(duration) || duration < 0) return said;
+  return `${clock(Math.floor(duration))}${said === "" ? "" : ` · ${said}`}`;
 }
 
 interface DateFormatters {

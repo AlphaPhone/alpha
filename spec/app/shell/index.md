@@ -22,11 +22,12 @@ Home is the empty trail; the app showing is the last one on it. Ask Alpha
 rests as a bar, takes typing, opens as a sheet, or fills the screen.
 
 ```quint
-type View = Phone | Messages | Inbox | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Settings
+type View = Phone | Messages | Inbox | Telegram | Slack | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
 type Detent = Bar | Typing | Sheet | Full
-type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool, route: int }
+type TextAsk = NoTextAsk | TextAskVisit({ ticket: int, prior: Detent, closing: bool })
+type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool, route: int, spokenRoute: int, textAsk: TextAsk, textAskThrough: int }
 
-pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false, route: 0 }
+pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false, route: 0, spokenRoute: 0, textAsk: NoTextAsk, textAskThrough: 0 }
 pure val maxTrail = 6
 
 type RouteMove = { before: Shell, after: Shell }
@@ -67,13 +68,14 @@ pure def admit(s: Shell, image: bool, contacts: bool): Shell =
 ### Opening an app shows it on top and lowers Ask Alpha to its bar
 
 The app already showing is not opened again, and the trail keeps the last
-six.
+six. An Android Ask Alpha visit closes before the owner can open another app.
 
 ```quint
 pure def showing(s: Shell, view: View): bool =
   s.trail.length() > 0 and s.trail.nthOr(s.trail.length() - 1, view) == view
 
-pure def canOpenView(s: Shell, view: View): bool = available(s, view) and not(showing(s, view))
+pure def canOpenView(s: Shell, view: View): bool =
+  s.textAsk == NoTextAsk and available(s, view) and not(showing(s, view))
 
 pure def openView(s: Shell, view: View): Shell =
   val grown = s.trail.append(view)
@@ -93,6 +95,33 @@ pure def openDrawer(s: Shell, phone: bool): Shell = recordRoute({ before: s, aft
 pure def canCloseDrawer(s: Shell): bool = s.drawer
 
 pure def closeDrawer(s: Shell): Shell = recordRoute({ before: s, after: { ...s, drawer: false } })
+```
+
+### Apps can open beside the landscape Ask sheet and Close leaves Ask open
+
+On a landscape phone, the quiet Ask sheet can sit beside Home and its
+Apps drawer. Apps opens in the left pane
+without moving Ask. Close apps closes only the drawer. Escape does the
+same with focus inside Apps after its menu is closed. Back keeps its
+usual order. After a rotation the drawer remains on the same route, and
+a sheet over it takes input before the drawer until they are beside each
+other again or the owner lowers Ask.
+
+```quint
+pure def adjacentAskSheet(s: Shell, landscapePhone: bool): bool =
+  landscapePhone and s.textAsk == NoTextAsk and s.trail.length() == 0 and s.assistant == Sheet
+
+pure def canOpenDrawerBeside(s: Shell, phone: bool, landscapePhone: bool): bool =
+  phone and not(s.drawer) and adjacentAskSheet(s, landscapePhone)
+
+pure def openDrawerBeside(s: Shell, phone: bool, landscapePhone: bool): Shell = openDrawer(s, phone)
+
+pure def lawOpeningAppsBesideKeepsAsk(s: Shell, phone: bool, landscapePhone: bool): bool =
+  val opened = openDrawerBeside(s, phone, landscapePhone)
+  canOpenDrawerBeside(s, phone, landscapePhone)
+    implies (opened.drawer and opened.assistant == s.assistant and opened.route == s.route + 1)
+
+pure val eval_witness_canOpenDrawerBeside = (("raise", Sheet), ("openDrawerBeside", true, true))
 ```
 
 ### Ask Alpha rises to typing, a sheet or the full screen
@@ -135,7 +164,7 @@ keeps the page for the next visit.
 pure def layers(s: Shell): int =
   s.trail.length() + (if (s.drawer) 1 else 0) + (if (s.assistant == Bar) 0 else if (s.assistant == Full) 2 else 1)
 
-pure def canGoBack(s: Shell): bool = layers(s) > 0
+pure def canGoBack(s: Shell): bool = s.textAsk == NoTextAsk and layers(s) > 0
 
 pure def goBack(s: Shell): Shell =
   if (s.assistant == Full) recordRoute({ before: s, after: { ...s, assistant: Sheet } })
@@ -144,23 +173,64 @@ pure def goBack(s: Shell): Shell =
   else recordRoute({ before: s, after: { ...s, trail: s.trail.removeAt(s.trail.length() - 1) } })
 ```
 
+### On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it
+
+As in Sunday's v119, which drew an app's Back only when Alpha was not the
+phone's launcher, the first page of Settings and of Workflows has no Back
+control in its header while Alpha is the launcher. A page inside either
+keeps its Back, and away from the launcher the first page keeps it too.
+The control is only how Back is drawn: Android's own Back gesture still
+closes the app as the rule above says.
+
+```quint
+type AppPage = FirstPage | InnerPage
+
+pure def drawsAppBack(s: Shell, launcher: bool, page: AppPage): bool =
+  canGoBack(s) and not(launcher and page == FirstPage)
+
+pure def lawAFirstPageOnTheLauncherDrawsNoBack(s: Shell): bool =
+  not(drawsAppBack(s, true, FirstPage)) and drawsAppBack(s, false, FirstPage) == canGoBack(s) and drawsAppBack(s, true, InnerPage) == canGoBack(s)
+```
+
 ### Returning to the prior communications app keeps Ask Alpha open at its current height
 
 The communications stage asks for this step only when its history names
 the preceding app. It can return from Phone, Messages or Contacts to one
-of those apps while Ask Alpha is open.
+of those apps while Ask Alpha is open. An Android Ask Alpha visit
+handles Back before that history returns.
 
 ```quint
 pure def commsView(view: View): bool = view == Phone or view == Messages or view == Contacts
 
 pure def canReturnCommsView(s: Shell, previous: View): bool =
-  (s.assistant == Sheet or s.assistant == Full) and s.trail.length() > 1 and commsView(previous)
+  s.textAsk == NoTextAsk and (s.assistant == Sheet or s.assistant == Full)
+    and s.trail.length() > 1 and commsView(previous)
     and commsView(s.trail.nthOr(s.trail.length() - 1, Settings)) and s.trail.nthOr(s.trail.length() - 2, Settings) == previous
 
 pure def returnCommsView(s: Shell, previous: View): Shell = recordRoute({ before: s, after: { ...s, trail: s.trail.removeAt(s.trail.length() - 1) } })
 
 pure def stepACommsReturnPreservesTheSheet(before: Shell, via: str, after: Shell): bool =
   via == "returnCommsView" implies (after.assistant == before.assistant and after.trail.length() == before.trail.length() - 1)
+```
+
+### Opening another communications app from the stage keeps Ask Alpha open
+
+The owner's action can open an admitted communications app from the app
+currently on stage. Back can return to the source at the same height.
+
+```quint
+pure def canOpenCommsView(s: Shell, view: View): bool =
+  s.textAsk == NoTextAsk and (s.assistant == Sheet or s.assistant == Full)
+    and commsView(s.trail.nthOr(s.trail.length() - 1, Settings)) and commsView(view) and canOpenView(s, view)
+
+pure def openCommsView(s: Shell, view: View): Shell =
+  val opened = openView(s, view)
+  { ...opened, assistant: s.assistant }
+
+pure def stepACommsOpeningPreservesTheSheet(before: Shell, via: str, after: Shell): bool =
+  via == "openCommsView" implies (after.assistant == before.assistant
+    and after.trail.nthOr(after.trail.length() - 2, Settings) == before.trail.nthOr(before.trail.length() - 1, Settings)
+    and commsView(after.trail.nthOr(after.trail.length() - 1, Settings)))
 ```
 
 ### Home leaves every app and closes every layer at once
@@ -173,7 +243,7 @@ task.
 ```quint
 pure def canGoHome(s: Shell): bool = layers(s) > 0
 
-pure def goHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false, assistant: Bar } })
+pure def goHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false, assistant: Bar, textAsk: NoTextAsk } })
 ```
 
 ### Agent navigation shows an admitted app or Home without lowering Ask Alpha
@@ -205,15 +275,43 @@ pure def canAgentGoHome(s: Shell): bool = s.trail.length() > 0 or s.drawer
 pure def agentGoHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false } })
 
 pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell): bool =
-  (via == "agentOpenView" or via == "agentOpenFilesFrom" or via == "agentGoHome") implies (after.assistant == before.assistant)
+  (via == "agentOpenView" or via == "agentOpenFilesFrom" or via == "agentGoHome"
+    or via == "agentOpenSpoken" or via == "agentHomeSpoken") implies (after.assistant == before.assistant)
 
 pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
+```
+
+### Only a spoken move from its exact source route is marked as Talk's navigation
+
+An agent's spoken move can open the destination only from the route the
+turn was sent from. The shell records the route that this move created. A
+manual move names a new route even when it reaches the same destination.
+
+```quint
+pure def canAgentOpenSpoken(s: Shell, view: View, route: int): bool =
+  s.route == route and canAgentOpenView(s, view)
+
+pure def agentOpenSpoken(s: Shell, view: View, route: int): Shell =
+  val opened = agentOpenView(s, view)
+  { ...opened, spokenRoute: opened.route }
+
+pure def canAgentHomeSpoken(s: Shell, route: int): bool =
+  s.route == route and canAgentGoHome(s)
+
+pure def agentHomeSpoken(s: Shell, route: int): Shell =
+  val returned = agentGoHome(s)
+  { ...returned, spokenRoute: returned.route }
+
+pure def stepSpokenRouteMarksTheWriter(before: Shell, via: str, after: Shell): bool =
+  if (via == "agentOpenSpoken" or via == "agentHomeSpoken")
+    after.spokenRoute == after.route and after.route == before.route + 1
+  else after.spokenRoute == before.spokenRoute
 ```
 
 ### When Alpha opens again the trail is kept, and Ask Alpha is closed
 
 ```quint
-pure def reopen(s: Shell): Shell = recordRoute({ before: s, after: { ...s, drawer: false, assistant: Bar } })
+pure def reopen(s: Shell): Shell = recordRoute({ before: s, after: { ...s, drawer: false, assistant: Bar, textAsk: NoTextAsk, textAskThrough: 0 } })
 ```
 
 ### The trail never holds more than six apps
@@ -264,4 +362,53 @@ pure def sometimesDrawerOpen(s: Shell): bool = s.drawer
 
 ```quint
 pure def sometimesContactsShowing(s: Shell): bool = showing(s, Contacts)
+```
+
+## Story: Open text Ask Alpha from Android
+
+> As the owner, I want an Android assistant invocation on my Alpha image
+> to open Ask Alpha and let me return to where I was without opening the
+> microphone.
+
+### Only a native Android visit opens text Ask, and Back or Close settles that exact visit
+
+Alpha raises its existing chat without starting a voice turn or applying
+any intent content. The phone says when the current visit has closed.
+When Alpha was already visible the prior panel returns in place.
+Otherwise Android moves Alpha's task behind the preceding one. A refused
+return leaves Ask open so the owner can try again. A communications
+stage behind the visit does not take Back before that visit closes.
+
+```quint
+pure val ticketValues = Set(1, 2, 3)
+
+pure def canOpenTextAsk(s: Shell, ticket: int): bool = s.image and ticket > s.textAskThrough and s.textAsk == NoTextAsk
+pure def openTextAsk(s: Shell, ticket: int): Shell =
+  recordRoute({ before: s, after: { ...s, assistant: Full, textAsk: TextAskVisit({ ticket: ticket, prior: s.assistant, closing: false }), textAskThrough: ticket } })
+
+pure def canCloseTextAsk(s: Shell, ticket: int): bool =
+  val visit = s.textAsk
+  match visit { | NoTextAsk => false | TextAskVisit(v) => not(v.closing) and v.ticket == ticket }
+
+pure def closeTextAsk(s: Shell, ticket: int): Shell =
+  val visit = s.textAsk
+  match visit { | NoTextAsk => s | TextAskVisit(v) => { ...s, textAsk: TextAskVisit({ ...v, closing: true }) } }
+
+pure def canTextAskClosed(s: Shell, ticket: int, closed: bool): bool =
+  val visit = s.textAsk
+  match visit { | NoTextAsk => false | TextAskVisit(v) => v.closing and v.ticket == ticket }
+
+pure def textAskClosed(s: Shell, ticket: int, closed: bool): Shell =
+  val visit = s.textAsk
+  match visit {
+    | NoTextAsk => s
+    | TextAskVisit(v) =>
+      if (closed) recordRoute({ before: s, after: { ...s, assistant: v.prior, textAsk: NoTextAsk } })
+      else { ...s, textAsk: TextAskVisit({ ...v, closing: false }) }
+  }
+
+pure def alwaysTextAskIsFull(s: Shell): bool = s.textAsk != NoTextAsk implies s.assistant == Full
+
+pure def stepClosedTextAskKeepsTheAdmittedTicket(before: Shell, via: str, after: Shell): bool =
+  (via == "closeTextAsk" or via == "textAskClosed") implies after.textAskThrough == before.textAskThrough
 ```

@@ -207,7 +207,8 @@ pure def handoffKept(c: Clock, id: int, ok: bool): Moved =
 ### A review ends when Alpha is hidden or the page is closed, and a handoff not yet sent is withdrawn
 
 Closing waits for a handoff in flight. Hiding does not, so the handoff
-recorded for a review that is gone is never sent.
+recorded for a review that is gone is never sent. Tapping Ask Alpha closes
+the Clock page when that same close is allowed.
 
 ```quint
 pure def withdrawn(c: Clock): A::Attempt = if (c.handoff.outcome == A::Recorded) A::plan(c.handoff.id) else c.handoff

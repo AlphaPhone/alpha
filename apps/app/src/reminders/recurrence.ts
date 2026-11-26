@@ -1,9 +1,8 @@
 // spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
+import type { ReminderRecurrence } from "@repo/launcher-records";
 import { type CivilDate, type Repeat, nextOccurrence, validDate } from "../../gen/app__reminders__recurrence.ts";
 
 /** Wire recurrence rule shared between Reminders UI and the resident agent. */
-export type ReminderRecurrence = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
-
 const wireToSpec: Readonly<Record<ReminderRecurrence, Repeat>> = {
   none: "NoRepeat",
   daily: "Daily",
@@ -79,6 +78,22 @@ export function advanceDueDate(dueDate: string, recurrence: ReminderRecurrence):
   if (!parsed || recurrence === "none") return dueDate;
   const dow = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day)).getUTCDay();
   return formatCivilDate(nextOccurrence(parsed, dow, wireToSpec[recurrence]));
+}
+
+/** The next repeat whose alert or unalerted due time has not elapsed. @throws {never} */
+export function nextFutureOccurrence(dueDate: string, recurrence: ReminderRecurrence, dueMinute: number | null, alertMinutes: number | null, now: number): { readonly dueDate: string; readonly skippedDates: number } | undefined {
+  const elapsedAt = now + (alertMinutes ?? 0) * 60_000;
+  const elapsedDay = formatCivilDate(civilDateAt(elapsedAt));
+  let date = dueDate;
+  for (let skippedDates = 0; skippedDates < 40_000; skippedDates++) {
+    const next = advanceDueDate(date, recurrence);
+    if (next <= date) return undefined;
+    if (next > elapsedDay || (next === elapsedDay && (dueInstantMs(next, dueMinute) ?? 0) > elapsedAt)) {
+      return { dueDate: next, skippedDates };
+    }
+    date = next;
+  }
+  return undefined;
 }
 
 /** Shift a `CivilDate` forward by `offsetDays` days (non-negative). */

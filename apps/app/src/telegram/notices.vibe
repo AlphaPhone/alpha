@@ -1,0 +1,251 @@
+// spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
+import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
+import * as Notices from "../../gen/app__telegram__notices.effect.vibe"
+import type { Effect as Out, Event, Incoming } from "../../gen/app__telegram__notices.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import { Telegram, type TelegramUpdate } from "../platform/telegram.vibe"
+import { type Job, answer, contained, following, reacting, run, stop, together } from "../runtime/reactor.vibe"
+import { reportSessionRevoked } from "./auth.vibe"
+import {
+  TelegramStore,
+  chatKindOf,
+  currentSessionToken,
+  dialogTitle,
+  isRevokedFailure,
+  mergeTimeline,
+  removeHistoryMessages,
+  updateDialogReadState,
+  upsertHistoryMessage,
+} from "./store.vibe"
+
+const emptyIncoming: Incoming = { chat: 0, message: 0, kind: "DirectMessage", isOwn: false, mentioned: false }
+
+effect function incomingFromMessage(
+  peerKey: string,
+  msgId: number,
+  isOwn: boolean,
+  mentioned: boolean,
+): Incoming!!TelegramStore {
+  const store = try TelegramStore
+  const chat = try store.chatIdOf(peerKey)
+  const snap = try store.get()
+  const dialog = snap.dialogs.find((item) => item.peer_key === peerKey)
+  const kind = dialog === undefined
+    ? (peerKey.startsWith("chat:") ? "GroupChat" : peerKey.startsWith("channel:") ? "Supergroup" : "DirectMessage")
+    : chatKindOf(dialog, snap.chats)
+  return { chat, message: msgId, kind, isOwn, mentioned }
+}
+
+effect function applyLiveUpdate(
+  update: TelegramUpdate,
+): void!!(TelegramStore | Auth.Machine | MessagingSessions | Conversation.Machine | Notices.Machine) {
+  if (update._type === "updateSessionRevoked") {
+    const activeToken = try currentSessionToken()
+    if (update.session_token === undefined || (Option.isSome(activeToken) && activeToken.value === update.session_token)) {
+      try reportSessionRevoked()
+    }
+    return
+  }
+  const store = try TelegramStore
+  if (update._type === "updateNewMessage" && update.message !== undefined) {
+    const msg = update.message
+    const conv = try (try Conversation.Machine).get()
+    const chatId = try store.chatIdOf(msg.peer_key)
+    const isFront = conv.front && conv.chat === chatId
+    try store.update((snap) => {
+      const nextHistory = new Map(snap.historyByPeer)
+      nextHistory.set(msg.peer_key, mergeTimeline(snap.historyByPeer.get(msg.peer_key) ?? [], [msg]))
+      return {
+        ...snap,
+        historyByPeer: nextHistory,
+        dialogs: snap.dialogs.map((dialog) => dialog.peer_key === msg.peer_key
+          ? {
+            ...dialog,
+            top_message: Math.max(dialog.top_message, msg.id),
+            top_date: Math.max(dialog.top_date, msg.date),
+            unread_count: msg.out || isFront ? dialog.unread_count : dialog.unread_count + 1,
+            unread_mentions_count: !msg.out && !isFront && msg.mentioned ? dialog.unread_mentions_count + 1 : dialog.unread_mentions_count,
+          }
+          : dialog),
+        pendingUpdates: [...snap.pendingUpdates, update],
+        pts: Math.max(snap.pts, update.pts),
+      }
+    })
+    const notices = try Notices.Machine
+    if (Notices.canPoll(try notices.get())) {
+      try contained(notices.send({ type: "poll" }), "telegram live update poll")
+    }
+    return
+  }
+  if (update._type === "updateEditMessage" && update.message !== undefined) {
+    try upsertHistoryMessage(update.message.peer_key, update.message, update.pts)
+    return
+  }
+  if (update._type === "updateDeleteMessages" && update.peer_key !== undefined && update.messages !== undefined) {
+    try removeHistoryMessages(update.peer_key, update.messages, update.pts)
+    return
+  }
+  if (update._type === "updateMessageReactions" && update.peer_key !== undefined && update.msg_id !== undefined && update.reactions !== undefined) {
+    const peerKey = update.peer_key
+    const msgId = update.msg_id
+    const reactions = update.reactions
+    try store.update((snap) => {
+      const nextHistory = new Map(snap.historyByPeer)
+      nextHistory.set(peerKey, (snap.historyByPeer.get(peerKey) ?? []).map((item) => item.id === msgId ? { ...item, reactions } : item))
+      return { ...snap, historyByPeer: nextHistory, pts: Math.max(snap.pts, update.pts) }
+    })
+    return
+  }
+  if (update._type === "updateReadHistoryInbox" && update.peer_key !== undefined && update.max_id !== undefined) {
+    try updateDialogReadState(update.peer_key, 0, update.max_id, update.pts)
+  }
+}
+
+// spec/app/telegram/notices.md, "Polling reads updates from the watermark; the first answer sets the baseline quietly and later answers post only eligible messages"
+effect function pollUpdates(
+  ticket: number,
+  since: number,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const token = try currentSessionToken()
+  if (Option.isNone(token)) {
+    try reportSessionRevoked()
+    return { type: "polled", ticket, ok: false, point: since, incoming: emptyIncoming }
+  }
+  const store = try TelegramStore
+  const snap = try store.get()
+  if (since > 0 && snap.pendingUpdates.length > 0) {
+    const [head, ...rest] = snap.pendingUpdates
+    try store.update((current) => ({ ...current, pendingUpdates: rest }))
+    const msg = head.message
+    const incoming = msg === undefined
+      ? emptyIncoming
+      : try incomingFromMessage(msg.peer_key, msg.id, msg.out, msg.mentioned)
+    return { type: "polled", ticket, ok: true, point: Math.max(since, head.pts, 1), incoming }
+  }
+  const diff = (try Telegram).getDifference(token.value, since) catch (failure) => failure
+  if (!("ok" in diff)) {
+    if (isRevokedFailure(diff)) try reportSessionRevoked()
+    return { type: "polled", ticket, ok: false, point: since, incoming: emptyIncoming }
+  }
+  try store.update((current) => {
+    const nextHistory = new Map(current.historyByPeer)
+    for (const msg of diff.new_messages) {
+      nextHistory.set(msg.peer_key, mergeTimeline(nextHistory.get(msg.peer_key) ?? [], [msg]))
+    }
+    return { ...current, historyByPeer: nextHistory, pts: Math.max(current.pts, diff.state.pts) }
+  })
+  const point = Math.max(since, diff.state.pts, 1)
+  if (since === 0 || diff.new_messages.length === 0) {
+    return { type: "polled", ticket, ok: true, point, incoming: emptyIncoming }
+  }
+  const newest = diff.new_messages[diff.new_messages.length - 1]
+  const incoming = try incomingFromMessage(newest.peer_key, newest.id, newest.out, newest.mentioned)
+  return { type: "polled", ticket, ok: true, point, incoming }
+}
+
+effect function startLiveSync(): void!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine | Conversation.Machine | Notices.Machine) {
+  const notices = try Notices.Machine
+  if (Notices.canPoll(try notices.get())) {
+    try contained(notices.send({ type: "poll" }), "telegram baseline poll")
+  }
+  const baselined = try Stream.runHead(Stream.filter(notices.changes, (state) => state.since > 0 || !Notices.watching(state)))
+  if (Option.isNone(baselined) || !Notices.watching(baselined.value)) return
+  const token = try currentSessionToken()
+  if (Option.isNone(token)) return
+  const baselinePts = Math.max((try (try TelegramStore).get()).pts, baselined.value.since)
+  const stream = (try Telegram).updatesStream(token.value, baselinePts)
+  const ended = try exit(Stream.runForEach(stream, (update) => applyLiveUpdate(update)))
+  if (Exit.isFailure(ended) && !Cause.hasInterruptsOnly(ended.cause)) {
+    const err = Cause.squash(ended.cause)
+    if (typeof err === "object" && err !== null && "_tag" in err && (err as { readonly _tag: string })._tag === "AuthRevoked") {
+      try reportSessionRevoked()
+    }
+  }
+}
+
+effect function loadChatContext(chat: number) {
+  const store = try TelegramStore
+  const peerKey = try store.peerKeyOf(chat)
+  if (peerKey === undefined) return undefined
+  const snap = try store.get()
+  const dialog = snap.dialogs.find((item) => item.peer_key === peerKey)
+  return { peerKey, snap, dialog }
+}
+
+effect function postNotice(chat: number, message: number): void!!(TelegramStore | Toasts | Said) {
+  const ctx = try loadChatContext(chat)
+  if (ctx === undefined) return
+  const { peerKey, snap, dialog } = ctx
+  const title = dialog === undefined ? peerKey : dialogTitle(dialog, snap.users, snap.chats)
+  const msg = (snap.historyByPeer.get(peerKey) ?? []).find((item) => item.id === message)
+  const excerpt = msg?.message ?? "New message"
+  try (try TelegramStore).update((current) => ({
+    ...current,
+    notices: [
+      ...current.notices.filter((entry) => entry.chat !== chat),
+      { chat, peerKey, message, title, excerpt, date: msg?.date ?? 0 },
+    ],
+  }))
+  try say(`Telegram · ${title}: ${excerpt}`)
+}
+
+effect function openNoticeChat(chat: number): void!!(TelegramStore | Conversation.Machine | Shell) {
+  const ctx = try loadChatContext(chat)
+  if (ctx === undefined) return
+  const { snap, dialog } = ctx
+  const kind = dialog === undefined ? "DirectMessage" : chatKindOf(dialog, snap.chats)
+  const canPost = dialog?.can_post ?? true
+  const shell = try Shell
+  if (!showing(try shell.get(), "Telegram")) {
+    try contained(shell.send({ type: "openView", view: "Telegram" }), "open telegram from notice")
+  }
+  const conv = try Conversation.Machine
+  if (Conversation.canOpenChat(try conv.get(), chat, kind, canPost, true)) {
+    try contained(conv.send({ type: "openChat", chat, kind, canPost, front: true }), "open telegram chat from notice")
+  }
+}
+
+function carry(
+  fx: Out,
+): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine | Conversation.Machine | Notices.Machine | Shell | Toasts | Said, []> {
+  return match (fx) {
+    when { tag: "ScheduleSync" }: run("sync", startLiveSync());
+    when { tag: "UnscheduleSync" }: stop("sync");
+    when { tag: "PollUpdates", let ticket, let since }: answer(
+      "poll",
+      pollUpdates(ticket, since),
+      { type: "polled", ticket, ok: false, point: since, incoming: emptyIncoming },
+    );
+    when { tag: "PostNotice", let chat, let message }: run(`post-notice ${chat}`, postNotice(chat, message));
+    when { tag: "WithdrawChat", let chat }: run(`withdraw-chat ${chat}`, effect {
+      try (try TelegramStore).update((snap) => ({ ...snap, notices: snap.notices.filter((entry) => entry.chat !== chat) }))
+    });
+    when { tag: "WithdrawAll" }: run("withdraw-all", effect {
+      try (try TelegramStore).update((snap) => ({ ...snap, notices: [] }))
+    });
+    when { tag: "OpenChat", let chat }: run(`open-chat ${chat}`, openNoticeChat(chat));
+  }
+}
+
+const machine = reacting(Notices, { keep: 1, open: [{ type: "restart" }], carry })
+
+const watchSync = following(
+  Auth.Machine,
+  (auth) => auth.step === "Authenticated",
+  Notices.Machine,
+  (authenticated): Event => ({ type: "watchChanged", authenticated, notifyAllowed: authenticated }),
+)
+
+const frontSync = following(
+  Conversation.Machine,
+  (conv) => (conv.front ? conv.chat : 0),
+  Notices.Machine,
+  (chat): Event => ({ type: "frontChatChanged", chat }),
+)
+
+/** Telegram real-time SSE sync and notification shell: watermark baseline, suppression, deep-links, and withdrawal. */
+export const telegramNotices = together(machine, watchSync, frontSync)

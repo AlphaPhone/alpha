@@ -65,10 +65,10 @@ describe("Browser hit-test", () => {
     expect(hitAtCenter(attachItem.element())).toContain(attachItem.element());
     await attachItem.click();
 
-    const attachDialog = document.querySelector<HTMLElement>("[aria-label='Attach files']");
-    expect(attachDialog).not.toBeNull();
     const closeAttach = page.getByRole("button", { name: "Close attachments" });
     await expect.element(closeAttach).toBeVisible();
+    const attachDialog = document.querySelector<HTMLElement>("[aria-label='Attach files']");
+    expect(attachDialog).not.toBeNull();
     expect(hitAtCenter(closeAttach.element())).toContain(closeAttach.element());
     await closeAttach.click();
 

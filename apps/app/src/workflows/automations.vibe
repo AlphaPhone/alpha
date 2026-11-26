@@ -12,7 +12,7 @@ import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Prompt, PromptSchema, type PromptTiming, ScheduledTask, type WorkflowsApi, localTimeZone, readPromptRuns, readPrompts } from "./api.vibe"
+import { type Prompt, PromptSchema, type PromptTiming, ScheduledTask, type WorkflowsApi, localTimeZone, readPromptRuns, readPrompts, sendChangeWhenReady } from "./api.vibe"
 import { type WorkflowRow, Rows, refresh } from "./list.vibe"
 
 type EditSource =
@@ -35,11 +35,21 @@ interface ObservedPrompt {
   readonly prompt: Prompt
 }
 
+interface PromptPowerReview {
+  readonly owner: number
+  readonly row: number
+  readonly id: string
+  readonly revision: number
+  readonly name: string
+  readonly enabled: boolean
+}
+
 const empty: EditorWords = { owner: 0, row: 0, title: "", text: "", zone: "UTC", source: { kind: "New" } }
 
 export interface AutomationWordsSnapshot {
   readonly editor: EditorWords
   readonly observed?: ObservedPrompt
+  readonly power?: PromptPowerReview
 }
 
 export service AutomationWords {
@@ -47,6 +57,8 @@ export service AutomationWords {
   hold(words: EditorWords): void!!
   current(owner: number, row: number, ticket: number): (Prompt | undefined)!!
   remember(shown: ObservedPrompt): void!!
+  powerReview(): (PromptPowerReview | undefined)!!
+  keepPowerReview(review: PromptPowerReview): void!!
   snapshot(this: void): AutomationWordsSnapshot
   subscribe(this: void, listener: () => void): () => void
 }
@@ -61,11 +73,12 @@ const words = Layer.sync(AutomationWords, () => {
       return observed?.owner === owner && observed.row === row && observed.ticket === ticket ? observed.prompt : undefined
     }),
     remember: (observed: ObservedPrompt) => sync(() => { shelf.update((cur) => ({ ...cur, observed })) }),
+    powerReview: () => sync(() => shelf.get().power),
+    keepPowerReview: (power: PromptPowerReview) => sync(() => { shelf.update((cur) => ({ ...cur, power })) }),
     snapshot: shelf.snapshot,
     subscribe: shelf.subscribe,
   }
 })
-
 const TriggerReply = Schema.Struct({ trigger: PromptSchema })
 const TaskReply = Schema.Struct({ task: ScheduledTask })
 const RemovedReply = Schema.Struct({ ok: Schema.Literal(true) })
@@ -272,10 +285,16 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
     if (selected.kind === "Prompt") {
       const path = promptPath(selected.id)
       if (wanted === "Enable" || wanted === "Disable") {
+        const words = try AutomationWords
+        const reviewed = try words.powerReview()
+        const observed = try words.current(state.owner, state.row, state.list.ticket)
         const enabled = wanted === "Enable"
-        try persistHeld({ id, wanted, targetKind: "Prompt", targetId: selected.id, expectedRevision: selected.record.revision })
-        const { trigger } = try ask(Agent, put(path, { enabled, expectedRevision: selected.record.revision }), TriggerReply)
-        return { ...failed, applied: trigger.id === selected.id && trigger.enabled === enabled && trigger.revision > selected.record.revision }
+        if (reviewed?.owner !== state.owner || reviewed.row !== state.row || reviewed.id !== selected.id || reviewed.enabled !== enabled ||
+          observed?.id !== reviewed.id || observed.revision !== reviewed.revision || observed.enabled === enabled) return failed
+        try persistHeld({ id, wanted, targetKind: "Prompt", targetId: selected.id, expectedRevision: reviewed.revision })
+        const { trigger } = try ask(Agent, put(path, { enabled, expectedRevision: reviewed.revision }), TriggerReply)
+        return trigger.id === reviewed.id && trigger.enabled === enabled && trigger.revision === reviewed.revision + 1
+          ? { ...failed, applied: true } : ({ type: "changeUnanswered" } as const)
       }
       if (wanted === "Remove") {
         try persistHeld({ id, wanted, targetKind: "Prompt", targetId: selected.id, expectedRevision: selected.record.revision })
@@ -401,8 +420,21 @@ const choosing = applying(Listing.Machine, (state) => ({ owner: state.owner, row
     if (status !== "Loading" && (try machine.get()).row === row) try ignore(machine.send({ type: "readAutomations" }))
   })
 
-const sending = following(Model.Machine, (state) => Model.canSendChange(state), Model.Machine,
-  (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
+const sending = following(Model.Machine, Model.canSendChange, Model.Machine, sendChangeWhenReady)
+
+// spec/app/workflows/automations.md, "Turning a prompt on or off, removing an automation, and running it now require confirmation of the row and action shown"
+export effect function reviewPromptPower(owner: number, row: number): void!!(Model.Machine | AutomationWords) {
+  const machine = try Model.Machine
+  const state = try machine.get()
+  if (owner !== state.owner || row !== state.row) return
+  const words = try AutomationWords
+  const prompt = try words.current(owner, row, state.list.ticket)
+  if (prompt === undefined || prompt.enabled !== state.on) return
+  const wanted = prompt.enabled ? "Disable" : "Enable"
+  if (!Model.canReviewChange(state, wanted)) return
+  try words.keepPowerReview({ owner, row, id: prompt.id, revision: prompt.revision, name: prompt.displayName, enabled: !prompt.enabled })
+  try ignore(machine.send({ type: "reviewChange", wanted }))
+}
 
 export effect function editAutomation(owner: number, row: number): void!!(Model.Machine | AutomationWords) {
   const machine = try Model.Machine

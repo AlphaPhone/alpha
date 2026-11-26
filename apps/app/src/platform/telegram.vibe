@@ -420,7 +420,7 @@ const TELEGRAM_AUTH_ERRORS = ["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED"]
 const TELEGRAM_FORBIDDEN_ERRORS = ["CHAT_WRITE_FORBIDDEN", "MESSAGE_AUTHOR_REQUIRED"]
 
 /** Reject Telegram bot tokens at the client boundary; only user-account session tokens are permitted. */
-effect function assertTelegramUserToken(token: string): string!Msg.BotTokenRejected {
+export effect function assertTelegramUserToken(token: string): string!Msg.BotTokenRejected {
   if (TELEGRAM_BOT_TOKEN_PATTERN.test(token.trim())) {
     throw new Msg.BotTokenRejected({ provider: "telegram", reason: "Telegram bot tokens are not allowed; use a user-account session" })
   }

@@ -22,12 +22,18 @@ export interface AboutProps {
 
 /** Alpha's own names for the flags the notices carry; a flag it has no name for is shown as written. */
 const flags: Record<string, string> = {
-  copyleft: "Copyleft", "network-copyleft": "Network copyleft", "weak-copyleft": "Weak copyleft", "share-alike": "Share-alike data",
-  unknown: "Unknown license", "no-license-file": "No license file in package", unverified: "License unverified", "permissive-new": "Permissive, newly listed",
-  "not-open-source": "Not open-source terms", "proprietary-owned": "Proprietary, license held by owner", proprietary: "Proprietary, no license recorded",
+  "copyleft-strong": "Copyleft (GPL family)", "network-copyleft": "Network copyleft (AGPL)",
+  "copyleft-weak": "Weak copyleft (LGPL, MPL, EPL)", "share-alike-data": "Share-alike data",
+  "unknown-licence": "Unknown license", "licence-text-missing-from-package": "No license file in package",
+  unverified: "License unverified", "permissive-not-previously-listed": "Permissive, newly listed",
+  "non-open-source-terms": "Not open-source terms", "proprietary-licence-held-outside-repo": "Proprietary, license held by owner",
+  "proprietary-no-licence-recorded": "Proprietary, no license recorded",
+  copyleft: "Copyleft", "weak-copyleft": "Weak copyleft", "share-alike": "Share-alike data", unknown: "Unknown license",
+  "no-license-file": "No license file in package", "permissive-new": "Permissive, newly listed", "not-open-source": "Not open-source terms",
+  "proprietary-owned": "Proprietary, license held by owner", proprietary: "Proprietary, no license recorded",
 };
 
-const matches = (notice: Notice, query: string) => `${notice.name} ${notice.license}`.toLowerCase().includes(query.trim().toLowerCase());
+const matches = (notice: Notice, query: string) => `${notice.name} ${notice.version} ${notice.license}`.toLowerCase().includes(query.trim().toLowerCase());
 
 /** The licences, searched; one opens from the list the search shows, and Back returns to the same search. */
 export function Licences({ runtime, common }: AboutProps) {
@@ -41,9 +47,11 @@ export function Licences({ runtime, common }: AboutProps) {
     return (
       <SettingsLicenceDetail
         name={open.name}
-        licence={`${open.license} · ${open.version}`}
+        licence={open.license}
+        version={open.version}
         source={open.source}
-        flags={(open.flags ?? []).map((flag) => flags[flag] ?? flag)}
+        flags={(open.flags ?? []).filter(Boolean).map((flag) => flags[flag] ?? flag)}
+        obligations={open.obligations?.filter(({ flag, note }) => flag && note).map(({ note }) => note)}
         text={open.text}
         onBack={() => void send({ type: "closeLicence" })}
       />

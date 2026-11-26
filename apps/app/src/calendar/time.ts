@@ -11,6 +11,9 @@ export interface ResolvedWallTime {
   readonly ms: number;
 }
 
+/** UTC midnight of a civil date, for providers that store all-day events as UTC dates. @throws {never} */
+export const utcStart = (civil: number) => civil * dayMs;
+
 /** The phone's civil day of `ms`, counted in days from 1970-01-01, in the phone's own time zone. @throws {never} */
 export function civilDay(ms: number): number {
   const at = new Date(ms);
@@ -19,7 +22,7 @@ export function civilDay(ms: number): number {
 
 /** The local date of a civil day, as a Date at its midnight. @throws {never} */
 export function dateOf(civil: number): Date {
-  const utc = new Date(civil * dayMs);
+  const utc = new Date(utcStart(civil));
   return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
 }
 
@@ -30,7 +33,7 @@ export function dayStart(civil: number): number {
 
 /** The UTC midnight ISO string of a civil day, for all-day wire dates. @throws {never} */
 export function utcDate(civil: number): string {
-  return new Date(civil * dayMs).toISOString();
+  return new Date(utcStart(civil)).toISOString();
 }
 
 /** Whether `at` displays the exact local calendar components `(year, month, date, hour, minute)`. @throws {never} */

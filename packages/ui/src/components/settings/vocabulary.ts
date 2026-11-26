@@ -35,7 +35,7 @@ export type SettingsAndroidProps = {
 /** What the phone said about a fact: not yet, that it could not read it, or its value, with a state when the value has one. */
 export type Reading =
   | { word: "waiting" }
-  | { word: "unavailable" }
+  | { word: "unavailable"; compact?: boolean }
   | { word: "reported"; value: string; status?: StatusDotProps["status"] };
 
 /** The accesses Alpha holds: `Access` in spec/app/settings/facts.md. */

@@ -1,7 +1,7 @@
 // spec/app/clock/index.md, "Story: Hear and prioritize ringing alerts"; spec/app/clock/alarms.md, "Story: Ring, snooze, dismiss, and recover alarms"; spec/app/clock/timers.md, "Story: Run multiple countdown timers"
 import { Button, Card } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { AlarmClock, BellOff, Timer as TimerIcon, VolumeX } from "lucide-react";
+import { Clock, VolumeX } from "lucide-react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
 import { activeAlert } from "../../gen/app__clock.ts";
@@ -53,7 +53,7 @@ export function ClockAlertOverlay({ runtime }: ClockAlertOverlayProps) {
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
-                <AlarmClock className="size-5" />
+                <Clock className="size-5.5" />
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-xl font-semibold tabular-nums text-foreground">{timeText}</p>
@@ -62,7 +62,7 @@ export function ClockAlertOverlay({ runtime }: ClockAlertOverlayProps) {
             </div>
             {canMute && (
               <Button variant="ghost" size="icon" aria-label="Mute alarm sound" disabled={!canMute} onClick={() => void view.send({ type: "muteAlert" })}>
-                <VolumeX aria-hidden className="size-4" />
+                <VolumeX aria-hidden className="size-4.5" />
               </Button>
             )}
           </div>
@@ -71,7 +71,6 @@ export function ClockAlertOverlay({ runtime }: ClockAlertOverlayProps) {
               {`Snooze ${alarm.snoozeMinutes}m`}
             </Button>
             <Button variant="destructive" disabled={!canDismiss} onClick={() => void runtime.runPromise(dismissAlarm(alarm.id))}>
-              <BellOff aria-hidden className="size-4" />
               Dismiss
             </Button>
           </div>
@@ -93,7 +92,7 @@ export function ClockAlertOverlay({ runtime }: ClockAlertOverlayProps) {
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-              <TimerIcon className="size-5" />
+              <Clock className="size-5.5" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-lg font-semibold text-foreground">{title}</p>
@@ -102,7 +101,7 @@ export function ClockAlertOverlay({ runtime }: ClockAlertOverlayProps) {
           </div>
           {canMute && (
             <Button variant="ghost" size="icon" aria-label="Mute timer sound" disabled={!canMute} onClick={() => void view.send({ type: "muteAlert" })}>
-              <VolumeX aria-hidden className="size-4" />
+              <VolumeX aria-hidden className="size-4.5" />
             </Button>
           )}
         </div>

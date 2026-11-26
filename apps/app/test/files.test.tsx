@@ -25,7 +25,7 @@ import files from "../src/files/index.tsx";
 import { called } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
-import { textReview } from "./fakes/text-review.ts";
+import { textReview, type TextReviewScene } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -72,6 +72,32 @@ async function onFiles(world = { ...scene(), phone: true }, ...otherPlaces: Plac
   return { ...running, world, runtime };
 }
 
+async function onDownloads() {
+  const running = await onFiles();
+  const { alpha, runtime } = running;
+  await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+  await press("Internal storage");
+  await press("Download");
+  await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+  return running;
+}
+
+async function withFilesReviewOnHome(world: ReturnType<typeof scene>, review: TextReviewScene) {
+  world.telephony.textReview = review;
+  const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
+  const chat = assistant.runtime(alpha);
+  const storage = files.runtime(alpha);
+  await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+  await until(alpha, chat, Conversation, (s) => s.ready);
+  return { alpha, chat, storage };
+}
+
+async function sendChat(text: string) {
+  await fill("Message Alpha", text);
+  await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
+}
+
 describe("Files on a phone", () => {
   it("Browse my storage (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
     const { alpha, runtime, world } = await onFiles();
@@ -90,16 +116,19 @@ describe("Files on a phone", () => {
     expect(listed().sort()).toEqual(["Documents", "Download"]);
     // spec/app/files/index.md, "Opening Files reads the storage and the place it left, and leaving Files drops every read, the selection, the confirmation and the sheets": a place is read once, however often the screen draws it
     const reads = world.files.calls.filter((call) => call === "storageList").length;
-    await choose("Grid");
-    await choose("List");
-    await choose("Name");
+    await choose("Grid view");
+    await choose("List view");
+    await choose("Name A–Z");
     expect([world.files.calls.filter((call) => call === "storageList").length, runtime.runSync(Browser.use((m) => m.get())).trail.length]).toEqual([reads, 1]);
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
     expect(listed().sort()).toEqual(["Old", "notes.txt"]);
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
-    await choose("Browse storage");
+    await openMenu("Files options");
+    expect(menuItem("Browse storage")).toBeUndefined();
+    await drawn(() => menuItem("Grid view")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await hardware("back");
     await press("Images");
     await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded");
     // spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
@@ -133,7 +162,7 @@ describe("Files on a phone", () => {
     world.files.listMost = 5_000;
 
     // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
-    await choose("Browse storage");
+    await hardware("back");
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded");
     await openRow("Documents");
@@ -145,6 +174,53 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.missing);
     await drawn(() => {});
     expect([world.files.watching, Boolean(button("Internal storage"))]).toEqual([undefined, true]);
+  });
+
+  it('Selects a Files row with a stationary touch and lets drag or cancellation leave it alone (spec/app/files/index.md, "The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation")', async () => {
+    const { alpha, runtime } = await onFiles();
+    await until(alpha, runtime, Browser, (state) => state.storage.status === "Loaded");
+    await press("Internal storage");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded");
+    await openRow("Download");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded" && state.trail.length === 2);
+
+    const picked = () => runtime.runSync(Effect.flatMap(Browser, (machine) => machine.get())).picked;
+    const touch = (type: string, clientX = 30) => drawn(() => {
+      const row = button("lease.pdf");
+      if (!row) throw new Error("The listed file is missing");
+      row.dispatchEvent(new PointerEvent(type, { bubbles: true, isPrimary: true, button: 0, pointerId: 1, pointerType: "touch", clientX, clientY: 20 }));
+    });
+    await touch("pointerdown");
+    await touch("pointermove", 70);
+    await later(alpha, 500);
+    expect(picked()).toEqual([]);
+    await touch("pointerup", 70);
+
+    await touch("pointerdown");
+    await touch("pointercancel");
+    await later(alpha, 500);
+    expect(picked()).toEqual([]);
+
+    await touch("pointerdown");
+    await later(alpha, 499);
+    expect(picked()).toEqual([]);
+    await later(alpha, 1);
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 1);
+    await drawn(() => button("lease.pdf")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+    await touch("pointerup");
+    await drawn(() => button("lease.pdf")?.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+    expect(picked()).toHaveLength(1);
+    expect(button("lease.pdf")?.getAttribute("aria-pressed")).toBe("true");
+
+    await press("Cancel");
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 0);
+    const checkbox = button("Select beach.jpg");
+    if (!checkbox) throw new Error("The keyboard selection control is missing");
+    await drawn(() => checkbox.focus());
+    expect(document.activeElement).toBe(checkbox);
+    await drawn(() => checkbox.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })));
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 1);
+    expect(button("beach.jpg")?.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
@@ -198,6 +274,9 @@ describe("Files on a phone", () => {
     world.files.stored.splice(world.files.stored.findIndex((one) => one.path === "Download"), 1);
     await showInFiles();
     await until(alpha, runtime, Browser, (s) => s.open && s.handed && s.inCategory && s.category === "Download" && s.listing.status === "Loaded");
+    await choose("Browse storage");
+    await until(alpha, runtime, Browser, (s) => s.open && !s.handed && !s.inCategory && s.trail.length === 0);
+    expect(alpha.runtime.runSync(Shell.use((m) => m.get())).trail.at(-1)).toBe("Files");
   });
 
   it("Browse my storage without access (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
@@ -217,56 +296,16 @@ describe("Files on a phone", () => {
     expect(world.files.calls.filter((call) => call.startsWith("storageRequestAccess"))).toEqual(["storageRequestAccess", "storageRequestAccess settings", "storageRequestAccess settings"]);
   });
 
-  async function openDownloads() {
-    const opened = await onFiles();
-    await until(opened.alpha, opened.runtime, Browser, (s) => s.storage.status === "Loaded");
-    await press("Internal storage");
-    await press("Download");
-    await until(opened.alpha, opened.runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
-    return opened;
-  }
-
-  async function pickDestination(alpha: Awaited<ReturnType<typeof onFiles>>["alpha"], runtime: Awaited<ReturnType<typeof onFiles>>["runtime"], folder: string) {
-    await pressOnTop("Internal storage");
-    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-    await pressOnTop(folder);
-    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
-  }
-
-  async function submitFilesProposal(
-    world: ReturnType<typeof scene>,
-    review: ReturnType<typeof textReview>,
-    id: string,
-    text: string,
-    direct: boolean,
-    operation?: ReturnType<typeof textReview>["proposal"]["payload"]["operation"],
-  ) {
-    review.proposal.id = id;
-    review.proposal.state = "pending";
-    if (operation !== undefined) review.proposal.payload.operation = operation;
-    world.ask.nextReplyChunks = ["I found a Files action."];
-    world.ask.nextActions = (metadata) => {
-      const mode = readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode;
-      expect(mode).toBe(direct ? "direct-request-v1" : undefined);
-      review.proposal.payload.requestMessageId = mode === "direct-request-v1" ? `m${world.ask.said.length}u` : undefined;
-      return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: !direct,
-        ...(direct ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
-    };
-    await fill("Message Alpha", text);
-    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
-    await press("Send");
-  }
-
   it("Arrange and filter what I see (spec/app/files/index.md, \"Story: Arrange and filter what I see\"; spec/app/files/search.md, \"Story: Filter what I see\")", async () => {
-    const { alpha, runtime, world } = await openDownloads();
+    const { alpha, runtime, world } = await onDownloads();
     // spec/app/files/index.md, "The owner chooses a grid or a list, and a sort; choosing the same sort again reverses it"
-    await choose("Name");
+    await choose("Name A–Z");
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
-    await choose("Name");
+    await choose("Name Z–A");
     expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
-    await choose("Size");
+    await choose("Largest first");
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
-    await choose("Size");
+    await choose("Smallest first");
     expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
     // spec/app/files/index.md, "The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown"
     await choose("Filter files");
@@ -305,23 +344,31 @@ describe("Files on a phone", () => {
   });
 
   it("Change my files (spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/change.md, \"Story: Change my files\"; spec/app/files/destination.md, \"Story: Choose a destination\"; spec/app/files/change.md, \"Story: Share what I selected\")", async () => {
-    const { alpha, runtime, world } = await openDownloads();
+    const { alpha, runtime, world } = await onDownloads();
+    const openDocumentsInDestination = async () => {
+      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
+      await pressOnTop("Open Documents");
+      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
+    };
 
     // spec/app/files/index.md, "A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it"
     await select("lease.pdf");
-    await press("Move or copy");
+    await press("Move");
     // spec/app/files/index.md, "The owner opens the Move to sheet for the selection, at the folder showing, and goes through the volumes and folders in it"
-    await pressOnTop("Storage");
+    await pressOnTop("Parent folder");
+    await until(alpha, runtime, Browser, (s) => s.sheet.trail.length === 1);
+    await pressOnTop("Parent folder");
     await until(alpha, runtime, Browser, (s) => s.sheet.trail.length === 0);
-    expect([Boolean(buttonOnTop("Internal storage")), Boolean(buttonOnTop("SD card"))]).toEqual([true, false]);
-    await pickDestination(alpha, runtime, "Documents");
+    expect([buttonOnTop("Open Internal storage")?.disabled, buttonOnTop("Open SD card")?.disabled]).toEqual([false, true]);
+    await pressOnTop("Open Internal storage");
+    await openDocumentsInDestination();
     // spec/app/files/index.md, "A new folder in the destination picker uses the parent as shown and opens the new folder in that picker"
     await pressOnTop("New folder");
     await fill("Name", "Filed copies");
     await pressOnTop("Create");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 3);
     expect([document.querySelector("nav[aria-label='Destination path']")?.textContent?.includes("Filed copies"), paths(world).includes("primary:Documents/Filed copies")]).toEqual([true, true]);
-    await pressOnTop("Documents");
+    await pressOnTop("Parent folder");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2 && s.picked.length === 1);
     await pressOnTop("Move here");
     // spec/app/files/index.md, "A change ends as its answer says, what a move took away is told, and the place is read again"
@@ -330,8 +377,11 @@ describe("Files on a phone", () => {
 
     // spec/app/files/change.md, "A change starts when none is under way and nothing of it is still unknown; when names clash in the destination the owner is asked first, and an approved request keeps both"
     await select("beach.jpg");
-    await press("Move or copy");
-    await pickDestination(alpha, runtime, "Download");
+    await press("Copy");
+    await pressOnTop("Parent folder");
+    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
+    await pressOnTop("Open Download");
+    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
     await pressOnTop("Copy here");
     await until(alpha, runtime, Browser, (s) => s.change.clash.showing);
     await press("Keep both");
@@ -341,8 +391,9 @@ describe("Files on a phone", () => {
     // spec/app/files/change.md, "A file of the same name is replaced only when the owner chose to replace it, never for the agent"
     for (let round = 0; round < 2; round += 1) {
       await select("beach.jpg");
-      await press("Move or copy");
-      await pickDestination(alpha, runtime, "Documents");
+      await press("Copy");
+      await pressOnTop("Parent folder");
+      await openDocumentsInDestination();
       await pressOnTop("Copy here");
       if (runtime.runSync(Effect.flatMap(Browser, (m) => m.get())).change.clash.showing) await press("Replace");
       await until(alpha, runtime, Browser, (s) => s.change.work === "CopyTo" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
@@ -353,7 +404,7 @@ describe("Files on a phone", () => {
     // spec/app/files/index.md, "One request leaves for each change, for items listed as they are now or the file shown, and only when the owner starts, chooses or renames it, or approved it"
     await choose("New folder");
     await fill("Name", "Taxes");
-    await press("Make");
+    await pressOnTop("Create");
     await until(alpha, runtime, Browser, (s) => s.change.work === "NewFolder" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
     await select("beach.jpg (2)");
     await press("Rename");
@@ -372,7 +423,7 @@ describe("Files on a phone", () => {
     expect(world.files.shared).toEqual([["Download/dunes.jpg"]]);
     // spec/app/files/change.md, "Each sheet sends once, by email when an account can take it, through the phone's chooser, as copied text or saved through the system picker, and then goes away; sharing by text message is not offered"
     await press("Share");
-    await press("Copy");
+    await pressOnTop("Copy");
     await until(alpha, runtime, Browser, (s) => s.change.sending.outcome === "Confirmed" && s.change.sentTo === "Copy");
     expect(await navigator.clipboard.readText()).toBe("Internal storage/Download/dunes.jpg");
     // spec/app/files/change.md, "The sheet goes away when the owner closes it or Files is hidden, and when the selection changes the owner is told it sent nothing; a sheet never opens again"
@@ -387,8 +438,8 @@ describe("Files on a phone", () => {
     await select("dunes.jpg");
     const dunes = world.files.stored.find((one) => one.path === "Download/dunes.jpg");
     if (dunes) dunes.modified = 99;
-    await press("Move or copy");
-    await pressOnTop("Taxes");
+    await press("Move");
+    await pressOnTop("Open Taxes");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 3);
     await pressOnTop("Move here");
     await until(alpha, runtime, Browser, (s) => s.change.work === "MoveTo" && s.change.attempt.outcome === "Refused" && s.listing.status === "Loaded");
@@ -414,7 +465,8 @@ describe("Files on a phone", () => {
     await fill("To", "+15550123456");
     await press("Text +15550123456");
     await until(alpha, alpha.runtime, MessageComposer, (s) => s.pictures === 1);
-    const pictures = alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()));
+    const { thread } = alpha.runtime.runSync(MessageComposer.use((composer) => composer.get()));
+    const pictures = alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures(thread)));
     expect(pictures).toEqual([{ name: "handed.png", wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(png, (byte) => byte.charCodeAt(0)) }]);
     expect(world.telephony.sent).toEqual([]);
   });
@@ -541,13 +593,13 @@ describe("Files on a phone", () => {
     await press("code.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
     const previousViewer = runtime.runSync(Shown.use((m) => m.get())).viewer;
-    await choose("Rename", "File actions");
+    await press("Rename code.txt");
     await fill("Name", "codes.txt");
     await pressOnTop("Rename");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.viewer > previousViewer);
     expect([paths(world).includes("primary:Download/codes.txt"), document.querySelector("[aria-label='Preview']")?.textContent?.includes("codes.txt")]).toEqual([true, true]);
 
-    await choose("Move to", "File actions");
+    await choose("Add to folder", "File actions");
     await until(alpha, runtime, Browser, (s) => s.sheet.open && s.sheet.reading.status === "Loaded");
     expect(runtime.runSync(Browser.use((m) => m.get())).picked).toHaveLength(1);
     await hardware("back");
@@ -557,7 +609,7 @@ describe("Files on a phone", () => {
     await press("Cancel");
     await press("codes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded");
-    await choose("Move to Trash", "File actions");
+    await choose("Delete", "File actions");
     await until(alpha, runtime, Browser, (s) => s.deleting.showing);
     await pressOnTop("Delete");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
@@ -582,7 +634,7 @@ describe("Files on a phone", () => {
     await press("attach.txt");
     await until(alpha, runtime, Shown, (state) => state.content.status === "Loaded");
 
-    await choose("Use in email", "File actions");
+    await choose("Email", "File actions");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
     await until(alpha, runtime, Shown, (state) => state.attempt.outcome === "Confirmed");
     expect(alpha.runtime.runSync(Drafts.use((model) => model.get())).open).toBe(false);
@@ -596,7 +648,7 @@ describe("Files on a phone", () => {
   });
 
   it("Let the agent read my files (spec/app/files/index.md, \"Story: Let the agent read my files\")", async () => {
-    const { alpha, runtime, world } = await openDownloads();
+    const { alpha, runtime, world } = await onDownloads();
     const now = () => runtime.runSync(Effect.flatMap(Browser, (machine) => machine.get()));
     // spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
     expect(await runtime.runPromise(offer)).toEqual({ operations: true, positions: true });
@@ -738,7 +790,7 @@ describe("Files on a phone", () => {
   it('Opens or filters only what the owner asked for directly (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
     const world = { ...scene(), phone: true, image: true };
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
-    const review = textReview(world.notes.owner, "unasked-filter", filter);
+    const review = textReview(world.notes.owner, "asked-filter", filter);
     world.telephony.textReview = review;
     const { alpha, runtime } = await onFiles(world, "assistant");
     const chat = assistant.runtime(alpha);
@@ -748,24 +800,60 @@ describe("Files on a phone", () => {
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
 
-    const send = async (id: string, text: string, direct: boolean) => {
+    const send = async (id: string, text: string, proposed: "Nothing" | "Review" | "Direct") => {
+      review.proposal.id = id;
+      review.proposal.state = "pending";
       const reads = review.pendingReads;
-      await submitFilesProposal(world, review, id, text, direct);
+      world.ask.nextReplyChunks = [proposed === "Nothing" ? "Your Downloads hold a lease and a photo." : "I found a Files action."];
+      world.ask.nextActions = (metadata) => {
+        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        review.proposal.payload.requestMessageId = proposed === "Nothing" ? undefined : `m${world.ask.said.length}u`;
+        return proposed === "Nothing" ? [] : [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: proposed === "Review",
+          ...(proposed === "Direct" ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
+      };
+      await sendChat(text);
       await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
     };
+    const before = runtime.runSync(Browser.use((m) => m.get()));
 
-    await send("unasked-filter", "What is in my Downloads?", false);
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect(review.decisions).toEqual([]);
+    await send("no-files-request", "What is in my Downloads?", "Nothing");
+    const after = runtime.runSync(Browser.use((m) => m.get()));
+    expect([button("Approve"), review.decisions, review.claims, after.trail, after.search.filter]).toEqual([undefined, [], [], before.trail, before.search.filter]);
 
-    await send("asked-filter", "Show PDFs in Download", true);
+    const changes = [
+      ["move-lease", "put the lease in my documents", { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" }],
+      ["share-lease", "send the lease to someone", { type: "files_share", paths: ["Download/lease.pdf"] }],
+      ["trash-lease", "get rid of the lease", { type: "files_trash", paths: ["Download/lease.pdf"] }],
+      ["taxes-folder", "make a taxes folder in downloads", { type: "files_folder_create", parent: "Download", name: "Taxes" }],
+    ] as const;
+    for (const [id, text, change] of changes) {
+      review.proposal.payload.operation = change;
+      await send(id, text, "Review");
+      await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+      expect([review.decisions, review.claims, world.files.shared, world.files.trash]).toEqual([[], [], [], []]);
+    }
+
+    review.proposal.payload.operation = filter;
+    await send("asked-filter", "only the pdfs from my downloads please", "Direct");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]));
     expect(document.body.textContent).toContain("Showing 1 item in Files.");
     expect(button("Approve")).toBeUndefined();
 
+    // spec/app/assistant/context.md, "A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it"
+    world.ask.knowsNoActionMode = true;
+    world.ask.metadata = [];
+    world.ask.nextReplyChunks = ["Your Downloads hold a lease and a photo."];
+    await fill("Message Alpha", "what is in my downloads?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await until(alpha, chat, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.metadata.map((one) => readTurnContext({ content: { metadata: one } }).voiceUi?.agentActionMode)).toEqual(["direct-files-v1", undefined]);
+    expect(document.body.textContent).toContain("Your Downloads hold a lease and a photo.");
+    world.ask.knowsNoActionMode = false;
+
     review.proposal.payload.operation = { type: "files_open", path: "Documents/notes.txt" };
     world.files.refusing.push("readSelected");
-    await send("refused-open", "Open Documents/notes.txt", true);
+    await send("refused-open", "open my notes file", "Direct");
     await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "failed", operationId: "refused-open" }));
     expect(document.body.textContent).not.toContain("Opened the requested item in Files.");
   });
@@ -775,13 +863,9 @@ describe("Files on a phone", () => {
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
     const openNotes = { type: "files_open", path: "Documents/notes.txt" } as const;
     const allPdfs = { type: "files_filter", kind: "pdf" } as const;
+    const firstShown = { type: "files_open", shown: 1 } as const;
     const review = textReview(world.notes.owner, "home-filter", filter);
-    world.telephony.textReview = review;
-    const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
-    const chat = assistant.runtime(alpha);
-    const storage = files.runtime(alpha);
-    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
-    await until(alpha, chat, Conversation, (s) => s.ready);
+    const { alpha, chat, storage } = await withFilesReviewOnHome(world, review);
     await openFromHome("Files");
     await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loaded");
     await press("Internal storage");
@@ -797,13 +881,26 @@ describe("Files on a phone", () => {
       await press("Open conversation");
       await panel();
     };
-    const send = (id: string, text: string, direct: boolean, operation: typeof filter | typeof allPdfs | typeof openNotes) =>
-      submitFilesProposal(world, review, id, text, direct, operation);
+    const send = async (id: string, text: string, operation: typeof filter | typeof allPdfs | typeof openNotes | typeof firstShown) => {
+      review.proposal.id = id;
+      review.proposal.state = "pending";
+      review.proposal.payload.operation = operation;
+      world.ask.nextReplyChunks = ["I found a Files action."];
+      const received = Promise.withResolvers<ReturnType<typeof readTurnContext>>();
+      world.ask.nextActions = (metadata) => {
+        received.resolve(readTurnContext({ content: { metadata } }));
+        review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true } }];
+      };
+      await sendChat(text);
+      const context = await received.promise;
+      expect(context.voiceUi?.agentActionMode).toBe("direct-files-v1");
+    };
 
     await fromHome();
     world.ask.holdAfterTools = true;
-    await send("cancel-at-source", "Show PDFs in Download", true, filter);
-    await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
+    await send("cancel-at-source", "Show PDFs in Download", filter);
+    expect(world.ask.turns.size).toBe(1);
     expect([review.claims, review.journal.size, world.files.calls.includes("storageQuery")]).toEqual([[], 0, false]);
     await hardware("back");
     await fromHome();
@@ -813,7 +910,7 @@ describe("Files on a phone", () => {
 
     const filterGate = Promise.withResolvers<void>();
     world.files.gate = filterGate.promise;
-    await send("home-filter", "Show PDFs", true, allPdfs);
+    await send("home-filter", "just my pdfs", allPdfs);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files" && s.assistant === "Sheet");
     await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loading");
     expect([review.claims, review.journal.has("home-filter"), review.receipts, world.files.calls.includes("storageQuery")])
@@ -827,7 +924,7 @@ describe("Files on a phone", () => {
     await fromHome();
     const fileGate = Promise.withResolvers<void>();
     world.files.gate = fileGate.promise;
-    await send("cancel-in-files", "Open Documents/notes.txt", true, openNotes);
+    await send("cancel-in-files", "Open Documents/notes.txt", openNotes);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files" && s.assistant === "Sheet");
     await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loading");
     expect(review.journal.has("cancel-in-files")).toBe(true);
@@ -844,15 +941,67 @@ describe("Files on a phone", () => {
     await hardware("home");
     await fromHome();
     const reads = review.pendingReads;
-    await send("ordinal-without-results", "Open item 1", false, openNotes);
+    await send("ordinal-without-results", "Open item 1", firstShown);
     await until(alpha, chat, Conversation, (s) => s.turn.reply === "Complete" && review.pendingReads > reads);
     expect(review.claims).toEqual(["home-filter", "cancel-in-files"]);
 
-    await send("home-open", "Open Documents/notes.txt", true, openNotes);
+    await send("home-open", "open the notes file in my documents", openNotes);
     await until(alpha, storage, Shown, (s) => s.kind === "Text" && s.content.status === "Loaded");
     await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: "home-open" }));
     expect(world.files.calls.filter((call) => call === "storageSelect")).toHaveLength(1);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files");
+  });
+
+  it('Shows a change asked away from Files as a notice, and its card once Files is open (spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows")', async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const move = { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" } as const;
+    const review = textReview(world.notes.owner, "move-lease", move);
+    const { alpha, chat, storage } = await withFilesReviewOnHome(world, review);
+    const askFromHome = async (id: string, text: string) => {
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+      if (alpha.runtime.runSync(Effect.flatMap(Shell, (m) => m.get())).assistant !== "Sheet") await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+      review.proposal.id = id;
+      review.proposal.state = "pending";
+      const reads = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+      world.ask.nextActions = (metadata) => {
+        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      };
+      await sendChat(text);
+      await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
+    };
+    const openFiles = async () => {
+      await press("Minimize chat");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+      await openFromHome("Files");
+      await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loaded");
+      await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files" && s.assistant === "Sheet");
+    };
+
+    await askFromHome("move-lease", "put the lease in my documents");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Open Files to review this action."));
+    expect([button("Approve"), review.decisions, review.claims, paths(world).includes("primary:Download/lease.pdf")]).toEqual([undefined, [], [], true]);
+
+    await openFiles();
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(document.body.textContent).not.toContain("Open Files to review this action.");
+    expect([review.decisions, review.claims, paths(world).includes("primary:Download/lease.pdf")]).toEqual([[], [], true]);
+    await press("Approve");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied" })]));
+    expect([review.decisions, paths(world).includes("primary:Documents/lease.pdf")]).toEqual([["move-lease"], true]);
+
+    await hardware("home");
+    review.proposal.payload.operation = { type: "files_trash", paths: ["Documents/lease.pdf"] };
+    await askFromHome("trash-lease", "get rid of the lease");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Open Files to review this action."));
+    review.proposal.state = "expired";
+    await openFiles();
+    await later(alpha, 300);
+    expect([button("Approve"), document.body.textContent?.includes("Open Files to review this action."), review.decisions]).toEqual([undefined, false, ["move-lease"]]);
   });
 
   it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/change.md, \"Story: Come back to my changes after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {
@@ -881,8 +1030,8 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await openRow("Documents");
     await until(first.alpha, first.runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
-    await choose("Name");
-    await choose("Grid");
+    await choose("Name A–Z");
+    await choose("Grid view");
     await press("notes.txt");
     await until(first.alpha, first.runtime, Shown, (s) => s.content.status === "Loaded");
     await first.close();
@@ -912,7 +1061,7 @@ describe("Files on a phone", () => {
   });
 
   it("Delete into the Trash and bring it back (spec/app/files/trash.md, \"Story: Delete into the Trash\"; spec/app/files/trash.md, \"Story: See what is in the Trash\"; spec/app/files/trash.md, \"Story: Bring something back\"; spec/app/files/trash.md, \"Story: Erase for good\")", async () => {
-    const { alpha, runtime, world } = await openDownloads();
+    const { alpha, runtime, world } = await onDownloads();
 
     // spec/app/files/index.md, "Deleting shows what goes to the Trash, and only a confirmation of the selection as shown hands it over"
     await select("lease.pdf");
@@ -954,7 +1103,7 @@ describe("Files on a phone", () => {
     // spec/app/files/trash.md, "The owner opens a listed Trash item's details and can restore or ask to erase that same item"
     await press("beach.jpg");
     await until(alpha, runtime, Bin, (s) => s.details !== 0);
-    expect(document.querySelector("[aria-label='Trash item details']")?.textContent).toContain("Internal storage › Download");
+    expect([...document.querySelectorAll("[role=dialog]")].at(-1)?.textContent).toContain("Internal storage › Download");
     await hardware("back");
     await until(alpha, runtime, Bin, (s) => s.open && s.details === 0);
     await press("beach.jpg");
@@ -968,7 +1117,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 1);
     await press("old.txt");
     await pressOnTop("Delete now");
-    await pressOnTop("Erase");
+    await pressOnTop("Delete");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0);
     expect(world.files.trash).toEqual([]);
 
@@ -987,9 +1136,10 @@ describe("Files on a phone", () => {
     world.files.trash.push({ id: "13", was: { volume: "primary", path: "Download/d.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now });
     await press("Refresh");
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
-    await press("Mark c.txt");
-    await press("Mark d.txt");
-    await press("Restore marked");
+    await press("Select items");
+    await press("Select c.txt");
+    await press("Select d.txt");
+    await press("Restore");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect(paths(world).filter((path) => path.endsWith("c.txt") || path.endsWith("d.txt"))).toEqual(["primary:Download/c.txt", "primary:Download/d.txt"]);
 
@@ -1029,18 +1179,18 @@ describe("Files on a phone", () => {
     );
     await press("Refresh");
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
-    await press("Empty the Trash");
+    await press("Empty");
     await until(alpha, runtime, Bin, (s) => s.erasing.showing && s.doomed.length === 2);
-    await pressOnTop("Erase");
+    await pressOnTop("Empty");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect(world.files.trash).toEqual([]);
     // spec/app/files/trash.md, "The Trash is closed, without access, reading, unreadable, empty or listing"
-    expect(document.body.textContent?.includes("The Trash is empty")).toBe(true);
+    expect(document.body.textContent?.includes("Trash is empty. Items in Trash are deleted after 30 days.")).toBe(true);
     await hardware("home");
   });
 
   it("Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/files/index.md, \"Story: Change my files\")", async () => {
-    const { alpha, runtime, world } = await openDownloads();
+    const { alpha, runtime, world } = await onDownloads();
 
     const hiddenCheck = document.querySelector<HTMLElement>("[aria-label='Select lease.pdf']");
     expect(hiddenCheck?.className).toContain("pointer-events-none");
@@ -1048,7 +1198,7 @@ describe("Files on a phone", () => {
     await press("lease.pdf");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded");
     expect(document.querySelector("[aria-label='Preview']")).not.toBeNull();
-    await choose("Move to", "File actions");
+    await choose("Add to folder", "File actions");
     await until(alpha, runtime, Browser, (s) => s.sheet.open && s.sheet.reading.status === "Loaded");
     expect(document.querySelector("[aria-label='Preview']")).toBeNull();
     await hardware("back");

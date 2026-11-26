@@ -1,0 +1,108 @@
+// spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
+import { type SignInAttempt, type SignInReceipt, signInCode } from "@elizaos/os-bridges"
+import { type Account, Cloud } from "../platform/cloud.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
+import { accountIsInFront, type Buyer, buyerOf, readAccount, sameBuyer } from "./profile.vibe"
+
+type Visit = Effect.Services<typeof accountIsInFront>
+type Attempt = { readonly number: SignInAttempt; readonly buyer: Buyer; readonly expiresAt: number }
+type Verified = { readonly buyer: Buyer; readonly expiresAt: number }
+export type BillingVerification =
+  | { readonly tag: "EnterCode"; readonly expiresAt: number }
+  | { readonly tag: "UseFactor"; readonly factors: readonly ("sms" | "totp")[]; readonly expiresAt: number }
+  | { readonly tag: "Verified" }
+  | { readonly tag: "TryAgain" }
+  | { readonly tag: "Unavailable" }
+
+export service BillingSession {
+  authorized(buyer: Buyer): boolean!!
+  email(buyer: Buyer): BillingVerification!!
+  sendSms(buyer: Buyer): boolean!!
+  verify(buyer: Buyer, typed: string, factor?: "sms" | "totp"): BillingVerification!!
+  retire(): void!!
+}
+
+export effect function reviewedBuyer(cloud: Account): (Buyer | undefined)!! {
+  const profile = readAccount(cloud) catch () => undefined
+  return profile === undefined ? undefined : try buyerOf(profile)
+}
+
+export const billingSession = Layer.effect(BillingSession, effect {
+  const cloud = try Cloud
+  const ctx = try Effect.context<Visit>()
+  const lock = try Semaphore.make(1)
+  let attempt: Attempt | undefined
+  let verified: Verified | undefined
+  let epoch = 0
+
+  effect function profileFor(buyer: Buyer) {
+    if (!(try Effect.provideContext(accountIsInFront, ctx))) return undefined
+    const profile = readAccount(cloud) catch () => undefined
+    const current = profile === undefined ? undefined : try buyerOf(profile)
+    return sameBuyer(buyer, current) && (try Effect.provideContext(accountIsInFront, ctx)) ? profile : undefined
+  }
+
+  effect function retireAttempt(): void!! {
+    const previous = attempt
+    attempt = undefined
+    if (previous !== undefined) try ignore(tryPromise(() => signInAccounts().cancel({ attempt: previous.number })))
+  }
+
+  const unavailable = { tag: "Unavailable" } as const
+  return {
+    authorized: (buyer: Buyer) => effect {
+      const proof = verified
+      return proof !== undefined && sameBuyer(proof.buyer, buyer) && (try Clock.currentTimeMillis) < proof.expiresAt
+    },
+    email: (buyer: Buyer) => lock.withPermits(1)(effect {
+      const started = epoch
+      try retireAttempt()
+      const owner = try profileFor(buyer)
+      const email = owner?.email?.trim()
+      if (!email || epoch !== started) return unavailable
+      const receipt = tryPromise(() => signInAccounts().reauthenticate({ environment: CLOUD_ENVIRONMENT, method: "email", email })) catch () => undefined
+      if (receipt?.verdict.kind !== "CodeOnItsWay") return unavailable
+      if ((try profileFor(buyer)) === undefined || epoch !== started) {
+        try ignore(tryPromise(() => signInAccounts().cancel({ attempt: receipt.attempt })))
+        return unavailable
+      }
+      attempt = { number: receipt.attempt, buyer, expiresAt: receipt.verdict.expiresAt }
+      return { tag: "EnterCode", expiresAt: attempt.expiresAt } as const
+    }),
+    sendSms: (buyer: Buyer) => lock.withPermits(1)(effect {
+      const pending = attempt
+      const started = epoch
+      if (pending === undefined || !sameBuyer(pending.buyer, buyer) || (try Clock.currentTimeMillis) >= pending.expiresAt ||
+          (try profileFor(buyer)) === undefined || epoch !== started) return false
+      const sent = tryPromise(() => signInAccounts().sendFactorCode({ attempt: pending.number })) catch () => undefined
+      return sent === pending.number && epoch === started && attempt === pending && (try profileFor(buyer)) !== undefined
+    }),
+    verify: (buyer: Buyer, typed: string, factor?: "sms" | "totp") => lock.withPermits(1)(effect {
+      const pending = attempt
+      const started = epoch
+      const code = signInCode(typed)
+      if (pending === undefined || !sameBuyer(pending.buyer, buyer) ||
+          (try Clock.currentTimeMillis) >= pending.expiresAt || (try profileFor(buyer)) === undefined || epoch !== started) return unavailable
+      if (Option.isNone(code)) return { tag: "TryAgain" } as const
+      const receipt: SignInReceipt | undefined = tryPromise(() => signInAccounts().verify({
+        attempt: pending.number, code: code.value, ...(factor === undefined ? {} : { factor }),
+      })) catch () => undefined
+      if (receipt?.attempt !== pending.number || (try profileFor(buyer)) === undefined || epoch !== started || attempt !== pending) return unavailable
+      const reply = receipt.verdict
+      if (reply.kind === "FactorAsked") {
+        attempt = { ...pending, expiresAt: reply.expiresAt }
+        return { tag: "UseFactor", factors: reply.factors, expiresAt: reply.expiresAt } as const
+      }
+      if (reply.kind === "TryAgain") return { tag: "TryAgain" } as const
+      attempt = undefined
+      if (reply.kind !== "AccountConfirmed") return unavailable
+      verified = { buyer, expiresAt: (try Clock.currentTimeMillis) + 3_600_000 }
+      return { tag: "Verified" } as const
+    }),
+    retire: () => effect {
+      epoch++
+      verified = undefined
+      try retireAttempt()
+    },
+  }
+})

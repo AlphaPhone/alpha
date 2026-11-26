@@ -1,0 +1,259 @@
+// spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, normalizePhoneNumber, operationIdOf, type OperationId, type PhoneNumber, type SmsSendStatus, type ThreadId } from "@elizaos/os-bridges"
+import { telephony, type Telephony } from "../platform/telephony.vibe"
+import { Vault, type SmsDraftSlot, type VaultFailed } from "../platform/vault.vibe"
+import { androidInboundOf, canonicalDraftRecipients, decodeDraftRecord, draftSlot, encodeDraftRecord, sameDraftSource, type DraftRecord, type DraftSource } from "./draft-record.vibe"
+
+type Secret = Redacted.Redacted<string>
+type Reason = "identity" | "malformed" | "conflict" | "storage" | "pending-legacy-send"
+
+export error DraftStoreRefused { reason: Reason; storageCode?: VaultFailed["code"] }
+
+export type HeldDraft = { readonly source: DraftSource; readonly slot: SmsDraftSlot } & (
+  | { readonly raw: null; readonly record: null }
+  | { readonly raw: Secret; readonly record: DraftRecord }
+)
+
+function storageFailure(failure: VaultFailed): DraftStoreRefused {
+  return new DraftStoreRefused({ reason: failure.code === "malformed" ? "malformed" : "storage", storageCode: failure.code })
+}
+
+/** The current native value is the compare-and-exchange token. Only native absence gives an empty record. */
+export effect function openDraftRecord(source: DraftSource): HeldDraft!DraftStoreRefused!Vault {
+  const slot = try draftSlot(source)
+  if (slot === undefined) throw new DraftStoreRefused({ reason: "identity" })
+  const raw = try Effect.mapError((try Vault).read(slot), storageFailure)
+  if (Option.isNone(raw)) return { source, slot, raw: null, record: null }
+  const record = decodeDraftRecord(Redacted.value(raw.value), source)
+  if (record === undefined) throw new DraftStoreRefused({ reason: "malformed" })
+  return { source, slot, raw: raw.value, record }
+}
+
+/** Change only the revision held by this editor, and publish the change only once the phone acknowledges it. */
+export effect function writeDraftRecord(held: HeldDraft, next: DraftRecord): HeldDraft!DraftStoreRefused!Vault {
+  if (!sameDraftSource(held.source, next.source)) throw new DraftStoreRefused({ reason: "identity" })
+  if (next.revision <= 0 || (held.record !== null && next.revision !== held.record.revision + 1)) {
+    throw new DraftStoreRefused({ reason: "conflict" })
+  }
+  const text = encodeDraftRecord(next)
+  if (text === undefined) throw new DraftStoreRefused({ reason: "malformed" })
+  const raw = Redacted.make(text)
+  const vault = try Vault
+  const result = try Effect.result(vault.compareAndExchange(held.slot, held.raw, raw))
+  if (result._tag === "Failure" || result.success !== "saved") {
+    const observed = vault.read(held.slot) catch () => Option.none()
+    if (Option.isNone(observed) || Redacted.value(observed.value) !== text) {
+      if (result._tag === "Failure") throw storageFailure(result.failure)
+      throw new DraftStoreRefused({ reason: "conflict" })
+    }
+  }
+  return { source: held.source, slot: held.slot, raw, record: next }
+}
+
+interface SentDraft {
+  readonly source: DraftSource
+  readonly revision: number
+  readonly operation: OperationId
+}
+
+/** After the caller verifies the native send receipt, clear the exact sent revision and retain its replay marker. */
+export effect function settleDraftRecord(held: HeldDraft, sent: SentDraft): { readonly kind: "settled" | "changed"; readonly draft: HeldDraft }!DraftStoreRefused!Vault {
+  if (!sameDraftSource(held.source, sent.source)) throw new DraftStoreRefused({ reason: "identity" })
+  const record = held.record
+  if (record?.completedOperation === sent.operation) return { kind: "settled", draft: held }
+  if (record === null || record.revision !== sent.revision) return { kind: "changed", draft: held }
+  const blank = { revision: record.revision + 1, body: "", author: "Nobody" as const, pictures: [], completedOperation: sent.operation }
+  const androidInbound = androidInboundOf(record)
+  const next: DraftRecord = sent.source.kind === "new"
+    ? { ...blank, source: sent.source, recipients: "", ...(androidInbound === undefined ? {} : { androidInbound }) }
+    : { ...blank, source: sent.source }
+  return { kind: "settled", draft: try writeDraftRecord(held, next) }
+}
+
+module legacy {
+  import { allowsTestMocks } from "../platform/build.ts"
+  import { replyTo } from "../platform/portReply.ts"
+
+  interface DraftPort extends EventTarget { postMessage(data: string): void }
+  type Request = { kind: "read"; threadId: string | null }
+    | { kind: "retire"; threadId: string | null; expected: string }
+
+  export async function request(input: Request, signal: AbortSignal): Promise<unknown> {
+    if (typeof window === "undefined" || (!allowsTestMocks() && (window.top !== window || window.location.origin !== "https://localhost"))) {
+      throw new Error("Installed Messages drafts are unavailable.")
+    }
+    const candidate = (window as Window & { alphaLegacySmsDrafts?: DraftPort }).alphaLegacySmsDrafts
+    if (!candidate || typeof candidate.postMessage !== "function") throw new Error("Installed Messages drafts are unavailable.")
+    const port = candidate
+    const requestId = crypto.randomUUID()
+    const detail = JSON.stringify({ requestId, ...input })
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(5_000)])
+    return new Promise((resolve, reject) => {
+      function cleanup() {
+        deadline.removeEventListener("abort", cancelled)
+        port.removeEventListener("message", received)
+      }
+      function cancelled() {
+        cleanup()
+        reject(new Error("The installed Messages draft could not be confirmed."))
+      }
+      function received(event: Event) {
+        const reply = replyTo(event, requestId, 16 * 1024 * 1024)
+        if (reply === undefined) return
+        cleanup()
+        if (Object.keys(reply).length === 2 && "result" in reply) resolve(reply.result)
+        else reject(new Error("The installed Messages draft request was refused."))
+      }
+      if (deadline.aborted) { cancelled(); return }
+      port.addEventListener("message", received)
+      deadline.addEventListener("abort", cancelled, { once: true })
+      try { port.postMessage(detail) } catch { cancelled() }
+    })
+  }
+}
+import { request } from legacy
+
+type LegacySource = Extract<DraftSource, { readonly kind: "new" | "thread" }>
+interface LegacySmsSend {
+  readonly kind: "sms" | "mms"
+  readonly id: OperationId
+  readonly recipients: readonly PhoneNumber[]
+  readonly subscriptionId: number
+}
+
+export interface LegacySmsDraft {
+  readonly threadId: ThreadId | null
+  readonly raw: Secret
+  readonly record: DraftRecord
+  readonly pending: LegacySmsSend | null
+}
+
+const legacyReply = Schema.Struct({ value: Schema.NullOr(Schema.String) })
+const retirement = Schema.Struct({ status: Schema.Literals(["removed", "conflict"]) })
+const legacyLimit = 8 * 1024 * 1024
+const legacyRecord = Schema.fromJsonString(Schema.Struct({
+  binding: Schema.String.check(Schema.isMaxLength(40)),
+  recipients: Schema.String.check(Schema.isMaxLength(512)),
+  body: Schema.String.check(Schema.isMaxLength(MMS_MAX_BODY)),
+  origin: Schema.Literals(["owner", "asked"]),
+  sim: Schema.String.check(Schema.isPattern(/^\d{0,10}$/u)),
+  pictures: Schema.Array(Schema.Struct({
+    name: Schema.String.check(Schema.isPattern(/^picture-[1-9]\d{0,8}\.(jpg|png|gif)$/u)),
+    contentType: Schema.Literals(MMS_ATTACHMENT_TYPES),
+    bytes: Schema.Uint8ArrayFromBase64.check(Schema.isMinLength(1), Schema.isMaxLength(MMS_MAX_TOTAL_BYTES)),
+  })).check(Schema.isMaxLength(MMS_MAX_ATTACHMENTS)),
+  operation: Schema.NullOr(Schema.Struct({
+    kind: Schema.Literals(["sms", "mms"]),
+    id: Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu)),
+    recipients: Schema.Array(Schema.String.check(Schema.isMaxLength(32))).check(Schema.isMinLength(1), Schema.isMaxLength(MMS_MAX_RECIPIENTS)),
+    subscriptionId: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(2_147_483_647)),
+  })),
+}))
+
+function sameRecipients(left: readonly PhoneNumber[], right: readonly PhoneNumber[]): boolean {
+  return left.length === right.length && left.every((number, at) => number === right[at])
+}
+
+function legacySend(operation: NonNullable<typeof legacyRecord.Type["operation"]>, addresses: readonly PhoneNumber[] | undefined, pictured: boolean): LegacySmsSend | undefined {
+  const id = operationIdOf(operation.id)
+  if (id === null || addresses === undefined || (operation.kind === "sms" && pictured)) return undefined
+  const recipients: PhoneNumber[] = []
+  for (const address of operation.recipients) {
+    const number = normalizePhoneNumber(address)
+    if (number !== address || recipients.includes(number)) return undefined
+    recipients.push(number)
+  }
+  if (!sameRecipients(addresses, [...recipients].sort())) return undefined
+  return { kind: operation.kind, id, recipients, subscriptionId: operation.subscriptionId }
+}
+
+function legacyDraft(raw: string, source: LegacySource): LegacySmsDraft | undefined {
+  if (raw.length > legacyLimit) return undefined
+  const found = Schema.decodeUnknownOption(legacyRecord, { onExcessProperty: "error" })(raw)
+  if (Option.isNone(found)) return undefined
+  const threadId = source.kind === "thread" ? source.thread : null
+  const held = found.value
+  if (held.binding !== `sms-draft:v1:${threadId ?? "new"}`) return undefined
+  const addresses = canonicalDraftRecipients(held.recipients.split(",").map((text) => text.trim()).filter(Boolean))
+  if (source.kind === "thread" && (addresses === undefined || !sameRecipients(source.recipients, addresses))) return undefined
+  const pending = held.operation === null ? null : legacySend(held.operation, addresses, held.pictures.length > 0)
+  if (pending === undefined) return undefined
+  const author: DraftRecord["author"] = held.body === "" ? "Nobody" : held.origin === "asked" ? "AlphaWrote" : "OwnerWrote"
+  const contents = { revision: 1, author, body: held.body, pictures: held.pictures }
+  const record: DraftRecord = source.kind === "new" ? { ...contents, source, recipients: held.recipients } : { ...contents, source }
+  if (encodeDraftRecord(record) === undefined) return undefined
+  return { threadId, raw: Redacted.make(raw), record, pending }
+}
+
+/** Read only the earlier New draft or the exact provider thread named by the current conversation. */
+export effect function readLegacySmsDraft(source: DraftSource): (LegacySmsDraft | null)!DraftStoreRefused {
+  if (source.kind === "recipients") return null
+  const threadId = source.kind === "thread" ? source.thread : null
+  const raw = tryPromise((signal) => request({ kind: "read", threadId }, signal)) catch effect () => {
+    throw new DraftStoreRefused({ reason: "storage" })
+  }
+  const answer = Schema.decodeUnknownOption(legacyReply, { onExcessProperty: "error" })(raw)
+  if (Option.isNone(answer)) throw new DraftStoreRefused({ reason: "malformed" })
+  if (answer.value.value === null) return null
+  const record = legacyDraft(answer.value.value, source)
+  if (record === undefined) throw new DraftStoreRefused({ reason: "malformed" })
+  return record
+}
+
+effect function retireLegacyValue(draft: LegacySmsDraft): ("removed" | "conflict")!DraftStoreRefused {
+  const threadId = draft.threadId
+  const expected = Redacted.value(draft.raw)
+  const raw = tryPromise((signal) => request({ kind: "retire", threadId, expected }, signal)) catch effect () => {
+    throw new DraftStoreRefused({ reason: "storage" })
+  }
+  const answer = Schema.decodeUnknownOption(retirement, { onExcessProperty: "error" })(raw)
+  if (Option.isNone(answer)) throw new DraftStoreRefused({ reason: "malformed" })
+  return answer.value.status
+}
+
+/** A pending send can be retired only by the receipt resolver below. */
+export effect function retireLegacySmsDraft(draft: LegacySmsDraft): ("removed" | "conflict")!DraftStoreRefused {
+  if (draft.pending !== null) throw new DraftStoreRefused({ reason: "pending-legacy-send" })
+  return try retireLegacyValue(draft)
+}
+
+/** Copy into an empty native slot. An identical prior copy can finish retiring its earlier value. */
+export effect function importLegacySmsDraft(held: HeldDraft, draft: LegacySmsDraft): HeldDraft!DraftStoreRefused!Vault {
+  if (!sameDraftSource(held.source, draft.record.source)) throw new DraftStoreRefused({ reason: "identity" })
+  if (draft.pending !== null) throw new DraftStoreRefused({ reason: "pending-legacy-send" })
+  if (held.raw !== null && Redacted.value(held.raw) !== encodeDraftRecord(draft.record)) {
+    throw new DraftStoreRefused({ reason: "conflict" })
+  }
+  const saved = held.raw === null ? try writeDraftRecord(held, draft.record) : held
+  try ignore(retireLegacySmsDraft(draft))
+  return saved
+}
+
+export type LegacyDraftRecovery = { readonly kind: "ready"; readonly draft: HeldDraft } | { readonly kind: "pending" }
+
+/** The pinned client validates the receipt against the original operation and full ordered review. */
+export effect function recoverLegacySmsDraft(held: HeldDraft, legacy: LegacySmsDraft, current: Effect.Effect<boolean> = succeed(true)): LegacyDraftRecovery!DraftStoreRefused!(Vault | Telephony) {
+  if (!sameDraftSource(held.source, legacy.record.source)) throw new DraftStoreRefused({ reason: "identity" })
+  if (!(try current)) return { kind: "pending" }
+  const operation = legacy.pending
+  if (operation === null) return { kind: "ready", draft: try importLegacySmsDraft(held, legacy) }
+  const review = { recipients: [...operation.recipients], body: legacy.record.body, subscriptionId: operation.subscriptionId }
+  const read = operation.kind === "sms"
+    ? telephony<SmsSendStatus>("smsSendResult", async (client) => (await client.messages.smsSendResult(review, operation.id)).status)
+    : telephony<SmsSendStatus>("mmsSendResult", async (client) => (await client.messages.mmsSendResult({ ...review, attachments: legacy.record.pictures.map((one) => ({
+      name: one.wireName ?? one.name, contentType: one.contentType, bytes: one.bytes,
+    })) }, operation.id)).status)
+  const status = timeout(read, "2 seconds") catch () => undefined
+  if (!(try current) || (status !== "sent" && status !== "delivered" && status !== "denied" && status !== "cancelled")) return { kind: "pending" }
+
+  const source = legacy.record.source
+  const blank = { revision: legacy.record.revision + 1, author: "Nobody" as const, body: "", pictures: [], completedOperation: operation.id }
+  const next: DraftRecord = status === "denied" || status === "cancelled" ? legacy.record
+    : source.kind === "new" ? { source, recipients: "", ...blank } : { source, ...blank }
+  if (held.raw !== null && Redacted.value(held.raw) !== encodeDraftRecord(next)) {
+    return { kind: "ready", draft: held }
+  }
+  const saved = held.raw === null ? try writeDraftRecord(held, next) : held
+  if (try current) try ignore(retireLegacyValue(legacy))
+  return { kind: "ready", draft: saved }
+}

@@ -1,4 +1,5 @@
 // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+import type { ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "@repo/launcher-records";
 import { Alert, Button, Checkbox, Chip, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Switch, Textarea } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import type * as KeyValueStore from "effect/persistence/KeyValueStore";
@@ -9,7 +10,6 @@ import { useMachine as useEditorMachine } from "../../gen/app__reminders__editor
 import { closeReminderEditor, keepMineReminderDraft, takeSavedReminderDraft, updateEditorDraft } from "./editor.vibe";
 import { inputTimeToMinute, minuteToInputTime, quickDatePresets } from "./recurrence.ts";
 import { EditorDraftShelf, type ReminderEditorFields, RemindersNowShelf, type RemindersShelf } from "./shelf.vibe";
-import type { ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "./store.ts";
 
 const RECURRENCE_OPTIONS: readonly { readonly value: ReminderRecurrence; readonly label: string }[] = [
   { value: "none", label: "Never" },
@@ -245,7 +245,7 @@ export function ReminderEditorSheet({
                   if (target !== null) onDelete(target);
                 }}
               >
-                <Trash2 aria-hidden className="size-4" />
+                <Trash2 aria-hidden className="size-4.5" />
                 Delete
               </Button>
             ) : (
@@ -392,7 +392,7 @@ export function ReminderEditorSheet({
                 onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSubtask(); } }}
               />
               <Button type="button" variant="secondary" size="sm" className="min-h-11" aria-label="Add subtask" disabled={!canAddSubtask || newSubtask.trim() === ""} onClick={addSubtask}>
-                <Plus aria-hidden className="size-4" />
+                <Plus aria-hidden className="size-4.5" />
               </Button>
             </div>
           </div>

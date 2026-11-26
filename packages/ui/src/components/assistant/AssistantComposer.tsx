@@ -1,14 +1,15 @@
-import type { ComponentProps, PointerEvent, ReactNode, Ref } from "react";
-import { ArrowUp, Clock, Keyboard, Mic, Paperclip, Plus, Search } from "lucide-react";
+import { type ComponentProps, type PointerEvent, type ReactNode, type Ref } from "react";
+import { ArrowUp, Keyboard, Mic } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
+import { AssistantChatActions } from "./AssistantChatActions.tsx";
 import { Textarea } from "../Textarea.tsx";
 import { AssistantDraftNotice, type AssistantDraftNoticeProps } from "./AssistantDraftNotice.tsx";
 import type { AssistantAttachment } from "./AssistantAttachmentChip.tsx";
 import { AssistantPendingAttachments } from "./AssistantPendingAttachments.tsx";
 import { AssistantQuoteBar } from "./AssistantQuoteBar.tsx";
+import { type AssistantPull, useAssistantPull } from "./assistant-pull.ts";
 
 export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "onChange"> & {
   /** Where the composer sits: in the Ask Alpha bar, raised on its own, or at the foot of the conversation sheet. */
@@ -69,10 +70,12 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   opener?: ReactNode;
   /** The target or action named in the field. */
   placeholder?: string;
-  /** Called when the field takes focus: on the bar this opens Ask Alpha as a sheet. */
+  /** Called when the field takes focus: on the bar this raises Ask Alpha to typing, in place. */
   onFocusField?: () => void;
   /** Ref to the composer field so a tap on the resting bar can focus it synchronously. */
   fieldRef?: Ref<HTMLTextAreaElement>;
+  /** Allows a pull to start on the editable field when the dock admits it. */
+  fieldPull?: AssistantPull;
   /** Removes a pending attachment. */
   onRemoveAttachment?: (id: string) => void;
   /** Opens a pending image over the conversation. */
@@ -96,40 +99,37 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
+  // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
+  const draggable = value.length === 0;
   const bar = variant === "bar";
   const compact = bar && onType !== undefined;
   const targeting = !bar && placeholder !== undefined;
-  const acting = Boolean(onAttach || onSearch || onNew || making || onHistory) && !closed;
+  const pickedFiles = attachments.every(({ kind }) => kind === "image" || kind === "file");
+  const frame = bar ? "mx-4 [--alpha-composer-rest:1.75rem]" : "mx-3 [--alpha-composer-rest:1.875rem]";
+  const pull = useAssistantPull<HTMLTextAreaElement>(fieldPull, true);
   return (
-    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(var(--alpha-safe-bottom)+0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(var(--alpha-safe-bottom)+0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
+    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(var(--alpha-safe-bottom)_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
-      {!compact && attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
+      {!compact && attachments.length ? (
+        <AssistantPendingAttachments attachments={attachments} limit={limit}
+          className={pickedFiles ? cn("-mb-2", !bar && "-mx-3") : undefined}
+          onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} />
+      ) : null}
       {!compact && quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? "min-h-18.5 touch-pan-y gap-2 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : "min-h-17 touch-pan-y gap-2 rounded-sheet py-1.5 pr-2 pl-3")}>
+      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
-          <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-full scale-[1.18]" /></Button>
+          <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-full scale-[1.18]" /></Button>
         ) : null) : null}
-        {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard aria-hidden /></Button> : targeting ? (onAttach ? <Button variant="ghost" size="icon" aria-label="Attach" disabled={closed} onClick={onAttach}><Plus aria-hidden /></Button> : null) : (
-          <Menu>
-            <MenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!acting} className="hover:bg-transparent disabled:opacity-40"><Plus aria-hidden /></Button>
-            </MenuTrigger>
-            <MenuContent side="top" align="start" alignOffset={bar ? 0 : -16} sideOffset={bar ? 12 : 20}
-              className="min-w-55 rounded-tile p-2 shadow-dock dark:shadow-dock-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:px-3">
-              {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
-              {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
-              {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
-              {onHistory ? <MenuItem onSelect={onHistory}><Clock aria-hidden />Chat history</MenuItem> : null}
-            </MenuContent>
-          </Menu>
+        {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard aria-hidden /></Button> : (
+          <AssistantChatActions placement={bar ? "bar" : "sheet"} disabled={closed} onAttach={onAttach} onSearch={onSearch} onNew={onNew} making={making} onHistory={onHistory} />
         )}
         <Textarea
           ref={fieldRef}
@@ -142,12 +142,14 @@ export function AssistantComposer({
           disabled={closed}
           onChange={(event) => onValueChange(event.target.value)}
           onFocus={onFocusField}
+          data-alpha-pull={fieldPull ? "" : undefined}
+          {...pull}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
             event.preventDefault();
             if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
           }}
-          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-panel bg-transparent px-3 py-2.75 text-body leading-field", targeting ? "border border-primary" : "border-0", compact && "hidden")}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 rounded-panel border-0 bg-transparent py-2.75 pr-0.5 text-body leading-field", bar ? "pl-2" : "pl-0.5", fieldPull || (bar && draggable) ? "touch-none" : bar ? "touch-pan-y" : "touch-auto", compact && "hidden")}
         />
         {onStop || stopping ? (
           <Button variant={compact ? "ghost" : undefined} size="icon" aria-label="Stop reply" loading={stopping} className={compact ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>
@@ -161,11 +163,11 @@ export function AssistantComposer({
             onClick={onSend}
           ><ArrowUp aria-hidden /></Button>
         ) : onTalk ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic aria-hidden /></Button>
+          <Button variant="ghost" size="icon" aria-label="Talk" className={bar || targeting ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic aria-hidden /></Button>
         ) : !compact && onDictate ? (
           <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic aria-hidden /></Button>
-        ) : compact || (bar && showUnavailableTalk) ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" disabled><Mic aria-hidden /></Button>
+        ) : compact || showUnavailableTalk ? (
+          <Button variant="ghost" size="icon" aria-label="Talk" className={!bar && !targeting ? "bg-foreground text-background" : undefined} disabled><Mic aria-hidden /></Button>
         ) : null}
       </div>
     </div>

@@ -179,8 +179,34 @@ export effect function contained<R = never>(work: unknown!unknown!R, what: strin
 }
 
 /** Where a machine's state is kept: under the spec's own path, so no two machines share a key, and a version the area raises when the state's shape changes. */
-function storeKey(machine: string, version: number): string {
+export function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
+}
+
+/**
+ * The store, reading what is kept under `key` through `migrate`: a state kept in an older shape is brought to the
+ * current one before its machine decodes it.
+ */
+export function migratedStore(key: string, migrate: (raw: string | undefined) => (string | undefined)!!) {
+  return Layer.effect(KeyValueStore.KeyValueStore, effect {
+    const store = try KeyValueStore.KeyValueStore
+    return KeyValueStore.make({ ...store, get: (name: string) => name === key ? Effect.flatMap(store.get(name), migrate) : store.get(name) })
+  })
+}
+
+/** Where the epoch of a durable machine's attempts is kept, beside its state under `key`. */
+const epochKey = (key: string): string => `${key}.epoch`
+
+/**
+ * Look up a durable attempt under the same scope the reactor gave its sender: the machine's store key and the epoch
+ * kept beside it, or this launch where none could be kept.
+ */
+export effect function keptAttempts(machine: { readonly key: string }, version: number): Attempts.Shape!!(Install | KeyValueStore.KeyValueStore) {
+  const install = try Install
+  const store = try KeyValueStore.KeyValueStore
+  const scope = storeKey(machine.key, version)
+  const epoch = store.get(epochKey(scope)) catch () => undefined
+  return attemptsOf(install, `${scope}@${epoch ?? install.launch}`)
 }
 
 /** The places a value kept under `key` that is no longer a state may be copied to, in order. */
@@ -219,7 +245,7 @@ function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Lay
     if (!copied) return asMemory
     const removed = effect { try store.remove(key); return true } catch () => false
     if (!removed) return asMemory
-    try ignore(store.remove(`${key}.epoch`))
+    try ignore(store.remove(epochKey(key)))
     return Layer.catch(asStored(Layer.fresh(stored(key))), () => asMemory)
   })
   return Layer.catch(asStored(stored(key)), (cause) => (isNotAState(cause) ? aside : asMemory))
@@ -248,10 +274,10 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
     const store = try KeyValueStore.KeyValueStore
     effect function epoch(): string!! {
       if (!durable) return install.launch
-      const found = store.get(`${scope}.epoch`) catch () => undefined
+      const found = store.get(epochKey(scope)) catch () => undefined
       if (found !== undefined) return found
       const made = fresh()
-      return effect { try store.set(`${scope}.epoch`, made); return made } catch () => install.launch
+      return effect { try store.set(epochKey(scope), made); return made } catch () => install.launch
     }
     const attempts = attemptsOf(install, `${scope}@${try epoch()}`)
     const running = try FiberMap.make<string>()

@@ -101,6 +101,10 @@ pure val weight_contactRead = 4
 > a filter, and to be told plainly when there are none, when nothing
 > matches and when Alpha has no access.
 
+Contacts are grouped from A to Z by the first letter without accents, with
+other names together at the end. Names use local alphabetical order
+within each section. Section headings appear from 20 contacts.
+
 ### Contacts reads the list each time it comes to the front
 
 ```quint
@@ -306,6 +310,27 @@ pure def readCard(contact: str, s: Contacts): Moved =
 pure def openContact(s: Contacts, contact: str): Moved = readCard(contact, s)
 
 pure def alwaysAnOpenContactIsNamed(s: Contacts): bool = s.opened implies s.contact != ""
+```
+
+### Returning to a contact on the Ask Alpha stage reads that exact card again
+
+The stage names the contact it left and the preceding Contacts list ticket.
+The new visit rereads the list and card. If the new visit has already begun
+its list read, the return starts only the card read.
+
+```quint
+pure def canRestoreStageContact(s: Contacts, contact: str, ticket: int): bool =
+  P::allows(s.access) and contact != "" and contact == s.contact and not(s.opened) and s.form == Shut
+    and s.list.ticket == (if (s.front) ticket + 1 else ticket)
+
+pure def restoreStageContact(s: Contacts, contact: str, ticket: int): Moved =
+  val visit = if (s.front) { state: s, out: List() } else show(s)
+  val card = readCard(contact, visit.state)
+  { state: card.state, out: visit.out.concat(card.out) }
+
+pure def stepTheReturnedCardIsReadOnItsNewVisit(before: Contacts, via: str, after: Contacts): bool =
+  via == "restoreStageContact" implies (after.front and after.opened and after.contact == before.contact
+    and after.card.ticket == before.card.ticket + 1 and after.list.ticket == before.list.ticket + (if (before.front) 0 else 1))
 ```
 
 ### When the phone reports a change to the address book, Contacts reads the visible list and any open contact again

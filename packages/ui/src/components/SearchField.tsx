@@ -10,10 +10,12 @@ export type SearchFieldProps = Omit<InputProps, "type" | "value" | "defaultValue
   onValueChange: (value: string) => void;
   /** The accessible name of the clear button. */
   clearLabel?: string;
+  /** Keeps the clear button while the field is empty, as a list's own search in the header does. */
+  keepClear?: boolean;
 };
 
 /** A field that finds or filters, on a filled 48px bar: the text between a search icon and a button that clears it. Name it with `aria-label`; `ref` reaches the field, to focus it. */
-export function SearchField({ value, onValueChange, clearLabel = "Clear", disabled, className, ...props }: SearchFieldProps) {
+export function SearchField({ value, onValueChange, clearLabel = "Clear", keepClear = false, disabled, className, ...props }: SearchFieldProps) {
   return (
     <div className={cn("relative flex items-center", className)}>
       <Search aria-hidden className="pointer-events-none absolute left-4 size-4.5 text-muted-foreground" />
@@ -26,7 +28,7 @@ export function SearchField({ value, onValueChange, clearLabel = "Clear", disabl
         className="rounded-panel border-0 pr-12 pl-11 [&::-webkit-search-cancel-button]:appearance-none"
         {...props}
       />
-      {value ? (
+      {value || keepClear ? (
         <Button
           variant="ghost"
           size="icon"

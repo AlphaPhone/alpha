@@ -14,6 +14,13 @@ export function fetched(answer: Answering, url: URL, init: { method: string; hea
   return answer(new Request(url, requestInit as RequestInit));
 }
 
+/** What the dev server answers under `prefix`, asked as a plugin's native code would ask the service it stands for. */
+export const servedUnder = (prefix: string): Answering => async (request) => {
+  const { pathname, search } = new URL(request.url);
+  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
+  return fetch(`${prefix}${pathname}${search}`, { method: request.method, headers: request.headers, body, signal: request.signal });
+};
+
 /** The service that answers by the first route that does, and 404 where none does. */
 export function answering(routes: readonly Route[]): Answering {
   return async (request) => {

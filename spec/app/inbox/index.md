@@ -27,6 +27,17 @@ holds, never more than was read.
 > As the owner, I want the mail of the account, folder and search I chose,
 > and never a list that was read for another.
 
+### Only a card with a positive attachment hint shows a paperclip
+
+A mail row shows and announces that it has attachments when Cloud gave
+the card a positive attachment hint. An older card without a hint and a
+card with a false hint show no paperclip. The row uses the list response.
+Opening the message reads the available attachments.
+
+```quint
+pure def showsAttachment(positiveHint: bool): bool = positiveHint
+```
+
 ### The list is for one account, folder and search, and remembers the last list it showed and the credential it was read under
 
 Account 0 is no account, and credential 0 none. What is kept through a
@@ -169,7 +180,11 @@ pure def emptied(account: int, s: Mailbox): Mailbox =
 ### Choosing a folder or a search reads its first page
 
 Both need read access. A folder starts without a search. Spam and Trash
-are chosen only where they can be searched.
+are chosen only where they can be searched. A signed-out owner can open
+and type into the search field. Submitting a nonempty search there opens
+Cloud sign-in before any mail is requested. When the phone has no mail sign-in
+to ask for, Search and Connect Eliza Cloud open Account above the current Inbox
+visit. Back closes Account and keeps the search field and its text.
 
 ```quint
 pure def canChooseFolder(s: Mailbox, folder: Folder): bool =
@@ -362,6 +377,22 @@ pure def alwaysAFurtherPageNeedsAFreshList(s: Mailbox): bool =
   s.cursor != 0 implies (s.pages > 0 and not(s.saved))
 ```
 
+### Inbox reads ahead only from a fresh list on screen
+
+While Inbox shows a fresh list, the phone may read the next page and the
+first two messages ahead. These answers stay in memory. Only opening a
+message or asking for the next page can use an answer, under the same
+account, grant, selection and revision. Leaving Inbox, hiding it, composing
+or changing the selection retires the reads. A missed or failed read ahead
+leaves the request the owner makes to run as usual.
+
+```quint
+pure def aheadAllowed(s: Mailbox, visible: bool, composing: bool): bool =
+  visible and not(composing) and readable(s) and s.accounts.status == R::Loaded and
+    s.pages > 0 and not(s.saved) and s.selected.folder != DraftsFolder and s.failure == Fine and
+    (s.list.status == R::Loaded or (s.list.status == R::Loading and s.further))
+```
+
 ### A second page can be shown with more offered, and the mailbox can have moved between pages
 
 When it has, the list says newer mail may be missing until Refresh.
@@ -463,6 +494,14 @@ pure def sometimesTheListMayBeOutOfDate(s: Mailbox): bool = s.doubtful and s.pag
 > there is none, to choose among several, to see only what my grant
 > allows, and to see nothing once I withdraw it.
 
+### The owner authorizes Gmail in Google and Inbox checks access on return
+
+Connect Gmail, Give access and Reconnect open Google's authorization for
+the same signed-in Cloud owner. The request covers reading, sending,
+saving drafts and organizing mail. Reconnecting keeps the selected
+account's existing Calendar access. Inbox checks the grants again on
+return and only uses the access Google actually granted.
+
 ### Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out
 
 Only the newest check's answer is taken, so one computed before a
@@ -490,7 +529,11 @@ pure def checkAccess(s: Mailbox): Moved =
 A list kept under a credential the account no longer has is dropped.
 Replacing the selected credential clears the live list, its unread count,
 and the read in flight. With read access the first page is
-read when access is new, or when nothing fresh is on screen. Without it
+read when access is new, or when nothing fresh is on screen: no list, a
+saved list, or a list whose last read failed. So a check after a failed
+read reads the mail again and the count recovers, as v121 read the mail
+again each time Alpha came back to the front (the Sunday demo build, Alpha
+45f6bed30, `apps/app/src/prototype/inbox-cloud-adapter.ts:255-312`, `:1387`). Without it
 the screen is emptied. A failed check changes nothing. An answer ends a
 wait for the mail lease, as it ends a withdrawal.
 
@@ -525,8 +568,16 @@ pure def accountsAnswered(s: Mailbox, ticket: int, ok: bool, connected: List[Lin
   if (not(ok)) { state: told, out: List() }
   else if (not(readable(placed))) { state: emptied(account, placed), out: List() }
   else if (not(searchableIn(placed.selected.folder, placed))) { state: placed, out: List() }
-  else if (not(was) or (placed.list.status != R::Loading and (placed.pages == 0 or placed.saved))) asking(0, placed)
+  else if (not(was) or (placed.list.status != R::Loading and (placed.pages == 0 or placed.saved or placed.list.status == R::Failed))) asking(0, placed)
   else { state: placed, out: List() }
+```
+
+### A check that answers after a failed read reads the first page again
+
+```quint
+pure def stepACheckAfterAFailedReadReadsAgain(before: Mailbox, via: str, after: Mailbox): bool =
+  (via == "accountsAnswered" and before.list.status == R::Failed and after.accounts.status == R::Loaded
+    and readable(after) and searchableIn(after.selected.folder, after)) implies after.list.status == R::Loading
 ```
 
 ### A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in
@@ -535,20 +586,27 @@ A phone signed in before mail leases existed cannot check the accounts
 until the owner signs in once more for mail
 ([platform](../platform/index.md)). That is not a sign-out: the owner stays
 signed in, and the accounts, the selection, the lists kept and the count
-stay as they were, while the list asks the owner to sign in. The next check
-that answers ends the wait.
+stay as they were, the count no longer fresh, as after any read that did
+not answer, while the list asks the owner to sign in. The next check that
+answers ends the wait.
+
+Discovered by the journey: a held check that kept the count fresh broke "A
+fresh count is of the account selected, from a list read afresh that has
+not failed since; a failed or saved list never reports one", so the phone
+refused its own kept Inbox state.
 
 ```quint
 pure def canAccountsHeld(s: Mailbox, ticket: int): bool = canAccountsAnswered(s, ticket)
 
 pure def accountsHeld(s: Mailbox, ticket: int): Moved =
-  { state: { ...s, accounts: R::answer(s.accounts, false), failure: LeaseNeeded }, out: List() }
+  { state: { ...s, accounts: R::answer(s.accounts, false), failure: LeaseNeeded, count: { ...s.count, fresh: false } }, out: List() }
 
 pure def stepAHeldCheckForgetsNothing(before: Mailbox, via: str, after: Mailbox): bool =
   via == "accountsHeld" implies (
     after.signedIn == before.signedIn and after.connected == before.connected and after.selected == before.selected
       and after.kept == before.kept and after.keptPages == before.keptPages and after.keptCredential == before.keptCredential
-      and after.count == before.count and after.pages == before.pages and after.revision == before.revision
+      and after.count.account == before.count.account and after.count.unread == before.count.unread and not(after.count.fresh)
+      and after.pages == before.pages and after.revision == before.revision
   )
 
 pure def sometimesTheMailLeaseIsNeeded(s: Mailbox): bool = s.signedIn and s.failure == LeaseNeeded
@@ -692,8 +750,9 @@ pure def sometimesTheSavedListIsShownOffline(s: Mailbox): bool =
 
 ### Attention says whether the owner is signed out, has no account, is being checked, or has a count of unread messages, fresh or no longer fresh, or could not be read
 
-Only counts, a time and whether there are more leave Inbox: no sender,
-subject or body.
+Attention itself is only counts, a time and whether there are more. Home's
+mail card also shows the senders and subjects of the first unread messages
+Inbox loaded, and which account it read when; no body ever leaves Inbox.
 
 ```quint
 type Standing = SignedOut | NotConnected | Checking | Ready | Stale | Unavailable

@@ -34,7 +34,7 @@ it("Ask Alpha production assistant talks to eliza's agent and stops a stalled tu
   await until(alpha, runtime, Composer, (s) => s.slot === "Open");
   await until(alpha, runtime, Conversation, (s) => s.ready);
 
-  await elizaHandle.script({ kind: "text", parts: ["Hello ", "from ", "Ask Alpha."] });
+  await elizaHandle.script({ kind: "text", parts: ["[answer] Hello ", "from ", "Ask Alpha."] }, "Say hello.");
   await fill("Message Alpha", "Say hello.");
   await press("Send");
   await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
@@ -43,7 +43,7 @@ it("Ask Alpha production assistant talks to eliza's agent and stops a stalled tu
   expect(transcriptLines()).toEqual(["Say hello.", "Hello from Ask Alpha."]);
   expect([button("Earlier"), button("Later")]).toEqual([undefined, undefined]);
 
-  await elizaHandle.script({ kind: "stall", first: "Thinking" });
+  await elizaHandle.script({ kind: "stall", first: "[answer] Thinking" }, "Take your time.");
   await fill("Message Alpha", "Take your time.");
   await press("Send");
   await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");

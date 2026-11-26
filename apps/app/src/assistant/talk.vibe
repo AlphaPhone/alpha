@@ -1,5 +1,5 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
-import type { ConversationRecord } from "@elizaos/agent"
+import type { ClientMessageId, ConversationRecord } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
 import { sameArchiveAuthority, type ArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
@@ -9,7 +9,11 @@ import type { MailQuestion } from "../inbox/mail-context.vibe"
 import type { Sighting } from "../platform/location.vibe"
 import type { CommsPrompt } from "../phone/comms.vibe"
 import type { NoteTranscript } from "../notes/selection.vibe"
-import { createBoundedCache } from "../runtime/shelf.vibe"
+import type { RecordingSummary } from "./recording-summary.vibe"
+
+export type PhotoDraft =
+  | { readonly kind: "ViewedPhoto"; readonly close: void!! }
+  | { readonly kind: "CapturedPhoto" }
 
 /** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
 export interface Attached {
@@ -17,9 +21,34 @@ export interface Attached {
   readonly name: string
   readonly mimeType: string
   readonly data: string
+  readonly origin?: PhotoDraft
 }
 
-/** The batch staged for one concrete send, under the composer's own hold number and binding. */
+/** The exact Contact card and owner that opened the attachment review. */
+export interface ContactFileTarget {
+  readonly person: string
+  readonly card: number
+  readonly about: string
+  readonly revision: number
+  readonly authority: ArchiveAuthority
+}
+
+export interface ContactAttachmentDraft {
+  readonly target: ContactFileTarget
+  readonly files: readonly Attached[]
+}
+
+/** Pressing Send freezes a card's reviewed files and the current shell route. */
+export interface ContactFileSend {
+  readonly route: number
+  readonly draft: ContactAttachmentDraft
+}
+
+export interface CommsRequest extends CommsPrompt {
+  readonly contact?: ContactFileSend
+}
+
+/** The batch staged for one concrete send and its exact draft. */
 export interface StagedFiles {
   readonly ticket: number
   readonly hold: number
@@ -29,6 +58,7 @@ export interface StagedFiles {
   readonly authority?: ArchiveAuthority
   readonly mail?: MailQuestion
   readonly transcript?: TranscriptAttachment
+  readonly contactDraft?: ContactAttachmentDraft
 }
 
 /** The exact note accepted into this composer's conversation. */
@@ -49,16 +79,26 @@ export interface Line {
   readonly attachments?: readonly Attached[]
 }
 
-export interface PageBounds {
-  readonly hasEarlier: boolean
-  readonly hasLater: boolean
+/** The exact visible server rows which have older or newer history past them. */
+export interface HistoryBounds {
+  readonly earlier?: string
+  readonly later?: string
+}
+
+export interface HistoryReference {
+  readonly conversation: number
+  readonly message: number
+}
+
+interface ReadLine {
+  readonly conversation: number
+  readonly line: Pick<Line, "id" | "mine" | "text">
 }
 
 interface MessagePage {
   readonly conversation: number
   readonly lines: ReadonlyArray<Line>
-  readonly hasEarlier: boolean
-  readonly hasLater: boolean
+  readonly bounds?: HistoryBounds
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
@@ -76,22 +116,24 @@ export interface Known {
 
 /** What the screen shows beside the machines' states: words, which the specs count but never hold. */
 export interface Seen {
-  /** The messages of each page read, by the ticket that read it; the page showing is the one under the chats' newest ticket. */
+  /** The page showing, and any page still receiving the exact words of an in-flight typed turn. */
   readonly pages: ReadonlyMap<number, MessagePage>
   /** The reply as it is written, until it ends. */
   readonly reply: string
   /** What the agent says it is doing until its reply is written: its acknowledgment, its status or the app its tool uses. */
   readonly label: string
   /** Why the last reply did not finish, the fix the agent named, and how long the provider asked to wait, or -1. */
-  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number } | undefined
+  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number; readonly messageId?: string } | undefined
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
   readonly files: readonly Attached[]
   readonly filesBinding: Binding | undefined
   readonly filesAuthority: ArchiveAuthority | undefined
+  readonly contactDraft: ContactAttachmentDraft | undefined
   readonly transcript: TranscriptAttachment | undefined
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
+  readonly recordingSummary: RecordingSummary | undefined
   readonly media: ReadonlyArray<MediaCard>
   readonly mediaNote: { readonly conversation: number; readonly text: string } | undefined
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
@@ -108,6 +150,13 @@ export interface Seen {
  */
 export interface DraftSeat { readonly number: number; readonly authority: ArchiveAuthority }
 
+export interface PostedMessage {
+  readonly turn: number
+  readonly seat: DraftSeat
+  readonly record: ConversationRecord
+  receipt?: { readonly clientMessageId: ClientMessageId; readonly replyId?: string }
+}
+
 export interface Board {
   draftSeat: DraftSeat | undefined
   phoneDrafts: { kind: "encrypted" } | { kind: "temporary"; values: Map<string, string> } | undefined
@@ -122,8 +171,8 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
-  /** The exact wire text, used only to reconcile a turn without a message ID. */
   lastSentWire: string
+  lastPost: PostedMessage | undefined
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
   sendWhenMade: boolean
@@ -137,8 +186,8 @@ export interface Board {
   forgetPosition(): void
   /** The remembered position for `ticket`, if the locator still holds that ticket. */
   positionFor(ticket: number): Sighting | undefined
-  waitingRequest: CommsPrompt | undefined
-  postingRequest: CommsPrompt | undefined
+  waitingRequest: CommsRequest | undefined
+  postingRequest: { readonly ticket: number; readonly request: CommsRequest } | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -151,9 +200,11 @@ export interface Board {
   /** The page under `ticket`, and mutations of a turn's own page. */
   page(ticket: number): ReadonlyArray<Line>
   line(conversation: number, message: number): Line | undefined
-  putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>, bounds?: PageBounds): void
-  /** Take confirmed rows and retire loaded copies of any now-redacted attachment, returning its open preview ticket. */
-  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>, bounds?: PageBounds): number | undefined
+  putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>): void
+  /** Keep the mutation target of the single typed writer until its stream's scope ends. */
+  holdTurnPage(ticket: number): () => void
+  /** Replace the loaded page, carrying only the words readers still hold, and close a newly redacted preview. */
+  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>, bounds: HistoryBounds, readers: readonly HistoryReference[]): number | undefined
   append(ticket: number, conversation: number, line: Line): void
   rename(ticket: number, line: Line, id: string): void
   drop(ticket: number, line: Line): void
@@ -162,6 +213,7 @@ export interface Board {
 export service Talk {
   readonly board: Board
   readonly attachmentLock: Semaphore.Semaphore
+  readonly writer: Semaphore.Semaphore
   /** Seal the previous seat, or open the verified conversation catalogue and say if it was selected before. */
   seat(next: DraftSeat | undefined): boolean!!
   /** Record which verified catalogue the settled numeric Chat state belongs to. */
@@ -190,8 +242,6 @@ module pure {
 }
 import { unkept } from pure
 
-const maxRetainedPages = 8
-
 /** The board, with the conversations numbered before kept from the store, and each new one kept there. */
 export const talk = Layer.effect(Talk, effect {
   const store = try KeyValueStore.KeyValueStore
@@ -200,14 +250,17 @@ export const talk = Layer.effect(Talk, effect {
   let records: Known[] = []
   const messages: string[] = []
   const numbers = new Map<string, number>()
-  const pageCache = createBoundedCache<number, MessagePage>(maxRetainedPages)
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
+  let loadedPage: number | undefined
+  let turnPage: { readonly ticket: number } | undefined
+  let readLines: readonly ReadLine[] = []
+  let previewOrigin: { readonly preview: NonNullable<Seen["preview"]>; readonly conversation: number; readonly id: string } | undefined
+  let restoredSentId = ""
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(),
   }
-  const snapshotPages = (): ReadonlyMap<number, MessagePage> => new Map(pageCache.entries())
   const keep = () => {
     const key = catalogue
     if (key !== undefined) runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
@@ -226,7 +279,9 @@ export const talk = Layer.effect(Talk, effect {
     outgoing: "",
     lastSent: "",
     lastSentWire: "",
-    lastSentId: "",
+    lastPost: undefined,
+    get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? restoredSentId },
+    set lastSentId(id: string) { restoredSentId = id },
     sendWhenMade: false,
     staged: undefined,
     lastTranscriptOffer: 0,
@@ -241,7 +296,10 @@ export const talk = Layer.effect(Talk, effect {
     waitingRequest: undefined,
     postingRequest: undefined,
     change: (patch) => {
+      const previous = seen.recordingSummary
       seen = { ...seen, ...patch }
+      if (previewOrigin?.preview !== seen.preview) previewOrigin = undefined
+      if (previous !== undefined && previous !== seen.recordingSummary) runFork(previous.runtime.disposeEffect)
       for (const listener of listeners) listener()
     },
     numberOf: (record, title) => {
@@ -274,56 +332,82 @@ export const talk = Layer.effect(Talk, effect {
       if (previous !== undefined && authority !== undefined && sameArchiveAuthority(previous, authority)) return false
       archiveAuthority = authority
       if (previous === undefined) return false
+      const pages = new Map(seen.pages)
       let changed = false
-      for (const [ticket, page] of pageCache.entries()) {
+      for (const [ticket, page] of pages) {
         if (!page.lines.some((line) => line.attachments !== undefined)) continue
-        pageCache.set(ticket, { ...page, lines: page.lines.map((line) => line.attachments === undefined ? line : { ...line, attachments: undefined }) })
+        pages.set(ticket, { ...page, lines: page.lines.map((line) => line.attachments === undefined ? line : { ...line, attachments: undefined }) })
         changed = true
       }
-      if (changed || seen.preview !== undefined) board.change({ pages: snapshotPages(), preview: undefined })
+      if (changed || seen.preview !== undefined) board.change({ pages, preview: undefined })
       return true
     },
     page: (ticket) => seen.pages.get(ticket)?.lines ?? [],
     line: (conversation, message) => {
       const id = board.messageId(message)
       if (id === undefined) return undefined
+      const latest = loadedPage === undefined ? undefined : seen.pages.get(loadedPage)
+      const loaded = latest?.conversation === conversation ? latest.lines.find((line) => line.id === id) : undefined
+      if (loaded !== undefined) return loaded
       for (const page of seen.pages.values()) {
-        if (page.conversation !== conversation) continue
+        if (page === latest || page.conversation !== conversation) continue
         const line = page.lines.find((one) => one.id === id)
         if (line !== undefined) return line
       }
-      return undefined
+      return readLines.find((item) => item.conversation === conversation && item.line.id === id)?.line
     },
-    putPage: (ticket, conversation, lines, bounds) => {
-      const prior = pageCache.get(ticket)
-      const nextBounds = bounds ?? (prior === undefined ? { hasEarlier: false, hasLater: false } : { hasEarlier: prior.hasEarlier, hasLater: prior.hasLater })
-      pageCache.set(ticket, { conversation, lines, ...nextBounds })
-      board.change({ pages: snapshotPages() })
+    holdTurnPage: (ticket) => {
+      const held = { ticket }
+      turnPage = held
+      return () => {
+        if (turnPage !== held) return
+        turnPage = undefined
+        if (loadedPage === ticket || !seen.pages.has(ticket)) return
+        const pages = new Map(seen.pages)
+        pages.delete(ticket)
+        board.change({ pages })
+      }
     },
-    takeHistory: (ticket, conversation, lines, redacted, bounds) => {
+    putPage: (ticket, conversation, lines) => {
+      const previous = seen.pages.get(ticket)
+      const taken = previous?.conversation === conversation ? { ...previous, lines } : { conversation, lines }
+      const pages = new Map([...seen.pages].filter(([key]) => key === loadedPage || key === turnPage?.ticket))
+      pages.set(ticket, taken)
+      board.change({ pages })
+    },
+    takeHistory: (ticket, conversation, lines, redacted, bounds, readers) => {
       const incoming = new Map(lines.map((line) => [line.id, line]))
       const merged = [...lines, ...board.page(ticket).filter((line) => !incoming.has(line.id))]
-      const nextBounds = bounds ?? { hasEarlier: false, hasLater: false }
-      if (redacted.size === 0) {
-        board.putPage(ticket, conversation, merged, nextBounds)
-        return undefined
-      }
       const preview = seen.preview
-      let closed: number | undefined
-      for (const [previous, page] of pageCache.entries()) {
-        if (page.conversation !== conversation) continue
-        let updated = false
-        const kept = page.lines.map((line) => {
-          const replacement = redacted.has(line.id) ? incoming.get(line.id) : undefined
-          if (replacement === undefined) return line
-          if (preview !== undefined && line.attachments?.includes(preview.file)) closed = preview.ticket
-          updated = true
-          return replacement
-        })
-        if (previous !== ticket && updated) pageCache.set(previous, { ...page, lines: kept })
+      if (preview !== undefined && previewOrigin === undefined) {
+        for (const previous of seen.pages.values()) {
+          const found = previous.lines.find((line) => line.attachments?.includes(preview.file))
+          if (found !== undefined) {
+            previewOrigin = { preview, conversation: previous.conversation, id: found.id }
+            break
+          }
+        }
       }
-      pageCache.set(ticket, { conversation, lines: merged, ...nextBounds })
-      board.change(closed === undefined ? { pages: snapshotPages() } : { pages: snapshotPages(), preview: undefined })
+      const priorPreview = previewOrigin
+      const closed = priorPreview?.conversation === conversation && redacted.has(priorPreview.id) ? priorPreview.preview.ticket : undefined
+      readLines = readers.flatMap((reader) => {
+        const id = board.messageId(reader.message)
+        const line = (reader.conversation === conversation && id !== undefined ? incoming.get(id) : undefined)
+          ?? board.line(reader.conversation, reader.message)
+        return line === undefined ? [] : [{ conversation: reader.conversation, line: { id: line.id, mine: line.mine, text: line.text } }]
+      })
+      const pages = new Map<number, MessagePage>()
+      if (turnPage !== undefined && turnPage.ticket !== ticket) {
+        const previous = seen.pages.get(turnPage.ticket)
+        if (previous !== undefined) {
+          const kept = previous.conversation !== conversation || redacted.size === 0 ? previous.lines
+            : previous.lines.map((line) => redacted.has(line.id) ? incoming.get(line.id) ?? line : line)
+          pages.set(turnPage.ticket, { ...previous, lines: kept })
+        }
+      }
+      loadedPage = ticket
+      pages.set(ticket, { conversation, lines: merged, bounds })
+      board.change(closed === undefined ? { pages } : { pages, preview: undefined })
       return closed
     },
     append: (ticket, conversation, line) => {
@@ -334,6 +418,7 @@ export const talk = Layer.effect(Talk, effect {
       const page = seen.pages.get(ticket)
       if (page === undefined) return
       const existing = page.lines.some((one) => one.id === id)
+      if (previewOrigin?.conversation === page.conversation && previewOrigin.id === line.id) previewOrigin = { ...previewOrigin, id }
       board.putPage(ticket, page.conversation, existing ? page.lines.filter((one) => one !== line) : page.lines.map((one) => (one === line ? { ...one, id } : one)))
     },
     drop: (ticket, line) => {
@@ -349,21 +434,23 @@ export const talk = Layer.effect(Talk, effect {
     records = remembered.map((one) => ({ record: { id: one.id, roomId: one.roomId } as ConversationRecord, title: one.title }))
     messages.length = 0
     numbers.clear()
-    pageCache.clear()
     position = undefined
+    loadedPage = undefined
+    turnPage = undefined
+    readLines = []
+    previewOrigin = undefined
     board.draftSeat = next
     board.phoneDrafts = undefined
     board.outgoing = ""
     board.lastSent = ""
-    board.lastSentWire = ""
-    board.lastSentId = ""
+    board.lastPost = undefined
     board.sendWhenMade = false
     board.waitingRequest = undefined
     board.postingRequest = undefined
     board.change({
       pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "",
-      files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
-      hits: [], media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
+      files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
+      hits: [], recordingSummary: undefined, media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
     })
     return key !== undefined && preceding === key && remembered.length > 0
   }
@@ -376,5 +463,5 @@ export const talk = Layer.effect(Talk, effect {
       return true
     } catch () => false
   }
-  return { board, attachmentLock: try Semaphore.make(1), seat, markSeat }
+  return { board, attachmentLock: try Semaphore.make(1), writer: try Semaphore.make(1), seat, markSeat }
 })

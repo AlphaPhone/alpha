@@ -6,8 +6,8 @@ import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__as
 const failures: Record<Failure, string> = {
   CredentialInvalid: "Your provider refused its key", InsufficientCredits: "Out of credits", LimitReached: "Too many requests",
   ProviderIssue: "The provider had a problem", TimedOut: "The reply timed out", MissingCapability: "Your agent cannot do that yet",
-  NoProvider: "No AI provider", PlanLimit: "Your plan's limit is reached",
-  OutOfFunds: "You’re out of plan allowance and credits, so I couldn’t reply.", OtherFailure: "The reply did not finish",
+  NoProvider: "No AI provider", OutOfFunds: "You’re out of plan allowance and credits, so I couldn’t reply.",
+  OtherFailure: "The reply did not finish",
 };
 
 function about(waitMs: number): string {

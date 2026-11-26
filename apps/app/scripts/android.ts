@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "The launch names the pack's pinned workflow worker"
+// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "The launch names the pack's pinned workflow worker, and the agent refuses any other with its configuration code"
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { gzipSync } from "node:zlib";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -24,6 +25,10 @@ const agentPack = join(root, "apps/agent");
 const variant = "launcher";
 const abis = ["arm64-v8a", "x86_64"] as const;
 const voiceAssets = "assets/paradee-voice/v1/";
+const nodeLicence = "assets/agent/notices/node/LICENSE";
+const nodeLicenceBySource = new Map([
+  ["a7f6204ff63b6a2cd274d48903285abb86ed53a99070e532d4c2fd787457d9e6", "8e603aa87c70d36e497004f0dec63111511cb61b7d65ace12e10ea791599286c"],
+]);
 const mockSwitches = ["ELIZA_DEV_ALLOW_TEST_MOCKS", "VITE_ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_FAKES"];
 const signingNames = ["ELIZAOS_KEYSTORE_PATH", "ELIZAOS_KEYSTORE_PASSWORD", "ELIZAOS_KEY_ALIAS", "ELIZAOS_KEY_PASSWORD"];
 const usage = "Usage: node scripts/android.ts <inputs|pack|stage|web|host|build [--release]|verify [--release-only]|audit DIR>";
@@ -239,6 +244,22 @@ export async function stageRuntime(): Promise<string> {
   return output;
 }
 
+/**
+ * The Android Gradle plugin's asset merge gunzips every asset named `*.gz` once and drops the extension. eliza's
+ * generated host keeps the runtime payload's inventoried archives (elizaOS/eliza#40652); the page's own `*.gz`
+ * assets, the OCR training data `public/ocr/eng.traineddata.gz`, are wrapped in one more gzip layer as
+ * `<name>.gz` after `cap copy`, which the merge unwraps back to the exact bytes and name. `verify` audits both.
+ */
+export function keepGzipAssets(assets: string) {
+  if (!existsSync(assets)) return;
+  for (const name of readdirSync(assets, { recursive: true }).map(String)) {
+    const file = join(assets, name);
+    if (!name.endsWith(".gz") || name.endsWith(".gz.gz") || !lstatSync(file).isFile()) continue;
+    writeFileSync(`${file}.gz`, gzipSync(readFileSync(file)));
+    rmSync(file);
+  }
+}
+
 /** The page, built with the test mocks off, and the record that says so. */
 export function buildWeb() {
   run(process.execPath, [join(root, "vibestack/spec.ts"), "tasks", "@repo/app#build"], { cwd: root });
@@ -254,6 +275,7 @@ const REQUIRED_DIRECTIVES: readonly (readonly [string, readonly string[]])[] = [
 const DEVELOPMENT_TEXT = [
   "10.0.2.2", "127.0.0.1:", "http://localhost:", "ALPHA_FAKES", "/test/fakes/", "/__control/",
   "api-staging.eliza.app", "cloud-staging.eliza.app", "staging.eliza.app", "staging.alphacompute.cc",
+  "api-staging.alphaphone.dev", "cloud-staging.alphaphone.dev",
   "xoxp-alpha-team-owner-initial", "xoxp-design-guild-owner-initial", "tg-sess-initial-owner", "xoxb-",
   "Maya Chen", "Ben Ortiz", "Harbour Cafe", "Harbour Gallery",
 ];
@@ -340,7 +362,7 @@ export function hostProfile() {
   return {
     ...profile,
     manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath },
-    buildConfigFields: [...fields, { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud }],
+    buildConfigFields: [...fields, { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud }, { name: "CLOUD_APP_LINK_HOST", type: "String", value: production.appLinkHost }],
   };
 }
 
@@ -353,7 +375,7 @@ export async function generateHost(runtime: string) {
   const version = String(record(readJson(join(app, "package.json"))).version);
   const envCode = Number(process.env.ELIZAOS_VERSION_CODE ?? "");
   const versionCode = Number.isSafeInteger(envCode) && envCode > 0 ? envCode : releaseSignerMeta().versionCode;
-  return runEffect(generateAndroidHost({
+  const host = await runEffect(generateAndroidHost({
     consumerRoot: app,
     dependencyRoot: join(app, "node_modules"),
     output: android,
@@ -361,6 +383,8 @@ export async function generateHost(runtime: string) {
     profile: hostProfile(),
     runtime,
   }));
+  writeJson(join(android, "app/src/main/assets/capacitor.plugins.json"), []);
+  return host;
 }
 
 interface BuildConsumer {
@@ -401,7 +425,10 @@ export async function build(release: boolean) {
     mappings: release,
     signing: { environment: signingNames },
     gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
-    prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
+    prepare: [
+      { command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] },
+      () => keepGzipAssets(join(app, androidPaths.project, "app/src/main/assets/public")),
+    ],
     record: {
       name: "build-config.json",
       metadata: {
@@ -428,10 +455,11 @@ const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)li
 const REQUIRED_CLASSES = [
   ...["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin",
     "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaContactsPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin",
-    "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
+    "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaInboxAttachmentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
     "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
   "Lai/eliza/plugins/camera/CameraPlugin;",
   "Lai/eliza/plugins/filesystem/FilesPlugin;",
+  "Lai/eliza/plugins/signin/SignInCallbackActivity;",
   ...["PermittedPhotosPlugin", "PermittedMediaCatalog", "OwnedPhotoEdits", "OwnedVideoPlayback", "OwnedCaptures",
     "SelectedDocuments", "DocumentDestinations"].map((name) => `Lai/eliza/plugins/media/${name};`),
 ];
@@ -519,6 +547,26 @@ function currentLicenceBlockers(): readonly string[] {
   return blockers;
 }
 
+/** Checks inventoried APK bytes against the locked Node source's license and the pinned binary for each packaged ABI. */
+function recordedRuntimeNotices({ entries, listed, packagedAbis }: {
+  readonly entries: readonly string[];
+  readonly listed: readonly Record<string, unknown>[];
+  readonly packagedAbis: readonly string[];
+}): boolean {
+  const notices = listed.filter((row) => row.path === nodeLicence);
+  if (notices.length !== 1 || entries.filter((entry) => entry === nodeLicence).length !== 1) return false;
+  const lock = record(readJson(join(prepared().root, "packages/os/aosp/runtime/node.lock.json")));
+  const expected = typeof lock.sourceSha256 === "string" ? nodeLicenceBySource.get(lock.sourceSha256) : undefined;
+  if (expected === undefined || notices[0]?.sha256 !== expected || !Array.isArray(lock.entries)) return false;
+  const pinned = lock.entries.map(record);
+  return packagedAbis.every((abi) => {
+    const binaries = listed.filter((row) => row.path === `lib/${abi}/libeliza_node.so`);
+    const candidates = pinned.filter((row) => row.abi === abi);
+    const binaryDigest = candidates[0]?.sha256;
+    return binaries.length === 1 && candidates.length === 1 && typeof binaryDigest === "string" && binaries[0]?.sha256 === binaryDigest;
+  });
+}
+
 /** One APK, checked: identity, version, payload, page audit and classes. Throws on the first broken rule. */
 export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.ProcessEnv = environment(), options: { readonly allowMissingVoiceReceipt?: boolean } = {}): Row {
   const name = relative(artifacts, file);
@@ -580,11 +628,23 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
     if (!entries.includes(entryPath)) throw new Error(`${name} lacks its inventoried ${entryPath}`);
     if (sha256(read(entryPath)) !== row.sha256) throw new Error(`${name}'s ${entryPath} differs from its inventory`);
   }
+  const runtimeNotices = recordedRuntimeNotices({ entries, listed, packagedAbis: wantedAbis });
   for (const data of ["host.json", "character.json", "policy.json"]) if (!entries.includes(`assets/agent/${data}`)) throw new Error(`${name} carries no agent ${data}`);
+  const pluginManifest = "assets/capacitor.plugins.json";
+  if (!entries.includes(pluginManifest)) throw new Error(`${name} lacks the Capacitor plugin discovery manifest`);
+  const discovered: unknown = JSON.parse(read(pluginManifest).toString("utf8"));
+  if (!Array.isArray(discovered) || discovered.length !== 0) throw new Error(`${name} carries discovered plugins outside the Android host registration`);
   const capacitor = record(JSON.parse(read("assets/capacitor.config.json").toString("utf8")));
   const signIn = record(record(capacitor.plugins).ElizaSignIn);
   if (signIn.testEnvironments !== false) throw new Error(`${name} registers test cloud environments`);
   verifyCloudRoutes(name, capacitor);
+  const environments: unknown = signIn.environments;
+  const registration = Array.isArray(environments) && environments.length === 1 ? record(environments[0]) : {};
+  if (signIn.clientId !== identity.appId || signIn.googleMode !== "browser" || registration.name !== "production"
+      || registration.apiOrigin !== production.cloud || registration.appLinkHost !== production.appLinkHost
+      || registration.redirectPath !== signInCallbackPath) {
+    throw new Error(`${name} lacks the production Alpha Cloud sign-in registration`);
+  }
   const page = mkdtempSync(join(tmpdir(), "alpha-apk-page-"));
   try {
     execFileSync("unzip", ["-q", file, "assets/public/*", "-d", page]);
@@ -597,19 +657,19 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const missing = REQUIRED_CLASSES.filter((descriptor) => !classes.includes(`Class descriptor  : '${descriptor}'`));
   if (missing.length > 0) throw new Error(`${name} lacks ${missing.join(", ")}`);
   const { signed, signerSha256 } = verifyApkSignature(file, name, mode, env);
-  const runtimeNotices = entries.includes("assets/public/licenses/THIRD_PARTY_NOTICES.txt") && entries.includes("assets/public/licenses/third-party-notices.json");
+  const allRuntimeNotices = runtimeNotices && entries.includes("assets/public/licenses/THIRD_PARTY_NOTICES.txt") && entries.includes("assets/public/licenses/third-party-notices.json");
   const licenceBlockers = currentLicenceBlockers();
   const blockers = [
     ...(mode === "debug" ? ["debug build"] : []),
     ...(signed ? [] : ["unsigned release"]),
-    ...(runtimeNotices ? [] : ["missing runtime notices"]),
+    ...(allRuntimeNotices ? [] : ["Node runtime notices missing or unverified"]),
     ...licenceBlockers,
   ];
   return {
     mode, variant, flavor: variant, file: name, name, sha256: sha256(bytes), bytes: bytes.byteLength, signed, signerSha256, debuggable, versionCode, versionName: packageLine[3] ?? "",
-    abis: abiList, testMocks: false, bundleAudit: "passed", runtime: "PACKAGED", runtimeNotices, runtimeProfile: "native",
+    abis: abiList, testMocks: false, bundleAudit: "passed", runtime: "PACKAGED", runtimeNotices: allRuntimeNotices, runtimeProfile: "native",
     voiceHost: { packaged: true, differences: [], qualified: true }, licenceBlockers,
-    distributable: mode === "release" && signed && runtimeNotices && licenceBlockers.length === 0, blockers,
+    distributable: blockers.length === 0, blockers,
   };
 }
 
@@ -632,7 +692,7 @@ export function verify(env: NodeJS.ProcessEnv = environment(), options: { readon
     results,
   };
   writeJson(join(artifacts, "apk-manifest.json"), manifest);
-  for (const row of results) process.stdout.write(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signerSha256}` : "unsigned"}, page audit passed, runtime packaged\n`);
+  for (const row of results) process.stdout.write(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signerSha256}` : "unsigned"}, page audit passed, runtime packaged, Node notices ${row.runtimeNotices ? "verified" : "unverified"}\n`);
   return manifest;
 }
 

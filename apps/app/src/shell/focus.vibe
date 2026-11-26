@@ -88,6 +88,8 @@ module page {
         const heading = [...main.querySelectorAll<HTMLElement>("h1")].find((node) => node.closest("[inert], [hidden]") === null)
         if (heading) return heading
       }
+      const tile = [...main.querySelectorAll<HTMLElement>("[data-home-tile]")].find(eligible)
+      if (tile) return tile
       return [...main.querySelectorAll<HTMLElement>(focusable)].find(eligible) ?? undefined
     }
     if (target === "Title") {
@@ -98,7 +100,7 @@ module page {
   }
   /** Whether the screen's target is drawn. @throws {never} */
   export const found = (target: Target): boolean => targetOf(target) !== undefined
-  /** Focus the screen's target, letting a title or region take focus from script without sideways scroll jumps. @throws {never} */
+  /** Focus the screen's target, letting a title or region take focus from script without scroll jumps. @throws {never} */
   export function moveTo(target: Target): void {
     const element = targetOf(target) ?? (target === "Title" ? targetOf("Region") : undefined)
     if (element === undefined) return
@@ -186,7 +188,7 @@ const framed = started(effect {
   })
 }, "focus")
 
-// spec/app/shell/focus.md, "Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
+// spec/app/shell/focus.md, "Home's tiles and cards show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
 const watching = started(effect {
   if (!paged()) return
   const focus = try Focus.Machine

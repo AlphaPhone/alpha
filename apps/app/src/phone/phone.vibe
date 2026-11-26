@@ -5,7 +5,7 @@ import type { PhoneNumber, TelephonyCallLogEntry, TelephonyPermissionState } fro
 import { normalizePhoneNumber } from "@elizaos/os-bridges"
 import * as Phone from "../../gen/app__phone.effect.vibe"
 import type { Carrier, DialMode, DialNumberKind, Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -74,16 +74,16 @@ effect function readLog(ticket: number, device: boolean): Event!!(Telephony | Di
   let grant = before.log.grant
   let ok = true
   if (source === undefined || grant !== "Granted") {
-    const status = telephony("status", (c) => c.phone.status()) catch () => undefined
-    grant = grantOf(status?.permissions.callLog)
-    ok = status !== undefined
-    if (grant === "Granted") {
-      const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
-      ok = page !== undefined
-      if (page !== undefined) {
-        const names = try namesOf("phone", page.calls.map((entry) => entry.number))
-        source = page.calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName }))
-      }
+    const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
+    ok = page !== undefined
+    if (page === undefined) {
+      const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+      grant = grantOf(status?.permissions.callLog)
+      source = undefined
+    } else {
+      grant = "Granted"
+      const names = try namesOf("phone", page.calls.map((entry) => entry.number))
+      source = page.calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName }))
     }
   }
   const current = try machine.get()
@@ -214,14 +214,25 @@ export function prefilled(number: string): { readonly digits: string; readonly e
   return digits === "" || typed === "Blank" ? undefined : { digits, event: { type: "prefill", digits: digits.length, typed } }
 }
 
-/** Phone, opened with `number` on the keypad where the keypad can hold it: nothing is dialed. */
-export effect function dialing(number: string): boolean!!(Dialer | Phone.Machine | Shell) {
+// spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
+export effect function dialing(number: string, owner: { readonly view: "Contacts" | "Messages"; readonly route: number }): boolean!!(Dialer | Phone.Machine | Shell) {
   const handed = prefilled(number)
   if (handed === undefined) return false
-  try (try Dialer).set({ digits: handed.digits })
-  try ignore((try Phone.Machine).send(handed.event))
-  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
-  return true
+  const shell = try Shell
+  const source = try shell.get()
+  const sameSource = (where: typeof source) => where.route === owner.route && showing(where, owner.view)
+  if (!sameSource(source)) return false
+  const staged = source.assistant === "Sheet" || source.assistant === "Full"
+  const open = staged ? { type: "openCommsView", view: "Phone" } as const : { type: "openView", view: "Phone" } as const
+  if (!(try contained(shell.send(open, sameSource), "opening Phone for the handed number"))) return false
+  const store = try Dialer
+  return try contained((try Phone.Machine).send(handed.event, () => {
+    const arrived = Effect.runSync(shell.get())
+    if (arrived.route !== owner.route + 1 || !showing(arrived, "Phone") || arrived.assistant !== (staged ? source.assistant : "Bar")) return false
+    // spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"
+    Effect.runSync(store.set({ digits: handed.digits }))
+    return true
+  }), "filling the handed number")
 }
 
 // spec/app/phone/index.md, "The phone says whether a call is live, whether it may be an emergency call, and whether the carrier is ready"

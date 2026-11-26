@@ -1,23 +1,21 @@
 // spec/app/startup/access.md, "Story: Look at access again"; spec/app/settings/index.md, "Story: Reach what another area owns"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Access from "../../gen/app__startup__access.effect.vibe"
 import type { Actor } from "../../gen/app__startup__actor.ts"
-import * as Steps from "../../gen/app__startup__steps.effect.vibe"
+import type * as Steps from "../../gen/app__startup__steps.effect.vibe"
 import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import type { Access as Permission } from "../../gen/app__settings__facts.ts"
 import type { Target } from "../../gen/app__settings__android.ts"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type Shell as ShellState, showing } from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import * as Update from "../../gen/app__update__page.effect.vibe"
 import { say } from "../notices/toasts.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Job, answer, contained, due, following, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
-import { Backs } from "../shell/shell.vibe"
-
-const reviewKeys: Record<Permission, Steps.Key> = {
-  CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
-  PhotosAccess: "Photos", FilesAccess: "Files", NotificationsAccess: "Notifications",
-}
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { accessVersion, legacyAccessAsked, legacyAccessSteps, savedAccess } from "./accessProgress.vibe"
+import { StartupSignIn } from "./signIn.vibe"
 
 const reviewed: Record<Steps.Key, { access: Permission; target: Target }> = {
   Camera: { access: "CameraAccess", target: "AppPermissions" },
@@ -29,60 +27,177 @@ const reviewed: Record<Steps.Key, { access: Permission; target: Target }> = {
   Notifications: { access: "NotificationsAccess", target: "AlphaAlerts" },
 }
 
-const opening = (): Access.Event => ({ type: "begin", phone: native(), pregrants: false, now: untimed })
-
-effect function check(key: Steps.Key, ticket: number, open: boolean): Access.Event!!SystemSettings {
-  const system = try SystemSettings
-  const { access, target } = reviewed[key]
-  if (open && native()) try system.open(target, "")
-  const grant = try system.access(access)
-  return Option.isNone(grant)
-    ? { type: "failed", ticket, key }
-    : { type: "answered", ticket, key, grant: grant.value.grant, on: grant.value.on, requestable: false }
+const opening = () => effect {
+  const phone = native()
+  const pregrants = phone && (try (try SystemSettings).startupPermissionDefaults())
+  return { type: "begin", phone, pregrants, now: untimed } as Access.Event
 }
 
-function carry(result: Access.Effect): Job<Access.Event, SystemSettings, [Actor]> {
-  return match (result) {
-    when { tag: "Check", let key, let ticket }: answer(`access ${key}`, check(key, ticket, false), { type: "failed", ticket, key } as const, "Owner" as Actor);
-    when { tag: "OpenSettings", let key, let ticket }: answer(`access ${key}`, check(key, ticket, true), { type: "failed", ticket, key } as const, "Owner" as Actor);
-    when { tag: "Ask", let key, let ticket }: answer(`access ${key}`, check(key, ticket, true), { type: "failed", ticket, key } as const, "Owner" as Actor);
-    when { tag: "Save", let ticket }: answer("save access", succeed<Access.Event>({ type: "saved", ticket, ok: false, now: untimed }), { type: "saved", ticket, ok: false, now: untimed }, "Owner" as Actor);
-    when { tag: "GoHome" }: stop("home");
+export type AccessSurface = Device | Access.Machine | Shell | Layers.Machine | Update.Machine | StartupSignIn
+type AccessWorld = AccessStart | SystemSettings | Device | Access.Machine | Shell | Layers.Machine | Update.Machine | KeyValueStore.KeyValueStore
+
+// spec/app/startup/access.md, "Sign-in, another panel or a running connection covers the walkthrough"
+export effect function accessCover() {
+  const shell = try Shell
+  const layers = try Layers.Machine
+  const page = try Update.Machine
+  const device = try Device
+  return (where: ShellState = Effect.runSync(shell.get())) => {
+    const update = Effect.runSync(page.get())
+    return !Effect.runSync(device.showing()) || Access.coveredAt(
+      where, Layers.pageInert(Effect.runSync(layers.get())), Update.dialogShown(update) || !Update.editorsMounted(update),
+    )
   }
 }
+
+type AccessInput = Extract<Access.Event, { type: "act" | "review" | "proceed" | "skip" | "done" | "leave" }>
+type AccessVisit = {
+  route: number
+  panel: Exclude<Access.Panel, "Hidden">
+  look: Access.Access["look"]
+  key: Steps.Key
+  since: number
+}
+
+export effect function actOnAccess(event: AccessInput, visit: AccessVisit) {
+  const shell = try Shell
+  const access = try Access.Machine
+  const confirmed = (try StartupSignIn).confirmedAccount()
+  const covered = try accessCover()
+  const current = (state: Access.Access) => {
+    const where = Effect.runSync(shell.get())
+    return where.route === visit.route && !covered(where) && state.since === visit.since
+      && Access.panel(state) === visit.panel && state.look === visit.look && Access.shownKey(state) === visit.key
+      && (visit.panel === "Review" ? showing(where, "Settings") : Effect.runSync(confirmed))
+  }
+  if (current(try access.get())) try ignore(access.send(event, "Owner", current))
+}
+
+effect function canHandoff(key: Steps.Key, ticket: number): boolean!!(Device | Access.Machine | Shell | Layers.Machine | Update.Machine) {
+  if (!native()) return false
+  const state = try (try Access.Machine).get()
+  if (state.covered || !Access.setUp(state) || Access.shownKey(state) !== key || !Access.canAnswered(state, key, ticket)) return false
+  const shell = try (try Shell).get()
+  const covered = try accessCover()
+  return !covered(shell) && (state.look === "AtOne" ? showing(shell, "Settings") : Access.panel(state) === "Walkthrough")
+}
+
+effect function check(key: Steps.Key, ticket: number, work: "Check" | "OpenSettings" | "Ask"): Access.Event!!AccessWorld {
+  const system = try SystemSettings
+  const { access, target } = reviewed[key]
+  const asked = native() && (try legacyAccessAsked(key))
+  const inFront = work !== "Check" && (try canHandoff(key, ticket))
+  if (work === "OpenSettings" && inFront) try system.open(target, "")
+  const grant = work === "Ask" && inFront && !asked
+    ? try system.askStartupAccess(access)
+    : try system.startupAccess(access)
+  return Option.isNone(grant)
+    ? { type: "failed", ticket, key }
+    : { type: "answered", ticket, key, grant: grant.value.grant, on: grant.value.on, requestable: grant.value.requestable && !asked }
+}
+
+function carry(result: Access.Effect): Job<Access.Event, AccessWorld, [Actor]> {
+  return match (result) {
+    when { tag: "AccessStarted" }: run("access started", effect { try (try AccessStart).markReady() }, "Owner" as Actor);
+    when { tag: "Check", let key, let ticket }: answer(`access ${key}`, check(key, ticket, "Check"), { type: "failed", ticket, key } as const, "Owner" as Actor);
+    when { tag: "OpenSettings", let key, let ticket }: answer(`access ${key}`, check(key, ticket, "OpenSettings"), { type: "failed", ticket, key } as const, "Owner" as Actor);
+    when { tag: "Ask", let key, let ticket }: answer(`access ${key}`, check(key, ticket, "Ask"), { type: "failed", ticket, key } as const, "Owner" as Actor);
+    when { tag: "Save", let ticket }: answer("save access", savedAccess(ticket), { type: "saved", ticket, ok: false, now: untimed }, "Owner" as Actor);
+    when { tag: "GoHome" }: run("access home", effect {
+      const covered = try accessCover()
+      try ignore((try Shell).send({ type: "goHome" }, (where) => !covered(where)))
+    }, "Owner" as Actor);
+  }
+}
+
+export service AccessStart {
+  ready(): void!!
+  markReady(): void!!
+}
+
+const accessStart = Layer.effect(AccessStart, effect {
+  const ready = try Deferred.make<void>()
+  return {
+    ready: () => Deferred.await(ready),
+    markReady: () => Effect.asVoid(Deferred.succeed(ready, undefined)),
+  }
+})
+
+/** Automatic access follows a confirmed, unblocked native startup account. */
+export const startupAccessLifecycle = (enabled: boolean) => Layer.effectDiscard(effect {
+  if (!enabled || !native()) return
+  try fork.scoped contained(effect {
+    try (try AccessStart).ready()
+    const access = try Access.Machine
+    const signIn = try StartupSignIn
+    const device = try Device
+    const covered = try accessCover()
+    const confirmed = () => Effect.runSync(signIn.confirmedAccount())
+    const inFront = () => confirmed() && !covered()
+    const facts = Stream.zipLatestAll(
+      signIn.changes, (try Shell).changes, (try Layers.Machine).changes, (try Update.Machine).changes,
+      Stream.concat(Stream.fromEffect(device.showing()), device.visible),
+    )
+    try Stream.runForEach(facts, effect () => {
+      if (!confirmed()) return
+      const hidden = covered()
+      const state = try access.get()
+      if (Access.canContext(state, hidden)) {
+        try ignore(access.send({ type: "context", covered: hidden, now: untimed }, "Owner", () => confirmed() && covered() === hidden))
+      }
+      if (!inFront() || Access.completed(state)) return
+      if (!Access.setUp(state)) {
+        const upTo = try legacyAccessSteps()
+        if (upTo > 0) try ignore(access.send({ type: "carriedOver", upTo }, "Owner", inFront))
+        if (!(try contained(access.send({ type: "welcome", created: false, now: untimed }, "Owner", inFront), "opening startup access"))) return
+      }
+      if (inFront()) try checkStale(inFront)
+    })
+  }, "following the startup access surface")
+})
 
 effect function refreshed(): void!!Access.Machine {
   const access = try Access.Machine
   try ignore(access.send({ type: "resumed" }, "Owner"))
-  for (const key of Steps.everyKey) if ((try access.get()).stale.includes(key)) {
-    try ignore(access.send({ type: "check", key }, "Owner"))
+  try checkStale()
+}
+
+effect function checkStale(current: () => boolean = () => true): void!!Access.Machine {
+  const access = try Access.Machine
+  for (const key of (try access.get()).stale) {
+    if (!current()) return
+    try ignore(access.send({ type: "check", key }, "Owner", current))
   }
 }
 
-/** Open a reviewed permission or the list, only once the phone has confirmed the Cloud account exists. */
-export const openReview = (permission: Permission | undefined) => effect {
+/** Open the reviewed permissions after the phone confirms the Cloud account. */
+export const openReview = effect {
   const shell = try Shell
-  const device = try Device
   const settings = try Settings
-  const expected = permission === undefined ? "Privacy" : "Permissions"
-  const here = effect { return showing(try shell.get(), "Settings") && (try settings.get()).page === expected && (try device.showing()) }
-  if (!(try here)) return
+  const covered = try accessCover()
+  const route = (try shell.get()).route
+  const here = () => {
+    const where = Effect.runSync(shell.get())
+    return where.route === route && showing(where, "Settings") && !covered(where) && Effect.runSync(settings.get()).page === "Privacy"
+  }
+  if (!here()) return
+  try (try AccessStart).ready()
+  if (!here()) return
   const cloud = (try Cloud).client
   const signedIn = try Effect.option(timeout(tryPromise((signal) => cloud.account({ signal })), "10 seconds"))
-  if (!(try here)) return
+  if (!here()) return
   const access = try Access.Machine
   if (Option.isNone(signedIn)) {
-    try ignore(access.send({ type: "signedOut" }, "Owner"))
-    try say("Alpha could not confirm your sign-in", true)
+    try ignore(access.send({ type: "signedOut" }, "Owner", here))
+    if (here()) try say("Alpha could not confirm your sign-in", true)
     return
   }
-  if (!(try access.get()).begun) try ignore(access.send(opening(), "Owner"))
-  if (!Access.setUp(try access.get())) try ignore(access.send({ type: "welcome", created: false, now: untimed }, "Owner"))
-  const event: Access.Event = permission === undefined ? { type: "reopen", now: untimed } : { type: "review", key: reviewKeys[permission], now: untimed }
-  if (try contained(access.send(event, "Owner"), "opening the access review")) try refreshed()
+  if (!Access.setUp(try access.get())) try ignore(access.send({ type: "welcome", created: false, now: untimed }, "Owner", here))
+  if (try contained(access.send({ type: "reopen", now: untimed }, "Owner", here), "opening the access review")) try refreshed()
 }
 
 const revisiting = started(effect {
+  try (try AccessStart).ready()
   const device = try Device
   const shell = try Shell
   const access = try Access.Machine
@@ -90,12 +205,30 @@ const revisiting = started(effect {
   const foreground = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
   const visits = Stream.changes(Stream.zipLatest(shown, foreground))
   try Stream.runForEach(visits, effect ([settings, visible]) => {
-    if ((try access.get()).look === "NotLooking") return
-    if (!settings) {
+    const state = try access.get()
+    if (state.look !== "NotLooking" && !settings) {
       try ignore(access.send({ type: "leave", now: untimed }, "Owner"))
-    } else if (visible) try refreshed()
+    } else if (visible && (state.look !== "NotLooking" || (Access.setUp(state) && !Access.completed(state)))) try refreshed()
   })
 }, "settings access review lifecycle")
+
+const progressing = started(effect {
+  try (try AccessStart).ready()
+  const access = try Access.Machine
+  const covered = try accessCover()
+  try Stream.runForEach(access.changes, effect (state) => {
+    if (covered()) return
+    if (Access.canPass(state)) {
+      try ignore(access.send({ type: "pass", now: untimed }, "Owner", () => !covered()))
+      return
+    }
+    const key = Access.nextKey(state)
+    const canContinue = (next: Access.Access) => Access.nextKey(next) === key && next.acted.includes(key) && Access.flow(next, key) === "Ready"
+    if (Access.canProceed(state, "Owner") && canContinue(state)) {
+      try ignore(access.send({ type: "proceed", now: untimed }, "Owner", (next) => !covered() && canContinue(next)))
+    }
+  })
+}, "continuing past confirmed access")
 
 export const reviewBack = effect {
   const access = try Access.Machine
@@ -103,34 +236,17 @@ export const reviewBack = effect {
   return try contained(access.send({ type: "leave", now: untimed }, "Owner"), "closing the access review")
 }
 
-const accessReviewLayer = "startup-access-review"
-
-const reviewLayered = together(
-  following(
-    Access.Machine,
-    (state) => state.look !== "NotLooking",
-    Layers.Machine,
-    (open): Layers.Event => open
-      ? { type: "openLayer", id: accessReviewLayer, kind: "DialogLayer", covers: true }
-      : { type: "closeLayer", id: accessReviewLayer },
-  ),
-  started(effect {
-    const access = try Access.Machine
-    const backs = try Backs
-    try backs.register(`layer:${accessReviewLayer}`, Effect.provideService(reviewBack, Access.Machine, access))
-  }, "registering access review layer back"),
-)
-
-/** The existing Access rules, used by Settings for an explicit review. */
-export const startupReview = together(
+/** One Access machine for startup and the owner's Settings review. */
+export const startupReview = Layer.provideMerge(together(
   reacting(Access, {
-    open: effect { return [opening(), "Owner"] as const },
+    keep: accessVersion,
+    open: effect { return [try opening(), "Owner"] as const },
     carry,
     timers: (state) => {
       const clock = state.since + 20000
-      return Access.canTick(state, clock) && state.look !== "NotLooking" ? [due<Access.Event, [Actor]>("access-timeout", clock, { type: "tick", clock }, "Owner")] : []
+      return Access.canTick(state, clock) ? [due<Access.Event, [Actor]>("access-timeout", clock, { type: "tick", clock }, "Owner")] : []
     },
   }),
   revisiting,
-  reviewLayered,
-)
+  progressing,
+), accessStart)

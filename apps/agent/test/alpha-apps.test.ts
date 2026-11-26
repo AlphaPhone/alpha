@@ -1,12 +1,14 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import type { ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "@repo/launcher-records";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defineRoutes } from "@elizaos/agent";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { AlphaAppsStore, alphaAppsModule, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
+import { AlphaAppsStore, alphaAppsModule, alphaAppsPluginName, createAlphaAppsPlugin, notesTranscriptionRoutes } from "../src/plugins/index.ts";
 import { advanceDueDate, civilToEpochMs } from "../src/plugins/store.ts";
-import type { AgentAction, AgentRoute, AgentRuntimeLike, ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "../src/plugins/types.ts";
+import type { AgentAction, AgentRoute, AgentRuntimeLike } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
   ({ content: { text }, metadata }) as unknown as Parameters<AgentAction["handler"]>[1];
@@ -27,23 +29,37 @@ function makeFakeRuntime(initialTasks: readonly {
   readonly status: string;
   readonly trigger: { readonly kind: string; readonly atIso?: string };
   readonly metadata: Readonly<Record<string, unknown>>;
+  readonly nextAt?: string | null;
 }[] = []) {
-  const tasks = initialTasks.map((task) => ({ ...task }));
+  const tasks = initialTasks.map((task) => ({ ...task, nextAt: task.nextAt === undefined ? task.trigger.atIso ?? null : task.nextAt }));
   const notifications: unknown[] = [];
-  const appliedVerbs: { taskId: string; request: unknown }[] = [];
+  const refusing = new Set<string>();
+  const open = (status: string) => status === "Scheduled" || status === "Fired" || status === "Acknowledged";
+  const answers: Record<string, (task: (typeof tasks)[number], request: { kind: string; verb?: { tag: string }; edit?: { trigger?: { kind: string; atIso?: string } } }) => (typeof tasks)[number] | undefined> = {
+    Dismiss: (task) => task.status === "Dismissed" ? undefined : { ...task, status: "Dismissed" },
+    Complete: (task) => open(task.status) ? { ...task, status: "Completed", nextAt: null } : undefined,
+    Reopen: (task) => task.status === "Completed" ? { ...task, status: "Scheduled" } : undefined,
+    edit: (task, request) => task.status === "Dismissed" || request.edit?.trigger === undefined ? undefined : { ...task, trigger: request.edit.trigger, nextAt: request.edit.trigger.atIso ?? null },
+  };
   const runtime = {
     getService: (name: string) => {
       if (name === "scheduled-tasks") {
         return {
           list: () => Promise.resolve([...tasks]),
+          get: (taskId: string) => Promise.resolve(tasks.find((task) => task.taskId === taskId)),
+          applyVerb: (taskId: string, request: { kind: string; verb?: { tag: string }; edit?: { trigger?: { kind: string; atIso?: string } } }) => {
+            const at = tasks.findIndex((task) => task.taskId === taskId);
+            if (at < 0) return Promise.resolve({ kind: "notFound" });
+            const verb = request.kind === "edit" ? "edit" : request.verb?.tag ?? "";
+            const next = refusing.has(verb) ? undefined : answers[verb]?.(tasks[at], request);
+            if (next === undefined) return Promise.resolve({ kind: "refused", reason: { tag: "NotApplicable" } });
+            tasks[at] = next;
+            return Promise.resolve({ kind: "applied", task: next });
+          },
           create: (task: { kind: string; ownerVisible: boolean; promptInstructions: string; trigger: { kind: string; atIso?: string }; metadata: Record<string, unknown> }) => {
-            const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled" };
+            const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled", nextAt: task.trigger.atIso ?? null };
             tasks.push(created);
             return Promise.resolve({ kind: "created", task: created });
-          },
-          applyVerb: (taskId: string, request: unknown) => {
-            appliedVerbs.push({ taskId, request });
-            return Promise.resolve({ kind: "applied" });
           },
         };
       }
@@ -58,7 +74,7 @@ function makeFakeRuntime(initialTasks: readonly {
       return null;
     },
   } as unknown as AgentRuntimeLike;
-  return { runtime, tasks, notifications, appliedVerbs };
+  return { runtime, tasks, notifications, refusing };
 }
 
 async function callRoute(
@@ -170,6 +186,50 @@ describe("Alpha product plugin: Clock acts only on what the model named", () => 
     await run("CLOCK_TIMER", { action: "cancel", label: "pasta" });
     expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
   });
+
+  it("snoozes or dismisses only an alarm that rings, matches a label among live timers only, and never reports a timer it could not keep", async () => {
+    const { store, run } = clockOf();
+    await run("CLOCK_ALARM", { action: "set", hour: 7, minute: 0, enabled: false });
+    const snoozedQuiet = await run("CLOCK_ALARM", { action: "snooze" });
+    const dismissedQuiet = await run("CLOCK_ALARM", { action: "dismiss" });
+    expect([snoozedQuiet?.success, dismissedQuiet?.success, store.getClock().alarms.map(({ enabled, phase }) => ({ enabled, phase }))]).toEqual([false, false, [{ enabled: false, phase: "idle" }]]);
+    const seven = store.getClock().alarms[0]?.id ?? "";
+    store.updateAlarm(seven, { phase: "ringing", enabled: true, timeZone: "UTC" });
+    const snoozed = await run("CLOCK_ALARM", { action: "snooze", id: seven });
+    expect([snoozed?.success, store.getClock().alarms[0]?.phase]).toEqual([true, "snoozed"]);
+    await run("CLOCK_ALARM", { action: "delete", id: seven });
+
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 60, label: "pasta" });
+    await run("CLOCK_TIMER", { action: "reset", label: "pasta" });
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 600, label: "pasta" });
+    const paused = await run("CLOCK_TIMER", { action: "pause", label: "pasta" });
+    expect([paused?.success, store.getClock().timers.map(({ status }) => status)]).toEqual([true, ["ready", "paused"]]);
+
+    for (let at = 0; at < 14; at++) await run("CLOCK_TIMER", { action: "start", durationSeconds: 60 + at });
+    const seventeenth = await run("CLOCK_TIMER", { action: "start", durationSeconds: 999, label: "one more" });
+    expect([seventeenth?.success, store.getClock().timers.length, store.getClock().timers.some(({ label }) => label === "one more")]).toEqual([true, 16, true]);
+    const overflow = await run("CLOCK_TIMER", { action: "start", durationSeconds: 30, label: "too many" });
+    expect([overflow?.success, store.getClock().timers.length, store.getClock().timers.some(({ label }) => label === "too many")]).toEqual([false, 16, false]);
+    for (const timer of store.getClock().timers) await run("CLOCK_TIMER", { action: "cancel", id: timer.id });
+    expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
+  });
+
+  it("finds the one live timer past a finished one, and the alarm's time past a label that names none", async () => {
+    const { store, run } = clockOf();
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 60, label: "eggs" });
+    await run("CLOCK_TIMER", { action: "reset", label: "eggs" });
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 300, label: "pasta" });
+    const paused = await run("CLOCK_TIMER", { action: "pause" });
+    await run("CLOCK_ALARM", { action: "set", hour: 6, minute: 0, label: "Gym" });
+    await run("CLOCK_ALARM", { action: "set", hour: 7, minute: 0 });
+    const toggled = await run("CLOCK_ALARM", { action: "toggle", label: "gym day", hour: 7, minute: 0, enabled: false });
+    const unmatched = await run("CLOCK_ALARM", { action: "delete", label: "work" });
+    expect([paused?.success, store.getClock().timers.map(({ label, status }) => ({ label, status }))]).toEqual([true, [{ label: "eggs", status: "ready" }, { label: "pasta", status: "paused" }]]);
+    expect([toggled?.success, unmatched?.success, store.getClock().alarms.map(({ hour, enabled }) => ({ hour, enabled }))]).toEqual([true, false, [{ hour: 6, enabled: true }, { hour: 7, enabled: false }]]);
+    for (const timer of store.getClock().timers) await run("CLOCK_TIMER", { action: "cancel", id: timer.id });
+    for (const alarm of store.getClock().alarms) await run("CLOCK_ALARM", { action: "delete", id: alarm.id });
+    expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
+  });
 });
 
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {
@@ -180,7 +240,8 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const { runtime } = makeFakeRuntime();
     const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
     expect(plugin.name).toBe(alphaAppsPluginName);
-    expect(plugin.views?.map((v) => v.id)).toEqual(["clock", "reminders"]);
+    // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
+    expect(plugin.views).toBeUndefined();
 
     const alarmAction = actionOf(plugin, "CLOCK_ALARM");
     const timerAction = actionOf(plugin, "CLOCK_TIMER");
@@ -193,6 +254,8 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(setRes?.success).toBe(true);
     const alarmId = ((setRes?.data as { alarm: { id: string } }).alarm).id;
     expect(store.getClock().alarms[0]?.daysMask).toBe(62);
+    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did"
+    expect(store.getClock().alarms[0]?.snoozeMinutes).toBe(10);
 
     const toggleRes = await alarmAction.handler(runtime, emptyMessage("Turn off alarm"), emptyState, { parameters: { action: "toggle", id: alarmId, enabled: false } });
     expect(toggleRes?.success).toBe(true);
@@ -201,6 +264,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     await alarmAction.handler(runtime, emptyMessage("Update alarm"), emptyState, { parameters: { action: "update", id: alarmId, hour: 8, minute: 15, enabled: true } });
     expect(store.getClock().alarms[0]?.hour).toBe(8);
 
+    store.updateAlarm(alarmId, { phase: "ringing", timeZone: "UTC" });
     const snoozeRes = await alarmAction.handler(runtime, emptyMessage("Snooze"), emptyState, { parameters: { action: "snooze", id: alarmId, snoozeMinutes: 10 } });
     expect(snoozeRes?.success).toBe(true);
     expect(store.getClock().alarms[0]?.phase).toBe("snoozed");
@@ -383,14 +447,14 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     }
   });
 
-  it("converges DST offsets, re-mirrors recurring reminders, prevents deleted reminder resurrection, validates HTTP payloads, and rejects unknown ops and overflow", async () => {
+  it("converges DST offsets, validates HTTP payloads, rejects unknown ops and overflow, and loads alphaAppsModule", async () => {
     const springAlarm = civilToEpochMs("2026-03-08", 7 * 60, "America/Los_Angeles");
     expect(springAlarm).toBe(Date.UTC(2026, 2, 8, 14, 0, 0));
     const fallAlarm = civilToEpochMs("2026-11-01", 7 * 60, "America/Los_Angeles");
     expect(fallAlarm).toBe(Date.UTC(2026, 10, 1, 15, 0, 0));
 
     const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15, 0, 0) });
-    const { runtime, tasks, appliedVerbs } = makeFakeRuntime();
+    const { runtime } = makeFakeRuntime();
 
     const hosted = await Effect.runPromise(alphaAppsModule({ timeZone: "UTC", runtime } as Parameters<typeof alphaAppsModule>[0]));
     expect(hosted.name).toBe(alphaAppsPluginName);
@@ -413,29 +477,197 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     const badRestore = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params: { id: "r1" }, body: { item: { id: "other", title: "X" } } });
     expect(badRestore.status).toBe(400);
 
-    const created = await remAction.handler(runtime, emptyMessage(""), emptyState, {
-      parameters: { op: "create", title: "Daily vitamins", dueDate: "2026-11-24", dueMinute: 540, recurrence: "daily" },
-    });
-    const createdItem = (created?.data as { item: ReminderItemRecord }).item;
-    expect(createdItem.agentTaskId).toBe("task-1");
-
-    const completed = await remAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { op: "complete", id: createdItem.id } });
-    const nextItem = (completed?.data as { nextItem: ReminderItemRecord | null }).nextItem;
-    expect(nextItem?.dueDate).toBe("2026-11-25");
-    expect(nextItem?.agentTaskId).toBe("task-2");
-    expect(appliedVerbs.some((v) => v.taskId === "task-1")).toBe(true);
-
-    if (tasks[0] !== undefined) tasks[0].status = "Completed";
-    await callRoute(routes, "GET", "/api/alpha/reminders");
-    expect(store.getReminders().items.find((i) => i.id === createdItem.id)?.completed).toBe(false);
-
-    await callRoute(routes, "DELETE", "/api/alpha/reminders/items/{id}", { params: { id: createdItem.id } });
-    expect(appliedVerbs.some((v) => v.taskId === "task-2")).toBe(true);
-    await callRoute(routes, "GET", "/api/alpha/reminders");
-    expect(store.getReminders().items).toHaveLength(0);
-
     for (let i = 0; i < 16; i += 1) store.createTimer({ durationMs: 60_000, label: `T${i}` });
     const overflow = await callRoute(routes, "POST", "/api/alpha/clock/timers", { body: { durationMs: 60_000, label: "Overflow" } });
     expect(overflow.status).toBe(409);
+  });
+
+  it("registers the Clock context for activity labels, marks read-only ops, and gives accurate parameter guidance", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 14, 0, 0) });
+    const registeredContexts: unknown[] = [];
+    const { runtime } = makeFakeRuntime();
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    await plugin.init?.({}, { ...runtime, contexts: { tryRegister: (ctx: unknown) => { registeredContexts.push(ctx); } } } as never);
+    expect(registeredContexts).toContainEqual(expect.objectContaining({ id: "clock", label: "Clock" }));
+
+    const alarm = actionOf(plugin, "CLOCK_ALARM");
+    const timer = actionOf(plugin, "CLOCK_TIMER");
+    const world = actionOf(plugin, "CLOCK_WORLD");
+    const reminders = actionOf(plugin, "REMINDERS_MANAGE");
+
+    expect((await alarm.handler(runtime, emptyMessage("list alarms"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await timer.handler(runtime, emptyMessage("list timers"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await world.handler(runtime, emptyMessage("list cities"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await world.handler(runtime, emptyMessage("time in Tokyo"), emptyState, { parameters: { action: "time_in", city: "Tokyo" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await reminders.handler(runtime, emptyMessage("list reminders"), emptyState, { parameters: { op: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+
+    for (const act of [alarm, timer, world, reminders]) {
+      const idParam = act.parameters?.find((p) => p.name === "id");
+      expect(idParam?.description).not.toContain("context lists it");
+    }
+  });
+
+  // spec/agent/index.md, "A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder"; spec/agent/index.md, "The page names the query values each gated route can receive"
+  it("keeps each reminder's scheduled task following it, so a delete, completion or new time made in the app or in chat holds, and says so only when it does", async () => {
+    const nowMs = Date.UTC(2026, 10, 24, 15, 0, 0);
+    const store = new AlphaAppsStore({ now: () => nowMs });
+    const { runtime, tasks, refusing } = makeFakeRuntime([
+      { taskId: "plumber-task", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Call the plumber", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T18:00:00.000Z" }, metadata: { title: "Call the plumber" } },
+      { taskId: "dentist-task", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Call the dentist", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T19:00:00.000Z" }, metadata: { title: "Call the dentist" } },
+    ]);
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    const action = actionOf(plugin, "REMINDERS_MANAGE");
+    const routes = plugin.routes!;
+    const read = async () => (await callRoute(routes, "GET", "/api/alpha/reminders")).body as unknown as RemindersSnapshot;
+    const named = async (title: string) => (await read()).items.find((item) => item.title === title);
+    const statusOf = (taskId: string) => tasks.find((task) => task.taskId === taskId)?.status;
+
+    const walk = await action.handler(runtime, emptyMessage("remind me to walk the dog at 8pm"), emptyState, { parameters: { op: "create", title: "Walk the dog", dueDate: "2026-11-24", dueMinute: 1200 } });
+    const listed = await action.handler(runtime, emptyMessage("what reminders do I have"), emptyState, { parameters: { op: "list" } });
+    expect({ receipt: walk?.effectReceipts?.[0]?.outcome, listed: listed?.text?.includes("Walk the dog due 2026-11-24 8:00 PM (UTC; pending)"), listReceipts: listed?.effectReceipts }).toEqual({ receipt: "applied", listed: true, listReceipts: undefined });
+    const walkGone = await action.handler(runtime, emptyMessage("delete it"), emptyState, { parameters: { op: "delete", title: "Walk the dog" } });
+    expect({ success: walkGone?.success, receipt: walkGone?.effectReceipts?.[0]?.operation, left: await named("Walk the dog") }).toEqual({ success: true, receipt: "alpha.reminder.delete", left: undefined });
+
+    const untitled = await action.handler(runtime, emptyMessage("remind me to water the plants"), emptyState, { parameters: { op: "create", dueDate: "2026-11-24" } });
+    expect({ success: untitled?.success, made: (await read()).items.length }).toEqual({ success: false, made: 2 });
+
+    const plumber = (await named("Call the plumber"))!;
+    refusing.add("Dismiss");
+    const refused = await action.handler(runtime, emptyMessage("delete my plumber reminder"), emptyState, { parameters: { op: "delete", title: "Call the plumber" } });
+    expect({ success: refused?.success, task: statusOf("plumber-task"), kept: (await named("Call the plumber"))?.id }).toEqual({ success: false, task: "Scheduled", kept: plumber.id });
+    refusing.delete("Dismiss");
+    const deleted = await action.handler(runtime, emptyMessage("delete my plumber reminder"), emptyState, { parameters: { op: "delete", title: "Call the plumber" } });
+    expect({ success: deleted?.success, task: statusOf("plumber-task"), kept: await named("Call the plumber") }).toEqual({ success: true, task: "Dismissed", kept: undefined });
+
+    const dentist = (await named("Call the dentist"))!;
+    expect((await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: dentist.id } })).status).toBe(200);
+    expect({ completed: (await named("Call the dentist"))?.completed, task: statusOf("dentist-task") }).toEqual({ completed: true, task: "Completed" });
+    expect((await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id: dentist.id } })).status).toBe(200);
+    expect({ completed: (await named("Call the dentist"))?.completed, task: statusOf("dentist-task"), fires: tasks.find((task) => task.taskId === "dentist-task")?.nextAt })
+      .toEqual({ completed: false, task: "Scheduled", fires: "2026-11-24T19:00:00.000Z" });
+    expect((await callRoute(routes, "DELETE", "/api/alpha/reminders/items/{id}", { params: { id: dentist.id } })).status).toBe(200);
+    expect({ kept: await named("Call the dentist"), task: statusOf("dentist-task") }).toEqual({ kept: undefined, task: "Dismissed" });
+
+    const made = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: { title: "Pick up keys", dueDate: "2026-11-24", dueMinute: 20 * 60 } });
+    const keys = made.body.item as ReminderItemRecord;
+    const moved = await callRoute(routes, "PATCH", "/api/alpha/reminders/items/{id}", { params: { id: keys.id }, body: { dueDate: "2026-11-25", dueMinute: 9 * 60 } });
+    expect(moved.status).toBe(200);
+    const live = tasks.filter((task) => task.metadata.alphaReminderId === keys.id && task.status !== "Dismissed");
+    expect(live.map((task) => task.trigger.atIso)).toEqual(["2026-11-25T09:00:00.000Z"]);
+    await action.handler(runtime, emptyMessage("rename it"), emptyState, { parameters: { op: "update", title: "keys", notes: "From the front desk" } });
+    expect((await named("Pick up keys"))?.notes).toBe("From the front desk");
+    const keysTask = tasks.findIndex((task) => task.metadata.alphaReminderId === keys.id && task.status !== "Dismissed");
+    tasks[keysTask] = { ...tasks[keysTask], status: "Dismissed" };
+    expect(await named("Pick up keys")).toBeUndefined();
+
+    const gate = defineRoutes(routes.map(({ method, path, query }) => (query === undefined ? { method, path } : { method, path, query })));
+    const admitted = (method: string, target: string) => gate.admit({ method, target, streamed: false, body: undefined }).tag;
+    expect([
+      admitted("DELETE", "/api/alpha/reminders/items/rem-1"),
+      admitted("DELETE", "/api/alpha/reminders/lists/list-1?mode=cascade"),
+      admitted("DELETE", "/api/alpha/reminders/items/rem-1?idempotencyKey=k"),
+    ]).toEqual(["Admitted", "Admitted", "RouteRefused"]);
+  });
+
+  it("reopens the reviewed Calendar reminder without firing its old task (spec/agent/index.md, \"A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder\")", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15) });
+    const { runtime, tasks, refusing } = makeFakeRuntime([]);
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime }).plugin.routes!;
+    const creation = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: { title: "Pick up keys", dueDate: "2026-11-24", dueMinute: 18 * 60, alertMinutes: 0 } });
+    const id = (creation.body.item as ReminderItemRecord).id;
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id } });
+    const record = completed.body.item as ReminderItemRecord;
+    const body = { dueDate: "2026-11-24", dueMinute: 18 * 60, expectedRevision: record.revision };
+    const noAlert = (expectedRevision: number) => callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id }, body: { ...body, expectedRevision } });
+
+    expect((await noAlert(record.revision + 1)).status).toBe(409);
+    const withoutTasks = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    expect((await callRoute(withoutTasks, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id }, body })).status).toBe(409);
+    refusing.add("Dismiss");
+    expect((await noAlert(record.revision)).status).toBe(409);
+    expect(store.getReminders().items.find((item) => item.id === id)?.completed).toBe(true);
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)?.status).toBe("Completed");
+
+    refusing.delete("Dismiss");
+    const revision = store.getReminders().items.find((item) => item.id === id)!.revision;
+    const reopened = await noAlert(revision);
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.item).toMatchObject({ id, completed: false, dueDate: body.dueDate, dueMinute: body.dueMinute, alertMinutes: null, agentTaskId: null });
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)?.status).toBe("Dismissed");
+    expect(tasks.filter((task) => task.metadata.alphaReminderId === id && task.status === "Scheduled")).toHaveLength(0);
+  });
+
+  it("applies an approved Calendar reschedule to the exact completed reminder and task", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15) });
+    const { runtime, tasks } = makeFakeRuntime();
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime }).plugin.routes!;
+    const due = { title: "Pick up keys", dueDate: "2026-11-24", dueMinute: 18 * 60, alertMinutes: 0, recurrence: "none" };
+    const create = () => callRoute(routes, "POST", "/api/alpha/reminders/items", { body: due });
+    const selected = (await create()).body.item as ReminderItemRecord;
+    const other = (await create()).body.item as ReminderItemRecord;
+    const record = (await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: selected.id } })).body.item as ReminderItemRecord;
+    const fields = { ...due, dueMinute: 19 * 60, expectedRevision: record.revision };
+    const edit = (body: unknown) => callRoute(routes, "PATCH", "/api/alpha/reminders/items/{id}", { params: { id: record.id }, body });
+    expect((await edit(fields)).status).toBe(409);
+    expect((await edit({ ...fields, expectedRevision: record.revision - 1, rescheduleCompleted: true })).status).toBe(409);
+    expect(store.getReminders().items.find((item) => item.id === record.id)?.completed).toBe(true);
+    const saved = await edit({ ...fields, rescheduleCompleted: true });
+    expect(saved.status).toBe(200);
+    expect(saved.body.item).toMatchObject({ id: record.id, completed: false, completedAtMs: null, dueMinute: 19 * 60, alertMinutes: 0 });
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)).toMatchObject({ status: "Scheduled", trigger: { atIso: "2026-11-24T19:00:00.000Z" } });
+    expect(store.getReminders().items.find((item) => item.id === other.id)).toEqual(other);
+  });
+
+  it("retains the real previous occurrence when a daily reminder advances", async () => {
+    const now = Date.UTC(2026, 10, 24, 8);
+    const store = new AlphaAppsStore({ now: () => now });
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    const input = { title: "Bring a notebook", dueDate: "2026-11-24", dueMinute: 570, alertMinutes: 0, recurrence: "daily" };
+    const created = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: input });
+    const selected = created.body.item as ReminderItemRecord;
+    const params = { id: selected.id };
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params });
+    const expected = [{ revision: selected.revision, dueAtMs: Date.UTC(2026, 10, 24, 9, 30), completedAtMs: now }];
+    expect(completed.body.item).toMatchObject({ id: selected.id, completed: false, dueDate: "2026-11-25", history: expected });
+    const readback = await callRoute(routes, "GET", "/api/alpha/reminders");
+    expect(readback.body.items).toEqual([expect.objectContaining({ id: selected.id, history: expected })]);
+    const undo = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params });
+    expect(undo.body.item).toMatchObject({ id: selected.id, dueDate: input.dueDate });
+    expect((undo.body.item as ReminderItemRecord).history).toBeUndefined();
+  });
+
+  it("skips elapsed repeat dates while keeping the completed Saturday occurrence", async () => {
+    const now = Date.UTC(2027, 2, 15, 10, 30);
+    const store = new AlphaAppsStore({ now: () => now });
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    const input = { title: "Bring a notebook", dueDate: "2027-03-13", dueMinute: 570, alertMinutes: 0, recurrence: "daily" };
+    const created = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: input });
+    const selected = created.body.item as ReminderItemRecord;
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: selected.id } });
+    expect(completed.body.item).toMatchObject({ id: selected.id, completed: false, dueDate: "2027-03-16", history: [
+      { revision: selected.revision, dueAtMs: Date.UTC(2027, 2, 13, 9, 30), completedAtMs: now, skippedDates: 2 },
+    ] });
+  });
+});
+
+describe("Notes transcription for the local browser", () => {
+  const transcriptionContext = (environment?: Record<string, string>) => ({
+    launch: { account: { userId: "owner-1", organizationId: "org-1" }, ...(environment === undefined ? {} : { environment }) },
+    runtime: { getModelRegistrations: () => [], useModel: () => Promise.reject(new Error("no local model")) },
+  }) as unknown as Parameters<typeof notesTranscriptionRoutes>[0];
+
+  // spec/agent/index.md, "The local browser can request a private transcription of a reviewed note"
+  it("offers the route without a local engine, and says no local model is ready to transcribe", async () => {
+    const routes = notesTranscriptionRoutes(transcriptionContext(), "local-inference", () => Promise.resolve(false));
+    expect(routes.map(({ method, path }) => `${method} ${path}`)).toEqual(["GET /api/alpha/notes/transcription", "POST /api/alpha/notes/transcription"]);
+    const signal = new AbortController().signal;
+    expect(await routes[0].handler({ signal } as never)).toEqual({ status: 200, body: { local: false } });
+    const pcm = Buffer.from(new Uint8Array(3_200)).toString("base64");
+    expect(await routes[1].handler({ body: { pcm }, signal } as never)).toEqual({ status: 503, body: { error: "LOCAL_TRANSCRIPTION_UNAVAILABLE" } });
+  });
+
+  // spec/agent/index.md, "The local browser can request a private transcription of a reviewed note"
+  it("is not offered while the agent runs Alpha's native speech engine", () => {
+    expect(notesTranscriptionRoutes(transcriptionContext({ ALPHA_LOCAL_SPEECH_SOCKET: "/run/alpha/speech.sock" }), "local-inference", () => Promise.resolve(true))).toEqual([]);
   });
 });

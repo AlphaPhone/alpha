@@ -334,8 +334,10 @@ pure def stepSharingNamesTheExactPreview(before: Preview, via: str, after: Previ
 A document another provider holds may be shared through its selected grant.
 Only Files can rename, move or bin one of its own entries here. The phone
 opens the exact folder and selection before showing the usual Move to or
-Trash confirmation. A successful rename reopens the same document with
-its new name when that preview is still showing.
+Trash confirmation. The title of a renameable stored file opens its name card.
+The name field selects its base name and leaves its extension visible. A
+successful rename reopens the same document with its new name when that
+preview is still showing.
 
 ```quint
 pure def canActOnStoredFile(s: Preview, operation: StorageAction, name: str, stored: bool, by: Actor): bool =

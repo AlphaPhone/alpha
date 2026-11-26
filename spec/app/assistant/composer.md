@@ -350,6 +350,32 @@ pure def sometimesAMovedMessageClearsItsOldSlot(c: Composer): bool = c.clear.out
 pure def sometimesAChangedOldSlotIsKept(c: Composer): bool = c.clear.outcome == A::Refused
 ```
 
+### A typed draft in a conversation that vanished moves into the new chat
+
+When the conversation showing is no longer listed, a plain typed draft
+(with no attachments, quote or edit from that conversation) moves into the
+new chat's slot instead of being left behind.
+
+```quint
+pure def canCarry(c: Composer): bool =
+  c.binding.conversation > 0 and c.slot == Open and c.away == Free
+    and not(c.marked) and not(attached(c.editor)) and c.editor.text
+    and c.source == 0 and c.draft.sync != D::Saving and c.draft.sync != D::Conflicted
+    and c.clear.outcome != A::Sent
+
+pure def carry(c: Composer): Moved =
+  written(false, { ...c, binding: { ...c.binding, conversation: 0 },
+    draft: D::edit(D::blank), failing: false, unsettled: false })
+
+pure def stepACarriedDraftMovesToANewChat(before: Composer, via: str, after: Composer): bool =
+  via == "carry" implies
+    (before.binding.conversation > 0 and after.binding == { owner: before.binding.owner, conversation: 0 }
+      and after.editor == before.editor and after.editor.text)
+
+pure def sometimesACarriedDraftLandsInANewChat(c: Composer): bool =
+  c.binding.conversation == 0 and c.slot == Open and c.editor.text and c.draft.sync == D::Saving
+```
+
 ## Story: Choose between my text and the saved copy
 
 > As the owner, when the slot holds a copy I did not expect, I want to see
@@ -607,6 +633,26 @@ pure def stepAQuestionKeepsAnExistingDraft(before: Composer, via: str, after: Co
   via == "attachQuestion" implies
     (after.binding == before.binding and after.editor.files == before.editor.files + 1 and
       (before.editor.text implies (after.editor.text and after.long == before.long and after.draft == before.draft)))
+```
+
+### A later reviewed photo replaces the chosen draft photo
+
+Asking Alpha from the Photos viewer puts one photo into this owner’s open
+draft. Its chip stays visible wherever the draft can be sent. An accepted
+second photo takes its place in the same draft and leaves the other files,
+text and attachment count as they were. An approved Camera capture can fill
+this slot when it is empty, while the draft still belongs to the same owner,
+conversation and read ticket. Both photos wait for the owner's Send.
+
+```quint
+pure def canReplaceReviewedPhoto(c: Composer, owner: int, conversation: int, ticket: int): bool =
+  c.binding.owner == owner and c.binding.conversation == conversation and c.read.ticket == ticket
+    and c.slot == Open and c.away == Free and not(c.unsettled) and c.editor.editing == 0 and c.editor.files > 0
+
+pure def replaceReviewedPhoto(c: Composer, owner: int, conversation: int, ticket: int): Composer = c
+
+pure def lawAReviewedPhotoReplacementKeepsTheDraft(c: Composer, owner: int, conversation: int, ticket: int): bool =
+  canReplaceReviewedPhoto(c, owner, conversation, ticket) implies replaceReviewedPhoto(c, owner, conversation, ticket) == c
 ```
 
 ### The mail open in Inbox, the photo open in Photos, or a transcript handed over by "Ask Alpha about this" is offered once by the view showing

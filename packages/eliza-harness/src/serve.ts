@@ -5,7 +5,7 @@ import type { Plugin } from "vite";
 import type { RunningProvider } from "./providers/shared.ts";
 import { startSlackProvider } from "./providers/slack-provider.ts";
 import { startTelegramProvider } from "./providers/telegram-provider.ts";
-import { type RealModel, startEliza } from "./services.ts";
+import { type RealModel, type RealSpeech, startEliza } from "./services.ts";
 
 /**
  * The model the agent pack asks its cloud for (spec/agent/index.md, `cloudModel`), which Cerebras serves on its own API
@@ -54,16 +54,29 @@ function validatedProviderUrl(raw: string, envName: string): string {
   return parsed.origin;
 }
 
+/** The file the owner keeps their Cartesia key in: where it is, the dev server's cloud offers Talk real speech. */
+const speechKeyFile = ".config/alphaphone/cartesia-key";
+
+/** The real speech the dev server's cloud relays Talk through, where the owner keeps a Cartesia key; none otherwise. */
+function realSpeech(): RealSpeech | undefined {
+  const file = path.join(os.homedir(), speechKeyFile);
+  const key = fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
+  return key === "" ? undefined : { key };
+}
+
+/** What tells the page its `/cloud` relays speech (spec/app/voice/index.md, "What voice asks the phone and the voice service to do"). */
+const speechOffered = { tag: "meta", attrs: { name: "alpha-cloud-speech", content: "/cloud" }, injectTo: "head-prepend" as const };
 /**
  * eliza's agent, cloud, and external messaging providers at the dev server's `/agent`, `/cloud`, `/slack`, and `/telegram`:
- * the processes the journeys start (services.ts), over state of this run alone; the agent's is kept in the directory
- * `ALPHA_ELIZA_STATE` names, where one is named. The cloud's model is the scripted one, or the real one `ALPHA_DEV_MODEL`
- * names. When `ALPHA_SLACK_URL` or `ALPHA_TELEGRAM_URL` is set, the proxy forwards to that external URL instead of starting
+ * the processes the journeys start (services.ts), over state of this run alone; the agent's and the cloud's are kept
+ * in the directory `ALPHA_ELIZA_STATE` names, where one is named, so a restart reopens the same owner's chats. The
+ * cloud's model is the scripted one, or the real one `ALPHA_DEV_MODEL` names. When `ALPHA_SLACK_URL` or `ALPHA_TELEGRAM_URL` is set, the proxy forwards to that external URL instead of starting
  * a local provider server. The proxy adds the agent's token, so the page never holds it, as on the phone. `apply` keeps it
  * out of every build.
  */
 export function eliza(): Plugin {
   let running: Awaited<ReturnType<typeof startEliza>> | undefined;
+  let speech: RealSpeech | undefined;
   let slackProvider: RunningProvider | undefined;
   let telegramProvider: RunningProvider | undefined;
   return {
@@ -76,7 +89,8 @@ export function eliza(): Plugin {
       const validatedSlack = externalSlack && externalSlack.length > 0 ? validatedProviderUrl(externalSlack, "ALPHA_SLACK_URL") : undefined;
       const validatedTelegram = externalTelegram && externalTelegram.length > 0 ? validatedProviderUrl(externalTelegram, "ALPHA_TELEGRAM_URL") : undefined;
       try {
-        running = await startEliza(stateDir, realModel());
+        speech = realSpeech();
+        running = await startEliza(stateDir, realModel(), speech);
         const slackTarget =
           validatedSlack ??
           (slackProvider = await startSlackProvider({
@@ -93,7 +107,7 @@ export function eliza(): Plugin {
           server: {
             proxy: {
               "/agent": { target: agent.origin, rewrite: under("/agent"), headers: { authorization: `Bearer ${agent.token}` } },
-              "/cloud": { target: cloud.local, rewrite: under("/cloud"), headers: { authorization: `Bearer ${key.token}` } },
+              "/cloud": { target: cloud.local, rewrite: under("/cloud"), headers: { authorization: `Bearer ${key.token}` }, ws: true },
               "/slack": { target: slackTarget, rewrite: under("/slack"), changeOrigin: true },
               "/telegram": { target: telegramTarget, rewrite: under("/telegram"), changeOrigin: true },
             },
@@ -107,6 +121,7 @@ export function eliza(): Plugin {
         throw cause;
       }
     },
+    transformIndexHtml: () => (speech === undefined ? [] : [speechOffered]),
     configureServer(server) {
       server.httpServer?.once("close", () => {
         void Promise.allSettled([running?.stop(), slackProvider?.stop(), telegramProvider?.stop()]);

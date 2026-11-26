@@ -5,12 +5,17 @@ export const dockClearance = "pb-[calc(--spacing(4)+max(var(--alpha-dock-overlap
 
 /** The look of a field a person types or chooses in: filled, as develop's are; a single-line one is 48px, as tall as a `Button`. */
 export const field = cn(
-  focusRing,
-  "w-full rounded-lg border border-transparent bg-secondary px-3.5 text-md text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:focus-visible:outline-destructive",
+  "w-full rounded-lg border border-transparent bg-secondary px-3.5 text-md text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive",
 );
 
+/** A field typed in: its caret marks focus, so it draws no ring, as develop's fields draw none. */
+export const textField = cn(field, "outline-none");
+
+/** A field chosen from: it has no caret, so keyboard focus draws the ring. */
+export const choiceField = cn(focusRing, field, "aria-invalid:focus-visible:outline-destructive");
+
 /** The panel of a menu or of a select's list, floating over the page. */
-export const floatingPanel = cn("z-dialog rounded-lg border border-border/60 bg-popover p-1 text-popover-foreground shadow-menu outline-none motion-safe:animate-drop dark:border-border");
+export const floatingPanel = cn("z-dialog rounded-lg border border-border/60 bg-popover p-1 text-base text-popover-foreground shadow-menu outline-none motion-safe:animate-drop dark:border-border dark:shadow-menu-dark");
 
 /** One row of such a panel: 44px, lit under the pointer and the keyboard. */
 export const floatingRow = cn(
@@ -20,14 +25,23 @@ export const floatingRow = cn(
 /** The dimmed page behind a dialog or a sheet. */
 export const overlay = cn("fixed inset-0 bg-foreground/18 motion-safe:animate-fade dark:bg-background/55");
 
-/** The panel of a dialog, in the middle of the dimmed page. */
-export const dialogPanel = cn("fixed inset-x-4 top-1/2 z-dialog mx-auto flex max-h-[calc(var(--alpha-viewport-height,100dvh)-2rem)] max-w-sm -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-tile border border-border/60 bg-popover p-5 text-popover-foreground shadow-md outline-none motion-safe:animate-rise dark:border-border");
+/** The panel of a dialog: a card held over the foot of the dimmed page, clear of Ask Alpha, as develop's are. */
+export const dialogPanel = cn("fixed inset-x-4 bottom-30 z-dialog mx-auto flex max-h-[min(75dvh,calc(var(--alpha-viewport-height,100dvh)-2rem))] max-w-sm flex-col gap-3 overflow-y-auto rounded-sheet border border-border/60 bg-popover px-5 pt-5.5 pb-6 text-popover-foreground shadow-md outline-none motion-safe:animate-rise dark:border-border");
 
-/** The heading of a floating surface: a dialog or a sheet. */
-export const surfaceTitle = cn("text-xl leading-snug font-semibold");
+/** While Ask Alpha is drawn, a sheet and its dimming stop 108px above the foot, as develop's do, so Ask Alpha shows below them. */
+export const aboveDock = "in-[body:has([data-alpha-assistant-host]:not([hidden])>[data-alpha-detent])]:bottom-27";
+
+/** The panel of a sheet: it rises from the foot of the dimmed page with rounded top corners; add `aboveDock` to stop it above Ask Alpha. */
+export const sheetPanel = cn("fixed inset-x-0 bottom-0 z-sheet mx-auto flex max-h-[min(85dvh,calc(100dvh_-_--spacing(35)))] max-w-xl flex-col rounded-t-sheet outline-none motion-safe:animate-rise");
+
+/** The grab handle at the top of a sheet, drawn before its content so it adds nothing to the content's layout; decorative. */
+export const sheetHandle = cn("before:absolute before:top-3 before:left-1/2 before:h-1 before:w-10 before:-translate-x-1/2 before:rounded-full before:bg-muted-foreground/40");
+
+/** The heading of a floating surface, a dialog or a sheet: develop's serif display title. */
+export const surfaceTitle = cn("font-display text-surface font-light wrap-anywhere");
 
 /** What a floating surface asks or says, under its heading. */
-export const surfaceDescription = cn("text-base text-muted-foreground");
+export const surfaceDescription = cn("text-base leading-normal text-muted-foreground");
 
 /** A 44px target around the 24px mark of a checkbox or a radio button. */
 export const markTarget = cn(focusRing, "group peer inline-flex size-11 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50");

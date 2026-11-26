@@ -41,7 +41,8 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
   ]);
   // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the phone admits them by the plugins its host registered, and the broken layer over Home took nothing away.
   await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
-  expect([/^Phone/, /^Messages/, /^Contacts/].map((name) => Boolean(button(name)))).toEqual([true, true, true]);
+  // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited": a tile's name is its app's, with what waits there said after it.
+  expect(["Phone", "Messages", "Contacts"].map((name) => Boolean(button(new RegExp(`^${name}(?![A-Za-z])`))))).toEqual([true, true, true]);
 
   // spec/app/shell/index.md, "Opening an app shows it on top and lowers Ask Alpha to its bar"
   for (const view of ["Files", "Maps"]) {
@@ -213,16 +214,27 @@ it('Keeps a trail from before the Apps drawer while reopening (spec/app/shell/in
   localStorage.setItem("alpha/app/shell/index@1", JSON.stringify(earlier));
   const { alpha } = await open(scene(), only("home"));
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
-  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@3") ?? "null")).toMatchObject({ trail: ["Notes"], drawer: false, assistant: "Bar" });
+  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@5") ?? "null")).toMatchObject({ trail: ["Notes"], drawer: false, assistant: "Bar" });
   await closeAll();
   localStorage.setItem("alpha/app/shell/index@2", JSON.stringify({ ...earlier, trail: ["Files"], drawer: false }));
   const reopened = await open(scene(), only("home"));
   await until(reopened.alpha, reopened.alpha.runtime, Shell, (state) => state.trail.at(-1) === "Files" && state.assistant === "Bar");
+  await closeAll();
+  localStorage.setItem("alpha/app/shell/index@3", JSON.stringify({ ...earlier, trail: ["Calendar"], drawer: false, route: 20 }));
+  const beforeTalkMark = await open(scene(), only("home"));
+  await until(beforeTalkMark.alpha, beforeTalkMark.alpha.runtime, Shell, (state) => state.trail.at(-1) === "Calendar" && state.assistant === "Bar");
+  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@5") ?? "null")).toMatchObject({ trail: ["Calendar"], route: 21, spokenRoute: 0 });
+  await closeAll();
+  localStorage.removeItem("alpha/app/shell/index@5");
+  localStorage.setItem("alpha/app/shell/index@4", JSON.stringify({ ...earlier, trail: ["Maps"], drawer: false, route: 30, spokenRoute: 30 }));
+  const beforeTextAsk = await open(scene(), only("home"));
+  await until(beforeTextAsk.alpha, beforeTextAsk.alpha.runtime, Shell, (state) => state.trail.at(-1) === "Maps" && state.assistant === "Bar");
+  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@5") ?? "null")).toMatchObject({ trail: ["Maps"], route: 31, spokenRoute: 30, textAsk: { tag: "NoTextAsk" }, textAskThrough: 0 });
 });
 
 // spec/app/platform/index.md, "Story: Keep my phone's state across restarts"
 it("Keep my phone's state across restarts: a kept value Alpha can no longer read is set aside, and no copy waiting is written over (spec/app/platform/index.md, \"Story: Keep my phone's state across restarts\")", async () => {
-  const kept = "alpha/app/shell/index@3";
+  const kept = "alpha/app/shell/index@5";
   let waiting: [string, string][] = [];
   const storedAsides = (): [string, string][] => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
     .filter((key): key is string => key !== null && key.startsWith(`${kept}.unreadable`))

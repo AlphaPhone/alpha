@@ -1,8 +1,10 @@
 import type { ComponentProps, ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { X } from "lucide-react";
 import { cn } from "../lib/cn.ts";
 import { useLayerSurface } from "../lib/layers.tsx";
-import { surfaceDescription, surfaceTitle } from "../lib/styles.ts";
+import { aboveDock, sheetHandle, sheetPanel, surfaceDescription, surfaceTitle } from "../lib/styles.ts";
+import { Button } from "./Button.tsx";
 import { DialogOverlay } from "./Dialog.tsx";
 
 export type SheetProps = ComponentProps<typeof DialogPrimitive.Root>;
@@ -17,6 +19,12 @@ export type SheetContentProps = Omit<ComponentProps<typeof DialogPrimitive.Conte
   actions?: ReactNode;
   /** An enclosing container for the sheet's portal. */
   container?: HTMLElement;
+  /** A local sheet's mounted frame and backdrop. */
+  frame?: { readonly container: HTMLElement; readonly backdrop: ReactNode };
+  /** The dimmed backdrop where the sheet has its own surface treatment. */
+  overlayClassName?: string;
+  /** Names a close button beside the title; leave out where the sheet's own actions close it. */
+  closeLabel?: string;
 };
 
 /** A task that rises from the foot of the screen: holds a `SheetTrigger` and a `SheetContent`. */
@@ -30,27 +38,38 @@ export const SheetTrigger = DialogPrimitive.Trigger;
 /** Closes the sheet; pass `asChild` to use a `Button`. */
 export const SheetClose = DialogPrimitive.Close;
 
-/** The panel at the foot of a dimmed page: its title, a body that scrolls, and its actions. Escape and a press outside dismiss it. */
-export function SheetContent({ title, description, actions, container, className, children, ref, onPointerDownOutside, onInteractOutside, ...props }: SheetContentProps) {
-  const surface = useLayerSurface("SheetLayer", { container, ref, onPointerDownOutside, onInteractOutside });
+/** The panel at the foot of a dimmed page, under a grab handle: its title, a body that scrolls, and its actions. Escape and a press outside dismiss it. */
+export function SheetContent({ title, description, actions, container, overlayClassName, closeLabel, frame, className, children, ref, onPointerDownOutside, onInteractOutside, ...props }: SheetContentProps) {
+  const placed = /(?:^|\s)(?:inset-0|inset-y-|bottom-)/.test(className ?? "");
+  const surface = useLayerSurface("SheetLayer", { container: frame?.container ?? container, ref, onPointerDownOutside, onInteractOutside });
   return (
     <DialogPrimitive.Portal container={surface.container}>
-      <DialogOverlay className="z-sheet" />
+      {frame ? frame.backdrop : <DialogOverlay className={cn("z-sheet", !placed && aboveDock, overlayClassName)} />}
       <DialogPrimitive.Content
         {...(description ? {} : { "aria-describedby": undefined })}
         className={cn(
-          "fixed inset-x-0 bottom-0 z-sheet mx-auto flex max-h-[min(85dvh,calc(var(--alpha-viewport-height,100dvh)-2rem))] max-w-xl flex-col gap-4 rounded-t-sheet border-t border-border/60 bg-popover px-5 pt-6 pb-[max(--spacing(5),var(--alpha-safe-bottom))] text-popover-foreground shadow-sheet outline-none motion-safe:animate-rise dark:border-border",
+          sheetPanel,
+          !placed && aboveDock,
+          sheetHandle,
+          "gap-3 border-t border-border/60 bg-popover px-5 pt-8.5 pb-[max(--spacing(9.5),var(--alpha-safe-bottom))] text-popover-foreground shadow-lift dark:border-border dark:shadow-lift-dark",
           className,
         )}
         {...surface.contentProps}
         {...props}
       >
-        <div className="flex flex-col gap-1">
-          <DialogPrimitive.Title className={surfaceTitle}>{title}</DialogPrimitive.Title>
-          {description ? <DialogPrimitive.Description className={surfaceDescription}>{description}</DialogPrimitive.Description> : null}
+        <div className="flex items-start gap-2">
+          <DialogPrimitive.Title className={cn(surfaceTitle, "min-w-0 flex-1 pt-1.5")}>{title}</DialogPrimitive.Title>
+          {closeLabel ? (
+            <DialogPrimitive.Close asChild>
+              <Button variant="ghost" size="icon" aria-label={closeLabel} className="-mt-0.5 -mr-2 rounded-tile [&_svg:not([class*='size-'])]:size-5">
+                <X aria-hidden />
+              </Button>
+            </DialogPrimitive.Close>
+          ) : null}
         </div>
-        {children ? <div className="-mx-5 min-h-0 flex-1 overflow-y-auto px-5">{children}</div> : null}
-        {actions ? <div className="flex gap-2 *:flex-1">{actions}</div> : null}
+        {description ? <DialogPrimitive.Description className={surfaceDescription}>{description}</DialogPrimitive.Description> : null}
+        {children ? <div className="-mx-5 -my-1 min-h-0 flex-1 overflow-y-auto px-5 py-1">{children}</div> : null}
+        {actions ? <div className="mt-2 flex gap-2.5 *:h-13.5 *:flex-1 *:text-md">{actions}</div> : null}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );

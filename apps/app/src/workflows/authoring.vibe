@@ -1,6 +1,11 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Keep the draft on the phone"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, validatePhoneWorkflowSpec, workflowUuid } from "@elizaos/plugin-workflow-client"
+import { PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL, SELECTED_REMINDERS_WINDOW, type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, phoneStepUsesDevice, phoneWorkflowCivilMidnight, validatePhoneWorkflowSpec, workflowCalendarRangeFitsLocalDays, workflowSha, workflowUuid } from "@elizaos/plugin-workflow-client"
+import { projectNoteForModel } from "@elizaos/plugin-notes-client"
+import { MediaReview, type WorkflowPhone } from "../assistant/media-review.vibe"
+import { PhoneCalendar } from "../platform/calendar.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
 import * as Build from "../../gen/app__workflows__builder.effect.vibe"
 import * as Generate from "../../gen/app__workflows__generate.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
@@ -8,26 +13,11 @@ import { canFile } from "../../gen/app__workflows__request.effect.vibe"
 import type { When } from "../../gen/app__workflows__schedule.effect.vibe"
 import type { Operation, Step } from "../../gen/app__workflows__steps.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
-import { PhoneCalendar } from "../platform/calendar.vibe"
-import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
-import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi, localTimeZone } from "./api.vibe"
 import { Rows, refresh } from "./list.vibe"
-
-interface NoteChoice {
-  readonly id: string
-  readonly revision: string
-  readonly title: string
-}
-
-interface CalendarChoice {
-  readonly id: string
-  readonly label: string
-}
 
 interface Draft {
   readonly owner: number
@@ -39,11 +29,27 @@ interface Draft {
   readonly generated?: PhoneWorkflowSpec
   readonly zone: string
   readonly held: number
-  readonly noteChoices: readonly NoteChoice[]
-  readonly calendarChoices: readonly CalendarChoice[]
+  readonly device?: WorkflowPhone
+  readonly choices?: SourceChoices
 }
 
-const blank: Draft = { owner: 0, name: "", description: "", steps: [], prompt: "", zone: "", held: 0, noteChoices: [], calendarChoices: [] }
+interface SourceChoice {
+  readonly id: string
+  readonly title: string
+  readonly revision: string
+}
+
+type SourceChoices =
+  | { readonly tag: "SelectedNotes"; readonly rows: readonly SourceChoice[] }
+  | { readonly tag: "CalendarRange"; readonly rows: readonly SourceChoice[] }
+
+const CalendarChoices = Schema.Struct({
+  status: Schema.Literal("ready"),
+  calendars: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, name: Schema.String, sourceRevision: Schema.NonEmptyString }))
+    .check(Schema.isMaxLength(256)),
+})
+
+const blank: Draft = { owner: 0, name: "", description: "", steps: [], prompt: "", zone: "", held: 0 }
 
 export service DraftWords {
   view(): Draft!!
@@ -69,7 +75,8 @@ const operations: Readonly<Record<PhoneStep["operation"], Operation>> = {
 }
 
 const authored = ["supplied_text", "contains", "compose_draft", "model_draft"] as const
-export type DraftOperation = (typeof authored)[number]
+const phone = ["selected_notes", "selected_reminders", "calendar_range", "save_note", "app_notification", "read_aloud"] as const
+export type DraftOperation = (typeof authored)[number] | (typeof phone)[number]
 
 function offered(catalog: PhoneWorkflowCatalog, operation: string): boolean {
   return catalog.palette.some((group) => group.operations.some((item) => item.id === operation && item.available))
@@ -100,8 +107,14 @@ function shapes(steps: readonly PhoneStep[]): Step[] {
   return steps.map((step, index) => projected(step, index + 1, "source" in step ? numbers.get(step.source) ?? 0 : 0))
 }
 
-export function available(catalog: PhoneWorkflowCatalog): readonly DraftOperation[] {
-  return authored.filter((operation) => offered(catalog, operation))
+function onDevice(catalog: PhoneWorkflowCatalog, operation: (typeof phone)[number], device: WorkflowPhone | undefined): boolean {
+  const item = catalog.palette.flatMap((group) => group.operations).find((one) => one.id === operation && one.available)
+  const minimum = operation === "selected_reminders" ? 3 : operation === "app_notification" || operation === "read_aloud" ? 2 : 1
+  return item !== undefined && device !== undefined && device.protocol >= Math.max(minimum, item.requiredDeviceProtocol ?? 1)
+}
+
+export function available(catalog: PhoneWorkflowCatalog, device?: WorkflowPhone): DraftOperation[] {
+  return [...authored.filter((operation) => offered(catalog, operation)), ...phone.filter((operation) => onDevice(catalog, operation, device))]
 }
 
 function clockTime(hour: number, minute: number): string {
@@ -113,7 +126,10 @@ function specification(state: Build.Builder, draft: Draft): PhoneWorkflowSpec {
   const trigger: PhoneWorkflowTrigger = preset === "Manual" ? { kind: "manual" } : {
     kind: "time", localTime: clockTime(hour, minute), timeZone: draft.zone, days: preset === "Daily" ? [0, 1, 2, 3, 4, 5, 6] : [...days].sort(),
   }
-  return { version: 1, name: draft.name.trim(), description: draft.description, trigger, steps: draft.steps }
+  const device = draft.device !== undefined && draft.steps.some(phoneStepUsesDevice)
+    ? { installationId: draft.device.installationId, enrollmentId: draft.device.enrollmentId } : undefined
+  return { version: 1, name: draft.name.trim(), description: draft.description, trigger, steps: draft.steps,
+    ...(device === undefined ? {} : { device }) }
 }
 
 const draftKey = (scope: string) => `alpha/workflows/draft/${encodeURIComponent(scope)}`
@@ -122,6 +138,7 @@ const saveKey = (scope: string) => `${draftKey(scope)}/submit`
 const DraftRecord = Schema.fromJsonString(Schema.Struct({
   version: Schema.Literal(1), name: Schema.String, description: Schema.String,
   steps: Schema.Array(Schema.Unknown), trigger: Schema.Unknown,
+  device: Schema.optionalKey(Schema.Unknown),
   held: Schema.optionalKey(Schema.Int),
 }))
 
@@ -139,12 +156,13 @@ effect function readDraft(scope: string) {
   if (raw === undefined) return undefined
   const record = (Schema.decodeUnknownEffect(DraftRecord)(raw) catch () => undefined)
   if (record === undefined) return undefined
+  const { held, ...specRecord } = record
   const parsed = (validatePhoneWorkflowSpec({
-    version: record.version, name: record.name.trim() || "Draft", description: record.description, trigger: record.trigger,
+    ...specRecord, name: record.name.trim() || "Draft",
     steps: record.steps.length === 0 ? [{ kind: "Read", operation: "supplied_text", id: "draft", text: "Draft" }] : record.steps,
   }) catch () => undefined)
   return parsed === undefined ? undefined : {
-    ...parsed, name: record.name, steps: record.steps.length === 0 ? [] : parsed.steps, held: record.held ?? 0,
+    ...parsed, name: record.name, steps: record.steps.length === 0 ? [] : parsed.steps, held: held ?? 0,
   }
 }
 
@@ -153,7 +171,8 @@ const Saved = Schema.fromJsonString(Schema.Struct({
   expected: Schema.Struct({ mutationId: Schema.NonEmptyString, specDigest: Schema.NonEmptyString, compilerRevision: Schema.NonEmptyString }),
 }))
 
-type Needs = Agent | WorkflowsApi | DraftWords | Rows | KeyValueStore.KeyValueStore | List.Machine | Build.Machine | NoteStore | PhoneCalendar | SystemSettings | Time
+type Needs = Agent | WorkflowsApi | DraftWords | Rows | KeyValueStore.KeyValueStore | List.Machine | Build.Machine
+  | NoteStore | PhoneCalendar | MediaReview | SystemSettings
 
 effect function offer(ticket: number): Build.Event!!Needs {
   const failed: Build.Event = { type: "offerRead", ticket, ok: false, speaks: false, reminders: false, runDay: false, schedules: false, generates: false, steps: [], name: 0, when: Build.initial.when }
@@ -167,18 +186,20 @@ effect function offer(ticket: number): Build.Event!!Needs {
   const catalog = (workflow.phoneCatalog() catch () => undefined)
   const prior = state.name === 0 && state.steps.length === 0 ? try readDraft(scope) : undefined
   if (catalog === undefined || (ownerAt() catch () => "") !== scope) return failed
+  const device = phone.some((operation) => offered(catalog, operation)) ? try (try MediaReview).workflowDevice() : undefined
+  if ((ownerAt() catch () => "") !== scope) return failed
   const live = try machine.get()
   if (live.owner !== state.owner || !Build.canOfferRead(live, ticket, [])) return failed
   const draft = try box.view()
   const restored = prior === undefined || live.name !== 0 || live.steps.length > 0 ? undefined : prior
-  try box.set({ ...draft, owner: live.owner, catalog,
+  try box.set({ ...draft, owner: live.owner, catalog, device, choices: undefined,
     name: restored?.name ?? draft.name, description: restored?.description ?? draft.description, steps: restored?.steps ?? draft.steps,
     held: restored?.held ?? draft.held,
     zone: restored?.trigger.kind === "time" ? restored.trigger.timeZone : draft.zone || localTimeZone() })
 
   return {
-    ...failed, ok: true, speaks: offered(catalog, "read_aloud") && offered(catalog, "app_notification"),
-    reminders: offered(catalog, "selected_reminders"), runDay: false,
+    ...failed, ok: true, speaks: onDevice(catalog, "read_aloud", device) && onDevice(catalog, "app_notification", device),
+    reminders: onDevice(catalog, "selected_reminders", device), runDay: (device?.protocol ?? 0) >= PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL && onDevice(catalog, "calendar_range", device),
     schedules: catalog.triggers.some((trigger) => trigger.kind === "time" && trigger.available),
     generates: catalog.generationProtocol === 1,
     steps: restored === undefined ? [] : shapes(restored.steps),
@@ -208,58 +229,6 @@ effect function keep(write: number, owner: number): Build.Event!!Needs {
   return kept ? { type: "draftKept", write, result: "WriteLanded", held: nextHeld } : failed
 }
 
-effect function readChoices(ticket: number, op: Operation): Build.Event!!Needs {
-  const failed: Build.Event = { type: "choicesListed", ticket, ok: false }
-  const machine = try Build.Machine
-  const state = try machine.get()
-  const box = try DraftWords
-  const rows = try Rows
-  const scope = ownerAt() catch () => ""
-  if (!(try rows.sameOwner(scope, state.owner))) return failed
-  if (op === "SelectedNotes") {
-    const snapshot = (try NoteStore).read() catch () => undefined
-    if (snapshot === undefined || (ownerAt() catch () => "") !== scope) return failed
-    const live = try machine.get()
-    if (live.owner !== state.owner || !Build.canChoicesListed(live, ticket)) return failed
-    const noteChoices: NoteChoice[] = snapshot.notes.map((note) => ({
-      id: note.id,
-      revision: String(snapshot.revision),
-      title: note.title.trim() || note.body.split("\n")[0]?.trim() || "Untitled note",
-    }))
-    try box.set({ ...(try box.view()), noteChoices })
-    return { type: "choicesListed", ticket, ok: true }
-  }
-  if (op === "CalendarRange") {
-    const cal = try PhoneCalendar
-    if (!cal.present) return failed
-    const now = try (try Time).now()
-    const listed = cal.list({ begin: now, end: now + 7 * 86_400_000 }) catch () => undefined
-    if (listed === undefined || listed.status !== "ready" || (ownerAt() catch () => "") !== scope) return failed
-    const live = try machine.get()
-    if (live.owner !== state.owner || !Build.canChoicesListed(live, ticket)) return failed
-    const calendarChoices: CalendarChoice[] = listed.calendars.map((entry) => ({
-      id: entry.id,
-      label: entry.name?.trim() || entry.id,
-    }))
-    try box.set({ ...(try box.view()), calendarChoices })
-    return { type: "choicesListed", ticket, ok: true }
-  }
-  return failed
-}
-
-effect function askCalendarAccess(): Build.Event!!Needs {
-  const cal = try PhoneCalendar
-  if (!cal.present) return { type: "calendarAccess", grant: "Denied" }
-  const current = try cal.grant()
-  if (current === "Granted") return { type: "calendarAccess", grant: "Granted" }
-  const granted = cal.requestAccess() catch () => false
-  return { type: "calendarAccess", grant: granted ? "Granted" : "Denied" }
-}
-
-effect function openCalendarSettings(): void!!Needs {
-  try ignore((try SystemSettings).open("AppPermissions", ""))
-}
-
 effect function save(id: number, revision: number): Build.Event!!Needs {
   const refused: Build.Event = { type: "saveAnswered", id, applied: false }
   const lost: Build.Event = { type: "saveUnanswered" }
@@ -269,6 +238,10 @@ effect function save(id: number, revision: number): Build.Event!!Needs {
   const catalog = words.catalog
   const scope = ownerAt() catch () => ""
   if (catalog === undefined || state.shown !== revision || words.owner !== state.owner || !(try (try Rows).sameOwner(scope, state.owner))) return refused
+  if (words.steps.some(phoneStepUsesDevice)) {
+    const actual = try (try MediaReview).workflowDevice()
+    if (actual === undefined || actual.installationId !== words.device?.installationId || actual.enrollmentId !== words.device?.enrollmentId) return refused
+  }
   const store = try KeyValueStore.KeyValueStore
   const { workflow } = try WorkflowsApi
   const key = saveKey(scope)
@@ -321,14 +294,47 @@ effect function checked(ticket: number, id: number): Build.Event!!Needs {
   return { ...failed, ok: true, found: answer !== null }
 }
 
+effect function choices(ticket: number, op: Operation): Build.Event!!Needs {
+  const refused: Build.Event = { type: "choicesListed", ticket, ok: false }
+  const machine = try Build.Machine
+  const earlier = try machine.get()
+  const scope = ownerAt() catch () => ""
+  const words = try DraftWords
+  if (scope === "" || !earlier.open || !Build.canChoicesListed(earlier, ticket) || !(try (try Rows).sameOwner(scope, earlier.owner))) return refused
+  const draft = try words.view()
+  if (draft.device === undefined || draft.catalog === undefined) return refused
+  let shown: SourceChoices
+  if (op === "SelectedNotes" && offered(draft.catalog, "selected_notes")) {
+    const notes = ((try NoteStore).read() catch () => undefined)?.notes
+    if (notes === undefined) return refused
+    const entries = try Effect.forEach(notes, effect (note) => {
+      const { title, body } = projectNoteForModel(note)
+      const revision = workflowSha([title, body]) catch () => undefined
+      return revision === undefined ? [] : [{ id: note.id, title, revision }]
+    }, { concurrency: 4 })
+    shown = { tag: op, rows: entries.flat() }
+  } else if (op === "CalendarRange" && offered(draft.catalog, "calendar_range")) {
+    const raw = (try PhoneCalendar).workflowCalendars() catch () => undefined
+    const found = Schema.decodeUnknownEffect(CalendarChoices)(raw) catch () => undefined
+    if (found === undefined) return refused
+    shown = { tag: op, rows: found.calendars.map(({ id, name, sourceRevision }) => ({ id, title: name, revision: sourceRevision })) }
+  } else return refused
+  const current = try machine.get()
+  if (!current.open || current.owner !== earlier.owner || !Build.canChoicesListed(current, ticket) || (ownerAt() catch () => "") !== scope) return refused
+  try words.set({ ...(try words.view()), choices: shown })
+  return { ...refused, ok: true }
+}
+
 function carry(fx: Build.Effect): Job<Build.Event, Needs, []> {
   return match (fx) {
     when { tag: "ReadOffer", let ticket }: answer("workflow catalogue", offer(ticket),
       { type: "offerRead", ticket, ok: false, speaks: false, reminders: false, runDay: false, schedules: false, generates: false, steps: [], name: 0, when: Build.initial.when });
     when { tag: "KeepDraft", let write, let owner }: answer("keep workflow draft", keep(write, owner), { type: "draftKept", write, result: "WriteFailed", held: 0 });
-    when { tag: "ReadChoices", let ticket, let op }: answer("workflow sources", readChoices(ticket, op), { type: "choicesListed", ticket, ok: false });
-    when { tag: "AskCalendarAccess" }: answer("workflow calendar permissions", askCalendarAccess(), { type: "calendarAccess", grant: "Denied" });
-    when { tag: "OpenSettings" }: run("workflow calendar settings", openCalendarSettings());
+    when { tag: "ReadChoices", let ticket, let op }: answer("workflow sources", choices(ticket, op), { type: "choicesListed", ticket, ok: false });
+    when { tag: "AskCalendarAccess" }: answer("workflow calendar permissions", effect {
+      return { type: "calendarAccess", grant: try (try PhoneCalendar).workflowAccess() } satisfies Build.Event
+    }, { type: "calendarAccess", grant: "Denied" });
+    when { tag: "OpenSettings" }: run("workflow calendar settings", effect { try ignore((try SystemSettings).open("AppPermissions", "")) });
     when { tag: "SaveWorkflow", let id, let revision }: answer("save workflow", save(id, revision), { type: "saveUnanswered" });
     when { tag: "ReadSaveRecord", let ticket, let id }: answer("workflow save receipt", checked(ticket, id), { type: "saveChecked", ticket, ok: false, found: false, updated: false });
   }
@@ -379,24 +385,50 @@ export effect function renameDraft(name: string): void!!(DraftWords | Build.Mach
   try ignore(machine.send({ type: "rename", chars: name.length }))
 }
 
-export effect function appendDraft(op: DraftOperation, source: number, text: string, ending: string): void!!(DraftWords | Build.Machine) {
+export effect function appendDraft(op: DraftOperation, source: number, text: string, ending: string, selected: readonly string[], runDays?: number): boolean!!(DraftWords | Build.Machine) {
   const machine = try Build.Machine
   const state = try machine.get()
   const box = try DraftWords
   const draft = try box.view()
-  if (draft.catalog === undefined || !offered(draft.catalog, op)) return
+  if (draft.catalog === undefined || !available(draft.catalog, draft.device).includes(op)) return false
   const prior = draft.steps[state.steps.findIndex((step) => step.id === source)]?.id
   const id = `step-${state.next}`
-  const step: PhoneStep | undefined = op === "supplied_text" ? { id, kind: "Read", operation: op, text }
-    : prior === undefined ? undefined
-    : op === "contains" ? { id, kind: "If", operation: op, source: prior, text, caseSensitive: false }
-    : op === "compose_draft" ? { id, kind: "Write", operation: op, source: prior, prefix: text, suffix: ending }
-    : { id, kind: "Write", operation: op, source: prior, instruction: text }
-  if (step === undefined) return
-  const shape = projected(step, state.next, op === "supplied_text" ? 0 : source)
-  if (!Build.canAddStep(state, shape.op, shape.source, shape.text, shape.items, shape.span, shape.days)) return
+  let step: PhoneStep | undefined
+  if (op === "selected_notes" || op === "calendar_range") {
+    const choices = draft.choices
+    if (draft.device === undefined || choices?.tag !== operations[op] || new Set(selected).size !== selected.length || selected.length === 0) return false
+    const picked = selected.flatMap((one) => choices.rows.filter(({ id }) => id === one))
+    if (picked.length !== selected.length) return false
+    if (op === "selected_notes") {
+      step = { id, kind: "Read", operation: op, notes: picked.map(({ id, revision }) => ({ id, revision })) }
+    } else if (runDays !== undefined) {
+      if (!state.catalog.runDay || !Number.isInteger(runDays) || runDays < 1 || runDays > 7) return false
+      step = { id, kind: "Read", operation: op, range: { calendarIds: picked.map(({ id }) => id), days: runDays, timeZone: draft.zone, maximumEvents: 100 } }
+    } else {
+      const before = phoneWorkflowCivilMidnight(text, draft.zone)
+      const after = phoneWorkflowCivilMidnight(ending, draft.zone)
+      if (!Number.isFinite(before) || !Number.isFinite(after)) return false
+      const [start, end] = [new Date(before).toISOString(), new Date(after).toISOString()]
+      if (!workflowCalendarRangeFitsLocalDays(start, end, draft.zone)) return false
+      step = { id, kind: "Read", operation: op, range: { calendarIds: picked.map(({ id }) => id), start, end, timeZone: draft.zone, maximumEvents: 100 } }
+    }
+  } else {
+    step = op === "supplied_text" ? { id, kind: "Read", operation: op, text }
+      : op === "selected_reminders" ? { id, kind: "Read", operation: op, scope: { window: SELECTED_REMINDERS_WINDOW, timeZone: draft.zone, maximumItems: 50 } }
+      : prior === undefined ? undefined
+      : op === "contains" ? { id, kind: "If", operation: op, source: prior, text, caseSensitive: false }
+      : op === "compose_draft" ? { id, kind: "Write", operation: op, source: prior, prefix: text, suffix: ending }
+      : op === "save_note" ? { id, kind: "Write", operation: op, source: prior, title: text }
+      : op === "app_notification" ? { id, kind: "Notify", operation: op, source: prior, title: text }
+      : op === "read_aloud" ? { id, kind: "Speak", operation: op, source: prior }
+      : { id, kind: "Write", operation: op, source: prior, instruction: text }
+  }
+  if (step === undefined) return false
+  const shape = projected(step, state.next, step.kind === "Read" ? 0 : source)
+  if (!Build.canAddStep(state, shape.op, shape.source, shape.text, shape.items, shape.span, shape.days)) return false
   try box.set({ ...draft, steps: [...draft.steps, step] })
   try ignore(machine.send({ type: "addStep", op: shape.op, source: shape.source, text: shape.text, items: shape.items, span: shape.span, days: shape.days }))
+  return true
 }
 
 export effect function removeDraftStep(): void!!(DraftWords | Build.Machine) {

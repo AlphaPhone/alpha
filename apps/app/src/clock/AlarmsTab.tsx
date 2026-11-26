@@ -1,7 +1,7 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/alarms.md, "Story: Ring, snooze, dismiss, and recover alarms"
 import { Banner, Button, Card, EmptyState, StatusDot, Switch, cn, focusRing } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { AlarmClock, BellOff, Plus, Trash2 } from "lucide-react";
+import { Clock, Plus, Trash2 } from "lucide-react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
 import { useMachine as useAlarms } from "../../gen/app__clock__alarms.react.ts";
@@ -56,7 +56,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
           )}
         </div>
         <Button size="sm" className="min-h-11" aria-label="Add alarm" disabled={!canOpenNew} onClick={openNew}>
-          <Plus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           Add alarm
         </Button>
       </div>
@@ -87,7 +87,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
       })}
 
       {sorted.length === 0 ? (
-        <EmptyState icon={<AlarmClock aria-hidden />} title="No alarms set">
+        <EmptyState icon={<Clock aria-hidden />} title="No alarms set">
           <Button disabled={!canOpenNew} onClick={openNew}>Add alarm</Button>
         </EmptyState>
       ) : (
@@ -105,7 +105,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
             const nextDismissFire = item.daysMask > 0 ? Math.max(now, item.fireAt, item.snoozeUntil, 1) + 31_536_000_000 : 0;
             const canDismiss = alarms.can({ type: "dismiss", id: item.id, nextFireAt: nextDismissFire, now: untimed });
             return (
-              <Card key={item.id} className="gap-3">
+              <Card key={item.id} className="gap-3 rounded-tile border-0 bg-secondary">
                 <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
@@ -142,7 +142,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                       disabled={!canDelete}
                       onClick={() => void runtime.runPromise(deleteAlarmWithUndo(item.id))}
                     >
-                      <Trash2 aria-hidden className="size-4" />
+                      <Trash2 aria-hidden className="size-4.5" />
                     </Button>
                     <Switch
                       aria-label={`Toggle alarm ${timeLabel}`}
@@ -159,7 +159,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                       <Button
                         variant="secondary"
                         size="sm"
-                        className="min-h-11"
+                        className="min-h-11 bg-background"
                         disabled={!canSnooze}
                         onClick={() => void runtime.runPromise(snoozeAlarm(item.id))}
                       >
@@ -173,7 +173,6 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                       disabled={!canDismiss}
                       onClick={() => void runtime.runPromise(dismissAlarm(item.id))}
                     >
-                      <BellOff aria-hidden className="size-4" />
                       Dismiss
                     </Button>
                   </div>

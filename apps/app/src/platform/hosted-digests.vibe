@@ -14,7 +14,7 @@ module held {
     setBackground(input: { enabled: boolean; lease: string }): Promise<void>
     enableNotifications(input: { lease: string }): Promise<void>
     peekNotice(): Promise<unknown>
-    settleNotice(input: { token: string }): Promise<void>
+    settleNotice(input: { token: string; questionLease?: string }): Promise<void>
     addListener(name: "changed", listener: () => void): Promise<PluginListenerHandle>
   }
 
@@ -46,6 +46,7 @@ export interface NativeDigestSnapshot {
 const PendingNotice = Schema.Struct({
   notice: Schema.NullOr(Schema.Struct({
     token: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
+    mode: Schema.optionalKey(Schema.Literals(["open", "ask"])),
     runId: Schema.String,
     workflowId: Schema.String,
     workflowVersionId: Schema.String,
@@ -55,6 +56,7 @@ const PendingNotice = Schema.Struct({
 
 export interface NativeDigestNotice {
   readonly token: string
+  readonly mode: "open" | "ask"
   readonly runId: string
   readonly workflowId: string
   readonly workflowVersionId: string
@@ -109,6 +111,7 @@ export effect function peekNativeDigestNotice(): (NativeDigestNotice | null | un
     if (notice === null) return null
     return {
       ...notice,
+      mode: notice.mode ?? "open",
       runId: try digestId(notice.runId),
       workflowId: try digestId(notice.workflowId),
       workflowVersionId: try digestId(notice.workflowVersionId),
@@ -116,8 +119,9 @@ export effect function peekNativeDigestNotice(): (NativeDigestNotice | null | un
   } catch () => undefined
 }
 
-export effect function settleNativeDigestNotice(token: string): void!! {
-  try ignore(tryPromise(() => bridge(pluginName).settleNotice({ token })))
+export effect function settleNativeDigestNotice(token: string, questionLease?: string): void!! {
+  const seen = questionLease === undefined ? { token } : { token, questionLease }
+  try ignore(tryPromise(() => bridge(pluginName).settleNotice(seen)))
 }
 
 export const nativeDigestChanges = () => Stream.suspend(() => {

@@ -5,7 +5,7 @@ The split stage of [Phone](./), [Messages](../messages/) and
 bottom bar that addresses the person on screen or Alpha, a stage that lays
 the app's view out above the conversation sheet instead of covering it,
 sheet heights closed, open and full, End never covered, and at most one
-proposal at a time that acts only on the owner's tap. The sheet's own fitted
+proposal at a time that acts only on the owner's confirmation. The sheet's own fitted
 heights, drag and motion are the shell's (AC-07); this spec keeps what the
 telephony screens decide: who the bar addresses, which view the stage shows
 and what it returns to, where End is, what Alpha may propose and when it
@@ -120,10 +120,12 @@ pure def sometimesAlphaAddressedOverAThread(c: Comms): bool = c.target == AlphaT
 ### A view change while the conversation is open keeps the sheet's height and remembers the view it left
 
 The stage slides sideways and the sheet holds its height and transcript
-(AC-05). Back first returns the stage to the view it came from (the
-"‹ Messages" chip), then closes the conversation, then is the app's own Back
-(AC-06). Closing the conversation keeps the current stage view: a call Alpha
-started stays on the call.
+(AC-05). Moving to another communications app remembers the app and subject
+it left. Choosing a tab, recipient or conversation in the same app updates
+the subject while preserving the app history. Back from the sheet first
+returns to the earlier app (the "‹ Messages" chip), then closes the
+conversation, then is the app's own Back (AC-06). Closing the conversation
+keeps the current stage view: a call Alpha started stays on the call.
 
 ```quint
 type BackStep = StageReturns | ChatCloses | AppBack
@@ -131,10 +133,13 @@ type BackStep = StageReturns | ChatCloses | AppBack
 pure def backStep(c: Comms): BackStep = if (c.stage.length() > 0) StageReturns else if (c.height != SheetClosed) ChatCloses else AppBack
 
 pure def subjectShown(c: Comms, app: CommsApp, subject: Subject, key: str, by: Actor): Comms =
-  val shifted = c.height != SheetClosed and key != c.key
+  val shifted = c.height != SheetClosed and app != c.app
   { ...c, app: app, subject: subject, key: key,
     stage: if (shifted) c.stage.append({ app: c.app, subject: c.subject, key: c.key }) else c.stage,
     height: if (c.emergency and c.height == SheetFull) SheetOpen else c.height }
+
+pure def stepSameAppKeepsStageHistory(before: Comms, via: str, after: Comms): bool =
+  (via == "subjectShown" and before.app == after.app) implies before.stage == after.stage
 
 pure def canStageReturned(c: Comms, by: Actor): bool = by != Agent and c.stage.length() > 0
 
@@ -149,6 +154,25 @@ pure def stepTheSheetHoldsItsHeightWhenTheStageChanges(before: Comms, via: str, 
   (via == "subjectShown" or via == "stageReturned") implies (after.height == before.height or (before.emergency and after.height == SheetOpen))
 
 pure def sometimesTheStageCanReturn(c: Comms): bool = c.stage.length() > 0 and c.subject == CallSubject
+```
+
+### Returning through an embedded Contacts tab follows the Phone stage without adding history
+
+Once the shell has returned to Phone from its embedded Contacts tab at the
+same Ask Alpha height, the Phone subject replaces Contacts on stage. A
+staged Phone entry is consumed if Contacts still owns it.
+
+```quint
+pure def canPhoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): bool =
+  by == Device and key != "" and (subject == KeypadSubject or subject == RecentsSubject)
+
+pure def phoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): Comms =
+  val shown = subjectShown(c, PhoneApp, subject, key, by)
+  val recentStage = c.stage.nthOr(c.stage.length() - 1, { app: ContactsApp, subject: ListSubject, key: "" })
+  { ...shown, stage: if (c.app == ContactsApp and recentStage.app == PhoneApp) c.stage.removeAt(c.stage.length() - 1) else c.stage }
+
+pure def stepPhoneTabReturnDoesNotAddHistory(before: Comms, via: str, after: Comms): bool =
+  via == "phoneTabReturned" implies after.stage.length() <= before.stage.length()
 ```
 
 ### The sheet is closed, open or full, and full never compacts an emergency call
@@ -174,21 +198,23 @@ pure def sometimesTheStripShows(c: Comms): bool = c.height == SheetFull and c.ca
 > drag and during a voice turn, always red and right-most, so that I can
 > always hang up (AC-18).
 
-### End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn
+### End is above the view when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn
 
-An emergency call keeps its full-screen card with its own End when the
-conversation is closed, and is never at full height.
+When closed, Android alone presents a ringing call and its Decline every
+time. An emergency call keeps its full-screen card with its own End when
+the conversation is closed, and is never at full height.
 
 ```quint
-type EndPlace = EndBesideBar | EndInCard | EndInStrip | EndOnVoicePanel | EndNowhere
+type EndPlace = EndAboveView | EndInCard | EndInStrip | EndOnVoicePanel | EndOnAndroid | EndNowhere
 
 pure def endPlace(c: Comms): EndPlace =
   if (not(c.callLive)) EndNowhere
   else if (c.voice) EndOnVoicePanel
   else if (c.height == SheetFull) (if (c.emergency) EndNowhere else EndInStrip)
   else if (c.height == SheetOpen) EndInCard
+  else if (c.ring != "") EndOnAndroid
   else if (c.emergency) EndInCard
-  else EndBesideBar
+  else EndAboveView
 
 pure def canCallChanged(c: Comms, live: bool, emergencyCall: bool, by: Actor): bool = by == Device
 
@@ -270,6 +296,12 @@ After a call proposal is approved the stage switches to the call with a
 before the tap. An approved proposal is done and can never be approved
 again.
 
+The addressed SMS review may also take the owner's next explicit spoken
+confirmation, for the same fully visible card in the same Talk session.
+The phone checks the exact approved text and SIM against the claimed
+operation before dispatching it. The voice rule for this exception is in
+[Talk](../voice/).
+
 ```quint
 pure def canProposalApproved(c: Comms, proposalId: str, by: Actor): bool =
   by == Owner and proposalId != "" and proposalId == openId(c.proposal) and openLive(c.proposal) and not(c.emergency and openActs(c.proposal))
@@ -324,7 +356,8 @@ pure def sometimesARestoredProposalWaits(c: Comms): bool = openId(c.proposal) !=
 
 The briefing comes from what the view read: missed calls and new voicemail
 on Phone; Messages and Contacts give none, since their rows never enter the
-agent's context. With nothing known it is absent.
+agent's context. It appears as a facts card that Alpha does not sign. With
+nothing known it is absent.
 
 ```quint
 pure def canBriefingShown(c: Comms, key: str, by: Actor): bool = by == Device and c.height != SheetClosed and key == c.key and key != c.briefed

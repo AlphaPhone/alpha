@@ -1,0 +1,312 @@
+// spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off"
+module browser {
+  import { createBrowserRecordingJournal, createNotesAudioStore, NotesAudioRefused, type BrowserRecording, type NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
+  import type { Command } from "../../gen/app__notes__recording.effect.vibe"
+  import type { Tape } from "./noteDevice.vibe"
+  import { browserNotePlayback } from "./notePlayback.vibe"
+  import { browserNoteTranscription } from "./noteTranscription.vibe"
+
+  const audioDatabase = "alpha.browser.audio.v1"
+  const journalDatabase = "alpha.browser.notes.capture.v1"
+  const segmentMs = 25_000
+  const lockName = (owner: string) => "alpha-notes-recording:" + owner
+  const idle = (): Tape => ({ state: "idle" })
+  const release = (stream: MediaStream) => { for (const track of stream.getTracks()) track.stop() }
+
+  function hold(owner: string): Promise<() => void> {
+    return new Promise((resolve, reject) => {
+      void navigator.locks.request(lockName(owner), { ifAvailable: true }, (lock) => {
+        if (lock === null) throw Error("This recording is open in another tab")
+        return new Promise<void>((release) => resolve(release))
+      }).catch(reject)
+    })
+  }
+
+  type Capture = {
+    readonly recorder: MediaRecorder
+    readonly stream: MediaStream
+    readonly started: number
+    readonly ended: Promise<void>
+    readonly metering: { close(): void; peak(): number } | undefined
+    row: BrowserRecording
+    phase: "recording" | "paused" | "stopped"
+    appending: Promise<void>
+    pausedAt: number | undefined
+    pausedMs: number
+    endedAt: number | undefined
+    reason: "user" | "hidden" | "error" | undefined
+    sequence: number
+  }
+
+  function durations(recordingId: string, durationMs: number, state: Tape["state"]) {
+    const length = state === "stopped" ? Math.ceil(durationMs / segmentMs) : Math.floor(durationMs / segmentMs)
+    return Array.from({ length }, (_, index) => ({
+      segmentId: recordingId + "-s" + index.toString(),
+      durationMs: Math.min(segmentMs, durationMs - index * segmentMs),
+    }))
+  }
+
+  function elapsed(session: Capture): number {
+    return Math.max(0, Math.round((session.endedAt ?? session.pausedAt ?? performance.now()) - session.started - session.pausedMs))
+  }
+
+  function meter(stream: MediaStream) {
+    if (typeof AudioContext === "undefined") return undefined
+    const context = new AudioContext()
+    const analyser = context.createAnalyser()
+    analyser.fftSize = 256
+    const source = context.createMediaStreamSource(stream)
+    source.connect(analyser)
+    const samples = new Float32Array(analyser.fftSize)
+    return {
+      peak() {
+        analyser.getFloatTimeDomainData(samples)
+        return Math.min(1, samples.reduce((largest, sample) => Math.max(largest, Math.abs(sample)), 0))
+      },
+      close() {
+        source.disconnect()
+        void context.close().catch(() => {})
+      },
+    }
+  }
+
+  /** The browser retains only its original connection's recordings, in the installed audio store. */
+  export function browserNoteDevice() {
+    const audio = createNotesAudioStore({ databaseName: audioDatabase })
+    const journal = createBrowserRecordingJournal(journalDatabase)
+    const listeners = new Set<(value: Tape) => void>()
+    let owner: string | undefined
+    const playback = browserNotePlayback(audio, () => owner)
+    const transcript = browserNoteTranscription(audio, () => owner)
+    let active: Capture | undefined
+    let opening = false
+    let permission: PermissionState = "prompt"
+
+    function tape(row: BrowserRecording, phase: Capture["phase"], durationMs = row.durationMs, reason?: string): Tape {
+      return { state: phase, recordingId: row.recordingId,
+        binding: { ownerDigest: row.ownerDigest, folderId: row.folderId },
+        durationMs, segments: durations(row.recordingId, row.durationMs, phase), ...(reason === undefined ? {} : { stopReason: reason }) }
+    }
+
+    function activeTape(session: Capture): Tape {
+      const shown = tape(session.row, session.phase, session.phase === "stopped" ? session.row.durationMs : elapsed(session), session.reason)
+      return { ...shown, peak: session.phase === "recording" ? session.metering?.peak() ?? 0 : 0 }
+    }
+
+    async function oneRecording<T>(authority: string, work: () => Promise<T>): Promise<T> {
+      const release = navigator.locks === undefined ? undefined : await hold(authority)
+      try {
+        if (owner !== authority) throw Error("Recording connection changed")
+        return await work()
+      } finally { release?.() }
+    }
+
+    function announce(session: Capture) {
+      if (session !== active || session.row.ownerDigest !== owner) return
+      const state = activeTape(session)
+      for (const listener of listeners) listener(state)
+    }
+
+    function stop(session: Capture, reason: NonNullable<Capture["reason"]>) {
+      if (session.endedAt !== undefined) return
+      session.endedAt = session.pausedAt ?? performance.now()
+      session.reason = reason
+      if (session.recorder.state !== "inactive") session.recorder.stop()
+      release(session.stream)
+    }
+
+    function retire() {
+      if (active !== undefined && active.phase !== "stopped") stop(active, "hidden")
+      active = undefined
+      owner = undefined
+      playback.halt()
+      transcript.clear()
+    }
+
+    async function current(ownerDigest = owner): Promise<Tape> {
+      if (ownerDigest === undefined) return idle()
+      if (ownerDigest !== owner) {
+        retire()
+        owner = ownerDigest
+      }
+      if (active !== undefined) return activeTape(active)
+      const recover = async (): Promise<Tape> => {
+        const pending = (await audio.pendingAudio(ownerDigest)).sort((a, b) => b.createdAt - a.createdAt)[0]
+        if (ownerDigest !== owner) return idle()
+        const binding = pending?.recordingSave
+        if (pending !== undefined && binding !== undefined) return {
+          state: "stopped", recordingId: pending.audioId, durationMs: pending.durationMs,
+          binding: { ownerDigest, folderId: binding.folderId }, recovered: true,
+          canonicalSavePending: binding.phase === "claimed", segments: durations(pending.audioId, pending.durationMs, "stopped"),
+        }
+        const stored = await journal.latest(ownerDigest)
+        if (stored === undefined || ownerDigest !== owner) return idle()
+        return { ...tape(stored, "stopped"), recovered: true }
+      }
+      const locks = await navigator.locks?.query()
+      if (locks?.held?.some(({ name, mode }) => name === lockName(ownerDigest) && mode === "exclusive")) return idle()
+      return recover()
+    }
+
+    function observe(listener: (value: Tape) => void): () => void {
+      listeners.add(listener)
+      const retire = () => { if (document.hidden && active !== undefined) stop(active, "hidden") }
+      document.addEventListener("visibilitychange", retire)
+      return () => { document.removeEventListener("visibilitychange", retire); listeners.delete(listener) }
+    }
+
+    return {
+      ...playback, transcript, observe, retire,
+      get available() { return typeof MediaRecorder !== "undefined" && navigator.locks !== undefined &&
+        typeof navigator.mediaDevices?.getUserMedia === "function" },
+      async permission() {
+        const reported = await navigator.permissions?.query({ name: "microphone" as PermissionName }).catch(() => undefined)
+        if (reported !== undefined) permission = reported.state
+        return { grant: permission }
+      },
+      async request() {
+        try {
+          release(await navigator.mediaDevices.getUserMedia({ audio: true }))
+          permission = "granted"
+        } catch (cause) {
+          if (cause instanceof DOMException && (cause.name === "NotAllowedError" || cause.name === "SecurityError")) permission = "denied"
+        }
+        return { grant: permission }
+      },
+      status: current,
+      async start(ownerDigest: string, folderId?: string): Promise<Tape> {
+        if (opening || document.hidden || owner !== ownerDigest) throw Error("Recording connection changed")
+        opening = true
+        let stream: MediaStream | undefined
+        let unlock: (() => void) | undefined
+        try {
+          if ((await current(ownerDigest)).state !== "idle") throw Error("An unfinished recording is already open")
+          unlock = await hold(ownerDigest)
+          if ((await audio.pendingAudio(ownerDigest)).length > 0 || (await journal.latest(ownerDigest)) !== undefined)
+            throw Error("An unfinished recording is already open")
+          if (document.hidden || owner !== ownerDigest) throw Error("Recording connection changed")
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          if (document.hidden || owner !== ownerDigest) throw Error("Recording connection changed")
+          const mimeType = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"].find((type) => MediaRecorder.isTypeSupported(type))
+          const recorder = new MediaRecorder(stream, mimeType === undefined ? undefined : { mimeType })
+          const row = await journal.start({ ownerDigest, folderId: folderId ?? null, recordingId: `browser-audio-${crypto.randomUUID()}`, startedAt: Date.now(), mimeType: recorder.mimeType })
+          if (document.hidden || owner !== ownerDigest) throw Error("Recording connection changed")
+          let finished = () => {}
+          const ended = new Promise<void>((resolve) => { finished = resolve })
+          const session: Capture = { recorder, stream, row, ended, metering: meter(stream), started: performance.now(), sequence: 0, phase: "recording",
+            appending: Promise.resolve(), pausedAt: undefined, pausedMs: 0, endedAt: undefined, reason: undefined }
+          recorder.ondataavailable = ({ data }) => {
+            if (data.size < 1) return
+            const index = session.sequence++
+            const duration = Math.max(1, elapsed(session))
+            session.appending = session.appending.then(async () => {
+              session.row = await journal.append(row.recordingId, ownerDigest, index, duration, data)
+              announce(session)
+            }).catch(() => { stop(session, "error") })
+          }
+          recorder.onstop = () => {
+            void session.appending.finally(() => {
+              session.phase = "stopped"
+              session.metering?.close()
+              release(session.stream)
+              unlock?.()
+              announce(session)
+              finished()
+            })
+          }
+          recorder.onerror = () => stop(session, "error")
+          try { recorder.start(1000) } catch (cause) { session.metering?.close(); throw cause }
+          active = session
+          announce(session)
+          return tape(row, "recording", 0)
+        } catch (cause) {
+          unlock?.()
+          if (stream !== undefined) release(stream)
+          throw cause
+        } finally { opening = false }
+      },
+      async command(recordingId: string, command: Command): Promise<Tape> {
+        const session = active
+        if (session === undefined || session.row.recordingId !== recordingId || session.row.ownerDigest !== owner)
+          throw Error("Recording changed")
+        if (command === "End") {
+          stop(session, "user")
+          await session.ended
+        } else if (command === "Pause" && session.phase === "recording") {
+          session.recorder.pause()
+          session.pausedAt = performance.now()
+          session.phase = "paused"
+        } else if (command === "Resume" && session.phase === "paused" && session.pausedAt !== undefined && !document.hidden) {
+          session.recorder.resume()
+          session.pausedMs += performance.now() - session.pausedAt
+          session.pausedAt = undefined
+          session.phase = "recording"
+        } else throw Error("Recording changed")
+        announce(session)
+        return activeTape(session)
+      },
+      async retain(recordingId: string, noteId: string) {
+        const authority = owner
+        if (authority === undefined) throw Error("Recording connection changed")
+        return oneRecording(authority, async () => {
+          const finish = async (receipt: { readonly audioId: string; readonly noteId: string; readonly durationMs: number }) => {
+            if (receipt.noteId !== noteId || owner !== authority) throw Error("Recording connection changed")
+            await journal.discard(recordingId, authority)
+            if (owner !== authority) throw Error("Recording connection changed")
+            if (active?.row.recordingId === recordingId && active.row.ownerDigest === authority && active.phase === "stopped") active = undefined
+            return { audioId: receipt.audioId, noteId: receipt.noteId, durationMs: receipt.durationMs }
+          }
+          const prior = (await audio.pendingAudio(authority)).find((row) => row.audioId === recordingId)
+          if (prior === undefined) {
+            const committed = await audio.audioRecord(recordingId, authority).catch((error: unknown) => {
+              if (error instanceof NotesAudioRefused && error.reason === "unavailable") return undefined
+              throw error
+            })
+            if (committed !== undefined) return finish(committed)
+            const row = await journal.find(recordingId, authority)
+            if (row === undefined || owner !== authority) throw Error("Recording changed")
+            const clip = await journal.clip(recordingId, authority)
+            if (owner !== authority) throw Error("Recording connection changed")
+            await audio.retainPendingAudio(recordingId, { ownerDigest: authority, folderId: row.folderId }, clip, "")
+          }
+          if (owner !== authority) throw Error("Recording connection changed")
+          await audio.claimPendingAudio(recordingId, authority)
+          if (owner !== authority) throw Error("Recording connection changed")
+          return finish(await audio.commitPendingAudio(recordingId, authority, noteId, prior?.transcript ?? ""))
+        })
+      },
+      async purge(receipt: NotesTrashRecordingCleanup): Promise<boolean> {
+        const authority = owner
+        if (authority === undefined) return false
+        return oneRecording(authority, async () => {
+          if (owner !== authority) return false
+          playback.halt()
+          await audio.purgeCommittedAudio({
+            audioId: receipt.audioId, noteId: receipt.noteId, operationId: receipt.operationId,
+            deletedAt: Date.parse(receipt.deletedAt), connection: authority,
+          })
+          return owner === authority
+        })
+      },
+      async discard(recordingId: string) {
+        const authority = owner
+        if (authority === undefined) throw Error("Recording connection changed")
+        const session = active
+        if (session?.row.recordingId === recordingId && session.row.ownerDigest === authority) {
+          if (session.phase !== "stopped") stop(session, "user")
+          await session.ended
+        }
+        if (owner !== authority) throw Error("Recording connection changed")
+        await oneRecording(authority, async () => {
+          await audio.discardPendingAudio(recordingId, authority)
+          await journal.discard(recordingId, authority)
+          if (active === session && session?.row.recordingId === recordingId) active = undefined
+        })
+      },
+    }
+  }
+
+  export const browserNotesSupported = () => typeof indexedDB !== "undefined" && typeof Audio !== "undefined"
+}
+import { browserNoteDevice, browserNotesSupported } from browser
+export { browserNoteDevice, browserNotesSupported }

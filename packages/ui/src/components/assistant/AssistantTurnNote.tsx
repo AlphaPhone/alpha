@@ -34,7 +34,7 @@ const notes: Record<AssistantTurnStatus, { status: StatusDotProps["status"]; lab
 };
 
 const busy: Partial<Record<AssistantTurnStatus, string>> = { sending: "Sending", replying: "Replying", stopping: "Stopping", checking: "Checking" };
-const dotDelays = ["", "[animation-delay:200ms]", "[animation-delay:400ms]"] as const;
+const dotDelays = ["0ms", "200ms", "400ms"] as const;
 
 /**
  * The state of the turn at the foot of the conversation: three pulsing dots while Alpha is at work, then a shape
@@ -46,7 +46,7 @@ export function AssistantTurnNote({ status, label, onCheck, className, ...props 
   if (working !== undefined) {
     return label === undefined ? (
       <div role="status" aria-label={working} className={cn("flex gap-1.25 py-1.5", className)} {...props}>
-        {dotDelays.map((delay) => <span key={delay} aria-hidden className={cn("size-1.75 rounded-full bg-primary motion-safe:animate-blink", delay)} />)}
+        {dotDelays.map((delay) => <span key={delay} aria-hidden className="size-1.75 rounded-full bg-primary motion-safe:animate-blink" style={{ animationDelay: delay }} />)}
       </div>
     ) : (
       <div role="status" className={cn("self-start bg-linear-to-r from-muted-foreground from-40% via-foreground via-50% to-muted-foreground to-60% bg-size-[300%_100%] bg-clip-text py-1.5 text-base text-transparent motion-safe:animate-shimmer motion-reduce:text-muted-foreground", className)} {...props}>{label}</div>

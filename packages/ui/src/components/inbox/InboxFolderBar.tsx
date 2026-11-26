@@ -1,4 +1,5 @@
-import { Archive, ChevronDown, FileText, Inbox, Mail, Send, ShieldAlert, Star, Trash2 } from "lucide-react";
+import { Archive, Check, ChevronDown, FileText, Inbox, Mail, Send, ShieldAlert, Star, Trash2 } from "lucide-react";
+import { useRef } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Chip } from "../Chip.tsx";
@@ -28,6 +29,8 @@ export type InboxFolderBarProps = {
 export function InboxFolderBar({ folder, unavailable = false, onChoose }: InboxFolderBarProps) {
   const moreSelected = moreFolders.some((name) => name === folder);
   const moreLabel = moreSelected ? inboxFolders[folder] : "More";
+  const pointerRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const refused = (name: InboxFolder) => !onChoose || (unavailable && (name === "spam" || name === "trashed"));
   return (
     <div role="group" aria-label="Folder" tabIndex={0} className={cn(focusRing, "-mx-4 flex touch-pan-x gap-2 overflow-x-auto px-5 py-1.5")}>
@@ -41,14 +44,28 @@ export function InboxFolderBar({ folder, unavailable = false, onChoose }: InboxF
       })}
       <Menu modal={false}>
         <MenuTrigger asChild>
-          <Button variant="secondary" size="sm" aria-label={moreSelected ? `${moreLabel}, more folders` : "More folders"} disabled={!onChoose} className={cn("h-11 px-3 before:inset-0", moreSelected && "bg-foreground text-background hover:bg-foreground active:bg-foreground")}>
-            {moreLabel}<ChevronDown size={16} aria-hidden />
+          <Button ref={triggerRef} variant="secondary" size="sm" aria-label={moreSelected ? `${moreLabel}, more folders` : "More folders"} disabled={!onChoose}
+            onPointerDown={() => { pointerRef.current = true; }} onKeyDown={() => { pointerRef.current = false; }}
+            className={cn("h-11 gap-3 px-3.5 before:inset-0", moreSelected && "w-28 justify-start bg-foreground text-background hover:bg-foreground active:bg-foreground")}>
+            {moreLabel}<ChevronDown aria-hidden className="size-4" />
           </Button>
         </MenuTrigger>
-        <MenuContent align="start">
+        <MenuContent align="end" sideOffset={8} aria-label="Mail folders"
+          onCloseAutoFocus={(event) => {
+            if (!pointerRef.current) return;
+            event.preventDefault();
+            triggerRef.current?.focus({ preventScroll: true, focusVisible: false });
+          }}
+          className="w-56 gap-0 border border-border p-1.5 shadow-md">
           {moreFolders.map((name) => {
             const Icon = icons[name];
-            return <MenuItem key={name} disabled={refused(name)} aria-current={name === folder ? "page" : undefined} onSelect={() => name !== folder && onChoose?.(name)}><Icon aria-hidden />{inboxFolders[name]}</MenuItem>;
+            const current = name === folder;
+            return (
+              <MenuItem key={name} role="menuitemradio" aria-checked={current} disabled={refused(name)} onSelect={() => !current && onChoose?.(name)}
+                className={cn("min-h-12 rounded-option px-3 py-2.5 leading-row hover:bg-secondary data-highlighted:bg-secondary", current && "bg-secondary font-semibold")}>
+                <Icon aria-hidden className="size-5" /><span className="min-w-0 flex-1">{inboxFolders[name]}</span><Check aria-hidden className={cn("size-4.5", !current && "invisible")} />
+              </MenuItem>
+            );
           })}
         </MenuContent>
       </Menu>

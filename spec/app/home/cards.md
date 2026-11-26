@@ -1,12 +1,13 @@
 # Home cards
 
 The daily overview above Home's tiles: one row of cards for the agenda,
-Messages, Phone, mail, the brief and Workflows. Home reads the agenda
-itself, from the phone's calendar and from the agent's calendar. Every
-other card shows what its own area already holds, passed in as it is:
+Messages, Phone, mail, Telegram, Slack, the brief and Workflows. Home reads
+the agenda itself, from the phone's calendar and from the agent's calendar.
+Every other card shows what its own area already holds, passed in as it is:
 reminders saved on the phone, which calendars Calendar hides, Inbox's
-summary of unread mail, the rows waiting in Messages and Phone,
-Workflows' enabled rows, and the brief the digests area kept for Home.
+summary of unread mail, Telegram's and Slack's summaries of unread chats and
+mentions, the rows waiting in Messages and Phone, Workflows' enabled rows,
+and the brief the digests area kept for Home.
 Each card shows only what was really read, says when that is not up to
 date, and is not drawn when it has nothing to show. The
 [launcher](./index.md) owns the tiles below and says whether the cards
@@ -18,12 +19,14 @@ are shown at all.
 > my latest brief, and never to show me something it did not read today
 > as if it were current.
 
-### Home keeps, for the phone's calendar and the agent's calendar, the last read, what it answered, the day of the items it gave and when it was asked; and the local day it last looked
+### Home keeps, for the phone's calendar and the agent's calendar, the last read, what it answered, the day of the items it gave, and when and for which day it was asked; and the owner's day
 
 A calendar answers that it was read, that access is off, that it failed,
 that this phone cannot reach it, or that no account is connected; a read
-that gets no answer in time runs out. The local day is counted from the
-time the shell passes in.
+that gets no answer in time runs out. Days are the owner's civil dates,
+counted in whole days in the phone's own time zone, as v121 counted them:
+the shell tells Home the day, as it tells Calendar, and nothing in Home
+turns a time into a day. Times are milliseconds, passed in by the shell.
 
 ```quint
 import read as R from "../../kit/read"
@@ -32,17 +35,15 @@ import shell as S from "../shell"
 type Source = Unanswered | Ready | Denied | Broken | Unavailable | NotConnected | TimedOut
 type Origin = PhoneCalendar | AgentCalendar | Reminder
 type Item = { id: int, origin: Origin, calendar: int, begin: int, end: int, allDay: bool, overdue: bool, done: bool }
-type Feed = { read: R::Read, source: Source, day: int, items: List[Item], since: int }
+type Feed = { read: R::Read, source: Source, day: int, items: List[Item], since: int, asked: int }
 type Cards = { calendar: Feed, agent: Feed, today: int }
-type Effect = ReadCalendar({ ticket: int }) | ReadAgentCalendar({ ticket: int }) | Go({ view: S::View })
+type CardVisit = BareCard | AdjacentCard({ kind: Kind, route: int }) | MailCardVisit({ route: int, beside: bool })
+type Effect = ReadCalendar({ ticket: int }) | ReadAgentCalendar({ ticket: int }) | Go({ view: S::View, visit: CardVisit })
 type Asked = { state: Cards, out: List[Effect] }
 
-pure val dayLength = 86400000
 pure val patience = 30000
 
-pure def dayOf(now: int): int = now / dayLength
-
-pure val unfed: Feed = { read: R::unread, source: Unanswered, day: 0, items: List(), since: 0 }
+pure val unfed: Feed = { read: R::unread, source: Unanswered, day: 0, items: List(), since: 0, asked: 0 }
 
 pure val initial: Cards = { calendar: unfed, agent: unfed, today: 0 }
 ```
@@ -62,11 +63,15 @@ pure val eventsValues = Set(
   List({ id: 4, origin: AgentCalendar, calendar: 0, begin: 90000000, end: 93600000, allDay: false, overdue: false, done: false }))
 pure val reminder: Item = { id: 5, origin: Reminder, calendar: 0, begin: 0, end: 0, allDay: false, overdue: true, done: false }
 pure val quiet: Mail = { connected: false, unread: 0, rows: List(), current: false }
+pure val quietMessaging: Messaging = { connected: false, unread: 0, mentions: 0, rows: List(), current: false }
 pure val othersValues = Set(
-  { image: false, reminders: List(), hidden: Set(), mail: quiet, messages: List(), phone: List(),
+  { image: false, reminders: List(), hidden: Set(), mail: quiet, telegram: quietMessaging, slack: quietMessaging,
+    messages: List(), phone: List(),
     flows: { rows: List(), freshness: UpToDate }, brief: NoBrief },
   { image: true, reminders: List(reminder, { ...reminder, id: 6, done: true }), hidden: Set(2),
     mail: { connected: true, unread: 3, rows: List({ title: "Lunch", detail: "Ana" }), current: true },
+    telegram: { connected: true, unread: 2, mentions: 1, rows: List({ title: "Alex", detail: "See you at 5" }), current: true },
+    slack: { connected: true, unread: 4, mentions: 2, rows: List({ title: "#design", detail: "@you review?" }), current: false },
     messages: List({ title: "Ana", detail: "On my way" }), phone: List({ title: "Ben", detail: "Missed call" }),
     flows: { rows: List({ title: "a", detail: "" }, { title: "b", detail: "" }, { title: "c", detail: "" }), freshness: Stale },
     brief: RunFailed })
@@ -83,43 +88,41 @@ pure val flowsValues = Set(
   { rows: List({ title: "a", detail: "" }), freshness: NotCurrent },
   { rows: List({ title: "a", detail: "" }, { title: "b", detail: "" }, { title: "c", detail: "" }), freshness: SomeUnavailable })
 pure val dayValues = Set(0, 1, 2)
-pure val tValues = Set(0, 86399999, 86400000, 172800000)
+pure val todayValues = Set(0, 1, 2)
 ```
 
-### What a calendar gave is current only if it answered on the local day of now
+### What a calendar gave is current only if it was read for the owner's day
 
 ```quint
-pure def fresh(f: Feed, now: int): bool = f.source == Ready and f.day == dayOf(now)
+pure def fresh(f: Feed, today: int): bool = f.source == Ready and f.day == today
 
-pure def behind(f: Feed, now: int): bool =
-  f.source == Broken or f.source == Unavailable or f.source == TimedOut or (f.source == Ready and f.day != dayOf(now))
+pure def behind(f: Feed, today: int): bool =
+  f.source == Broken or f.source == Unavailable or f.source == TimedOut or (f.source == Ready and f.day != today)
 ```
 
-### A read stays current through the last moment of the day it was asked on, and goes stale at the first moment of the next
+### A read stays current through the day it was asked for, and goes stale when the next day begins
 
 ```quint
-pure def lawAReadGoesStaleWhenItsDayEnds(day: int, t: int): bool =
+pure def lawAReadGoesStaleWhenItsDayEnds(day: int, today: int): bool =
   val f = { ...unfed, source: Ready, day: day }
-  (day >= 0 and t >= 0) implies ((fresh(f, t) iff dayOf(t) == day)
-    and fresh(f, day * dayLength) and fresh(f, (day + 1) * dayLength - 1) and not(fresh(f, (day + 1) * dayLength)))
+  (fresh(f, today) iff today == day) and not(fresh(f, day + 1))
 ```
 
-### When Home shows, when Alpha comes back to the front, and when the local day turns while Home shows, Home asks again for every calendar not read today that is not already being read
+### When Home shows and when Alpha comes back to the front, Home asks again for every calendar not read today that is not already being read
 
 ```quint
 pure def loading(f: Feed): bool = f.read.status == R::Loading
 
-pure def needsReading(f: Feed, now: int): bool = not(loading(f)) and not(fresh(f, now))
+pure def needsReading(f: Feed, today: int): bool = not(loading(f)) and not(fresh(f, today))
 
-pure def asking(f: Feed, now: int): Feed = { ...f, read: R::ask(f.read), since: now }
+pure def asking(f: Feed, now: int, day: int): Feed = { ...f, read: R::ask(f.read), since: now, asked: day }
 
-pure def canLook(c: Cards, now: int): bool =
-  dayOf(now) >= c.today and (needsReading(c.calendar, now) or needsReading(c.agent, now))
+pure def canLook(c: Cards, now: int): bool = needsReading(c.calendar, c.today) or needsReading(c.agent, c.today)
 
 pure def look(c: Cards, now: int): Asked =
-  val calendar = if (needsReading(c.calendar, now)) asking(c.calendar, now) else c.calendar
-  val agent = if (needsReading(c.agent, now)) asking(c.agent, now) else c.agent
-  { state: { calendar: calendar, agent: agent, today: dayOf(now) },
+  val calendar = if (needsReading(c.calendar, c.today)) asking(c.calendar, now, c.today) else c.calendar
+  val agent = if (needsReading(c.agent, c.today)) asking(c.agent, now, c.today) else c.agent
+  { state: { calendar: calendar, agent: agent, today: c.today },
     out: (if (calendar != c.calendar) List(ReadCalendar({ ticket: calendar.read.ticket })) else List())
       .concat(if (agent != c.agent) List(ReadAgentCalendar({ ticket: agent.read.ticket })) else List()) }
 
@@ -127,6 +130,26 @@ pure def stepALookLeavesNoCalendarUnread(before: Cards, via: str, after: Cards):
   via == "look" implies (
     (not(loading(before.calendar)) implies (loading(after.calendar) or (after.calendar.source == Ready and after.calendar.day == after.today)))
       and (not(loading(before.agent)) implies (loading(after.agent) or (after.agent.source == Ready and after.agent.day == after.today))))
+```
+
+### When the owner's day begins, Home counts the new day and asks both calendars for it, in place of any read still asked for an earlier day
+
+The shell tells Home the day when it starts and at each midnight of the
+phone's own time zone, so a phone west of UTC never counts tomorrow from
+UTC's midnight, and one east of it never keeps yesterday after its own.
+
+```quint
+pure def canDayBegins(c: Cards, day: int): bool = day > c.today
+
+pure def dayBegins(c: Cards, now: int, day: int): Asked =
+  val calendar = asking(c.calendar, now, day)
+  val agent = asking(c.agent, now, day)
+  { state: { calendar: calendar, agent: agent, today: day },
+    out: List(ReadCalendar({ ticket: calendar.read.ticket }), ReadAgentCalendar({ ticket: agent.read.ticket })) }
+
+pure def stepANewDayIsReadForItself(before: Cards, via: str, after: Cards): bool =
+  via == "dayBegins" implies (after.today > before.today and loading(after.calendar) and loading(after.agent)
+    and after.calendar.asked == after.today and after.agent.asked == after.today)
 ```
 
 ### Each read is asked for under the next ticket, and only the newest ticket's answer is taken
@@ -145,7 +168,7 @@ pure def stepReadsAreTicketed(before: Cards, via: str, after: Cards, out: List[E
 ### An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date
 
 Each calendar gives only its own events, and an event is never overdue
-or done; the items are dated by the day the read was asked.
+or done; the items are dated by the day the read was asked for.
 
 ```quint
 pure def keeps(source: Source): bool =
@@ -153,7 +176,7 @@ pure def keeps(source: Source): bool =
 
 pure def answer(f: Feed, source: Source, items: List[Item]): Feed =
   { ...f, read: R::answer(f.read, source == Ready), source: source,
-    day: if (source == Ready) dayOf(f.since) else f.day,
+    day: if (source == Ready) f.asked else f.day,
     items: if (source == Ready) items else if (keeps(source)) f.items else List() }
 
 pure def own(items: List[Item], origin: Origin): bool = items.every(i => i.origin == origin and not(i.overdue) and not(i.done))
@@ -195,12 +218,12 @@ pure val fair_calendarRead = "weak"
 pure val fair_agentRead = "weak"
 ```
 
-### A restart forgets every read and keeps its tickets rising, so nothing read before it is drawn after it
+### A restart forgets every read and keeps its tickets rising, so nothing read before it is drawn after it; it counts the day the shell tells it, never an earlier one
 
 ```quint
-pure def restart(c: Cards): Cards =
+pure def restart(c: Cards, day: int): Cards =
   { calendar: { ...unfed, read: { status: R::Idle, ticket: c.calendar.read.ticket } },
-    agent: { ...unfed, read: { status: R::Idle, ticket: c.agent.read.ticket } }, today: c.today }
+    agent: { ...unfed, read: { status: R::Idle, ticket: c.agent.read.ticket } }, today: if (day > c.today) day else c.today }
 
 pure def stepTicketsOnlyRise(before: Cards, via: str, after: Cards): bool =
   after.calendar.read.ticket >= before.calendar.read.ticket and after.agent.read.ticket >= before.agent.read.ticket
@@ -220,7 +243,7 @@ pure def alwaysEachCalendarHoldsOnlyWhatItAnswered(c: Cards): bool =
 
 pure def alwaysNoReadIsFromALaterDay(c: Cards): bool =
   c.today >= 0 and c.calendar.day <= c.today and c.agent.day <= c.today
-    and dayOf(c.calendar.since) <= c.today and dayOf(c.agent.since) <= c.today
+    and c.calendar.asked <= c.today and c.agent.asked <= c.today
 ```
 
 ### A calendar is unanswered only before its first answer
@@ -267,11 +290,12 @@ read.
 ```quint
 type Row = { title: str, detail: str }
 type Mail = { connected: bool, unread: int, rows: List[Row], current: bool }
+type Messaging = { connected: bool, unread: int, mentions: int, rows: List[Row], current: bool }
 type Freshness = UpToDate | NotCurrent | Stale | SomeUnavailable
 type Flows = { rows: List[Row], freshness: Freshness }
 type Outcome = NoBrief | Finished | RunFailed
 type Others = {
-  image: bool, reminders: List[Item], hidden: Set[int], mail: Mail,
+  image: bool, reminders: List[Item], hidden: Set[int], mail: Mail, telegram: Messaging, slack: Messaging,
   messages: List[Row], phone: List[Row], flows: Flows, brief: Outcome,
 }
 
@@ -282,6 +306,11 @@ pure def candidates(c: Cards, o: Others): List[Item] =
 ```
 
 ### An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled
+
+An all-day item's dates are the owner's civil dates: the shell passes
+them in as the midnights of the phone's own time zone they begin and end
+at, as v121 read them, so today's all-day event stays until the owner's
+midnight wherever the phone is.
 
 ```quint
 pure def ongoing(i: Item, now: int): bool = i.overdue or (if (i.allDay) i.end > now else i.end >= now)
@@ -357,14 +386,14 @@ behind, because an event of that calendar may come before it.
 ```quint
 type Card = Hidden | Current | NotUpdated
 
-pure def upToDate(c: Cards, origin: Origin, now: int): bool =
-  if (origin == PhoneCalendar) fresh(c.calendar, now)
-  else if (origin == AgentCalendar) fresh(c.agent, now)
-  else not(behind(c.calendar, now)) and not(behind(c.agent, now))
+pure def upToDate(c: Cards, origin: Origin): bool =
+  if (origin == PhoneCalendar) fresh(c.calendar, c.today)
+  else if (origin == AgentCalendar) fresh(c.agent, c.today)
+  else not(behind(c.calendar, c.today)) and not(behind(c.agent, c.today))
 
 pure def agendaCard(c: Cards, now: int, o: Others): Card =
   val first = lead(candidates(c, o), now)
-  if (first.length() == 0) Hidden else if (first.every(i => upToDate(c, i.origin, now))) Current else NotUpdated
+  if (first.length() == 0) Hidden else if (first.every(i => upToDate(c, i.origin))) Current else NotUpdated
 ```
 
 ### An event is shown as current only when its calendar answered today
@@ -372,15 +401,15 @@ pure def agendaCard(c: Cards, now: int, o: Others): Card =
 ```quint
 pure def lawAnEventIsCurrentOnlyFromTodaysRead(cards: Cards, now: int, others: Others): bool =
   agendaCard(cards, now, others) == Current implies lead(candidates(cards, others), now).every(i =>
-    (i.origin == PhoneCalendar implies (cards.calendar.source == Ready and cards.calendar.day == dayOf(now)))
-      and (i.origin == AgentCalendar implies (cards.agent.source == Ready and cards.agent.day == dayOf(now))))
+    (i.origin == PhoneCalendar implies (cards.calendar.source == Ready and cards.calendar.day == cards.today))
+      and (i.origin == AgentCalendar implies (cards.agent.source == Ready and cards.agent.day == cards.today)))
 ```
 
 ### An agenda read on an earlier day, or kept through a failed read, can be shown
 
 ```quint
 pure def sometimesTheAgendaIsFromAnEarlierDay(c: Cards): bool =
-  c.calendar.items.length() > 0 and c.calendar.source == Ready and c.calendar.day < c.today and not(loading(c.calendar))
+  c.calendar.items.length() > 0 and c.calendar.day < c.today and not(loading(c.calendar))
 
 pure def sometimesAnAgendaOutlivesAFailedRead(c: Cards): bool = c.calendar.items.length() > 0 and c.calendar.source == Broken
 ```
@@ -393,6 +422,11 @@ pure def sometimesAnAgendaOutlivesAFailedRead(c: Cards): bool = c.calendar.items
 
 ### The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row
 
+As v121 drew them, each card leads with how many wait, lists the two newest
+rows (a number's new missed calls as one "Missed" or "Missed · 2" row, an
+unheard voicemail as "Voicemail · 0:42") and closes on when the newest came
+("now", "11m", "6:30 PM", "Fri"), measured against Alpha's latest time.
+
 ```quint
 pure def callsCard(image: bool, rows: List[Row]): Card = if (image and rows.length() > 0) Current else Hidden
 ```
@@ -400,10 +434,37 @@ pure def callsCard(image: bool, rows: List[Row]): Card = if (image and rows.leng
 ### The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row
 
 What Inbox loaded is what the card shows: Home reads no mail of its own.
+As the Sunday demo build drew it (Alpha 45f6bed30,
+`apps/app/src/ui/overview/daily-overview.ts:171-198`),
+the card closes on "Open to retry · last updated 10:24 PM" only when Inbox's
+last read or account check failed, on "Updating email…" while Inbox reads
+its page, and otherwise on "Recent email" when
+Inbox's page did not see every message, else the account it read, and when
+it was read ("Updated 10:24 PM", or "Updated Wed, Nov 25 10:24 PM" for an
+earlier day).
 
 ```quint
 pure def mailCard(m: Mail): Card =
   if (not(m.connected) or m.rows.length() == 0) Hidden else if (m.current) Current else NotUpdated
+```
+
+### The Telegram and Slack cards show unread and mention counts with up to two preview rows, marked not up to date when stale, and are not drawn when disconnected or with nothing unread
+
+Home reads no chats of its own: each card reflects what its area holds.
+
+```quint
+pure def messagingCard(m: Messaging): Card =
+  if (not(m.connected) or m.unread <= 0 or m.rows.length() == 0) Hidden else if (m.current) Current else NotUpdated
+
+pure val messagingValues = Set(
+  quietMessaging,
+  { connected: true, unread: 0, mentions: 0, rows: List({ title: "Alex", detail: "Hi" }), current: true },
+  { connected: true, unread: 2, mentions: 1, rows: List({ title: "Alex", detail: "Hi" }), current: true },
+  { connected: true, unread: 2, mentions: 0, rows: List({ title: "#general", detail: "Update" }), current: false })
+
+pure def lawMessagingCardHidesWhenDisconnectedOrQuiet(messaging: Messaging): bool =
+  (not(messaging.connected) or messaging.unread <= 0 or messaging.rows.length() == 0)
+    implies messagingCard(messaging) == Hidden
 ```
 
 ### The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row
@@ -437,20 +498,26 @@ pure def briefCard(brief: Outcome): BriefCard =
   if (brief == Finished) BriefShown else if (brief == RunFailed) FailureShown else NoBriefCard
 ```
 
-### The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is
+### The row holds the agenda, Messages, Phone, Workflows, mail, Telegram, Slack and brief cards in that order, each only when drawn, and is not drawn when none is
 
 ```quint
-type Kind = AgendaCard | MessagesCard | PhoneCard | MailCard | BriefOfToday | WorkflowsCard
+type Kind = AgendaCard | MessagesCard | PhoneCard | MailCard | TelegramCard | SlackCard | BriefOfToday | WorkflowsCard
 
-pure val cardOrder: List[Kind] = List(AgendaCard, MessagesCard, PhoneCard, MailCard, BriefOfToday, WorkflowsCard)
+pure val cardOrder: List[Kind] = List(
+  AgendaCard, MessagesCard, PhoneCard, WorkflowsCard, MailCard, TelegramCard, SlackCard, BriefOfToday)
+
+pure def shownBeside(kind: Kind, flows: Flows, brief: Outcome): bool =
+  if (kind == BriefOfToday) briefCard(brief) != NoBriefCard
+  else kind == WorkflowsCard and workflowsCard(flows) != Hidden
 
 pure def drawn(c: Cards, now: int, o: Others, kind: Kind): bool =
   if (kind == AgendaCard) agendaCard(c, now, o) != Hidden
   else if (kind == MessagesCard) callsCard(o.image, o.messages) != Hidden
   else if (kind == PhoneCard) callsCard(o.image, o.phone) != Hidden
   else if (kind == MailCard) mailCard(o.mail) != Hidden
-  else if (kind == BriefOfToday) briefCard(o.brief) != NoBriefCard
-  else workflowsCard(o.flows) != Hidden
+  else if (kind == TelegramCard) messagingCard(o.telegram) != Hidden
+  else if (kind == SlackCard) messagingCard(o.slack) != Hidden
+  else shownBeside(kind, o.flows, o.brief)
 
 pure def row(c: Cards, now: int, o: Others): List[Kind] = cardOrder.select(k => drawn(c, now, o, k))
 ```
@@ -459,7 +526,7 @@ pure def row(c: Cards, now: int, o: Others): List[Kind] = cardOrder.select(k => 
 
 > As the owner, I want a tap on a card to open the app it comes from.
 
-### A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed
+### A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed
 
 The shell opens the app.
 
@@ -469,23 +536,65 @@ pure def opens(kind: Kind): S::View =
   else if (kind == MessagesCard) S::Messages
   else if (kind == PhoneCard) S::Phone
   else if (kind == MailCard) S::Inbox
+  else if (kind == TelegramCard) S::Telegram
+  else if (kind == SlackCard) S::Slack
   else S::Workflows
 
 pure def failed(f: Feed): bool = not(loading(f)) and (f.source == Broken or f.source == Unavailable or f.source == TimedOut)
 
-pure def canOpenCard(c: Cards, now: int): bool = dayOf(now) >= c.today
+pure def canOpenCard(c: Cards, kind: Kind): bool = kind != MailCard
 
 pure def openCard(c: Cards, kind: Kind, now: int): Asked =
   val retry = kind == AgendaCard and failed(c.calendar)
-  val calendar = if (retry) asking(c.calendar, now) else c.calendar
-  { state: { ...c, calendar: calendar, today: dayOf(now) },
-    out: List(Go({ view: opens(kind) })).concat(if (retry) List(ReadCalendar({ ticket: calendar.read.ticket })) else List()) }
+  val calendar = if (retry) asking(c.calendar, now, c.today) else c.calendar
+  { state: { ...c, calendar: calendar },
+    out: List(Go({ view: opens(kind), visit: BareCard })).concat(if (retry) List(ReadCalendar({ ticket: calendar.read.ticket })) else List()) }
+```
+
+### A Workflows or Brief card beside the landscape Ask sheet opens Workflows from the same Home visit
+
+Only a card still drawn can open Workflows from the uncovered Home
+pane, with no Apps drawer, Home editing or real layer above it. The
+phone's landscape geometry and the same Shell route must still admit
+the request when the app opens. Workflows opens with Ask at rest. The
+card opens the view without running a workflow or acknowledging a brief.
+
+```quint
+pure def canOpenCardBeside(c: Cards, kind: Kind, shell: S::Shell, landscapePhone: bool, shown: bool): bool =
+  shown and (kind == WorkflowsCard or kind == BriefOfToday) and not(shell.drawer)
+    and S::adjacentAskSheet(shell, landscapePhone) and S::canOpenView(shell, opens(kind))
+
+pure def openCardBeside(c: Cards, kind: Kind, shell: S::Shell, landscapePhone: bool, shown: bool): Asked =
+  { state: c, out: List(Go({ view: opens(kind), visit: AdjacentCard({ kind: kind, route: shell.route }) })) }
+
+pure val shellValues = Set(S::initial, S::raise(S::initial, S::Sheet), { ...S::raise(S::initial, S::Sheet), drawer: true })
+pure val eval_witness_canOpenCardBeside = ("openCardBeside", WorkflowsCard, S::raise(S::initial, S::Sheet), true, true)
+```
+
+### The unread mail card opens Inbox without a search or message open
+
+From bare Home, or beside Ask on a landscape phone, the same uncovered
+Home visit and visible card must still admit the tap when Inbox opens.
+Inbox keeps its selected account and folder. Inbox closes the previous
+message and clears the previous search for that exact new visit.
+
+```quint
+pure def canOpenMailCard(c: Cards, shell: S::Shell, beside: bool, shown: bool): bool =
+  shown and S::canOpenView(shell, S::Inbox)
+    and (if (beside) not(shell.drawer) and S::adjacentAskSheet(shell, true) else S::layers(shell) == 0)
+
+pure def openMailCard(c: Cards, shell: S::Shell, beside: bool, shown: bool): Asked =
+  { state: c, out: List(Go({ view: S::Inbox, visit: MailCardVisit({ route: shell.route, beside: beside }) })) }
+
+pure val eval_witness_canOpenMailCard = ("openMailCard", S::raise(S::initial, S::Sheet), true, true)
 ```
 
 ### A tap opens exactly one app, and asks a calendar again only after its read did not succeed
 
 ```quint
+pure def isCardTap(via: str): bool = via == "openCard" or via == "openCardBeside" or via == "openMailCard"
+
 pure def stepATapOpensOneApp(before: Cards, via: str, after: Cards, out: List[Effect]): bool =
-  (out.select(e => match e { | Go(g) => true | _ => false }).length() == 1 iff via == "openCard")
+  (out.select(e => match e { | Go(g) => true | _ => false }).length() == 1 iff isCardTap(via))
     and ((via == "openCard" and out.some(e => match e { | ReadCalendar(r) => true | _ => false })) implies failed(before.calendar))
 ```

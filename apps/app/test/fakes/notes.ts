@@ -19,8 +19,12 @@ export interface NotesScene {
   failing: boolean;
   /** Whether a write to the store fails while reads still answer, as an agent that cannot change its notes answers. */
   refusing: boolean;
+  deleteAtRevision?: boolean;
+  refuseDiscardId?: string;
+  deleteRequests?: Array<{ readonly id: string; readonly expectedRevision: number | undefined }>;
   /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
   target?: string;
+  viewClaimGate?: Promise<void>;
   /** Each claim and result a renderer sent eliza's views routes, in order. */
   readonly views: { readonly path: "claim" | "result"; readonly body: Record<string, unknown> }[];
 }
@@ -61,13 +65,13 @@ export function notesScene(now = Date.now()): NotesScene {
         data: {
           audio: { durationMs: 408_000 },
           lines: [
-            { s: "maya", t: "Okay, lock screen first. Notifications stay as icons until you unlock.", at: 0 },
+            { s: "Maya Chen", t: "Okay, lock screen first. Notifications stay as icons until you unlock.", at: 0 },
             { s: "me", t: "Agreed. Voice still works locked, but the answers stay vague.", at: 42 },
-            { s: "sam", t: "What about the chat over other apps?", at: 90 },
-            { s: "maya", t: "Four heights. Pill, input, half, full. You drag between them.", at: 125 },
+            { s: "Sam Okafor", t: "What about the chat over other apps?", at: 90 },
+            { s: "Maya Chen", t: "Four heights. Pill, input, half, full. You drag between them.", at: 125 },
             { s: "me", t: "Let's cut the mark button from the recorder. Nobody used it.", at: 190 },
-            { s: "sam", t: "I'll wire the new recorder into Notes by Thursday.", at: 242 },
-            { s: "maya", t: "I'll send the prototype to the team tonight.", at: 315 },
+            { s: "Sam Okafor", t: "I'll wire the new recorder into Notes by Thursday.", at: 242 },
+            { s: "Maya Chen", t: "I'll send the prototype to the team tonight.", at: 315 },
             { s: "me", t: "And I'll book a review with Jordan for next week.", at: 390 },
           ],
           summary: ["Notifications stay as icons until unlock", "Voice works while locked; answers stay vague", "Chat has four heights: pill, input, half, full", "The recorder drops the mark button"],
@@ -150,7 +154,7 @@ function contentOf(text: string): Pick<StickyNote, "title" | "body"> {
   return line < 0 ? { title: text, body: "" } : { title: text.slice(0, line), body: text.slice(line) };
 }
 
-function interact(scene: NotesScene, input: unknown): Response {
+function interact(scene: NotesScene, input: unknown, now: () => number): Response {
   const found = decoded(input);
   if (found._tag === "None") return refused(400);
   const { capability, params } = found.value;
@@ -180,8 +184,10 @@ function interact(scene: NotesScene, input: unknown): Response {
   }
   if (present === undefined) return refused(404);
   if (capability === "delete-note") {
+    scene.deleteRequests?.push({ id: present.id, expectedRevision: params.expectedRevision });
+    if (present.id === scene.refuseDiscardId) return refused(409);
     scene.notes = scene.notes.filter((item) => item !== present);
-    scene.trash.push({ note: present, deletedAt: iso(at) });
+    scene.trash.push({ note: present, deletedAt: iso(now()) });
     scene.revision += 1;
     return result(scene, present);
   }
@@ -197,7 +203,7 @@ function interact(scene: NotesScene, input: unknown): Response {
 }
 
 /** The resident agent's Notes and owner routes. */
-export function notesRoutes(scene: NotesScene): Route[] {
+export function notesRoutes(scene: NotesScene, now: () => number): Route[] {
   return [
     (request, url) => {
       if (request.method === "GET" && url.pathname === "/api/auth/me") {
@@ -208,14 +214,18 @@ export function notesRoutes(scene: NotesScene): Route[] {
           deviceActions: { protocol: 1, capabilities: [] } });
       }
       if (request.method === "GET" && url.pathname === "/api/notes/state") {
-        return scene.failing ? refused(503) : Response.json({ success: true, data: snapshot(scene) });
+        const advertised = scene.deleteAtRevision === false ? {} : { deleteAtRevision: true };
+        return scene.failing ? refused(503) : Response.json({ success: true, data: { ...snapshot(scene), ...advertised } });
       }
-      if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body));
+      if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body, now));
       if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
-        return request.json().then((body: Record<string, unknown>) => {
+        return request.json().then(async (body: Record<string, unknown>) => {
+          const gate = scene.viewClaimGate;
+          const claimId = `claim-${scene.views.length + 1}`;
           scene.views.push({ path: "claim", body });
+          await gate;
           const saved = body.targetProtocol === "saved-note-v1" && scene.target !== undefined;
-          return Response.json({ claimId: `claim-${scene.views.length}`, ...(saved ? { target: { kind: "saved-note", noteId: scene.target } } : {}) });
+          return Response.json({ claimId, ...(saved ? { target: { kind: "saved-note", noteId: scene.target } } : {}) });
         });
       }
       if (request.method === "POST" && url.pathname === "/api/views/interact-result") {

@@ -18,7 +18,7 @@ import { ownerAt } from "../platform/owner.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
-import { NoteContent, numberOf } from "./content.vibe"
+import { NoteContent, audioIdOf, numberOf } from "./content.vibe"
 
 const phone: Actor = "Phone"
 const takesKey = "alpha/notes/takes@1"
@@ -68,34 +68,47 @@ const takeRegistry = Layer.effect(TakeRegistry, effect {
   }
 })
 
+export const levelCount = 44
+type Meter = { readonly owner: number; readonly take: number; readonly seconds: number; readonly levels: readonly number[] }
+
 export service RecordingDisplay {
-  readonly snapshot: () => { readonly seconds: number; readonly peak: number }
+  readonly snapshot: () => Meter
   readonly subscribe: (listener: () => void) => () => void
-  tell(seconds: number, peak: number): void!!
+  tell(owner: number, take: number, durationMs: number, peak?: number): void!!
 }
 
+const emptyMeter: Meter = { owner: 0, take: 0, seconds: 0, levels: [] }
+
 const display = Layer.effect(RecordingDisplay, effect {
-  const shelf = createShelf({ seconds: 0, peak: 0 }, { reset: () => ({ seconds: 0, peak: 0 }) })
-  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+  const shelf = createShelf<Meter>(emptyMeter, { reset: () => emptyMeter })
+  let lastDuration = -1
+  try Effect.addFinalizer(() => sync(() => { lastDuration = -1; shelf.reset() }))
   return {
     snapshot: shelf.snapshot,
     subscribe: shelf.subscribe,
-    tell: (seconds: number, peak: number) => sync(() => {
+    tell: (owner: number, take: number, durationMs: number, peak?: number) => sync(() => {
       const shown = shelf.get()
-      if (shown.seconds === seconds && shown.peak === peak) return
-      shelf.set({ seconds, peak })
+      const same = shown.owner === owner && shown.take === take
+      if (!same) lastDuration = -1
+      if (durationMs <= lastDuration) return
+      lastDuration = durationMs
+      const previous = same ? shown.levels : []
+      const levels = peak === undefined ? previous : [...previous, peak].slice(-levelCount)
+      const seconds = Math.trunc(durationMs / 1000)
+      if (same && shown.seconds === seconds && shown.levels === levels) return
+      shelf.set({ owner, take, seconds, levels })
     }),
   }
 })
 
 type Scope = Rec.Machine | Mic.Machine | Notes | Editor | Voice | Link | Trash | Shell | Device | NoteDevice | NoteContent | NoteStore | Agent | TakeRegistry
 
-effect function currentTape(): (Tape | undefined)!!(NoteDevice | Agent) {
+effect function currentTape(expectedOwner?: number): (Tape | undefined)!!(NoteDevice | Agent) {
   const device = try NoteDevice
   const own = ownerAt() catch () => ""
-  if (own === "") return undefined
+  if (own === "" || (expectedOwner !== undefined && numberOf("owner", own) !== expectedOwner)) return undefined
   const fingerprint = try promise(() => ownerDigest(own))
-  const tape = device.status() catch () => undefined
+  const tape = device.status(fingerprint) catch () => undefined
   return tape?.binding?.ownerDigest === fingerprint ? tape : undefined
 }
 
@@ -126,20 +139,29 @@ effect function start(folder: number): boolean!!Scope {
 
 /** The owner's Record button, whether it can start or needs to ask Android first. */
 export const record = effect {
-  const list = try (try Notes).get()
+  const notes = try Notes
+  const before = try notes.get()
   const device = try NoteDevice
   const mic = try Mic.Machine
   const grant = try device.permission()
+  const list = try notes.get()
+  if (list.owner !== before.owner || list.filter !== before.filter || (try mic.get()).owner !== list.owner
+    || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Notes")) return
   try ignore(mic.send({ type: "reported", grant }, phone))
   if (grant === "Granted") {
     try start(list.filter)
     return
   }
   const state = try mic.get()
-  if (Mic.canOpenSettings(state, "Owner")) {
+  const available = readyForNew(list)
+  if (device.onWeb && grant === "Denied") {
+    if (!Rec.unfinished(try (try Rec.Machine).get())) {
+      try ignore(mic.send({ type: "showBrowserDenial", available, covered: try covered() }, "Owner"))
+    }
+  } else if (!device.onWeb && Mic.canOpenSettings(state, "Owner")) {
     try ignore(mic.send({ type: "openSettings" }, "Owner"))
   } else {
-    try ignore(mic.send({ type: "ask", available: readyForNew(list), folder: list.filter, covered: try covered() }, "Owner"))
+    try ignore(mic.send({ type: "ask", available, folder: list.filter, covered: try covered(), browser: device.onWeb }, "Owner"))
   }
 }
 
@@ -172,13 +194,15 @@ effect function samples(tape: Tape, owner?: string): void!!(Rec.Machine | NoteCo
 }
 
 /** Before ending or pausing, sample the tail that Android has heard so even a short note is retained. */
-export effect function control(kind: "pause" | "resume" | "stop"): void!!Scope {
+export effect function control(kind: "pause" | "resume" | "stop", take: number): void!!Scope {
   const recorder = try Rec.Machine
+  if ((try recorder.get()).take !== take) return
   const tape = try currentTape()
-  if (tape !== undefined) try samples(tape)
   const current = try recorder.get()
-  if (kind === "resume") try ignore(recorder.send({ type: "resume", take: current.take, room: try room() }, "Owner"))
-  else try ignore(recorder.send({ type: kind, take: current.take }, "Owner"))
+  if (current.take !== take) return
+  if (tape !== undefined) try samples(tape)
+  if (kind === "resume") try ignore(recorder.send({ type: "resume", take, room: try room() }, "Owner"))
+  else try ignore(recorder.send({ type: kind, take }, "Owner"))
 }
 
 effect function capture(fx: Extract<Rec.Effect, { readonly tag: "Captures" }>): void!!Scope {
@@ -237,11 +261,11 @@ effect function commitRecording(fx: Extract<Rec.Effect, { readonly tag: "Finishe
   const folder = collection.folderByNumber.get(fx.folder)
   const have = store.read() catch () => undefined
   if (have === undefined) return lost
-  const capture = have.notes.find((note) => note.format?.data.audioId === id)
+  const capture = have.notes.find((note) => note.format?.kind === "voice" && audioIdOf(note) === id)
   if (capture === undefined && segments.length === 0) return failed
   const made = capture === undefined ? (store.create({
     content: "Voice note",
-    format: { kind: "voice", data: { audioId: id, durationMs: tape?.durationMs ?? 0, segments: segments.map((part) => ({ durationMs: part.durationMs })), ...(folder === undefined ? {} : { folderId: folder.id }) } },
+    format: { kind: "voice", data: { recordingId: id, audio: { audioId: id, durationMs: tape?.durationMs ?? 0 }, segments: segments.map((part) => ({ durationMs: part.durationMs })), ...(folder === undefined ? {} : { folderId: folder.id }) } },
     creationId: id,
   }) catch () => undefined)?.note : capture
   if (made === undefined) return lost
@@ -261,7 +285,7 @@ effect function findRecording(fx: Extract<Rec.Effect, { readonly tag: "Looks" }>
   if (recording === undefined) return failed
   const snapshot = (try NoteStore).read() catch () => undefined
   if (snapshot === undefined) return failed
-  const note = snapshot.notes.find((one) => one.format?.data.audioId === recording)
+  const note = snapshot.notes.find((one) => one.format?.kind === "voice" && audioIdOf(one) === recording)
   if (note === undefined) return { ...failed, ok: true }
   const device = try NoteDevice
   const held = device.describe(recording) catch () => undefined
@@ -271,42 +295,72 @@ effect function findRecording(fx: Extract<Rec.Effect, { readonly tag: "Looks" }>
   return { ...failed, ok: true, note: numberOf("note", note.id) }
 }
 
+schema DiscardReceipt { readonly owner: number; readonly take: number; readonly recordingId?: string }
+const DiscardValue = Schema.fromJsonString(DiscardReceipt)
+
+effect function discardKey(ticket: number): string!!Attempts {
+  return `alpha/recording/discard/${try (try Attempts).key(ticket)}`
+}
+
+function receiptOf(raw: string | undefined): DiscardReceipt | undefined {
+  return raw === undefined ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(DiscardValue)(raw))
+}
+
+effect function writeDiscard(fx: Extract<Rec.Effect, { readonly tag: "WritesDown" }>): Rec.Event!!(Scope | Attempts | KeyValueStore.KeyValueStore) {
+  const failure: Rec.Event = { type: "writtenDown", ticket: fx.ticket, ok: false }
+  const key = try discardKey(fx.ticket)
+  const store = try KeyValueStore.KeyValueStore
+  const raw = store.get(key) catch () => undefined
+  const existing = receiptOf(raw)
+  if (raw !== undefined && (existing?.owner !== fx.owner || existing.take !== fx.take)) return failure
+  if (existing?.recordingId) return { ...failure, ok: true }
+
+  const tape = try currentTape(fx.owner)
+  const id = tape?.recordingId
+  const state = try (try Rec.Machine).get()
+  if (!id || state.phase !== "Discarding" || state.owner !== fx.owner || state.take !== fx.take || state.erasing.id !== fx.ticket) return failure
+  if (tape.state === "recording" || tape.state === "paused") {
+    const stopped = (try NoteDevice).command(id, "End") catch () => undefined
+    if (stopped?.recordingId !== id || stopped.state !== "stopped") return failure
+  }
+  const saved = effect { try store.set(key, JSON.stringify({ owner: fx.owner, take: fx.take, recordingId: id })); return true } catch () => false
+  return { ...failure, ok: saved }
+}
+
+effect function eraseRecording(fx: Extract<Rec.Effect, { readonly tag: "Erases" }>): Rec.Event!!(Scope | Attempts | KeyValueStore.KeyValueStore) {
+  const missing: Rec.Event = { type: "erased", ticket: fx.ticket, ok: false, known: true }
+  const key = try discardKey(fx.ticket)
+  const receipt = receiptOf((try KeyValueStore.KeyValueStore).get(key) catch () => undefined)
+  if (receipt?.owner !== fx.owner || receipt.take !== fx.take || !receipt.recordingId) return missing
+  const recordingId = receipt.recordingId
+  const tape = try currentTape(fx.owner)
+  if (tape?.recordingId !== recordingId) return missing
+  return effect {
+    try (try NoteDevice).discard(recordingId)
+    try (try TakeRegistry).forget(fx.owner, fx.take)
+    return { ...missing, ok: true }
+  } catch () => ({ ...missing, known: false })
+}
+
 function carry(fx: Rec.Effect): Job<Rec.Event, Scope | KeyValueStore.KeyValueStore, [Actor]> {
   return match (fx) {
     when { tag: "Captures" }: run("capture", capture(fx), phone);
     when { tag: "Tells" }: run("command", command(fx), phone);
     when { tag: "Finishes" }: answer(`finish ${fx.ticket}`, commitRecording(fx), { type: "finished", ticket: fx.ticket, ok: false, known: false, note: 0 }, phone);
     when { tag: "Looks" }: answer("lookup", findRecording(fx), { type: "noteFound", ticket: fx.ticket, ok: false, note: 0 }, phone);
-    when { tag: "WritesDown" }: answer("write discard", effect {
-      const id = try (try Attempts).key(fx.ticket)
-      const storage = try KeyValueStore.KeyValueStore
-      const saved = effect { try storage.set(`alpha/recording/discard/${id}`, JSON.stringify({ owner: fx.owner, take: fx.take })); return true } catch () => false
-      return { type: "writtenDown", ticket: fx.ticket, ok: saved } satisfies Rec.Event
-    }, { type: "writtenDown", ticket: fx.ticket, ok: false }, phone);
-    when { tag: "Erases" }: answer("erase", effect {
-      const own = ownerAt() catch () => ""
-      const missing: Rec.Event = { type: "erased", ticket: fx.ticket, ok: false, known: true }
-      if (own === "" || numberOf("owner", own) !== fx.owner) return missing
-      const takes = try TakeRegistry
-      const tape = try currentTape()
-      const id = (try takes.recordingFor(fx.owner, fx.take)) ?? tape?.recordingId
-      if (id === undefined) return missing
-      return effect {
-        try (try NoteDevice).discard(id)
-        try takes.forget(fx.owner, fx.take)
-        return { type: "erased", ticket: fx.ticket, ok: true, known: true } satisfies Rec.Event
-      } catch () => ({ ...missing, known: false })
-    }, { type: "erased", ticket: fx.ticket, ok: false, known: false }, phone);
+    when { tag: "WritesDown" }: answer("write discard", writeDiscard(fx), { type: "writtenDown", ticket: fx.ticket, ok: false }, phone);
+    when { tag: "Erases" }: answer("erase", eraseRecording(fx), { type: "erased", ticket: fx.ticket, ok: false, known: false }, phone);
   }
 }
 
 function microphone(fx: Mic.Effect): Job<Mic.Event, Scope, [Actor]> {
   return match (fx) {
     when { tag: "AsksMicrophone" }: answer("microphone", effect {
-      const grant = try (try NoteDevice).request()
+      const device = try NoteDevice
+      const grant = try device.request()
       const ready = grant === "Granted" && (try room()).front && !(try covered())
-      return { type: "answered", grant, ready } satisfies Mic.Event
-    }, { type: "answered", grant: "Unasked", ready: false }, phone);
+      return { type: "answered", grant, ready, browser: device.onWeb } satisfies Mic.Event
+    }, { type: "answered", grant: "Unasked", ready: false, browser: false }, phone);
     when { tag: "Records" }: run("record", start(fx.folder), phone);
     when { tag: "OpensSettings" }: run("settings", effect { try (try NoteDevice).settings() }, phone);
   }
@@ -319,7 +373,7 @@ export effect function ownerRecords(owner: number): void!!Scope {
   const takes = try TakeRegistry
   try ignore(mic.send({ type: "ownerChanged", owner }, phone))
   try ignore(recorder.send({ type: "ownerChanged", owner }, phone))
-  if (owner === 0) return
+  if (owner === 0) { try (try NoteDevice).retire(); return }
   try ignore(mic.send({ type: "reported", grant: try (try NoteDevice).permission() }, phone))
   const tape = try currentTape()
   const prior = try recorder.get()
@@ -366,11 +420,21 @@ const updates = started(effect {
     digests.set(identity, computed)
     return computed
   }
-  const report = effect (tape: Tape) => {
+  const project = effect (tape: Tape) => {
     const identity = ownerAt() catch () => ""
-    if (identity === "" || tape.binding?.ownerDigest !== (try digestOf(identity))) return
-    try shown.tell(Math.trunc((tape.durationMs ?? 0) / 1000), Math.max(0, Math.min(1, tape.peak ?? 0)))
-    try samples(tape, identity)
+    if (identity === "" || tape.binding?.ownerDigest !== (try digestOf(identity))) return undefined
+    const before = try recorder.get()
+    const owner = numberOf("owner", identity)
+    if (before.owner === owner && before.take !== 0 && tape.recordingId !== undefined) {
+      const peak = tape.state === "recording" && tape.peak !== undefined ? Math.max(0, Math.min(1, tape.peak)) : undefined
+      try shown.tell(owner, before.take, tape.durationMs ?? 0, peak)
+    }
+    return identity
+  }
+  const report = effect (tape: Tape) => {
+    const owner = try project(tape)
+    if (owner === undefined) return
+    try samples(tape, owner)
     const state = try recorder.get()
     if (tape.state === "stopped" && (state.phase === "Recording" || state.phase === "Paused")) {
       if (tape.stopReason === "user" || tape.stopReason === "done") try ignore(recorder.send({ type: "stop", take: state.take }, "Owner"))
@@ -381,26 +445,55 @@ const updates = started(effect {
       try ignore(recorder.send({ type: "resume", take: state.take, room: try room() }, "Owner"))
     }
   }
-  const poll = Stream.fromEffectSchedule(effect { return device.status() catch () => undefined }, Schedule.spaced("1 second"))
+  const read = effect { return device.status() catch () => undefined }
+  const poll = Stream.fromEffectSchedule(read, Schedule.spaced("1 second"))
   const playing = Stream.changes(Stream.map(recorder.changes, (state) => state.phase === "Recording" || state.phase === "Stopping"))
   const ticks = Stream.switchMap(playing, (polling) => polling ? Stream.filter(poll, (tape): tape is Tape => tape !== undefined) : Stream.empty)
+  const visibility = Stream.concat(Stream.fromEffect(devicePage.showing()), devicePage.visible)
+  const listening = Stream.changes(Stream.map(Stream.zipLatestAll(recorder.changes, shell.changes, visibility),
+    ([state, place, visible]) => state.phase === "Recording" && visible && showing(place, "Notes")))
+  const amplitudes = Stream.filter(Stream.fromEffectSchedule(read, Schedule.spaced("120 millis")),
+    (tape): tape is Tape => tape?.state === "recording")
+  const meters = Stream.switchMap(listening, (on) => on ? amplitudes : Stream.empty)
   const opened = Stream.merge(device.openAsked, Stream.as(Stream.filter(devicePage.visible, (front) => front), undefined))
   const reopen = effect () => {
     if (try device.consumeOpen()) try ignore(shell.send({ type: "openView", view: "Notes" }))
   }
   try reopen()
-  try Effect.all([Stream.runForEach(opened, reopen), Stream.runForEach(Stream.merge(device.changed, ticks), report)], { concurrency: "unbounded" })
+  try Effect.all([
+    Stream.runForEach(opened, reopen),
+    Stream.runForEach(Stream.merge(device.changed, ticks), report),
+    Stream.runForEach(meters, project),
+  ], { concurrency: "unbounded" })
 }, "watch the phone’s Notes recorder")
 
 const calls = following(Calls, (state) => state.calls.length > 0, Rec.Machine,
   (active): Rec.Event => ({ type: active ? "callStarted" : "callEnded" }), phone)
+
+function storedMicrophone(key: string, start?: Mic.Microphone) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const readable = {
+      ...store,
+      effect get(name: string) {
+        const raw = try store.get(name)
+        if (name !== key) return raw
+        const saved = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(raw))
+        if (typeof saved !== "object" || saved === null || Array.isArray(saved) || "browserDenied" in saved) return raw
+        const previous = Mic.decodeState({ ...saved, browserDenied: false }) catch () => undefined
+        return previous === undefined ? raw : JSON.stringify(previous)
+      },
+    }
+    return Layer.provide(Mic.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, readable))
+  })
+}
 
 export const recording = Layer.provideMerge(together(
   reacting(Rec, { keep: 1, open: effect {
     const tape = try currentTape()
     return [{ type: "restart", intact: tape !== undefined, found: tape?.segments?.length ?? 0 }, phone] as const
   }, carry }),
-  reacting(Mic, { keep: 1, open: [{ type: "restart" }, phone], carry: microphone }),
+  reacting({ ...Mic, stored: storedMicrophone }, { keep: 1, open: [{ type: "restart" }, phone], carry: microphone }),
   cleanupKept,
   updates,
   calls,

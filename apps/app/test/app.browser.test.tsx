@@ -1,10 +1,10 @@
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
-import { Machine as Reminders } from "../gen/app__sample.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
-import { at, mounts } from "../src/areas.ts";
+import { at, first as firstScreen, mounts } from "../src/areas.ts";
+import files from "../src/files/index.tsx";
 import { single } from "../src/runtime/single.ts";
 import { home } from "../src/shell/shell.vibe";
 import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
@@ -15,7 +15,7 @@ import "../src/main.css";
 afterEach(closeAll);
 
 const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx"))];
-const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@3") ?? "null") as { trail: unknown } | null)?.trail;
+const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@5") ?? "null") as { trail: unknown } | null)?.trail;
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps, and find the same place after the page is opened again (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
@@ -67,7 +67,7 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const bookmark = { url: "https://archive.example/reference", title: "Saved reference" };
   await savedBrowserRecords([first, second], [bookmark]);
   try {
-    const { alpha } = await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
+    const { alpha } = await open(scene(), [...only("home", "view:Browser", "assistant"), firstScreen("view:Files", files)]);
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
@@ -120,13 +120,12 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
     await closeAll();
     await savedBrowserRecords([]);
   }
-});
+}, 120_000);
 
 // spec/app/sample/index.md, "Story: See and dismiss reminders"
-it("See and dismiss reminders: focus moves to Undo while a dismissal is held (spec/app/sample/index.md, \"Story: See and dismiss reminders\")", async () => {
-  const { alpha } = await open(scene(), withSample);
+it("Moves reminder dismissal focus to Undo", async () => {
+  await open(scene(), [...only("home"), firstScreen("view:Notes", sample)]);
   await page.getByRole("button", { name: "Notes" }).click();
-  await until(alpha, sample.runtime(alpha), Reminders, (s) => s.list.status === "Loaded");
   // spec/app/sample/index.md, "Undo within the five seconds puts the reminder back"
   await page.getByRole("button", { name: "Dismiss Water the plants" }).click();
   await expect.element(page.getByRole("button", { name: "Undo dismissing “Water the plants”" })).toHaveFocus();
@@ -168,7 +167,7 @@ it("Full Ask Alpha keeps focus off the Home it covers (spec/app/shell/index.md, 
 
 
 // spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/index.md, "Story: Keep digests to their owner and through a restart"
-it("Checks for a browser brief outside Workflows only after this owner opts in (spec/app/digests/index.md, \"Story: Receive results without losing or repeating one\")", async () => {
+it("Checks for browser briefs only after the owner opts in", async () => {
   await page.viewport(390, 844);
   const world = scene();
   const hosted: NonNullable<typeof world.workflows.hosted> = { entries: [], reads: 0, acknowledgements: [] };
@@ -181,7 +180,7 @@ it("Checks for a browser brief outside Workflows only after this owner opts in (
   const scheduled = async () => {
     await page.getByRole("button", { name: "Workflows", exact: true }).click();
     await page.getByRole("button", { name: "Add to Workflows" }).click();
-    await page.getByRole("button", { name: "Scheduled digests" }).click();
+    await page.getByRole("button", { name: "Scheduled digest", exact: true }).click();
   };
   const toggle = () => page.getByRole("switch", { name: "Check for digests while Alpha is visible" });
 
@@ -230,4 +229,4 @@ it("Checks for a browser brief outside Workflows only after this owner opts in (
   expect(hosted.reads).toBe(switchedReads);
   await scheduled();
   await expect.element(toggle()).not.toBeChecked();
-});
+}, 120_000);

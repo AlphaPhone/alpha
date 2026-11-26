@@ -18,6 +18,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 import ai.eliza.plugins.media.RecordingStore;
 import ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots;
 import java.io.File;
+import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -270,15 +271,31 @@ public final class AlphaNotesPlugin extends Plugin {
   }
 
   @PluginMethod public void purge(PluginCall call) {
-    onMain(call, () -> {
-      String audioId = RecordingStore.id(call.getString("audioId"));
-      String noteId = call.getString("noteId");
-      String operation = call.getString("operationId");
-      if (audioId.equals(playingId)) endedPlayback(false);
-      onDisk(call, () -> {
-        RecordingStore store = recordings();
-        store.remove(audioId, noteId, operation, () -> {});
-        call.resolve(JSObject.fromJSONObject(store.purge(audioId, noteId, operation, () -> {})));
+    onDisk(call, () -> {
+      var receipt = new ResidentDigestChannel.RecordingCleanup(
+          RecordingStore.id(call.getString("audioId")), RecordingStore.id(call.getString("noteId")),
+          call.getString("operationId"), call.getString("deletedAt"));
+      var account = ResidentDigestChannel.openAccount(getContext());
+      account.prepareRecordingCleanup(receipt);
+      onMain(call, () -> {
+        if (receipt.audioId().equals(playingId)) endedPlayback(false);
+        onDisk(call, () -> {
+          RecordingStore store = recordings();
+          Runnable current = () -> {
+            if (closed) throw new IllegalStateException("Notes is closed");
+            try { account.check(); }
+            catch (IOException changed) { throw new IllegalStateException("Resident account changed", changed); }
+          };
+          current.run();
+          store.remove(receipt.audioId(), receipt.noteId(), receipt.operationId(), current);
+          var purged = store.purge(receipt.audioId(), receipt.noteId(), receipt.operationId(), current);
+          if (!RecordingStore.PURGED.equals(purged.get("status")) || !receipt.audioId().equals(purged.get("audioId"))
+              || !receipt.noteId().equals(purged.get("noteId")) || !receipt.operationId().equals(purged.get("operationId"))) {
+            throw new IOException("Recording purge was not confirmed");
+          }
+          account.confirmRecordingCleanup(receipt);
+          call.resolve(JSObject.fromJSONObject(purged));
+        });
       });
     });
   }

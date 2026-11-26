@@ -1,13 +1,11 @@
 // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+import type { ReminderItemRecord } from "@repo/launcher-records"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
 import { contained, reacting, started, together } from "../runtime/reactor.vibe"
 import { civilDayFromString } from "./recurrence.ts"
 import { EditorDraftShelf, type ReminderEditorFields, RemindersShelf, blankEditorFields } from "./shelf.vibe"
-import {
-  DEFAULT_LIST_ID,
-  type ReminderItemRecord,
-} from "./store.ts"
+import { DEFAULT_LIST_ID } from "./store.ts"
 
 export type { ReminderEditorFields }
 

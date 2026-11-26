@@ -17,12 +17,19 @@ require(hashlib.sha256((ROOT / manifest['patch']).read_bytes()).hexdigest() == m
         'Patch digest drift')
 for row in manifest['files']:
     path = safe_relative_path(row['path'], 'source input path')
-    url = ('https://android.googlesource.com/platform/packages/apps/Launcher3/+/'
-           + manifest['revision'] + '/' + row['path'] + '?format=TEXT')
     target = data / 'baseline' / path
-    fetch_pinned_googlesource(url, target, row['beforeSha256'], data, max_bytes=1024 * 1024)
     staged = data / 'staged' / path
+    reject_symlinks(target, data, 'source input path')
     reject_symlinks(staged, data, 'staged input path')
+    if row['beforeSha256'] is None:
+        require(not target.exists(), 'Unexpected new-file baseline')
+        if staged.exists():
+            require(hashlib.sha256(staged.read_bytes()).hexdigest() == row['afterSha256'], 'Staged output drift')
+            staged.unlink()
+        continue
+    url = 'https://android.googlesource.com/platform/packages/apps/Launcher3/+/' + manifest['revision'] + '/' + row['path']
+    require(row['url'] == url, 'Unexpected source input URL')
+    fetch_pinned_googlesource(url + '?format=TEXT', target, row['beforeSha256'], data, max_bytes=1024 * 1024)
     staged.parent.mkdir(parents=True, exist_ok=True)
     staged.write_bytes(target.read_bytes())
 subprocess.run(['git', 'apply', '--check', str(ROOT / manifest['patch'])], cwd=data / 'staged', check=True)

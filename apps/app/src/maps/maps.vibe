@@ -21,6 +21,7 @@ import { type Job, answer, due, following, reacting, run, started, stream, toget
 import { Time } from "../runtime/time.vibe"
 import { Atlas, type AtlasStore, type Coverage, type Spot, type View, type Way, atlasLayer, withoutDetails } from "./atlas.vibe"
 import { type Point, coordinateOf, measured, normalizeLng, pointOf } from "./geometry.ts"
+import { handedQuery, takeHandedQuery, watchHandoff } from "./handoff.ts"
 
 type CloudPlace = Awaited<ReturnType<CloudClient["mapsPlacesSearch"]>>["places"][number]
 
@@ -212,8 +213,8 @@ effect function planned(ticket: number, origin: Origin, travel: Travel, place: n
       .filter((route) => route.geometry.length > 0)
       .slice(0, 3)
       .map((route) => ({
-        meters: Math.round(route.distanceMeters), seconds: Math.round(route.durationSeconds), line: route.geometry.map(pointOf),
-        turns: route.steps.map((step) => ({ instruction: step.instruction, at: pointOf(step.coordinate), meters: Math.round(step.distanceMeters) })),
+        meters: Math.round(route.distanceMeters), seconds: Math.round(route.durationSeconds), line: route.geometry.map(pointOf), live: route.traffic === "live",
+        turns: route.steps.map((step) => ({ instruction: step.instruction, at: pointOf(step.coordinate), meters: Math.round(step.distanceMeters), ...(step.maneuver === undefined ? {} : { maneuver: step.maneuver }) })),
       }))
     const first = ways[0]
     if (first === undefined) throw new Unanswered({ cause: "the provider returned no route" })
@@ -226,7 +227,7 @@ function allowedOf(grant: Grant): Allowed {
   return grant === "precise" ? "Granted" : grant === "approximate" ? "Limited" : grant === "denied" ? "Denied" : "Unasked"
 }
 
-// spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"
+// spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75"; spec/app/maps/connection.md, "\"Use my location\" gives up after 15 seconds without a fix"
 function located(session: number, once: boolean): Stream.Stream<Ev, never, Location | Time | Screen.Machine | Atlas> {
   return Stream.unwrap(effect {
     const location = try Location
@@ -678,6 +679,33 @@ const detailsReader = started(effect {
   })
 }, "reading place details")
 
+// spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation"
+const handoffs = started(effect {
+  const shell = try Shell
+  const screen = try Screen.Machine
+  const wakes = Stream.concat(
+    Stream.succeed(undefined),
+    Stream.callback<void>((queue) => acquireRelease(sync(() => watchHandoff(() => { Queue.offerUnsafe(queue, undefined) })), (off) => sync(off))),
+  )
+  const ticks = Stream.mergeAll([wakes, Stream.as(shell.changes, undefined), Stream.as(screen.changes, undefined)], { concurrency: "unbounded" })
+  let wasShown = false
+  try Stream.runForEach(ticks, effect () => {
+    const mapsShown = showing(try shell.get(), "Maps")
+    if (!mapsShown) {
+      if (wasShown) try sync(() => takeHandedQuery())
+      wasShown = false
+      return
+    }
+    wasShown = true
+    const query = try sync(() => handedQuery())
+    if (query === undefined) return
+    const current = try screen.get()
+    if (!Screen.canHandOver(current, query, query.length) || Screen.canContinueDisclosure(current)) return
+    try sync(() => takeHandedQuery())
+    try ignore(screen.send({ type: "handOver", query, chars: query.length }))
+  })
+}, "Maps search handoff")
+
 /**
  * Maps: its screen and the map's credits, which live from Maps' first opening until Alpha closes; the saved places,
  * kept on the phone; and what each follows: the shell's showing Maps, the account, Android's permission and the surface.
@@ -689,6 +717,7 @@ export const maps = Layer.provideMerge(
     retried,
     opening,
     presence,
+    handoffs,
     serviceEnds,
     notificationWords,
     detailsReader,

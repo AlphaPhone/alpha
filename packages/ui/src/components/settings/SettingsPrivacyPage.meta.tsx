@@ -1,9 +1,8 @@
 import { expect, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
-import { Mic } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { fullHeight } from "./samples.ts";
-import { SettingsSwitchRow } from "./SettingsSwitchRow.tsx";
+import { SettingsFactRow } from "./SettingsFactRow.tsx";
 import type { SettingsPrivacyPageProps } from "./SettingsPrivacyPage.tsx";
 
 const onOpen = fn();
@@ -20,20 +19,21 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
     onOpen,
     onSetUpAccess,
     onAskFirstChange,
-    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true, "telegram-context": false, "slack-context": true },
+    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true },
     onShareChange,
-    onHandOver: fn(),
     children: (
       <ListGroup>
-        <SettingsSwitchRow title="Listening" icon={<Mic />} checked={false} onCheckedChange={() => undefined} />
+        <SettingsFactRow title="Voice" reading={{ word: "reported", value: "On this phone" }} />
       </ListGroup>
     ),
   },
   decorator: fullHeight,
   examples: {
+    Browser: { onPhone: false },
     Reading: { read: "reading" },
     Saving: { saving: true },
     "Acts without asking": { askFirst: false },
+    "On an Alpha image": { onListener: fn() },
     Unreadable: { read: "failed", onRecover },
     Recovering: { read: "failed", recovering: true },
   },
@@ -44,9 +44,16 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
       onAskFirstChange.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Permissions" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Access setup" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Review access setup" }));
       await userEvent.click(canvas.getByRole("switch", { name: /Ask before Alpha acts/ }));
       await expect([onOpen.mock.calls, onSetUpAccess.mock.calls.length, onAskFirstChange.mock.calls]).toEqual([[["permissions"]], 1, [[false]]]);
+    },
+    Browser: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const canvas = within(canvasElement);
+      await expect(canvas.queryByRole("switch", { name: /Location for Alpha/ })).toBeNull();
+      await expect(canvas.getByRole("switch", { name: /Browser page for Alpha/ })).toBeTruthy();
+      await expect(canvas.getByText(/Hosted models can receive it/)).toBeTruthy();
+      await expect(canvas.getByRole("switch", { name: /Gmail changes/ })).toBeTruthy();
     },
     "Acts without asking": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onShareChange.mockClear();

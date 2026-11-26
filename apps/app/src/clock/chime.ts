@@ -1,5 +1,5 @@
 // spec/app/clock/index.md, "Story: Hear and prioritize ringing alerts"
-import type { AlarmSound } from "./records.ts";
+import type { ClockSound } from "@repo/launcher-records";
 
 interface SoundPattern {
   readonly wave: OscillatorType;
@@ -9,7 +9,7 @@ interface SoundPattern {
   readonly gain: number;
 }
 
-const PATTERNS: Readonly<Record<AlarmSound, SoundPattern>> = {
+const PATTERNS: Readonly<Record<ClockSound, SoundPattern>> = {
   radar: { wave: "triangle", notes: [880, 1174.66, 880], noteSec: 0.12, gapSec: 0.06, gain: 0.22 },
   chime: { wave: "sine", notes: [523.25, 659.25, 783.99, 1046.5], noteSec: 0.16, gapSec: 0.04, gain: 0.2 },
   pulse: { wave: "sine", notes: [698.46, 698.46], noteSec: 0.14, gapSec: 0.1, gain: 0.22 },
@@ -40,7 +40,7 @@ function audioContext(): AudioContext | undefined {
   }
 }
 
-function schedulePulse(ctx: AudioContext, sound: AlarmSound, isTimer: boolean): void {
+function schedulePulse(ctx: AudioContext, sound: ClockSound, isTimer: boolean): void {
   try {
     const pattern = isTimer ? TIMER_PATTERN : PATTERNS[sound];
     let offset = ctx.currentTime + 0.01;
@@ -68,7 +68,7 @@ function schedulePulse(ctx: AudioContext, sound: AlarmSound, isTimer: boolean): 
  * when suspended before scheduling the first oscillator pulse; safe no-op where AudioContext is unavailable.
  * @throws {never}
  */
-export function playChimePulse(sound: AlarmSound, isTimer = false): void {
+export function playChimePulse(sound: ClockSound, isTimer = false): void {
   const ctx = audioContext();
   if (!ctx) return;
   if (ctx.state === "suspended") {

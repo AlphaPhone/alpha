@@ -5,7 +5,7 @@ import { existsSync, globSync, readFileSync, readdirSync, statSync } from "node:
 import { basename, dirname, join, relative } from "node:path";
 import ts from "typescript";
 import { formatStamp } from "../run.ts";
-import { owner } from "../util.ts";
+import { fileCitations, owner } from "../util.ts";
 
 /** A value in a metadata file that only running it would give, such as JSX or a function. */
 const dynamic = Symbol("dynamic");
@@ -378,23 +378,10 @@ function body(decl: ts.Declaration): ts.FunctionDeclaration | ts.FunctionExpress
   return node && (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)) ? node : undefined;
 }
 
-const CITATION = /(?<![\w/.-])(spec\/(?:[A-Za-z0-9]+\/)*[A-Za-z0-9]+\.md), "([^"]+)"/g;
 const GEN_MODULE = /(?:^|\/)gen\/[^/]+\.(?:ts|effect\.vibe)$/;
 
 function readCitations(text: string): { spec: string; heading: string }[] {
-  if (!text.includes("spec/")) return [];
-  const seen = new Set<string>();
-  const out: { spec: string; heading: string }[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.includes("spec/")) continue;
-    for (const [, spec, heading] of line.matchAll(CITATION)) {
-      const id = `${spec}\0${heading}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push({ spec, heading });
-    }
-  }
-  return out;
+  return [...new Map(fileCitations("", text).map(({ spec, heading }) => [`${spec}\0${heading}`, { spec, heading }])).values()];
 }
 
 function genUses(file: ts.SourceFile): string[] {

@@ -1,10 +1,13 @@
 // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
 import { Button, focusRing } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { BellRing, Check, Clock, X } from "lucide-react";
+import { Bell, Check, Clock, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
+import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effect.vibe";
+import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 import type * as Alerts from "../../gen/app__reminders__alerts.effect.vibe";
 import { useMachine as useAlertsMachine } from "../../gen/app__reminders__alerts.react.ts";
+import { native } from "../platform/device.vibe";
 import { useTimed } from "../runtime/react.ts";
 import type { Time } from "../runtime/time.vibe";
 import { snoozeAlertFromBanner } from "./alerts.vibe";
@@ -16,7 +19,7 @@ export function AlertBanner({
   runtime,
   onOpenItem,
 }: {
-  readonly runtime: ManagedRuntime.ManagedRuntime<Alerts.Machine | AlertBannerShelf | RemindersNowShelf | Time, unknown>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<Alerts.Machine | AlertBannerShelf | BrowserAlerts.Machine | RemindersNowShelf | Time, unknown>;
   readonly onOpenItem?: (itemId: string) => void;
 }) {
   const { state, can, send } = useTimed(runtime, useAlertsMachine);
@@ -24,7 +27,8 @@ export function AlertBanner({
   const nowShelf = runtime.runSync(Effect.map(RemindersNowShelf, (service) => service.shelf));
   const banner = useSyncExternalStore(bannerShelf.subscribe, bannerShelf.snapshot);
   const nowMs = useSyncExternalStore(nowShelf.subscribe, nowShelf.snapshot);
-  if (!state || state.bannerId === 0 || banner === undefined) return null;
+  const browserAlerts = useBrowserAlerts(runtime).state;
+  if (!state || state.bannerId === 0 || banner === undefined || (!native() && browserAlerts?.status === "Disabled")) return null;
   const { item, specId, revision } = banner;
   const displayNow = nowMs > 0 ? nowMs : item.updatedAtMs;
   const dueText = formatRelativeDue(item.dueDate, item.dueMinute, displayNow, false);
@@ -42,7 +46,7 @@ export function AlertBanner({
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-          <BellRing aria-hidden className="size-4" />
+          <Bell aria-hidden className="size-4.5" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium tracking-caps text-muted-foreground uppercase">Reminder due</p>
@@ -74,7 +78,7 @@ export function AlertBanner({
           disabled={!can(completeEvent)}
           onClick={() => void send(completeEvent)}
         >
-          <Check aria-hidden className="size-4" />
+          <Check aria-hidden className="size-4.5" />
           Complete
         </Button>
         <Button

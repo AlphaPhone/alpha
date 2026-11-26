@@ -1,7 +1,8 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401"; spec/app/platform/index.md, "A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out"; spec/app/platform/index.md, "A request is refused for want of a network only when Android confirms the app's network is down"
 import { createCloudClient } from "@elizaos/cloud"
-import { BridgeUnavailable, CloudRefused, type CloudClient as Relay, type CloudFailure, type CloudMethod, type CloudPath, type CloudRequest, SignInRefused } from "@elizaos/os-bridges"
+import { BridgeUnavailable, CloudRefused, type CloudClient as Relay, type CloudFailure, type CloudMethod, type CloudPath, type CloudRequest, type CredentialId, SignInRefused } from "@elizaos/os-bridges"
 import { type MailSignIn, cloudStatusOf, heldAnswer, leaseRefusalCode, refusedOffline, replied } from "../../gen/app__platform.effect.vibe"
+import { native } from "./device.vibe"
 import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt } from "./remote.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "./voice.vibe"
 import { WiFi, phoneWiFi } from "./wifi.vibe"
@@ -31,6 +32,9 @@ export type CloudClient = ReturnType<typeof createCloudClient>
  */
 export interface Account extends Remote {
   readonly client: CloudClient
+  readonly clientFor: (credential: CredentialId) => CloudClient | undefined
+  callFor(request: HttpClientRequest.HttpClientRequest, credential: CredentialId): unknown!Failure
+  callBillingFor(request: HttpClientRequest.HttpClientRequest, credential: CredentialId): unknown!Failure
 }
 
 export service Cloud: Account {}
@@ -95,7 +99,8 @@ function fetching(direct: Wired): typeof globalThis.fetch {
       : HttpClientRequest.bodyUint8Array(started, body.bytes, headers["content-type"])
     return runPromise(effect {
       const opened = try direct.open(request)
-      return answer(Stream.toReadableStream(opened.body), opened.status, { ...opened.headers })
+      const response = opened.status >= 400 ? try opened.text : Stream.toReadableStream(opened.body)
+      return answer(response, opened.status, { ...opened.headers })
     }, { signal })
   }
 }
@@ -104,7 +109,10 @@ function fetching(direct: Wired): typeof globalThis.fetch {
 export function cloudAt(base: string) {
   return Layer.effect(Cloud, effect {
     const direct = try remoteAt(base)
-    return { call: direct.call, events: direct.events, client: typed(fetching(direct)) }
+    return { call: direct.call, events: direct.events, client: typed(fetching(direct)),
+      clientFor: () => undefined,
+      callFor: () => Effect.fail(new Unsent({ cause: "A browser has no device credential" })),
+      callBillingFor: () => Effect.fail(new Unsent({ cause: "A browser has no account session" })) }
   })
 }
 
@@ -163,35 +171,43 @@ function singleValuedQuery(params: URLSearchParams): Record<string, string> | un
   return query
 }
 
-/** The cloud on the phone as a `Remote`: one whole answer per request. The plugin streams nothing, so a stream is never sent. */
-function plugged(relay: Relay, wifi: WiFi.Shape): Remote {
+/** Send the owner’s reviewed request through the phone’s device-key custody. */
+function plugged(relay: Relay, wifi: WiFi.Shape): Omit<Account, "client" | "clientFor"> {
+  effect function send(request: HttpClientRequest.HttpClientRequest, binding: Pick<CloudRequest, "expectedCredentialId" | "expectedSessionCredentialId">): unknown!Failure {
+    if (request.body._tag !== "Empty" && request.body._tag !== "Uint8Array") {
+      throw new Unsent({ cause: "the phone relays only JSON to the cloud" })
+    }
+    const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
+    const body = text === "" ? undefined : parsed(text) catch effect (cause) => { throw new Unsent({ cause }) }
+    const query = singleValuedQuery(new URLSearchParams(UrlParams.toString(request.urlParams)))
+    if (query === undefined) throw new Unsent({ cause: "duplicate query parameters cannot be relayed" })
+    const headers = Object.fromEntries(Object.entries(request.headers).filter((one): one is [string, string] => typeof one[1] === "string"))
+    const sent = relayed(request.method, request.url, query, headers, body)
+    if (sent === undefined) throw new Unsent({ cause: `the phone relays no ${request.method} to the cloud` })
+    try networked(wifi)
+    const reply = timeout(tryPromise({
+      try: (signal) => relay.request({ ...sent, ...binding, signal }),
+      catch: (cause) => binding.expectedSessionCredentialId !== undefined && cause instanceof CloudRefused && cause.failure === "reauth-required"
+        ? refusal(428, undefined)
+        : undelivered(cause),
+    }), patience) catch effect (cause) => match (cause) {
+      when Unsent: throw cause;
+      when Refused: throw cause;
+      default: throw new Unreachable({ cause });
+    }
+    if (!replied(reply.status)) throw refusal(reply.status, reply.retryAfter)
+    return try parsed(new TextDecoder().decode(reply.body))
+  }
   return {
-    effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
-      if (request.body._tag !== "Empty" && request.body._tag !== "Uint8Array") {
-        throw new Unsent({ cause: "the phone relays only JSON to the cloud" })
-      }
-      const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
-      const body = text === "" ? undefined : parsed(text) catch effect (cause) => { throw new Unsent({ cause }) }
-      const query = singleValuedQuery(new URLSearchParams(UrlParams.toString(request.urlParams)))
-      if (query === undefined) throw new Unsent({ cause: "duplicate query parameters cannot be relayed" })
-      const headers = Object.fromEntries(Object.entries(request.headers).filter((one): one is [string, string] => typeof one[1] === "string"))
-      const sent = relayed(request.method, request.url, query, headers, body)
-      if (sent === undefined) throw new Unsent({ cause: `the phone relays no ${request.method} to the cloud` })
-      try networked(wifi)
-      const reply = timeout(tryPromise({ try: (signal) => relay.request({ ...sent, signal }), catch: undelivered }), patience) catch effect (cause) => match (cause) {
-        when Unsent: throw cause;
-        when Refused: throw cause;
-        default: throw new Unreachable({ cause });
-      }
-      if (!replied(reply.status)) throw refusal(reply.status, reply.retryAfter)
-      return try parsed(new TextDecoder().decode(reply.body))
-    },
+    call: (request) => send(request, {}),
+    callFor: (request, expectedCredentialId) => send(request, { expectedCredentialId }),
+    callBillingFor: (request, expectedSessionCredentialId) => send(request, { expectedSessionCredentialId }),
     events: () => Stream.fail(new Unsent({ cause: "the phone's cloud plugin streams nothing" })),
   }
 }
 
 /** fetch over the plugin, for eliza's client. An account that must sign in answers 401, as the cloud itself would; a phone Android says is offline, and any other refusal, is a failed fetch. */
-function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
+function relaying(relay: Relay, wifi: WiFi.Shape, expectedCredentialId?: CredentialId): typeof globalThis.fetch {
   return async (input, init) => {
     const { url, method, headers, body, signal } = asked(input, init)
     if (body === false || (body !== undefined && "form" in body)) {
@@ -215,7 +231,11 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
     if (await runPromise(offline(wifi))) throw new TypeError("the phone has no network")
     const deadline = boundedSignal(signal, relayTimeoutMs)
     try {
-      const reply = await relay.request(deadline.signal === undefined ? sent : { ...sent, signal: deadline.signal })
+      const reply = await relay.request({
+        ...sent,
+        ...(deadline.signal === undefined ? {} : { signal: deadline.signal }),
+        ...(expectedCredentialId === undefined ? {} : { expectedCredentialId }),
+      })
       const head = { etag: reply.etag, "content-type": reply.contentType, "retry-after": reply.retryAfter }
       return answer(reply.body as Uint8Array<ArrayBuffer>, reply.status, Object.fromEntries(Object.entries(head).filter((one): one is [string, string] => one[1] !== undefined)))
     } catch (cause) {
@@ -228,6 +248,28 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
   }
 }
 
+effect function openStripe(url: string, host: "checkout.stripe.com" | "invoice.stripe.com"): boolean!! {
+  const target = Effect.try(() => new URL(url)) catch () => undefined
+  if (target === undefined || target.origin !== "https://" + host || target.username || target.password
+    || (host === "invoice.stripe.com" && !target.pathname.startsWith("/i/"))) return false
+  return effect {
+    try tryPromise(() => client().openExternal({ url, environment: CLOUD_ENVIRONMENT }))
+    return true
+  } catch () => false
+}
+
+/** Stripe pages must be the exact checkout or invoice the authenticated Cloud answered. */
+export const openCloudCheckout = (url: string) => openStripe(url, "checkout.stripe.com")
+export const openCloudInvoice = (url: string) => openStripe(url, "invoice.stripe.com")
+
+/** Open the Google consent page returned by the authenticated Cloud. */
+export effect function openGoogleAuthorization(url: URL): boolean!! {
+  return effect {
+    try tryPromise(() => client().openExternal({ url: url.href, environment: CLOUD_ENVIRONMENT }))
+    return true
+  } catch () => false
+}
+
 /**
  * The cloud on the phone, through the `ElizaCloud` plugin of eliza's Android package: eliza's `cloudClient()` of
  * `@elizaos/os-bridges`, sent only while Android has not said the phone is offline.
@@ -235,16 +277,17 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
 export const relayedCloud = Layer.provide(Layer.effect(Cloud, effect {
   const wifi = try WiFi
   const relay = client()
-  return { ...plugged(relay, wifi), client: typed(relaying(relay, wifi)) }
+  return { ...plugged(relay, wifi), client: typed(relaying(relay, wifi)), clientFor: (credential: CredentialId) => typed(relaying(relay, wifi, credential)) }
 }), phoneWiFi)
 
 // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once"
 /**
  * What the phone answers the owner's tap on a mail sign-in control: eliza's `upgradeMailLease`, which the phone starts
- * only where it holds mail back for the lease, and refuses as `Rejected` anywhere else. A page with no sign-in plugin,
- * or any other failure to ask, is a phone that wants no such sign-in.
+ * only where it holds mail back for the lease, and refuses as `Rejected` anywhere else. A browser keeps its usual
+ * sign-in route directly. A phone with no sign-in plugin also keeps the usual route.
  */
 export effect function mailSignIn(): MailSignIn!! {
+  if (!native()) return "MailSignInNotWanted"
   return effect {
     const receipt = try tryPromise({ try: () => signInAccounts().upgradeMailLease({ environment: CLOUD_ENVIRONMENT }), catch: (cause) => new MailSignInUnasked({ cause }) })
     return receipt.verdict.kind === "SignedInAs" ? "SignedInForMail" : "MailSignInEnded"

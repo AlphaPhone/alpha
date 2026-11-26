@@ -3,7 +3,7 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn.ts";
 import { useLayerSurface } from "../lib/layers.tsx";
-import { field, floatingPanel, floatingRow } from "../lib/styles.ts";
+import { choiceField, floatingPanel, floatingRow } from "../lib/styles.ts";
 
 export type SelectProps = ComponentProps<typeof SelectPrimitive.Root>;
 export type SelectTriggerProps = Omit<ComponentProps<typeof SelectPrimitive.Trigger>, "children"> & {
@@ -26,7 +26,7 @@ export function Select(props: SelectProps) {
 /** The field that shows the choice and opens the list. Name it with a `Label` or `aria-label`. */
 export function SelectTrigger({ placeholder, invalid = false, className, ...props }: SelectTriggerProps) {
   return (
-    <SelectPrimitive.Trigger aria-invalid={invalid || undefined} className={cn(field, "flex h-12 items-center justify-between gap-2 text-left data-placeholder:text-muted-foreground", className)} {...props}>
+    <SelectPrimitive.Trigger aria-invalid={invalid || undefined} className={cn(choiceField, "flex h-12 items-center justify-between gap-2 text-left data-placeholder:text-muted-foreground", className)} {...props}>
       <span className="truncate">
         <SelectPrimitive.Value placeholder={placeholder} />
       </span>

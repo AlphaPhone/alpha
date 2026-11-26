@@ -265,7 +265,7 @@ pure def goBack(m: Maps): Stepped =
         origins: cleared(m.origins), originsFound: 0, guideNotice: Quiet, quiet: false },
       out: finderStops(m.link) }
   else if (m.place != 0)
-    { state: { ...dropped, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Full else Peek,
+    { state: { ...dropped, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Half else Peek,
         review: voided(m.review), copyNotice: Uncopied, copying: false, startPlace: 0, origins: cleared(m.origins), originsFound: 0 }, out: List() }
   else { state: { ...dropped, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek, waitingProvider: false, pausing: false }, out: List() }
 ```
@@ -333,7 +333,7 @@ input.
 ```quint
 pure def canOpenSearch(m: Maps): bool = mode(m) == Browse and onScreen(m)
 
-pure def openSearch(m: Maps): Maps = { ...m, searching: true, sheet: Full }
+pure def openSearch(m: Maps): Maps = { ...m, searching: true, sheet: Half }
 
 pure def canSearch(m: Maps, query: str, chars: int): bool =
   mode(m) == Search and onScreen(m) and (query == "" or (fits(chars) and not(C::holding(m.link))))
@@ -503,7 +503,7 @@ pure def canHandOver(m: Maps, query: str, chars: int): bool =
   query != "" and fits(chars) and not(C::holding(m.link)) and m.trip.guidance == N::Stopped and onScreen(m)
 
 pure def handOver(m: Maps, query: str, chars: int): Stepped =
-  val opened = { ...m, searching: true, query: "", search: cleared(m.search), place: 0, directions: false, sheet: Full,
+  val opened = { ...m, searching: true, query: "", search: cleared(m.search), place: 0, directions: false, sheet: Half,
       trip: N::forgetRoute(m.trip), copyNotice: Uncopied, copying: false, renaming: false, startPlace: 0,
       origins: cleared(m.origins), originsFound: 0, question: NoQuestion, review: voided(m.review), details: cleared(m.details) }
   search(opened, query, chars)

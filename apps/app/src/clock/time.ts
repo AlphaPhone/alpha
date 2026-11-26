@@ -173,12 +173,17 @@ export function formatAlarmCountdown(fireAtMs: number, nowMs: number): string {
   return `Rings in ${parts.join(" ")}`;
 }
 
+function durationParts(totalSeconds: number) {
+  return {
+    hours: Math.floor(totalSeconds / 3600),
+    minutes: Math.floor((totalSeconds % 3600) / 60),
+    seconds: totalSeconds % 60,
+  };
+}
+
 /** Format timer milliseconds as `MM:SS` or `H:MM:SS` (ceiling to seconds for countdowns). */
 export function formatTimerDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+  const { hours, minutes, seconds } = durationParts(Math.max(0, Math.ceil(ms / 1000)));
   return hours > 0 ? `${hours}:${pad2(minutes)}:${pad2(seconds)}` : `${pad2(minutes)}:${pad2(seconds)}`;
 }
 
@@ -186,10 +191,7 @@ export function formatTimerDuration(ms: number): string {
 export function formatStopwatch(ms: number): string {
   const clamped = Math.max(0, Math.floor(ms));
   const centis = Math.floor((clamped % 1000) / 10);
-  const totalSeconds = Math.floor(clamped / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+  const { hours, minutes, seconds } = durationParts(Math.floor(clamped / 1000));
   return hours > 0
     ? `${hours}:${pad2(minutes)}:${pad2(seconds)}.${pad2(centis)}`
     : `${pad2(minutes)}:${pad2(seconds)}.${pad2(centis)}`;

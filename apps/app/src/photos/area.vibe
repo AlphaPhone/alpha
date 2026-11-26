@@ -31,7 +31,7 @@ export const back = effect {
   const trashed = try Trash.Machine
   const bin = try trashed.get()
   if (bin.open) {
-    const event: Trash.Event = bin.prepared.length !== 0 ? { type: "cancelForever" }
+    const event: Trash.Event = Trash.canCancelForever(bin, "Owner") ? { type: "cancelForever" }
       : bin.selecting ? { type: "endSelect" } : { type: "leave" }
     return Exit.isSuccess(try exit(trashed.send(event, "Owner")))
   }

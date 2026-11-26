@@ -3,9 +3,8 @@ import { SearchX } from "lucide-react";
 import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
 import { EmptyState } from "../EmptyState.tsx";
-import { ListGroup } from "../ListGroup.tsx";
-import { ListRow } from "../ListRow.tsx";
-import { SearchField } from "../SearchField.tsx";
+import { cn, focusRing } from "../../lib/cn.ts";
+import { Input } from "../Input.tsx";
 import { Skeleton } from "../Skeleton.tsx";
 
 export type AssistantSearchHit = {
@@ -45,20 +44,31 @@ export type AssistantSearchProps = Omit<ComponentProps<"div">, "children"> & {
  */
 export function AssistantSearch({ words, hits, status = "idle", blocked = false, onWordsChange, onMore, onOpenHit, ...props }: AssistantSearchProps) {
   return (
-    <div className="flex flex-col gap-3" {...props}>
-      <SearchField aria-label="Search chats" value={words} onValueChange={onWordsChange} />
+    <div className="flex flex-col gap-4" {...props}>
+      <Input type="search" aria-label="Search chats" placeholder="Search messages" value={words} onChange={(event) => onWordsChange(event.target.value)} className="rounded-action border-0 px-4 text-base leading-normal [&::-webkit-search-cancel-button]:hidden" />
       {blocked && hits.some((hit) => !hit.here) ? <Banner variant="info">Send or remove what you are writing to open another chat</Banner> : null}
       {hits.length ? (
-        <ListGroup surface="plain" aria-label="Results">
-          {hits.map((hit) => (
-            <ListRow key={hit.id} title={hit.snippet} detail={hit.when ? `${hit.chat} · ${hit.when}` : hit.chat} disabled={blocked && !hit.here} onClick={onOpenHit ? () => onOpenHit(hit.id) : undefined} />
-          ))}
-        </ListGroup>
+        <section aria-label="Results">
+          <div className="flex flex-col">
+            {hits.map((hit) => (
+              <button
+                key={hit.id}
+                type="button"
+                disabled={blocked && !hit.here}
+                onClick={onOpenHit ? () => onOpenHit(hit.id) : undefined}
+                className={cn(focusRing, "flex flex-col-reverse gap-1.5 border-b border-border py-4 text-left disabled:opacity-50")}
+              >
+                <span className="text-base break-words">{hit.snippet}</span>
+                <span className="text-sm text-muted-foreground">{hit.when ?? hit.chat}</span>
+              </button>
+            ))}
+          </div>
+        </section>
       ) : null}
       {status === "loading" ? <div role="status" aria-label="Searching chats" aria-busy className="flex flex-col gap-2"><Skeleton className="h-13" /><Skeleton className="h-13" /></div> : null}
       {status === "failed" ? <Banner variant="warn">Search did not finish</Banner> : null}
       {status === "loaded" && !hits.length ? <EmptyState icon={<SearchX />} title="Nothing found" /> : null}
-      {status === "loaded" && onMore ? <Button variant="ghost" onClick={onMore}>More</Button> : null}
+      {status === "loaded" && onMore ? <Button variant="ghost" className="w-full" onClick={onMore}>More results</Button> : null}
     </div>
   );
 }

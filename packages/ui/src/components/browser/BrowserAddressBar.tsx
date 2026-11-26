@@ -38,7 +38,7 @@ export function BrowserAddressBar({ leading, value, onValueChange, onSubmit, onC
           value={value} onChange={(event) => onValueChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") onCancel?.(); }}
           className="h-10.5 min-w-0 flex-1 border-0 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
         />
-        <Button variant="ghost" size="icon" aria-label="Clear address" onClick={() => { onValueChange(""); inputRef.current?.focus(); }}><X aria-hidden className="size-4.5" /></Button>
+        <Button variant="ghost" size="icon" aria-label="Clear address" className="h-13 w-11" onClick={() => { onValueChange(""); inputRef.current?.focus(); }}><X aria-hidden className="size-4.5" /></Button>
       </form>
       <Button variant="ghost" size="icon" aria-label="Cancel editing" className="h-13 w-11" onClick={onCancel} disabled={onCancel === undefined}><X aria-hidden className="size-5" /></Button>
     </header>

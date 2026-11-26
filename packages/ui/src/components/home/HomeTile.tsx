@@ -26,12 +26,12 @@ export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, 
   const activation = useLauncherPress(hold, onHold, onClick);
   return (
     <div data-home-cell="" className={cn("group/home-cell relative flex justify-center data-[home-dragging]:z-10", className)}>
-      <div className="relative">
+      <div className="relative w-full">
         <AppTile
           label={label}
           icon={icon}
           badge={editing ? undefined : badge}
-          className={cn(editing && "touch-none *:first:animate-wiggle *:first:motion-reduce:animate-none *:first:group-data-[home-dragging]/home-cell:animate-none")}
+          className={cn("w-full", editing && "touch-none *:first:animate-wiggle *:first:motion-reduce:animate-none *:first:group-data-[home-dragging]/home-cell:animate-none")}
           {...activation}
           {...props}
         />
@@ -41,7 +41,10 @@ export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, 
             aria-label={`Remove ${label}`}
             disabled={!onRemove}
             onClick={onRemove}
-            className={cn(focusRing, "absolute -top-4 -left-4 flex size-11 items-center justify-center rounded-full focus-visible:-outline-offset-focus disabled:opacity-50")}
+            className={cn(
+              focusRing,
+              "absolute -top-4 left-[calc(50%-3rem)] flex size-11 origin-[3rem_3rem] animate-wiggle items-center justify-center rounded-full focus-visible:-outline-offset-focus disabled:opacity-50 motion-reduce:animate-none group-data-[home-dragging]/home-cell:animate-none",
+            )}
           >
             <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-foreground text-background">
               <Minus className="size-3.5" />

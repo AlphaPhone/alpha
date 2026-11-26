@@ -34,6 +34,10 @@ public final class AlphaAgentService extends AgentService {
     RuntimeUpdatePause.beforeStart();
     synchronized (speechLock) {
       if (retiring) return;
+    }
+    AlphaLegacyAgentArchive.prepareLaunch(this, variables);
+    synchronized (speechLock) {
+      if (retiring) return;
       if (speech != null) {
         variables.put(SPEECH_SOCKET, speech.name());
         return;

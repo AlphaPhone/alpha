@@ -308,6 +308,29 @@ pure def canWithdraw(r: Request, by: Actor): bool = by == Device and (r.stage ==
 pure def withdraw(r: Request, by: Actor): Moved = finish(Withdrawn, { ...r, review: V::dismiss(r.review) })
 ```
 
+### A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it
+
+A text is reviewed in one card of two rows, as Sunday's v119 drew it. The
+first row says Review SMS, who the text goes to, the text exactly as it
+will be sent and the SIM it goes from, and ends in Send; the second says
+"Keep things as they are." and ends in Decline. Each row is one control:
+the owner's tap anywhere on the first row is the approval by touch, held to
+every rule of an approval above, and a tap anywhere on the second row is
+the owner's decline. A row takes a tap only while its event is allowed, so
+while the decision is being made both rows stay shown and neither can be
+pressed. A spoken "Send this text" finds the same first row.
+
+```quint
+type ReviewRow = TextRow | KeepRow
+
+pure def rowApproves(row: ReviewRow): bool = row == TextRow
+
+pure def rowTakesTheTap(row: ReviewRow, r: Request, clear: bool): bool =
+  r.ask == Text and (if (rowApproves(row)) canApprove(r, clear, false, Owner) else canDecline(r, Owner))
+
+pure def lawOnlyTheTextRowApproves(row: ReviewRow): bool = rowApproves(row) iff row != KeepRow
+```
+
 ### Only a text to a number the owner wrote is approved by voice, and only that text names the number at once
 
 ```quint

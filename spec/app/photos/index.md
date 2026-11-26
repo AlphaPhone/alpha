@@ -33,6 +33,13 @@ higher one. A browser's library consists of captures and images saved in
 that browser and needs no phone permission. It has the same Favorites,
 custom albums, selection and Recently deleted controls.
 
+As in the existing app, the Library is headed by the day each item was
+taken, counted back from Alpha's time in the owner's zone: "Today",
+"Yesterday", then the short weekday and date ("Sat, Oct 31", with the year
+when it is not this year) for the rest of the last 30 days, and the month
+and year ("October 2026") before that. An album and Recently deleted are not
+headed.
+
 ```quint
 import permission as P from "../../kit/permission"
 import read as R from "../../kit/read"
@@ -330,8 +337,9 @@ pure def sometimesOwnBeforeAsking(s: Photos): bool =
 
 ## Story: Browse the library
 
-> As the owner, I want to see my photos and albums, narrow them by
-> favourites, videos, people or a search, scroll on through them, change the thumbnail size, and be
+> As the owner, I want to see my photos and albums, find my favourites and
+> videos in their albums, see the Library as Alpha narrowed it and clear that,
+> scroll on through them, change the thumbnail size, and be
 > told when they are loading, empty, locked, or could not be read, with a
 > way to try again.
 
@@ -580,6 +588,9 @@ pure def alwaysSelectionIsListed(s: Photos): bool =
 
 ### Selection starts over a grid of items, toggles only items it lists, and has no limit
 
+Select all takes every item listed in that grid. When all are already
+selected, Deselect all clears the selection and keeps selection mode open.
+
 ```quint
 pure def canStartSelect(s: Photos, by: Actor): bool =
   by == Owner and unlocked(s) and showsItems(s) and s.rows.size() > 0 and not(s.selecting) and s.shelf.dialog == AL::NoDialog
@@ -594,7 +605,8 @@ pure def toggle(s: Photos, photo: int, by: Actor): Photos =
 
 pure def canSelectAll(s: Photos, by: Actor): bool = by == Owner and s.selecting and s.shelf.dialog == AL::NoDialog
 
-pure def selectAll(s: Photos, by: Actor): Photos = { ...s, selected: s.rows }
+pure def selectAll(s: Photos, by: Actor): Photos =
+  { ...s, selected: if (s.rows.subseteq(s.selected)) Set() else s.rows }
 
 pure def canEndSelect(s: Photos, by: Actor): bool = by == Owner and s.selecting and s.shelf.dialog == AL::NoDialog
 

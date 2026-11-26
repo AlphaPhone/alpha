@@ -32,7 +32,7 @@ pure val maxSnooze = 60
 
 pure val noAlarm: Alarm = {
   id: 0, hour: 0, minute: 0, daysMask: 0, enabled: false,
-  snoozeMinutes: 9, vibrate: true, phase: Idle, fireAt: 0,
+  snoozeMinutes: defaultSnooze, vibrate: true, phase: Idle, fireAt: 0,
   snoozeUntil: 0, missed: false, revision: 0,
 }
 
@@ -66,15 +66,21 @@ pure val idValues = Set(1, 2)
 pure val hourValues = Set(6, 7)
 pure val minuteValues = Set(0, 30)
 pure val daysMaskValues = Set(0, 62)
-pure val snoozeMinutesValues = Set(5, 9)
+pure val snoozeMinutesValues = Set(5, defaultSnooze)
 pure val fireAtValues = Set(1000, 2000)
 pure val nextFireAtValues = Set(700000, 900000)
 pure val nowValues = Set(500, 1000, 2000, 6000, 7000, 602000)
 pure val nextIssuedValues = Set(2, 3)
 pure val syncedValues = Set(
   List(),
-  List({ id: 1, hour: 7, minute: 30, daysMask: 62, enabled: true, snoozeMinutes: 9, vibrate: true, phase: Idle, fireAt: 1000, snoozeUntil: 0, missed: false, revision: 1 })
+  List({ id: 1, hour: 7, minute: 30, daysMask: 62, enabled: true, snoozeMinutes: defaultSnooze, vibrate: true, phase: Idle, fireAt: 1000, snoozeUntil: 0, missed: false, revision: 1 })
 )
+```
+
+### A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did
+
+```quint
+pure val defaultSnooze = 10
 ```
 
 ### Creating an alarm assigns the next id and schedules it enabled when under the limit

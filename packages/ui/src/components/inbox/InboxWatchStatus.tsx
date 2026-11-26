@@ -2,14 +2,16 @@ import { Mail } from "lucide-react";
 import { ListRow } from "../ListRow.tsx";
 import { StatusDot, type StatusDotProps } from "../StatusDot.tsx";
 
-const phases: Record<"off" | "watching" | "catchingUp" | "expired" | "stopped" | "noLongerAllowed", { status: StatusDotProps["status"]; label: string }> = {
+const phases = {
   off: { status: "off", label: "Off" },
+  waiting: { status: "busy", label: "Waiting to check" },
   watching: { status: "ok", label: "Watching" },
   catchingUp: { status: "busy", label: "Catching up" },
   expired: { status: "warn", label: "Missed earlier mail" },
+  retrying: { status: "warn", label: "Will try again" },
   stopped: { status: "error", label: "Stopped" },
   noLongerAllowed: { status: "error", label: "No longer allowed" },
-};
+} satisfies Record<string, { status: StatusDotProps["status"]; label: string }>;
 
 export type InboxWatchStatusProps = {
   /** Whether new mail is noticed, is being caught up on, missed some after Google reset its history, or stopped, and why. */
@@ -18,6 +20,8 @@ export type InboxWatchStatusProps = {
   account?: string;
   /** When mail was last checked, already worded; left out before the first check. */
   checkedAt?: string;
+  /** Opens the phone's notification settings, when available. */
+  onSettings?: () => void;
 };
 
 /**
@@ -26,8 +30,8 @@ export type InboxWatchStatusProps = {
  *
  * @model spec/app/inbox/notices.md
  */
-export function InboxWatchStatus({ phase, account, checkedAt }: InboxWatchStatusProps) {
+export function InboxWatchStatus({ phase, account, checkedAt, onSettings }: InboxWatchStatusProps) {
   const { status, label } = phases[phase];
   const detail = [account, checkedAt && `Checked ${checkedAt}`].filter(Boolean).join(" · ");
-  return <ListRow title="New mail notices" detail={detail || undefined} leading={<Mail />} trailing={<StatusDot status={status} label={label} showLabel />} />;
+  return <ListRow title="New mail notices" detail={detail || undefined} leading={<Mail />} trailing={<StatusDot status={status} label={label} showLabel />} onClick={onSettings} />;
 }

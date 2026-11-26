@@ -38,8 +38,8 @@ export const meta: ComponentMeta<SettingsActivityPageProps> = {
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Decline" }));
       await userEvent.click(canvas.getByRole("button", { name: "Didn’t" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Conversations" }));
-      await expect([onDecline.mock.calls, onReconcile.mock.calls, onHandOver.mock.calls]).toEqual([[["1"]], [["2", false]], [["conversations"]]]);
+      await expect(canvas.queryByRole("button", { name: "Conversations" })).toBeNull();
+      await expect([onDecline.mock.calls, onReconcile.mock.calls, onHandOver.mock.calls]).toEqual([[["1"]], [["2", false]], []]);
     },
     "Needs restart": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRecover.mockClear();
@@ -49,13 +49,11 @@ export const meta: ComponentMeta<SettingsActivityPageProps> = {
       await expect(onRecover.mock.calls).toEqual([["restart"]]);
     },
     Reading: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      onRefresh.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Refresh actions" }), { pointerEventsCheck: 0 });
-      await expect(onRefresh.mock.calls.length).toBe(0);
+      await expect(within(canvasElement).queryByRole("button", { name: "Refresh phone actions" })).toBeNull();
     },
     "Nothing listed": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRefresh.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Refresh actions" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Refresh phone actions" }));
       await expect(onRefresh.mock.calls.length).toBe(1);
     },
     Development: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

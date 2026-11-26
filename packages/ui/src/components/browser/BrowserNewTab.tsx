@@ -29,7 +29,7 @@ export function BrowserNewTab({ private: privateTab = false, privateNotice, onSe
   return (
     <div className={cn(dockClearance, "flex flex-col items-center gap-7.5 px-6 pt-27.5")}>
       <span className="flex size-18 items-center justify-center rounded-full bg-secondary"><Globe aria-hidden className="size-7.5" /></span>
-      <h2 className="font-display text-title">{privateTab ? "New private tab" : "New tab"}</h2>
+      <h2 className="font-display text-title leading-row font-light">{privateTab ? "New private tab" : "New tab"}</h2>
       {privateTab && <PrivateNotice className="-mt-3.5 text-center">{privateNotice}</PrivateNotice>}
       <button type="button" aria-label="Search or type address" onClick={onSearch} disabled={onSearch === undefined}
         className={cn(focusRing, "flex min-h-14 w-full items-center gap-3 rounded-full bg-secondary px-5 text-body text-muted-foreground disabled:opacity-50")}>

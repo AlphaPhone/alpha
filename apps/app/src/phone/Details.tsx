@@ -1,5 +1,5 @@
 // spec/app/phone/details.md, "Story: See my SIM, carrier and number on the image"; spec/app/phone/details.md, "Story: Keep Alpha as my phone and SMS app"
-import { Alert, Banner, Button, ListGroup, ListRow, Spinner } from "@repo/ui";
+import { Alert, Banner, Button, ListGroup, ListRow, SettingsFactRow, Spinner } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import type { Line, Machine as DetailsMachine } from "../../gen/app__phone__details.effect.vibe";
 import { imeiElsewhere, simSummary } from "../../gen/app__phone__details.ts";
@@ -17,12 +17,12 @@ const voicemails = { VoicemailOn: "Set up", VoicemailNotSetUp: "Not set up", Voi
 function LineRows({ line }: { line: Line }) {
   return (
     <ListGroup heading={line.simName || line.carrier || `SIM ${line.slot + 1}`}>
-      <ListRow title="Carrier" trailing={line.carrier} />
-      <ListRow title="Number" trailing={line.number || "Not shown"} />
-      <ListRow title="Network" trailing={`${networks[line.network]}${line.roaming ? " · Roaming" : ""}`} />
-      <ListRow title="Signal" trailing={line.signal < 0 ? "Unknown" : `${line.signal} of 4`} />
-      {line.embedded && <ListRow title="eSIM" />}
-      {line.imei !== "" && <ListRow title="IMEI" trailing={line.imei} />}
+      <SettingsFactRow title="Carrier" reading={{ word: "reported", value: line.carrier }} />
+      <SettingsFactRow title="Number" reading={{ word: "reported", value: line.number || "Not shown" }} />
+      <SettingsFactRow title="Network" reading={{ word: "reported", value: `${networks[line.network]}${line.roaming ? " · Roaming" : ""}` }} />
+      <SettingsFactRow title="Signal" reading={{ word: "reported", value: line.signal < 0 ? "Unknown" : `${line.signal} of 4` }} />
+      {line.embedded && <SettingsFactRow title="eSIM" />}
+      {line.imei !== "" && <SettingsFactRow title="IMEI" reading={{ word: "reported", value: line.imei }} />}
     </ListGroup>
   );
 }
@@ -55,13 +55,13 @@ export function Details({ runtime }: DetailsProps) {
       {state.lines.map((line) => <LineRows key={line.slot} line={line} />)}
       {state.info.status === "Loaded" && (
         <ListGroup heading="Apps">
-          <ListRow title="Calls" trailing={state.holders.phoneAlpha ? "Alpha" : state.holders.phoneApp || "None"} />
+          <SettingsFactRow title="Calls" reading={{ word: "reported", value: state.holders.phoneAlpha ? "Alpha" : state.holders.phoneApp || "None" }} />
           {can({ type: "roleAsked", sms: false }) && <ListRow title="Make Alpha your phone app" onClick={() => void send({ type: "roleAsked", sms: false })} />}
-          <ListRow title="Texts" trailing={state.holders.smsAlpha ? "Alpha" : state.holders.smsApp || "None"} />
+          <SettingsFactRow title="Texts" reading={{ word: "reported", value: state.holders.smsAlpha ? "Alpha" : state.holders.smsApp || "None" }} />
           {can({ type: "roleAsked", sms: true }) && <ListRow title="Make Alpha your SMS app" onClick={() => void send({ type: "roleAsked", sms: true })} />}
-          <ListRow title="Voicemail" trailing={voicemails[state.voicemail]} />
+          <SettingsFactRow title="Voicemail" reading={{ word: "reported", value: voicemails[state.voicemail] }} />
           <ListRow title="Mobile network" detail="Manage SIM and mobile network in Android settings" onClick={() => openSettings("MobileNetworks")} />
-          {imeiElsewhere(state) && <ListRow title="IMEI" detail="Shown in Android's device status" onClick={() => openSettings("AboutPhone")} />}
+          {imeiElsewhere(state) && <SettingsFactRow title="IMEI" reading={{ word: "reported", value: "Shown in Android's device status" }} />}
         </ListGroup>
       )}
     </section>

@@ -5,18 +5,20 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Recovery from "../gen/app__startup__recovery.effect.vibe";
 import { App } from "../src/App.tsx";
+import { Machine as Access } from "../gen/app__startup__access.effect.vibe";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
 import { versions } from "../src/settings/build.ts";
-import { closeAll, later, open, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, openOver, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
-
-underAct();
-afterEach(closeAll);
+import { fakeWorld } from "./fakes/world.vibe";
 
 const react = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 
 describe("Startup recovery", () => {
+  underAct();
+  afterEach(closeAll);
   it("Shows recovery before the shell opens with the real version and Switch Home when launcher (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\")", async () => {
     const unavailable = Layer.effectContext<Platform, never, never>(Effect.die("unavailable startup service"));
     const alpha = boot(unavailable, []);
@@ -58,7 +60,7 @@ describe("Startup recovery", () => {
   it("Runs the resident startup recovery machine through failure and Switch Home (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\")", async () => {
     const world = { ...scene(), phone: true };
     world.launcher.launcher = true;
-    const { alpha } = await open(world);
+    const { alpha } = await open(world, only("home", "overlay"));
     await alpha.runtime.runPromise(Recovery.Machine.use((machine) => machine.send({ type: "breaks", side: "HomeSide", kind: "FailedToDraw" }, "Owner")));
     await until(alpha, alpha.runtime, Recovery.Machine, (s) => s.home.page === "Broken" && s.home.failure === "FailedToDraw");
     await alpha.runtime.runPromise(Recovery.Machine.use((machine) => machine.send({ type: "switchHome", launcher: true }, "Owner")));
@@ -66,4 +68,190 @@ describe("Startup recovery", () => {
     await until(alpha, alpha.runtime, Recovery.Machine, (s) => s.switch.status !== "Loading");
     expect(world.settings.opened.length).toBeGreaterThan(0);
   });
+});
+
+it("Holds native Home until the phone confirms the signed-in account (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
+  const world = { ...scene(), phone: true, signedIn: false, now: 1_700_000_000_000 };
+  const startEmail = vi.fn(() => Promise.resolve({ request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 600_000, resendAt: world.now + 60_000 }));
+  const verify = vi.fn((input: { attempt: number; code: string }) => {
+    if (input.code === "123456") {
+      world.signedIn = true;
+      return Promise.resolve({ request: 3, attempt: input.attempt, verdict: "signed-in-as", credentialId: world.voice.credentialId, google: "not-requested" });
+    }
+    return Promise.resolve({ request: 2, attempt: input.attempt, verdict: "try-again", retry: "wrong-code" });
+  });
+  world.voice.startupSignIn = { startEmail, verify };
+  underAct();
+  try {
+    localStorage.setItem("alpha:startup-permission-walkthrough:v1", JSON.stringify({ version: 4, status: "completed", step: 7 }));
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    await vi.waitFor(() => expect(document.querySelector('form[aria-label="Sign in with email"]')).toBeTruthy());
+    expect(button("Settings")).toBeUndefined();
+    expect(button("Back")).toBeUndefined();
+    const enter = async (selector: string, text: string) => {
+      const field = document.querySelector<HTMLInputElement>(selector)!;
+      await drawn(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, text);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    await enter('input[type="email"]', "owner@example.test");
+    await press("Send code");
+    await vi.waitFor(() => expect(document.querySelector('input[aria-label="Code"]')).toBeTruthy());
+    expect(startEmail).toHaveBeenCalledWith({ environment: "production", email: "owner@example.test" });
+    await enter('input[aria-label="Code"]', "654321");
+    await press("Verify");
+    await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain("Wrong code"));
+    expect(button("Settings")).toBeUndefined();
+    await enter('input[aria-label="Code"]', "123456");
+    await press("Verify");
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+    expect(verify).toHaveBeenCalledTimes(2);
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Shows native Access after sign-in and keeps the owner's place through restart (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
+  const world = { ...scene(), phone: true, signedIn: true };
+  world.settings.permissionStates.notifications = "prompt";
+  world.settings.permissionReplies.notifications = "denied";
+  world.settings.permissionStates.camera = "prompt";
+  world.settings.permissionReplies.camera = "granted";
+  const dialog = () => document.querySelector('[role="dialog"]');
+  const step = (number: number) => vi.waitFor(() => expect(dialog()?.textContent).toContain(`Step ${number} of 7`));
+  underAct();
+  try {
+    const first = await openOver(fakeWorld(world), only("home", "overlay"), true);
+    await step(1);
+    expect(button("Settings")).toBeUndefined();
+    expect(world.settings.permissionRequests).toEqual([]);
+    await drawn(() => first.alpha.runtime.runPromise(Layers.use((work) =>
+      work.send({ type: "openLayer", id: "covered-startup", kind: "DialogLayer", covers: true }))));
+    await vi.waitFor(() => expect(dialog()?.textContent ?? "").not.toContain("Step 1 of 7"));
+    expect(button("Settings")).toBeUndefined();
+    await hardware("back");
+    await step(1);
+    await hardware("back");
+    await step(1);
+    await vi.waitFor(() => expect(button("Allow")).toBeDefined());
+    await press("Allow");
+    await vi.waitFor(() => expect(world.settings.permissionRequests).toEqual(["notifications"]));
+    await vi.waitFor(() => expect(button("Skip")).toBeDefined());
+    await press("Skip");
+    await step(2);
+    await first.close();
+
+    world.settings.permissionStates.notifications = "prompt-with-rationale";
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    await step(2);
+    await vi.waitFor(() => expect(button("Skip")).toBeDefined());
+    await press("Skip");
+    await step(3);
+    await vi.waitFor(() => expect(button("Allow")).toBeDefined());
+    await press("Allow");
+    for (let number = 4; number <= 7; ++number) {
+      await step(number);
+      await vi.waitFor(() => expect(button("Skip")).toBeDefined());
+      await press("Skip");
+    }
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+    expect(dialog()).toBeNull();
+    expect(world.settings.permissionRequests).toEqual(["notifications", "camera"]);
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Stops the Alpha image Access walkthrough at its first ungranted permission (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
+  const world = { ...scene(), phone: true, image: true, signedIn: true };
+  world.settings.hostFacts.startupPermissionDefaults = true;
+  world.settings.permissionStates.notifications = "granted";
+  world.settings.permissionStates.camera = "prompt";
+  world.voice.permission = "granted";
+  underAct();
+  try {
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    const dialog = () => document.querySelector('[role="dialog"]');
+    await vi.waitFor(() => {
+      expect(dialog()?.textContent).toContain("Step 3 of 7");
+      expect(dialog()?.querySelector('[aria-current="step"]')?.textContent).toContain("Camera");
+    });
+    expect(button("Allow")).toBeDefined();
+    expect(button("Settings")).toBeUndefined();
+    expect(world.settings.permissionRequests).toEqual([]);
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Shows All set only for the account result that calls for it (spec/app/startup/access.md, \"Story: Hear that all is set\")", async () => {
+  const world = { ...scene(), phone: true, signedIn: true };
+  underAct();
+  try {
+    localStorage.setItem("alpha:startup-permission-walkthrough:v1", JSON.stringify({ version: 4, status: "completed", step: 7 }));
+    const { alpha } = await openOver(fakeWorld(world), only("home", "overlay"), true);
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+    const finishForNewAccount = () => drawn(() => alpha.runtime.runPromise(Access.use((walkthrough) => Effect.gen(function* () {
+      yield* walkthrough.send({ type: "signedOut" }, "Owner");
+      yield* walkthrough.send({ type: "welcome", created: true, now: world.now }, "Owner");
+    }))));
+    const heading = () => document.querySelector('[role="dialog"] h2');
+    await finishForNewAccount();
+    await vi.waitFor(() => expect(heading()?.textContent).toBe("All set"));
+    expect(heading()).toBe(document.activeElement);
+    expect(button("Settings")).toBeUndefined();
+    await press("Done");
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+
+    await finishForNewAccount();
+    await vi.waitFor(() => expect(heading()?.textContent).toBe("All set"));
+    await hardware("back");
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Returns from Android Wi-Fi settings to the sign-in chooser (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
+  const world = { ...scene(), phone: true, signedIn: false };
+  world.settings.connectivity = { online: false, validated: false, captivePortal: false, ssid: null };
+  underAct();
+  try {
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    const notice = () => document.querySelector('[aria-label="Sign-in connection"]');
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("You’re offline. Connect to Wi-Fi to sign in."));
+    expect(button("Send code")?.disabled).toBe(true);
+    expect(button("Settings")).toBeUndefined();
+    await press("Open Wi-Fi settings");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["wifi"]));
+    expect(notice()?.querySelector('[role="alert"]')).toBeNull();
+
+    world.settings.connectivity = { online: true, validated: false, captivePortal: true, ssid: "captive" };
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("Android couldn’t verify internet access."));
+    expect(button("Send code")?.disabled).toBe(false);
+
+    world.settings.facts.wifiActive = false;
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access."));
+    world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: null };
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("You can use mobile data or connect to Wi-Fi."));
+    expect(button("Send code")?.disabled).toBe(false);
+
+    world.settings.facts.wifiActive = true;
+    world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: "home" };
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()).toBeNull());
+    expect(button("Send code")?.disabled).toBe(false);
+    expect(button("Settings")).toBeUndefined();
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
 });

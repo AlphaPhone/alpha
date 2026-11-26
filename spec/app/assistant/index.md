@@ -39,8 +39,8 @@ Ask Alpha is raised to and every view it opens to the [shell](../shell/).
 The send is an [attempt](../../kit/attempt.md): recorded while its
 attachments are stored, sent, then confirmed once the agent is heard,
 refused when nothing left the phone, or unknown. A message typed in the
-composer comes under the composer's hold number; a prompt given by a card
-or another app has none. A reply is silent, streaming, complete, stopped by
+composer comes under the composer's hold number. A prompt from a card or another app
+has none and keeps its own reviewed files. A reply is silent, streaming, complete, stopped by
 the owner or broken off.
 
 ```quint
@@ -113,6 +113,7 @@ type Effect =
   | Reread({ turn: int, recheck: int })
   | Arrived({ recorded: bool })
   | Navigate({ turn: int, view: S::View })
+  | NavigateHome({ turn: int })
   | NavigateFiles({ turn: int, source: List[S::View], panel: S::Detent, route: int })
   | Navigated({ turn: int, opened: bool })
 type Moved = { state: Conversation, out: List[Effect] }
@@ -149,7 +150,7 @@ pure val holdValues = Set(0, 1, 2, 3)
 pure val promptValues = Set(0, 1, 2)
 pure val attachmentsValues = Set(0, 2)
 pure val dayValues = Set(0, 3)
-pure val showingValues = Set(Home).union(Set(App({ view: S::Calendar }))).union(Set(App({ view: S::Notes })))
+pure val showingValues = Set(Home).union(Set(App({ view: S::Calendar }))).union(Set(App({ view: S::Notes }))).union(Set(App({ view: S::Contacts })))
 pure val viewValues = Set(S::Calendar, S::Notes)
 pure val sourceValues = Set(List(), List(S::Calendar), List(S::Notes), List(S::Notes, S::Calendar), List(S::Files))
 pure val panelValues = Set(S::Bar, S::Sheet, S::Full)
@@ -224,7 +225,8 @@ pure def alwaysTheScreenIsToldOnlyToAnAgentThatTakesIt(c: Conversation): bool =
 ### A message is asked when the agent can be reached, the screen may be sent and no turn is in flight
 
 Asking never looks at what the composer holds. A message with attachments
-first has them stored; only a typed message carries attachments.
+first has them stored. The selected Contact can send its own reviewed files
+without taking anything from the ordinary composer.
 
 ```quint
 pure def askable(c: Conversation): bool = c.ready and not(c.context.sensitive) and not(inFlight(c.turn))
@@ -244,6 +246,26 @@ pure def ask(c: Conversation, hold: int, prompt: int, attachments: int): Moved =
   { state: asked,
     out: (if (attachments > 0) List(Upload({ ticket: ticket, attachments: attachments })) else List(post(ticket, asked)))
       .concat(if (prompt > 0) List(Prompted({ prompt: prompt, taken: true })) else List()) }
+```
+
+### A selected Contact can send the files its owner reviewed for that Contact
+
+The Contact keeps a separate draft. Confirming a choice only adds the files to
+that Contact. Pressing Send starts the same attachment storage and turn as the
+ordinary composer, with the Contact's current screen and its own prompt.
+
+```quint
+pure def selectedContact(c: Conversation): bool =
+  val shown = c.context.showing
+  c.context.selected and match shown { | Home => false | App(a) => a.view == S::Contacts }
+
+pure def canAskContactFiles(c: Conversation, prompt: int, attachments: int): bool =
+  askable(c) and selectedContact(c) and prompt > 0 and attachments > 0
+
+pure def askContactFiles(c: Conversation, prompt: int, attachments: int): Moved = ask(c, 0, prompt, attachments)
+
+pure def sometimesReviewedContactFilesWaitToBePosted(c: Conversation): bool =
+  selectedContact(c) and c.turn.hold == 0 and c.turn.attachments > 0 and c.turn.send.outcome == A::Recorded
 ```
 
 ### A message that cannot be asked is given back at once: a typed one to the composer, a card's prompt to its card
@@ -271,7 +293,7 @@ pure def stepEveryMessageAskedIsPostedOnce(before: Conversation, via: str, after
         and p.context == after.context and p.told == after.observing and not(p.context.sensitive)
     | _ => true
   })
-    and (via == "ask" implies after.turn.send.id == before.turn.send.id + 1)
+    and ((via == "ask" or via == "askContactFiles") implies after.turn.send.id == before.turn.send.id + 1)
 ```
 
 ### Every message and card prompt offered is taken or given back, once
@@ -279,7 +301,7 @@ pure def stepEveryMessageAskedIsPostedOnce(before: Conversation, via: str, after
 ```quint
 pure def stepEveryAskIsAnswered(before: Conversation, via: str, after: Conversation, out: List[Effect]): bool =
   out.every(e => match e {
-    | Prompted(p) => (via == "ask" and p.taken) or (via == "decline" and not(p.taken) and after == before)
+    | Prompted(p) => ((via == "ask" or via == "askContactFiles") and p.taken) or (via == "decline" and not(p.taken) and after == before)
     | _ => true
   })
     and (via == "decline" implies (after == before and out.length() == 1))
@@ -387,11 +409,15 @@ pure def alwaysAReplyIsAwaitedOnlyFromAnAgentInReach(c: Conversation): bool =
   inFlight(c.turn) implies c.ready
 ```
 
-### Only a typed message carries attachments
+### Only the held composer or a selected Contact starts a message with attachments
 
 ```quint
-pure def alwaysOnlyATypedMessageCarriesAttachments(c: Conversation): bool =
-  c.turn.attachments >= 0 and (c.turn.attachments > 0 implies c.turn.hold > 0)
+pure def alwaysAttachmentCountsAreNonnegative(c: Conversation): bool = c.turn.attachments >= 0
+
+pure def stepAttachmentsOnlyComeFromTheHeldComposerOrTheSelectedContact(before: Conversation, via: str, after: Conversation): bool =
+  (after.turn.send.id > before.turn.send.id and after.turn.attachments > 0) implies
+    ((via == "ask" and after.turn.hold > 0) or
+      (via == "askContactFiles" and after.turn.hold == 0 and selectedContact(before)))
 ```
 
 ### A turn that has ended keeps its outcome
@@ -489,6 +515,42 @@ pure def sometimesAReplyBreaksOff(c: Conversation): bool = c.turn.reply == Broke
 pure def sometimesTheAgentIsAwayWithACheckToDo(c: Conversation): bool = not(c.ready) and c.check == LookLater
 ```
 
+### Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it
+
+The first reply after opening Alpha should come as fast as the second, so
+Alpha asks the agent to warm its model (`POST /api/turns/warm`, eliza's
+`spec/agent/conversation/planning.md`) when the owner may talk soon: when
+Ask Alpha first loads at launch, each time Alpha returns to the
+foreground, each time the phone's sign-in settles on an account, and each
+time Ask Alpha leaves its bar for typing, the sheet or the full screen.
+This warm-up is the only one that asks the agent: a spoken turn of the
+enrolled phone is planned with the same tools as a typed one, so Talk's
+own warm-up warms speech and its Cloud relay ([voice](../voice/index.md))
+and leaves the agent to this one, and no other control asks for it.
+Every trigger is gated alike: it asks only when the agent's status says it can answer
+(signed in, or on a key of the owner's, and not blocked) and no sensitive
+screen shows, where no message is sent either, and with the enrolled
+device's headers, so the warm-up builds the tools this phone's turns are
+offered; a warm-up that finds the device not yet enrolled shares the one
+enrollment a message would wait for, never a second. The agent keeps the
+warm-ups at least four minutes apart and pays for nothing more, so a
+warm-up asked without this phone's headers would take that slot with a
+prompt no turn of this phone sends; the
+warm-up is detached and bounded as a whole, never holds the screen, and
+its answer and any failure are dropped without a word.
+
+```quint
+type WarmTrigger = Launched | Foreground | SignedIn | Raised
+pure def raisedFromTheBar(before: S::Detent, after: S::Detent): bool = before == S::Bar and after != S::Bar
+pure def asksWarmUp(trigger: WarmTrigger, canRespond: bool, sensitive: bool): bool = canRespond and not(sensitive)
+pure def lawEveryTriggerIsGatedAlike(trigger: WarmTrigger, other: WarmTrigger, canRespond: bool, sensitive: bool): bool =
+  asksWarmUp(trigger, canRespond, sensitive) iff asksWarmUp(other, canRespond, sensitive)
+pure def lawAnAgentThatCannotAnswerIsNeverWarmed(trigger: WarmTrigger, sensitive: bool): bool = not(asksWarmUp(trigger, false, sensitive))
+pure def lawNoWarmUpOverASensitiveScreen(trigger: WarmTrigger, canRespond: bool): bool = not(asksWarmUp(trigger, canRespond, true))
+pure def lawEveryRaiseFromTheBarIsATrigger(after: S::Detent): bool = raisedFromTheBar(S::Bar, after) iff after != S::Bar
+pure def lawMovingAboveTheBarIsNoTrigger(before: S::Detent, after: S::Detent): bool = before != S::Bar implies not(raisedFromTheBar(before, after))
+```
+
 ## Story: Stop a reply
 
 > As the owner, I want Stop reply to end the turn at once, to take back a
@@ -563,13 +625,33 @@ pure def checkForReply(c: Conversation): Moved =
 
 ### The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later
 
-A reply still unfinished counts as stopped only when the agent confirmed
-the abort. A read that fails says to look later. A reply that finished
-anyway is read again into the conversation showing, and the composer is
-told whether the message was recorded.
+The read finds the exact owner's message by the send key in its original
+conversation. Only the reply named in that turn's receipt shows that the
+reply finished anyway. An adjacent reply without that evidence may belong
+to another turn, such as a scheduled trigger. A missing reply or an exact
+aborted reply counts as stopped only when the agent confirmed the abort.
+A read that fails, an unmatched reply, or a bounded page that cannot settle
+the check says to look later. A reply that finished anyway is read again
+into the conversation showing, and the composer is told whether the message
+was recorded.
 
 ```quint
 type Found = Ended | Unended | Unrecorded | Unread
+type HistoryAnswer = MissingReply | MatchedReply | MatchedAbort | UnknownReply
+type HistoryEvidence = MissingMessage({ complete: bool }) | RecordedMessage({ answer: HistoryAnswer })
+pure val evidenceValues = Set(
+  MissingMessage({ complete: true }), MissingMessage({ complete: false }),
+  RecordedMessage({ answer: MissingReply }), RecordedMessage({ answer: MatchedReply }),
+  RecordedMessage({ answer: MatchedAbort }), RecordedMessage({ answer: UnknownReply }))
+pure def observedHistory(evidence: HistoryEvidence): Found = match evidence {
+  | MissingMessage(row) => if (row.complete) Unrecorded else Unread
+  | RecordedMessage(row) =>
+      if (row.answer == MatchedReply) Ended
+      else if (row.answer == UnknownReply) Unread
+      else Unended
+}
+pure def lawOnlyTheExactHistoryReplyFinishes(evidence: HistoryEvidence): bool =
+  observedHistory(evidence) == Ended iff evidence == RecordedMessage({ answer: MatchedReply })
 
 pure def canReconcile(c: Conversation, ticket: int): bool = R::canAnswer(c.recheck, ticket)
 
@@ -715,7 +797,9 @@ pure def told(showing: Showing, zone: str, day: int, selected: bool, sensitive: 
 
 A sensitive screen is the passwords view, a password surface in Settings,
 Settings' Carrier & SIM setup and Phone pages, a locked or secure screen, a
-screen that is off, a hidden page, and the agent connection dialog.
+screen that is off, a hidden page, the agent connection dialog, and any
+Telegram or Slack sign-in, verification code, two-factor password, QR
+login, or OAuth consent screen.
 
 ```quint
 pure def lawASensitiveScreenTellsNothingOfItself(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, section: P::Page, revision: int): bool =
@@ -785,6 +869,22 @@ pure def navigate(c: Conversation, ticket: int, view: S::View): Moved =
   { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view })) }
 ```
 
+### A complete reply may take the owner Home, once, as it may open a view
+
+The agent names Home as it names any view (`spec/agent/index.md`, "The
+launch names Home and every Alpha app but Notes and Browser as a view the
+agent may show, by the id the phone opens it by"). The phone claims it once for the
+turn, on the same terms, and asks the shell to go Home.
+
+```quint
+pure def canNavigateHome(c: Conversation, ticket: int): bool =
+  ticket == c.turn.send.id and c.turn.reply == Complete and c.turn.revision == c.context.revision
+    and not(c.context.sensitive) and c.opening.id < ticket
+
+pure def navigateHome(c: Conversation, ticket: int): Moved =
+  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(NavigateHome({ turn: ticket })) }
+```
+
 ### An explicit Files continuation opens only from the same app trail and Ask Alpha panel
 
 The completed turn names its source trail and panel in the shell request.
@@ -824,6 +924,8 @@ pure def navigated(c: Conversation, ticket: int, opened: bool): Moved =
 pure def stepAViewIsOpenedOncePerTurn(before: Conversation, via: str, after: Conversation, out: List[Effect]): bool =
   out.every(e => match e {
     | Navigate(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
+        and not(after.context.sensitive) and after.turn.revision == after.context.revision
+    | NavigateHome(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
         and not(after.context.sensitive) and after.turn.revision == after.context.revision
     | NavigateFiles(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
         and not(after.turn.stopping) and not(after.context.sensitive) and after.turn.revision == after.context.revision

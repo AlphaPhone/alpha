@@ -237,7 +237,8 @@ pure def lawAPeerThatDoesNotTakeTheScreenGetsNoDay(observed: bool, onCalendar: b
 
 Each turn of a voice conversation reads the screen again when it is sent:
 the observation with its day, location and selected record, the Browser
-page beside it, the direct-request mode of approvals, and, from a screen
+page beside it, the direct-request mode of approvals (for Files filter and
+open only, since a spoken turn shows no review card), and, from a screen
 that is not sensitive, the claim of a view the agent prepares for it. Voice
 opens that view as it opens any screen it is asked for, and a saved note
 the owner names aloud opens as one named in writing would ([Notes](../notes/index.md),
@@ -259,33 +260,52 @@ pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
     and not(carries(source, ViewClaim, false, direct))
 ```
 
-### A spoken request about the open document attaches it for that turn
+### A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it
 
-When Files is showing a readable text document and the owner explicitly
-asks aloud about this file or the open document, Alpha attaches the text
-that Files confirmed for that same preview and send. An ordinary spoken or
-typed turn can name only the opaque selection. Secret text, an unreadable
-file, and a file whose selection or contents changed supply no attachment.
-The file belongs only to the spoken turn and does not enter the typed draft.
+An agent older than the direct-request mode a turn asks for refuses the
+whole turn as an invalid voice view context, before it records the owner's
+words. The turn is then sent once more, the same in every other part,
+without the mode, so it is answered with no direct action; any other
+refusal stands.
 
 ```quint
-type OpenDocumentTurn = { filesShowing: bool, readable: bool, explicitlyRequested: bool, sensitive: bool, currentTurn: bool }
+type TurnAnswer = TurnAccepted | ContextRefused | OtherRefusal
+pure def resent(answer: TurnAnswer, askedDirect: bool): bool = askedDirect and answer == ContextRefused
+pure def lawOnlyAContextRefusalOfADirectTurnIsResent(answer: TurnAnswer, askedDirect: bool): bool =
+  resent(answer, askedDirect) implies (askedDirect and answer == ContextRefused)
+pure def lawATurnWithoutTheModeIsNeverResent(answer: TurnAnswer): bool = not(resent(answer, false))
+```
+
+### A turn asked while Files shows a readable document attaches it for that turn
+
+When Files is showing a readable text document, each turn the owner asks,
+typed or spoken, takes with it the text that Files confirmed for that same
+preview and send, and the agent decides whether the question is about it;
+the owner's words are never matched to decide it. Secret text, an
+unreadable file, a file larger than a chat attachment may be, and a file
+whose selection or contents changed supply no attachment, and a sensitive
+screen sends none. The file belongs only to that turn and does not enter
+the typed draft.
+
+```quint
+type OpenDocumentTurn = { filesShowing: bool, readable: bool, sensitive: bool, currentTurn: bool }
 
 pure val docValues = Set(
-  { filesShowing: true, readable: true, explicitlyRequested: true, sensitive: false, currentTurn: true },
-  { filesShowing: true, readable: true, explicitlyRequested: false, sensitive: false, currentTurn: true },
-  { filesShowing: true, readable: false, explicitlyRequested: true, sensitive: false, currentTurn: true },
-  { filesShowing: false, readable: true, explicitlyRequested: true, sensitive: false, currentTurn: true },
-  { filesShowing: true, readable: true, explicitlyRequested: true, sensitive: true, currentTurn: true },
-  { filesShowing: true, readable: true, explicitlyRequested: true, sensitive: false, currentTurn: false },
+  { filesShowing: true, readable: true, sensitive: false, currentTurn: true },
+  { filesShowing: false, readable: true, sensitive: false, currentTurn: true },
+  { filesShowing: true, readable: false, sensitive: false, currentTurn: true },
+  { filesShowing: true, readable: true, sensitive: true, currentTurn: true },
+  { filesShowing: true, readable: true, sensitive: false, currentTurn: false },
 )
 
 pure def sendsOpenDocument(source: Source, doc: OpenDocumentTurn): bool =
-  source == Spoken and doc.filesShowing and doc.readable and doc.explicitlyRequested and not(doc.sensitive) and doc.currentTurn
+  doc.filesShowing and doc.readable and not(doc.sensitive) and doc.currentTurn
 
-pure def lawAnOpenDocumentNeedsItsCurrentSpokenRequest(source: Source, doc: OpenDocumentTurn): bool =
-  sendsOpenDocument(source, doc) implies
-    (source == Spoken and doc.filesShowing and doc.readable and doc.explicitlyRequested and not(doc.sensitive) and doc.currentTurn)
+pure def lawAnOpenDocumentNeedsFilesShowingItReadableOnACurrentTurn(source: Source, doc: OpenDocumentTurn): bool =
+  sendsOpenDocument(source, doc) implies (doc.filesShowing and doc.readable and not(doc.sensitive) and doc.currentTurn)
+
+pure def lawATypedAndASpokenTurnTakeTheSameDocument(doc: OpenDocumentTurn): bool =
+  sendsOpenDocument(Typed, doc) == sendsOpenDocument(Spoken, doc)
 ```
 
 ## Story: Let my agent read the page I have open in Browser
@@ -315,6 +335,44 @@ pure def lawASensitiveScreenSendsNoPage(handed: bool, peer: Peer): bool = not(se
 pure def lawOffBrowserNoPageIsSent(handed: bool, peer: Peer): bool = not(sendsPage(true, false, handed, peer))
 
 pure def lawAPageBrowserWithheldIsNeverSent(peer: Peer): bool = not(sendsPage(true, true, false, peer))
+```
+
+## Story: Let my agent see the Telegram or Slack chat I have open
+
+> As the owner, when I ask about the Telegram chat or Slack channel or
+> thread I have open, I want my agent to see only a bounded snapshot of that
+> conversation when I allowed it, never while signing in or entering a code
+> or password, and never once I turned that share off.
+
+### A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer
+
+Telegram and Slack each own what they hand over: bounded recent messages
+and non-secret draft metadata, stripped of every code, password, QR token,
+OAuth secret and session token. When the screen is sensitive, the session
+is not authenticated, the matching privacy share (`TelegramContext` or
+`SlackContext`) is off or unread, or another app is in front, nothing of
+the chat leaves the phone.
+
+```quint
+type MessagingApp = NoMessaging | OnTelegram | OnSlack
+
+pure def asksForMessagingContext(observed: bool, app: MessagingApp, authenticated: bool, shareAllowed: bool): bool =
+  observed and app != NoMessaging and authenticated and shareAllowed
+
+pure def sendsMessagingContext(observed: bool, app: MessagingApp, authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  asksForMessagingContext(observed, app, authenticated, shareAllowed) and handed and peer.takes
+
+pure def lawASensitiveScreenSendsNoMessagingContext(app: MessagingApp, authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(false, app, authenticated, shareAllowed, handed, peer))
+
+pure def lawOffMessagingNoMessagingContextIsSent(authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, NoMessaging, authenticated, shareAllowed, handed, peer))
+
+pure def lawUnauthenticatedSendsNoMessagingContext(app: MessagingApp, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, app, false, shareAllowed, handed, peer))
+
+pure def lawDisallowedShareSendsNoMessagingContext(app: MessagingApp, authenticated: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, app, authenticated, false, handed, peer))
 ```
 
 ## Story: Let my agent see what Maps shows when I ask about it

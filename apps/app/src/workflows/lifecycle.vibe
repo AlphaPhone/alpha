@@ -11,7 +11,7 @@ import { ownerAt } from "../platform/owner.vibe"
 import { ask } from "../platform/remote.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
-import { PromptSchema, WorkflowsApi } from "./api.vibe"
+import { PromptSchema, WorkflowsApi, sendChangeWhenReady } from "./api.vibe"
 import { type WorkflowRow, Rows, refresh } from "./list.vibe"
 
 interface Definition {
@@ -238,7 +238,7 @@ const focus = applying(
   },
 )
 
-const sending = following(Model.Machine, Model.canSendChange, Model.Machine, (ready): Event | undefined => (ready ? { type: "sendChange" } : undefined))
+const sending = following(Model.Machine, Model.canSendChange, Model.Machine, sendChangeWhenReady)
 
 export effect function reviewName(row: number, proposed: string, unfinished: boolean, interrupted: boolean): void!!(Model.Machine | DefinitionWords) {
   const machine = try Model.Machine

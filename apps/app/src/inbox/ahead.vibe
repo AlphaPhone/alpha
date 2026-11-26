@@ -1,0 +1,124 @@
+// spec/app/inbox/index.md, "Inbox reads ahead only from a fresh list on screen"
+import type { MailCard, MailMessage } from "@elizaos/cloud"
+import { mailReadAhead } from "@elizaos/plugin-inbox-client"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Device } from "../platform/device.vibe"
+import { started, together } from "../runtime/reactor.vibe"
+import { Mail, type SearchPage, bodyAt, page } from "./gmail.vibe"
+
+interface Prepared<A> {
+  start(key: string, part: string, read: A!unknown): void!!
+  take(key: string, part: string): (A | undefined)!!
+  pause(key: string): void!!
+  stop(): void!!
+}
+
+effect function prepared<A>(): Prepared<A>!! {
+  const cache = try mailReadAhead<A | undefined, never>()
+  let active: { key: string; part: string; paused: boolean; stopped: Deferred.Deferred<void> } | undefined
+  effect function stop(): void!! {
+    const previous = active
+    if (previous === undefined) return
+    active = undefined
+    try Deferred.succeed(previous.stopped, undefined)
+    try cache.invalidate()
+  }
+  return {
+    stop,
+    take: (key, part) => active?.key === key && active.part === part && !active.paused ? cache.take(key, part) : succeed(undefined),
+    effect pause(key) {
+      const previous = active
+      if (previous === undefined) return
+      if (previous.key !== key) {
+        try stop()
+        return
+      }
+      if (!previous.paused) active = { ...previous, paused: true }
+    },
+    effect start(key, part, read) {
+      if (active?.key === key && active.part === part) {
+        if (active.paused) active = { ...active, paused: false }
+        return
+      }
+      try stop()
+      const began = try Deferred.make<void>()
+      const stopped = try Deferred.make<void>()
+      active = { key, part, paused: false, stopped }
+      const answer = Effect.andThen(Deferred.await(began), Effect.orElseSucceed(read, () => undefined))
+      try cache.prepare(key, part, Effect.raceFirst(answer, Effect.as(Deferred.await(stopped), undefined)))
+      try Deferred.succeed(began, undefined)
+    },
+  }
+}
+
+export service InboxAhead {
+  readonly page: Prepared<SearchPage>
+  readonly bodies: readonly [Prepared<MailMessage>, Prepared<MailMessage>]
+}
+
+const preparedReads = Layer.effect(InboxAhead, effect {
+  const next = try acquireRelease(prepared<SearchPage>(), (read) => read.stop())
+  const first = try acquireRelease(prepared<MailMessage>(), (read) => read.stop())
+  const second = try acquireRelease(prepared<MailMessage>(), (read) => read.stop())
+  return { page: next, bodies: [first, second] as const }
+})
+
+export function aheadKey(state: Inbox.Mailbox, mail: Mail.Shape, ticket?: number): string {
+  const { account, folder, query } = state.selected
+  return JSON.stringify([mail.generation(account), mail.grant(account), Inbox.linkOf(state.connected, account).credential, account, folder, query, ticket])
+}
+
+export const bodyPart = (card: MailCard): string => JSON.stringify([card.id, card.metadata.historyId])
+
+const watching = started(effect {
+  const list = try Inbox.Machine
+  const drafts = try Drafts
+  const device = try Device
+  const shell = try Shell
+  const cloud = try Cloud
+  const mail = try Mail
+  const ahead = try InboxAhead
+  const reads = [ahead.page, ...ahead.bodies]
+  const changes = Stream.merge(
+    Stream.zipLatest(list.changes, drafts.changes),
+    Stream.zipLatest(shell.changes, Stream.concat(Stream.fromEffect(device.showing()), device.visible)),
+  )
+  try Stream.runForEach(changes, () => effect {
+    const state = try list.get()
+    const visible = showing(try shell.get(), "Inbox") && (try device.showing())
+    const composing = (try drafts.get()).open
+    if (!Inbox.aheadAllowed(state, visible, composing)) {
+      if (visible && !composing && state.accounts.status === "Loading") {
+        try ahead.page.pause(aheadKey(state, mail, state.list.ticket))
+        const key = aheadKey(state, mail)
+        for (const slot of ahead.bodies) try slot.pause(key)
+      } else {
+        for (const slot of reads) try slot.stop()
+      }
+      return
+    }
+    if (state.list.status === "Loading") return
+    const { account, folder, query } = state.selected
+    const cursor = state.cursor === 0 ? undefined : mail.token(state.cursor)
+    if (cursor === undefined) try ahead.page.stop()
+    else {
+      const read = Effect.provideService(Effect.provideService(page(account, folder, query, state.cursor, state.searchable), Mail, mail), Cloud, cloud)
+      try ahead.page.start(aheadKey(state, mail, state.list.ticket), cursor, read)
+    }
+    const rows = mail.shown(state)
+    const key = aheadKey(state, mail)
+    for (const [at, slot] of ahead.bodies.entries()) {
+      const row = rows[at]
+      if (row === undefined || row.card.metadata.historyId === null) try slot.stop()
+      else {
+        const read = Effect.provideService(Effect.provideService(bodyAt(account, row.card.id), Mail, mail), Cloud, cloud)
+        try slot.start(key, bodyPart(row.card), read)
+      }
+    }
+  })
+}, "reading the visible Inbox ahead")
+
+export const prefetch = together(preparedReads, watching)

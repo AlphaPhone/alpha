@@ -1,14 +1,15 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
-import type { LibraryAccess, PhotosPlugin, Reviewed } from "@elizaos/os-bridges";
+import type { LibraryAccess, PermittedPhotosPlugin, PhotosPlugin, Reviewed } from "@elizaos/os-bridges";
+import { boardingPass } from "./img/boarding-pass.ts";
 import { plugin, type Faked } from "./phone.ts";
 
 const photo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+T5XQAAAAASUVORK5CYII=";
 
-function row(id: number, name: string, owned: boolean) {
-  return { id: `m:external_primary:i:${id}`, name, owned, kind: "image", image: photo, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
+function row(id: number, name: string, owned: boolean, image = photo) {
+  return { id: `m:external_primary:i:${id}`, name, owned, kind: "image", image, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
 }
 
-type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string; mutationRevision?: string; favorite?: boolean };
+type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string; mutationRevision?: string; favorite?: boolean; trashed?: boolean };
 type ListedRow = Omit<FixtureRow, "owned"> & { owned?: boolean };
 
 function ownedKey(row: Pick<FixtureRow, "id" | "kind">): string {
@@ -29,8 +30,10 @@ export interface PhotosScene {
   watching: boolean;
   changed(): void;
   promptCount: number;
+  settingsOpens: number;
   readCount: number;
   readGate?: Promise<void>;
+  listPermittedGate?: (query: string | undefined) => Promise<void> | undefined;
   readonly saves: string[];
   readonly editLookups: string[];
   selectedPicture?: (picture: Reviewed) => Promise<FixturePicture>;
@@ -40,9 +43,31 @@ export interface PhotosScene {
 export function photosScene(): PhotosScene {
   return {
     access: { scope: "denied", images: "denied", videos: "denied" },
-    rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true), row(1, "Original.jpg", false)],
-    watching: false, changed: () => {}, promptCount: 0, readCount: 0, saves: [], editLookups: [],
+    rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true, `data:image/jpeg;base64,${boardingPass}`), row(1, "Original.jpg", false)],
+    watching: false, changed: () => {}, promptCount: 0, settingsOpens: 0, readCount: 0, saves: [], editLookups: [],
   };
+}
+
+type PhotoPermissions = Pick<PermittedPhotosPlugin, "libraryAccess" | "requestLibraryAccess" | "openLibrarySettings">;
+
+function photoPermissions(scene: PhotosScene): PhotoPermissions {
+  return {
+    libraryAccess: () => Promise.resolve(scene.access),
+    requestLibraryAccess() {
+      scene.promptCount++;
+      scene.access = { scope: "full", images: "full", videos: "denied" };
+      return Promise.resolve(scene.access);
+    },
+    openLibrarySettings: () => {
+      scene.settingsOpens += 1;
+      return Promise.resolve();
+    },
+  };
+}
+
+/** The ElizaPhotos bridge registered for the Settings and startup permission flows. */
+export function elizaPhotosPermissions(scene: PhotosScene): Faked {
+  return plugin<PhotoPermissions>(() => photoPermissions(scene));
 }
 
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
@@ -69,30 +94,29 @@ export function alphaPhotos(scene: PhotosScene): Faked {
     let beganEdit = false;
     const savedEdits = new Map<string, { id: string; revision: string; replaced: boolean }>();
     return {
-      libraryAccess: () => Promise.resolve(scene.access),
-      requestLibraryAccess() {
-        scene.promptCount++;
-        scene.access = { scope: "full", images: "full", videos: "denied" };
-        return Promise.resolve(scene.access);
-      },
+      ...photoPermissions(scene),
       watchLibrary({ active }) {
         scene.watching = active;
         return Promise.resolve({ active });
       },
-      list: ({ album, limit, thumbnails }) => {
-        const permittable = album === "camera" ? scene.rows.filter((item) => item.owned) : scene.rows;
-        const availableOwned = album === "camera" ? owned().slice(0, limit) : owned();
+      list: ({ album, limit, thumbnails, trashed = false }) => {
+        const binned = (item: { trashed?: boolean }) => (item.trashed === true) === trashed;
+        const permittable = (album === "camera" ? scene.rows.filter((item) => item.owned) : scene.rows).filter(binned);
+        const availableOwned = album === "camera" ? owned().filter(binned).slice(0, limit) : owned().filter(binned);
         return Promise.resolve(scene.access.scope === "denied"
           ? { items: listed(availableOwned, thumbnails), next: "" }
           : { items: listed(permittable.slice(0, limit), thumbnails), next: "", access: scene.access });
       },
-      listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
+      async listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
-        return Promise.resolve({ items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
+        const page = { items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access };
+        await scene.listPermittedGate?.(query);
+        return page;
       },
       thumbnails: ({ ids }) => Promise.resolve({ items: ids.flatMap((id) => available().filter((row) => row.id === id).map((row) => ({ id, image: row.image }))) }),
-      readPermitted({ id, pixels }) {
-        const item = scene.access.scope === "denied" ? undefined : scene.rows.find((row) => row.id === id);
+      readPermitted({ id, revision, pixels }) {
+        const item = scene.access.scope === "denied" ? undefined : scene.rows.find((row) =>
+          row.id === id && (revision === undefined || row.revision === revision));
         if (item === undefined) return Promise.reject(new Error("This item is unavailable"));
         return Promise.resolve(listed([item], pixels)[0]);
       },
@@ -141,7 +165,6 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         return Promise.resolve();
       },
       albums: () => Promise.resolve({ items: [] }),
-      openLibrarySettings: () => Promise.resolve(undefined),
     };
   });
 }

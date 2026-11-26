@@ -1,0 +1,99 @@
+// spec/app/browser/site.md, "Clearing a site's data needs a loaded site, and runs one at a time"; spec/app/browser/site.md, "Cleared data forgets the answers given to that site; a clearing that fails forgets nothing"
+import type { BrowserPageBinding } from "@elizaos/os-bridges"
+import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
+import * as Site from "../../gen/app__browser__site.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
+import { TabHost, hosted } from "../platform/browser.vibe"
+import { answer, contained, reacting, run } from "../runtime/reactor.vibe"
+import { browserInFront, idOf } from "./browser.vibe"
+
+export type SitePage = BrowserPageBinding & { readonly host: string }
+type Clearing = SitePage & { readonly ticket: number }
+
+/** The number the site state knows each site by, and the page a clearing was asked for. */
+export service SiteRows {
+  origin(host: string): number!!
+  prepare(clearing: Clearing): void!!
+  take(ticket: number): (Clearing | undefined)!!
+}
+
+const rows = Layer.effect(SiteRows, effect {
+  const origins = new Map<string, number>()
+  let offered: Clearing | undefined
+  return {
+    origin: (host: string) => sync(() => {
+      const known = origins.get(host)
+      if (known !== undefined) return known
+      const next = origins.size + 1
+      origins.set(host, next)
+      return next
+    }),
+    prepare: (clearing: Clearing) => sync(() => { offered = clearing }),
+    take: (ticket: number) => sync(() => {
+      if (offered?.ticket !== ticket) return undefined
+      const clearing = offered
+      offered = undefined
+      return clearing
+    }),
+  }
+})
+
+/** The site of the page shown, while it is a page that loaded: its host and its page, or none. */
+export effect function siteShown(): (SitePage | undefined)!!(Tabs | TabHost) {
+  const tabs = try (try Tabs).get()
+  const host = try TabHost
+  if (Option.isNone(host.plugin)) return undefined
+  const id = idOf(tabs.selected)
+  const binding = host.session.pageBinding(id)
+  const info = host.session.info(id)
+  const url = binding === undefined ? undefined : URL.parse(binding.url)
+  if (binding === undefined || url === null || url === undefined || url.hostname === "" || (info?.error ?? "") !== "") return undefined
+  return { ...binding, host: url.hostname }
+}
+
+effect function stillShown(reviewed: SitePage): boolean!!(Tabs | TabHost | Shell) {
+  if (!(try browserInFront())) return false
+  const shown = try siteShown()
+  return shown?.id === reviewed.id && shown.url === reviewed.url && shown.navigation === reviewed.navigation && shown.revision === reviewed.revision
+}
+
+/** Clear what the site shown keeps, once the owner reviewed it: its cookies, stored data and the answers given to it. */
+export effect function clearSiteShown(reviewed: SitePage): boolean!!(Site.Machine | SiteRows | Tabs | TabHost | Shell | Toasts | Said) {
+  if (!(try stillShown(reviewed))) {
+    try say("The page changed. Review the site again before clearing its data.", true)
+    return false
+  }
+  const machine = try Site.Machine
+  const site = try SiteRows
+  const origin = try site.origin(reviewed.host)
+  const s = try machine.get()
+  if (!Site.canClearSite(s, origin, true)) return false
+  try site.prepare({ ticket: s.clear + 1, ...reviewed })
+  return try contained(machine.send({ type: "clearSite", origin, loaded: true }), "clearing a site's data")
+}
+
+effect function clearing(ticket: number): Site.Event!!(SiteRows | TabHost | Tabs | Shell | Toasts | Said) {
+  const failed: Site.Event = { type: "cleared", ticket, ok: false }
+  const asked = try (try SiteRows).take(ticket)
+  if (asked === undefined || !(try stillShown(asked))) return failed
+  const guard = (try TabHost).session.guard(asked)
+  const cleared = effect {
+    const result = try hosted("clearSiteData", (plugin) => plugin.clearSiteData(guard))
+    return result.site || asked.host
+  } catch () => undefined
+  try say(cleared === undefined ? `Could not clear data for ${asked.host}.` : `Cleared ${cleared}`, cleared === undefined)
+  return cleared === undefined ? failed : { type: "cleared", ticket, ok: true }
+}
+
+/** The Browser's site state: here, clearing a site's data through the phone's tab host. */
+export const site = Layer.provideMerge(reacting(Site, {
+  carry: (fx: Site.Effect) => match (fx) {
+    when { tag: "Clear", let ticket }: answer("clear site", clearing(ticket), { type: "cleared", ticket, ok: false } as Site.Event);
+    when { tag: "AskAndroid" }: run("ask android", Effect.void);
+    when { tag: "Grant" }: run("grant", Effect.void);
+    when { tag: "Refuse" }: run("refuse", Effect.void);
+    when { tag: "Authenticate" }: run("authenticate", Effect.void);
+  },
+}), rows)

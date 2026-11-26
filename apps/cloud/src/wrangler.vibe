@@ -1,4 +1,5 @@
 // spec/cloud/rollout.md, "Story: Render a deployment only when it is provisioned"; spec/cloud/rollout.md, "The API Worker's bindings repeat its profile's origins and database, and its registry is Alpha's registration of that environment"
+// spec/cloud/index.md, "Alpha's own cloud uses Cloudflare to mail sign-in codes from its own address"
 import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud"
 import type { Registration } from "../gen/cloud.effect.vibe"
 import { renderAccepted, renderProblems, type ResourceId } from "../gen/cloud__rollout.effect.vibe"
@@ -72,9 +73,9 @@ function apiVars(profile: CloudProfile, environment: CloudEnvironment, registrat
     NATIVE_CLIENT_REGISTRY: registryVariable(registration, environment),
     NATIVE_CLIENT_ID: registration.clientId,
     NATIVE_AUTH_CALLBACK: signIn,
-    EMAIL_FROM: `${settings.name} <${settings.mailSender}>`,
+    EMAIL_FROM: settings.mailSender,
     GOOGLE_CLIENT_ID: settings.google?.clientId ?? "",
-    GOOGLE_CONNECT_CLIENT_ID: settings.google?.clientId ?? "",
+    GOOGLE_CONNECT_CLIENT_ID: settings.google?.serverClientId ?? settings.google?.clientId ?? "",
     STRIPE_PLAN: "plus_monthly",
     STRIPE_PRICE_ID: plan?.priceId ?? "",
     STRIPE_PRODUCT_ID: plan?.productId ?? "",
@@ -116,8 +117,9 @@ export effect function renderEnvironment(templates: { readonly api: unknown; rea
   const problems = problemsRendering(profile, environment, resources)
   const settings = profile.environments[environment]
   const shared = { workerName: resources.workerName, accountId: resources.accountId, hyperdriveId: resources.hyperdriveId, apiHost: hostOf(settings.api), webHost: hostOf(settings.web) }
+  const sendEmail = settings.mail.kind === "binding" ? [{ name: settings.mail.binding, allowed_sender_addresses: [settings.mailSender] }] : []
   const rendered = {
-    api: filled(templates.api, { ...shared, main: paths.apiMain, assetsDirectory: paths.assets, vars: apiVars(profile, environment, registration) }),
+    api: filled(templates.api, { ...shared, main: paths.apiMain, assetsDirectory: paths.assets, sendEmail, vars: apiVars(profile, environment, registration) }),
     edge: filled(templates.edge, { ...shared, main: paths.edgeMain, vars: edgeVars(profile, environment) }),
     profile: profileText(profile),
   }

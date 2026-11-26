@@ -1,68 +1,29 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
+import type { ReminderItemRecord, ReminderListRecord, ReminderPriority, ReminderRecurrence, RemindersSnapshot } from "@repo/launcher-records";
 import type { Priority, SmartView, SortKey } from "../../gen/app__reminders.ts";
 import type { Repeat } from "../../gen/app__reminders__recurrence.ts";
-import type { Shelf } from "../runtime/store.ts";
-import { type ReminderRecurrence, civilDayFromString, civilDayNumber, dueInstantMs, dueSortInstantMs } from "./recurrence.ts";
+import { type Shelf, createShelf } from "../runtime/store.ts";
+import { civilDayFromString, civilDayNumber, dueInstantMs, dueSortInstantMs, nextFutureOccurrence } from "./recurrence.ts";
 
-export type { ReminderRecurrence };
-
-/** Semantic color token choices for custom reminder lists. */
-export type ReminderListColor = "accent" | "blue" | "green" | "amber" | "rose" | "violet";
-
-/** Icon identifiers for custom reminder lists. */
-export type ReminderListIcon = "list" | "home" | "work" | "shopping" | "heart" | "star" | "bookmark" | "bolt";
-
-/** Wire priority values shared with the resident agent. */
-export type ReminderPriority = "none" | "low" | "medium" | "high";
-
-/** One custom or default reminder list record. */
-export interface ReminderListRecord {
-  readonly id: string;
-  readonly name: string;
-  readonly color: ReminderListColor;
-  readonly icon: ReminderListIcon;
-  readonly isDefault: boolean;
-  readonly order: number;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
+function withReminderCompletion(item: ReminderItemRecord, completedAtMs: number, skippedDates = 0): ReminderItemRecord {
+  const dueAtMs = dueInstantMs(item.dueDate, item.dueMinute);
+  if (dueAtMs === null) return item;
+  const record = { revision: item.revision, dueAtMs, completedAtMs, ...(skippedDates > 0 ? { skippedDates } : {}) };
+  return { ...item, history: [...(item.history ?? []), record].slice(-32) };
 }
 
-/** One checklist subtask nested inside a reminder. */
-export interface ReminderSubtaskRecord {
-  readonly id: string;
-  readonly title: string;
-  readonly done: boolean;
-}
-
-/** One rich reminder item record matching the shared agent wire contract. */
-export interface ReminderItemRecord {
-  readonly id: string;
-  readonly listId: string;
-  readonly title: string;
-  readonly notes: string;
-  readonly dueDate: string | null;
-  readonly dueMinute: number | null;
-  readonly alertMinutes: number | null;
-  readonly recurrence: ReminderRecurrence;
-  readonly priority: ReminderPriority;
-  readonly flagged: boolean;
-  readonly subtasks: readonly ReminderSubtaskRecord[];
-  readonly completed: boolean;
-  readonly completedAtMs: number | null;
-  readonly snoozedUntilMs: number | null;
-  readonly notifiedAtMs: number | null;
-  readonly agentTaskId: string | null;
-  readonly revision: number;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
-}
-
-/** Full reminders snapshot synced with the resident agent and cached locally. */
-export interface RemindersSnapshot {
-  readonly version: number;
-  readonly updatedAtMs: number;
-  readonly lists: readonly ReminderListRecord[];
-  readonly items: readonly ReminderItemRecord[];
+/** Land one actual occurrence and advance a repeat to its next future alert. @throws {never} */
+export function completeReminderOccurrence(item: ReminderItemRecord, now: number): ReminderItemRecord | undefined {
+  if (item.completed) return undefined;
+  const recurring = item.recurrence !== "none" && item.dueDate !== null;
+  const next = recurring && item.dueDate !== null ? nextFutureOccurrence(item.dueDate, item.recurrence, item.dueMinute, item.alertMinutes, now) : undefined;
+  if (recurring && next === undefined) return undefined;
+  const updated = {
+    ...withReminderCompletion(item, now, next?.skippedDates),
+    snoozedUntilMs: null, revision: item.revision + 1, updatedAtMs: now,
+  };
+  if (next === undefined) return { ...updated, completed: true, completedAtMs: now };
+  return { ...updated, dueDate: next.dueDate, subtasks: item.subtasks.map((row) => ({ ...row, done: false })), completedAtMs: null, notifiedAtMs: null };
 }
 
 /** Filter parameters applied to a reminder list view. */
@@ -379,6 +340,12 @@ export interface RemindersStoreApi {
   /** @throws {never} */
   readonly findListBySpecId: (specId: number) => ReminderListRecord | undefined;
   /** @throws {never} */
+  readonly keepNumbers: (items: readonly (readonly [string, number])[], lists: readonly (readonly [string, number])[]) => void;
+  /** @throws {never} */
+  readonly numberItem: (id: string, specId: number) => void;
+  /** @throws {never} */
+  readonly numberList: (id: string, specId: number) => void;
+  /** @throws {never} */
   readonly specIdForItem: (id: string) => number;
   /** @throws {never} */
   readonly specIdForList: (id: string) => number;
@@ -450,6 +417,17 @@ export function createRemindersStore(shelf: Shelf<RemindersStoreView>): Reminder
       }
       return undefined;
     },
+    keepNumbers(items: readonly (readonly [string, number])[], lists: readonly (readonly [string, number])[]): void {
+      shelf.set({ ...shelf.snapshot(), itemSpecIds: new Map(items), listSpecIds: new Map([[DEFAULT_LIST_ID, 1], ...lists]) });
+    },
+    numberItem(id: string, specId: number): void {
+      const view = shelf.snapshot();
+      shelf.set({ ...view, itemSpecIds: new Map([...view.itemSpecIds, [id, specId]]) });
+    },
+    numberList(id: string, specId: number): void {
+      const view = shelf.snapshot();
+      shelf.set({ ...view, listSpecIds: new Map([...view.listSpecIds, [id, specId]]) });
+    },
     specIdForItem(id: string): number {
       return shelf.snapshot().itemSpecIds.get(id) ?? 0;
     },
@@ -458,3 +436,42 @@ export function createRemindersStore(shelf: Shelf<RemindersStoreView>): Reminder
     },
   };
 }
+
+const remindersListeners = new Set<() => void>();
+let activeRemindersShelf: Shelf<RemindersStoreView> = createShelf<RemindersStoreView>(emptyStoreView(), { reset: emptyStoreView });
+let unsubActiveReminders = activeRemindersShelf.subscribe(() => {
+  for (const listener of remindersListeners) listener();
+});
+
+/** Bind the active scoped `RemindersShelf` so cross-area callers of `remindersStore` share one runtime-scoped store. @throws {never} */
+export function attachRemindersShelf(shelf: Shelf<RemindersStoreView>): () => void {
+  const previous = activeRemindersShelf;
+  unsubActiveReminders();
+  activeRemindersShelf = shelf;
+  unsubActiveReminders = shelf.subscribe(() => {
+    for (const listener of remindersListeners) listener();
+  });
+  for (const listener of remindersListeners) listener();
+  return () => {
+    if (activeRemindersShelf !== shelf) return;
+    unsubActiveReminders();
+    activeRemindersShelf = previous;
+    unsubActiveReminders = previous.subscribe(() => {
+      for (const listener of remindersListeners) listener();
+    });
+    for (const listener of remindersListeners) listener();
+  };
+}
+
+/** Reactive Reminders store backed by the active runtime-scoped `RemindersShelf` (with clean reset on disposal). */
+export const remindersStore: RemindersStoreApi = createRemindersStore({
+  snapshot: () => activeRemindersShelf.snapshot(),
+  get: () => activeRemindersShelf.get(),
+  set: (next) => { activeRemindersShelf.set(next); },
+  update: (fn) => activeRemindersShelf.update(fn),
+  reset: () => activeRemindersShelf.reset(),
+  subscribe: (listener) => {
+    remindersListeners.add(listener);
+    return () => { remindersListeners.delete(listener); };
+  },
+});

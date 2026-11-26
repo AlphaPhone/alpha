@@ -24,6 +24,8 @@ final class AlphaCallState {
   Reading(Boolean inCall, Boolean emergency) { this.inCall = inCall; this.emergency = emergency; }
   /** AC-19 holds while a call is live that cannot be ruled out as an emergency call. */
   boolean emergencyLive() { return AlphaCallState.emergencyLive(inCall, emergency); }
+  /** A send requires a known call state and no call that may be an emergency. */
+  boolean clearForMessages() { return inCall != null && !emergencyLive(); }
  }
 
  /**

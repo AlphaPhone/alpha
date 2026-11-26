@@ -1,7 +1,7 @@
 // spec/app/clock/stopwatch.md, "Story: Time laps with the stopwatch"
 import { Button, Card } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Flag, Pause, Play, RotateCcw } from "lucide-react";
+import { Pause, Play, Undo2 } from "lucide-react";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
 import { useMachine as useStopwatch } from "../../gen/app__clock__stopwatch.react.ts";
 import { bestLapIndex, elapsedAt, lastLapTotal, worstLapIndex } from "../../gen/app__clock__stopwatch.ts";
@@ -38,7 +38,7 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
 
   return (
     <section aria-label="Stopwatch" className="flex flex-col gap-5">
-      <Card className="items-center gap-2 py-8">
+      <Card className="items-center gap-2 py-8 rounded-tile border-0 bg-secondary">
         <span aria-label="Stopwatch elapsed time" className="font-mono text-4xl font-light tracking-tight tabular-nums text-foreground">
           {formatStopwatch(totalElapsed)}
         </span>
@@ -52,38 +52,37 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
       <div className="grid grid-cols-2 gap-3">
         {state.status === "Paused" ? (
           <Button variant="secondary" disabled={!sw.can(resetEvent)} onClick={() => void sw.send(resetEvent)}>
-            <RotateCcw aria-hidden className="size-4" />
+            <Undo2 aria-hidden className="size-4.5" />
             Reset
           </Button>
         ) : (
           <Button variant="secondary" disabled={!sw.can(lapEvent)} onClick={() => void sw.send(lapEvent)}>
-            <Flag aria-hidden className="size-4" />
             Lap
           </Button>
         )}
 
         {state.status === "Reset" && (
           <Button disabled={!sw.can(startEvent)} onClick={() => void sw.send(startEvent)}>
-            <Play aria-hidden className="size-4" />
+            <Play aria-hidden className="size-4.5" />
             Start
           </Button>
         )}
         {state.status === "Running" && (
           <Button variant="destructive" disabled={!sw.can(pauseEvent)} onClick={() => void sw.send(pauseEvent)}>
-            <Pause aria-hidden className="size-4" />
+            <Pause aria-hidden className="size-4.5" />
             Pause
           </Button>
         )}
         {state.status === "Paused" && (
           <Button disabled={!sw.can(resumeEvent)} onClick={() => void sw.send(resumeEvent)}>
-            <Play aria-hidden className="size-4" />
+            <Play aria-hidden className="size-4.5" />
             Resume
           </Button>
         )}
       </div>
 
       {reversedLaps.length > 0 && (
-        <Card className="gap-2 p-0">
+        <Card className="gap-2 p-0 rounded-tile border-0 bg-secondary">
           <div className="grid grid-cols-3 border-b border-border px-4 py-2 text-xs font-semibold text-muted-foreground">
             <span>Lap</span>
             <span className="text-right">Split</span>

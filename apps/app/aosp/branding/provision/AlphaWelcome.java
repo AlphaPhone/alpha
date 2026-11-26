@@ -34,6 +34,7 @@ final class AlphaWelcome {
 
     /** Installs the welcome view and returns a destroy cleanup callback that cancels pending timeouts. */
     static Runnable show(Activity activity, Runnable completed) {
+        AlphaFreshPresets.defaultToGestureNavigation(activity);
         ScrollView scroll = new ScrollView(activity);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BACKGROUND);

@@ -1,6 +1,6 @@
 // spec/app/workflows/list.md, "Filter choices are made on a sheet and take effect together, on Done"
-import { Button, Sheet, SheetContent } from "@repo/ui";
-import { Check, RotateCw } from "lucide-react";
+import { Button, RadioGroup, RadioGroupItem, Sheet, SheetContent } from "@repo/ui";
+import { Check, RotateCw, X } from "lucide-react";
 import type { Event, KindFilter, Listing, StatusFilter } from "../../gen/app__workflows__list.ts";
 
 export const kinds = {
@@ -26,41 +26,58 @@ interface FiltersProps {
   can: (event: Event) => boolean;
   send: (event: Event) => void;
   refresh: () => void;
+  restoreFocus: () => void;
 }
 
 /** The unapplied type and status choices on the Workflows filter sheet. */
-export function Filters({ listing, can, send, refresh }: FiltersProps) {
+export function Filters({ listing, can, send, refresh, restoreFocus }: FiltersProps) {
+  const dismiss = { type: "dismissFilters" } as const;
+  const availableStatuses = entries(statuses).filter(([status]) => status !== "Removed" || listing.owner > 0);
   return (
-    <Sheet open={listing.sheet} onOpenChange={(open) => { if (!open && can({ type: "dismissFilters" })) send({ type: "dismissFilters" }); }}>
-      <SheetContent title="Filter workflows" actions={
-        <Button onClick={() => send({ type: "applyFilters" })} disabled={!can({ type: "applyFilters" })}>Done</Button>
-      }>
-        <fieldset className="flex flex-col">
-          <legend className="mb-1 text-sm text-muted-foreground">Type</legend>
-          {entries(kinds).map(([wanted, label]) => {
-            const picked = listing.pickedKind === wanted;
-            const event = { type: "pickKind", wanted } as const;
-            return <Button key={wanted} variant="ghost" aria-pressed={picked} className="justify-between rounded-md px-2"
-              onClick={() => { if (can(event)) send(event); }}>{label}{picked && <Check aria-hidden />}</Button>;
-          })}
+    <Sheet open={listing.sheet} onOpenChange={(open) => { if (!open && can(dismiss)) send(dismiss); }}>
+      <SheetContent title="Filter workflows" overlayClassName="bg-foreground/28 dark:bg-background/28"
+        className="inset-x-3 bottom-3 max-h-[calc(100dvh-2rem)] before:hidden max-w-100 rounded-panel bg-background px-6 pt-5 pb-6 text-foreground shadow-none [&>div:first-child]:min-h-11 [&>div:first-child]:items-center [&>div:last-child]:mt-1 [&_h2]:mr-14 [&_h2]:pt-0 [&_h2]:font-sans [&_h2]:text-xl [&_h2]:leading-row [&_h2]:font-semibold"
+        onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}
+        actions={<Button className="h-12! rounded-full bg-foreground text-base! font-semibold text-background hover:bg-foreground/90"
+          onClick={() => send({ type: "applyFilters" })} disabled={!can({ type: "applyFilters" })}>Done</Button>}>
+        <Button variant="ghost" size="icon" className="absolute top-5 right-6 rounded-full" aria-label="Close filters"
+          onClick={() => send(dismiss)}><X aria-hidden /></Button>
+        <fieldset className="flex flex-col pt-2">
+          <legend className="float-left mb-2 w-full text-label leading-chat font-semibold text-muted-foreground">Type</legend>
+          <RadioGroup aria-label="Type" orientation="vertical" loop value={listing.pickedKind} onValueChange={(value) => {
+            const kind = entries(kinds).find(([wanted]) => wanted === value)?.[0];
+            if (kind !== undefined) {
+              const event = { type: "pickKind", wanted: kind } as const;
+              if (can(event)) send(event);
+            }
+          }}>
+            {entries(kinds).map(([wanted, label]) => (
+              <RadioGroupItem key={wanted} value={wanted} className="h-12 w-full justify-between rounded-lg px-0 text-sm font-normal">
+                {label}{listing.pickedKind === wanted && <Check aria-hidden className="size-4.5" />}
+              </RadioGroupItem>
+            ))}
+          </RadioGroup>
         </fieldset>
-        <fieldset className="my-4">
-          <legend className="mb-2 text-sm text-muted-foreground">Status</legend>
-          <div className="flex flex-wrap gap-2">
-            {entries(statuses).map(([standing, label]) => {
-              const picked = listing.pickedStatus === standing;
-              const event = { type: "pickStatus", standing } as const;
-              return <Button key={standing} variant={picked ? "primary" : "secondary"} size="sm"
-                aria-pressed={picked} onClick={() => { if (can(event)) send(event); }}>{label}</Button>;
-            })}
-          </div>
+        <fieldset className="mt-5">
+          <legend className="float-left mb-2 w-full text-label leading-chat font-semibold text-muted-foreground">Status</legend>
+          <RadioGroup aria-label="Status" orientation="horizontal" loop value={listing.pickedStatus} onValueChange={(value) => {
+            const status = availableStatuses.find(([standing]) => standing === value)?.[0];
+            if (status !== undefined) {
+              const event = { type: "pickStatus", standing: status } as const;
+              if (can(event)) send(event);
+            }
+          }} className="flex-row gap-0.5 rounded-option bg-secondary p-0.75">
+            {availableStatuses.map(([standing, label]) => (
+              <RadioGroupItem key={standing} value={standing}
+                className="h-11 w-auto min-w-0 flex-1 rounded-tab-count px-1 text-meta font-normal data-[state=checked]:bg-background data-[state=checked]:font-semibold">{label}</RadioGroupItem>
+            ))}
+          </RadioGroup>
         </fieldset>
-        <div className="flex justify-end">
-          <Button variant="ghost" size="icon" aria-label="Refresh list" disabled={listing.list.status === "Loading"} onClick={() => {
-            if (can({ type: "dismissFilters" })) send({ type: "dismissFilters" });
+        <Button variant="ghost" aria-label="Refresh list" className="mt-4 h-12 min-w-11 justify-start rounded-lg px-0"
+          disabled={listing.list.status === "Loading"} onClick={() => {
+            if (can(dismiss)) send(dismiss);
             refresh();
-          }}><RotateCw aria-hidden /></Button>
-        </div>
+          }}><RotateCw aria-hidden className="size-4.5" /></Button>
       </SheetContent>
     </Sheet>
   );

@@ -51,8 +51,8 @@ pure val atValues = Set(0, 1000, 2500, 4000, 64000)
 
 ### The bar is about the call that needs the owner first: a ringing call, then the connected one
 
-The comms stage and End beside the comms bar read this call while a call
-rings; the top bar itself draws nothing then.
+The open comms stage reads this call while it rings. The top bar itself
+draws nothing then and Android presents the closed-stage incoming alert.
 
 ```quint
 pure def inPhase(calls: List[LiveCall], phase: CallPhase): List[LiveCall] = calls.select(c => c.phase == phase)
@@ -107,8 +107,8 @@ pure def sometimesTheBarShowsALiveCall(b: CallBar): bool = barPhase(b) == LiveBa
 
 The top bar draws nothing while any listed call rings, a call waiting behind
 a held or connected call included; a second call bar would cover or repeat
-Android's alert. The ringing call stays listed, so the comms stage and End
-beside the comms bar still see it. Once the ring is answered or gone the bar
+Android's alert. The ringing call stays listed so the open comms stage
+still sees it. Once the ring is answered or gone the bar
 draws the call that is left. A ring holds no "Call ended" moment, and a ring
 that arrives during that moment clears it.
 
@@ -184,7 +184,7 @@ pure def sometimesAnEndedCallHoldsItsPlace(b: CallBar): bool = barPhase(b) == En
 
 ### Return and End act only on the call the bar shows, and End is asked once
 
-End on a ringing call, from End beside the comms bar, is Decline. While an
+End on a ringing call is Decline. While an
 End is waiting for Telecom a second tap does nothing; a refused End releases
 it, and either way the bar reads Telecom again.
 

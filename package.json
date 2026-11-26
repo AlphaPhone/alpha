@@ -71,7 +71,7 @@
     "README.md",
     "AGENTS.md",
     "SPEC.md",
-    "LICENSE"
+    "vibestack/LICENSE"
   ],
   "dependencies": {
     "@antithesishq/bombadil": "0.7.10",

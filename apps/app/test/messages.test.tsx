@@ -20,15 +20,14 @@ import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
-import { button, closeAll, drawn, fill, hardware, only, open, press, underAct } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import { displayNumber } from "../src/phone/words.ts";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { alphaImage as image } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
 
-/** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
-const image = () => ({ ...scene(), phone: true, image: true });
 const mounts = only("home", "assistant", "notice", "view:Messages", "view:Browser");
 const openImage = (world: ReturnType<typeof image>) => open(world, mounts);
 
@@ -39,6 +38,51 @@ async function ready<I, S>(runtime: ManagedRuntime.ManagedRuntime<I, unknown>, k
     if (current._tag === "None" || !accepted(current.value)) throw new Error(`${label}: ${JSON.stringify(current)}`);
   }, { timeout: 12_000, interval: 50 });
   await drawn(() => undefined);
+}
+
+async function readyImageWithIdlePhone(world: ReturnType<typeof image>) {
+  const { alpha } = await openImage(world);
+  await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+  await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+  return alpha;
+}
+
+async function openTextReview(world: ReturnType<typeof image>, review: ReturnType<typeof textReview>) {
+  world.telephony.textReview = review;
+  const { alpha } = await openImage(world);
+  return { alpha, runtime: assistant.runtime(alpha) };
+}
+
+/** Open Ask Alpha over Home with `review` waiting on the phone, and send `text`, which the agent answers by proposing it: once the phone has read the proposal (`read`). */
+async function proposeText(world: ReturnType<typeof image>, review: ReturnType<typeof textReview>, text: string, read: string) {
+  const { alpha, runtime } = await openTextReview(world, review);
+  await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+  await openHomeConversation(alpha, runtime);
+
+  world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+  world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+  await fill("Message Alpha", text);
+  await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
+  await ready(runtime, Conversation, read, (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
+  return { alpha, runtime };
+}
+
+async function exactSmsConfirmation(
+  review: ReturnType<typeof textReview>,
+  sms: Pick<ReturnType<typeof textReview>["confirmations"][number], "recipients" | "body" | "subscriptionId">,
+) {
+  await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+  const confirmation = review.confirmations[0];
+  expect(confirmation).toMatchObject({ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body, subscriptionId: sms.subscriptionId });
+  return confirmation;
+}
+
+async function openHomeConversation(alpha: Awaited<ReturnType<typeof openImage>>["alpha"], runtime: ReturnType<typeof assistant.runtime>) {
+  await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+  await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+  await press("Open conversation");
+  await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
 }
 
 async function openMessages(alpha: Awaited<ReturnType<typeof openImage>>["alpha"]) {
@@ -54,7 +98,7 @@ async function openMessages(alpha: Awaited<ReturnType<typeof openImage>>["alpha"
 
 async function openUnreadCard() {
   const card = await vi.waitFor(() => {
-    const found = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((button) => button.textContent?.startsWith("Messages"));
+    const found = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((button) => button.getAttribute("aria-label")?.startsWith("Open Messages"));
     if (!found) throw new Error("Messages unread card was not drawn");
     return found;
   });
@@ -68,22 +112,6 @@ const confirm = (name: string) => drawn(() => {
   found.click();
 });
 
-/** Type into the text box named `name`, as a person does. */
-const write = fill;
-
-async function openHomeAsk(world: ReturnType<typeof image>, review: ReturnType<typeof textReview>, waitForPhone = false) {
-  world.telephony.textReview = review;
-  const { alpha } = await openImage(world);
-  const runtime = assistant.runtime(alpha);
-  await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
-  if (waitForPhone) await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
-  await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
-  await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
-  await press("Open conversation");
-  await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
-  return { alpha, runtime };
-}
-
 /** Open the message action menu from the keyboard. */
 const bubble = (text: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=log] [data-alpha-message-id]")].find((one) => one.textContent?.includes(text));
@@ -95,8 +123,8 @@ const bubble = (text: string) => drawn(() => {
 /** Choose an action from the open conversation's composer menu. */
 async function composeAction(name: string) {
   await drawn(() => {
-    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Message actions"]');
-    if (!trigger) throw new Error("Message actions are unavailable");
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Message attachments"]');
+    if (!trigger) throw new Error("Message attachments are unavailable");
     trigger.focus();
     trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
@@ -118,8 +146,17 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Messages, "Messages read", (state) => state.list.status === "Loaded" && state.threads === 1);
     await press("Maya Chen");
     await ready(alpha.runtime, Composer, "Two SIMs loaded", (state) => state.thread > 0 && state.sims === 2 && state.simInfo.grant === "Granted");
-    await write("Message", "Use the reviewed line");
-    await press("SIM 2");
+    await fill("Text Maya", "Use the reviewed line");
+    await ready(alpha.runtime, Composer, "The message draft is saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    const chooseTravel = async () => {
+      await press("Travel");
+      await vi.waitFor(async () => {
+        await drawn(() => undefined);
+        expect(button("Travel")?.getAttribute("aria-pressed")).toBe("true");
+        expect(button("Send")?.disabled).toBe(false);
+      }, { timeout: 12_000, interval: 50 });
+    };
+    await chooseTravel();
 
     const replacement = { ...second, id: 9 };
     world.telephony.subscriptions = [replacement, first];
@@ -127,7 +164,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Composer, "Old SIM refused", (state) => state.outgoing.denied && state.slot.author === "OwnerWrote");
     expect(world.telephony.sent).toEqual([]);
 
-    await press("SIM 2");
+    await chooseTravel();
     world.telephony.subscriptions = [first, replacement];
     await press("Send");
     await ready(alpha.runtime, Composer, "Replacement SIM sent", (state) => state.outgoing.op.outcome === "Confirmed");
@@ -138,15 +175,39 @@ describe("Messages on an Alpha image", () => {
   it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
     const world = image();
     world.telephony.live = [];
-    const { alpha } = await openImage(world);
+    const { alpha } = await open(world, [...mounts, ...only("view:Phone")]);
     // spec/app/messages/index.md, "Messages reads the conversation list each time it comes to the front"
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded" && s.threads === 1);
+    const listHeading = document.querySelector("[data-alpha-messages-header] h1");
+    // spec/app/messages/index.md, "Story: See my conversations"
+    expect([listHeading?.textContent, listHeading?.classList.contains("sr-only")]).toEqual(["Messages", false]);
 
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
     await press("Maya Chen");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
     await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
+
+    // spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+    const actions = () => document.querySelector('[data-alpha-sms-actions]');
+    await bubble("See you at five");
+    await press("Copy");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(button("Copied!")).toBeDefined();
+    }, { timeout: 12_000, interval: 50 });
+    expect([actions()?.querySelector('[role="status"]')?.textContent, world.settings.copied]).toEqual(["Copied.", ["See you at five"]]);
+    await later(alpha, 1_400);
+    expect(button("Copy")).toBeDefined();
+    world.settings.refusesCopy = true;
+    await press("Copy");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(actions()?.querySelector('[role="status"]')?.textContent).toBe("Copy failed");
+    }, { timeout: 12_000, interval: 50 });
+    expect([Boolean(button("Copy")), world.settings.copied]).toEqual([true, ["See you at five"]]);
+    await drawn(() => actions()?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(actions()).toBeNull();
 
     // spec/app/messages/composer.md, "Typing changes the draft and makes it the owner's; emptying it leaves no draft"
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0 && s.recipients === 1);
@@ -154,13 +215,13 @@ describe("Messages on an Alpha image", () => {
     // spec/app/messages/composer.md, "Alpha's suggestion is asked for only when the draft is empty, and lands only if it still is"; spec/app/messages/composer.md, "Undo takes Alpha's draft away"
     await composeAction("Let Alpha suggest a reply");
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.slot.author === "AlphaWrote" && s.suggestion.status === "Loaded");
-    expect([world.telephony.asked, (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
+    expect([world.telephony.asked, (document.querySelector("textarea[aria-label='Text Maya']") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
       [{ participant: "+14155550100", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false }], "Five works, see you there", [],
     ]);
     expect(document.querySelector("[role=group][aria-label='Message draft to Maya Chen · +14155550100']")).not.toBeNull();
-    await press("Don't send");
+    await press("Don’t send");
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.slot.author === "Nobody");
-    await write("Message", "On my way");
+    await fill("Text Maya", "On my way");
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.slot.author === "OwnerWrote");
     expect(world.telephony.sent).toEqual([]);
 
@@ -172,10 +233,28 @@ describe("Messages on an Alpha image", () => {
       await drawn(() => undefined);
       expect([...document.querySelectorAll("[data-alpha-composer]")].map((field) => field.getAttribute("aria-label"))).toEqual(["Ask Alpha"]);
     }, { timeout: 12_000 });
-    await write("Ask Alpha", "What did I miss?");
+    await fill("Ask Alpha", "What did I miss?");
+
+    // spec/app/messages/index.md, "Returning from Phone restores the conversation the Ask Alpha stage held"
+    await ready(alpha.runtime, Composer, "The message draft is saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    const beforePhone = alpha.runtime.runSync(Messages.use((machine) => machine.get()));
+    await press("Call Maya Chen");
+    await ready(alpha.runtime, Shell, "Phone on the same Ask Alpha sheet", (state) => state.trail.at(-1) === "Phone" && state.assistant === "Sheet");
+    await ready(alpha.runtime, Phone, "Maya's number on the keypad", (state) => state.front && state.tab === "Keypad" && state.digits === "+14155550100".length);
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.querySelector<HTMLInputElement>("[data-alpha-phone-number]")?.value).toBe("+14155550100");
+    }, { timeout: 12_000 });
+    expect([world.telephony.dialed, world.telephony.placed, world.telephony.sent]).toEqual([[], [], []]);
+    await hardware("back");
+    await ready(alpha.runtime, Shell, "Messages again on the same Ask Alpha sheet", (state) => state.trail.at(-1) === "Messages" && state.assistant === "Sheet");
+    await ready(alpha.runtime, Messages, "The exact conversation was read again", (state) => state.thread === beforePhone.thread && state.page.ticket > beforePhone.page.ticket && state.page.status === "Loaded");
+    await ready(alpha.runtime, Composer, "The exact conversation's draft was restored", (state) => state.thread === beforePhone.thread && state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    expect(document.querySelector("[role='log'][aria-label='Messages']")?.textContent).toContain("See you at five");
+
     await press("Back to texting Maya Chen");
     await ready(alpha.runtime, Shell, "Alpha image admitted", (s) => s.assistant === "Bar");
-    expect([document.querySelectorAll("[data-alpha-composer]").length, document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value, world.telephony.sent])
+    expect([document.querySelectorAll("[data-alpha-composer]").length, document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value, world.telephony.sent])
       .toEqual([1, "On my way", []]);
 
     // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
@@ -188,9 +267,9 @@ describe("Messages on an Alpha image", () => {
     const dictated = "On my way Dictated note";
     await vi.waitFor(async () => {
       await drawn(() => undefined);
-      expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe(dictated);
+      expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe(dictated);
     }, { timeout: 12_000 });
-    expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value, world.telephony.sent, world.ask.opened, world.ask.said, world.voice.startLiveCaptureCalls])
+    expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value, world.telephony.sent, world.ask.opened, world.ask.said, world.voice.startLiveCaptureCalls])
       .toEqual([dictated, [], openedChats, [], 0]);
 
     // spec/app/messages/composer.md, "Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call"
@@ -248,40 +327,243 @@ describe("Messages on an Alpha image", () => {
     await openUnreadCard();
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.front && s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
     await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
+
+    const title = () => document.querySelector("[data-alpha-messages-title]")?.textContent;
+    expect(title()).toBe("Maya Chen");
+    const ticket = alpha.runtime.runSync(Messages.use((machine) => machine.get())).page.ticket;
+    world.telephony.contacts = false;
+    await drawn(() => world.telephony.changed());
+    await ready(alpha.runtime, Messages, "Open conversation read after Contacts access ended", (state) => state.page.ticket > ticket && state.page.status === "Loaded");
+    expect(title()).toBe(displayNumber("+14155550100"));
   });
 
   it("Start a new message to a number I type (spec/app/messages/index.md, \"Story: Start a new message\")", async () => {
     const world = image();
-    const { alpha } = await openImage(world);
+    const { alpha, close } = await openImage(world);
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded");
 
-    // spec/app/messages/index.md, "New message opens the picker, which reads the contacts that have a number"
+    // spec/app/messages/index.md, "New message reads the contacts that have a number and brings back the owner's unsent New draft"
     await press("New message");
-    await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Picker" && s.picker.status === "Loaded" && s.choices === 2);
+    await ready(alpha.runtime, Messages, "New draft", (s) => s.pane === "New" && s.picker.status === "Loaded" && s.choices === 2);
+    const body = "Meet at five";
+    const message = () => document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea");
+    await vi.waitFor(() => expect(message()?.getAttribute("aria-label")).toBe("Message"));
+    await fill("Message", body);
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(true));
+    expect(world.telephony.sent).toEqual([]);
 
-    // spec/app/messages/index.md, "Choosing a contact's number, or typing one, opens that conversation"
+    // spec/app/messages/index.md, "The owner can write before choosing To, then adjust To without moving or losing the message"
     await press("Ben Ortiz");
-    await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
-    await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0);
+    await ready(alpha.runtime, Messages, "Ben addressed in New", (s) => s.pane === "New" && s.newDraft.recipient > 0);
+    expect(message()?.value).toBe(body);
+    await vi.waitFor(() => expect(message()?.getAttribute("aria-label")).toBe("Text Ben"), { timeout: 12_000 });
+    await press("Choose contacts");
+    await ready(alpha.runtime, Messages, "Recipient picker open", (s) => s.newDraft.picking);
+    await press("Dictate a text to Ben");
+    await ready(messages.runtime(alpha), Voice, "New message recording", (s) => s.recorder.field === "MessagesBar" && s.recorder.stage === "Recording");
+    await press("Stop recording");
+    await ready(messages.runtime(alpha), Voice, "New message transcript returned", (s) => s.recorder.stage === "Closed");
+    const dictated = `${body} Dictated note`;
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(message()?.value).toBe(dictated);
+    }, { timeout: 12_000 });
+    expect(world.telephony.sent).toEqual([]);
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Only the recipient picker closed", (s) => s.pane === "New" && !s.newDraft.picking);
+    expect(message()?.value).toBe(dictated);
 
     await press("Back");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Threads" && s.list.status === "Loaded");
     await press("New message");
-    await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Picker" && s.picker.status === "Loaded");
-    await write("To", "+14155550100, +14155550122");
-    await press("Text 2 recipients");
-    await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0 && s.recipients === 2 && s.sending.grant === "Granted");
-    await write("Message", "Meet at five");
-    await ready(alpha.runtime, Composer, "Composer state", (s) => s.slot.author === "OwnerWrote");
+    await ready(alpha.runtime, Messages, "New draft restored", (s) => s.pane === "New" && s.picker.status === "Loaded" && s.newDraft.recipient > 0);
+    expect(message()?.value).toBe(dictated);
+    await fill("To", "+14155550100, +14155550122");
+    await vi.waitFor(() => expect(message()?.getAttribute("aria-label")).toBe("Text Maya Chen, Ben Ortiz"), { timeout: 12_000 });
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    expect(world.telephony.sent).toEqual([]);
     await press("Send");
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.outgoing.op.outcome === "Confirmed");
+    await ready(alpha.runtime, Messages, "New draft sent", (s) => s.pane === "Threads" && s.list.status === "Loaded");
     expect(world.telephony.sent.map(({ operationId, recipients, body }) => ({ kind: world.telephony.journal.get(operationId)?.kind, recipients, body }))).toEqual([
-      { kind: "mms-send", recipients: ["+14155550100", "+14155550122"], body: "Meet at five" },
+      { kind: "mms-send", recipients: ["+14155550100", "+14155550122"], body: dictated },
     ]);
+    await press("New message");
+    await ready(alpha.runtime, Messages, "A fresh New draft", (s) => s.pane === "New" && s.newDraft.recipient === 0);
+    expect(message()?.value).toBe("");
+
+    // spec/app/messages/index.md, "A current Android text request opens New only when its saved draft is empty"
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Messages list before the Android request", (s) => s.pane === "Threads");
+    const sent = [...world.telephony.sent];
+    const first = { token: "first-android-text", recipients: ["+14155550122"], body: "Draft from Android" };
+    const second = { token: "second-android-text", recipients: ["+14155550100"], body: "A different Android draft" };
+    const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
+    const bridge = (globalThis as { Capacitor?: { nativePromise(name: string, method: string, input: unknown): Promise<unknown> } }).Capacitor;
+    if (!bridge) throw new Error("The phone fixture has no native bridge");
+    const nativePromise = bridge.nativePromise.bind(bridge);
+    const write = Promise.withResolvers<void>();
+    let writing = false;
+    const pendingWrite = vi.spyOn(bridge, "nativePromise").mockImplementation((name, method, input) => {
+      if (name === "ElizaSecureStore" && method === "compareAndExchange" && typeof input === "object" && input !== null
+        && "key" in input && input.key === "sms-draft:v2:new") {
+        writing = true;
+        return write.promise.then(() => nativePromise(name, method, input));
+      }
+      return nativePromise(name, method, input);
+    });
+    const acknowledgment = Promise.withResolvers<void>();
+    world.telephony.holdSmsDraftAcknowledgment = acknowledgment.promise;
+    try {
+      world.telephony.smsDraft = first;
+      await drawn(world.telephony.wakeSmsDraft);
+      await vi.waitFor(() => expect(writing).toBe(true));
+      await ready(alpha.runtime, Messages, "New admitted before Android draft storage", (s) => s.pane === "New" && s.newDraft.recipient === 0);
+      expect([to(), message()?.value, world.telephony.smsDraftAcknowledgments]).toEqual(["", "", []]);
+      write.resolve();
+      pendingWrite.mockRestore();
+      await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([first.token]));
+      await drawn(() => undefined);
+      expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], first.body, sent]);
+      const imported = await alpha.runtime.runPromise(Effect.flatMap(Messages, (machine) => machine.get()));
+
+      const ownerEdit = "I am editing my own draft";
+      const label = message()?.getAttribute("aria-label");
+      if (!label) throw new Error("The Android text draft did not show an editor");
+      await fill(label, ownerEdit);
+      await ready(alpha.runtime, Messages, "Owner edit in Android draft is saved", (s) => s.pane === "New" && s.newDraft.revision > imported.newDraft.revision);
+      const saved = world.secrets.get("sms-draft:v2:new");
+      expect(saved).toBeDefined();
+      await close();
+      expect(world.telephony.smsDraft).toEqual(first);
+      const restarted = await openImage(world);
+      await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([first.token, first.token]));
+      await ready(restarted.alpha.runtime, Messages, "Messages list after Android draft restart", (s) => s.front && s.pane === "Threads");
+      expect(world.secrets.get("sms-draft:v2:new")).toBe(saved);
+      await press("New message");
+      await ready(restarted.alpha.runtime, Messages, "Owner-edited Android draft restored", (s) => s.pane === "New" && s.newDraft.revision > imported.newDraft.revision);
+      expect([to(), message()?.value]).toEqual([first.recipients[0], ownerEdit]);
+
+      world.telephony.smsDraft = second;
+      await drawn(world.telephony.wakeSmsDraft);
+      acknowledgment.resolve();
+      const secondReads = () => world.telephony.smsDraftReads.filter((token) => token === second.token).length;
+      await vi.waitFor(() => expect(secondReads()).toBeGreaterThan(0));
+      const reads = secondReads();
+      await drawn(world.telephony.wakeSmsDraft);
+      await vi.waitFor(() => expect(secondReads()).toBeGreaterThan(reads));
+      await drawn(() => undefined);
+      expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], ownerEdit, sent]);
+      expect([world.telephony.smsDraft, world.telephony.smsDraftAcknowledgments]).toEqual([second, [first.token, first.token]]);
+    } finally {
+      write.resolve();
+      pendingWrite.mockRestore();
+      acknowledgment.resolve();
+    }
   });
 
-  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
+  it.each(["unused", "owner-touched"] as const)("Keeps the right New message when Android replaces a request and the opening is %s (spec/app/messages/index.md, \"A current Android text request opens New only when its saved draft is empty\")", async (opening) => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Messages list", (state) => state.front && state.pane === "Threads");
+    const first = { token: "android-old", recipients: ["+14155550122"], body: "Older Android request" };
+    const second = { token: "android-new", recipients: ["+14155550100"], body: "Current Android request" };
+    const ownerBody = "Keep the message I am writing";
+    const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
+    const message = () => document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea");
+    const bridge = (globalThis as { Capacitor?: { nativePromise(name: string, method: string, input: unknown): Promise<unknown> } }).Capacitor;
+    if (!bridge) throw new Error("The phone fixture has no native bridge");
+    const nativePromise = bridge.nativePromise.bind(bridge);
+    const check = Promise.withResolvers<void>();
+    let pendingReads = 0;
+    const watched = vi.spyOn(bridge, "nativePromise").mockImplementation((name, method, input) => {
+      if (name === "ElizaTelephony" && method === "smsDraftPending" && world.telephony.smsDraft === first && ++pendingReads === 3) {
+        return check.promise.then(() => nativePromise(name, method, input));
+      }
+      return nativePromise(name, method, input);
+    });
+    try {
+      world.telephony.smsDraft = first;
+      await drawn(world.telephony.wakeSmsDraft);
+      await ready(alpha.runtime, Messages, "First empty New visit", (state) => state.pane === "New" && state.newDraft.recipient === 0);
+      await vi.waitFor(() => expect(pendingReads).toBe(3));
+      expect([to(), message()?.value]).toEqual(["", ""]);
+      if (opening === "owner-touched") {
+        await drawn(() => message()?.focus());
+        await fill("Message", ownerBody);
+        expect(message()?.value).toBe(ownerBody);
+      }
+
+      world.telephony.smsDraft = second;
+      await drawn(world.telephony.wakeSmsDraft);
+      check.resolve();
+      if (opening === "unused") {
+        await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([second.token]));
+        await drawn(() => undefined);
+        expect([to(), message()?.value]).toEqual([second.recipients[0], second.body]);
+      } else {
+        await vi.waitFor(() => expect(world.telephony.smsDraftReads.filter((token) => token === second.token).length).toBeGreaterThan(1));
+        await ready(alpha.runtime, Messages, "Owner kept the same New visit", (state) => state.pane === "New" && state.newDraft.revision > 0);
+        expect([to(), message()?.value, document.activeElement]).toEqual(["", ownerBody, message()]);
+        expect([world.telephony.smsDraft, world.telephony.smsDraftAcknowledgments]).toEqual([second, []]);
+      }
+      expect(world.telephony.sent).toEqual([]);
+    } finally {
+      check.resolve();
+      watched.mockRestore();
+    }
+  });
+
+  it("Sends New without replacing a saved draft for the same recipient (spec/app/messages/composer.md, \"The owner's New message uses the same send and never takes another draft's place\")", async () => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Conversations read", (s) => s.list.status === "Loaded");
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Maya composer", (s) => s.thread > 0 && s.slot.author === "Nobody");
+    await fill("Text Maya", "Keep this reply draft");
+    await ready(alpha.runtime, Composer, "Maya draft kept", (s) => s.slot.author === "OwnerWrote" && s.slot.draft.sync === "Kept");
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Conversations restored", (s) => s.pane === "Threads" && s.list.status === "Loaded");
+    await press("New message");
+    await ready(alpha.runtime, Messages, "New draft open", (s) => s.pane === "New" && s.picker.status === "Loaded");
+    await fill("Message", "A separate new message");
+    await press("Maya Chen");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await ready(alpha.runtime, Messages, "New completed", (s) => s.pane === "Threads" && s.list.status === "Loaded");
+    expect(world.telephony.sent).toMatchObject([{ recipients: ["+14155550100"], body: "A separate new message" }]);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Maya draft reopened", (s) => s.thread > 0 && s.slot.author === "OwnerWrote");
+    expect(document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea")?.value).toBe("Keep this reply draft");
+  });
+
+  it.each([
+    { reply: "lost", outcome: "Unknown", staged: true },
+    { reply: "refused", outcome: "Refused", staged: false },
+  ] as const)("Ends a $reply Android message deletion as $outcome (spec/app/messages/index.md, \"The phone's answer ends the removal it names, and the conversation is read again unless it was refused\")", async ({ reply, outcome, staged }) => {
+    const world = image();
+    world.telephony.deletionReply = reply;
+    world.telephony.holdMessageDeletion = true;
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Conversation list loaded", (state) => state.list.status === "Loaded" && state.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Messages, "Conversation loaded", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
+    await bubble("See you at five");
+    await press("Delete");
+    await ready(alpha.runtime, Messages, "Message deletion confirmation", (state) => state.confirming);
+    await confirm("Delete");
+    await ready(alpha.runtime, Messages, "Message deletion ended", (state) => state.removal.outcome === outcome);
+    expect(document.body.textContent?.includes("Alpha cannot tell whether the message was deleted")).toBe(outcome === "Unknown");
+    expect(button("Undo")).toBeUndefined();
+    expect(world.telephony.staged).toMatchObject(staged ? [{ kind: "message", phase: "queued", target: { id: "sms:1" } }] : []);
+    expect(world.telephony.deletionAttempts).toEqual(["sms:1"]);
+  });
+
+  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send and its pending clear, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
     const world = image();
     world.telephony.holdMmsSubmission = true;
     const first = await openImage(world);
@@ -296,7 +578,7 @@ describe("Messages on an Alpha image", () => {
       Object.defineProperty(picker, "files", { value: [new File([Uint8Array.from(atob("R0lGODlhAQABAAAAACwAAAAAAQABAAA="), (byte) => byte.charCodeAt(0))], "photo.gif", { type: "image/gif" })] });
       picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await ready(first.alpha.runtime, Composer, "picture attached", (state) => state.pictures === 1);
+    await ready(first.alpha.runtime, Composer, "picture draft saved", (state) => state.pictures === 1 && state.slot.draft.sync === "Kept");
     await press("Send");
     await ready(first.alpha.runtime, Composer, "picture send awaiting receipt", (state) => state.outgoing.op.outcome === "Unknown");
     const operation = world.telephony.mmsAttempts[0];
@@ -310,12 +592,22 @@ describe("Messages on an Alpha image", () => {
     await ready(restarted.alpha.runtime, Shell, "Messages returns after restart", (state) => state.trail.at(-1) === "Messages");
     await ready(restarted.alpha.runtime, Messages, "conversation list after restart", (state) => state.list.status === "Loaded" && state.threads === 1);
     await press("Maya Chen");
-    await ready(restarted.alpha.runtime, Composer, "picture check without saved bytes", (state) => state.thread === state.outgoing.thread && state.pictures === 0 && state.outgoing.op.outcome === "Unknown");
+    await ready(restarted.alpha.runtime, Composer, "picture restored while waiting for the original receipt", (state) => state.thread === state.outgoing.thread && state.pictures === 1 && state.outgoing.op.outcome === "Unknown");
+    expect(button("Remove photo.gif")?.disabled).toBe(true);
     const priorReads = world.telephony.mmsQueries.length;
     await press("Check send status");
-    await ready(restarted.alpha.runtime, Composer, "original picture send confirmed", (state) => state.outgoing.op.outcome === "Confirmed");
+    await ready(restarted.alpha.runtime, Composer, "original picture confirmed and saved attachment removed", (state) => state.outgoing.op.outcome === "Confirmed" && state.pictures === 0 && state.pendingClear.id === 0);
+    expect(button("Remove photo.gif")).toBeUndefined();
     expect([world.telephony.mmsAttempts, world.telephony.mmsQueries.slice(priorReads), world.telephony.sent.map((send) => send.operationId)])
       .toEqual([[operation], [operation], [operation]]);
+
+    await fill("Text Maya", "The next message");
+    await ready(restarted.alpha.runtime, Composer, "next draft saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    await press("Send");
+    await ready(restarted.alpha.runtime, Composer, "next message confirmed", (state) =>
+      state.outgoing.op.id > 1 && state.outgoing.op.outcome === "Confirmed" && state.pendingClear.id === 0);
+    expect(world.telephony.journal.get(operation)?.status).toBe("sent");
+    expect(world.telephony.sent.map((send) => send.body)).toEqual(["", "The next message"]);
   });
 
   it("Shares only the reviewed open conversation (spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async () => {
@@ -344,11 +636,30 @@ describe("Messages on an Alpha image", () => {
     expect([await read(), world.telephony.sent]).toEqual([refusal, []]);
   });
 
+  it("Drafts in the exact Android thread from a reviewed sender, even when another thread has the same number (spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+    const world = image();
+    world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550100", box: "inbox", date: 1_700_000_060_000, body: "The reviewed thread", read: true });
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Both same-number threads are listed", (state) => state.pane === "Threads" && state.list.status === "Loaded" && state.threads === 2);
+    const body = "I’m replying to the reviewed sender";
+    const attempt = (replyThreadId: string) => executeMedia(alpha,
+      { type: "sms_compose", target: { kind: "number", number: "+14155550100" }, draft: true, replyThreadId, body },
+      { proposalId: "reviewed-sender-draft", operationId: "reviewed-sender-draft", attemptId: 1 }, { current: () => Promise.resolve(true) });
+
+    await expect(attempt("thread:999")).resolves.toEqual({ kind: "refused", code: NOT_DISPATCHED });
+    expect(document.querySelector('[data-alpha-messages-thread]')).toBeNull();
+    await expect(attempt("thread:23")).resolves.toEqual({ kind: "applied", result: { kind: "sms-compose", status: "drafted" } });
+    await ready(alpha.runtime, Composer, "The exact thread has Alpha’s draft", (state) => state.slot.author === "AlphaWrote");
+    const lines = [...document.querySelectorAll('[role="log"][aria-label="Messages"] [data-alpha-message-body]')].map((row) => row.textContent);
+    expect(lines).toEqual(["The reviewed thread"]);
+    expect(document.querySelector('[data-alpha-draft-bubble="alpha"]')?.textContent).toContain(body);
+    expect(world.telephony.sent).toEqual([]);
+  });
+
   it("Confirms reviewed agent SMS with the exact native operation (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
     const world = image();
-    const { alpha } = await openImage(world);
-    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
-    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+    const alpha = await readyImageWithIdlePhone(world);
     const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
     const call = { proposalId: "reviewed-sms", operationId: "reviewed-sms", attemptId: 1 };
     const approved = { current: () => Promise.resolve(true) };
@@ -367,35 +678,67 @@ describe("Messages on an Alpha image", () => {
     ]);
   });
 
-  it("From Home, asks the owner to review the exact text the agent just proposed (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
+  it("Watches Android’s submitted text for the carrier’s exact receipt (spec/app/contacts/agent.md, \"Only the phone answers the action, and the request ends as that answer says\")", async () => {
+    const world = image();
+    world.telephony.holdSmsSubmission = true;
+    const alpha = await readyImageWithIdlePhone(world);
+    const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
+    const call = { proposalId: "carrier-receipt", operationId: "carrier-receipt", attemptId: 1 };
+    const send = executeMedia(alpha, sms, call, { current: () => Promise.resolve(true) });
+    const submitted = await vi.waitFor(() => {
+      const receipt = world.telephony.journal.get(call.operationId);
+      if (receipt?.status !== "submitted") throw new Error("The carrier has not been asked");
+      return receipt;
+    });
+    await expect(alpha.runtime.runPromise(readAgentSms(sms, call))).resolves.toBeUndefined();
+    const waitForRead = (count: number) => vi.waitFor(async () => {
+      await later(alpha, 500);
+      expect(world.telephony.smsQueries).toHaveLength(count);
+    }, { timeout: 4_000 });
+    await waitForRead(2);
+    world.telephony.journal.set(call.operationId, {
+      ...submitted, status: "sent", parts: [{ index: 0, recipientIndex: 0, partIndex: 0, sent: "success", delivery: "unknown" }],
+    });
+    await waitForRead(3);
+    await expect(send).resolves.toMatchObject({ kind: "applied", result: { operationId: call.operationId, status: "sent" } });
+    expect(world.telephony.smsQueries).toEqual(Array.from({ length: 3 }, () => call.operationId));
+    expect(world.telephony.sent.map(({ operationId }) => operationId)).toEqual([call.operationId]);
+  });
+
+  it("From Home, asks the owner to review the exact text the agent just proposed (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\"; spec/app/contacts/agent.md, \"A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it\")", async () => {
     const world = image();
     const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
     const review = textReview(world.notes.owner, "reviewed-text", sms);
-    const { runtime } = await openHomeAsk(world, review, true);
+    const { alpha, runtime } = await openTextReview(world, review);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+    await openHomeConversation(alpha, runtime);
 
     const ask = async (proposalId: string, prompt: string) => {
       const reads = review.pendingReads;
       world.ask.nextReplyChunks = ["Review the text on your phone."];
       world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-      await write("Message Alpha", prompt);
+      await fill("Message Alpha", prompt);
       await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
       await press("Send");
       await ready(runtime, Conversation, "Reviewed reply complete", (state) => review.pendingReads > reads && state.turn.reply === "Complete");
     };
 
     await ask("unrelated-proposal", "Text +14155550100 from SIM 1 saying Meet at the front door");
-    expect([button("Approve"), review.decisions, review.confirmations, world.telephony.sent]).toEqual([undefined, [], [], []]);
+    expect([button("Send this text"), review.decisions, review.confirmations, world.telephony.sent]).toEqual([undefined, [], [], []]);
 
     await ask(review.proposal.id, "Use SIM 1 to send +14155550100 the text Meet at the front door");
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect(document.body.textContent).toContain("Review this text on your phone");
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
+    expect(document.body.textContent).toContain(`To: ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
+    // spec/app/contacts/agent.md, "A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it"
+    const sendRow = button("Send this text")?.textContent ?? "";
+    expect([sendRow.startsWith(`Review SMSTo: ${displayNumber(sms.recipients[0])}${sms.body}`), sendRow.endsWith("Send")]).toEqual([true, true]);
+    expect(button("Decline Keep things as they are.")?.textContent).toBe("Keep things as they are.Decline");
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
-    await press("Approve");
+    await press("Send this text");
     try {
-      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
-      const confirmation = review.confirmations[0];
-      expect(confirmation).toMatchObject({ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body, subscriptionId: sms.subscriptionId });
+      const confirmation = await exactSmsConfirmation(review, sms);
       expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[review.proposal.id], [review.proposal.id], []]);
       expect(review.journal.get(review.proposal.id)).toMatchObject({
         ownerId: world.notes.owner, agentId: world.notes.owner, installationId: world.notes.owner,
@@ -403,6 +746,51 @@ describe("Messages on an Alpha image", () => {
       await drawn(() => confirmation.confirm());
       await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: review.proposal.id })]));
       expect(world.telephony.sent).toEqual([{ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body }]);
+    } finally {
+      for (const confirmation of review.confirmations) confirmation.confirm();
+    }
+  });
+
+  it("Uses the sole Android SIM when Ask Alpha opens over the Messages list (spec/app/messages/composer.md, \"The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access\")", async () => {
+    const world = image();
+    const first = world.telephony.subscriptions[0];
+    world.telephony.subscriptions = [first, { ...first, id: 14, slot: 1, defaultSms: false }];
+    world.ask.metadata = [];
+    const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: first.id } as const;
+    const review = textReview(world.notes.owner, "text-from-threads", sms);
+    const { alpha, runtime } = await openTextReview(world, review);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+    await ready(alpha.runtime, Messages, "Conversation list read", (state) => state.pane === "Threads" && state.list.status === "Loaded");
+    await ready(alpha.runtime, Composer, "No open text composer", (state) => state.thread === 0);
+    await ready(runtime, Conversation, "Ask Alpha sees Messages", (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Messages");
+    await press("Open Alpha");
+    await ready(alpha.runtime, Shell, "Ask Alpha sheet", (state) => state.assistant === "Sheet");
+
+    const ask = async () => {
+      const earlier = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review the text on your phone."];
+      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Ask Alpha"]')).not.toBeNull());
+      await fill("Ask Alpha", "Text +14155550100: Meet at the front door");
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await ready(runtime, Conversation, "The proposed text returned", (state) => review.pendingReads > earlier && state.turn.reply === "Complete");
+      const metadata = world.ask.metadata?.at(-1) as { observation?: { selectedObject?: unknown } } | undefined;
+      return metadata?.observation?.selectedObject;
+    };
+    expect(await ask()).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
+    world.telephony.subscriptions = [first];
+    const revision: unknown = expect.stringMatching(/^[a-f0-9-]{36}$/u);
+    expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision });
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
+    await press("Send this text");
+    try {
+      const confirmation = await exactSmsConfirmation(review, sms);
+      expect(world.telephony.sent).toEqual([]);
+      await drawn(() => confirmation.confirm());
+      await vi.waitFor(() => expect(world.telephony.sent).toHaveLength(1));
     } finally {
       for (const confirmation of review.confirmations) confirmation.confirm();
     }
@@ -416,9 +804,7 @@ describe("Messages on an Alpha image", () => {
     world.ask.metadata = [];
     const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: second.id } as const;
     const review = textReview(world.notes.owner, "text-with-sim", sms);
-    world.telephony.textReview = review;
-    const { alpha } = await openImage(world);
-    const runtime = assistant.runtime(alpha);
+    const { alpha, runtime } = await openTextReview(world, review);
     await openMessages(alpha);
     await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
     await ready(alpha.runtime, Messages, "Conversations ready", (state) => state.list.status === "Loaded" && state.threads === 1);
@@ -434,7 +820,7 @@ describe("Messages on an Alpha image", () => {
       const reads = review.pendingReads;
       world.ask.nextReplyChunks = ["Review the text on your phone."];
       world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-      await write("Ask Alpha", "Text +14155550100: Meet at the front door");
+      await fill("Ask Alpha", "Text +14155550100: Meet at the front door");
       await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
       await press("Send");
       await ready(runtime, Conversation, "The proposed text has been read", (state) => review.pendingReads > reads && state.turn.reply === "Complete");
@@ -453,36 +839,45 @@ describe("Messages on an Alpha image", () => {
 
     const opaqueRevision: unknown = expect.stringMatching(/^[a-f0-9-]{36}$/u);
     expect(await ask()).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
-    await choose("SIM 1");
+    expect(button("Send this text")).toBeUndefined();
+    await choose("Carrier");
     expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision: opaqueRevision });
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     await giveBack();
     await press("Back");
     await ready(alpha.runtime, Messages, "Conversation closed", (state) => state.pane === "Threads");
     await press("Maya Chen");
     await ready(alpha.runtime, Messages, "Conversation reopened", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
     expect(await ask()).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
-    await choose("SIM 2");
+    expect(button("Send this text")).toBeUndefined();
+    await choose("Personal line");
     expect(await ask()).toEqual({ kind: "sms-subscription", id: String(second.id), revision: opaqueRevision });
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
 
     world.telephony.subscriptions = [first, { ...second, carrierName: "Replacement carrier" }];
-    await press("Approve");
+    await press("Send this text");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "failed", operationId: review.proposal.id })]));
     expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
   });
 
-  it("Reviews the exact number for a named text, then opens an editable draft (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+  it.each(["draft", "send", "send with a lost answer"] as const)("Reviews the exact number for a named text and handles its %s (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\"; spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\")", async (mode) => {
     const world = image();
-    const compose = { type: "sms_compose", query: "Maya", body: "Meet at the front door" } as const;
+    const body = "Meet at the front door";
+    const compose = mode === "draft" ? { type: "sms_compose", target: { kind: "contact", query: "Maya" }, draft: true, body } as const
+      : { type: "sms_compose", query: "Maya", body } as const;
     const review = textReview(world.notes.owner, "draft-for-maya", compose);
-    const { alpha, runtime } = await openHomeAsk(world, review);
+    world.telephony.textReview = review;
+    const lostAnswer = mode === "send with a lost answer";
+    world.telephony.loseSmsReply = lostAnswer;
+    const { alpha } = await open(world, lostAnswer ? [...mounts, ...only("view:Settings", "settings/activity")] : mounts);
+    const runtime = assistant.runtime(alpha);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await openHomeConversation(alpha, runtime);
 
-    world.ask.nextReplyChunks = ["Review the draft for Maya."];
+    const action = mode === "draft" ? "Open draft" : "Send this text";
+    world.ask.nextReplyChunks = ["Review the text for Maya."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-    await write("Message Alpha", "Text Maya: Meet at the front door");
+    await fill("Message Alpha", mode === "draft" ? "Draft a text for Maya: Meet at the front door" : "Text Maya: Meet at the front door");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await ready(runtime, Conversation, "The named proposal is ready", (state) => review.pendingReads === 1 && state.turn.reply === "Complete");
@@ -491,12 +886,48 @@ describe("Messages on an Alpha image", () => {
       expect(found?.textContent).toContain("Maya Chen");
       return found!;
     });
-    expect(button("Open draft")).toBeUndefined();
+    expect(button(action)).toBeUndefined();
     expect(review.decisions).toEqual([]);
     await drawn(() => choice.click());
-    await vi.waitFor(() => expect(button("Open draft")).toBeDefined());
+    await vi.waitFor(() => expect(button(action)).toBeDefined());
     expect(review.decisions).toEqual([]);
-    await press("Open draft");
+    await press(action);
+    if (mode !== "draft") {
+      try {
+        const confirmation = await exactSmsConfirmation(review, { recipients: ["+14155550100"], body, subscriptionId: 1 });
+        expect(world.telephony.sent).toEqual([]);
+        await drawn(() => confirmation.confirm());
+        if (lostAnswer) {
+          await vi.waitFor(() => expect(review.proposal.state).toBe("reconciliation_required"), { timeout: 12_000 });
+          await drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "openView", view: "Settings" }))));
+          await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Settings");
+          await vi.waitFor(async () => {
+            await drawn(() => undefined);
+            expect(button("About")).toBeDefined();
+          }, { timeout: 12_000 });
+          await press("About");
+          const activity = await vi.waitFor(async () => {
+            await drawn(() => undefined);
+            const row = [...document.querySelectorAll<HTMLButtonElement>("button")].find((one) => one.textContent?.includes("Agent activity"));
+            if (row === undefined) throw new Error("Agent activity was not drawn");
+            return row;
+          }, { timeout: 12_000 });
+          await drawn(() => activity.click());
+          await vi.waitFor(async () => {
+            await drawn(() => undefined);
+            expect(document.body.textContent).toContain("Phone could not confirm the send");
+          }, { timeout: 12_000 });
+          expect([button("Happened"), button("Didn’t")]).toEqual([undefined, undefined]);
+        } else {
+          await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: review.proposal.id,
+            result: { kind: "sms-compose", status: "sent" } }));
+        }
+        expect(world.telephony.sent).toEqual([{ operationId: review.proposal.id, recipients: ["+14155550100"], body }]);
+      } finally {
+        for (const confirmation of review.confirmations) confirmation.confirm();
+      }
+      return;
+    }
     await ready(alpha.runtime, Composer, "The exact draft is ready", (state) => state.slot.author === "AlphaWrote");
     await vi.waitFor(() => expect(review.receipts).toEqual([{
       outcome: "applied", operationId: review.proposal.id, result: { kind: "sms-compose", status: "drafted" },
@@ -507,6 +938,95 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(document.querySelector('[aria-label^="Message draft to Maya Chen"]')?.textContent).toContain(compose.body));
   });
 
+  it.each([["a draft the model declared", true], ["a text to send", false]] as const)("Shows %s to a written number on its own card and sends nothing (spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async (_label, draft) => {
+    const world = image();
+    const body = "Can you bring ice tomorrow?";
+    const compose = draft ? { type: "sms_compose", target: { kind: "number", number: "+12025550142" }, body, draft: true } as const
+      : { type: "sms_compose", target: { kind: "number", number: "+12025550142" }, body } as const;
+    const review = textReview(world.notes.owner, draft ? "draft-to-number" : "text-to-number", compose);
+    await proposeText(world, review, draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?", "The proposal is read");
+    await vi.waitFor(() => expect(button(draft ? "Open draft" : "Send this text")).toBeDefined());
+    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To: ${displayNumber("+12025550142")}`);
+    expect(document.body.textContent).not.toContain(draft ? "Review this text on your phone" : "Open an editable text draft");
+    expect(button(draft ? "Send this text" : "Open draft")).toBeUndefined();
+    expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+  });
+
+  it.each([["a contact's first name", "Maya", true], ["a name no contact has", "Bob", false]] as const)("Reviews a text to %s on its card and sends nothing (spec/app/contacts/agent.md, \"Only the phone answers the newest search, and the request goes on by what it found\")", async (_label, query, known) => {
+    const world = image();
+    const review = textReview(world.notes.owner, `text-${query}`, { type: "sms_compose", query, body: "I'm running late" });
+    await proposeText(world, review, `text ${query} I'm running late`, "The named proposal is read");
+    if (known) {
+      await vi.waitFor(() => expect(document.querySelector('[aria-label="Choose a phone number"] button')?.textContent).toContain("Maya Chen"));
+    } else {
+      await vi.waitFor(() => expect(document.body.textContent).toContain("No matching contact with a phone number was found."));
+      expect(document.querySelector('[aria-label="Choose a phone number"]')).toBeNull();
+    }
+    expect(button("Decline")).toBeDefined();
+    expect([button("Send this text"), button("Open draft")]).toEqual([undefined, undefined]);
+    expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+  });
+
+  it.each(["suffix", "whole number", "open thread"] as const)("Completes the exact approved %s read in its original chat (spec/app/contacts/agent.md, \"The latest text's sender is named by its number alone, and the whole number only where the agent asked for it\"; spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async (scope) => {
+    const world = image();
+    const selected = scope === "open thread";
+    const operation = selected ? { type: "messages_read_selected" } as const : scope === "whole number"
+      ? { type: "sms_latest_sender", includeAddress: true } as const : { type: "sms_latest_sender" } as const;
+    const review = textReview(world.notes.owner, "reviewed-messages-read", operation);
+    const { alpha, runtime } = await openTextReview(world, review);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    if (selected) {
+      await openMessages(alpha);
+      await ready(alpha.runtime, Messages, "Conversations ready", (state) => state.list.status === "Loaded" && state.threads === 1);
+      await press("Maya Chen");
+      await ready(alpha.runtime, Messages, "Exact thread loaded", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
+      await ready(runtime, Conversation, "Ask Alpha sees Messages", (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Messages");
+      await press("Open Alpha");
+    } else {
+      await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+      await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+      await press("Open conversation");
+    }
+    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+    const label = selected ? "Ask Alpha" : "Message Alpha";
+    const ask = async (prompt: string, exact: boolean) => {
+      const earlier = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review this read on your phone."];
+      world.ask.nextActions = () => {
+        const chat = [...world.ask.kept].at(-1);
+        const owner = chat?.[1].messages.at(-1);
+        if (!chat || owner?.role !== "user" || !("clientMessageId" in owner) || typeof owner.clientMessageId !== "string") throw new Error("The fake resident did not retain the owner turn");
+        review.readOrigin = { version: 1, requestId: owner.clientMessageId, conversationId: chat[0], inReplyTo: exact ? owner.id : "other-message" };
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      };
+      await vi.waitFor(() => expect(document.querySelector(`textarea[aria-label="${label}"]`)).not.toBeNull());
+      await fill(label, prompt);
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await ready(runtime, Conversation, "The offered read returned", (state) => review.pendingReads > earlier && state.turn.reply === "Complete");
+    };
+    const prompt = selected ? "Read my open messages" : scope === "whole number" ? "What is the full phone number that last texted me?" : "What are the last four digits of the latest SMS sender?";
+    if (scope === "suffix") {
+      await ask(prompt, false);
+      expect([button("Approve"), review.senderReads, review.receipts, review.completions]).toEqual([undefined, [], [], []]);
+    }
+    await ask(prompt, true);
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect([review.senderReads, review.receipts, review.completions]).toEqual([[], [], []]);
+    if (!selected) {
+      world.telephony.texts.push({ id: 2, thread: 12, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Keep this out of the receipt", read: false });
+    }
+    await press("Approve");
+    await vi.waitFor(() => expect(review.completions).toHaveLength(1));
+    const result = selected ? { kind: "messages-read", status: "read", participant: "Maya Chen", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false }
+      : scope === "whole number" ? { kind: "sms-latest-sender", status: "found", address: "+14155550122", threadId: "thread:12" }
+        : { kind: "sms-latest-sender", status: "found", numberEnding: "0122" };
+    expect(review.receipts).toEqual([{ outcome: "applied", operationId: review.proposal.id, result }]);
+    expect(review.senderReads).toEqual(selected ? [] : [scope === "whole number"]);
+    expect(world.telephony.sent).toEqual([]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("The reviewed read answered the original request."));
+  });
+
   it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {
     const world = image();
     world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch? http://news.example/lunch or https://example-user@private.example/lunch", read: false });
@@ -514,6 +1034,25 @@ describe("Messages on an Alpha image", () => {
     const { alpha } = await openImage(world);
     await ready(alpha.runtime, Messages, "Messages state", (state) => state.pane === "Conversation" && state.page.status === "Loaded" && world.telephony.smsNotice === undefined && world.telephony.texts[1]?.read === true);
     expect([world.telephony.texts.map((text) => text.read), world.telephony.sent]).toEqual([[false, true], []]);
+    const title = () => document.querySelector("[data-alpha-messages-title]")?.textContent;
+    expect(title()).toBe("Ben Ortiz");
+
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Both conversations displayed", (state) => state.pane === "Threads" && state.list.status === "Loaded" && state.threads === 2);
+    expect(button("Maya Chen")).toBeDefined();
+    const ticket = alpha.runtime.runSync(Messages.use((machine) => machine.get())).list.ticket;
+    world.telephony.people = world.telephony.people.filter((person) => person.displayName !== "Maya Chen");
+    await drawn(() => world.telephony.changed());
+    await ready(alpha.runtime, Messages, "Conversations read after a contact was removed", (state) => state.list.ticket > ticket && state.list.status === "Loaded");
+    expect(button("Maya Chen")).toBeUndefined();
+    expect(button(displayNumber("+14155550100"))).toBeDefined();
+    expect(button("Ben Ortiz")).toBeDefined();
+
+    world.telephony.people = [];
+    world.telephony.smsNotice = { threadId: "thread:23", token: "2" };
+    await drawn(() => world.telephony.wakeSmsNotice());
+    await ready(alpha.runtime, Messages, "Second notification opened after a contact was removed", (state) => state.pane === "Conversation" && state.page.status === "Loaded" && world.telephony.smsNotice === undefined);
+    expect(title()).toBe(displayNumber("+14155550122"));
 
     const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-alpha-message-body] a")];
     expect([links.map((one) => one.href), world.browser.tabs.size]).toEqual([["http://news.example/lunch"], 0]);
@@ -539,20 +1078,20 @@ describe("Messages on an Alpha image", () => {
     await press("Maya Chen");
     await ready(alpha.runtime, Composer, "Composer ready", (state) => state.thread > 0 && state.slot.author === "Nobody");
 
-    await write("Message", "Temporary draft");
+    await fill("Text Maya", "Temporary draft");
     await ready(alpha.runtime, Composer, "Owner wrote draft", (state) => state.slot.author === "OwnerWrote");
-    await write("Message", "");
+    await fill("Text Maya", "");
     await ready(alpha.runtime, Composer, "Owner cleared draft", (state) => state.slot.author === "Nobody");
 
     await hardware("back");
     await ready(alpha.runtime, Messages, "Returned to threads", (state) => state.pane === "Threads");
     await press("Maya Chen");
     await ready(alpha.runtime, Composer, "Reopened empty composer", (state) => state.thread > 0 && state.slot.author === "Nobody");
-    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe("");
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe("");
     expect(await alpha.runtime.runPromise(answerReading({ type: "sms_reply_selected", body: "Fresh reply" }))).toEqual({
       kind: "sms-reply", status: "drafted",
     });
     await ready(alpha.runtime, Composer, "Agent drafted into cleared composer", (state) => state.slot.author === "AlphaWrote");
-    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe("Fresh reply");
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe("Fresh reply");
   });
 });
