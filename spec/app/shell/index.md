@@ -19,7 +19,9 @@ inside the shell and moves through it.
 ### The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits
 
 Home is the empty trail; the app showing is the last one on it. Ask Alpha
-rests as a bar, takes typing, opens as a sheet, or fills the screen.
+rests as a bar, takes typing, opens as a sheet, or fills the screen. An app
+rises over Home, which stays where the owner left it and takes no input
+underneath; going back takes the app away at once.
 
 ```quint
 type View = Phone | Messages | Inbox | Telegram | Slack | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
