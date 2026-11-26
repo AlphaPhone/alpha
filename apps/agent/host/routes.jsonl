@@ -65,7 +65,7 @@
 { "method": "GET", "path": "/api/notes/trash/recordings" }
 { "method": "GET", "path": "/api/alpha/notes/transcription" }
 { "method": "POST", "path": "/api/alpha/notes/transcription", "maxBodyBytes": 1100000 }
-{ "method": "POST", "path": "/api/alpha/notes/browser-cleanup" }
+{ "method": "POST", "path": "/api/alpha/notes/browser-cleanup", "maxBodyBytes": 2048 }
 { "method": "GET", "path": "/api/workflow/status" }
 { "method": "GET", "path": "/api/workflow/hosted/loops" }
 { "method": "POST", "path": "/api/workflow/hosted/loops" }
