@@ -16,7 +16,7 @@ import { callerInitials } from "../phone/words.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Drafts, attachNewPictures, editNewMessage, handOffNewMessage, messageRecipients, newDraftHeld, requestNewAccess, sameSubscription, sendNewMessage, supported, type NewMessageDraft } from "./composer.vibe";
 import { dictateNewMessage } from "./dictation.vibe";
-import { Inbox, titleOf } from "./messages.vibe";
+import { useNewRecipientTitle } from "./new-recipient.ts";
 import type { MessagesProps } from "./Messages.tsx";
 
 const textAction = "min-h-11 underline focus-visible:outline-2 focus-visible:outline-ring";
@@ -24,6 +24,7 @@ const textAction = "min-h-11 underline focus-visible:outline-2 focus-visible:out
 interface NewMessageDockProps {
   readonly runtime: MessagesProps["runtime"];
   readonly scope: NewDraft;
+  readonly contactsAllowed: boolean;
   readonly draft: NewMessageDraft;
   readonly textarea: RefObject<HTMLTextAreaElement | null>;
   readonly minHeight: number | undefined;
@@ -34,7 +35,7 @@ interface NewMessageDockProps {
   readonly onRetrySave: () => void;
 }
 
-export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, body, saveStatus, textIsSaved, onBody, onRetrySave }: NewMessageDockProps) {
+export function NewMessageDock({ runtime, scope, contactsAllowed, draft, textarea, minHeight, body, saveStatus, textIsSaved, onBody, onRetrySave }: NewMessageDockProps) {
   const composer = useComposer(runtime);
   const phone = usePhone(runtime);
   const voice = useVoice(runtime);
@@ -43,16 +44,11 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
   const camera = useRef<HTMLInputElement>(null);
   const chooserRevision = useRef<number | undefined>(undefined);
   const state = composer.state;
+  const title = useNewRecipientTitle(runtime, scope, contactsAllowed);
   if (!state || !phone.state) return <CommsBar runtime={runtime} />;
 
   const { visit, recipient, revision, picking } = scope;
   const addresses = messageRecipients(draft.recipients);
-  const held = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
-  const names = new Map(held.names);
-  for (const contact of held.choices) {
-    for (const number of contact.phones) names.set(number, contact.name);
-  }
-  const title = titleOf(addresses, names);
   const first = /^[+(\d]/u.test(title) || title.includes(",") ? title : title.split(/\s+/u, 1)[0];
   const label = first ? `Text ${first}` : "Message";
   const editable = !newDraftHeld(state, revision);
