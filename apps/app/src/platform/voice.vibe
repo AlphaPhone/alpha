@@ -447,7 +447,7 @@ function phoneSpeechStatus() {
       settled = status
       return status
     }, effect {
-      statusFlight = undefined
+      if (statusFlight?.done === flight) statusFlight = undefined
       try Deferred.succeed(flight, settled)
     })
   }
@@ -700,7 +700,7 @@ effect function phoneSpeaker() {
 interface CloudVoiceSession {
   readonly session: number
   readonly stream: CloudStreamingSpeech
-  readonly signal: AbortSignal
+  readonly abort: AbortController
   capture: Awaited<ReturnType<CloudStreamingSpeech["listen"]>> | undefined
 }
 
@@ -784,7 +784,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       const currentSession = session
       const owner: CloudVoiceSession = cloudSpeech?.session === currentSession ? cloudSpeech : {
         session: currentSession,
-        signal: makeAbort().signal,
+        abort: makeAbort(),
         capture: undefined,
         stream: createCloudStreamingSpeech({
           environment: CLOUD_ENVIRONMENT,
@@ -804,7 +804,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       cloudPreview = previewOwner
       const capture = tryPromise({
         try: () => owner.stream.listen({
-          signal: owner.signal,
+          signal: owner.abort.signal,
           onSpeechStart: () => publish({ kind: "speechStart", session: currentSession }),
           onSpeechEnd: () => undefined,
           onSegment: (text) => {
@@ -1011,6 +1011,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session === session) {
       cloudSpeech = undefined
+      owner.abort.abort()
       const capture = owner.capture
       if (capture !== undefined) {
         confirmed = try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
@@ -1098,7 +1099,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     activeSession = session
     const owner: CloudVoiceSession = cloudSpeech?.session === session ? cloudSpeech : {
       session,
-      signal: makeAbort().signal,
+      abort: makeAbort(),
       capture: undefined,
       stream: createCloudStreamingSpeech({
         environment: CLOUD_ENVIRONMENT,
@@ -1117,7 +1118,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     cloudPreview = previewOwner
     const capture = tryPromise({
       try: () => owner.stream.listen({
-        signal: owner.signal,
+        signal: owner.abort.signal,
         onSpeechStart: () => publish({ kind: "speechStart", session }),
         onSpeechEnd: () => undefined,
         onSegment: (text) => {
@@ -1188,6 +1189,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session !== session) return true
     cloudSpeech = undefined
+    owner.abort.abort()
     const capture = owner.capture
     const cancelled = capture === undefined || (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)))
     return (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && cancelled

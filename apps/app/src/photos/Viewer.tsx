@@ -14,6 +14,7 @@ import { trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
 import { headingOf } from "../runtime/dateHeading.ts";
 import { Time } from "../runtime/time.vibe";
 import { Device } from "../platform/device.vibe";
+import { fadeIn } from "../shell/Layers.tsx";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
 const messages = {
@@ -165,13 +166,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
       });
     }
   }
-  function played() {
+  function played(ended = false) {
     const clip = videoRef.current;
     if (clip === null || !state?.playing) return;
     const end = state.editing ? state.edit.end : state.duration;
-    const position = Math.min(end, Math.max(0, Math.round(clip.currentTime * 10)));
+    const position = ended ? end : Math.min(end, Math.max(0, Math.round(clip.currentTime * 10)));
     if (position >= end) clip.pause();
-    if (position !== state.position && can({ type: "played", position }, "Phone")) void send({ type: "played", position }, "Phone");
+    if ((ended || position !== state.position) && can({ type: "played", position }, "Phone")) void send({ type: "played", position }, "Phone");
   }
   const close = () => {
     videoRef.current?.pause();
@@ -221,7 +222,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
     <div role={clipEditor ? "dialog" : undefined} aria-modal={clipEditor || undefined} aria-label={clipEditor ? "Edit video" : name}
       data-alpha-subview={clipEditor ? "photos-clip-editor" : state.editing ? "photos-editor" : "photos-viewer"}
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
-      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col text-foreground", "bg-background", !clipEditor && dockClearance)}>
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col text-foreground", "bg-background", fadeIn, !clipEditor && dockClearance)}>
       <header data-host-chrome="" className={cn(clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : "flex min-h-13 shrink-0 items-center gap-0.5 px-2", !chrome && hiddenChrome)}>
         <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : state.editing ? undefined : "size-13 rounded-tile"} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
         {clipEditor ? <h1 className="flex-1 text-base font-normal">Edit video</h1> : state.editing ? <div className="flex-1"><h1 className="sr-only">Edit photo</h1></div> : <div className="min-w-0 flex-1">
@@ -331,7 +332,7 @@ interface ViewportProps {
   readonly action: (event: Event) => void;
   readonly allows: (event: Event) => boolean;
   readonly attachVideo: RefCallback<HTMLVideoElement>;
-  readonly played: () => void;
+  readonly played: (ended?: boolean) => void;
   readonly onPlaybackStarted: () => void;
   readonly onDecode: (loaded: boolean) => void;
 }
@@ -447,7 +448,7 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
                 state.editing && videoRatio === undefined && "size-full")}
                 style={videoRatio === undefined ? undefined : { width: `min(100cqw, calc(100cqh * ${videoRatio}))`, aspectRatio: videoRatio }}>
                 <video ref={attachVideo} key={state.open} src={current.uri} poster={current.item?.image ?? current.browser?.item.thumbnail}
-                  muted={state.muted} playsInline preload={state.editing ? "metadata" : "none"} onPlaying={onPlaybackStarted} onLoadedData={() => onDecode(true)} onError={() => onDecode(false)} onTimeUpdate={played} onEnded={played}
+                  muted={state.muted} playsInline preload={state.editing ? "metadata" : "none"} onPlaying={onPlaybackStarted} onLoadedData={() => onDecode(true)} onError={() => onDecode(false)} onTimeUpdate={() => played(false)} onEnded={() => played(true)}
                   className={videoRatio === undefined ? "size-full object-contain" : "absolute top-1/2 left-1/2 max-w-none object-fill"}
                   style={videoRatio === undefined ? undefined : { width: `${sideways ? videoScale / videoRatio : videoScale}%`, height: `${sideways ? videoScale * videoRatio : videoScale}%`, transform: `translate(-50%, -50%) rotate(${state.edit.turns * 90}deg)` }} />
                 {!state.editing && state.playing && state.duration > 0 && <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-0.75 bg-foreground/25">

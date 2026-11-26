@@ -9,6 +9,11 @@ sent here. The agent never reads this list.
 
 - [Agent requests](./agent.md): a call or a contact change the agent proposes, for the owner to approve
 
+One contact and the form each rise over the list as Alpha's earlier build
+drew them, and the list stays under them as it was; Back takes them away at
+once. Before Contacts has its first answer, it shows its header, never a
+blank screen.
+
 ## Domain
 
 ### What Contacts holds

@@ -6,7 +6,7 @@ import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { type Engagement, Engagements } from "../src/update/activity.vibe";
 import * as Updates from "../gen/app__update.effect.vibe";
 import * as Page from "../gen/app__update__page.effect.vibe";
-import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { apk, manifestDigest, release, tell } from "./fakes/update.ts";
 
@@ -184,6 +184,38 @@ describe("Updates", () => {
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.installed === 120 && s.permission === "Required");
     expect([(await updatesOf(alpha)).offer.release.version, world.update.checks.length]).toEqual([121, 1]);
   });
+
+  it("Apps drawer keeps automatic updates waiting, deferred retry still polls at 15 minutes, and an incomplete manifest keeps the saved offer installable (spec/app/update/index.md, \"Story: Install an update\"; spec/app/update/index.md, \"Story: Keep the offer that fits this phone\")", async () => {
+    const world = phoneWith([release(121)]);
+    world.update.installAnswer = "starting";
+    const { alpha } = await open(world, only("home", "view:Settings", "settings/update"));
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.deferrals === 1);
+    world.update.installAnswer = undefined;
+
+    // spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (s) => s.drawer);
+    await later(alpha, 60_000);
+    expect([world.update.installs.length, (await updatesOf(alpha)).activity.open]).toEqual([1, true]);
+
+    // spec/app/update/index.md, "A check is due fifteen minutes after one that was answered, a minute after one that failed, and at once before the first or when the clock went back"
+    const checksBefore = world.update.checks.length;
+    await later(alpha, 15 * 60_000);
+    expect(world.update.checks.length).toBeGreaterThan(checksBefore);
+
+    // spec/app/update/index.md, "Only the answer to the newest check is taken: a complete manifest replaces the offer, a withdrawn one removes it, and anything else keeps it"
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => !s.drawer);
+    await general(alpha);
+    world.update.manifest = JSON.stringify(release(122, { apkUrl: "http://releases.alphacompute.cc/alpha-122.apk" }));
+    await press("Check for updates");
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.note === "CouldNotCheck");
+    expect((await updatesOf(alpha)).offer.release.version).toBe(121);
+    const installsBefore = world.update.installs.length;
+    await pressRow("Install update");
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.installing && s.note === "Installing");
+    expect(world.update.installs.length).toBe(installsBefore + 1);
+  });
 });
 
 describe("An open page during an update (spec/app/update/page.md, \"Story: Save my work before Alpha updates\")", () => {
@@ -268,5 +300,14 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     world.update.state = { activationId: "a7", bridgeId: "b7", outcome: "installed" };
     await later(alpha, 1_000);
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.mount === "Mounted");
+  });
+
+  it("a pending update reported without ids holds rather than mount editors (spec/app/update/page.md, \"A page that cannot read the update state holds rather than mount\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.update.state = { pending: true, phase: "preparing" };
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Page.Machine, (s) => s.mount !== "Opening");
+    expect((await alpha.runtime.runPromise(Page.Machine.use((page) => page.get()))).mount).toBe("Holding");
+    expect([document.body.textContent?.includes("Updating Alpha…"), button("Settings")]).toEqual([true, undefined]);
   });
 });

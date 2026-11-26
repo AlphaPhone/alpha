@@ -25,11 +25,11 @@ export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
   children?: ReactNode;
 };
 
-/** An event, over the days: Back and its actions, its title, time, day and calendar, then what it holds. */
+/** An event, rising over the days as Alpha's earlier build drew it (v119 45f6bed30 template.html:1277 `class="enter"`): Back and its actions, its title, time, day and calendar, then what it holds. */
 export function CalendarEventPage({ title, onBack, actions, when, day, source, repeat, dot = "primary", notes, className, children, ...props }: CalendarEventPageProps) {
   const dotClass = cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : "bg-foreground");
   return (
-    <div data-alpha-subview="calendar-detail" className={cn("absolute inset-0 z-20 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
+    <div data-alpha-subview="calendar-detail" className={cn("absolute inset-0 z-20 flex flex-col bg-background motion-safe:animate-rise", className)} {...props}>
       <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 px-2">
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />
@@ -39,7 +39,7 @@ export function CalendarEventPage({ title, onBack, actions, when, day, source, r
         <h1 className="m-0 font-display text-display font-light">{title}</h1>
         <div className="mt-3.5 text-lg leading-plain">{when}</div>
         <div className="mt-1 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{day}</div>
-        <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{source}</div>
+        {source ? <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{source}</div> : null}
         {repeat ? <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><Repeat aria-hidden className="size-4.5 shrink-0" />{repeat}</div> : null}
         {children}
         {notes ? <div className="mt-4.5 border-t border-border pt-4.5 text-prose whitespace-pre-wrap">{notes}</div> : null}
@@ -144,18 +144,32 @@ export interface CalendarEventMenuItem {
 }
 
 /** The event's actions, behind the "…" at the top end: a small list that opens under it. */
-export function CalendarEventMenu({ items, className, ...props }: Omit<ComponentProps<"div">, "children"> & { items: ReadonlyArray<CalendarEventMenuItem> }) {
+export function CalendarEventMenu({ items, className, onKeyDown, ...props }: Omit<ComponentProps<"div">, "children"> & { items: ReadonlyArray<CalendarEventMenuItem> }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={cn("relative z-10", className)} {...props}>
-      <CalendarHeaderAction aria-label="Event actions" aria-expanded={open} className="size-11" onClick={() => setOpen(!open)}><Ellipsis aria-hidden /></CalendarHeaderAction>
+    <div
+      className={cn("relative z-10", className)}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (open && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+      {...props}
+    >
+      <CalendarHeaderAction aria-label="Event actions" aria-haspopup="menu" aria-expanded={open} className="size-11" onClick={() => setOpen(!open)}><Ellipsis aria-hidden /></CalendarHeaderAction>
       {open ? (
-        <div role="menu" className="absolute top-full right-0 w-max rounded-lg bg-background p-1 text-foreground shadow-md">
-          {items.map((item) => (
-            <button key={item.label} type="button" role="menuitem" aria-label={item.name} onClick={() => { setOpen(false); item.onSelect(); }}
-              className={cn(focusRing, "block min-h-11 w-full px-3.5 text-start active:bg-accent")}>{item.label}</button>
-          ))}
-        </div>
+        <>
+          <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 cursor-default" />
+          <div role="menu" className="absolute top-full right-0 w-max rounded-lg bg-background p-1 text-foreground shadow-md">
+            {items.map((item) => (
+              <button key={item.label} type="button" role="menuitem" aria-label={item.name} onClick={() => { setOpen(false); item.onSelect(); }}
+                className={cn(focusRing, "block min-h-11 w-full px-3.5 text-start active:bg-accent")}>{item.label}</button>
+            ))}
+          </div>
+        </>
       ) : null}
     </div>
   );

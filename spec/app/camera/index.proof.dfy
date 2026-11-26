@@ -536,32 +536,6 @@ lemma close_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
   RetiringOut();
 }
 
-lemma scanDocument_ensures(s: Camera, by_: app__photos__actor_Actor)
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysNoCameraWithoutAccess(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysNothingHeldAway(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysStartsAccounted(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysTorchBelongsToItsPreview(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysLensSettingsValid(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysFocusFollowsTheNewestTap(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysRecordingHoldsThePreview(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysOneShutterOnTheCamera(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysTheRequestWaitsOnTheCamera(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> alwaysSecureShowsOnlyItsSession(scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepALostPreviewFails(s, "scanDocument", scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepARetiredPreviewIsReleased(s, "scanDocument", scanDocument(s, by_).state, scanDocument(s, by_).out))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepOneFocusWriteAtATime(s, "scanDocument", scanDocument(s, by_).state, scanDocument(s, by_).out))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepSoundOnlyWithTheMicrophone(s, scanDocument(s, by_).state, scanDocument(s, by_).out))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepASavedVideoIsTheLast(s, scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepTheShutterNeverFiresCovered(s, scanDocument(s, by_).state, scanDocument(s, by_).out))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepEachRequestIsAnsweredOnce(s, scanDocument(s, by_).state, scanDocument(s, by_).out))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepTheAgentFailsOnlyForCause(s, "scanDocument", scanDocument(s, by_).state))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepTheLockScreenOpensNothingElse(s, scanDocument(s, by_).state, scanDocument(s, by_).out))
-  ensures (inv(s) ==> canScanDocument(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "scanDocument", scanDocument(s, by_).state))
-{
-  AnsweringAll();
-  RetiringOut();
-}
-
 lemma flip_ensures(s: Camera, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canFlip(s, by_) ==> alwaysNoCameraWithoutAccess(flip(s, by_).state))
   ensures (inv(s) ==> canFlip(s, by_) ==> alwaysNothingHeldAway(flip(s, by_).state))

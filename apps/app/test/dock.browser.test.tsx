@@ -340,6 +340,27 @@ describe("Ask Alpha dock", () => {
     }
   });
 
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v119's Browser bar (45f6bed30 chat-overlay-motion-adapter.ts:637-646), a bar dragged down and let go is the pill where it is, with no entrance that drops it and lifts it again
+  it("a swipe down on the Browser's bar shows the pill in place, with no entrance", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Browser" });
+    const pill = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha'] [data-alpha-pill]");
+    const mark = document.querySelector("section[aria-label='Ask Alpha'] [aria-label='Open conversation']");
+    const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
+    const finger = (type: string, clientY: number) =>
+      mark?.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientY, pointerId: 21, pointerType: "touch", isPrimary: true }));
+    expect(pill()).toBeNull();
+    const y = Math.round((mark?.getBoundingClientRect().top ?? 0) + 20);
+    finger("pointerdown", y);
+    for (let step = 1; step <= 6; step++) { await pause(25); finger("pointermove", y + step * 15); }
+    await pause(120);
+    finger("pointerup", y + 90);
+    await expect.poll(() => pill()).not.toBeNull();
+    expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Bar");
+    expect(pill()?.getAnimations()).toEqual([]);
+    expect(getComputedStyle(pill() as HTMLElement).opacity).toBe("1");
+  });
+
   // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": as v119's pill, a swipe up that starts on Type carries the sheet with the finger and opens it without typing; once it is a drag the sheet holds the pointer, so later moves reach the sheet as a captured touch's do
   it("a swipe up from Type on the pill follows the finger and opens Sheet without typing", async () => {
     await page.viewport(390, 844);

@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { type ScheduledTasksApi, type VerbRequest, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent-host";
 import {
   type AlphaAppsStore, DEFAULT_LIST_ID, addCivilDays, civilToEpochMs, normalizeListColor,
-  normalizeListIcon, normalizePriority, normalizeRecurrence, parseCivilDate, todayCivilDate,
+  normalizeListIcon, normalizePriority, normalizeRecurrence, parseCivilDate, parseListColor,
+  parseListIcon, parsePriority, parseRecurrence, todayCivilDate,
 } from "./store.ts";
 import {
   type AgentAction, type AgentProvider, type AgentRoute, type AgentRuntimeLike,
@@ -197,17 +198,20 @@ function parseSubtasksParam(value: unknown): ReminderSubtaskRecord[] | undefined
   return result;
 }
 
-function resolveListId(store: AlphaAppsStore, params: Record<string, unknown>): string {
+function findListId(store: AlphaAppsStore, params: Record<string, unknown>): string | undefined {
   const snapshot = store.getReminders();
   const explicitId = readString(params, "listId");
-  if (explicitId !== undefined && snapshot.lists.some((list) => list.id === explicitId)) return explicitId;
+  if (explicitId !== undefined) return snapshot.lists.find((list) => list.id === explicitId)?.id;
   const listName = readString(params, "listName") ?? readString(params, "list");
   if (listName !== undefined) {
     const lower = listName.toLowerCase();
-    const matched = snapshot.lists.find((list) => list.id.toLowerCase() === lower || list.name.toLowerCase() === lower);
-    if (matched !== undefined) return matched.id;
+    return snapshot.lists.find((list) => list.id.toLowerCase() === lower || list.name.toLowerCase() === lower)?.id;
   }
-  return DEFAULT_LIST_ID;
+  return undefined;
+}
+
+function resolveListId(store: AlphaAppsStore, params: Record<string, unknown>): string {
+  return findListId(store, params) ?? DEFAULT_LIST_ID;
 }
 
 function taskAnswer(store: AlphaAppsStore, { item, followed }: Followed) {
@@ -276,6 +280,7 @@ function queryReminders(store: AlphaAppsStore, params: Record<string, unknown>, 
   const matchedList = listName === undefined
     ? undefined
     : snapshot.lists.find((l) => l.id === listName || l.name.toLowerCase() === listName.toLowerCase());
+  if (listName !== undefined && matchedList === undefined) return [];
   return snapshot.items.filter((item) => {
     if (matchedList !== undefined && item.listId !== matchedList.id) return false;
     if (search !== undefined && !item.title.toLowerCase().includes(search) && !item.notes.toLowerCase().includes(search)) return false;
@@ -296,11 +301,12 @@ async function handleListOp(store: AlphaAppsStore, runtime: AgentRuntimeLike | u
     const list = store.createList({ name, color: normalizeListColor(params.color), icon: normalizeListIcon(params.icon) });
     return { success: true, text: `Created list "${list.name}".`, data: { op, list } };
   }
-  const targetId = resolveListId(store, params);
+  const targetId = findListId(store, params);
+  if (targetId === undefined) return { success: false, text: "Reminder list not found." };
   if (op === "rename_list") {
     const name = readString(params, "newName") ?? readString(params, "name");
     if (name === undefined) return { success: false, text: "Please provide the new list name." };
-    const updated = store.updateList(targetId, { name, color: params.color === undefined ? undefined : normalizeListColor(params.color), icon: params.icon === undefined ? undefined : normalizeListIcon(params.icon) });
+    const updated = store.updateList(targetId, { name, color: parseListColor(params.color), icon: parseListIcon(params.icon) });
     if (updated === undefined) return { success: false, text: "Reminder list not found." };
     return { success: true, text: `Renamed list to "${updated.name}".`, data: { op, list: updated } };
   }
@@ -405,7 +411,8 @@ async function handleRemindersManage(
     return { success: true, text: `${flagged ? "Flagged" : "Unflagged"} "${target.title}".`, data: { op, item: updated } };
   }
   if (op === "move") {
-    const listId = resolveListId(store, params);
+    const listId = findListId(store, params);
+    if (listId === undefined) return { success: false, text: "Reminder list not found." };
     const updated = store.updateItem(target.id, { listId });
     return { success: true, text: `Moved "${target.title}" to list ${listId}.`, data: { op, item: updated } };
   }
@@ -426,11 +433,22 @@ async function handleRemindersManage(
   if (op === "toggle_subtask") {
     const subId = readString(params, "subtaskId");
     const subTitle = readString(params, "subtaskTitle")?.toLowerCase();
-    const subtasks = target.subtasks.map((sub) =>
-      sub.id === subId || (subTitle !== undefined && sub.title.toLowerCase().includes(subTitle)) ? { ...sub, done: !sub.done } : sub);
+    if (subId === undefined && subTitle === undefined) return { success: false, text: "Please specify a subtask to toggle." };
+    let matched = false;
+    const subtasks = target.subtasks.map((sub) => {
+      if (sub.id === subId || (subTitle !== undefined && sub.title.toLowerCase().includes(subTitle))) {
+        matched = true;
+        return { ...sub, done: !sub.done };
+      }
+      return sub;
+    });
+    if (!matched) return { success: false, text: "No matching subtask found." };
     const updated = store.updateItem(target.id, { subtasks });
     return { success: true, text: `Updated subtask on "${target.title}".`, data: { op, item: updated } };
   }
+  const hasListParam = params.listId !== undefined || params.listName !== undefined || params.list !== undefined;
+  const targetListId = hasListParam ? findListId(store, params) : undefined;
+  if (hasListParam && targetListId === undefined) return { success: false, text: "Reminder list not found." };
   const updated = store.updateItem(target.id, {
     title: readString(params, "newTitle"),
     notes: readRawString(params, "notes"),
@@ -440,7 +458,7 @@ async function handleRemindersManage(
     recurrence: params.recurrence === undefined ? undefined : normalizeRecurrence(params.recurrence, target.recurrence),
     priority: params.priority === undefined ? undefined : normalizePriority(params.priority, target.priority),
     flagged: readBoolean(params, "flagged"),
-    listId: params.listId !== undefined || params.listName !== undefined ? resolveListId(store, params) : undefined,
+    listId: targetListId,
     subtasks: parseSubtasksParam(params.subtasks),
   });
   if (updated === undefined) return { success: false, text: "Reminder not found." };
@@ -579,8 +597,8 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
         const body = asRecord(input.body);
         const updated = store.updateList(input.parameters.get("id") ?? "", {
           name: readString(body, "name"),
-          color: body.color === undefined ? undefined : normalizeListColor(body.color),
-          icon: body.icon === undefined ? undefined : normalizeListIcon(body.icon),
+          color: parseListColor(body.color),
+          icon: parseListIcon(body.icon),
         });
         if (updated === undefined) return { status: 404, body: { error: "reminder_list_not_found" } };
         return { status: 200, body: { list: updated, snapshot: store.getReminders() } };
@@ -645,7 +663,7 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
         const dueDate = parseDueDateParam(body, store.now(), timeZone);
         const dueMinute = parseDueMinuteParam(body);
         const alertMinutes = body.alertMinutes === null ? null : readNumber(body, "alertMinutes");
-        const recurrence = body.recurrence === undefined ? undefined : normalizeRecurrence(body.recurrence);
+        const recurrence = parseRecurrence(body.recurrence);
         const reschedule = body.rescheduleCompleted === true;
         const changedTiming = before !== undefined && ((dueDate !== undefined && dueDate !== before.dueDate)
           || (dueMinute !== undefined && dueMinute !== before.dueMinute) || (alertMinutes !== undefined && alertMinutes !== before.alertMinutes)
@@ -681,7 +699,7 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
           dueMinute,
           alertMinutes,
           recurrence,
-          priority: body.priority === undefined ? undefined : normalizePriority(body.priority),
+          priority: parsePriority(body.priority),
           flagged: readBoolean(body, "flagged"),
           subtasks: parseSubtasksParam(body.subtasks),
           completed: reschedule ? false : readBoolean(body, "completed"),
@@ -777,9 +795,8 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       path: "/api/alpha/reminders/items/{id}/restore",
       handler: async (input) => {
         const body = asRecord(input.body);
-        const fallback = typeof body.item === "object" && body.item !== null ? (body.item as ReminderItemRecord) : undefined;
         const before = itemNamed(store, input.parameters.get("id"));
-        const restored = store.restoreItem(input.parameters.get("id") ?? "", fallback);
+        const restored = store.restoreItem(input.parameters.get("id") ?? "", body.item);
         if (restored === undefined) return { status: 404, body: { error: "reminder_not_found" } };
         return taskAnswer(store, before === undefined
           ? await followTask(store, runtime, undefined, store.updateItem(restored.id, { agentTaskId: null }), timeZone)

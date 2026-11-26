@@ -16,10 +16,10 @@ export type CalendarFormPageProps = ComponentProps<"div"> & {
   saving?: boolean;
 };
 
-/** A new or changed event, over the days: Back and Save, then its fields. */
+/** A new or changed event, rising over the days as Alpha's earlier build drew it (v119 45f6bed30 template.html:1362 `class="enter"`): Back and Save, then its fields. */
 export function CalendarFormPage({ onBack, onSave, actions, saving = false, className, children, ...props }: CalendarFormPageProps) {
   return (
-    <div data-alpha-subview="calendar-form" className={cn("absolute inset-0 z-50 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
+    <div data-alpha-subview="calendar-form" className={cn("absolute inset-0 z-50 flex flex-col bg-background motion-safe:animate-rise", className)} {...props}>
       <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 pr-4 pl-2">
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />
@@ -161,7 +161,7 @@ export function CalendarChip({ label, chosen = false, dot, className, ...props }
     <button type="button" aria-pressed={chosen}
       className={cn(focusRing, "box-border flex min-h-13 max-w-full items-center gap-2 rounded-chip px-3 py-1.5 text-left text-snippet leading-plain font-semibold wrap-anywhere disabled:opacity-50",
         dot && "px-3.5", chosen ? "bg-foreground text-background" : "bg-background", className)} {...props}>
-      {dot ? <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : "bg-foreground")} /> : null}
+      {dot ? <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : chosen ? "bg-background" : "bg-foreground")} /> : null}
       <span className="min-w-0">{label}</span>
     </button>
   );
