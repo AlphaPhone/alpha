@@ -36,8 +36,8 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerdown", 100, startY));
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
-const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
-const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Wallet", "view:Workflows", "view:Settings"];
+const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Wallet", "view:Workflows", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -104,11 +104,9 @@ describe("Home on a phone", () => {
     await press("Telegram");
     await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 3);
     await press("Slack");
-    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 4);
-    await press("Wallet");
     // spec/app/home/index.md, "Add to Home closes once there is nothing left to add"
-    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 5);
-    expect(tiles().slice(-4)).toEqual(["view:Notes", "view:Telegram", "view:Slack", "view:Wallet"]);
+    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 4);
+    expect(tiles().slice(-3)).toEqual(["view:Notes", "view:Telegram", "view:Slack"]);
 
     // spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
     await hardware("back");
@@ -124,13 +122,13 @@ describe("Home on a phone", () => {
     await first.close();
     const second = await open(world, only("home"));
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
-    expect(tiles().slice(-4)).toEqual(["view:Notes", "view:Telegram", "view:Slack", "view:Wallet"]);
+    expect(tiles().slice(-3)).toEqual(["view:Notes", "view:Telegram", "view:Slack"]);
 
     // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the same saved tiles on an Alpha image that grants contacts show Phone, Messages and Contacts in Home order too.
     await second.close();
     const third = await open({ ...world, image: true }, only("home"));
     await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
-    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes", "view:Telegram", "view:Slack", "view:Wallet"]);
+    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes", "view:Telegram", "view:Slack"]);
 
     // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
     await third.close();
@@ -342,17 +340,32 @@ describe("Home on a phone", () => {
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
     expect(dialog()).not.toBeNull();
-    const composer = document.activeElement;
-    expect(composer?.getAttribute("aria-label")).toBe("Message Alpha");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
-    expect(document.activeElement).toBe(composer);
+    await focusedAfterFrames(button("Apps"));
 
     await press("Apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
     await hardware("home");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.trail.length === 0);
     expect(dialog()).toBeNull();
+  });
+
+  // spec/app/home/index.md, "Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would"
+  it('Lists Telegram and Slack in Apps, not on Home, and opens one from there (spec/app/home/index.md, "Apps also lists Alpha\'s own apps that are not on Home, and opens one as its tile would")', async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home", "assistant", "view:Telegram"));
+    const homes = home.runtime(alpha);
+    await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
+    expect(tiles()).not.toContain("view:Telegram");
+    expect(Boolean(button("Telegram"))).toBe(false);
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await vi.waitFor(() => expect(Boolean(button("Open Telegram"))).toBe(true));
+    expect(Boolean(button("Open Phone"))).toBe(false);
+    await press("Open Telegram");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.trail.at(-1) === "Telegram");
   });
 
   it('Holds a native app for App info and to pin it (spec/app/home/drawer.md, "Story: Act on an installed app from its menu")', async () => {
@@ -457,14 +470,18 @@ describe("Home on a phone", () => {
     const seenThere: Array<{ readonly card: string | undefined; readonly utcDay: boolean }> = [];
     const wanted: string[][] = [];
     const allDay: string[] = [];
+    /** A phone at `at` in time zone `where`, whose Work calendar holds `events`. */
+    const phoneThere = (where: string, at: number, events: Scene["calendar"]["phoneEvents"]) => {
+      process.env.TZ = where;
+      const there = { ...scene(), phone: true, now: at };
+      there.calendar.granted = true;
+      there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
+      there.calendar.phoneEvents = events;
+      return there;
+    };
     try {
       for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["UTC", day + 8 * hour], ["America/Los_Angeles", day + 18 * hour]] as const) {
-        process.env.TZ = where;
-        const there = { ...scene(), phone: true, now: at };
-        there.calendar.granted = true;
-        there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
-        there.calendar.phoneEvents = [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }];
-        const opened = await open(there);
+        const opened = await open(phoneThere(where, at, [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }]));
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 1);
         await drawn(() => undefined);
         const utcMidnight = Math.floor(at / 86_400_000) * 86_400_000;
@@ -475,16 +492,11 @@ describe("Home on a phone", () => {
       }
       // spec/app/home/cards.md, "An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled": an all-day event is the owner's date, as v121 read it. In Tokyo at 06:00 on the 11th (UTC still the 10th) yesterday's all-day event has ended; in Los Angeles at 18:00 on the 11th (UTC already the 12th) today's has not.
       for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["America/Los_Angeles", day + 26 * hour]] as const) {
-        process.env.TZ = where;
-        const there = { ...scene(), phone: true, now: at };
-        there.calendar.granted = true;
-        there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
-        there.calendar.phoneEvents = [
+        const opened = await open(phoneThere(where, at, [
           { id: "y", calendarId: "1", title: "Moving day", begin: day - 86_400_000, end: day, allDay: true, recurring: false },
           { id: "t", calendarId: "1", title: "Holiday", begin: day, end: day + 86_400_000, allDay: true, recurring: false },
           { id: "n", calendarId: "1", title: "Trip", begin: day + 86_400_000, end: day + 2 * 86_400_000, allDay: true, recurring: false },
-        ];
-        const opened = await open(there);
+        ]));
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 3);
         await drawn(() => undefined);
         allDay.push(agenda()?.getAttribute("aria-label") ?? "");

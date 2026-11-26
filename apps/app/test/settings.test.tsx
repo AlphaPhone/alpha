@@ -47,6 +47,13 @@ const tap = (title: string) => drawn(() => {
 
 const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime.runPromise(Pages.Machine.use((pages) => pages.get())).then((state) => state.page);
 
+/** Back closes the Account sheet onto the top of Settings. */
+async function backFromAccount(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
+  await hardware("back");
+  await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+  expect(await page(alpha)).toBe("Top");
+}
+
 /** Alpha on a phone, its Settings open at the first page with the phone's facts read. */
 async function settingsOpen(world = { ...scene(), phone: true }) {
   const running = await open(world);
@@ -92,9 +99,7 @@ describe("Settings", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     await press("Try again");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
-    await hardware("back");
-    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    expect(await page(alpha)).toBe("Top");
+    await backFromAccount(alpha);
 
     world.signedIn = false;
     await drawn(() => titled("Account")?.focus());
@@ -143,9 +148,7 @@ describe("Settings", () => {
       expect(plus).toContain(roundUsd.format(16));
       expect(pro).toContain(roundUsd.format(49));
     });
-    await hardware("back");
-    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    expect(await page(alpha)).toBe("Top");
+    await backFromAccount(alpha);
 
     world.signedIn = false;
     await tap("Account");

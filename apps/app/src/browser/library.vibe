@@ -12,7 +12,8 @@ export type Bookmark = { readonly url: string; readonly title?: string }
 type WriteIntent =
   | { readonly kind: "bookmark"; readonly ticket: number; readonly entry: Bookmark; readonly saved: boolean }
   | { readonly kind: "history"; readonly ticket: number; readonly stamps: ReadonlySet<number> }
-type HistoryChoice = "all" | number
+/** One visit by its stamp, every visit, or the visits since a moment (a time range's start, in epoch milliseconds). */
+type HistoryChoice = "all" | number | { readonly since: number }
 export type BookmarkPage = BrowserPageBinding | FrameRequest
 
 /** The saved rows and the address bound to a library write. */
@@ -132,15 +133,16 @@ export effect function editHistory(choice: HistoryChoice): boolean!!(Pages | Lib
   return try Semaphore.withPermit(rows.turn, effect {
     const machine = try Library.Machine
     const state = try machine.get()
-    if (choice === "all" ? !Library.canConfirmClear(state) : !Library.canRemoveVisit(state)) return false
+    const clearing = typeof choice !== "number"
+    if (clearing ? !Library.canConfirmClear(state, 1) : !Library.canRemoveVisit(state)) return false
     const current = try (try Pages).history()
-    const chosen = current.filter((row) => choice === "all" || row.stamp === choice)
+    const chosen = current.filter((row) => choice === "all" || (typeof choice === "number" ? row.stamp === choice : row.at !== undefined && row.at >= choice.since))
     if (chosen.length === 0) return false
     const event: Library.Event = { type: "visited", count: current.length, remaining: state.kept }
     if (Library.canVisited(state, current.length, state.kept)) try contained(machine.send(event), "counting the current Browser visits")
     const ticket = state.write + 1
     try rows.prepare({ kind: "history", ticket, stamps: new Set(chosen.map((row) => row.stamp)) })
-    const sent = try contained(machine.send(choice === "all" ? { type: "confirmClear" } : { type: "removeVisit" }), "choosing exact Browser history")
+    const sent = try contained(machine.send(clearing ? { type: "confirmClear", count: chosen.length } : { type: "removeVisit" }), "choosing exact Browser history")
     if (!sent) try rows.take(ticket)
     return sent
   })

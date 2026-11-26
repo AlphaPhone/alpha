@@ -4,7 +4,6 @@ import { afterEach, expect, it } from "vitest";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
-import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Adding } from "../gen/app__inbox__adding.effect.vibe";
 import inbox from "../src/inbox/index.tsx";
 import { Incoming } from "../src/inbox/adding.vibe";
@@ -12,7 +11,7 @@ import { Machine as MessageComposer } from "../gen/app__messages__composer.effec
 import { Drafts as MessageDrafts } from "../src/messages/composer.vibe";
 import photosArea from "../src/photos/index.tsx";
 import { headingOf } from "../src/runtime/dateHeading.ts";
-import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, only, open, press, readInboxFirst, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import type { FixturePicture } from "./fakes/photos.ts";
 
@@ -142,14 +141,8 @@ it('Offer the original photo for Inbox to review (spec/app/photos/viewer.md, "St
   source.mutationRevision = source.revision;
   world.photos.selectedPicture = () => Promise.resolve({ name: source.name, mimeType: "image/png", size: source.size, dataBase64 });
   const { alpha } = await open(world, only("home", "view:Photos", "view:Inbox", "notice"));
-  await drawn(() => {
-    const inboxTile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
-    if (!inboxTile) throw new Error("No Inbox home tile");
-    inboxTile.click();
-  });
   const letters = inbox.runtime(alpha);
-  await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
-  await hardware("back");
+  await readInboxFirst(alpha, letters);
   await press("Photos");
   const runtime = photosArea.runtime(alpha);
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded");

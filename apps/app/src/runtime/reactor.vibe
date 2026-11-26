@@ -161,6 +161,17 @@ export function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
 }
 
+/**
+ * The store, reading what is kept under `key` through `migrate`: a state kept in an older shape is brought to the
+ * current one before its machine decodes it.
+ */
+export function migratedStore(key: string, migrate: (raw: string | undefined) => (string | undefined)!!) {
+  return Layer.effect(KeyValueStore.KeyValueStore, effect {
+    const store = try KeyValueStore.KeyValueStore
+    return KeyValueStore.make({ ...store, get: (name: string) => name === key ? Effect.flatMap(store.get(name), migrate) : store.get(name) })
+  })
+}
+
 /** Where the epoch of a durable machine's attempts is kept, beside its state under `key`. */
 const epochKey = (key: string): string => `${key}.epoch`
 

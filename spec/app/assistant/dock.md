@@ -13,8 +13,11 @@ which a stray click is ignored, and the height a sheet was left at.
 > away, with one press doing one thing, and the composer never hidden by
 > the keyboard.
 
-As in Alpha before VibeStack, the sheet follows the finger while its
-handle or Alpha's mark is dragged, and lands where the release says. A tap
+As in Alpha before VibeStack (v121 on the owner's phone, which the owner
+asked to match on 2026-11-26), the sheet follows the finger while its
+handle or the resting bar is dragged (the bar's background, Alpha's mark,
+an empty field, or anywhere on the pill), and lands where the release
+says. A tap
 or a drag on the page outside an open sheet lowers Ask Alpha when it ends;
 outside the bar being typed in, it only leaves the field, which rests the
 bar once.
@@ -294,17 +297,45 @@ pure def lawTheKeyboardLiftsNothingElse(keyboard: int, navigation: int): bool =
   composerLift(false, keyboard, navigation) == navigation
 ```
 
-### Focusing or tapping the composer on the bar opens Ask Alpha as a sheet
+### Focusing the composer on the bar raises Ask Alpha to typing
 
-Tapping or focusing the input bar from rest opens the half-screen conversation
-sheet immediately without requiring an upward drag, while leaving an already
-open sheet or full screen where it is.
+As on v121, a tap in the resting bar's field types there: the bar rises
+above the keyboard and the page keeps its place behind it.
 
 ```quint
-pure def focused(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
+pure def focused(detent: S::Detent): List[Effect] = if (detent == S::Bar) List(Raise({ detent: S::Typing })) else List()
 
-pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
-  applied(focused(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
+pure def lawFocusingTheBarTypes(phone: S::Shell): bool =
+  applied(focused(phone.assistant), phone).assistant == (if (phone.assistant == S::Bar) S::Typing else phone.assistant)
+```
+
+### Sending from the bar opens the sheet, where the reply shows
+
+As on v121, a message sent from the bar or while typing on it opens the
+conversation sheet; an open sheet or the full screen stays as it is.
+
+```quint
+pure def sent(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
+
+pure def lawSendingShowsTheReply(phone: S::Shell): bool =
+  applied(sent(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
+```
+
+### A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen
+
+As on v121, the mark on the bar or the pill opens the conversation sheet
+without taking the keyboard, and the handle of a half-open sheet toggles
+it to the full screen.
+
+```quint
+pure def tapped(detent: S::Detent): List[Effect] =
+  if (not(isOpen(detent))) List(Raise({ detent: S::Sheet }))
+  else if (detent == S::Sheet) List(Raise({ detent: S::Full }))
+  else List()
+
+pure def lawATapOpensTheSheetOrFillsTheScreen(phone: S::Shell): bool =
+  applied(tapped(phone.assistant), phone).assistant ==
+    (if (not(isOpen(phone.assistant))) S::Sheet else if (phone.assistant == S::Sheet) S::Full else phone.assistant)
 ```
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar
@@ -333,9 +364,9 @@ pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
 The pill is how the bar is drawn in an app, not another height: Back,
 gestures and every guard treat it as the bar. Alpha's mark opens the sheet,
 Type focuses the composer, and Talk starts a spoken turn. A swipe up that
-starts on one of the pill's buttons opens the sheet, as the pill in Alpha
-before VibeStack did; a press there that does not move stays that button's
-tap.
+starts on one of the pill's buttons opens the sheet, which follows the
+finger as it does from the bar, as the pill in Alpha before VibeStack did;
+a press there that does not move stays that button's tap.
 
 ```quint
 pure def pill(phone: S::Shell): bool = phone.assistant == S::Bar and phone.trail.length() > 0 and not(S::showing(phone, S::Browser))
