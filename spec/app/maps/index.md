@@ -27,10 +27,10 @@ number was copied. It also keeps whether the name field is open, whether
 the location being found is the quiet fix on opening and whether that was
 taken this visit, whether the owner's own locate found nothing, whether a
 locate waits for Android's answer, whether the location disclosure is
-showing, whether a search waits for a provider,
-whether the last fix of guidance could not guide, whether this build has
-Phone, and the pin dropped last with the name the owner gave it before it is
-saved.
+showing, whether a search waits for a provider, whether another app
+handed the search over, whether the last fix of guidance could not guide,
+whether this build has Phone, and the pin dropped last with the name the
+owner gave it before it is saved.
 
 ```quint
 import read as R from "../../kit/read"
@@ -62,6 +62,7 @@ type Maps = {
   following: bool, guideNotice: GuideNotice, copyNotice: CopyNotice,
   typingChars: int, copying: bool, renaming: bool, quiet: bool, quietDone: bool, missedFix: bool,
   owedLocate: bool, waitingProvider: bool, imprecise: bool, dialer: bool, pin: int, pinName: str, explaining: bool,
+  handedOver: bool,
 }
 
 pure val initial: Maps = {
@@ -77,6 +78,7 @@ pure val initial: Maps = {
   following: false, guideNotice: Quiet, copyNotice: Uncopied,
   typingChars: 0, copying: false, renaming: false, quiet: false, quietDone: false, missedFix: false,
   owedLocate: false, waitingProvider: false, imprecise: false, dialer: false, pin: 0, pinName: "", explaining: false,
+  handedOver: false,
 }
 
 pure def onScreen(m: Maps): bool = not(m.trip.away)
@@ -228,7 +230,7 @@ pure def chosen(place: int, m: Maps): Maps =
   else { ...m, place: place, directions: false, sheet: Half, trip: N::forgetRoute(m.trip),
     question: NoQuestion, review: voided(m.review), details: cleared(m.details),
     startPlace: 0, origins: cleared(m.origins), originsFound: 0, copyNotice: Uncopied, guideNotice: Quiet,
-    copying: false, renaming: false, missedFix: false, waitingProvider: false, notice: unnamed(m.notice) }
+    copying: false, renaming: false, missedFix: false, waitingProvider: false, handedOver: false, notice: unnamed(m.notice) }
 
 pure def cleared(r: R::Read): R::Read = { ...N::withdrawn(r), status: R::Idle }
 
@@ -269,7 +271,7 @@ pure def goBack(m: Maps): Stepped =
   else if (m.place != 0)
     { state: { ...dropped, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Half else Peek,
         review: voided(m.review), copyNotice: Uncopied, copying: false, startPlace: 0, origins: cleared(m.origins), originsFound: 0 }, out: List() }
-  else { state: { ...dropped, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek, waitingProvider: false, pausing: false }, out: List() }
+  else { state: { ...dropped, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek, waitingProvider: false, handedOver: false, pausing: false }, out: List() }
 ```
 
 ### Back never leaves more than one mode
@@ -349,7 +351,7 @@ pure def answering(m: Maps, query: str): bool =
 
 pure def search(m: Maps, query: str, chars: int): Stepped =
   val asked = R::ask(m.search)
-  val unpaused = { ...m, pausing: false, quiet: false }
+  val unpaused = { ...m, pausing: false, quiet: false, handedOver: false }
   val reading = C::canConnect(m.link)
   if (query == "") { state: { ...unpaused, query: "", search: cleared(m.search), results: 0, waitingProvider: false }, out: List() }
   else if (answering(m, query)) { state: unpaused, out: List() }
@@ -498,7 +500,11 @@ pure def sometimesPinnedByHand(m: Maps): bool = m.pinning and m.presses > 0
 ### A query another app hands to Maps opens as a search, never over navigation
 
 A query handed over while no provider works waits for one, as a search
-does, and the owner's next action drops it before it is sent.
+does, and the owner's next action drops it before it is sent. Another
+account never drops it before it is answered: Maps reads the account as it
+opens, often just after the query arrives, so the query waits through the
+change and is sent, again if the last account's provider had it, once the
+new account's provider works.
 
 ```quint
 pure def canHandOver(m: Maps, query: str, chars: int): bool =
@@ -509,7 +515,11 @@ pure def handOver(m: Maps, query: str, chars: int): Stepped =
       trip: N::forgetRoute(m.trip), copyNotice: Uncopied, copying: false, renaming: false, startPlace: 0,
       origins: cleared(m.origins), originsFound: 0, question: NoQuestion, review: voided(m.review), details: cleared(m.details),
       notice: unnamed(m.notice) }
-  search(opened, query, chars)
+  val searched = search(opened, query, chars)
+  { ...searched, state: { ...searched.state, handedOver: true } }
+
+pure def handedUnanswered(m: Maps): bool =
+  m.handedOver and m.searching and m.place == 0 and m.query != "" and (m.search.status == R::Idle or m.search.status == R::Loading)
 
 pure def stepAHandedQueryNeverInterruptsGuidance(before: Maps, via: str, after: Maps): bool =
   via == "handOver" implies (before.trip.guidance == N::Stopped and after.searching and after.place == 0)
@@ -1327,10 +1337,12 @@ pure def canChangeAccount(m: Maps, account: int): bool = C::canChangeAccount(m.l
 pure def changeAccount(m: Maps, account: int): Stepped =
   val guided = m.link.locator == C::Guide
   val link = C::changeAccount(if (guided) C::stopLocating(m.link) else m.link, account)
-  { state: { ...m, link: link, trip: N::retireTrip(m.trip), searching: false, query: "",
-      search: cleared(m.search), results: 0, recent: List(), place: 0, details: cleared(m.details), directions: false, sheet: Peek,
+  val handed = handedUnanswered(m)
+  { state: { ...m, link: link, trip: N::retireTrip(m.trip), searching: handed, query: if (handed) m.query else "",
+      search: cleared(m.search), results: 0, recent: List(), place: 0, details: cleared(m.details), directions: false,
+      sheet: if (handed) m.sheet else Peek, handedOver: handed,
       copyNotice: Uncopied, startPlace: 0, origins: cleared(m.origins), originsFound: 0, typing: "", pausing: false,
-      following: false, guideNotice: if (guided) AccountChanged else Quiet, waitingProvider: false, copying: false,
+      following: false, guideNotice: if (guided) AccountChanged else Quiet, waitingProvider: handed, copying: false,
       renaming: false, imprecise: false, quiet: false,
       question: NoQuestion, review: voided(m.review), pinning: false, pressing: false, notice: unnamed(m.notice) },
     out: (if (guided) List(StopGuidance) else List())
@@ -1340,11 +1352,18 @@ pure def changeAccount(m: Maps, account: int): Stepped =
 
 ### Another account hides every route, place and search of the last one, and ends its guidance
 
+A query another app handed over and not yet answered belongs to no
+account, so it stays, waiting for the new account's provider.
+
 ```quint
 pure def stepAnotherAccountHidesTheLast(before: Maps, via: str, after: Maps): bool =
   via == "changeAccount" implies
     (after.trip.route == 0 and after.trip.guidance == N::Stopped and after.place == 0
-      and not(after.searching) and after.results == 0)
+      and (not(after.searching) or handedUnanswered(before)) and after.results == 0)
+
+pure def stepAHandedQuerySurvivesAnotherAccount(before: Maps, via: str, after: Maps): bool =
+  (via == "changeAccount" and handedUnanswered(before)) implies
+    (after.searching and after.query == before.query and after.waitingProvider)
 ```
 
 ### Opening Maps, the network returning or Retry reads the coverage when no provider works, and leaves a working one alone

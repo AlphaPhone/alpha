@@ -118,35 +118,6 @@ export effect function withdrawn(): boolean!!Agent.Machine {
   return try contained(machine.send({ type: "withdraw" }, "Device"), "withdrawing the agent's request")
 }
 
-module page {
-  /** Whether the review is whole on screen and its enabled Send is what a finger there would hit, nothing covering it. @throws {never} */
-  export function sendShowing(proposal?: string): boolean {
-    if (typeof document === "undefined" || document.visibilityState !== "visible" || typeof document.elementFromPoint !== "function") return false
-    const review = Array.from(document.querySelectorAll<HTMLElement>("[data-alpha-review]"))
-      .find((item) => item.dataset.alphaReview === (proposal ?? ""))
-    const send = review?.querySelector<HTMLButtonElement>("button[data-alpha-review-send]")
-    if (!review || !send || send.disabled || review.closest('[inert],[hidden],[aria-hidden="true"]')) return false
-    const whole = review.getBoundingClientRect()
-    if (whole.width <= 0 || whole.height <= 0 || whole.top < 0 || whole.left < 0 || whole.bottom > window.innerHeight || whole.right > window.innerWidth) return false
-    if (proposal !== undefined) {
-      const clip = review.closest('[role="log"]')?.getBoundingClientRect()
-      if (clip === undefined || whole.top < clip.top || whole.bottom > clip.bottom || whole.left < clip.left || whole.right > clip.right) return false
-    }
-    const at = send.getBoundingClientRect()
-    return send.contains(document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2))
-  }
-}
-import { sendShowing } from page
-export { sendShowing }
-
-// spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
-/** The owner said "Send this text" as the next thing said in Talk: the shown text is approved only while its whole review and its enabled Send are on screen. Answers whether it was approved. */
-export effect function spokenSend(): boolean!!(Agent.Machine | PhoneMachine) {
-  if (!sendShowing()) return false
-  const approve: Event = { type: "approve", clear: clear(try (try PhoneMachine).get()), spoken: true }
-  return try contained((try Agent.Machine).send(approve, "Owner"), "the spoken Send")
-}
-
 /** The contact as the request would leave it: a new contact, or `before` with the change applied. */
 export function afterOf(operation: Asking | undefined, before: Lines): Lines {
   if (operation?.type === "contact_create") return { name: operation.contact.displayName, phones: operation.contact.phoneNumbers, emails: operation.contact.emailAddresses }

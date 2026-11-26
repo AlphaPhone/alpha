@@ -6,6 +6,7 @@ source. Linking a document is [a document source](./source.md), the web
 source of a note taken from a page is [its link note](./linkNote.md), and
 deleting is the editor's own. The Share row opens a panel over the menu.
 Only an explicit destination hands off text from the saved revision shown.
+A new note asked to be shared is shared once its first save lands.
 
 ## Story: Share a note, or make a reminder or event from it
 
@@ -79,6 +80,22 @@ pure def canCloseMenu(m: Menu): bool = m.open and not(m.sharing)
 pure def closeMenu(m: Menu): Menu = dismissAll(m)
 
 pure def alwaysTheMenuIsOverANote(m: Menu): bool = m.open implies (isOwner(m.owner) and m.note > 0 and m.revision > 0 and sound(m.link))
+```
+
+### The phone opens the share the owner asked for on a new note, once its first save lands
+
+The owner chose Share in More before the note was saved ([the
+editor](./editor.md), "More over a new note offers Share, Pin and Delete,
+as v119's did"). Once the editor shows it saved, the menu opens over it as
+the owner's own More would, with the share panel over it, so the text
+handed off is still the saved revision's, reviewed like any other note's.
+
+```quint
+pure def canShareSaved(m: Menu, note: int, revision: int, link: Source, saved: bool, by: Actor): bool =
+  by == Phone and canOpenMenu(m, note, revision, link, saved, Owner) and link.tie == NoLink
+
+pure def shareSaved(m: Menu, note: int, revision: int, link: Source, saved: bool, by: Actor): Menu =
+  { ...openMenu(m, note, revision, link, saved, Owner), sharing: true }
 ```
 
 ### A note with a source is vouched for only while the source is unchanged

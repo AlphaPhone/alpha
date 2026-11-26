@@ -1,6 +1,7 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner, Toast, ToastRegion } from "@repo/ui";
 import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, Lock, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Settings, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
+import { Exit } from "effect";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -21,7 +22,7 @@ import { type Coverage, type Seen, type Spot, type Way, atlas } from "./atlas.vi
 import { degreesOf, pointIn } from "./geometry.ts";
 import googleMaps from "./google-maps-attribution.svg";
 import { coverageOf, settled, tile } from "./maps.vibe";
-import { handedQuery, takeHandedQuery, watchHandoff } from "./handoff.ts";
+import { handedQuery, offerHandedQuery, watchHandoff } from "./handoff.ts";
 import { liftOver } from "./lift.ts";
 
 const ways: ReadonlyArray<{ travel: Travel; label: string; icon: LucideIcon }> = [
@@ -168,16 +169,18 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   const { state, can, send } = screen;
   const handed = useSyncExternalStore(watchHandoff, handedQuery, handedQuery);
-  const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length } as const;
-  // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a search not taken is dropped when Maps leaves
-  useEffect(() => () => { takeHandedQuery(); }, []);
   // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": a search needs no location, so the disclosure never holds a handed query back, as v119 handed it over (prototype/maps-adapter.ts:237-243)
+  // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": the query stays left until the machine takes it, so a snapshot older than the machine only delays it
   useEffect(() => {
-    if (handOver === undefined || !can(handOver)) return;
-    takeHandedQuery();
-    setTyped(handOver.query);
-    void send(handOver);
-  }, [can, handOver, send, state]);
+    void offerHandedQuery((query) => {
+      const handOver = { type: "handOver", query, chars: query.length } as const;
+      if (!can(handOver)) return undefined;
+      return send(handOver).then((taken) => {
+        if (Exit.isSuccess(taken)) setTyped(query);
+        return Exit.isSuccess(taken);
+      });
+    });
+  }, [can, handed, send, state]);
   if (screen.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Maps</Alert>;
   const info = credits.state;
   if (!state || !info) return null;

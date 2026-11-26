@@ -32,7 +32,9 @@ down takes it lower again. A finger counts as a drag once it
 has moved 8 points. While the sheet rises from the bar or the pill, the
 bar or pill is hidden and the sheet shows its own composer; while an open
 sheet is pulled down it fades by how far it has gone into the floor's zone
-and the bar or pill it will rest on shows through it. A release is a flick
+and the bar or pill it will rest on shows through it; as in v119
+(chat-overlay-motion-adapter.ts:1037-1039), the floor is the bar drawn when
+the finger went down, or 62 points where none is, and 28 more. A release is a flick
 when the finger rose or fell at 1 point a millisecond over the last 100
 milliseconds before it lifted, and was not held still for 80 milliseconds;
 a flick goes the way it was aimed. Once released, the sheet moves to where
@@ -45,8 +47,12 @@ the sheet's, such as its black Talk, is carried onto the bar. As v119's
 one field did, which stayed in the sheet until the bar took it (old-line
 Alpha 45f6bed30, chat-overlay-motion-adapter.ts:1356-1360), only one field
 shows words at a time: the bar or pill drawn under a sheet being pulled
-down shows none, and a sheet put away, by a tap or by a drag, shrinks or
-fades with its field empty over the bar's own words, which show at once.
+down shows none, and the bar's own words show at once under a sheet put
+away: one a tap put away shrinks with its field empty, and one a drag put
+away falls with no composer at all, as v119's did once the finger let go
+(chat-overlay-motion-adapter.ts:613-651), so its Talk and + never show
+over the bar's or under it, and its header slides down onto the bar as it
+fades.
 A drag on the conversation
 that reaches its end moves nothing else: the sheet stays where it is, as
 v119's did. Alpha's mark at the start of the open sheet's header is tapped

@@ -731,7 +731,8 @@ card, and, since voice shows no Files review card,
 asks for a filter or an open only (`direct-files-only-v1`): the agent
 refuses a change by voice and has the owner ask for it in the chat, where
 its card shows. A page open the agent keeps for review on that turn still
-shows its card, as Browser has it. An attached document does not authorize a direct action. The agent gets a result receipt without the
+shows its card, as Browser has it, and the turn still says its Files
+result beside that card, as v119 said every direct turn's result. An attached document does not authorize a direct action. The agent gets a result receipt without the
 opened file's contents. An open counts only when that folder loaded or
 that file could be shown.
 
