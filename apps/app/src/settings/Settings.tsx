@@ -318,14 +318,14 @@ function Display({ runtime, common }: PageProps) {
 // spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"; spec/app/settings/index.md, "Each page links to what another area owns there"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
-  const { can, send } = usePages(runtime);
+  const { state: pages, can, send } = usePages(runtime);
   if (!device) return null;
   const { recovery, ...shown } = device;
   const review = { type: "reviewAllAccess" } as const;
   return (
     <>
       {recovery}
-      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
+      <SettingsPrivacyPage {...common} {...shown} onPhone={pages?.phone ?? false} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
         {alpha.slot("settings/voice")}
         <ListenerControls runtime={runtime} common={common} />
       </SettingsPrivacyPage>
