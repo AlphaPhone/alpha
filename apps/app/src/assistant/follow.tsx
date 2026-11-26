@@ -185,7 +185,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       if (landed.detent !== held.start && !canLand(landed.detent)) return drop();
       heldRef.current = undefined;
       void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: d.floor, full, now: untimed }).then((sent) => {
-        if (sent._tag === "Success") return;
+        if (sent._tag === "Success" || heldRef.current !== undefined) return;
         setSeen((s) => ({ ...s, leaving: undefined }));
         drop();
       });
@@ -216,6 +216,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     sectionRef.current = element;
     if (!element || !animates()) return;
     const drawnHeight = element.getBoundingClientRect().height;
+    const moving = motionsRef.current.length > 0;
     for (const motion of motionsRef.current.splice(0)) {
       motion.finished.catch(() => undefined);
       motion.cancel();
@@ -242,7 +243,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       return;
     }
     if (!handing) return;
-    const from = handing.height ?? drawnHeight;
+    const from = moving ? drawnHeight : handing.height ?? drawnHeight;
     const to = handing.tap ? block : 0;
     const ghost = ghostOf(element);
     ghostRef.current?.remove();
