@@ -38,6 +38,10 @@ export interface AskScene {
   nextActions?: (metadata: unknown) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
   holdDoneAfterReady?: Promise<void>;
+  /** The agent sends no status frame, as the resident host does not. */
+  noStatus?: boolean;
+  /** With `holdDoneAfterReady`, awaits this promise after the reply's text before emitting `reply_ready`. */
+  holdReady?: Promise<void>;
   /** The next reply's tools ran while the stream was busy, so only the newest waiting tool frame is written, as eliza's reply stream writes progress. */
   nextNewestProgressOnly?: boolean;
   /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
@@ -114,15 +118,18 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
   const provisional = scene.nextReplyProvisional;
   const actions = scene.nextActions?.(metadata) ?? [];
   const holdDone = scene.holdDoneAfterReady;
+  const holdReady = scene.holdReady;
+  let cancelled = false;
   const newestOnly = scene.nextNewestProgressOnly === true;
   scene.nextNewestProgressOnly = undefined;
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
   scene.nextActions = undefined;
   scene.holdDoneAfterReady = undefined;
+  scene.holdReady = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(frame({ type: "status", activity: "thinking" }));
+      if (!scene.noStatus) controller.enqueue(frame({ type: "status", activity: "thinking" }));
       if (scene.refusal !== undefined) {
         controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length), ...scene.refusal }));
         controller.close();
@@ -134,7 +141,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (streamedCue !== undefined) controller.enqueue(frame({ type: "token", fullText: "" }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
-        for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece }));
+        for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
         scene.turns.set(room, () => controller.close());
         return;
       }
@@ -148,11 +155,17 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
           const full = custom.join("");
           keep(full);
           if (holdDone !== undefined) {
-            controller.enqueue(frame({ type: "reply_ready", fullText: full, actionResults: actions }));
-            void holdDone.then(() => {
-              controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
-              controller.close();
-            });
+            const announce = () => {
+              if (cancelled) return;
+              controller.enqueue(frame({ type: "reply_ready", fullText: full, actionResults: actions }));
+              void holdDone.then(() => {
+                if (cancelled) return;
+                controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+                controller.close();
+              });
+            };
+            if (holdReady === undefined) announce();
+            else void holdReady.then(announce);
             return;
           }
           controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
@@ -176,7 +189,10 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       }
       answer();
     },
-    cancel: () => void scene.turns.delete(room),
+    cancel: () => {
+      cancelled = true;
+      scene.turns.delete(room);
+    },
   });
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }

@@ -56,8 +56,12 @@ it runs, naming the app it chose, except that once the acknowledgment is
 taken it stays the label until text or the reply arrives. Provisional text
 may still be taken back: a tool call can replace it, and a check of the
 reply can revise it after it was written. So it is never shown, and the
-owner sees one reply that is never contradicted mid-turn, as the old phone
-showed it. The label stays until settled text or the reply arrives.
+owner sees one reply that is never contradicted mid-turn (shown, it
+visibly rewrote its first text in 10 of 130 gate turns). The reply the
+agent stored, announced ahead of its last frame, is settled text and shows
+at once. The label stays until settled text or the reply arrives. While a
+reply is written with neither text shown nor a label, it shows as
+replying, with the pulsing dots of a turn at work.
 
 ```quint
 pure def canToken(r: Reply, turn: int, units: int, provisional: bool): bool = live(r) and turn == r.turn and units >= 1
@@ -185,8 +189,9 @@ conversation/history.vibe, keeps Cloud's code on the reply it stored) and
 for a Talk turn, and it is never spoken. Spent credits the agent reports
 without that code keep their own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
-removes its bubble. Stop keeps what was shown, and the conversation's check
-of a stopped reply owns the only notice.
+removes its bubble. Stop keeps what was shown, which is only settled text:
+a reply stopped before any of its text settled keeps no bubble. The
+conversation's check of a stopped reply owns the only notice.
 
 ```quint
 type Failure = CredentialInvalid | InsufficientCredits | LimitReached | ProviderIssue | TimedOut

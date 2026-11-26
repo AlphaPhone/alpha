@@ -77,7 +77,7 @@ export interface AssistantProps {
   onBack?: () => void;
 }
 
-function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
+function turnOf(talking: Talking, label: string, writing: boolean): AssistantTurnNoteProps["status"] | undefined {
   const { turn, check } = talking;
   if (turn.stopping) return "stopping";
   if (check === "Aborting" || talking.recheck.status === "Loading") return "checking";
@@ -86,7 +86,8 @@ function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status
   if (check === "NotRecorded") return "neverArrived";
   if (check === "LookLater") return "lookLater";
   if (turn.send.outcome === "Recorded" || turn.send.outcome === "Sent") return "sending";
-  if (turn.reply === "Streaming") return label === "" ? undefined : "replying";
+  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": a reply with neither text shown nor a label still shows as replying.
+  if (turn.reply === "Streaming") return label === "" && writing ? undefined : "replying";
   if (turn.reply === "Broken") return "cutOff";
   if (turn.reply === "Stopped") return "stopped";
   if (turn.send.outcome === "Unknown") return "unknown";
@@ -553,13 +554,13 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     onChoose,
   });
   if (!talking || !shown || !writing) return undefined;
-  const status = turnOf(talking, seen.label);
   const checkable = conversation.can(check) && (talking.turn.send.outcome === "Unknown" || talking.turn.reply === "Stopped" || talking.check === "LookLater" || writing.unsettled);
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = page?.bounds?.earlier;
   const readEarlier = { type: "scroll", around: board.numbered(earlier ?? "") } as const;
   const readLater = { type: "scroll", around: board.numbered(later ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
+  const status = turnOf(talking, seen.label, replyWords !== "");
   const onOpenLink = messageActions?.openLink;
   const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
