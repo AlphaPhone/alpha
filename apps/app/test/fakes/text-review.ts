@@ -24,6 +24,8 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
     attemptId,
     workflow: undefined as { binding: WorkflowDeviceBinding; offered(): boolean; answered?(): void } | undefined,
     pendingReads: 0,
+    /** While set, each read of the pending proposals waits for it. */
+    proposalsGate: undefined as Promise<void> | undefined,
     readOrigin: undefined as ReadOrigin | undefined,
     senderReads: [] as boolean[],
     completions: [] as unknown[],
@@ -100,10 +102,13 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     }
     if (request.method === "GET" && resource === "proposals") {
       review.pendingReads += 1;
-      if (review.workflow !== undefined && !review.workflow.offered()) return Response.json({ proposals: [] });
-      const payload = { ...proposal.payload, ...(review.workflow === undefined ? {} : { workflow: review.workflow.binding }) };
-      const execution = ["executing", "reconciliation_required", "done"].includes(proposal.state) ? { attemptId } : undefined;
-      return Response.json({ proposals: [{ ...proposal, payload, execution, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
+      const listed = (): Response => {
+        if (review.workflow !== undefined && !review.workflow.offered()) return Response.json({ proposals: [] });
+        const payload = { ...proposal.payload, ...(review.workflow === undefined ? {} : { workflow: review.workflow.binding }) };
+        const execution = ["executing", "reconciliation_required", "done"].includes(proposal.state) ? { attemptId } : undefined;
+        return Response.json({ proposals: [{ ...proposal, payload, execution, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
+      };
+      return review.proposalsGate === undefined ? listed() : review.proposalsGate.then(listed);
     }
     if (request.method !== "POST" || !resource.startsWith(`proposals/${proposal.id}/`)) return reject(404);
     const step = resource.split("/").at(-1);

@@ -644,6 +644,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         toolRan = true
         if (labelled()) board.change({ label: label ?? `Using ${name}` })
       },
+      // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": the reply the agent stored is settled text, shown at once, so Stop keeps it.
+      onReady: (fullText: string) => { if (fullText !== "") preview(fullText, false) },
     }
     board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNote: undefined })
     const views = try Views
