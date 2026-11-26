@@ -655,7 +655,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const replyWords = replyBlocks(seen.reply, true).words;
   const status = turnOf(talking, seen.label, replyWords !== "", writingNow);
   const onOpenLink = messageActions?.openLink;
-  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
+  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, onOpenLink } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,

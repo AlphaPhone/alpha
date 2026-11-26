@@ -1,4 +1,4 @@
-// spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text"
+// spec/app/assistant/reply.md, "Prose is shown as the model wrote it, line for line; only a bare https address is a link, and HTML reads as text"; spec/app/assistant/reply.md, "Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks"
 
 /** A run of words in a reply, as the model's Markdown marks it. */
 export type ReplyInline =
@@ -195,6 +195,30 @@ function listFrom(lines: readonly string[], start: number, written: boolean, dep
     at = skip;
   }
   return { list: { kind: "list", start: ordered === undefined ? undefined : Number(ordered), items }, next: at };
+}
+
+/** A run of a reply as it is shown: its words as the model wrote them, or a bare https address that is a link. */
+export type ReplyRun = { readonly kind: "text"; readonly text: string } | { readonly kind: "link"; readonly href: string; readonly text: string };
+
+/**
+ * A reply as it is shown, as Sunday's v119 printed it: the model's words exactly as written, every mark, rule and
+ * list number included, with each bare https address that starts a word made a link. Nothing else is read. @throws {never}
+ */
+export function replyRuns(text: string): ReplyRun[] {
+  const runs: ReplyRun[] = [];
+  let plain = 0;
+  for (let at = text.indexOf("https://"); at >= 0; at = text.indexOf("https://", at + 1)) {
+    if (at < plain || /[\p{L}\p{N}]/u.test(text[at - 1] ?? " ")) continue;
+    bareLink.lastIndex = at;
+    const found = bareLink.exec(text)?.[0].replace(/[.,!?;:'"’”*_]+$/u, "");
+    const href = found === undefined ? undefined : httpsHref(found);
+    if (found === undefined || href === undefined) continue;
+    if (at > plain) runs.push({ kind: "text", text: text.slice(plain, at) });
+    runs.push({ kind: "link", href, text: found });
+    plain = at + found.length;
+  }
+  if (plain < text.length) runs.push({ kind: "text", text: text.slice(plain) });
+  return runs;
 }
 
 /**
