@@ -1,18 +1,8 @@
-import { spawn } from "node:child_process";
-import path from "node:path";
-import readline from "node:readline";
 import { chromium } from "playwright";
+import { pnpmDev } from "./dev.ts";
 
-const root = path.join(import.meta.dirname, "../..");
 const started = Date.now();
-const dev = spawn("pnpm", ["run", "dev"], { cwd: root, env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1", BROWSER: "none" }, stdio: ["ignore", "pipe", "inherit"], detached: true });
-const origin = await new Promise<string>((done, fail) => {
-  readline.createInterface({ input: dev.stdout }).on("line", (line) => {
-    const at = /https?:\/\/localhost:\d+/.exec(line)?.[0];
-    if (at) done(at);
-  });
-  dev.once("close", (code) => fail(new Error(`pnpm dev ended with ${code}`)));
-});
+const { origin, stop } = await pnpmDev();
 process.stdout.write(`pnpm dev serves ${origin} after ${Date.now() - started} ms\n`);
 const browser = await chromium.launch();
 try {
@@ -34,5 +24,5 @@ try {
   if (seen.length || lines.at(-1) !== "You said: Hello from the browser" || account.data?.email !== "owner@alpha.test") process.exitCode = 1;
 } finally {
   await browser.close();
-  process.kill(-dev.pid!, "SIGTERM");
+  stop();
 }

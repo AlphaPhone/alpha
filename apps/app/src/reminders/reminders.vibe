@@ -99,6 +99,21 @@ const SnapshotSchema = Schema.Struct({
 const SnapshotJsonSchema = Schema.fromJsonString(SnapshotSchema)
 const ItemReplySchema = Schema.Struct({ item: ItemSchema })
 
+/**
+ * Send `request` to the resident agent: the item it answered with, and whether the change may have been kept, as it
+ * may have been where the answer was lost after it was sent.
+ */
+effect function itemAnswer(request: HttpClientRequest.HttpClientRequest): { readonly kept: boolean; readonly item: typeof ItemReplySchema.Type["item"] | undefined }!!Agent {
+  const agent = try Agent
+  return effect {
+    const decoded = Schema.decodeUnknownOption(ItemReplySchema)(try agent.call(request))
+    return { kept: true, item: Option.isSome(decoded) ? decoded.value.item : undefined }
+  } catch (failure) => {
+    const status = outcomeOf(failure)
+    return { kept: status.confirmed || !status.known || failure._tag === "Unsent", item: undefined }
+  }
+}
+
 type PendingRequest =
   | { readonly kind: "createItem"; readonly item: ReminderItemRecord; readonly createOnly: boolean }
   | { readonly kind: "updateItem"; readonly item: ReminderItemRecord }
@@ -477,18 +492,10 @@ export effect function editDatedReminder(id: string, revision: number, fields: D
   if (sameDatedFields(item, fields)) return true
   const timing = changedTiming(item, fields) ? { snoozedUntilMs: null, notifiedAtMs: null } : {}
   const key = try (try Attempts).key(attempt)
-  const agent = try Agent
-  const outcome = effect {
-    const body = try agent.call(HttpClientRequest.bodyJsonUnsafe(
-      HttpClientRequest.patch(`/api/alpha/reminders/items/${encodeURIComponent(id)}`),
-      { ...fields, ...timing, ...(reschedule ? { rescheduleCompleted: true } : {}), expectedRevision: revision, idempotencyKey: key },
-    ))
-    const decoded = Schema.decodeUnknownOption(ItemReplySchema)(body)
-    return { kept: true, item: Option.isSome(decoded) ? decoded.value.item : undefined }
-  } catch (failure) => {
-    const status = outcomeOf(failure)
-    return { kept: status.confirmed || !status.known || failure._tag === "Unsent", item: undefined }
-  }
+  const outcome = try itemAnswer(HttpClientRequest.bodyJsonUnsafe(
+    HttpClientRequest.patch(`/api/alpha/reminders/items/${encodeURIComponent(id)}`),
+    { ...fields, ...timing, ...(reschedule ? { rescheduleCompleted: true } : {}), expectedRevision: revision, idempotencyKey: key },
+  ))
   const now = try (try Time).now()
   const view = remindersStore.snapshot()
   const latest = view.snapshot.items.find((row) => row.id === id)
@@ -535,18 +542,10 @@ export effect function reopenDatedReminder(id: string, revision: number, dueAt: 
   const date = new Date(dueAt)
   const dueDate = formatCivilDate(civilDateAt(dueAt))
   const dueMinute = date.getHours() * 60 + date.getMinutes()
-  const agent = try Agent
-  const outcome = effect {
-    const body = try agent.call(HttpClientRequest.bodyJsonUnsafe(
-      HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(id)}/reopen`),
-      { expectedRevision: revision, dueDate, dueMinute, idempotencyKey: key },
-    ))
-    const decoded = Schema.decodeUnknownOption(ItemReplySchema)(body)
-    return { kept: true, item: Option.isSome(decoded) ? decoded.value.item : undefined }
-  } catch (failure) => {
-    const result = outcomeOf(failure)
-    return { kept: result.confirmed || !result.known || failure._tag === "Unsent", item: undefined }
-  }
+  const outcome = try itemAnswer(HttpClientRequest.bodyJsonUnsafe(
+    HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(id)}/reopen`),
+    { expectedRevision: revision, dueDate, dueMinute, idempotencyKey: key },
+  ))
   const view = remindersStore.snapshot()
   const latest = view.snapshot.items.find((row) => row.id === id)
   if (!outcome.kept || latest?.revision !== revision || view.hiddenIds.has(id)) {

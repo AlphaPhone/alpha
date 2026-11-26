@@ -33,6 +33,26 @@ async function showAttachments() {
   await expect.poll(() => named("Attach files")).not.toBeNull();
 }
 
+/** Wait until Ask Alpha rests at `detent`. */
+const resting = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"], detent: "Bar" | "Typing") =>
+  runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
+
+/** Ask Alpha rests on the bar and Calendar is still the app shown. */
+const restsOverCalendar = async (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"]) =>
+  expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+
+/** The dock mounted over Calendar, typing from its compact bar with the field focused. */
+async function typingOverCalendar() {
+  const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+    await resting(runtime, "Typing");
+  });
+  const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+  await act(async () => { textarea?.focus(); });
+  return { runtime, textarea };
+}
+
 describe("Ask Alpha dock and shell navigation", () => {
   // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
@@ -307,40 +327,28 @@ describe("Ask Alpha dock and shell navigation", () => {
 
   // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": typing in an app, a tap beside the bar only leaves the field, so Ask Alpha rests once and the app stays
   it("a tap beside the bar being typed in rests it without leaving the app (spec/app/assistant/dock.md, \"A keyboard closed while typing puts Ask Alpha back on the bar\")", async () => {
-    const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
-    });
-    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
-    await act(async () => { textarea?.focus(); });
+    const { runtime } = await typingOverCalendar();
     const scrim = document.querySelector("[data-alpha-chat-scrim]");
     expect(scrim).not.toBeNull();
     await act(async () => {
       scrim?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 40, clientY: 120, pointerId: 11, pointerType: "touch", isPrimary: true }));
       scrim?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 40, clientY: 120, pointerId: 11, pointerType: "touch", isPrimary: true }));
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+      await resting(runtime, "Bar");
     });
     await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
-    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+    await restsOverCalendar(runtime);
   });
 
   // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a field left with no keyboard report rests it once, and the reported close after it takes no step Back out of the app
   it("leaving the field being typed in rests Ask Alpha once (spec/app/assistant/dock.md, \"A keyboard closed while typing puts Ask Alpha back on the bar\")", async () => {
-    const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
-    });
-    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
-    await act(async () => { textarea?.focus(); });
+    const { runtime, textarea } = await typingOverCalendar();
     await act(async () => {
       textarea?.blur();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+      await resting(runtime, "Bar");
       await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: true, voice: false })));
       await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: false, voice: false })));
     });
-    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+    await restsOverCalendar(runtime);
   });
 
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"

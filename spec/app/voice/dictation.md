@@ -176,8 +176,9 @@ pure def alwaysWordsOnlyInReview(r: Recorder): bool = r.words implies r.stage ==
 
 A microphone failure waits in ready until voice closes the recorder. The
 field keeps what was written. A transcription failure keeps the clip for
-retry or discard and shows "Voice stopped" with the actions for the clip.
-The underlying service error stays private.
+retry or discard and offers the actions for the clip, with no words about
+the failure: no status line, notice or popup. The underlying service error
+stays private.
 
 ```quint
 pure def micFailure(f: Failure): bool = f == Denied or f == NoMicrophone

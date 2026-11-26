@@ -53,6 +53,20 @@ const ended = ["completed", "dismissed", "skipped", "expired", "failed"];
 const problemWords = {
   Workflows: "Workflows", "Removed workflows": "Removed workflows", Prompts: "Automations", "Scheduled tasks": "Scheduled items",
 } as const;
+/**
+ * The header on the phone's launcher, as the Sunday v119 demo build drew it (Alpha 45f6bed30): 44px down and 56px tall
+ * (prototype/template.html:3697), the list's title row 20px in with its 44px New button (template.html:3697,3700,
+ * prototype.css:13), a page inside Workflows 12px in with a 44px Back right against its 26px bold sans title at 1.2
+ * leading, leading-plain being the nearest token (automations.css:17,22, template.html:3744), and a routine's page 8px
+ * in with no title in its header (template.html:3791-3793).
+ */
+const launcherFrame = "in-data-[alpha-launcher]:pt-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] in-data-[alpha-launcher]:[&>header]:min-h-14";
+const launcherBack = "in-data-[alpha-launcher]:[&>header>button[aria-label=Back]]:size-11 in-data-[alpha-launcher]:[&>header>button[aria-label=Back]]:min-w-11 in-data-[alpha-launcher]:[&>header>button[aria-label=Back]]:rounded-full";
+const launcherHeader = {
+  list: cn(launcherFrame, "in-data-[alpha-launcher]:[&>header]:pl-5"),
+  page: cn(launcherFrame, launcherBack, "in-data-[alpha-launcher]:[&>header]:gap-0 in-data-[alpha-launcher]:[&>header]:px-3 in-data-[alpha-launcher]:[&>header>h1]:font-sans in-data-[alpha-launcher]:[&>header>h1]:text-home-display in-data-[alpha-launcher]:[&>header>h1]:leading-plain in-data-[alpha-launcher]:[&>header>h1]:font-bold in-data-[alpha-launcher]:[&>header>h1]:tracking-tight in-data-[alpha-launcher]:[&>header>h1]:wrap-anywhere"),
+  routine: cn(launcherFrame, launcherBack),
+};
 /** The body of a page inside Workflows, at develop's 24px sides. */
 const inset = "-mx-4 -mt-1 flex flex-col px-6 pt-2";
 const fullDate = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" });
@@ -119,8 +133,10 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   const filter = { type: "openFilters" } as const;
   const add = { type: "openAdd" } as const;
   const screen = (
-    <Screen title={title} inert={clock.state?.open === true} leading={<AppBack alpha={alpha} />} actions={<>
-      {place?.tag === "ListingRows" && <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
+    <Screen title={title} inert={clock.state?.open === true} leading={<AppBack alpha={alpha} />}
+      className={place?.tag === "ListingRows" || place === undefined ? launcherHeader.list : selected?.kind === "Routine" ? launcherHeader.routine : launcherHeader.page}
+      actions={<>
+      {place?.tag === "ListingRows" && <Button variant="ghost" size="icon" aria-label="Add to Workflows" className="in-data-[alpha-launcher]:size-11! in-data-[alpha-launcher]:min-w-11!" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
       {selected?.kind === "Prompt" && state && <AutomationPower runtime={runtime} row={selected} owner={state.owner} />}
       {selected?.kind === "Routine" && state && <WorkflowPower runtime={runtime} row={selected} owner={state.owner} />}
     </>} {...(selected?.kind === "Routine" ? { titleControl: <span className="grow" /> } : {})}>

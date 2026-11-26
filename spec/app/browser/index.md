@@ -427,8 +427,9 @@ pure def sometimesAFailedSaveWaits(s: Browser): bool = s.failures > 1 and s.stal
 > As the owner, I want to clear everything the Browser kept, after
 > confirming, and to keep my private tabs open.
 
-### Clearing is asked for from the menu, and confirmed or cancelled
+### Clearing is asked for from the Library's history, and confirmed or cancelled
 
+Reset browser data, under the time range for clearing history, asks for it.
 Not while the saved session is being read or a write is in flight.
 
 ```quint

@@ -12,7 +12,7 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Device } from "../platform/device.vibe"
 import type { Install } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed, migratedStore } from "../runtime/reactor.vibe"
 import { Mail, operationReceipt } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { provider } from "./provider.vibe"
@@ -515,14 +515,7 @@ effect function composerRecord(raw: string | undefined): (string | undefined)!! 
 }
 
 function stored(key: string, start = Drafts.initial) {
-  return Layer.unwrap(effect {
-    const store = try KeyValueStore.KeyValueStore
-    const compatible = KeyValueStore.make({
-      ...store,
-      get: (name: string) => name === key ? Effect.flatMap(store.get(name), composerRecord) : store.get(name),
-    })
-    return Layer.provide(Drafts.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, compatible))
-  })
+  return Layer.provide(Drafts.stored(key, start), migratedStore(key, composerRecord))
 }
 
 /** The composer: kept on the phone as it is typed, set aside and taken back, and written to the phone before Alpha leaves. */

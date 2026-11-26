@@ -215,6 +215,10 @@ pure def removeVisit(s: Library): Step = writing(Clearing, { ...s, kept: 1 })
 
 ### Clearing history asks first, and can be cancelled
 
+The owner picks a time range first: the last 15 minutes, hour, day, week or
+year, or all time. Clearing removes the visits in that range, and a range
+with no visits clears nothing.
+
 ```quint
 pure def canAskClear(s: Library): bool = hydrated(s) and s.history > 0 and s.job == Idle and not(s.confirming)
 
@@ -224,9 +228,10 @@ pure def canCancelClear(s: Library): bool = s.confirming
 
 pure def cancelClear(s: Library): Library = { ...s, confirming: false }
 
-pure def canConfirmClear(s: Library): bool = s.confirming and s.job == Idle and hydrated(s)
+pure def canConfirmClear(s: Library, count: int): bool =
+  s.confirming and s.job == Idle and hydrated(s) and count > 0 and count <= s.history
 
-pure def confirmClear(s: Library): Step = writing(Clearing, { ...s, confirming: false, kept: s.history })
+pure def confirmClear(s: Library, count: int): Step = writing(Clearing, { ...s, confirming: false, kept: count })
 ```
 
 ### Clearing all browsing data empties history at once

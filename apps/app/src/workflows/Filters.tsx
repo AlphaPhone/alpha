@@ -36,13 +36,13 @@ export function Filters({ listing, can, send, refresh, restoreFocus }: FiltersPr
   return (
     <Sheet open={listing.sheet} onOpenChange={(open) => { if (!open && can(dismiss)) send(dismiss); }}>
       <SheetContent title="Filter workflows" overlayClassName="bg-foreground/28 dark:bg-background/28"
-        className="inset-x-3 bottom-3 max-h-[calc(100dvh-2rem)] before:hidden max-w-100 rounded-panel bg-background pt-5 pr-9.5 pb-6 pl-6 text-foreground shadow-none [&>div:first-child]:min-h-11 [&>div:first-child]:justify-center [&_h2]:mr-14 [&_h2]:font-sans [&_h2]:text-xl [&_h2]:leading-row [&_h2]:font-semibold"
+        className="inset-x-3 bottom-3 max-h-[calc(100dvh-2rem)] before:hidden max-w-100 rounded-panel bg-background px-6 pt-5 pb-6 text-foreground shadow-none [&>div:first-child]:min-h-11 [&>div:first-child]:items-center [&>div:last-child]:mt-1 [&_h2]:mr-14 [&_h2]:pt-0 [&_h2]:font-sans [&_h2]:text-xl [&_h2]:leading-row [&_h2]:font-semibold"
         onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}
-        actions={<Button className="h-12 rounded-full bg-foreground text-prose font-semibold text-background hover:bg-foreground/90"
+        actions={<Button className="h-12! rounded-full bg-foreground text-base! font-semibold text-background hover:bg-foreground/90"
           onClick={() => send({ type: "applyFilters" })} disabled={!can({ type: "applyFilters" })}>Done</Button>}>
-        <Button variant="ghost" size="icon" className="absolute top-5 right-9.5 rounded-full" aria-label="Close filters"
+        <Button variant="ghost" size="icon" className="absolute top-5 right-6 rounded-full" aria-label="Close filters"
           onClick={() => send(dismiss)}><X aria-hidden /></Button>
-        <fieldset className="flex flex-col pt-1">
+        <fieldset className="flex flex-col pt-2">
           <legend className="float-left mb-2 w-full text-label leading-chat font-semibold text-muted-foreground">Type</legend>
           <RadioGroup aria-label="Type" orientation="vertical" loop value={listing.pickedKind} onValueChange={(value) => {
             const kind = entries(kinds).find(([wanted]) => wanted === value)?.[0];

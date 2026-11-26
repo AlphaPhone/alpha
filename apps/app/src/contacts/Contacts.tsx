@@ -16,7 +16,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { contactChatActionsId } from "../assistant/contact-chat-id.ts";
 import { attachFromContact, searchFromContact } from "../assistant/contact-search.ts";
 import { returnPhoneTab } from "../phone/back.vibe";
-import { PhoneTabs } from "../phone/PhoneTabs.tsx";
+import { PhoneTabs, telephonyHeader } from "../phone/PhoneTabs.tsx";
 import { callerInitials, displayNumber } from "../phone/words.ts";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
 import { CommsBar, type CommsServices, useCommsDock } from "../phone/CommsBar.tsx";
@@ -97,7 +97,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     </>
   );
   const searchHeader = searching ? (
-    <form role="search" aria-label="Search contacts" data-host-chrome="" className="mt-0.5 flex min-h-13 shrink-0 items-center gap-0.5 px-2" onSubmit={(event) => event.preventDefault()}>
+    <form role="search" aria-label="Search contacts" data-host-chrome="" className={cn(telephonyHeader, "flex min-h-13 items-center gap-0.5 px-2")} onSubmit={(event) => event.preventDefault()}>
       {can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" className="size-13 rounded-lg" onClick={() => void send({ type: "endSearch" })}><ChevronLeft /></Button>}
       <SearchField autoFocus keepClear className="min-w-0 flex-1 [&_button]:size-13 [&_input]:focus-visible:outline-none" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} maxLength={128} />
     </form>
@@ -105,7 +105,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const header = phoneTabs ? (
     <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
   ) : searchHeader ?? (
-    <AppHeader title="Contacts" className={cn("mt-0.5 shrink-0", filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
+    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
   const route = shell.state?.route;

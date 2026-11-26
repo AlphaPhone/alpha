@@ -268,6 +268,16 @@ export effect function actInApps(route: number, beside: boolean, event: AppsInpu
   return try contained((try Drawer.Machine).send(event, current), "using Apps")
 }
 
+// spec/app/home/index.md, "Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would"
+/** Open one of Alpha's own apps listed in Apps; the shell's openView closes Apps. */
+export effect function openOwnInApps(view: View, route: number, beside: boolean) {
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const admitted = try appsVisit(route, beside)
+  const current = (where: Shell.Shell) => admitted(where) && Home.drawerOpens(Effect.runSync(home.get()), view, where)
+  if (current(try shell.get())) try contained(shell.send({ type: "openView", view }, current), "opening an app from Apps")
+}
+
 // spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"; spec/app/home/index.md, "An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest"
 effect function ownTileVisit(view: View, route: number, beside: boolean) {
   const free = try homeInput(beside)
