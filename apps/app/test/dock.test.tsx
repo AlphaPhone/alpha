@@ -49,12 +49,12 @@ async function typingOverCalendar() {
     await resting(runtime, "Typing");
   });
   const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
-  await act(async () => { textarea?.focus(); });
+  await drawn(() => { textarea?.focus(); });
   return { runtime, textarea };
 }
 
 describe("Ask Alpha dock and shell navigation", () => {
-  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
+  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
     const { alpha } = await open(scene(), only("home", "assistant", "notice"));
     const runtime = assistant.runtime(alpha);

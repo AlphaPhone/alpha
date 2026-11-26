@@ -9,7 +9,7 @@ import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { MediaReview } from "../src/assistant/media-review.vibe";
 import type { Place } from "../src/areas.ts";
-import { requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
+import { CameraAssets, requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
 import camera from "../src/camera/index.tsx";
 import photosArea from "../src/photos/index.tsx";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
@@ -63,8 +63,7 @@ describe("Camera on a phone", () => {
     const cameraSession = await onCamera();
     const { alpha, runtime, world } = cameraSession;
 
-    // v119's Camera header has no grid, ratio or timer control (legacy template.html at 45f6bed30, lines 1861-1868),
-    // so these turn on through the machine and the header shows only back, flip and flash.
+    // spec/app/camera/index.md, "The grid turns on and off without restarting the preview": v119's Camera header has no grid, ratio or timer control (template.html at 45f6bed30, lines 1861-1868), so these turn on through the machine and the header shows only back, flip and flash.
     expect(button("Framing grid")).toBeUndefined();
     expect(button("Aspect ratio 4:3")).toBeUndefined();
     expect(button("Timer off")).toBeUndefined();
@@ -119,7 +118,9 @@ describe("Camera on a phone", () => {
 
     await press("Back to apps");
     await hardware("back");
+    await until(alpha, runtime, Machine, (state) => state.showing && state.film.stage === "StopWhenOpened");
     expect(button("Viewfinder. Tap to focus or pinch to zoom")).toBeDefined();
+    expect([Boolean(button("Back to apps")), button("Start recording")?.getAttribute("aria-busy")]).toEqual([true, "true"]);
     expect(world.camera.savedVideos).toHaveLength(0);
     await drawn(recorderOpened);
     await expectSavedVideo(cameraSession);
@@ -133,7 +134,7 @@ describe("Camera on a phone", () => {
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
     const { alpha, runtime } = await onCamera(world);
     await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
-    // v119's header (template.html at 45f6bed30, lines 1861-1868) drew back only off the launcher and had no Scan document.
+    // spec/app/camera/index.md, "Story: Open the camera": v119's header (template.html at 45f6bed30, lines 1861-1868) drew back only off the launcher and had no Scan document.
     expect(button("Back to apps")).toBeUndefined();
     expect(button("Scan document")).toBeUndefined();
     expect(button("Switch camera")).toBeDefined();
@@ -429,5 +430,31 @@ describe("Camera on a phone", () => {
     await expect.poll(() => review.receipts).toStrictEqual([{ outcome: "applied", operationId: id, result: wireEvidence }]);
     await expect.poll(() => review.journal.get(id)).toMatchObject({ acknowledged: true, evidence: { result: evidence } });
     expect(world.camera.photos).toHaveLength(0);
+  });
+
+  it("Returns Blocked Denied immediately when agent capture runs with camera permission denied (spec/app/camera/agent.md, \"Story: Take a photo for Alpha\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.camera.permission = "denied";
+    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(alpha);
+    let settled: CaptureAnswer | undefined;
+    await drawn(() => { void runtime.runPromise(requestCapture()).then((answer) => { settled = answer; }); });
+    await until(alpha, runtime, Machine, (state) => state.showing && state.permission.grant === "Denied");
+    await later(alpha, 1000);
+    expect(settled).toEqual({ result: "Blocked", cause: "Denied" });
+  });
+
+  it("Forgets a deleted last capture across Camera visits (spec/app/camera/index.md, \"An older library read never replaces a photo taken while it was pending\")", async () => {
+    const world = { ...scene(), phone: true };
+    const running = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(running.alpha);
+    await press("Camera");
+    await until(running.alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last > 0);
+    world.photos.rows.splice(0, world.photos.rows.length, ...world.photos.rows.filter((item) => !item.owned));
+    await hardware("back");
+    await until(running.alpha, runtime, Machine, (state) => !state.showing);
+    await press("Camera");
+    await until(running.alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last === 0);
+    expect(await runtime.runPromise(Effect.flatMap(CameraAssets, (assets) => assets.newest()))).toBe(0);
   });
 });

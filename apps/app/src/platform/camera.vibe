@@ -512,12 +512,16 @@ export const browserCamera = Layer.effect(CameraPort, effect {
     effect finish(): (CameraMedia | "failed" | undefined)!! {
       const running = film
       if (running === undefined) return undefined
-      if (running.recording.state !== "inactive") try ignore(Effect.try(() => running.recording.stop()))
-      const blob = try Deferred.await(running.answer)
-      if (film === running) film = undefined
-      if (blob === undefined || blob === "failed") return blob
-      const size = Effect.timeout(tryPromise((signal) => readVideoSize(blob, signal)), 2000) catch () => undefined
-      return kept(blob, size?.width ?? 0, size?.height ?? 0)
+      return try ensuring(effect {
+        if (running.recording.state !== "inactive") try ignore(Effect.try(() => running.recording.stop()))
+        const blob = try Deferred.await(running.answer)
+        if (blob === undefined || blob === "failed") return blob
+        const size = Effect.timeout(tryPromise((signal) => readVideoSize(blob, signal)), 2000) catch () => undefined
+        return kept(blob, size?.width ?? 0, size?.height ?? 0)
+      }, sync(() => {
+        running.release()
+        if (film === running) film = undefined
+      }))
     },
     release: (asset: CameraMedia) => asset.blob === undefined ? Effect.void : sync(() => revoke(asset.source)),
   }

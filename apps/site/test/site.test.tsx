@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import documents from "@repo/deployment/alpha-legal.json" with { type: "json" };
-import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Clock, Duration, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { act } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
@@ -200,5 +200,30 @@ describe('Walk through what Alpha does (spec/site/index.md, "Story: Walk through
       return [first, yield* told.get()] as const;
     }).pipe(Effect.provide(machine()))));
     expect([paced, stalled.scene, stalled.beat, stalled.due]).toEqual([2_700, "Day", 0, 100_600]);
+  });
+
+  it('keeps advancing when a timer wakes 1ms before due instead of freezing the walkthrough (spec/site/index.md, "A beat moves on once its time has come, and a scene\'s last beat leads to the next scene, the spoken note back to Home")', async () => {
+    let now = 1_000;
+    let wakes = 0;
+    const earlyClock: Clock.Clock = {
+      currentTimeMillisUnsafe: () => now,
+      currentTimeMillis: Effect.sync(() => now),
+      currentTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+      currentTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
+      monotonicTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+      monotonicTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
+      sleep: (duration) => Effect.suspend(() => {
+        const ms = Duration.toMillis(duration);
+        wakes += 1;
+        now += wakes === 1 ? Math.max(0, ms - 1) : ms;
+        return Effect.yieldNow;
+      }),
+    };
+    const runtime = ManagedRuntime.make(Layer.provideMerge(demo, Layer.succeed(Clock.Clock, earlyClock)));
+    closing.push(() => runtime.dispose());
+    await runtime.runPromise(Effect.void);
+    for (let turn = 0; turn < 16; turn += 1) await runtime.runPromise(Effect.yieldNow);
+    const current = await runtime.runPromise(Effect.flatMap(Machine, (m) => m.get()));
+    expect(current.beat).toBeGreaterThanOrEqual(1);
   });
 });

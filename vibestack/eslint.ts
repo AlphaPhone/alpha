@@ -1153,11 +1153,13 @@ const STACK_IMPORT_PATTERNS = [
 
 const CITATION_RE = String.raw`spec\/\S+\.md, "(?:[^"\\]|\\["\\])+"`
 const SUPPRESSIBLE_RE = String.raw`(?!code\/|barrel\/|no-console\b)[\w@/-]+`
-const CITED_RE = new RegExp(String.raw`^\s*${CITATION_RE}(?:; ${CITATION_RE})*\s*$`)
+const CITED_RE = new RegExp(String.raw`^\s*${CITATION_RE}(?:; ${CITATION_RE})*(?:: \S.*)?\s*$`)
 const SUPPRESSION_RE = new RegExp(String.raw`^ eslint-disable(?:-next-line|-line)? ${SUPPRESSIBLE_RE}(?:, ${SUPPRESSIBLE_RE})* -- \S`)
 const ALLOWED_INLINE_CONFIGS = [SUPPRESSION_RE, /^ eslint-enable\b/]
 const THROWS_TYPE_RE = String.raw`[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`
+const THROWS_TAG_RE = new RegExp(String.raw`^@throws \{[ \t]*${THROWS_TYPE_RE}(?:[ \t]*\|[ \t]*${THROWS_TYPE_RE})*[ \t]*\}`)
 const THROWS_DIRECTIVE_RE = new RegExp(String.raw`^\*(?:[\s*]*@throws \{[ \t]*${THROWS_TYPE_RE}(?:[ \t]*\|[ \t]*${THROWS_TYPE_RE})*[ \t]*\})+[\s*]*$`)
+const hasValidThrows = (value: string) => [...value.matchAll(/@throws\b/g)].every((match) => THROWS_TAG_RE.test(value.slice(match.index)))
 const CODE_DIRECTIVES: Record<string, RegExp[]> = {
   Line: [CITED_RE, SUPPRESSION_RE, /^@ (?:backend|requires|ensures|invariant|decreases|assert|pure|type|ghost)(?: |$)/, /^\/ <reference /, /^ @vitest-environment [\w-]+$/],
   Block: [CITED_RE, ...ALLOWED_INLINE_CONFIGS, /^\*(?:[\s*]*@(?:model|design) \S+)+[\s*]*$/, THROWS_DIRECTIVE_RE],
@@ -1188,23 +1190,33 @@ function createCodePlugin(root: string) {
     Boolean(node) && (/Function/.test(String(node?.type ?? "")) || withinFunction(node?.parent as AstNode | undefined))
   const isDocComment = (context: any, comment: any) =>
     Boolean(context.options[0]?.jsdoc) && comment.type === "Block" && String(comment.value).startsWith("*")
+    && hasValidThrows(String(comment.value))
     && !withinFunction(context.sourceCode.getNodeByRangeIndex(comment.range[0]))
   const leftSchema = { type: "object", additionalProperties: { type: "integer", minimum: 1 } }
-  const reportIfExcess = (context: any, found: any[]) => {
+  const reportIfExcess = (context: any, node: AstNode, found: any[], kind: "commented" | "scheduled") => {
     const rel = relative(root, context.filename).split(sep).join("/")
-    if (found.length > (context.options[0]?.left?.[rel] ?? 0)) {
+    const limits = context.options[0]?.left as Record<string, number> | undefined
+    const allowed = limits && Object.hasOwn(limits, rel) ? limits[rel] : 0
+    if (found.length > allowed) {
       for (const problem of found) context.report(problem)
+    } else if (allowed > 0 && found.length < allowed) {
+      context.report({
+        node,
+        message: found.length === 0
+          ? `Stale ${kind} ratchet (${allowed}) for "${rel}": 0 remain; remove it so the ratchet tightens.`
+          : `Stale ${kind} ratchet (${allowed}) for "${rel}": ${found.length} remain; lower it to ${found.length} so the ratchet tightens.`,
+      })
     }
   }
   const commentsRule = {
     meta: { type: "problem" as const, schema: [{ type: "object", properties: { jsdoc: { type: "boolean" }, left: leftSchema }, additionalProperties: false }] },
     create(context: any) {
       return {
-        Program() {
+        Program(node: AstNode) {
           const invalid = context.sourceCode.getAllComments()
             .filter((comment: any) => !(CODE_DIRECTIVES[comment.type] ?? []).some((directive) => directive.test(comment.value)) && !isDocComment(context, comment))
             .map((comment: any) => ({ loc: comment.loc, message: `No code comments: only spec citations and tool directives (${WRITING_REF}).` }))
-          reportIfExcess(context, invalid)
+          reportIfExcess(context, node, invalid, "commented")
         },
       }
     },
@@ -1221,7 +1233,7 @@ function createCodePlugin(root: string) {
       const found: any[] = []
       return {
         ...Object.fromEntries(Object.entries(schedulingSelectors).map(([selector, message]) => [selector, (node: unknown) => found.push({ node, message })])),
-        "Program:exit": () => reportIfExcess(context, found),
+        "Program:exit": (node: AstNode) => reportIfExcess(context, node, found, "scheduled"),
       }
     },
   }
@@ -1375,10 +1387,7 @@ export function vibestackConfig(options: VibestackConfigOptions): FlatConfig[] {
     if (vibeParser) {
       entries.push({ files: own.map((pattern) => pattern.replace(/\/\*\*$/, "/**/*.{vibe,vibex}")), languageOptions: { parser: createGuardedParser(vibeParser) } })
     }
-    entries.push({ files: own, plugins: { code: codePlugin }, rules: { "no-console": "error", "code/comments": ["error", { left: commented }], "code/effects": ["error", { left: scheduled }] } })
-    if (uiPackage) {
-      entries.push({ files: [`${uiPackage}/src/components/**`], ignores: ["**/*.meta.tsx"], rules: { "code/comments": ["error", { jsdoc: true, left: commented }] } })
-    }
+    entries.push({ files: own, plugins: { code: codePlugin }, rules: { "no-console": "error", "code/comments": ["error", { jsdoc: true, left: commented }], "code/effects": ["error", { left: scheduled }] } })
   }
 
   entries.push(...extra)

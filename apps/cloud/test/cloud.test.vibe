@@ -31,13 +31,28 @@ import resources from "./fixtures/resources.json" with { type: "json" }
 
 module node {
   import { pathOf, readCloudError, routesByName, type EnvironmentProfile } from "@elizaos/cloud"
-  import { createHash, randomBytes } from "node:crypto"
+  import { createHash, generateKeyPairSync, randomBytes } from "node:crypto"
   import http from "node:http"
   import type { AddressInfo } from "node:net"
   import { runInNewContext } from "node:vm"
 
   /** The paid plans a billing profile binds to provider prices: Plus always, Pro only where the deployment sells it. */
   type Plans = NonNullable<EnvironmentProfile["billing"]>["plans"]
+
+  /** A valid PKCS #8 DER private key on P-384 (not P-256), to verify entitlement key validation rejects wrong curves. @throws {never} */
+  export function p384Key(): string {
+    return generateKeyPairSync("ec", { namedCurve: "P-384" }).privateKey.export({ type: "pkcs8", format: "der" }).toString("base64")
+  }
+
+  /** Decoded byte length of a base64 string. @throws {never} */
+  export function base64Bytes(text: string): number {
+    return Buffer.from(text, "base64").length
+  }
+
+  /** An oversized 64-byte base64 key, invalid for AES-256-GCM sealing. @throws {never} */
+  export function oversizedKey(): string {
+    return Buffer.alloc(64, 1).toString("base64")
+  }
 
   /** Sends the device key to the session-only portal and reads the actual refusal. */
   export async function portalAnswer(local: string, credential: string) {
@@ -108,7 +123,7 @@ module node {
     return { address: url.href, ...shown }
   }
 }
-import { catalog, challengeOf, portalAnswer, random, returnPageAt, returnPageParts } from node
+import { base64Bytes, catalog, challengeOf, oversizedKey, p384Key, portalAnswer, random, returnPageAt, returnPageParts } from node
 
 /** The cloud stopped, or said nothing of serving, before its deadline. */
 error NotServing { output: string }
@@ -293,6 +308,7 @@ describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/ind
   it.effect("loads every route of Alpha's table, refuses a sign-in or fresh-session route, and covers eliza's managed Gmail client", () => effect {
     try holds(() => assert.deepStrictEqual(tableProblems(), []))
     const [group] = elizaCloudRoutes
+    try holds(() => assert.deepStrictEqual(group?.routes.find((route) => route.path === "/api/v1/maps/geocode"), { method: "POST", path: "/api/v1/maps/geocode" }))
     try holds(() => assert.deepStrictEqual(group?.routes.find((route) => route.path === "/api/v1/eliza/google/status"), { method: "GET", path: "/api/v1/eliza/google/status", query: [{ key: "side", accepts: { kind: "any" } }, { key: "grantId", accepts: { kind: "any" } }] }))
     const refused = tableProblems([
       { verb: "Get", path: "/api/public/service", query: [] },
@@ -416,6 +432,33 @@ describe(`Secrets stay private and fit their environment (spec/cloud/rollout.md,
     try holds(() => assert.deepStrictEqual(Object.keys(workerSecrets(first.values)).sort(), ["CARTESIA_API_KEY", "CEREBRAS_API_KEY", "CLOUD_DIGEST_KEY", "CLOUD_ENTITLEMENT_KEY", "CLOUD_SEALING_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY", "GOOGLE_MAPS_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]))
     try holds(() => assert.deepStrictEqual(secretProblems(first.values, "production"), ["STRIPE_SECRET_KEY must be a live key in production"]))
     try holds(() => assert.deepStrictEqual(secretProblems({ ...generated(provided), CARTESIA_API_KEY: "https://api.eliza.app" }, "staging"), ["CARTESIA_API_KEY names a deployed Eliza Cloud host"]))
+    try holds(() => assert.match(first.values.GOOGLE_CONNECT_TOKEN_KEY ?? "", /^[0-9a-fA-F]{64}$/))
+    try holds(() => assert.strictEqual(base64Bytes(first.values.CLOUD_SEALING_KEY ?? ""), 32))
+    try holds(() => assert.ok(secretProblems({ ...first.values, GOOGLE_CONNECT_TOKEN_KEY: "not-a-64-hex-token-key-even-if-32-bytes-base64url-abcdef" }, "staging").some((p) => p.includes("GOOGLE_CONNECT_TOKEN_KEY"))))
+    try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_SEALING_KEY: oversizedKey() }, "staging").some((p) => p.includes("CLOUD_SEALING_KEY"))))
+    const base64urlSealing = `${(first.values.CLOUD_SEALING_KEY ?? "").slice(0, 40)}-_${(first.values.CLOUD_SEALING_KEY ?? "").slice(40)}`
+    try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_SEALING_KEY: base64urlSealing }, "staging").some((p) => p.includes("CLOUD_SEALING_KEY"))))
+    try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_ENTITLEMENT_KEY: p384Key() }, "staging").some((p) => p.includes("CLOUD_ENTITLEMENT_KEY"))))
+    const badKeyFile = path.join(directory, "bad-entitlement.env")
+    try files.writeFileString(badKeyFile, Object.entries({ ...first.values, CLOUD_ENTITLEMENT_KEY: "not-a-key" }).map(([name, value]) => `${name}=${value}`).join("\n"), { mode: 0o600 })
+    const badVault = try effect {
+      provide rollout() {
+        const machine = try Rollout
+        const failed = (settledSecrets(badKeyFile, "staging") catch (failure) => failure._tag)
+        return { failed, vault: (try machine.get()).vault }
+      }
+    }
+    try holds(() => assert.deepStrictEqual(badVault, { failed: "OperatorFailed", vault: "Incomplete" }))
+    const symlinked = path.join(directory, "escape.env")
+    try files.symlink(path.join(path.dirname(import.meta.dirname), "inside-symlink.env"), symlinked)
+    const escaped = readSecrets(symlinked) catch (failure) => failure._tag
+    try holds(() => assert.strictEqual(escaped, "OperatorFailed"))
+    const unprovisionedResources = path.join(directory, "unprovisioned-resources.json")
+    try files.writeFileString(unprovisionedResources, JSON.stringify({ ...resources, staging: { ...resources.staging, accountId: "PENDING", hyperdriveId: "PENDING" } }))
+    const unprovisionedApply = operate("secrets", ["--environment", "staging", "--env-file", file, "--resources", unprovisionedResources, "--apply"]) catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag
+    try holds(() => assert.ok(typeof unprovisionedApply === "string" && /account|provision/i.test(unprovisionedApply), String(unprovisionedApply)))
+    const wrongModePrices = operate("prices", ["--environment", "production", "--profile", "profile/candidate.example.json", "--env-file", file]) catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag
+    try holds(() => assert.ok(typeof wrongModePrices === "string" && wrongModePrices.includes("STRIPE_SECRET_KEY"), String(wrongModePrices)))
   } |> scoped(%) |> Effect.provide(%, NodeServices.layer))
 })
 
@@ -443,6 +486,16 @@ describe(`Provisioning creates only what is missing (spec/cloud/rollout.md, "Sto
     try holds(() => assert.deepStrictEqual([recorded, rechecked], [created, created]))
     const foreign = (reconcileResources({ ...at, ids: { ...created, hyperdriveId: "c".repeat(32) }, creating: false }) catch (failure) => failure.problem)
     try holds(() => assert.strictEqual(foreign, "the Hyperdrive alpha-test-api-staging-db is not the one recorded"))
+    const fullPage = Array.from({ length: 50 }, (_, index) => ({
+      id: (index + 100).toString(16).padStart(32, "d"),
+      name: index === 0 ? `${at.ids.workerName}-db` : `other-db-${index}`,
+      origin: { scheme: "postgres", host: "DB.EXAMPLE", port: 5432, database: "alpha", user: "alpha" },
+      caching: { disabled: true },
+    }))
+    const cfFifty = try acquireRelease(tryPromise(() => startCloudflare({ account, zone: "alphaphone.dev", token: "cf-token", hyperdrives: fullPage })), (started) => promise(() => started.stop()))
+    const fiftyIds = { ...created, hyperdriveId: fullPage[0]!.id }
+    const checkedFifty = try reconcileResources({ ...at, ids: fiftyIds, creating: false, base: cfFifty.base })
+    try holds(() => assert.deepStrictEqual(checkedFifty, fiftyIds))
   } |> scoped(%) |> Effect.provide(%, [NodeServices.layer, FetchHttpClient.layer]), 30_000)
 })
 

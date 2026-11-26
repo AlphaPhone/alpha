@@ -9,6 +9,7 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as AlertsMachine from "../gen/app__reminders__alerts.effect.vibe";
+import * as EditorMachine from "../gen/app__reminders__editor.effect.vibe";
 import { Machine as Editor } from "../gen/app__reminders__editor.effect.vibe";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { at } from "../src/areas.ts";
@@ -18,6 +19,7 @@ import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { type NativeRemindersPort, setNativeRemindersPort } from "../src/reminders/alerts.vibe";
 import alertOverlayArea from "../src/reminders/alertOverlay.tsx";
+import { beginEditReminder, updateEditorDraft } from "../src/reminders/editor.vibe";
 import remindersArea from "../src/reminders/index.tsx";
 import { advanceDueDate, civilDateAt, dueInstantMs, formatCivilDate, formatRelativeDue } from "../src/reminders/recurrence.ts";
 import {
@@ -26,6 +28,7 @@ import {
   deleteReminderItem,
   deleteReminderList,
   resetReminderStores,
+  saveReminderDraft,
   syncRemindersNow,
   toggleReminderComplete,
   toggleReminderFlag,
@@ -195,9 +198,10 @@ describe("Reminders recurrence laws", () => {
 describe("Reminders full journeys", () => {
   const baseNow = Date.UTC(2026, 4, 15, 13, 0, 0);
 
-  async function launchReminders(nowMs: number, held: readonly ReminderItemRecord[] = []) {
+  async function launchReminders(nowMs: number, heldOrSeed: readonly ReminderItemRecord[] | ((recorder: AgentRecorder) => void) = []) {
     const world = { ...scene(), now: nowMs };
-    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now, held);
+    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now, typeof heldOrSeed === "function" ? [] : heldOrSeed);
+    if (typeof heldOrSeed === "function") heldOrSeed(recorder);
     const platform = makePlatform(world.now, agentHttp);
     const opened = await openOver(platform, withReminders);
     const runtime = remindersArea.runtime(opened.alpha);
@@ -206,8 +210,7 @@ describe("Reminders full journeys", () => {
     return { world, recorder, platform, ...opened, runtime };
   }
 
-  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
-  // Reminders left the default Home tiles; Workflows' More options still opens a phone reminder (#1592)
+  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists": Reminders left the default Home tiles; Workflows' More options still opens a phone reminder (#1592)
   it("opens a phone reminder from Workflows' More options", async () => {
     const world = { ...scene(), now: baseNow };
     const { layer: agentHttp } = makeFakeAgentReminders(world.now);
@@ -527,5 +530,112 @@ describe("Reminders full journeys", () => {
     const secondRuntime = remindersArea.runtime(second.alpha);
     await until(second.alpha, secondRuntime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
     expect(remindersStore.snapshot().snapshot.items.some((i) => i.title === "Pack passport")).toBe(true);
+  });
+
+  // spec/app/reminders/index.md, "Story: Sync with the resident agent and recover across restarts"
+  it("syncs agent lists and items into RemindersMachine so synced reminders support Undo delete and completion", async () => {
+    const today = formatCivilDate(civilDateAt(baseNow));
+    const { recorder, alpha, runtime } = await launchReminders(baseNow, (rec) => {
+      const list: ReminderListRecord = {
+        id: "list_chat",
+        name: "Groceries",
+        color: "accent",
+        icon: "shopping",
+        isDefault: false,
+        order: 1,
+        createdAtMs: baseNow,
+        updatedAtMs: baseNow,
+      };
+      const item: ReminderItemRecord = {
+        id: "rem_chat_2",
+        listId: list.id,
+        title: "Buy milk",
+        notes: "",
+        dueDate: today,
+        dueMinute: null,
+        alertMinutes: null,
+        recurrence: "none",
+        priority: "medium",
+        flagged: false,
+        subtasks: [],
+        completed: false,
+        completedAtMs: null,
+        snoozedUntilMs: null,
+        notifiedAtMs: null,
+        agentTaskId: "task_chat",
+        revision: 1,
+        createdAtMs: baseNow,
+        updatedAtMs: baseNow,
+      };
+      rec.snapshot = { ...rec.snapshot, version: 2, lists: [...rec.snapshot.lists, list], items: [item] };
+    });
+
+    await drawn(() => runtime.runPromise(deleteReminderItem("rem_chat_2")));
+    expect(remindersStore.snapshot().hiddenIds.has("rem_chat_2")).toBe(true);
+    expect((await runtime.runPromise(RemindersMachine.Machine.use((m) => m.get()))).undo.holding).toBe("Held");
+    await later(alpha, 5_100);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
+    expect(remindersStore.snapshot().snapshot.items.some((i) => i.id === "rem_chat_2")).toBe(false);
+    expect(recorder.calls.some((c) => c.method === "DELETE" && c.path.includes("/items/rem_chat_2"))).toBe(true);
+  });
+
+  // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+  it("marks the editor draft edited when switching between recurrence rules and releases Saving on vanished item", async () => {
+    const today = formatCivilDate(civilDateAt(baseNow));
+    const { alpha, runtime } = await launchReminders(baseNow);
+    const created = await runtime.runPromise(createReminderItem({
+      listId: DEFAULT_LIST_ID,
+      title: "Stretch",
+      dueDate: today,
+      recurrence: "daily",
+    }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    if (!created) throw new Error("expected created reminder");
+
+    await drawn(() => runtime.runPromise(beginEditReminder(created)));
+    await until(alpha, runtime, EditorMachine.Machine, (e) => e.open && e.draft.sync === "Kept");
+    await drawn(() => runtime.runPromise(updateEditorDraft({ recurrence: "weekly" })));
+    const afterRecurrence = await runtime.runPromise(EditorMachine.Machine.use((m) => m.get()));
+    expect(afterRecurrence.draft.sync).toBe("Edited");
+
+    const curSnap = remindersStore.snapshot().snapshot;
+    remindersStore.replace({ ...curSnap, items: [] });
+    await drawn(() => runtime.runPromise(saveReminderDraft()));
+    const afterFailedSave = await runtime.runPromise(EditorMachine.Machine.use((m) => m.get()));
+    expect(afterFailedSave.draft.sync).not.toBe("Saving");
+    expect(EditorMachine.canClose(afterFailedSave)).toBe(true);
+  });
+
+  // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
+  it("snoozes from a long-open banner using click time and persists plus reschedules recurring banner completion", async () => {
+    const { world, recorder, alpha, runtime } = await launchReminders(baseNow);
+    const scheduledAt = new Date(world.now + 10 * 60_000);
+    const fireDate = formatCivilDate(civilDateAt(scheduledAt.getTime()));
+    const item = await runtime.runPromise(createReminderItem({
+      listId: DEFAULT_LIST_ID,
+      title: "Daily pill",
+      dueDate: fireDate,
+      dueMinute: scheduledAt.getHours() * 60 + scheduledAt.getMinutes(),
+      alertMinutes: 0,
+      recurrence: "daily",
+    }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    await until(alpha, runtime, AlertsMachine.Machine, (s) => s.entries.some((entry) => entry.phase === "Scheduled"));
+
+    await later(alpha, 11 * 60_000);
+    await until(alpha, runtime, AlertsMachine.Machine, (s) => s.bannerId > 0);
+    await later(alpha, 12 * 60_000);
+    await press("10m");
+    expect((await runtime.runPromise(AlertsMachine.Machine.use((m) => m.get()))).bannerId).toBe(0);
+
+    await later(alpha, 601_000);
+    await until(alpha, runtime, AlertsMachine.Machine, (s) => s.bannerId > 0);
+    await press("Complete");
+    await until(alpha, runtime, AlertsMachine.Machine, (s) => s.bannerId === 0 && s.entries.some((entry) => entry.phase === "Scheduled"));
+    const expectedNext = advanceDueDate(fireDate, "daily");
+    expect(recorder.snapshot.items.find((one) => one.id === item!.id)).toMatchObject({ dueDate: expectedNext, completed: false });
+    const persistedRaw = localStorage.getItem("alpha.reminders.snapshot@1");
+    expect(persistedRaw).not.toBeNull();
+    expect((JSON.parse(persistedRaw!) as RemindersSnapshot).items.find((one) => one.id === item!.id)?.dueDate).toBe(expectedNext);
   });
 });

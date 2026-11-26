@@ -50,7 +50,8 @@ schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
 schema ResidentScope { userId: string; organizationId: string; agentId: string; epoch: Schema.Int }
-schema CleanupQueue { success: boolean; data: CleanupReceipt[] }
+const Receipts = Schema.Array(CleanupReceipt)
+schema CleanupQueue { success: boolean; data: Receipts }
 schema VoiceCreated { success: boolean; result: { data: { note: { id: string } }; state: { revision: Schema.Int } } }
 schema NoteRevision { success: boolean; data: { revision: Schema.Int } }
 schema CleanupStatus { status: string }
@@ -136,6 +137,8 @@ describe("Run Alpha's agent on the phone", () => {
         latest.status, near.status, edge.status, nearPage.messages.some((message) => message.id === anchor.id), edgePage.messages.map(({ id }) => id),
       ]).toEqual([200, 200, 200, true, [prior.id]]))
 
+      const createdAlarm = try promise(() => call(first, "POST", "/api/alpha/clock/alarms", { hour: 7, minute: 30, label: "Wake up" }))
+      const createdReminder = try promise(() => call(first, "POST", "/api/alpha/reminders/items", { title: "Buy heron seed", dueDate: "2026-11-25" }))
       const title = "Route admission check"
       const routine = try promise(() => call(first, "POST", "/api/personal-assistant/routines", { title, idempotencyKey: "route-admission", times: ["14:20"] }))
       const listing = try promise(() => call(first, "GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
@@ -146,7 +149,7 @@ describe("Run Alpha's agent on the phone", () => {
         triggerType: "event", eventKind: "MESSAGE_SENT", wakeMode: "inject_now", enabled: false,
       }))
       const { trigger } = try Schema.decodeUnknownEffect(Schema.fromJsonString(SavedTrigger))(queued.body)
-      try Effect.try(() => expect({ routine: routine.status, task: task !== undefined, trigger: queued.status }).toEqual({ routine: 201, task: true, trigger: 201 }))
+      try Effect.try(() => expect({ alarm: createdAlarm.status, reminder: createdReminder.status, routine: routine.status, task: task !== undefined, trigger: queued.status }).toEqual({ alarm: 201, reminder: 201, routine: 201, task: true, trigger: 201 }))
       const taskId = task?.taskId ?? ""
       for (const route of try Effect.try(() => listed())) {
         const target = filled(route.path, opened, taskId, trigger.id)
@@ -213,9 +216,6 @@ describe("Run Alpha's agent on the phone", () => {
       const proposals = try promise(() => call(first, "GET", "/api/approvals"))
       const pending = try Schema.decodeUnknownEffect(Schema.fromJsonString(Approvals))(proposals.body)
       try Effect.try(() => expect({ status: proposals.status, approvals: pending.approvals }).toEqual({ status: 200, approvals: [] }))
-      const createdAlarm = try promise(() => call(first, "POST", "/api/alpha/clock/alarms", { hour: 7, minute: 30, label: "Wake up" }))
-      const createdReminder = try promise(() => call(first, "POST", "/api/alpha/reminders/items", { title: "Buy heron seed", dueDate: "2026-11-25" }))
-      try Effect.try(() => expect({ alarm: createdAlarm.status, reminder: createdReminder.status }).toEqual({ alarm: 201, reminder: 201 }))
       return opened
     })
     const second = try phoneAgent(run, phone)

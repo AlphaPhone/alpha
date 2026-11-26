@@ -1,13 +1,18 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
+import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
 import { Machine as Automations } from "../gen/app__workflows__automations.effect.vibe";
+import { Machine as Builder } from "../gen/app__workflows__builder.effect.vibe";
 import { Machine as Runs } from "../gen/app__workflows__runs.effect.vibe";
 import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
 import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
-import { Machine as Builder } from "../gen/app__workflows__builder.effect.vibe";
+import { Machine as DigestSchedules } from "../gen/app__digests__schedules.effect.vibe";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
+import { ownerAt } from "../src/platform/owner.vibe";
 import workflows from "../src/workflows/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import home from "../src/home/index.tsx";
@@ -135,7 +140,7 @@ describe("Workflows", () => {
     expect(fromAreas.snapshot().flows.freshness).toBe("UpToDate");
     const told: string[] = [];
     onTestFinished(fromAreas.subscribe(() => { told.push(fromAreas.snapshot().flows.freshness); }));
-    // Back to Home reads Workflows again: the card keeps "up to date" through the read, with no "Not current" between.
+    // spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row": Back to Home reads Workflows again; the card keeps "up to date" through the read, with no "Not current" between.
     await drawn(() => alpha.back());
     await until(alpha, area, Listing, (state) => state.list.ticket > asked && state.list.status === "Loaded");
     await drawn(() => undefined);
@@ -274,6 +279,16 @@ describe("Workflows", () => {
     expect(world.workflows.promptEdits.at(-1)).toMatchObject({ expectedRevision: 3 });
     expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
   });
+
+  const openMonthlyStatement = async (world: ReturnType<typeof scene>, withAssistant = false) => {
+    const alpha = await openWorkflows(world, withAssistant);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await choose("Monthly statement");
+    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
+    await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
+    return { alpha, area };
+  };
 
   it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names"; spec/app/workflows/sheet.md, "Story: Open a finished workflow from its notification")', async () => {
     // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left": the WebView's IndexedDB keeps the run attached to Ask Alpha.
@@ -444,8 +459,9 @@ describe("Workflows", () => {
     if (kind === "speak_text") {
       expect(world.voice.played).toHaveLength(1);
     } else {
+      const operationId: unknown = expect.stringMatching(/^step-[a-f0-9]{64}$/);
       expect(notices.results).toMatchObject([{
-        operationId: expect.stringMatching(/^step-[a-f0-9]{64}$/),
+        operationId,
         title: "A reviewed notification", body: "A reviewed note.",
         route: { workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" },
       }]);
@@ -458,13 +474,17 @@ describe("Workflows", () => {
     }
   });
 
+const openStepsBuilder = async (alpha: Awaited<ReturnType<typeof open>>["alpha"], area: ReturnType<typeof workflows.runtime>) => {
+  await press("Add to Workflows");
+  await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+  await press("More options");
+  await press(/^Steps/);
+};
+
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
     const world = scene();
     const { alpha, area } = await onList(world);
-    await press("Add to Workflows");
-    await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
-    await press("More options");
-    await press(/^Steps/);
+    await openStepsBuilder(alpha, area);
     await until(alpha, area, Builder, (state) => state.offer.status === "Loaded");
 
     await write("Name", "Water the plants");
@@ -529,5 +549,161 @@ describe("Workflows", () => {
       { operation: "restore", version: "monthly-statement-v4" },
     ]);
     expect(world.workflows.statement).toMatchObject({ removed: false, active: false });
+  });
+
+  // spec/app/workflows/request.md, "The owner can let go of a request only once its record was checked, and it is then never sent again"; spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/index.md, "A change offered again is reviewed again before the same request is sent, or let go once its record was read"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"
+  it("letting go clears retained run, lifecycle, and authoring keys so a new request succeeds, and lifecycle offers resend", async () => {
+    const world = scene();
+    const { alpha, area } = await openMonthlyStatement(world);
+
+    const scope = await area.runPromise(ownerAt());
+    const runKey = `alpha/workflows/run/${encodeURIComponent(scope)}/${encodeURIComponent("monthly-statement")}`;
+    await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) =>
+      store.set(runKey, JSON.stringify({ id: 1, submission: "s-old", workflow: "monthly-statement", version: "monthly-statement-v3" }))));
+
+    await press("Run now");
+    await press("Confirm run");
+    await until(alpha, area, Runs, (state) => state.request.attempt.outcome === "Sent" && !state.request.live);
+    await press("Check run");
+    await until(alpha, area, Runs, (state) => state.request.record.status === "Failed");
+    await press("Allow a new run");
+    await until(alpha, area, Runs, (state) => state.request.attempt.outcome === "Unknown");
+
+    await press("Run now");
+    await press("Confirm run");
+    await until(alpha, area, Runs, (state) => state.request.attempt.id === 2 && state.request.attempt.outcome !== "Recorded" && !state.request.live);
+    const afterRun = await area.runPromise(Effect.flatMap(Runs, (m) => m.get()));
+    expect(afterRun.request.attempt.outcome).toBe("Confirmed");
+
+    const changeKey = `alpha/workflows/change/${encodeURIComponent(scope)}/${encodeURIComponent("monthly-statement")}`;
+    await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) =>
+      store.set(changeKey, JSON.stringify({ id: 1, mutation: "m-old", workflowId: "monthly-statement", version: "monthly-statement-v3", change: "Remove" }))));
+    await pressWorkflowAction("Remove workflow");
+    await pressInReview("Remove");
+    await until(alpha, area, Definition, (state) => state.change.attempt.outcome === "Sent" && !state.change.live);
+    await area.runPromise(Effect.flatMap(Definition, (m) => Effect.all([
+      m.send({ type: "checkChange" }),
+      Effect.flatMap(m.get(), (cur) => m.send({ type: "changeChecked", ticket: cur.change.record.ticket, ok: true, found: false, version: cur.version })),
+    ])));
+    await drawn(() => undefined);
+    expect(button("Review the same change")).toBeDefined();
+    await press("Review the same change");
+    await until(alpha, area, Definition, (state) => state.review.showing);
+    await pressInReview("Send again");
+    await until(alpha, area, Definition, (state) => state.change.again && state.change.attempt.outcome === "Sent" && !state.change.live);
+    const retainedAfterResend = await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) => store.get(changeKey)));
+    expect(retainedAfterResend).toContain('"mutation":"m-old"');
+    await press("Allow a different change");
+    await until(alpha, area, Definition, (state) => !state.change.offered);
+    await vi.waitFor(async () => expect(await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) => store.get(changeKey)))).toBeUndefined());
+    await pressWorkflowAction("Remove workflow");
+    await pressInReview("Remove");
+    await until(alpha, area, Definition, (state) => state.change.attempt.id === 2 && state.change.attempt.outcome !== "Recorded" && !state.change.live);
+    const afterChange = await area.runPromise(Effect.flatMap(Definition, (m) => m.get()));
+    expect(afterChange.change.attempt.outcome).not.toBe("Sent");
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    await openStepsBuilder(alpha, area);
+    await until(alpha, area, Builder, (state) => state.open);
+    const builderBefore = await area.runPromise(Effect.flatMap(Builder, (m) => m.get()));
+    if (builderBefore.offer.status !== "Loaded") {
+      await area.runPromise(Effect.flatMap(Builder, (m) => Effect.gen(function* () {
+        const cur = yield* m.get();
+        if (cur.offer.status === "Failed") {
+          yield* m.send({ type: "closeBuilder" });
+          yield* m.send({ type: "openBuilder", workflow: 0, version: 0, unfinished: false });
+        }
+        const next = yield* m.get();
+        if (next.offer.status === "Loading") {
+          yield* m.send({
+            type: "offerRead", ticket: next.offer.ticket, ok: true, speaks: false, reminders: false, runDay: false, schedules: false, generates: false,
+            steps: [], name: 0, when: next.when,
+          });
+        }
+      })));
+    }
+    await area.runPromise(Effect.flatMap(Builder, (m) => Effect.all([
+      m.send({ type: "rename", chars: 4 }),
+      m.send({ type: "addStep", op: "SuppliedText", source: 0, text: 4, items: 0, span: "FixedDates", days: 0 }),
+    ])));
+    await until(alpha, area, Builder, (state) => state.draft.sync === "Kept");
+    await area.runPromise(Effect.flatMap(Builder, (m) => Effect.all([
+      m.send({ type: "reviewSave", unfinished: false }),
+      m.send({ type: "confirmSave", unfinished: false }),
+      m.send({ type: "saveUnanswered" }),
+    ])));
+    await until(alpha, area, Builder, (state) => state.save.attempt.outcome === "Sent" && !state.save.live);
+    await press("Check save");
+    await until(alpha, area, Builder, (state) => state.save.record.status === "Failed");
+    expect(button("Allow a different save")).toBeDefined();
+    await press("Allow a different save");
+    await until(alpha, area, Builder, (state) => state.save.attempt.outcome === "Unknown");
+  });
+
+  // spec/app/workflows/automations.md, "A change with no answer stays kept, locks the panel's changes, and is settled by the agent's record or let go by the owner once it was checked"; spec/app/digests/schedules.md, "Discard drops only a change never sent; one that may have reached the agent is let go only once its record was read"
+  it("unanswered automation and digest schedule changes offer Check change and Allow a different change to unlock the panel", async () => {
+    const world = scene();
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    const unlockChange = async (machine: typeof Automations | typeof DigestSchedules) => {
+      await drawn(() => undefined);
+      expect(button("Check change")).toBeDefined();
+      await press("Check change");
+      await until(alpha, area, machine as typeof Automations, (state) => state.change.record.status === "Failed");
+      expect(button("Allow a different change")).toBeDefined();
+      await press("Allow a different change");
+      await until(alpha, area, machine as typeof Automations, (state) => state.change.attempt.outcome === "Unknown");
+    };
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await choose("Desk check");
+    await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
+
+    await area.runPromise(Effect.flatMap(Automations, (m) => Effect.all([
+      m.send({ type: "reviewChange", wanted: "Fire" }),
+      m.send({ type: "confirmChange" }),
+      m.send({ type: "sendChange" }),
+      m.send({ type: "changeUnanswered" }),
+    ])));
+    await unlockChange(Automations);
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    await press("Add to Workflows");
+    await press("Scheduled digest");
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingDigests");
+    await until(alpha, area, DigestSchedules, (state) => state.open);
+    await area.runPromise(Effect.flatMap(DigestSchedules, (m) => Effect.all([
+      m.send({ type: "openEditor", zone: 0 }),
+      m.send({ type: "pickSource", source: 1, fresh: true }),
+      m.send({ type: "reviewChange", wanted: "Create" }),
+      m.send({ type: "confirmChange" }),
+      m.send({ type: "sendChange" }),
+      m.send({ type: "changeUnanswered" }),
+    ])));
+    await unlockChange(DigestSchedules);
+  });
+
+  // spec/app/workflows/clock.md, "A review ends when Alpha is hidden or the page is closed, and a handoff not yet sent is withdrawn"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
+  it("opening Alarms from Workflows offers a Back step to Layers so Back closes Alarms", async () => {
+    const world = { ...scene(), phone: true };
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+
+    await press("Add to Workflows");
+    await press("Clock alarms");
+    await until(alpha, area, Clock, (state) => state.open);
+    for (let turn = 0; turn < 20; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    const offered = await alpha.runtime.runPromise(Effect.flatMap(Layers, (m) => m.get()));
+    expect(offered.steps.includes("view:Workflows")).toBe(true);
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Clock, (state) => !state.open);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    for (let turn = 0; turn < 20; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    const after = await alpha.runtime.runPromise(Effect.flatMap(Layers, (m) => m.get()));
+    expect(after.steps.includes("view:Workflows")).toBe(false);
   });
 });

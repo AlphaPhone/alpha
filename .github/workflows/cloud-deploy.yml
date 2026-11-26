@@ -1,7 +1,7 @@
 name: Cloud deploy
 run-name: Alpha Cloud ${{ github.event_name == 'push' && 'staging then production' || format('{0} ({1})', inputs.action, inputs.environment) }} on ${{ github.sha }}
 # Deploys Alpha Cloud (spec/cloud/rollout.md): the API Worker (apps/cloud/src/worker.vibe)
-# and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Pushes on vibestack-develop promote the same
+# and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Pushes on the branch below promote the same
 # commit only after staging passes. Manual runs follow the selected environment's deployment branch policy. Deploying the Cloud
 # leaves the hosts bundled in each installed app in place.
 #

@@ -1,6 +1,6 @@
 // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
 import { Button } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { Bell, Check, Clock, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type * as Alerts from "../../gen/app__reminders__alerts.effect.vibe";
@@ -32,6 +32,11 @@ export function AlertBanner({
   const snooze10 = snoozeTargetMs(nowMs, "10m");
   const snooze60 = snoozeTargetMs(nowMs, "1h");
   const snoozeTomorrow = snoozeTargetMs(nowMs, "tomorrow");
+  const snooze = (preset: "10m" | "1h" | "tomorrow") => {
+    void runtime.runPromise(Effect.flatMap(Time, (time) => time.now())).then((now) =>
+      send({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTargetMs(now, preset), now: untimed }),
+    );
+  };
   const completeEvent = { type: "completeFromBanner" as const, id: specId, expectedRevision: revision };
   const dismissEvent = { type: "dismissFromBanner" as const, id: specId, expectedRevision: revision };
 
@@ -82,7 +87,7 @@ export function AlertBanner({
           variant="secondary"
           size="sm"
           disabled={!can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snooze10, now: untimed })}
-          onClick={() => void send({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snooze10, now: untimed })}
+          onClick={() => snooze("10m")}
         >
           <Clock aria-hidden className="size-3.5" />
           10m
@@ -92,7 +97,7 @@ export function AlertBanner({
           variant="secondary"
           size="sm"
           disabled={!can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snooze60, now: untimed })}
-          onClick={() => void send({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snooze60, now: untimed })}
+          onClick={() => snooze("1h")}
         >
           1h
         </Button>
@@ -101,7 +106,7 @@ export function AlertBanner({
           variant="secondary"
           size="sm"
           disabled={!can({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTomorrow, now: untimed })}
-          onClick={() => void send({ type: "snoozeFromBanner", id: specId, expectedRevision: revision, until: snoozeTomorrow, now: untimed })}
+          onClick={() => snooze("tomorrow")}
         >
           Tomorrow
         </Button>

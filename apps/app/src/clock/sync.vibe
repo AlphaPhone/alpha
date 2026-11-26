@@ -184,6 +184,10 @@ export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers
   const metaSnap = clockRecords.snapshot()
   const remoteEmpty = remote.version === 0 && remote.alarms.length === 0 && remote.timers.length === 0 && remote.world.length === 0
   if (remoteEmpty && metaSnap.version === 0) return true
+  if (remote.version < metaSnap.version) {
+    try pushClockSnapshot()
+    return true
+  }
   const now = try (try Time).now()
   const alarmMachine = try Alarms.Machine
   const timerMachine = try Timers.Machine
@@ -199,7 +203,7 @@ export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers
   const nextAlarmMeta = new Map<number, AlarmMeta>()
   const deletedAlarmSet = new Set([...metaSnap.deletedAlarmIds, ...remote.deletedAlarmIds])
   for (const record of remote.alarms) {
-    if (deletedAlarmSet.has(record.id) && !(remote.version > metaSnap.version && !remote.deletedAlarmIds.includes(record.id))) continue
+    if (deletedAlarmSet.has(record.id)) continue
     let localId = existingAlarmByRemote.get(record.id) ?? parseNumericSuffix(record.id, nextAlarmIssued + 1)
     while (usedAlarmIds.has(localId) || localId <= 0) {
       nextAlarmIssued += 1
@@ -224,7 +228,9 @@ export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers
   const nextTimers: Timer[] = []
   const usedTimerIds = new Set<number>()
   const nextTimerMeta = new Map<number, TimerMeta>()
+  const deletedTimerSet = new Set([...metaSnap.deletedTimerIds, ...remote.deletedTimerIds])
   for (const record of remote.timers) {
+    if (deletedTimerSet.has(record.id)) continue
     let localId = existingTimerByRemote.get(record.id) ?? parseNumericSuffix(record.id, nextTimerIssued + 1)
     while (usedTimerIds.has(localId) || localId <= 0) {
       nextTimerIssued += 1
@@ -257,8 +263,8 @@ export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers
       clockRecords.replaceAll({
         alarms: nextAlarmMeta,
         timers: nextTimerMeta,
-        deletedAlarmIds: [...new Set(remote.deletedAlarmIds)],
-        deletedTimerIds: [...new Set(remote.deletedTimerIds)],
+        deletedAlarmIds: [...deletedAlarmSet],
+        deletedTimerIds: [...deletedTimerSet],
         version: Math.max(metaSnap.version, remote.version),
       })
       try contained(alarmMachine.send({ type: "applySync", synced: nextAlarms, nextIssued: nextAlarmIssued }), "applying synced alarms")

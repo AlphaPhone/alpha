@@ -1,5 +1,5 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/chats.md, "Story: Reuse words from a message"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
-import { AssistantChatHistorySheet, AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps, type AssistantTranscriptProps } from "@repo/ui";
+import { AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps, type AssistantTranscriptProps } from "@repo/ui";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { Effect, type ManagedRuntime } from "effect";
 import { useMemo, useState } from "react";
@@ -7,8 +7,6 @@ import * as Chats from "../../gen/app__assistant__chats.effect.vibe";
 import type { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
-import type { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
-import { top } from "../../gen/app__shell__layers.ts";
 import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
 import { replyBlocks, wordsOf } from "./words.ts";
@@ -118,19 +116,13 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
   }, [actions, board, canReadAloud, chats, holding, later, onChoose, onOpenMaps, onPreview, onSettings, opened, prepared, replying, runtime, settled, writing]);
 }
 
-const historyLayer = "assistant-history";
-const showHistory = { type: "openLayer", id: historyLayer, kind: "SheetLayer", covers: true } as const;
-const hideHistory = { type: "closeLayer", id: historyLayer } as const;
-
-// spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/shell/layers.md, "Back closes the layer on top, and nothing under it"
+// spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown"
 export function useHistorySheets(
   chats: ReturnType<typeof useChats>,
   search: ReturnType<typeof useSearch>,
-  layers: ReturnType<typeof useLayers>,
   seen: ReturnType<Board["snapshot"]>,
   free: { replying: boolean; holding: boolean },
   beginSearch: (() => void) | undefined,
-  returnFocus: () => void,
   returnSearchFocus: () => void,
 ) {
   const shown = chats.state;
@@ -138,35 +130,9 @@ export function useHistorySheets(
   const openSearch = finding?.open === true;
   const [typed, setTyped] = useState({ open: openSearch, words: "" });
   if (typed.open !== openSearch) setTyped({ open: openSearch, words: "" });
-  const start = { type: "start", ...free } as const;
-  const listing = layers.state !== undefined && top(layers.state).id === historyLayer;
-  const closeHistory = () => { if (layers.can(hideHistory)) void layers.send(hideHistory); };
-  const browse = layers.can(showHistory) ? () => {
-    void layers.send(showHistory).then(({ _tag }) => { if (_tag === "Success") void chats.send({ type: "browse" }); });
-  } : undefined;
   const searchHistory = beginSearch !== undefined && search.can({ type: "openSearch" }) ? beginSearch : undefined;
   const sheets = shown && finding ? (
     <>
-      <AssistantChatHistorySheet
-        open={listing}
-        onOpenChange={(open) => { if (!open) closeHistory(); }}
-        onReturnFocus={returnFocus}
-        history={{
-          chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
-          status: shown.list.status === "Loading" ? "loading" : shown.list.status === "Failed" ? "failed" : "loaded",
-          blocked: free.replying || free.holding,
-          making: Chats.making(shown),
-          unsure: Chats.unsure(shown),
-          onChoose: (id) => {
-            const choose = { type: "choose", conversation: Number(id), ...free } as const;
-            if (!chats.can(choose)) return;
-            void chats.send(choose);
-            closeHistory();
-          },
-          onStart: chats.can(start) ? () => { void chats.send(start); closeHistory(); } : undefined,
-          onRetry: () => void chats.send({ type: "browse" }),
-        }}
-      />
       <AssistantSearchSheet
         open={finding.open}
         onReturnFocus={returnSearchFocus}
@@ -192,5 +158,5 @@ export function useHistorySheets(
       />
     </>
   ) : null;
-  return { browse, search: searchHistory, sheets };
+  return { search: searchHistory, sheets };
 }
