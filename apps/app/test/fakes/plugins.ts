@@ -6,7 +6,7 @@ import { alphaInboxAttachments, alphaInboxNotices } from "./inbox.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { alphaNotes } from "./notes.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
-import { alphaPhotos } from "./photos.ts";
+import { alphaPhotos, elizaPhotosPermissions } from "./photos.ts";
 import { alphaConnection } from "./platform.ts";
 import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
@@ -35,6 +35,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCamera: elizaCamera(world.camera),
     ElizaFiles: elizaFiles(world.files),
     AlphaPhotos: alphaPhotos(world.photos),
+    ElizaPhotos: elizaPhotosPermissions(world.photos),
     SelectedDocuments: selectedDocuments(world.files),
     ElizaLocation: elizaLocation(world.maps, () => world.now),
     ElizaSystem: elizaSystem(world.launcher, world.settings),

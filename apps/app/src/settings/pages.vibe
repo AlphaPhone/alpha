@@ -36,8 +36,7 @@ function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Layers | Device | Pa
       if (neighbour === "CalendarAccount" || neighbour === "CalendarBackups") try ignore(shell.send({ type: "openView", view: "Calendar" }))
       if (neighbour === "Conversations") try ignore(shell.send({ type: "raise", detent: "Full" }))
     });
-    when { tag: "ReviewAccess", let access }: run("access review", openReview(access));
-    when { tag: "ReviewAllAccess" }: run("access review", openReview(undefined));
+    when { tag: "ReviewAllAccess" }: run("access review", openReview);
   }
 }
 
