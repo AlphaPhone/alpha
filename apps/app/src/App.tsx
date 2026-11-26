@@ -174,6 +174,8 @@ export function App({ alpha }: AppProps) {
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
   const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarse;
+  const inboxLandscapeBar = !phone && showing === "Inbox" && state.assistant === "Bar" && state.textAsk.tag === "NoTextAsk"
+    && canvas?.landscape === true && coarse;
   const fullScreen = state.assistant === "Full" && (phone || !side);
   const sheetBeside = layers !== undefined && !inert && adjacentAskSheet(state, landscapeHomeInput(canvas, coarse));
   const voiceOverHome = phone && side && canvas?.voice === true;
@@ -242,6 +244,7 @@ export function App({ alpha }: AppProps) {
             "[&&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:max-h-full",
             "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
           ],
+          inboxLandscapeBar && "[&&>[data-alpha-detent=bar]]:start-auto [&>[data-alpha-detent=bar]]:w-[min(400px,46%)]",
           side && [
             "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
             "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",

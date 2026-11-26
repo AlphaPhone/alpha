@@ -12,12 +12,13 @@ import { Mail, type SearchPage, bodyAt, page } from "./gmail.vibe"
 interface Prepared<A> {
   start(key: string, part: string, read: A!unknown): void!!
   take(key: string, part: string): (A | undefined)!!
+  pause(key: string): void!!
   stop(): void!!
 }
 
 effect function prepared<A>(): Prepared<A>!! {
   const cache = try mailReadAhead<A | undefined, never>()
-  let active: { key: string; part: string; stopped: Deferred.Deferred<void> } | undefined
+  let active: { key: string; part: string; paused: boolean; stopped: Deferred.Deferred<void> } | undefined
   effect function stop(): void!! {
     const previous = active
     if (previous === undefined) return
@@ -27,13 +28,28 @@ effect function prepared<A>(): Prepared<A>!! {
   }
   return {
     stop,
-    take: (key, part) => cache.take(key, part),
+    take: (key, part) => active?.key === key && active.part === part && !active.paused ? cache.take(key, part) : succeed(undefined),
+    effect pause(key) {
+      const previous = active
+      if (previous === undefined) return
+      if (previous.key !== key) {
+        try stop()
+        return
+      }
+      if (previous.paused) return
+      active = { ...previous, paused: true }
+      try Deferred.succeed(previous.stopped, undefined)
+      try cache.pause()
+    },
     effect start(key, part, read) {
-      if (active?.key === key && active.part === part) return
+      if (active?.key === key && active.part === part) {
+        if (active.paused) active = { ...active, paused: false }
+        return
+      }
       try stop()
       const began = try Deferred.make<void>()
       const stopped = try Deferred.make<void>()
-      active = { key, part, stopped }
+      active = { key, part, paused: false, stopped }
       const answer = Effect.andThen(Deferred.await(began), Effect.orElseSucceed(read, () => undefined))
       try cache.prepare(key, part, Effect.raceFirst(answer, Effect.as(Deferred.await(stopped), undefined)))
       try Deferred.succeed(began, undefined)
@@ -68,6 +84,7 @@ const watching = started(effect {
   const cloud = try Cloud
   const mail = try Mail
   const ahead = try InboxAhead
+  const reads = [ahead.page, ...ahead.bodies]
   const changes = Stream.merge(
     Stream.zipLatest(list.changes, drafts.changes),
     Stream.zipLatest(shell.changes, Stream.concat(Stream.fromEffect(device.showing()), device.visible)),
@@ -75,9 +92,13 @@ const watching = started(effect {
   try Stream.runForEach(changes, () => effect {
     const state = try list.get()
     const visible = showing(try shell.get(), "Inbox") && (try device.showing())
-    if (!Inbox.aheadAllowed(state, visible, (try drafts.get()).open)) {
-      try ahead.page.stop()
-      for (const read of ahead.bodies) try read.stop()
+    const composing = (try drafts.get()).open
+    if (!Inbox.aheadAllowed(state, visible, composing)) {
+      const checking = visible && !composing && state.accounts.status === "Loading" ? aheadKey(state, mail, state.list.ticket) : undefined
+      for (const slot of reads) {
+        if (checking === undefined) try slot.stop()
+        else try slot.pause(checking)
+      }
       return
     }
     if (state.list.status === "Loading") return

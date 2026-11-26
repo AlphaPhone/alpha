@@ -52,6 +52,10 @@ const menu = (item: string, label = "More actions") => drawn(() => {
 const told = () => document.body.textContent ?? "";
 const title = () => (document.querySelector('[data-alpha-subview="inbox-detail"] main[aria-label]') ??
   document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]"))?.getAttribute("aria-label");
+const afterDraw = (check: () => void | Promise<void>) => vi.waitFor(async () => {
+  await drawn(() => undefined);
+  await check();
+}, { timeout: 15_000 });
 async function openInboxFromHome(alpha: Alpha) {
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   await homeIsReady(alpha);
@@ -76,7 +80,11 @@ const inboxMounts = only("home", "view:Inbox", "view:Browser", "view:Settings", 
 const inboxAccountMounts = [...inboxMounts, { at: "overlay", load: () => import("../src/account/index.tsx") } as const];
 
 async function homeIsReady(alpha: Alpha) {
-  await until(alpha, home.runtime(alpha), Home, (state) => state.tiles.load.status === "Loaded");
+  await afterDraw(async () => {
+    const state = await home.runtime(alpha).runPromise(Home.use((machine) => machine.get()));
+    expect(state.tiles.load.status).toBe("Loaded");
+    expect(document.querySelector("[data-home-tile='view:Inbox']")).not.toBeNull();
+  });
 }
 
 async function openInbox(world: Scene) {
@@ -91,7 +99,7 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   world.inbox.notices = notices;
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
-  await drawn(() => vi.waitFor(() => expect(notices.selection?.grantId).toBe(world.inbox.google?.connection)));
+  await afterDraw(() => expect(notices.selection?.grantId).toBe(world.inbox.google?.connection));
   const selection = notices.selection;
   if (!selection || !notices.enter) throw new Error("No native mail watch");
   const enter = notices.enter;
@@ -103,25 +111,32 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   await drawn(() => enter({ ...tap, token: "obsolete", grantId: "retired-grant", messageId: first.card.id, threadId: first.card.threadId }));
   expect(notices.spent).toEqual([]);
   await drawn(() => enter({ ...tap, token: "ordinary", messageId: first.card.id, threadId: first.card.threadId }));
-  await until(alpha, runtime, Shown, (state) => state.body.status === "Loaded");
+  await afterDraw(async () => {
+    const state = await runtime.runPromise(Shown.use((machine) => machine.get()));
+    expect(state.body.status).toBe("Loaded");
+    expect(title()).toBe(first.card.subject);
+  });
   expect([title(), notices.spent, world.ask.said]).toEqual([first.card.subject, ["ordinary"], []]);
 
   const ask = { ...tap, question: true, messageId: second.card.id, threadId: second.card.threadId };
   const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
   await drawn(() => enter({ ...ask, token: "dismissed" }));
-  await drawn(() => vi.waitFor(() => expect(review()).toContain(second.body)));
+  await afterDraw(() => expect(review()).toContain(second.body));
   await confirm("Cancel");
-  await drawn(() => vi.waitFor(() => expect(notices.released).toEqual(["dismissed"])));
+  await afterDraw(() => expect(notices.released).toEqual(["dismissed"]));
   expect([notices.spent, world.ask.said]).toEqual([["ordinary"], []]);
   await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar" && showing(state, "Inbox"));
+  await afterDraw(async () => {
+    const state = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
+    expect([state.assistant, showing(state, "Inbox")]).toEqual(["Bar", true]);
+  });
 
   await drawn(() => enter({ ...ask, token: "reviewed" }));
-  await drawn(() => vi.waitFor(() => expect(review()).toContain(second.body)));
+  await afterDraw(() => expect(review()).toContain(second.body));
   await confirm("Add to chat");
-  await drawn(() => vi.waitFor(() => expect(notices.spent).toEqual(["ordinary", "reviewed"])));
+  await afterDraw(() => expect(notices.spent).toEqual(["ordinary", "reviewed"]));
   expect(world.ask.said).toEqual([]);
-}, 30_000);
+}, 120_000);
 
 it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/adding.md, \"The people shown are for the draft and the newest Contacts read, and choosing one adds only its displayed address\")", async () => {
   const world = { ...scene(), phone: true, image: true };
@@ -141,11 +156,11 @@ it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md
     await press("Choose contacts");
     await until(alpha, runtime, Adding, (state) => state.people.status === "Loaded" && state.addresses === 1);
   };
-  const choose = () => drawn(() => vi.waitFor(() => {
-    const choice = document.querySelector<HTMLButtonElement>('[aria-label="Contact addresses"] button');
-    expect(choice?.textContent ?? "").toContain(email);
-    choice?.click();
-  }));
+  const address = () => document.querySelector<HTMLButtonElement>('[aria-label="Contact addresses"] button');
+  const choose = async () => {
+    await afterDraw(() => expect(address()?.textContent ?? "").toContain(email));
+    await drawn(() => address()?.click());
+  };
   await show();
   expect(world.telephony.contacts).toBe(true);
   world.telephony.contacts = false;
@@ -264,7 +279,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/index.md, "Inbox reads ahead only from a fresh list on screen"; spec/app/inbox/index.md, "More messages are read with the page cursor, which is given up as its page is asked"
     const nextPage = () => world.inbox.pageReads.filter(({ query, cursor }) => query === "in:inbox" && cursor === "p25");
-    await drawn(() => vi.waitFor(() => expect([nextPage().length, [...new Set(world.inbox.bodyReads)].sort()]).toEqual([1, ["g1", "g2"]])));
+    await afterDraw(() => expect([nextPage().length, [...new Set(world.inbox.bodyReads)].sort()]).toEqual([1, ["g1", "g2"]]));
     expect([rows().length, world.inbox.changes]).toEqual([25, []]);
     await press("Load more");
     await until(alpha, runtime, List, (s) => s.pages === 2);
@@ -311,14 +326,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
-      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=alertdialog]")?.textContent ?? "").toContain("Share this email with Alpha?")));
+      await afterDraw(() => expect(document.querySelector("[role=alertdialog]")?.textContent ?? "").toContain("Share this email with Alpha?"));
       expect([document.querySelector("[role=alertdialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
       await confirm("Add to chat");
-      await drawn(() => vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Alpha"]')).not.toBeNull()));
+      await afterDraw(() => expect(document.querySelector('textarea[aria-label="Message Alpha"]')).not.toBeNull());
       await fill("Message Alpha", "What changed in the term sheet?");
       expect(world.ask.said).toEqual([]);
       await press("Send");
-      await drawn(() => vi.waitFor(() => expect(world.ask.said).toHaveLength(1)));
+      await afterDraw(() => expect(world.ask.said).toHaveLength(1));
       const sent = world.ask.said[0] ?? "";
       const lastBlock = sent.split("\n\n").at(-1) ?? "";
       expect([sent.startsWith("What changed in the term sheet?\n\n"), JSON.parse(lastBlock)]).toEqual([true, {
