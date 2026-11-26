@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ChevronDown, ChevronLeft, Maximize2, Minimize2, X } from "lucide-react";
+import { ChevronDown, Maximize2, Minimize2, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
@@ -14,7 +14,7 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
   subtitle?: ReactNode;
   /** The handle that resizes the sheet, in the middle: an `AssistantGrabber`. */
   grabber?: ReactNode;
-  /** Goes Home: the back mark and Alpha's mark at the start. */
+  /** Goes Home: Alpha's mark at the start, with no back arrow, as v119 drew it (45f6bed30 template.html:4459-4463). */
   onHome?: () => void;
   /** Lowers Ask Alpha or returns from the phone's assistant entry. */
   onClose?: () => void;
@@ -33,7 +33,7 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
 export function AssistantChatHeader({ title, context, subtitle, grabber, onHome, onClose, returnOnClose = false, expanded = false, onResize, className, ...props }: AssistantChatHeaderProps) {
   const told = context && (context.sensitive || context.selected) ? context : undefined;
   return (
-    <header className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)_2.75rem_minmax(0,1fr)] items-center px-3 pb-1", className)} {...props}>
+    <header data-alpha-chat-header="" className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)_2.75rem_minmax(0,1fr)] items-center px-3 pb-1", className)} {...props}>
       <div className="flex min-w-0 items-center gap-0.5">
         <button
           type="button"
@@ -43,7 +43,6 @@ export function AssistantChatHeader({ title, context, subtitle, grabber, onHome,
           onClick={onHome}
           className={cn(focusRing, "flex min-h-11 min-w-0 items-center gap-3 rounded-sm text-left")}
         >
-          <ChevronLeft aria-hidden className="-mr-2 size-4.5 shrink-0" />
           <span aria-hidden className="flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>
           {subtitle ? <span className="min-w-0 truncate text-caption text-muted-foreground">{subtitle}</span> : null}
         </button>

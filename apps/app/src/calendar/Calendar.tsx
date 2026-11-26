@@ -100,7 +100,6 @@ const words: Readonly<Record<ReplyWord, string>> = {
 
 const repeats: ReadonlyArray<{ repeat: NonNullable<Fields["repeat"]>; label: string }> = [
   { repeat: "NoRepeat", label: "Once" }, { repeat: "Daily", label: "Daily" }, { repeat: "Weekdays", label: "Weekdays" }, { repeat: "Weekly", label: "Weekly" },
-  { repeat: "Monthly", label: "Monthly" }, { repeat: "Yearly", label: "Yearly" },
 ];
 const reminderRepeats: ReadonlyArray<{ repeat: NonNullable<Fields["reminderRepeat"]>; label: string }> = [
   { repeat: "none", label: "Once" }, { repeat: "daily", label: "Daily" }, { repeat: "weekdays", label: "Weekdays" }, { repeat: "weekly", label: "Weekly" },
@@ -334,7 +333,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     <div ref={surface} className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
       <div className="relative shrink-0">
       <CalendarHeader inert={pageCovered} title={title} titleRef={dateButtonRef} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
-        className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
+        className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} firstPage className="size-13 [&_svg]:size-5.5" /> : null}>
         {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
         {/* v119 45f6bed30 prototype/template.html:1136-1149: the phone header holds the month, Today and New event; Search only on a wide screen. */}
         {!month && s.wide && (searching || view.can({ type: "openSearch" })) ? (
@@ -787,8 +786,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   ];
   const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, false, Editor.canKeepMyChanges(e), !e.titled)] : "";
   const choosesCalendar = reminder || e.form === "NewEvent";
-  const choosesRepeat = reminder || (e.form === "NewEvent" && shown.present() && (!connected || fields.calendar === "Phone"));
-  const choosesOptions = !reminder && (choosesRepeat || (e.form === "NewEvent" && shown.present() && (fields.video === true || fields.alert !== undefined)));
+  // v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on every new event; they need this phone's calendar.
+  const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
+  const choosesRepeat = reminder || choosesOptions;
   const editingPhone = e.form === "EditEvent" && shown.find(e.target)?.source === "Phone";
   const destinations: { name: string; value: NonNullable<Fields["calendar"]> }[] = [{ name: "Reminders", value: "Reminders" }];
   if (e.form === "NewEvent" && connected) destinations.push({ name: "Your agent's calendar", value: "Agent" });
@@ -888,6 +888,14 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           <CalendarSwitch aria-label="All day" checked={fields.allDay} disabled={editingPhone || !editor.can({ type: "setAllDay", allDay: !fields.allDay })}
             onCheckedChange={(allDay) => change({ ...fields, allDay }, { type: "setAllDay", allDay })} />
         </CalendarFormCard>
+        {/* v119 45f6bed30 prototype/template.html:1423-1430: the Video link row comes before the people. */}
+        {choosesOptions ? (
+          <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
+            <Video aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
+            <span className="grow text-body leading-plain">Video link</span>
+            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain)} onCheckedChange={(video) => withExtras({ ...fields, video })} />
+          </CalendarFormCard>
+        ) : null}
         <CalendarFormCard className="gap-1 py-2.5 pr-3 pl-4">
           <div className="flex min-h-9 flex-wrap items-center gap-3.5">
             <UserRound aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
@@ -914,13 +922,6 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           {picking !== undefined && typedEmail !== "" && !addable ? <div className="pt-3 pr-0 pb-1 pl-0.5 text-sm text-muted-foreground">No match</div> : null}
         </CalendarFormCard>
         </> : null}
-        {choosesOptions ? (
-          <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
-            <Video aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
-            <span className="grow text-body leading-plain">Video link</span>
-            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain)} onCheckedChange={(video) => withExtras({ ...fields, video })} />
-          </CalendarFormCard>
-        ) : null}
         {choosesCalendar || choosesRepeat || choosesOptions ? (
           <CalendarFormCard className="gap-1 py-2 pr-3 pl-4">
             {choosesCalendar ? (
@@ -939,7 +940,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                   {reminder ? reminderRepeats.map(({ repeat, label }) => (
                     <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat}
                       onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
-                  )) : repeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} disabled={!editor.can(plain)} onClick={() => withExtras({ ...fields, repeat })} />)}
+                  )) : repeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} disabled={!editor.can(plain)}
+                    onClick={() => withExtras({ ...fields, repeat, ...(repeat !== "NoRepeat" && destination === "Agent" ? { calendar: "Phone" as const } : {}) })} />)}
                 </div>
               </CalendarFormRow>
             ) : null}

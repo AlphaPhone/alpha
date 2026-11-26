@@ -11,6 +11,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
 import { TrashFacts } from "./trashFacts.vibe";
 import { sized } from "./entries.vibe";
+import { launcherTop } from "../shell/launcherFrame.ts";
 
 export interface TrashProps {
   /** Provides the Trash machine, of files.vibe, and Alpha's time, at which `can` is asked. */
@@ -47,13 +48,13 @@ export function Trash({ runtime, onBack }: TrashProps) {
   };
   const restoreMarked = { type: "restoreMarked", now: untimed } as const;
   return (
-    <section aria-label="Trash" className="relative flex min-h-0 flex-1 flex-col">
+    <section aria-label="Trash" className={cn("relative flex min-h-0 flex-1 flex-col", launcherTop)}>
       {selecting ? (
-        <AppHeader title={`${state.marked.length} selected`} detail className="[&>h1]:ms-1.5 [&>h1]:font-display [&>h1]:text-2xl [&>h1]:font-light in-data-[alpha-title-row]:[&>h1]:ms-0" leading={<Button variant="ghost" size="icon" aria-label="Cancel selection" onClick={stopChoosing}><X /></Button>}>
+        <AppHeader title={`${state.marked.length} selected`} detail className="in-data-[alpha-launcher]:min-h-14 [&>h1]:ms-1.5 [&>h1]:font-display [&>h1]:text-2xl [&>h1]:font-light in-data-[alpha-title-row]:[&>h1]:ms-0" leading={<Button variant="ghost" size="icon" aria-label="Cancel selection" onClick={stopChoosing}><X /></Button>}>
           {owner({ type: "markAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell(state.marked.length === state.entries.length ? { type: "unmark" } : { type: "markAll" })}>Select all</Button>}
         </AppHeader>
       ) : (
-        <AppHeader title="Trash" detail className="[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0" leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
+        <AppHeader title="Trash" detail className="in-data-[alpha-launcher]:min-h-14 [&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0" leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
           {owner({ type: "refresh" }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
           {owner({ type: "restoreAll", now: untimed }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
           {owner({ type: "askToEmpty" }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => { setAsked("empty"); tell({ type: "askToEmpty" }); }}>Empty</Button>}
