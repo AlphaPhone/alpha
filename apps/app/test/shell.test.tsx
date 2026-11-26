@@ -5,7 +5,7 @@ import { Machine as Focus } from "../gen/app__shell__focus.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import type { Event as LayerEvent } from "../gen/app__shell__layers.ts";
-import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { Effect } from "effect";
 import { act } from "react";
@@ -120,6 +120,23 @@ describe("the shell", () => {
     expect(document.documentElement.hasAttribute("data-alpha-keyboard")).toBe(false);
   });
 
+  it("Waiting for a missing opener does not block tracking the next layer (spec/app/shell/focus.md, \"A layer that closes gives focus back to the control that opened it, never over a control that took it\")", async () => {
+    const { alpha } = await open({ ...scene(), phone: true }, only("home"));
+    const send = (event: LayerEvent) => alpha.runtime.runPromise(Effect.flatMap(Layers, (layers) => layers.send(event)));
+    const opener = document.body.appendChild(document.createElement("button"));
+    opener.textContent = "Temporary trigger";
+    await drawn(() => opener.focus());
+    await send({ type: "openLayer", id: "first", kind: "SheetLayer", covers: true });
+    await until(alpha, alpha.runtime, Focus, (f) => f.openers.some((one) => one.layer === "first"));
+    await drawn(() => opener.blur());
+    opener.remove();
+    await send({ type: "closeLayer", id: "first" });
+    await until(alpha, alpha.runtime, Focus, (f) => f.waiting === "button:Temporary trigger");
+    await send({ type: "openLayer", id: "second", kind: "DialogLayer", covers: true });
+    await later(alpha, 50);
+    expect((await alpha.runtime.runPromise(Focus.use((f) => f.get()))).openers.some((one) => one.layer === "second")).toBe(true);
+  });
+
   // spec/app/shell/gestures.md, "Story: Swipe the way the phone expects"
   it("Swipe the way the phone expects (spec/app/shell/gestures.md, \"Story: Swipe the way the phone expects\")", async () => {
     const world = { ...scene(), phone: true };
@@ -133,7 +150,6 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     const page = document.querySelector("main");
     if (!page) throw new Error("no Alpha shell");
-    // Happy DOM does not lay out the shell. Give the gesture the phone's canvas.
     const width = 390;
     const height = 844;
     Object.defineProperties(page, {

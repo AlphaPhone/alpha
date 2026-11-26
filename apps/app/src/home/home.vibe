@@ -108,6 +108,12 @@ export interface Told {
 let last: Told | undefined
 const listeners = new Set<() => void>()
 
+function clearTold(): void {
+  if (last === undefined) return
+  last = undefined
+  for (const listener of [...listeners]) listener()
+}
+
 function subscribeTold(this: void, listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
@@ -331,6 +337,22 @@ const presented = started(effect {
   })
 }, "presenting Home")
 
+// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing"
+const clearing = started(effect {
+  clearTold()
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const canvas = try Canvas
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(home.changes, shell.changes), canvas.changes), ([[h, s], c]) => sync(() => {
+    if (last === undefined) return
+    const beside = Home.besideHomeSheet(s, landscapeHomeInput(c))
+    if (Home.noticeAt(h, s, beside) !== last.place) clearTold()
+    else if (last.place === "InEditBar" && h.tiles.save.outcome === "Confirmed") clearTold()
+    else if (last.place === "InDrawer" && last.notice.tag === "TellAppsUnread" && h.installed.read.status === "Loaded") clearTold()
+    else if (last.place === "InDrawer" && last.notice.tag === "TellNotOpened" && h.handoff.attempt.outcome === "Confirmed") clearTold()
+  }))
+}, "clearing Home's inline notice")
+
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
 export const home = together(
   addHomeLayer,
@@ -341,6 +363,7 @@ export const home = together(
     timers: (h) => (waiting(h.handoff) ? [due("android", h.handoff.until, { type: "stopWaiting", now: untimed }, owner)] : []),
   }),
   presented,
+  clearing,
   reacting(Drawer, {}),
   following(Shell.Machine, (shell) => shell.drawer, Drawer.Machine, (open) => open ? undefined : { type: "clear" } as const),
   following(Home.Machine, (state) => state.installed.apps, Drawer.Machine, (listed) => ({ type: "appsChanged", listed } as const)),

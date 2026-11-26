@@ -6,7 +6,10 @@ import { registered } from "./device.vibe"
 import { WebFrames, type FrameEvent } from "./browserWeb.vibe"
 
 module held {
-  import type { BrowserPageGuard, BrowserTabHostPlugin } from "@elizaos/os-bridges"
+  import type { BrowserPageGuard, BrowserTabHostPlugin, BrowserTabPresentation } from "@elizaos/os-bridges"
+
+  /** A place of Alpha's on the page, rounded by `cornerRadius`. */
+  type HostRect = { readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly cornerRadius: number }
   import { BrowserTabSession, tabHostPlugin } from "@elizaos/os-bridges"
 
   /**
@@ -14,6 +17,11 @@ module held {
    * and a failed page opened in another browser at the HTTPS address the host named (`AlphaBrowserPlugin.openFailedPage`).
    */
   export interface AlphaTabHost extends BrowserTabHostPlugin {
+    /**
+     * Draws a tab's page above Alpha. `hostRects` are the places of Alpha's controls drawn over the page, in the page's
+     * own pixels: the page is left out of them and a touch there is Alpha's (`AlphaBrowserPlugin.present`).
+     */
+    present(options: BrowserTabPresentation | (Extract<BrowserTabPresentation, { readonly id: string }> & { readonly hostRects?: readonly HostRect[] })): Promise<void>
     pageContext(options: BrowserPageGuard): Promise<unknown>
     openFailedPage(options: BrowserPageGuard): Promise<void>
     setDesktopSite(options: { readonly session: string; readonly id: string; readonly enabled: boolean }): Promise<unknown>

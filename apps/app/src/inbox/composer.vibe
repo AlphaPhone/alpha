@@ -437,17 +437,29 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
     type: "compose", kind, account, others: kind === "ReplyAll" ? others.length : 0, replyTo: directsReply,
     addressable: acceptable(sender), files: files.length, mib, forwardable, policy,
   }
-  const sent = try exit(composer.send(event, "Owner"))
-  if (!Exit.isSuccess(sent) || !sent.value.state.open) return false
+  const nextId = (try composer.get()).made + 1
   const prefix = replying ? "Re: " : kind === "Forward" ? "Fwd: " : ""
   const subject = message === undefined || message.subject.toLowerCase().startsWith(prefix.toLowerCase()) ? message?.subject ?? "" : `${prefix}${message.subject}`
   const text = forward === undefined ? "" : `\n\nForwarded message from ${forward.from}\nSubject: ${forward.subject}\n\n${forward.body}`
-  const carried: readonly Attached[] = sent.value.state.letter.attachments === 0 || forward === undefined || historyId == null ? []
+  const carried: readonly Attached[] = !forwardable || forward === undefined || historyId == null ? []
     : files.map(({ name, mimeType, size, partId }) => ({ name, mimeType: mimeType.toLowerCase(), size, original: { messageId: forward.id, historyId, partId } }))
-  words.set(sent.value.state.letter.id, {
+  const prepared: Words = {
     ...nothing, subject, text, answers: replying ? message?.id : undefined, mode: kind === "Reply" ? "reply" : kind === "ReplyAll" ? "reply-all" : kind === "Forward" ? "forward" : "compose",
     to: replying ? [sender] : [], cc: kind === "ReplyAll" ? others : [], files: carried,
-  })
+  }
+  words.set(nextId, prepared)
+  const sent = try exit(composer.send(event, "Owner"))
+  if (!Exit.isSuccess(sent) || !sent.value.state.open) {
+    try words.forget([nextId])
+    return false
+  }
+  const actual: Words = sent.value.state.letter.attachments === 0 && carried.length > 0 ? { ...prepared, files: [] } : prepared
+  if (sent.value.state.letter.id !== nextId) {
+    try words.forget([nextId])
+    words.set(sent.value.state.letter.id, actual)
+  } else if (actual !== prepared) {
+    words.set(nextId, actual)
+  }
   return true
 }
 

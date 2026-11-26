@@ -122,7 +122,7 @@ function CommsQuery({ runtime, phone, filter, placeholder, onAsk, onTalk }: { ru
   const machine = usePhone(runtime);
   const [draft, setDraft] = useState("");
   const phoneFilter: QueryFilter | undefined = phone && machine.can({ type: "search", typed: true }) ? {
-    value: runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.get())).sought,
+    value: machine.state?.sought ? runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.get())).sought : "",
     onChange: (sought) => {
       runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.set({ sought, filterLabel: "" })));
       const search = { type: "search", typed: sought.trim() !== "" } as const;

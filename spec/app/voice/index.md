@@ -130,6 +130,8 @@ pure def talking(v: Voice): bool = not(quiet(v)) and v.phase != Stopping
 
 pure def opened(m: Mic): bool = m == Opening or m == On
 
+pure def alphaResponds(v: Voice): bool = v.phase == Transcribing or v.phase == Thinking or v.phase == Speaking
+
 pure def closedMic(m: Mic): Mic = if (opened(m)) Closing else if (m == Asking) Off else m
 
 pure def closeOut(v: Voice): List[Effect] =
@@ -382,6 +384,21 @@ pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, 
   })
 ```
 
+### What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it
+
+When the owner finishes speaking, the words heard for that turn stay in the
+open conversation as the owner's own message, and three dots under it show
+Alpha at work, as the Sunday demo build did (v119,
+apps/app/src/prototype/template.html:4721-4726). They show while that turn
+is transcribed, thought about and spoken, and go the moment the recorded
+message and reply take their place, the turn ends unsent, or Talk leaves it.
+The words are not a draft and not history: only the recorded rows are kept.
+
+```quint
+pure def showsWhatWasSaid(v: Voice, session: int, turn: int): bool =
+  alphaResponds(v) and session == v.session and turn == v.turn
+```
+
 ### A microphone that cannot be closed sends nothing, and shuts the conversation down
 
 ```quint
@@ -628,8 +645,16 @@ pure def alwaysPlaybackIsTheCurrentTurns(v: Voice): bool =
 
 ### Mute turns the microphone off, and unmuting opens it again only where Alpha listens
 
+The microphone control acts only while Alpha listens. While Talk connects
+it waits, dimmed and unconfirmed, and while Alpha answers a turn
+(transcribing, thinking or speaking) it waits, dimmed, as the Sunday demo
+build held it ("Microphone paused while Alpha responds", v119
+apps/app/src/prototype/voice-adapter.ts:1116-1118 and 1631-1633,
+phone.css:920; demo frames v89-064, v89-072, v89-076). Stop and the
+speaker stay available.
+
 ```quint
-pure def canMute(v: Voice): bool = talking(v) and not(v.muted) and v.mic != Asking
+pure def canMute(v: Voice): bool = talking(v) and not(v.muted) and v.mic != Asking and v.phase == Listening
 
 pure def mute(v: Voice): Change = { state: { ...v, muted: true, mic: closedMic(v.mic) }, out: closeOut(v) }
 
@@ -642,14 +667,17 @@ pure def unmute(v: Voice): Change =
 
 pure def alwaysMutedMeansTheMicrophoneIsOff(v: Voice): bool = v.muted implies (v.mic == Off or v.mic == Closing)
 
-pure def sometimesMutedWhileSpeaking(v: Voice): bool = v.muted and v.phase == Speaking
+pure def sometimesMutedWhileListening(v: Voice): bool = v.muted and v.phase == Listening
 ```
 
 ### Speaker mute is offered after the current speech bridge confirms gain control
 
 The owner can silence Alpha without changing the microphone or interrupting
 the answer. The button waits for a receipt owned by the current session and
-request. The receipt says which gain the bridge confirmed. The phone retires
+request. While Talk connects and while that first receipt is awaited, the
+speaker control stands in its place, dimmed, as the Sunday demo build drew it
+(v119 apps/app/src/prototype/voice-adapter.ts:1121, the control disabled
+while starting or pending). The receipt says which gain the bridge confirmed. The phone retires
 its Talk gain before another conversation or reading can use local playback.
 
 ```quint

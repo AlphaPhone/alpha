@@ -70,7 +70,7 @@ interface SpokenView {
 const homeViewId = "home"
 
 /** The place an agent's view id names: Home by its id, else the app of the same name, compared without its case, as the shell's own events name views. */
-function placeOf(viewId: string): Place | undefined {
+function viewPlace(viewId: string): Place | undefined {
   if (viewId.toLowerCase() === homeViewId) return "Home"
   const opened = parseEvent({ type: "openView", view: `${viewId.charAt(0).toUpperCase()}${viewId.slice(1).toLowerCase()}` })
   return opened?.type === "openView" ? opened.view : undefined
@@ -78,7 +78,7 @@ function placeOf(viewId: string): Place | undefined {
 
 /** The place a handoff names, if Alpha has it: a saved note only in Notes. */
 function placeFor(handoff: Handoff): Place | undefined {
-  const place = placeOf(handoff.navigationBinding.viewId)
+  const place = viewPlace(handoff.navigationBinding.viewId)
   return handoff.subview === "saved-note-v1" && place !== "Notes" ? undefined : place
 }
 
@@ -183,6 +183,20 @@ export effect function navigateFilesForReply(conversation: ConversationMachine.S
 effect function navigationEnded(conversation: ConversationMachine.Shape, ticket: number): boolean!! {
   const ended = try Stream.runHead(Stream.filter(conversation.changes, (c) => c.opening.id !== ticket || c.opening.outcome !== "Sent"))
   return Option.isSome(ended) && ended.value.opening.id === ticket && ended.value.opening.outcome === "Confirmed"
+}
+
+export const voiceViews: ReadonlyArray<View> = [
+  "Phone", "Messages", "Inbox", "Telegram", "Slack", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Wallet", "Settings",
+]
+
+export function placeOf(view: View | undefined): number {
+  if (view === undefined) return 1
+  const at = voiceViews.indexOf(view)
+  return at >= 0 ? at + 2 : 1
+}
+
+export function viewOfPlace(place: number): View | undefined {
+  return place >= 2 ? voiceViews[place - 2] : undefined
 }
 
 /**

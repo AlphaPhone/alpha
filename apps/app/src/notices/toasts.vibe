@@ -17,9 +17,10 @@ export service Said {
   readonly toasts: Map<number, Words>
   readonly kept: Map<string, string>
   readonly undos: Map<string, void!!>
+  readonly turn: Semaphore.Semaphore
 }
 
-const said = Layer.sync(Said, () => ({ toasts: new Map<number, Words>(), kept: new Map<string, string>(), undos: new Map<string, void!!>() }))
+const said = Layer.sync(Said, () => ({ toasts: new Map<number, Words>(), kept: new Map<string, string>(), undos: new Map<string, void!!>(), turn: Semaphore.makeUnsafe(1) }))
 
 /** The name of a change, or of a kept notice, in the maps above: its area and its number there. */
 export function nameOf(area: string, about: number): string {
@@ -29,9 +30,11 @@ export function nameOf(area: string, about: number): string {
 effect function raised(words: Words, undo: boolean, area: string, about: number): void!!(Toasts.Machine | Said) {
   const toasts = try Toasts.Machine
   const sentences = try Said
-  const before = try toasts.get()
-  sentences.toasts.set(before.issued + 1, words)
-  try contained(toasts.send({ type: "raise", chars: Math.max(1, words.message.length), undo, area, about }), "a toast")
+  try sentences.turn.withPermits(1)(effect {
+    const before = try toasts.get()
+    sentences.toasts.set(before.issued + 1, words)
+    try contained(toasts.send({ type: "raise", chars: Math.max(1, words.message.length), undo, area, about }), "a toast")
+  })
 }
 
 /** Tell the owner `message` in passing: a failure is announced at once, other news politely. */

@@ -33,12 +33,15 @@ export const bigNumberInteger = (v: any): bigint | undefined => {
 export function typeWalks(typedefs: Json[], module: string, prefix = "") {
   const fields = (t: Json): Json[] => t.kind === "rec" && t.fields.fields.some((f: Json) => f.fieldName === "__proto__")
     ? fail("a record field cannot be called `__proto__`, which JavaScript reads as the object's prototype") : t.fields.fields;
-  // Quint sometimes names a type from a module imported under a name without that name; `base` finds it.
+  // Quint sometimes names a type from a module imported under a name without one or more leading aliases; a suffix or `base` finds it.
   const names = new Map<string, Json>();
   const typedef = (n: string): Json => {
     const known = names.get(n);
     if (known !== undefined) return known;
-    const definition = typedefs.find((d) => d.name === n) ?? typedefs.find((d) => d.base === n) ?? fail(`unknown type ${n}`);
+    const definition = typedefs.find((d) => d.name === n)
+      ?? typedefs.find((d) => d.name.endsWith(`::${n}`))
+      ?? typedefs.find((d) => d.base === n)
+      ?? fail(`unknown type ${n}`);
     names.set(n, definition);
     return definition;
   };
@@ -231,9 +234,12 @@ export function typeWalks(typedefs: Json[], module: string, prefix = "") {
     const t = resolve(t0);
     if (t.kind === "int") return v + 0; // -0 (from 0 * -1, say) prints as 0 and is the same integer, but would compare unequal
     if (t.kind === "list") return v.map((x: any) => canon(t.elem, x));
-    if (t.kind === "set") return v.map((x: any) => canon(t.elem, x)).sort((x: any, y: any) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1));
+    if (t.kind === "set") return v.map((x: any) => canon(t.elem, x)).sort((x: any, y: any) => {
+      const [sx, sy] = [JSON.stringify(x), JSON.stringify(y)];
+      return sx < sy ? -1 : sx > sy ? 1 : 0;
+    });
     if (t.kind === "rec") return Object.fromEntries(fields(t).map((f) => [f.fieldName, canon(f.fieldType, v[f.fieldName])]));
-    if (t.kind === "fun") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, canon(t.res, x)]));
+    if (t.kind === "fun") return Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, canon(t.res, x)]));
     if (tagged(t)) {
       const carried = carriedBy(t, v.tag);
       return carried ? { tag: v.tag, ...canon(carried, v) } : v;
