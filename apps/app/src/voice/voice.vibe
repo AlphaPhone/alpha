@@ -816,7 +816,8 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let asks = smsShown
-  if (!output.usedDirect && review !== undefined && enrolled !== undefined && chat !== undefined && chats !== undefined
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a turn that asked Files directly shows a page open's card alone.
+  if (review !== undefined && enrolled !== undefined && chat !== undefined && chats !== undefined
     && chatPage !== undefined && chatPage.around === 0 && conversation !== undefined && screen !== undefined && streamed
     && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined
     && (try atSource) && (try shell.get()).route === sourceRoute && (try lease.verified)) {
@@ -825,7 +826,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     const pageTicket = chatPage.page.ticket
     const reply = {
       clientMessageId: result.clientMessageId, conversationId: record.id, pageTicket, actionResults: result.reply.actionResults,
-      spoken: { session, turn, current: lease.verified },
+      spoken: { session, turn, current: lease.verified, ...(output.usedDirect ? { pagesOnly: true } : {}) },
       ...(observation?.sms === undefined ? {} : { sms: observation.sms }),
       ...(voicemail === undefined ? {} : { voicemail }),
     }
