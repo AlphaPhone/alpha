@@ -405,7 +405,9 @@ describe("Workflows", () => {
     world.image = true;
     const proposal = await workflowPhoneOffer(world.workflows, world.notes.owner, kind);
     world.telephony.textReview = proposal;
-    world.voice.onDevice = kind === "speak_text";
+    // An Alpha image has on-device speech; without it the phone enrolls below workflow protocol 2, which admits both
+    // app_notification and read_aloud steps, so it is never offered either.
+    world.voice.onDevice = true;
     if (scenario === "speak_text_stopped") world.voice.playbackHold = () => new Promise<void>(() => {});
     const notices = nativeApprovalNotices();
     world.workflows.nativeNotices = notices;
