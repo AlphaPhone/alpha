@@ -19,12 +19,13 @@ export interface AssistantChatActionsProps {
 /** The available Ask Alpha actions beside a composer. */
 export function AssistantChatActions({ placement, triggerId, disabled, onAttach, onSearch, onNew, making, onHistory }: AssistantChatActionsProps) {
   const visible = Boolean(onAttach || onSearch || onNew || making || onHistory);
+  const sideOffset = placement === "bar" ? 4 : placement === "contact" ? 19 : 20;
   return (
     <Menu>
       <MenuTrigger asChild>
         <Button id={triggerId} variant="ghost" size="icon" aria-label="Chat actions" disabled={disabled || !visible} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
       </MenuTrigger>
-      <MenuContent side="top" align="start" alignOffset={placement === "sheet" ? -16 : -57} sideOffset={placement === "bar" ? 4 : 20}
+      <MenuContent side="top" align="start" alignOffset={placement === "sheet" ? -16 : -57} sideOffset={sideOffset}
         className={cn("rounded-tile border-0 bg-background p-2 shadow-dock-compact dark:shadow-dock-compact-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3", placement === "contact" ? "min-w-59" : "min-w-55")}>
         {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
         {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}

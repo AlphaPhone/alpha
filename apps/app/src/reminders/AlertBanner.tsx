@@ -26,7 +26,7 @@ export function AlertBanner({
   const banner = useSyncExternalStore((listener) => alertBannerStore.subscribe(listener), alertBannerStore.snapshot);
   const nowMs = runtime.runSync(Time.use((time) => time.latest()));
   const browserAlerts = useBrowserAlerts(runtime).state;
-  if (!state || state.bannerId === 0 || banner === undefined || (!native() && browserAlerts?.status !== "Enabled")) return null;
+  if (!state || state.bannerId === 0 || banner === undefined || (!native() && browserAlerts?.status === "Disabled")) return null;
   const { item, specId, revision } = banner;
   const dueText = formatRelativeDue(item.dueDate, item.dueMinute, nowMs, false);
   const snooze10 = snoozeTargetMs(nowMs, "10m");

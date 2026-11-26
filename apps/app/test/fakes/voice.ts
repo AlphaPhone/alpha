@@ -295,7 +295,7 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
 
 /** `ElizaSignInPlugin.java`'s `status`, the registered cloud's readiness and the account its key belongs to, and its `signInSettled` receipt, as the wire carries it. */
 export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: MailLeaseScene): Faked {
-  return plugin<Pick<ElizaSignInPlugin, "status" | "upgradeMailLease">, { signInSettled: unknown }>((emit) => {
+  return plugin<Pick<ElizaSignInPlugin, "status" | "upgradeMailLease" | Overridable>, { signInSettled: unknown }>((emit) => {
     voice.signedInHere = () => emit("signInSettled", { request: 1, attempt: 1, verdict: "signed-in-as", credentialId: voice.credentialId, google: "not-requested" });
     return {
       upgradeMailLease() {
@@ -311,7 +311,20 @@ export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: M
           ? { signedIn: true, userId: "user-1", organizationId: voice.organizationId, credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
           : { signedIn: false },
       }),
+      ...unanswered,
       ...voice.startupSignIn,
     };
   });
 }
+
+type Overridable = Exclude<keyof NonNullable<VoiceScene["startupSignIn"]>, "status">;
+/**
+ * Each method a scene may answer, declared in every phone's header as the Java plugin declares it. Capacitor reads a
+ * plugin's header once, when the page first registers it, so a method one world leaves out would stay missing for
+ * the later worlds of the same file. One no scene answers fails as the bridge fails a method it lacks.
+ */
+const refused = (method: Overridable) => () => Promise.reject(rejection(`ElizaSignIn.${method} is not implemented`, "UNIMPLEMENTED"));
+const unanswered: Pick<ElizaSignInPlugin, Overridable> = {
+  startEmail: refused("startEmail"), startPhone: refused("startPhone"), startGoogle: refused("startGoogle"), reauthenticate: refused("reauthenticate"),
+  verify: refused("verify"), resend: refused("resend"), cancel: refused("cancel"), sendFactorCode: refused("sendFactorCode"),
+};

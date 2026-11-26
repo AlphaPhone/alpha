@@ -42,7 +42,7 @@ type Effect =
   | SaveHome({ tiles: List[T::Tile], ticket: int })
   | ReadApps({ ticket: int })
   | AskAndroid({ ask: N::Ask, ticket: int })
-  | Go({ view: S::View })
+  | Go({ view: S::View, route: int, beside: bool })
   | TellNotOpened({ ask: N::Ask, why: Why })
   | TellNoAnswer({ ask: N::Ask })
   | TellUnlockFirst
@@ -83,6 +83,7 @@ pure val shellValues = Set(
   S::initial,
   { ...S::initial, image: true, contacts: true },
   { ...S::initial, drawer: true },
+  S::raise(S::initial, S::Typing), S::raise(S::initial, S::Sheet), S::raise(S::initial, S::Full),
   { ...S::initial, trail: List(S::Notes) })
 pure val readHome: Home = {
   ...initial, host: AsLauncher, installed: { ...P::initial, read: { status: R::Loaded, ticket: 1 }, apps: Set("clock", "mail") },
@@ -339,6 +340,8 @@ pure def showAppInfo(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, now:
 
 ### A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited
 
+A request to open the app belongs to the Shell route that admitted the tap.
+
 ```quint
 pure def tilesShown(h: Home, shell: S::Shell): List[T::Tile] =
   if (h.host == AssistantOnly) List() else h.tiles.favourites.select(t => T::there(h.installed.apps, shell, t))
@@ -346,7 +349,34 @@ pure def tilesShown(h: Home, shell: S::Shell): List[T::Tile] =
 pure def canOpenTile(h: Home, view: S::View, shell: S::Shell, by: Actor): bool =
   by == Owner and not(h.editing) and S::layers(shell) == 0 and tilesShown(h, shell).some(t => T::shows(t, view))
 
-pure def openTile(h: Home, view: S::View, shell: S::Shell, by: Actor): Moved = { state: h, out: List(Go({ view: view })) }
+pure def openTile(h: Home, view: S::View, shell: S::Shell, by: Actor): Moved =
+  { state: h, out: List(Go({ view: view, route: shell.route, beside: false })) }
+```
+
+### An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest
+
+The uncovered Home pane on a landscape phone with a coarse primary pointer
+can open one of Alpha's own apps. The same Shell route and layout must
+still admit that tap when the app opens. An actual covering layer, voice,
+a protected Android Ask visit, Typing, Full, and the Apps drawer still
+own their input. Cards and installed-app tiles stay visible without
+receiving input in this visit. The Apps tile follows the shell's drawer
+rule.
+
+```quint
+pure def besideHomeSheet(shell: S::Shell, landscapePhone: bool): bool =
+  not(shell.drawer) and S::adjacentAskSheet(shell, landscapePhone)
+
+pure def canOpenTileBeside(h: Home, view: S::View, shell: S::Shell, landscapePhone: bool, by: Actor): bool =
+  by == Owner and not(h.editing) and onPhone(h) and besideHomeSheet(shell, landscapePhone)
+    and S::canOpenView(shell, view) and tilesShown(h, shell).some(t => T::shows(t, view))
+
+pure def openTileBeside(h: Home, view: S::View, shell: S::Shell, landscapePhone: bool, by: Actor): Moved =
+  { state: h, out: List(Go({ view: view, route: shell.route, beside: true })) }
+
+pure def lawOnlyTheAdjacentSheetAdmitsAHomeTile(h: Home, view: S::View, shell: S::Shell, landscapePhone: bool, by: Actor): bool =
+  canOpenTileBeside(h, view, shell, landscapePhone, by) implies (onPhone(h) and besideHomeSheet(shell, landscapePhone)
+    and not(h.editing) and by == Owner)
 ```
 
 ### Only an app in the last reading is opened, never while Home is being edited
@@ -627,7 +657,7 @@ pure def lawWhatTheShellLeavesBehindCloses(home: Home, shell: S::Shell): bool =
   canShellMoved(home, shell) implies (S::layers(shell) > 0 implies not(shellMoved(home, shell).state.editing))
 ```
 
-### Nothing on Home starts under a layer of the shell
+### The bare Home controls stay off under a layer of the shell
 
 ```quint
 pure def lawNothingStartsUnderALayer(home: Home, shell: S::Shell, view: S::View): bool =
@@ -735,8 +765,9 @@ pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool
 ### The agent is refused every touch on Home: opening an app, the shade, and adding, removing or moving a tile
 
 ```quint
-pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, drawer: D::Drawer, app: str, tile: T::Tile, onto: T::Tile, view: S::View): bool =
-  not(canOpenTile(home, view, shell, Agent)) and not(canOpenApp(home, app, Agent))
+pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, drawer: D::Drawer, app: str, tile: T::Tile, onto: T::Tile, view: S::View, landscapePhone: bool): bool =
+  not(canOpenTile(home, view, shell, Agent)) and not(canOpenTileBeside(home, view, shell, landscapePhone, Agent))
+    and not(canOpenApp(home, app, Agent))
     and not(canPinInstalled(home, app, shell, drawer, Agent)) and not(canShowAppInfo(home, app, shell, drawer, Agent))
     and not(canPullDown(home, shell, false, Agent))
     and not(canAddToHome(home, tile, shell, Agent)) and not(canRemoveFromHome(home, tile, shell, Agent))

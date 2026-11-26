@@ -341,9 +341,14 @@ pure def askAccess(s: Calendar): Viewed = { state: { ...s, access: P::ask(s.acce
 
 ### What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go
 
+Calendar reads the current grant when it comes into view or the phone
+returns to it. That read asks for no permission. Losing the grant closes
+an open phone event.
+
 ```quint
 pure def accessAnswered(s: Calendar, grant: P::Grant): Viewed =
-  val told = { ...s, access: P::observe(s.access, grant) }
+  val seen = { ...s, access: P::observe(s.access, grant) }
+  val told = if (not(P::allows(seen.access)) and s.local) closeEvent(seen) else seen
   if (P::allows(told.access) and not(P::allows(s.access))) readFor(s.anchor, told)
   else { state: { ...told, phoneRows: if (P::allows(told.access)) s.phoneRows else 0, phoneLimited: P::allows(told.access) and s.phoneLimited }, out: List() }
 ```

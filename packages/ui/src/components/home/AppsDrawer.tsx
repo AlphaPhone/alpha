@@ -30,6 +30,8 @@ export interface AppsDrawerProps {
   readonly query: string;
   readonly catalog: "reading" | "ready" | "unavailable";
   readonly opening?: string;
+  modal?: boolean;
+  inactive?: boolean;
   readonly notice?: HomeNoticeMessage;
   readonly hold?: LauncherHold;
   readonly menu?: { readonly app: string; readonly actions: NonNullable<HomeAppMenuProps["actions"]> };
@@ -126,15 +128,15 @@ function DrawerTile({ app, detail, opening, hold, menu, onOpen, onOpenMenu }: {
 }
 
 /** The native launcher catalog in a drawer over Home. @model spec/app/home/drawer.md */
-export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, onSearch, onClose, onBack = onClose, onOpen, onOpenMenu, onRetry }: AppsDrawerProps) {
+export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, modal = true, inactive = false, onSearch, onClose, onBack = onClose, onOpen, onOpenMenu, onRetry }: AppsDrawerProps) {
   const entries = matches(apps, query);
   const reading = catalog === "reading";
   const failed = catalog === "unavailable";
   return (
-    <section data-alpha-apps-drawer="" role="dialog" aria-modal="true" aria-label="Apps"
+    <section data-alpha-apps-drawer="" role="dialog" aria-modal={modal || undefined} aria-label="Apps" inert={inactive || undefined}
       className="absolute inset-x-0 top-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] bottom-0 z-10 flex min-h-0 flex-col bg-background pt-3 text-foreground"
       onKeyDown={(event) => {
-        if (event.key !== "Escape" || event.defaultPrevented) return;
+        if (inactive || event.key !== "Escape" || event.defaultPrevented) return;
         event.preventDefault();
         event.stopPropagation();
         onBack();

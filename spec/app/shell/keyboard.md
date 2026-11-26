@@ -137,6 +137,19 @@ pure def keyboardReported(c: Canvas, shown: bool, voice: bool): Canvas =
     field: if (release) NoField else c.field, released: if (release) c.released + 1 else c.released }
 ```
 
+### Voice keeps ownership of the composer even before the Android keyboard reports
+
+The voice area may claim or release the composer before Android has
+reported its keyboard. That changes voice ownership without inventing a
+keyboard observation or releasing a field.
+
+```quint
+pure def canVoiceBeforeKeyboard(c: Canvas, voice: bool): bool =
+  c.mounted and c.keyboard == NotReported and c.voice != voice
+
+pure def voiceBeforeKeyboard(c: Canvas, voice: bool): Canvas = { ...c, voice: voice }
+```
+
 ### Alpha going to the background puts the composer away
 
 ```quint
