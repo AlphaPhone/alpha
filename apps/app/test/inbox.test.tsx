@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as List } from "../gen/app__inbox.effect.vibe";
 import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
@@ -10,6 +10,7 @@ import { Machine as Adding } from "../gen/app__inbox__adding.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
+import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { openInboxAccount } from "../src/account/profile.vibe";
@@ -790,22 +791,48 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
 });
 
 // spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
-it("shows the authorized first page of unread Inbox mail on Home", async () => {
-  const world = scene();
+it.each([false, true])('Opens Inbox from its unread card on desktop or landscape phone %s (spec/app/home/cards.md, "The unread mail card opens Inbox without a search or message open")', async (phone) => {
+  const world = { ...scene(), phone };
+  if (phone) {
+    const size = { innerWidth: Object.getOwnPropertyDescriptor(window, "innerWidth"), innerHeight: Object.getOwnPropertyDescriptor(window, "innerHeight") };
+    onTestFinished(() => {
+      if (size.innerWidth) Object.defineProperty(window, "innerWidth", size.innerWidth);
+      if (size.innerHeight) Object.defineProperty(window, "innerHeight", size.innerHeight);
+    });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 844 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 390 });
+  }
   world.inbox.mail.splice(0, world.inbox.mail.length, letter(1, "A private subject", ["INBOX", "UNREAD"], "A private message body"));
   for (let id = 2; id <= 27; id++) world.inbox.mail.push(letter(id, `Read mail ${id}`, ["INBOX"], "", "Sender", Date.UTC(2026, 9, 31, 0, id)));
-  const { alpha } = await open(world, only("home", "view:Inbox"));
+  const { alpha } = await open(world, only("home", "assistant", "view:Inbox"));
+  if (phone) await until(alpha, alpha.runtime, Canvas, (state) => state.mounted && state.landscape);
   const inboxState = inbox.runtime(alpha);
   await openInboxFromHome(alpha);
   await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.pages === 1);
   expect(document.querySelectorAll("h1")).toHaveLength(1);
-  await press("Back to apps");
+  const previous = rows().find((subject) => subject?.startsWith("Read mail"));
+  if (!previous) throw new Error("Missing the previously read message");
+  await row(previous);
+  const detail = () => document.querySelector('[data-alpha-subview="inbox-detail"]');
+  await afterDraw(() => expect(detail()).not.toBeNull());
+  await hardware("home");
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   await homeIsReady(alpha);
+  if (phone) {
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  }
+  await afterDraw(() => expect(button("Open Inbox, 1+ unread")).toBeDefined());
   const card = button("Open Inbox, 1+ unread");
   expect(card?.textContent).toContain("A private subject");
   expect(card?.textContent).toContain("Sender 1");
   expect(card?.textContent).not.toContain("A private message body");
+  expect(card?.closest("[inert]")).toBeNull();
   await press("Open Inbox, 1+ unread");
-  await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox" && state.assistant === "Bar");
+  await afterDraw(() => {
+    expect(detail()).toBeNull();
+    expect(rows()).toContain("A private subject");
+  });
+  expect(world.inbox.changes).toEqual([]);
 });
