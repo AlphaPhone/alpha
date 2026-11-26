@@ -38,9 +38,24 @@ module page {
     const { left, top, width, height } = place.getBoundingClientRect()
     return width > 0 && height > 0 ? { x: left, y: top, width, height } : undefined
   }
+  /** How far an element's outer shadows, its ring among them, reach past its border box on each side, in CSS pixels. @throws {never} */
+  function shadowReach(boxShadow: string): { left: number; top: number; right: number; bottom: number } {
+    const reach = { left: 0, top: 0, right: 0, bottom: 0 }
+    for (const shadow of boxShadow.replace(/[a-z-]+\([^)]*\)/gi, "").split(",")) {
+      if (/\binset\b/.test(shadow)) continue
+      const [x = 0, y = 0, blur = 0, spread = 0] = (shadow.match(/-?[\d.]+(?=px)/g) ?? []).map(Number)
+      const out = blur + spread
+      reach.left = Math.max(reach.left, out - x)
+      reach.right = Math.max(reach.right, out + x)
+      reach.top = Math.max(reach.top, out - y)
+      reach.bottom = Math.max(reach.bottom, out + y)
+    }
+    return reach
+  }
   /**
    * Alpha's controls drawn over the page, in the same pixels as `placeOfPage`, rounded as drawn: the find bar while it is open
-   * (spec/app/browser/address.md, "The find bar opens over a shown page"). The phone leaves these places to Alpha.
+   * (spec/app/browser/address.md, "The find bar opens over a shown page"), with its ring and shadow, which v119 drew over the
+   * page it kept below Alpha. The phone leaves these places to Alpha.
    * @throws {never}
    */
   export function overPage(): { x: number; y: number; width: number; height: number; cornerRadius: number }[] {
@@ -49,7 +64,14 @@ module page {
       const { left, top, width, height } = element.getBoundingClientRect()
       if (width <= 0 || height <= 0) return []
       const scale = element.offsetWidth > 0 ? width / element.offsetWidth : 1
-      return [{ x: left, y: top, width, height, cornerRadius: (Number.parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0) * scale }]
+      const style = getComputedStyle(element)
+      const reach = shadowReach(style.boxShadow)
+      const radius = (Number.parseFloat(style.borderTopLeftRadius) || 0) + Math.min(reach.left, reach.top, reach.right, reach.bottom)
+      return [{
+        x: left - reach.left * scale, y: top - reach.top * scale,
+        width: width + (reach.left + reach.right) * scale, height: height + (reach.top + reach.bottom) * scale,
+        cornerRadius: radius * scale,
+      }]
     })
   }
   /** The facts of what was typed that the address bar's rules read. @throws {never} */

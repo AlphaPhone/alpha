@@ -115,11 +115,11 @@ pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
 pure val volumesValues = Set(List({ id: 1, used: 3, total: 8 }, { id: 9, used: 0, total: 0 }))
 pure val tallyValues = Set({ counts: List({ kind: F::Image, items: 2, bytes: 9 }), trashed: 1 })
-pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 })
-pure val firstValues = Set({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 5 })
-pure val secondValues = Set({ id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 9 }, { id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 })
+pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 })
+pure val firstValues = Set({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0, children: 0 }, { id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 5, children: 0 })
+pure val secondValues = Set({ id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 9, children: 0 }, { id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0, children: 0 })
 pure val trailValues = Set(List(), List(1, 4))
-pure val hitsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
+pure val hitsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0, children: 0 }))
 pure val positionsValues = Set(List(), List(1), List(2, 1), List(3))
 pure val weight_showDownloads = 3
 pure val weight_showDetails = 5
@@ -159,8 +159,8 @@ pure val weight_approve = 2
 pure val weight_approveBatch = 1
 pure val weight_approveNewFolder = 1
 pure val parentPlaceValues = Set({ folder: 1, path: List(), names: List("b") }, { folder: 4, path: List(1), names: List() })
-pure val approvedItemsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }),
-  List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
+pure val approvedItemsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 }),
+  List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0, children: 0 }))
 pure val reviewedFromValues = Set(S::top, { trail: List(1, 4), inCategory: false, category: F::Other })
 pure val weight_renameShown = 1
 pure val weight_openPreviewParent = 1
@@ -179,8 +179,8 @@ pure val weight_closeMoveTo = 8
 pure val weight_closeShare = 8
 pure val entriesValues =
   Set(List())
-    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 })))
-    .union(Set(List({ id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 })))
+    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0, children: 0 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 })))
+    .union(Set(List({ id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 0, children: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0, children: 0 })))
 ```
 
 ### Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place
@@ -731,7 +731,8 @@ card, and, since voice shows no Files review card,
 asks for a filter or an open only (`direct-files-only-v1`): the agent
 refuses a change by voice and has the owner ask for it in the chat, where
 its card shows. A page open the agent keeps for review on that turn still
-shows its card, as Browser has it. An attached document does not authorize a direct action. The agent gets a result receipt without the
+shows its card, as Browser has it, and the turn still says its Files
+result beside that card, as v119 said every direct turn's result. An attached document does not authorize a direct action. The agent gets a result receipt without the
 opened file's contents. An open counts only when that folder loaded or
 that file could be shown.
 
@@ -892,7 +893,7 @@ when the card is built; a refresh of Files after that changes nothing on it.
 ```quint
 pure def atPositions(hits: List[F::Item], positions: List[int]): List[F::Item] =
   if (positions.length() > 0 and positions.every(p => p >= 1 and p <= hits.length()))
-    positions.listMap(p => hits.nthOr(p - 1, { id: 0, name: "", revision: 0, kind: F::Other, volume: 0, bytes: 0 }))
+    positions.listMap(p => hits.nthOr(p - 1, { id: 0, name: "", revision: 0, kind: F::Other, volume: 0, bytes: 0, children: 0 }))
   else List()
 
 pure def lawAPositionNamesOnlyAResultShown(hits: List[F::Item], positions: List[int]): bool =

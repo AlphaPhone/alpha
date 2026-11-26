@@ -90,7 +90,7 @@ const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({
   messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, role: Schema.Literals(["user", "assistant"]), text: Schema.String,
     timestamp: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))), clientMessageId: Schema.optionalKey(Schema.String),
-    failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
+    failureKind: Schema.optionalKey(Schema.String), abortCause: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
   hasMore: Schema.optionalKey(Schema.Boolean), hasEarlier: Schema.optionalKey(Schema.Boolean), hasLater: Schema.optionalKey(Schema.Boolean),
 })
 const pageEdge = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) })
@@ -1137,6 +1137,8 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       { conversation, message: speaker.text === "Message" && (speaker.stage === "Waiting" || speaker.stage === "Preparing") ? speaker.item : 0 },
     ].filter(({ conversation, message }) => conversation > 0 && message > 0)
     const recorded = messages.map((one): Line => {
+      // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": eliza stores a reply stopped before any of its text settled as aborted, with the provisional text it had, which is never shown.
+      if (one.role === "assistant" && one.failureKind === "aborted" && (one.abortCause === "stop" || one.abortCause === "client_left")) return { id: one.id, mine: false, text: "" }
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
         Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", redacted.has(one.id), key) ? saved?.get(key) : undefined

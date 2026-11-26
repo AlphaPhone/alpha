@@ -23,6 +23,8 @@ rests as a bar, takes typing, opens as a sheet, or fills the screen. An app
 rises over Home, which stays where the owner left it and takes no input
 underneath; an app opened from another takes that app's place at once,
 with nothing of Home between them; going back takes the app away at once.
+Home shows under a rising app only until the rise is over, whether it ran
+to its end or stopped early.
 
 ```quint
 type View = Phone | Messages | Inbox | Telegram | Slack | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
@@ -229,6 +231,14 @@ pure def stepACommsReturnPreservesTheSheet(before: Shell, via: str, after: Shell
 
 The owner's action can open an admitted communications app from the app
 currently on stage. Back can return to the source at the same height.
+
+While Ask Alpha rests at its sheet in portrait, a switch of the staged app
+slides the app layer in over 0.42 s on v119's curve (cubic-bezier(.22, 1,
+.36, 1)), from 18% at 0.4 opacity: from the right when a communications app
+opens over another, from the left when the stage returns to the one before
+(45f6bed30 prototype/model.js:5759-5785, phone.css:412-417). A return chosen
+from Phone's tabs on its Contacts tab swaps at once, as v119's Phone tabs did
+(phone-adapter.ts:256-270), and nothing slides under reduced motion.
 
 ```quint
 pure def canOpenCommsView(s: Shell, view: View): bool =

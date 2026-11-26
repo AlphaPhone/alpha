@@ -50,8 +50,9 @@ pure val initial: Preview = {
 
 ### The caption and Details show facts for the exact document held
 
-The caption uses the listing's size and date format. It shows a location
-when the file comes from a known storage folder. A picked document may
+The caption gives the file's media type and says it was selected on this
+device, as v119 did, then its location when the file comes from a known
+storage folder; its size and date are in Details. A picked document may
 only have its name and type. The facts belong to the grant for the file
 and revision the preview still shows.
 
