@@ -1,14 +1,37 @@
 // spec/app/account/plan.md, "Story: Know my plan"; spec/app/account/plan.md, "Story: Keep my plan up to date"; spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/codes.md, "Story: Redeem a code"; spec/app/account/codes.md, "Story: Share or apply a referral"
-import { CloudError, isCredentialInvalid, networkError, normalizeSubscriptionCode, planAdmission, planFromSnapshot, redeemFailureForStatus, subscriptionView } from "@elizaos/cloud"
+import {
+  CloudError, checkoutFromResponse, commandFromResponse, idempotencyKey, isCredentialInvalid, networkError,
+  normalizeSubscriptionCode, paymentFromResponse, planAdmission, planFromSnapshot, redeemResultFromResponse,
+  reviewFromResponse, subscriptionView,
+} from "@elizaos/cloud"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
 import * as Change from "../../gen/app__account__change.effect.vibe"
 import * as Codes from "../../gen/app__account__codes.effect.vibe"
 import * as Plan from "../../gen/app__account__plan.effect.vibe"
 import * as Session from "../../gen/app__account__session.effect.vibe"
-import { Cloud, Device } from "../platform/index.vibe"
+import { Cloud, Device, Refused, ask, outcomeOf } from "../platform/index.vibe"
 import { Attempts, type Job, Time, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { AccountShelf } from "./bridge.vibe"
 import { nowSeconds, secondsTime, toSeconds } from "./clock.vibe"
+
+schema PortalReply { url: string }
+schema UndoReviewReply { quoteId: string }
+
+const InvoiceEntrySchema = Schema.Struct({
+  id: Schema.String,
+  number: Schema.NullOr(Schema.String),
+  date: Schema.Int,
+  status: Schema.Literals(["open", "paid", "uncollectible", "void"]),
+  amountDueCents: Schema.Int,
+  amountPaidCents: Schema.Int,
+  currency: Schema.String,
+  hostedInvoiceUrl: Schema.NullOr(Schema.String),
+})
+
+const InvoicePageSchema = Schema.Struct({
+  invoices: Schema.Array(InvoiceEntrySchema),
+  nextCursor: Schema.NullOr(Schema.String),
+})
 
 type PlanPorts = Cloud | AccountShelf | Time | Session.Machine | Billing.Machine | Change.Machine | Codes.Machine
 
@@ -121,7 +144,7 @@ effect function readOffersAndInvoices(check: number): Billing.Event!!(Cloud | Ac
   const shelf = try AccountShelf
   return effect {
     const offers = try timeout(tryPromise(() => cloud.client.plans()), "10 seconds")
-    const invoicesPage = timeout(tryPromise(() => cloud.client.invoices({ limit: 20 })), "10 seconds") catch () => undefined
+    const invoicesPage = ask(Cloud, HttpClientRequest.get("/api/v1/billing/invoices?limit=20"), InvoicePageSchema) catch () => undefined
     try shelf.update((now) => ({
       ...now,
       offers,
@@ -138,7 +161,13 @@ effect function openCheckoutVisit(visit: number, tier: Plan.Tier): void!!Billing
   const billing = try Billing.Machine
   const key = try attempts.key(visit)
   const planKey = tier === "Pro" ? "pro_monthly" as const : "plus_monthly" as const
-  const startedCheckout = timeout(tryPromise(() => cloud.client.startCheckout({ planKey, idempotencyKey: key, presentation: "mobile" })), "10 seconds") catch () => undefined
+  const req = HttpClientRequest.post("/api/v1/subscriptions/checkout")
+    |> HttpClientRequest.setHeader(%, idempotencyKey, key)
+    |> HttpClientRequest.bodyJsonUnsafe(%, { planKey, idempotencyKey: key, presentation: "mobile" })
+  const startedCheckout = effect {
+    const body = try cloud.call(req)
+    return try checkoutFromResponse(body)
+  } catch () => undefined
   if (startedCheckout === undefined) return
   if (startedCheckout.status === "open") {
     try shelf.setCheckoutSession(startedCheckout.sessionId)
@@ -156,22 +185,20 @@ effect function openCheckoutVisit(visit: number, tier: Plan.Tier): void!!Billing
 }
 
 effect function openFundsVisit(): void!!(Cloud | AccountShelf) {
-  const cloud = try Cloud
   const shelf = try AccountShelf
-  const portalUrl = timeout(tryPromise(() => cloud.client.billingPortal()), "10 seconds") catch () => undefined
-  if (portalUrl !== undefined) try shelf.openExternal(portalUrl)
+  const portal = ask(Cloud, HttpClientRequest.post("/api/v1/subscriptions/portal"), PortalReply) catch () => undefined
+  if (portal !== undefined) try shelf.openExternal(portal.url)
 }
 
 effect function openInvoiceVisit(): void!!(Cloud | AccountShelf) {
-  const cloud = try Cloud
   const shelf = try AccountShelf
   const heldUrl = try shelf.invoiceUrl()
   if (heldUrl !== undefined) {
     try shelf.openExternal(heldUrl)
     return
   }
-  const portalUrl = timeout(tryPromise(() => cloud.client.billingPortal()), "10 seconds") catch () => undefined
-  if (portalUrl !== undefined) try shelf.openExternal(portalUrl)
+  const portal = ask(Cloud, HttpClientRequest.post("/api/v1/subscriptions/portal"), PortalReply) catch () => undefined
+  if (portal !== undefined) try shelf.openExternal(portal.url)
 }
 
 effect function confirmCheckoutAttempt(attempt: number): Billing.Event!!(Cloud | AccountShelf) {
@@ -180,7 +207,8 @@ effect function confirmCheckoutAttempt(attempt: number): Billing.Event!!(Cloud |
   const sessionId = try shelf.checkoutSession()
   if (sessionId === undefined) return { type: "checkoutConfirmed", attempt, result: "NotKnown" }
   return effect {
-    const answerCheckout = try timeout(tryPromise(() => cloud.client.confirmCheckout(sessionId)), "10 seconds")
+    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/v1/subscriptions/checkout/confirm"), { sessionId }))
+    const answerCheckout = try checkoutFromResponse(body)
     if (answerCheckout.status === "completed") {
       try shelf.setCheckoutSession(undefined)
       return { type: "checkoutConfirmed", attempt, result: "Settled" } satisfies Billing.Event
@@ -249,8 +277,10 @@ effect function askPlanChangeQuote(ticket: number, tier: Plan.Tier, revision: nu
   if (subscriptionId === undefined) return { type: "quoted", ticket, ok: false, quote: 0, ends: 0 }
   const kind = tier === "Pro" ? "upgrade" as const : "downgrade" as const
   const targetPlanKey = tier === "Pro" ? "pro_monthly" as const : "plus_monthly" as const
+  const path = kind === "upgrade" ? "/api/v1/subscriptions/upgrade/review" : "/api/v1/subscriptions/downgrade/review"
   return effect {
-    const res = try timeout(tryPromise(() => cloud.client.reviewPlanChange(kind, { subscriptionId, expectedRevision: revision, targetPlanKey })), "10 seconds")
+    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), { subscriptionId, expectedSubscriptionRevision: revision, targetPlanKey }))
+    const res = try reviewFromResponse(body)
     const num = try shelf.nextQuoteNumber()
     const nowSec = try nowSeconds()
     const ends = toSeconds(res.review.expiresAt) || (nowSec + 600)
@@ -264,7 +294,10 @@ effect function mapCommandResult(command: { readonly commandId: string; readonly
   if (command.status === "awaiting_payment") {
     const cloud = try Cloud
     const shelf = try AccountShelf
-    const pay = timeout(tryPromise(() => cloud.client.continuePayment(command.commandId)), "10 seconds") catch () => undefined
+    const pay = effect {
+      const body = try cloud.call(HttpClientRequest.post(`/api/v1/subscriptions/upgrade/${encodeURIComponent(command.commandId)}/payment`))
+      return try paymentFromResponse(body)
+    } catch () => undefined
     if (pay !== undefined) try shelf.setInvoiceUrl(pay.url)
     return "PayNeeded"
   }
@@ -274,6 +307,11 @@ effect function mapCommandResult(command: { readonly commandId: string; readonly
 }
 
 function changeErrorResult(cause: unknown): Change.Result {
+  if (cause instanceof Refused) {
+    if (cause.status === 401 || cause.status === 403) return "NotAuthorized"
+    if (outcomeOf(cause).known) return "NotMade"
+    return "NotKnown"
+  }
   if (cause instanceof CloudError) {
     const tag = cause.failure.tag
     if (tag === "CloudCredentialInvalid" || tag === "CloudConsentRequired") return "NotAuthorized"
@@ -289,8 +327,10 @@ effect function confirmQuotedChange(attempt: number): Change.Event!!ChangePorts 
   const quote = shelf.snapshot().quote
   if (quote === undefined) return { type: "concluded", attempt, result: "NotMade" }
   const key = try attempts.key(attempt)
+  const path = quote.kind === "upgrade" ? "/api/v1/subscriptions/upgrade/confirm" : "/api/v1/subscriptions/downgrade/confirm"
   return effect {
-    const command = try timeout(tryPromise(() => cloud.client.confirmPlanChange(quote.kind, { quoteId: quote.quoteId, idempotencyKey: key })), "10 seconds")
+    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), { quoteId: quote.quoteId, idempotencyKey: key }))
+    const command = try commandFromResponse(body)
     const result = try mapCommandResult(command)
     return { type: "concluded", attempt, result } satisfies Change.Event
   } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
@@ -304,7 +344,8 @@ effect function cancelSubscriptionAtEnd(attempt: number, revision: number): Chan
   if (subscriptionId === undefined) return { type: "concluded", attempt, result: "NotMade" }
   const key = try attempts.key(attempt)
   return effect {
-    const command = try timeout(tryPromise(() => cloud.client.cancelSubscription({ subscriptionId, expectedRevision: revision, idempotencyKey: key })), "10 seconds")
+    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/v1/subscriptions/cancel"), { subscriptionId, expectedSubscriptionRevision: revision, idempotencyKey: key }))
+    const command = try commandFromResponse(body)
     const result = try mapCommandResult(command)
     return { type: "concluded", attempt, result } satisfies Change.Event
   } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
@@ -318,8 +359,9 @@ effect function keepSubscriptionGoing(attempt: number, revision: number): Change
   if (subscriptionId === undefined) return { type: "concluded", attempt, result: "NotMade" }
   const key = try attempts.key(attempt)
   return effect {
-    const review = try timeout(tryPromise(() => cloud.client.undoReview()), "10 seconds")
-    const command = try timeout(tryPromise(() => cloud.client.undoCancel({ subscriptionId, expectedRevision: revision, idempotencyKey: key, quoteId: review.quoteId })), "10 seconds")
+    const review = try ask(Cloud, HttpClientRequest.get("/api/v1/subscriptions/cancel/undo/review"), UndoReviewReply)
+    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/v1/subscriptions/cancel/undo"), { subscriptionId, expectedSubscriptionRevision: revision, idempotencyKey: key, quoteId: review.quoteId }))
+    const command = try commandFromResponse(body)
     const result = try mapCommandResult(command)
     return { type: "concluded", attempt, result } satisfies Change.Event
   } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
@@ -350,28 +392,27 @@ export const changeMachine = Layer.provide(
   secondsTime,
 )
 
-type CodesPorts = Cloud | AccountShelf | Attempts | Session.Machine | Plan.Machine
+type CodesPorts = Cloud | AccountShelf | Attempts | Time | Session.Machine | Plan.Machine
 
 effect function redeemGiftCode(attempt: number, rawCode: string): Codes.Event!!CodesPorts {
   const cloud = try Cloud
   const attempts = try Attempts
+  const nowMs = try (try Time).now()
   const key = try attempts.key(attempt)
   const normalized = normalizeSubscriptionCode(rawCode) ?? rawCode.trim().toUpperCase()
+  const req = HttpClientRequest.post("/api/v1/subscription/redeem")
+    |> HttpClientRequest.setHeader(%, idempotencyKey, key)
+    |> HttpClientRequest.bodyJsonUnsafe(%, { code: normalized, idempotencyKey: key })
   return effect {
-    const result = try timeout(tryPromise({
-      try: () => cloud.client.redeem({ code: normalized, idempotencyKey: key }),
-      catch: (cause) => cause instanceof CloudError ? cause : networkError(cause),
-    }), "10 seconds")
+    const body = try cloud.call(req)
+    const result = try redeemResultFromResponse(body, nowMs)
     return { type: "redeemed", attempt, ok: result.kind === "redeemed", known: true } satisfies Codes.Event
   } catch (cause): Codes.Event => {
-    if (cause instanceof CloudError) {
-      const failure = redeemFailureForStatus(cause)
-      if (failure !== undefined && failure.kind !== "RateLimited" && failure.kind !== "Unavailable") {
-        return { type: "redeemed", attempt, ok: false, known: true }
-      }
-      if (cause.failure.tag === "CloudRefused" || cause.failure.tag === "CloudCredentialInvalid") {
-        return { type: "redeemed", attempt, ok: false, known: true }
-      }
+    if (cause instanceof Refused) {
+      return { type: "redeemed", attempt, ok: false, known: outcomeOf(cause).known }
+    }
+    if (cause instanceof CloudError && (cause.failure.tag === "CloudRefused" || cause.failure.tag === "CloudCredentialInvalid")) {
+      return { type: "redeemed", attempt, ok: false, known: true }
     }
     return { type: "redeemed", attempt, ok: false, known: false }
   }

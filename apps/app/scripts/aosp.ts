@@ -187,7 +187,8 @@ const stage = (argv: readonly string[]) => Effect.gen(function* () {
     ...(found.repeated.patch ?? []).flatMap((name) => { const known = PATCHES[name]; return known === undefined ? [] : [patchReference(name, known.manifest, known.file)]; })]);
   const factory = found.values["factory-image"];
   const sourceOptions = { profile, sourceRoot: source, ...(factory === undefined ? {} : { factory }), patches };
-  const verdict = stage.target === "Pixel10a" ? yield* verifyDeviceSource(sourceOptions) : yield* verifySource(sourceOptions);
+  if (stage.target === "Pixel10a") yield* verifyDeviceSource(sourceOptions);
+  else yield* verifySource(sourceOptions);
   const provisioning = {
     assistant: listenerImage(stage) ? { tag: "ListenerAssistant" as const, power: true } : { tag: "NoAssistant" as const },
     requires: { autofill: true, allFilesAccess: true },
@@ -222,7 +223,7 @@ const stage = (argv: readonly string[]) => Effect.gen(function* () {
       source: sourceOptions, production, aapt, apksigner,
       ...(qualification === undefined ? {} : { activation: provisioning, qualification: { file: qualification, sha256: yield* attempt(() => sha256File(qualification)) } }),
     });
-    const product = yield* composeProduct({ output, descriptor: place(PRODUCTS[stage.target]), source: verdict.state, purpose: production ? "Production" : "Development", provisioning });
+    const product = yield* composeProduct({ output, descriptor: place(PRODUCTS[stage.target]), source: sourceOptions, purpose: production ? "Production" : "Development", provisioning });
     return { staged: staged.evidence, product, imageTelephony: imageTelephony(stage), claims: "staging only: not an image build, a boot, an update or acceptance" };
   }), Effect.sync(() => rmSync(scratch, { recursive: true, force: true })));
 });

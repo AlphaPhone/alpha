@@ -65,8 +65,9 @@ effect function readGoogleAccounts(check: number): Google.Event!!(Cloud | Accoun
 
 type GoogleCapability = "google.basic_identity" | "google.calendar.read" | "google.calendar.write" | "google.gmail.drafts" | "google.gmail.mailbox" | "google.gmail.manage" | "google.gmail.send" | "google.gmail.triage"
 
+schema GoogleConnectReply { authUrl: string }
+
 effect function openGoogleConsent(read: boolean, modify: boolean, send: boolean): void!!(Cloud | AccountShelf) {
-  const cloud = try Cloud
   const shelf = try AccountShelf
   const capabilities: GoogleCapability[] = ["google.basic_identity", "google.calendar.read", "google.calendar.write"]
   if (read || modify) {
@@ -78,7 +79,7 @@ effect function openGoogleConsent(read: boolean, modify: boolean, send: boolean)
   if (send) {
     capabilities.push("google.gmail.send")
   }
-  const startedConnect = timeout(tryPromise(() => cloud.client.googleConnect({ capabilities })), "10 seconds") catch () => undefined
+  const startedConnect = ask(Cloud, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/v1/eliza/google/connect/initiate"), { capabilities }), GoogleConnectReply) catch () => undefined
   if (startedConnect !== undefined) {
     try shelf.openExternal(startedConnect.authUrl)
   }

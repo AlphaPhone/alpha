@@ -1,5 +1,23 @@
 // spec/app/account/session.md, "Story: Hold the account signed in"; spec/app/account/signIn.md, "Story: Choose how to sign in"; spec/app/account/provider.md, "Story: Use my own key"; spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/google.md, "Story: See my Google accounts"
-import type { BillingSnapshot, InvoicePage, PlanChangeReview, PlanOffer, Referral, SubscriptionView } from "@elizaos/cloud"
+import type { BillingSnapshot, PlanChangeReview, PlanOffer, Referral, SubscriptionView } from "@elizaos/cloud"
+
+/** One billing invoice row returned by `GET /api/v1/billing/invoices`. */
+export interface InvoiceEntry {
+  readonly id: string
+  readonly number: string | null
+  readonly date: number
+  readonly status: "open" | "paid" | "uncollectible" | "void"
+  readonly amountDueCents: number
+  readonly amountPaidCents: number
+  readonly currency: string
+  readonly hostedInvoiceUrl: string | null
+}
+
+/** One page of billing invoices returned by Alpha Cloud. */
+export interface InvoicePage {
+  readonly invoices: ReadonlyArray<InvoiceEntry>
+  readonly nextCursor: string | null
+}
 import type { EnvironmentName, SignInAccount, SignInAttempt, SignInClient, SignInReceipt, SignInReadiness, SignInStatus } from "@elizaos/os-bridges"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type * as ProviderGen from "../../gen/app__account__provider.ts"

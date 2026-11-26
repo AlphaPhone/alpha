@@ -1,8 +1,9 @@
 // spec/app/account/session.md, "Story: Hold the account signed in"; spec/app/account/signIn.md, "Story: Choose how to sign in"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/google.md, "Story: See my Google accounts"
-import type { BillingSnapshot, InvoicePage, PlanOffer, Referral } from "@elizaos/cloud";
+import type { BillingSnapshot, PlanOffer, Referral } from "@elizaos/cloud";
 import type { AgentEvents, AgentStatus, ElizaAgentPlugin, ElizaCloudPlugin, ElizaSignInPlugin, NativeCloudRequest } from "@elizaos/os-bridges";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import type { InvoicePage } from "../../src/account/bridge.vibe";
 import { type Platform, phonePlatform } from "../../src/platform/platform.vibe";
 import { type Faked, plugIn, plugin, rejection } from "./phone.ts";
 import { type Route, answering } from "./routes.ts";
@@ -191,7 +192,17 @@ const toBase64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.f
 function accountCloudRoutes(scene: AccountScene): Route[] {
   return [
     (req, url) => (req.method === "GET" && url.pathname === "/api/v1/user"
-      ? Response.json({ success: true, data: { id: scene.userId, email: scene.email, phone: scene.phone, name: scene.name, organization_id: scene.organizationId, organization: { id: scene.organizationId, name: scene.name } } })
+      ? Response.json({
+        success: true,
+        data: {
+          id: scene.userId,
+          email: scene.email,
+          ...(scene.phone === null ? {} : { phone: scene.phone }),
+          name: scene.name,
+          organization_id: scene.organizationId,
+          organization: { id: scene.organizationId, name: scene.name },
+        },
+      })
       : undefined),
     (req, url) => (req.method === "DELETE" && url.pathname === "/api/v1/api-keys/current" ? new Response(null, { status: 204 }) : undefined),
     (req, url) => {

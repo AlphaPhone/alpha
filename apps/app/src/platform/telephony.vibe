@@ -56,7 +56,7 @@ module held {
   function make() {
     const journal = registerPlugin<Journal>("ElizaActionJournal")
     const nativePhone = registerPlugin<OwnerDialPlugin & MessagesNativePlugin>("ElizaTelephony")
-    const addressBook = addressBookPlugin()
+    const addressBook = addressBookPlugin("ElizaContacts")
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
