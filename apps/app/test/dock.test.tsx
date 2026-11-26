@@ -385,8 +385,8 @@ describe("Ask Alpha dock and shell navigation", () => {
     await restsOverCalendar(runtime);
   });
 
-  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
-  it("agent navigation moves between admitted apps and Home while keeping Ask Alpha raised (spec/app/shell/index.md, \"Agent navigation shows an admitted app or Home without lowering Ask Alpha\")", async () => {
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
+  it("agent navigation moves between admitted apps and Home while keeping Ask Alpha raised (spec/app/shell/index.md, \"Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it\")", async () => {
     const { runtime } = await mountDock({ view: "Home", withToast: true, flush: underAct });
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "raise", detent: "Sheet" })));

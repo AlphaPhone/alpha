@@ -571,8 +571,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(document.body.textContent).not.toContain("Review in chat");
   });
 
-  // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
-  it("keeps voice, mic, and raised Sheet open across agent navigation to an app, to Home, and same-screen refresh, while owner navigation stops voice", async () => {
+  // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
+  it("keeps voice and mic open across agent navigation to an app, to Home, and to Home again, keeping a raised Sheet where the view is in sight and lowering it or Full where they would hide it, while owner navigation stops voice", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const runtime = await startListening(world);
     await sendShell(runtime, { type: "raise", detent: "Sheet" });
@@ -587,10 +587,20 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
-    world.ask.nextReplyChunks = ["[NAVIGATE:Home] Refreshed Home."];
-    speakUtterance(world, "Refresh home");
+    // Asked for Home with the sheet over Home: Talk's own move lowers it, so Home shows, and Talk keeps listening.
+    const route = (await getShell(runtime)).route;
+    world.ask.nextReplyChunks = ["[NAVIGATE:Home] Here is Home."];
+    speakUtterance(world, "Go home");
+    await until(runtime, Shell.Machine, (s) => s.route === route + 1);
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
-    expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
+    expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Bar", spokenRoute: route + 1 });
+
+    // Full over Home hides any destination, so opening Calendar lowers it in the same move.
+    await sendShell(runtime, { type: "raise", detent: "Full" });
+    world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
+    speakUtterance(world, "Open my calendar");
+    await until(runtime, Voice.Machine, (s) => s.sent === 4 && s.phase === "Listening" && s.mic === "On" && s.followed === placeOf("Calendar") && s.claim === 0);
+    expect(await getShell(runtime)).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
 
     await sendShell(runtime, { type: "openView", view: "Notes" });
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");

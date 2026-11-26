@@ -257,10 +257,18 @@ pure def canGoHome(s: Shell): bool = layers(s) > 0
 pure def goHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false, assistant: Bar, textAsk: NoTextAsk } })
 ```
 
-### Agent navigation shows an admitted app or Home without lowering Ask Alpha
+### Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it
 
 When the agent navigates during an open conversation or voice session, Ask
-Alpha stays at its current height so the conversation is not interrupted.
+Alpha stays at its current height so the conversation is not interrupted,
+as in v119: a destination opened beside or above a sheet is in sight.
+Where Ask Alpha would still hide the destination, it lowers to its rest in
+the same move, so the owner sees where the agent went: the full screen over
+any destination, or a sheet over the view already showing, Home included.
+An Android Ask Alpha visit keeps its full screen. An app the agent brings
+forward for an action (a drafted message, an approved page, a reviewed
+keypad, Files for a reply's review) comes forward under Ask Alpha at its
+current height, so the card the owner is reading stays.
 
 ```quint
 pure def canAgentOpenView(s: Shell, view: View): bool = available(s, view) and not(showing(s, view))
@@ -281,13 +289,34 @@ pure val panelValues = Set(Bar, Sheet, Full)
 pure val routeValues = Set(0, 1, 2, 3, 6)
 pure val eval_witness_canAgentOpenFilesFrom = (("raise", Sheet), ("agentOpenFilesFrom", List(), Sheet, 1, false))
 
-pure def canAgentGoHome(s: Shell): bool = s.trail.length() > 0 or s.drawer
+pure def hides(s: Shell, arrived: bool): bool =
+  s.textAsk == NoTextAsk and (s.assistant == Full or (s.assistant == Sheet and arrived))
 
-pure def agentGoHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false } })
+pure def shownOver(s: Shell, arrived: bool): Detent = if (hides(s, arrived)) Bar else s.assistant
+
+pure def canAgentShowView(s: Shell, view: View): bool = available(s, view) and (not(showing(s, view)) or hides(s, true))
+
+pure def agentShowView(s: Shell, view: View): Shell =
+  val arrived = showing(s, view)
+  val grown = s.trail.append(view)
+  val trail = if (arrived) s.trail else if (grown.length() > maxTrail) grown.tail() else grown
+  recordRoute({ before: s, after: { ...s, trail: trail, drawer: false, assistant: shownOver(s, arrived) } })
+
+pure def homeShowing(s: Shell): bool = s.trail.length() == 0 and not(s.drawer)
+
+pure def canAgentGoHome(s: Shell): bool = not(homeShowing(s)) or hides(s, true)
+
+pure def agentGoHome(s: Shell): Shell =
+  recordRoute({ before: s, after: { ...s, trail: List(), drawer: false, assistant: shownOver(s, homeShowing(s)) } })
 
 pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell): bool =
-  (via == "agentOpenView" or via == "agentOpenFilesFrom" or via == "agentGoHome"
-    or via == "agentOpenSpoken" or via == "agentHomeSpoken") implies (after.assistant == before.assistant)
+  (via == "agentOpenView" or via == "agentOpenFilesFrom" or via == "agentOpenSpoken") implies (after.assistant == before.assistant)
+
+pure def stepAgentNavigationLeavesItsViewInSight(before: Shell, via: str, after: Shell): bool =
+  (via == "agentShowView" or via == "agentGoHome" or via == "agentShowSpoken" or via == "agentHomeSpoken")
+    implies ((after.assistant == before.assistant or after.assistant == Bar)
+      and (after.assistant == Full implies after.textAsk != NoTextAsk)
+      and ((after.trail == before.trail and after.drawer == before.drawer) implies after.assistant == Bar))
 
 pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
 ```
@@ -297,6 +326,9 @@ pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sh
 An agent's spoken move can open the destination only from the route the
 turn was sent from. The shell records the route that this move created. A
 manual move names a new route even when it reaches the same destination.
+Talk's move to Home or a view it names shows it as agent navigation does;
+an exact spoken Files request keeps Ask Alpha's panel, as Files opened for
+a reply's review does.
 
 ```quint
 pure def canAgentOpenSpoken(s: Shell, view: View, route: int): bool =
@@ -306,6 +338,13 @@ pure def agentOpenSpoken(s: Shell, view: View, route: int): Shell =
   val opened = agentOpenView(s, view)
   { ...opened, spokenRoute: opened.route }
 
+pure def canAgentShowSpoken(s: Shell, view: View, route: int): bool =
+  s.route == route and canAgentShowView(s, view)
+
+pure def agentShowSpoken(s: Shell, view: View, route: int): Shell =
+  val shown = agentShowView(s, view)
+  { ...shown, spokenRoute: shown.route }
+
 pure def canAgentHomeSpoken(s: Shell, route: int): bool =
   s.route == route and canAgentGoHome(s)
 
@@ -314,7 +353,7 @@ pure def agentHomeSpoken(s: Shell, route: int): Shell =
   { ...returned, spokenRoute: returned.route }
 
 pure def stepSpokenRouteMarksTheWriter(before: Shell, via: str, after: Shell): bool =
-  if (via == "agentOpenSpoken" or via == "agentHomeSpoken")
+  if (via == "agentOpenSpoken" or via == "agentShowSpoken" or via == "agentHomeSpoken")
     after.spokenRoute == after.route and after.route == before.route + 1
   else after.spokenRoute == before.spokenRoute
 ```
