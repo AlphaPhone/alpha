@@ -2,6 +2,7 @@ import { Effect, Layer, Queue, Stream } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { afterEach, describe, expect, inject, it } from "vitest";
 import { page } from "vitest/browser";
+import { homeOrder } from "../gen/app__home__tiles.effect.vibe";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as SlackWorkspaces from "../gen/app__slack.effect.vibe";
 import * as SlackAuth from "../gen/app__slack__auth.effect.vibe";
@@ -11,6 +12,7 @@ import * as TelegramList from "../gen/app__telegram.effect.vibe";
 import * as TelegramAuth from "../gen/app__telegram__auth.effect.vibe";
 import * as TelegramConversation from "../gen/app__telegram__conversation.effect.vibe";
 import * as TelegramNotices from "../gen/app__telegram__notices.effect.vibe";
+import { savedKey, written } from "../src/home/saved.vibe";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { messagingSessions } from "../src/platform/messaging.vibe";
 import { slackAt } from "../src/platform/slack.vibe";
@@ -37,7 +39,16 @@ async function controlJson(origin: string, route: string, body?: unknown): Promi
   return (await response.json()) as Record<string, unknown>;
 }
 
+/**
+ * Alpha with Telegram and Slack kept on Home after its default tiles, as the owner adds them from Add to Home:
+ * they are in Home's catalog, not its defaults (spec/app/home/tiles.md, "Home's defaults use the product's Home order").
+ */
 async function openMessagingAlpha() {
+  localStorage.setItem(savedKey, written([
+    ...homeOrder.map((view) => ({ tag: "Own" as const, view })),
+    { tag: "Own", view: "Telegram" },
+    { tag: "Own", view: "Slack" },
+  ]));
   const platform = fakeWorld(scene(), {
     slack: Layer.provide(slackAt(slackOrigin), FetchHttpClient.layer),
     telegram: Layer.provide(telegramAt(telegramOrigin), FetchHttpClient.layer),
