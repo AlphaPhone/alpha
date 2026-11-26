@@ -1103,6 +1103,39 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });
 
+  // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it"; spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+  it("shows the acknowledgment Alpha says in the dots' place while it is said, then the reply it says, before the conversation records them", async () => {
+    const { world, alpha, area } = await openCloudVoiceSheet(false);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const done = Promise.withResolvers<void>();
+    world.ask.acknowledgment = "Let me check your calendar.";
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["Nothing is on your calendar today."];
+    world.ask.holdDoneAfterReady = done.promise;
+    const sessionId = world.voice.activeMicSession;
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "speech-start", sessionId });
+      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: "What is on my calendar?" });
+    });
+    await later(alpha, CLOUD_TURN_GAP_MS);
+    const tail = () => ({
+      dots: document.querySelector('[role="status"][aria-label="Sending"]') !== null,
+      label: [...document.querySelectorAll('[role="status"]')].map((one) => one.textContent).find((text) => text === "Let me check your calendar."),
+      reply: document.querySelector("[data-alpha-voice-reply]")?.textContent,
+    });
+    await settleComposer(alpha, () => world.voice.spoken.length === 1);
+    await settleComposer(alpha, () => tail().label !== undefined);
+    expect([world.voice.spoken.map((one) => one.text), tail()]).toEqual([["Let me check your calendar."], { dots: false, label: "Let me check your calendar.", reply: undefined }]);
+    await drawn(() => [...world.ask.turns.values()][0]?.());
+    await settleComposer(alpha, () => tail().reply !== undefined);
+    expect(tail()).toEqual({ dots: false, label: undefined, reply: "Nothing is on your calendar today." });
+    done.resolve();
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.turn === 2 && s.mic === "On");
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "What the owner says is shown as it is heard"
   it("over the Cloud relay, a pause inside a sentence keeps it one turn, as v119's long gap did, and a finished sentence is sent once the gap passes", async () => {
     const { world, alpha, area } = await openCloudVoiceSheet(false);

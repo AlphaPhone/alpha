@@ -402,10 +402,11 @@ When the owner finishes speaking, the words heard for that turn stay in the
 open conversation as the owner's own message, and three dots under it show
 Alpha at work, as the Sunday demo build did (v119,
 apps/app/src/prototype/template.html:4721-4726). They show while that turn
-is transcribed and thought about. Once the reply's text arrives to be
-spoken, that text takes the dots' place in the same moment, as the Sunday
-demo build set the spoken text and the chat text together (v119,
-apps/app/src/prototype/agent-adapter.ts:2253-2254). Words and reply go the
+is transcribed and thought about. What Alpha speaks takes the dots' place
+in the same moment it is queued to be spoken, as the Sunday demo build set
+the spoken text and the chat text together (v119,
+apps/app/src/prototype/agent-adapter.ts:2253-2254): an acknowledgment as
+the turn's label, as a typed turn shows one, then the reply's text. Words and reply go the
 moment the recorded message and reply take their place, the turn ends
 unsent, or Talk leaves it. They are not a draft and not history: only the
 recorded rows are kept.
