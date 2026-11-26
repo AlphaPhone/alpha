@@ -35,6 +35,7 @@ if ((process.env.ALPHA_DEV_MODEL ?? "") === "" && process.env.ALPHA_NOTES_ORIGIN
 const timings = process.env.ALPHA_MODEL_TIMING_LOG ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "alpha-notes-")), "model-timing.jsonl");
 const shots = process.env.ALPHA_NOTES_SHOTS;
 const only = (process.env.ALPHA_NOTES_ONLY ?? "").split(",").filter((one) => one !== "");
+const routes = (process.env.ALPHA_NOTES_HOW ?? "typed,spoken").split(",");
 
 async function served(): Promise<{ origin: string; stop: () => void }> {
   const given = process.env.ALPHA_NOTES_ORIGIN;
@@ -72,6 +73,15 @@ async function opened(browser: Browser, origin: string, spoken: boolean) {
   }
   await page.goto(origin);
   await page.getByRole("button", { name: "Settings", exact: true }).waitFor();
+  if (spoken) {
+    const talk = page.getByRole("button", { name: "Talk", exact: true });
+    const skip = page.getByRole("button", { name: "Skip", exact: true });
+    for (let step = 0; step < 12 && !(await talk.isVisible()); step += 1) {
+      if (await skip.isVisible()) await skip.click();
+      else await page.waitForTimeout(250);
+    }
+    await talk.waitFor();
+  }
   return page;
 }
 
@@ -106,6 +116,14 @@ function heard(page: Page, words: string) {
   }, words);
 }
 
+/** What Talk said through the fake phone's Cloud speech relay so far, and how often the relay was started, stopped and hushed. */
+function relay(page: Page) {
+  return page.evaluate(() => {
+    const { voice } = (globalThis as unknown as { alphaPhone: { voice: { spoken: { text: string }[]; hushCalls: number; startCloudSpeechCalls: number; stopCloudSpeechCalls: number; activeMicSession?: string } } }).alphaPhone;
+    return { said: voice.spoken.map((line) => line.text), hushes: voice.hushCalls, micStarts: voice.startCloudSpeechCalls, micStops: voice.stopCloudSpeechCalls, mic: voice.activeMicSession };
+  });
+}
+
 function calls(from: number, to: number): Call[] {
   if (!fs.existsSync(timings)) return [];
   return fs.readFileSync(timings, "utf8").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as Call)
@@ -121,19 +139,33 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
   const title = one.title ?? newest?.title ?? "";
   let ended: number | undefined;
   let shownId: string | undefined;
+  let view: string | undefined;
+  let streamFailed: string | undefined;
   page.on("requestfinished", (request) => { if (request.url().includes("/messages/stream")) ended = Date.now(); });
+  page.on("requestfailed", (request) => { if (request.url().includes("/messages/stream")) streamFailed = `${request.failure()?.errorText ?? "failed"} after ${Date.now() - sent} ms`; });
   page.on("request", (request) => {
-    if (request.url().includes("/views/interact-result")) shownId = (request.postDataJSON() as { result?: { shown?: { noteId?: string } } }).result?.shown?.noteId;
+    if (!request.url().includes("/views/interact-result")) return;
+    const told = request.postDataJSON() as { success?: boolean; result?: { switched?: boolean; shown?: { noteId?: string } } };
+    shownId = told.result?.shown?.noteId;
+    view = told.result?.shown !== undefined ? "shown" : told.result?.switched === true ? "switched, note not shown" : "not switched";
   });
   if (spoken) {
     await page.getByRole("button", { name: "Talk", exact: true }).click();
     await page.waitForFunction(() => (globalThis as unknown as { alphaPhone: { voice: { activeMicSession?: string } } }).alphaPhone.voice.activeMicSession !== undefined);
   } else await typed(page, one.words);
   const sent = Date.now();
+  const trace: string[] = [];
+  const traced = async () => {
+    if (!spoken || process.env.ALPHA_NOTES_TRACE !== "1") return;
+    const { said, hushes, micStarts, micStops, mic } = await relay(page);
+    const now = `said ${said.length}, relay started ${micStarts}, stopped ${micStops}, hushed ${hushes}, mic ${mic === undefined ? "closed" : mic.slice(0, 8)}`;
+    if (trace.at(-1)?.endsWith(now) !== true) trace.push(`${Date.now() - sent} ms: ${now}`);
+  };
   if (spoken) await heard(page, one.words);
   else await page.getByRole("button", { name: "Send", exact: true }).click();
   let shown: number | undefined;
   while (Date.now() - sent < 120_000 && (ended === undefined || Date.now() - ended < 15_000)) {
+    await traced();
     const fields = await editorShows(page);
     if (shownId !== undefined && fields?.some((field) => field.toLowerCase() === title.toLowerCase()) && (one.items ?? []).every((item) => fields.some((field) => field.toLowerCase() === item))) {
       shown = Date.now();
@@ -146,10 +178,14 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
     : one.title === undefined ? newest : kept.find((note) => note.title === one.title);
   if (shots !== undefined) await page.screenshot({ path: path.join(shots, `${spoken ? "spoken" : "typed"}-${one.id}.png`) });
   const made = calls(sent, ended ?? Date.now());
+  const voiced = spoken ? { ...await relay(page), ...(trace.length === 0 ? {} : { trace }) } : undefined;
   await page.context().close();
   return {
     how: spoken ? "spoken" : "typed", id: one.id, title, opened: shown !== undefined && shownId === meant?.id, created: one.items === undefined ? undefined : meant !== undefined,
     replyMs: ended === undefined ? undefined : ended - sent, openMs: shown === undefined ? undefined : shown - sent,
+    view: view ?? "no view handed back",
+    ...(streamFailed === undefined ? {} : { streamFailed }),
+    ...(voiced === undefined ? {} : { voiced }),
     modelCalls: made.length, modelMs: made.reduce((sum, call) => sum + call.ms, 0),
     steps: made.map((call) => `${call.called.join("+") || "reply"} ${call.ms}`).join(", "),
   };
@@ -163,7 +199,7 @@ try {
   for (const seed of seeds) if (!kept.includes(seed.title)) await interact(setup, origin, "create-note", { content: `${seed.title}\n${seed.body}` });
   await setup.context().close();
   const rows = [];
-  for (const spoken of [false, true]) for (const one of cases) if (only.length === 0 || only.includes(one.id)) rows.push(await turn(browser, origin, one, spoken));
+  for (const spoken of [false, true].filter((voiced) => routes.includes(voiced ? "spoken" : "typed"))) for (const one of cases) if (only.length === 0 || only.includes(one.id)) rows.push(await turn(browser, origin, one, spoken));
   for (const row of rows) process.stdout.write(`${JSON.stringify(row)}\n`);
   if (rows.some((row) => !row.opened)) process.exitCode = 1;
 } finally {

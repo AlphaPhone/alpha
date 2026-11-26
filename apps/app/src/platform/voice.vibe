@@ -218,10 +218,13 @@ export service VoiceBridge {
 
 const LOCAL_PLUGIN = "AlphaVoiceCloud"
 
-/** The installed phone has Alpha's on-device speech bridge. */
-export function recognizesVoicemail(): boolean {
+/** The installed phone can read text aloud through its on-device speech bridge. */
+export function nativeReadingAvailable(): boolean {
   return registered(LOCAL_PLUGIN)
 }
+
+/** The installed phone has Alpha's on-device speech bridge. */
+export const recognizesVoicemail = nativeReadingAvailable
 
 /** The selected provider row is decoded and recognized on the phone, without sending it audio. */
 export effect function transcribeVoicemail(id: string): string!VoiceBridgeFailed {
@@ -649,7 +652,7 @@ const phoneVoiceAccess = {
   releaseEngineHold: () => registered(LOCAL_PLUGIN)
     ? ignore(tryPromise(() => localPlugin().releaseSpeechEngineHold({})))
     : Effect.void,
-  canRead: () => sync(() => registered(LOCAL_PLUGIN)),
+  canRead: () => sync(nativeReadingAvailable),
 } satisfies Pick<VoiceBridge.Shape, "available" | "checkPermission" | "requestPermission" | "streamTimings" | "holdEngine" | "releaseEngineHold" | "canRead">
 
 interface SpeakerSession {

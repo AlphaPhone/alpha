@@ -58,6 +58,7 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, ac
       ) : null}
       <SettingsNavRow
         title="Account"
+        data-settings-row="account"
         aria-label="Account"
         aria-describedby={accountDetail ? accountStatusId : undefined}
         detail={accountDetail ? <span id={accountStatusId}>{accountDetail}</span> : undefined}

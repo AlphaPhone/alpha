@@ -47,7 +47,7 @@ export const talkFromComms = started(effect {
   })
 }, "starting Talk from the communications bar")
 
-// spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
+// spec/app/phone/comms.md, "End is above the view when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 export const commsVoicePanel = started(effect {
   const shell = try Shell.Machine
   const voice = try Voice.Machine

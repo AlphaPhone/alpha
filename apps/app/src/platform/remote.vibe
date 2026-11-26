@@ -172,9 +172,14 @@ export effect function attempted<I>(remote: Context.Key<I, Remote>, request: Htt
  * how it ended, the answer's body, untrusted, where it came, and the reason a refusal named, where it named one.
  */
 export effect function attemptedWith<I>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): (Outcome & { readonly body: unknown; readonly reason?: string })!!(I | Attempts) {
+  return try attemptedUsing((try remote).call, build, id)
+}
+
+/** Keep the same attempt and refusal handling when a caller supplies an exact-key transport. */
+export effect function attemptedUsing(call: Remote["call"], build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): (Outcome & { readonly body: unknown; readonly reason?: string })!!Attempts {
   const key = try (try Attempts).key(id)
   return effect {
-    const body = try (try remote).call(build(key))
+    const body = try call(build(key))
     return { confirmed: true, known: true, body }
   } catch (failure) => ({ ...outcomeOf(failure), body: undefined, ...(failure._tag === "Refused" && failure.reason !== undefined ? { reason: failure.reason } : {}) })
 }

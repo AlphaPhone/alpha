@@ -54,8 +54,9 @@ const write = (name: string, text: string) => drawn(() => {
   found.dispatchEvent(new Event("input", { bubbles: true }));
 });
 
-async function openWorkflows(world: Scene) {
-  const { alpha } = await open(world, only("home", "view:Workflows", "notice"));
+async function openWorkflows(world: Scene, withAssistant = false) {
+  const mounts = only("home", "view:Workflows", "notice", ...(withAssistant ? ["assistant" as const] : []));
+  const { alpha } = await open(world, mounts);
   const runtime = home.runtime(alpha);
   await vi.waitFor(async () => {
     await drawn(() => undefined);
@@ -124,6 +125,7 @@ describe("Workflows", () => {
     await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
 
     const alarm = document.querySelector('[role="dialog"][aria-label="Clock alarms"]');
+    expect(opener?.closest("[inert]")).not.toBeNull();
     expect(alarm?.querySelector("h2")?.textContent).toBe("Alarms");
     expect(alarm?.querySelector('input[aria-label="Alarm time"]')).toBeInstanceOf(HTMLInputElement);
     await vi.waitFor(() => expect(document.activeElement).toBe(button("Close Clock")));
@@ -321,6 +323,40 @@ describe("Workflows", () => {
         activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
       });
     });
+  });
+
+  it('Reads the exact run on Android and stops it when Alpha goes into the background (spec/app/workflows/sheet.md, "Story: Read a run’s sheet")', async () => {
+    const world = scene();
+    world.phone = true;
+    world.voice.onDevice = true;
+    let endPlayback: () => void = () => {};
+    const playing = new Promise<void>((resolve) => { endPlayback = resolve; });
+    world.voice.playbackHold = () => playing;
+    world.workflows.run = true;
+    try {
+      const alpha = await openWorkflows(world, true);
+      const area = workflows.runtime(alpha);
+      await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+      await choose("Monthly statement");
+      await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown > 0);
+      await drawn(() => {
+        const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
+        if (!row) throw new Error("No finished run");
+        row.click();
+      });
+      await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
+      const initialHushes = world.voice.hushCalls;
+      await press("Read aloud");
+      await vi.waitFor(() => expect(world.voice.played.map(({ text }) => text)).toContain("Your statement is ready."), { timeout: 15_000 });
+      expect(world.voice.spoken).toContainEqual({ text: "Your statement is ready.", append: false, replace: false, channel: "local" });
+      expect(button("Stop reading")).toBeDefined();
+      await seen(false);
+      await until(alpha, area, Sheet, (state) => state.speech.outcome !== "Sent");
+      await vi.waitFor(() => expect(world.voice.hushCalls).toBeGreaterThan(initialHushes));
+      expect(world.voice.startCloudSpeechCalls).toBe(0);
+    } finally {
+      endPlayback();
+    }
   });
 
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {

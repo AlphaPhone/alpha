@@ -124,7 +124,8 @@ it('Use a photo in Messages from its still-open viewer (spec/app/photos/viewer.m
   await fill("To", "+15550123456");
   await press("Text +15550123456");
   await until(alpha, alpha.runtime, MessageComposer, (state) => state.pictures === 1);
-  expect(alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()))).toEqual([
+  const { thread } = alpha.runtime.runSync(MessageComposer.use((composer) => composer.get()));
+  expect(alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures(thread)))).toEqual([
     { name: source.name, wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(binary, (byte) => byte.charCodeAt(0)) },
   ]);
   expect(world.telephony.sent).toEqual([]);

@@ -428,7 +428,7 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.deletionAttempts).toEqual(["sms:1"]);
   });
 
-  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
+  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send and its pending clear, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
     const world = image();
     world.telephony.holdMmsSubmission = true;
     const first = await openImage(world);
@@ -443,7 +443,7 @@ describe("Messages on an Alpha image", () => {
       Object.defineProperty(picker, "files", { value: [new File([Uint8Array.from(atob("R0lGODlhAQABAAAAACwAAAAAAQABAAA="), (byte) => byte.charCodeAt(0))], "photo.gif", { type: "image/gif" })] });
       picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await ready(first.alpha.runtime, Composer, "picture attached", (state) => state.pictures === 1);
+    await ready(first.alpha.runtime, Composer, "picture draft saved", (state) => state.pictures === 1 && state.slot.draft.sync === "Kept");
     await press("Send");
     await ready(first.alpha.runtime, Composer, "picture send awaiting receipt", (state) => state.outgoing.op.outcome === "Unknown");
     const operation = world.telephony.mmsAttempts[0];
@@ -457,12 +457,22 @@ describe("Messages on an Alpha image", () => {
     await ready(restarted.alpha.runtime, Shell, "Messages returns after restart", (state) => state.trail.at(-1) === "Messages");
     await ready(restarted.alpha.runtime, Messages, "conversation list after restart", (state) => state.list.status === "Loaded" && state.threads === 1);
     await press("Maya Chen");
-    await ready(restarted.alpha.runtime, Composer, "picture check without saved bytes", (state) => state.thread === state.outgoing.thread && state.pictures === 0 && state.outgoing.op.outcome === "Unknown");
+    await ready(restarted.alpha.runtime, Composer, "picture restored while waiting for the original receipt", (state) => state.thread === state.outgoing.thread && state.pictures === 1 && state.outgoing.op.outcome === "Unknown");
+    expect(button("Remove photo.gif")?.disabled).toBe(true);
     const priorReads = world.telephony.mmsQueries.length;
     await press("Check send status");
-    await ready(restarted.alpha.runtime, Composer, "original picture send confirmed", (state) => state.outgoing.op.outcome === "Confirmed");
+    await ready(restarted.alpha.runtime, Composer, "original picture confirmed and saved attachment removed", (state) => state.outgoing.op.outcome === "Confirmed" && state.pictures === 0 && state.pendingClear.id === 0);
+    expect(button("Remove photo.gif")).toBeUndefined();
     expect([world.telephony.mmsAttempts, world.telephony.mmsQueries.slice(priorReads), world.telephony.sent.map((send) => send.operationId)])
       .toEqual([[operation], [operation], [operation]]);
+
+    await fill("Text Maya", "The next message");
+    await ready(restarted.alpha.runtime, Composer, "next draft saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    await press("Send");
+    await ready(restarted.alpha.runtime, Composer, "next message confirmed", (state) =>
+      state.outgoing.op.id > 1 && state.outgoing.op.outcome === "Confirmed" && state.pendingClear.id === 0);
+    expect(world.telephony.journal.get(operation)?.status).toBe("sent");
+    expect(world.telephony.sent.map((send) => send.body)).toEqual(["", "The next message"]);
   });
 
   it("Shares only the reviewed open conversation (spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async () => {

@@ -216,6 +216,8 @@ pure def sometimesAMessageChangedInGmail(s: MessageView): bool = s.message != 0 
 
 ### Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer
 
+The shell closes the message when the list switches account, folder, or
+search. Refreshing or paging the same selection keeps the message open.
 A save still in flight is then given up as unknown, and that is kept
 through a restart; nothing else of the view is.
 
@@ -270,19 +272,23 @@ pure def sometimesAMessageFailedToLoad(s: MessageView): bool = s.message != 0 an
 ## Story: Read a saved message offline
 
 > As the owner, I want to read a message of my saved list while Alpha is
-> still checking Gmail access, marked as saved.
+> still checking Gmail access or cannot reach it, marked as saved.
 
-### While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved
+### While the list shows its saved copy and access is being checked or offline, a message saved on the phone opens from there, marked as saved
 
-The saved copy is not read from Gmail and offers no links or
-attachments. It goes when access is known: read afresh if the account may
-be read, closed otherwise, and with the saved list.
+The shell shows only the plain text of a previously opened message for
+up to 30 days, while it can identify the owner and match the exact
+account, grant, message and history revision of the saved row. It keeps
+up to 16 bodies and two MiB of encoded storage. It keeps no image, link
+or attachment action with that text. The saved copy goes
+when access is known: read afresh if the account may be read, closed
+otherwise, and with the saved list.
 
 ```quint
-pure def canOpenSaved(s: MessageView, account: int, message: int, checking: bool, kept: bool): bool =
-  account != 0 and message != 0 and checking and kept
+pure def canOpenSaved(s: MessageView, account: int, message: int, checkingOrOffline: bool, kept: bool): bool =
+  account != 0 and message != 0 and checkingOrOffline and kept
 
-pure def openSaved(s: MessageView, account: int, message: int, checking: bool, kept: bool): MessageView =
+pure def openSaved(s: MessageView, account: int, message: int, checkingOrOffline: bool, kept: bool): MessageView =
   { ...close(s), account: account, message: message, thread: 1, fromPhone: true }
 
 pure def canAccessKnown(s: MessageView): bool = s.fromPhone

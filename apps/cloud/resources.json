@@ -1,14 +1,14 @@
 {
   "production": {
     "workerName": "alphacompute-cloud-api",
-    "accountId": "00000000000000000000000000000000",
-    "zone": "alphacompute.cc",
-    "hyperdriveId": "00000000000000000000000000000021"
+    "accountId": "50ad2052bbc6ca528d6993a689b419a4",
+    "zone": "alphaphone.dev",
+    "hyperdriveId": "3d60b34707bc4e22941f65aac9f394ef"
   },
   "staging": {
     "workerName": "alphacompute-cloud-api-staging",
-    "accountId": "00000000000000000000000000000000",
-    "zone": "alphacompute.cc",
-    "hyperdriveId": "00000000000000000000000000000011"
+    "accountId": "50ad2052bbc6ca528d6993a689b419a4",
+    "zone": "alphaphone.dev",
+    "hyperdriveId": "93e0ee57f35842c99393aabfb0188b61"
   }
 }

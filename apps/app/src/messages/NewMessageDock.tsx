@@ -7,7 +7,7 @@ import { ArrowUp, Camera, ImagePlus, Mic, Plus, RefreshCw, Square, X } from "luc
 import { useRef, useState, type RefObject } from "react";
 import type { NewDraft } from "../../gen/app__messages.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
-import { uncertain } from "../../gen/app__messages__sending.ts";
+import { busy, uncertain } from "../../gen/app__messages__sending.ts";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
@@ -22,15 +22,19 @@ import type { MessagesProps } from "./Messages.tsx";
 const textAction = "min-h-11 underline focus-visible:outline-2 focus-visible:outline-ring";
 
 interface NewMessageDockProps {
-  runtime: MessagesProps["runtime"];
-  scope: NewDraft;
-  draft: NewMessageDraft;
-  textarea: RefObject<HTMLTextAreaElement | null>;
-  minHeight: number | undefined;
-  onTyped: () => void;
+  readonly runtime: MessagesProps["runtime"];
+  readonly scope: NewDraft;
+  readonly draft: NewMessageDraft;
+  readonly textarea: RefObject<HTMLTextAreaElement | null>;
+  readonly minHeight: number | undefined;
+  readonly body: string;
+  readonly saveStatus: "Saving" | "Failed" | undefined;
+  readonly textIsSaved: () => boolean;
+  readonly onBody: (body: string) => void;
+  readonly onRetrySave: () => void;
 }
 
-export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, onTyped }: NewMessageDockProps) {
+export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, body, saveStatus, textIsSaved, onBody, onRetrySave }: NewMessageDockProps) {
   const composer = useComposer(runtime);
   const phone = usePhone(runtime);
   const voice = useVoice(runtime);
@@ -52,11 +56,13 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, onT
   const first = /^[+(\d]/u.test(title) || title.includes(",") ? title : title.split(/\s+/u, 1)[0];
   const label = first ? `Text ${first}` : "Message";
   const editable = !newDraftHeld(state, revision);
-  const hasContent = Boolean(draft.body.trim()) || draft.pictures.length > 0;
+  const hasContent = Boolean(body.trim()) || draft.pictures.length > 0;
+  const saved = saveStatus === undefined && draft.revision === revision && body === draft.body;
+  const sending = state.newSend.revision === revision && busy(state.outgoing);
   const checking = state.newSend.revision === revision && uncertain(state.outgoing);
   const supportedSend = runtime.runSync(supported(addresses.length, draft.pictures.length));
-  const canPicture = editable && !picking && draft.pictures.length < MMS_MAX_ATTACHMENTS && runtime.runSync(supported(1, 1));
-  const canSend = hasContent && !picking && (checking || state.sims <= 1 || selected !== undefined)
+  const canPicture = editable && saved && !picking && draft.pictures.length < MMS_MAX_ATTACHMENTS && runtime.runSync(supported(1, 1));
+  const canSend = saved && hasContent && !picking && (checking || state.sims <= 1 || selected !== undefined)
     && composer.can({ type: "sendNew", thread: recipient, recipients: addresses.length, visit, revision, supported: supportedSend, clear: clear(phone.state) });
   const subscriptions = runtime.runSync(Effect.flatMap(Drafts, (store) => store.subscriptions()));
   const recorder = voice.state?.recorder;
@@ -64,17 +70,19 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, onT
   const stop = { type: "stopRecording", now: untimed } as const;
   const dismiss = { type: "closeRecorder" } as const;
   const retry = { type: "transcribeAgain", now: untimed } as const;
-  const changeBody = (body: string) => {
-    onTyped();
-    void runtime.runPromise(editNewMessage(visit, { body }, false));
-  };
   const chooseFile = (input: HTMLInputElement | null) => {
+    if (!textIsSaved()) return;
     chooserRevision.current = revision;
     input?.click();
   };
   return <>
     <div className="flex shrink-0 flex-wrap gap-1.5 px-3 text-caption text-muted-foreground empty:hidden">
+      {(saveStatus === "Saving" || saveStatus === undefined && !saved) && <p role="status" className="basis-full">Saving message draft…</p>}
+      {saveStatus === "Failed" && <p role="status" className="basis-full">Message draft couldn’t be saved <button type="button" className={textAction} onClick={onRetrySave}>Retry save</button></p>}
+      {sending && <p role="status" className="basis-full">Sending…</p>}
       {checking && <p role="status" className="basis-full">Alpha is still waiting for the send result</p>}
+      {state.pendingClear.source === "NewMessageDraft" && state.pendingClear.revision === revision && composer.can({ type: "clearSentDraft" }) && <button
+        type="button" className={textAction} onClick={() => void composer.send({ type: "clearSentDraft" })}>Finish updating the saved draft</button>}
       {state.newSend.revision === revision && state.outgoing.denied && <p role="status" className="basis-full">The phone did not send the message</p>}
       {(["SendAccess", "SimAccess"] as const).map((need) => {
         if (need === "SimAccess" && state.sims <= 1) return null;
@@ -86,14 +94,14 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, onT
           {`${settings ? "Open Settings for" : "Allow"} ${access} access`}
         </button>;
       })}
-      {editable && !picking && !supportedSend && recipient > 0 && draft.body.trim() && draft.pictures.length === 0 && <button type="button" className={textAction}
-        onClick={() => void runtime.runPromise(handOffNewMessage(visit, revision))}>Review in messaging app</button>}
+      {editable && saved && !picking && !supportedSend && recipient > 0 && draft.body.trim() && draft.pictures.length === 0 && <button type="button" className={textAction}
+        onClick={() => { if (textIsSaved()) void runtime.runPromise(handOffNewMessage(visit, revision)); }}>Review in messaging app</button>}
       {(state.sims > 1 || selected !== undefined && state.sims === 1) && <div role="group" aria-label="SIM" className="flex flex-wrap gap-1.5">
         {subscriptions.map((sim) => <Button key={sim.id} variant="secondary" aria-pressed={selected !== undefined && sameSubscription(selected, sim)}
           disabled={!editable || state.simInfo.grant !== "Granted"} onClick={() => setSelected(sim)}>{sim.displayName || `SIM ${sim.slot + 1}`}</Button>)}
       </div>}
-      {draft.pictures.map((picture) => <Button key={picture.name} variant="secondary" aria-label={`Remove ${picture.name}`} disabled={!editable}
-        onClick={() => void runtime.runPromise(editNewMessage(visit, { pictures: draft.pictures.filter((one) => one !== picture) }, false, revision))}>
+      {draft.pictures.map((picture) => <Button key={picture.name} variant="secondary" aria-label={`Remove ${picture.name}`} disabled={!editable || !saved}
+        onClick={() => { if (textIsSaved()) void runtime.runPromise(editNewMessage(visit, { pictures: draft.pictures.filter((one) => one !== picture) }, false, revision)); }}>
         {picture.name}<X aria-hidden />
       </Button>)}
     </div>
@@ -113,8 +121,8 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, onT
             <MenuItem onSelect={() => chooseFile(pictures.current)}><ImagePlus />Add media</MenuItem>
           </MenuContent>
         </Menu>}
-        <Textarea ref={textarea} rows={1} aria-label={label} placeholder={label} value={draft.body} maxLength={MMS_MAX_BODY} readOnly={!editable}
-          onChange={(event) => changeBody(event.currentTarget.value)} style={minHeight === undefined ? undefined : { minHeight }}
+        <Textarea ref={textarea} rows={1} aria-label={label} placeholder={label} value={body} maxLength={MMS_MAX_BODY} readOnly={!editable}
+          onChange={(event) => onBody(event.currentTarget.value)} style={minHeight === undefined ? undefined : { minHeight }}
           className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 text-body leading-field shadow-none focus-visible:outline-none" />
         {([["Attach a picture", pictures, false], ["Take a picture", camera, true]] as const).map(([name, input, capture]) => <Input
           key={name} ref={input} type="file" hidden className="hidden" aria-label={name} multiple={!capture} capture={capture ? "environment" : undefined}
@@ -126,9 +134,9 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, onT
             if (picked !== undefined && files.length > 0) void runtime.runPromise(attachNewPictures(visit, picked, files));
           }} />)}
         {hasContent && <Button size="icon" className="disabled:opacity-100" aria-label={checking ? "Check send status" : "Send"} data-alpha-bar-send disabled={!canSend}
-          onClick={(event) => void runtime.runPromise(sendNewMessage(visit, revision, selected, event.nativeEvent.isTrusted))}>{checking ? <RefreshCw /> : <ArrowUp />}</Button>}
+          onClick={(event) => { if (textIsSaved()) void runtime.runPromise(sendNewMessage(visit, revision, selected, event.nativeEvent.isTrusted)); }}>{checking ? <RefreshCw /> : <ArrowUp />}</Button>}
         {editable && phone.state.telecom === "NoCall" && voice.can({ type: "openRecorder", target: "MessagesBar" }) && <Button variant="ghost" size="icon"
-          aria-label={`Dictate a text to ${first || "them"}`} onClick={() => void runtime.runPromise(dictateNewMessage(visit, revision))}><Mic /></Button>}
+          aria-label={`Dictate a text to ${first || "them"}`} disabled={picking || !saved} onClick={() => { if (textIsSaved()) void runtime.runPromise(dictateNewMessage(visit, revision)); }}><Mic /></Button>}
       </div>
     )} />
   </>;

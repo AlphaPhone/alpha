@@ -14,9 +14,10 @@ owner's Send does.
 ### What the composer holds
 
 The open conversation and its recipients; its draft, who wrote it and how
-far it is saved; what the phone saved for each conversation; a suggestion
+far it is saved; the pictures attached and the pictures the phone saved;
+the payload carried by a save and whether it needs a retry; a suggestion
 asked of the agent; send and SIM access, the SIMs and the one chosen; the
-pictures attached; and the send.
+send, its sealed draft revision, and any confirmed draft clear still owed.
 
 ```quint
 import read as R from "../../kit/read"
@@ -29,21 +30,31 @@ type Author = Nobody | OwnerWrote | AlphaWrote
 type Need = SendAccess | SimAccess
 type Slot = { author: Author, draft: D::Draft }
 type NewSource = { visit: int, revision: int }
+type SavePayload = { author: Author, pictures: int }
+type ClearSource = ConversationDraft | NewMessageDraft
+type SentDraft = { source: ClearSource, thread: int, revision: int, id: int, visit: int }
 type Composer = {
   thread: int, recipients: int,
   slot: Slot, saved: int -> Author, suggestion: R::Read,
   sending: P::Permission, simInfo: P::Permission, sims: int, sim: int, pictures: int,
+  carriedDraft: SavePayload, savedPictures: int, saveFailed: bool,
+  sendRevision: int, pendingClear: SentDraft,
   outgoing: S::Outgoing,
   newSend: NewSource,
 }
 
 pure val emptySlot: Slot = { author: Nobody, draft: D::blank }
 pure val noNewSend: NewSource = { visit: 0, revision: 0 }
+pure val noSave: SavePayload = { author: Nobody, pictures: 0 }
+pure val noClear: SentDraft = { source: ConversationDraft, thread: 0, revision: 0, id: 0, visit: 0 }
+pure val maxPictures = 5
 
 pure val initial: Composer = {
   thread: 0, recipients: 0,
   slot: emptySlot, saved: Map(), suggestion: R::unread,
   sending: P::unasked, simInfo: P::unasked, sims: 1, sim: 0, pictures: 0,
+  carriedDraft: noSave, savedPictures: 0, saveFailed: false,
+  sendRevision: 0, pendingClear: noClear,
   outgoing: S::initial,
   newSend: noNewSend,
 }
@@ -51,15 +62,14 @@ pure val initial: Composer = {
 
 ### What the composer asks of the phone and the agent
 
-A draft saved, or dropped once sent, for a conversation; a suggestion asked
-of the agent; Android's prompts and Settings; the messaging app opened for
-what Alpha cannot send; and what the send asks.
+A conversation draft saved or an exact sent revision cleared; a suggestion
+asked of the agent; Android's prompts and Settings; the messaging app
+opened for what Alpha cannot send; and what the send asks.
 
 ```quint
 type Effect =
-  | SaveDraft({ thread: int, author: Author })
-  | DropDraft({ thread: int })
-  | FinishNewDraft({ thread: int, visit: int, revision: int })
+  | SaveDraft({ thread: int, author: Author, base: int, edits: int, pictures: int })
+  | ClearSentDraft(SentDraft)
   | Suggest({ ticket: int, thread: int })
   | Prompt({ need: Need })
   | OpenSettings
@@ -82,10 +92,17 @@ pure val ticketValues = Set(1, 2)
 pure val idValues = Set(1, 2, 3)
 pure val threadValues = Set(0, 1, 2)
 pure val recipientsValues = Set(0, 1, 2)
-pure val revisionValues = Set(1, 2, 3)
 pure val visitValues = Set(1, 2)
 pure val countValues = Set(0, 1, 2)
 pure val simValues = Set(0, 1, 2)
+pure val revisionValues = Set(0, 1, 2, 3)
+pure val baseValues = Set(0, 1, 2, 3)
+pure val editsValues = Set(1, 2, 3)
+pure val heldValues = Set(0, 1, 2, 3)
+pure val landedRevisionValues = Set(0, 2, 3, 4)
+pure val sourceValues = Set(ConversationDraft, NewMessageDraft)
+pure val picturesValues = Set(0, 1, 2, 5)
+pure val authorValues = Set(Nobody, OwnerWrote, AlphaWrote)
 pure val weight_typeText = 3
 pure val weight_saveDraft = 2
 pure val weight_draftSaved = 2
@@ -98,16 +115,26 @@ pure val weight_draftSaved = 2
 
 ### Opening a conversation brings back the draft the phone saved for it
 
-The draft of the conversation left before it must be saved first.
+The previous conversation's draft must be saved and closed first. Opening
+uses the revision, author and ordered pictures read for this conversation
+from the phone. Revision zero is the empty slot. The model counts pictures
+and the shell holds their contents in order.
 
 ```quint
 pure def settledDraft(c: Composer): bool = not(D::unsaved(c.slot.draft))
 
-pure def canOpenDraft(c: Composer, thread: int, recipients: int): bool =
-  thread > 0 and recipients > 0 and thread != c.thread and settledDraft(c)
+pure def validSavedDraft(revision: int, author: Author, pictures: int): bool =
+  revision >= 0 and 0 <= pictures and pictures <= maxPictures
+    and (revision == 0 implies (author == Nobody and pictures == 0))
 
-pure def openDraft(c: Composer, thread: int, recipients: int): Composer =
-  { ...c, thread: thread, recipients: recipients, pictures: 0, slot: { author: savedFor(thread, c), draft: D::blank },
+pure def canOpenDraft(c: Composer, thread: int, recipients: int, revision: int, author: Author, pictures: int): bool =
+  c.thread == 0 and settledDraft(c) and thread > 0 and recipients > 0 and validSavedDraft(revision, author, pictures)
+
+pure def openDraft(c: Composer, thread: int, recipients: int, revision: int, author: Author, pictures: int): Composer =
+  val fresh = D::blank
+  { ...c, thread: thread, recipients: recipients, pictures: pictures,
+    slot: { author: author, draft: { ...fresh, base: revision } },
+    saved: c.saved.put(thread, author), savedPictures: pictures,
     suggestion: { ...c.suggestion, status: R::Idle } }
 ```
 
@@ -117,17 +144,19 @@ pure def openDraft(c: Composer, thread: int, recipients: int): Composer =
 pure def canCloseDraft(c: Composer): bool = c.thread > 0 and settledDraft(c)
 
 pure def closeDraft(c: Composer): Composer =
-  { ...c, thread: 0, recipients: 0, pictures: 0, slot: emptySlot, suggestion: { ...c.suggestion, status: R::Idle } }
+  { ...c, thread: 0, recipients: 0, pictures: 0, slot: emptySlot, savedPictures: 0,
+    suggestion: { ...c.suggestion, status: R::Idle } }
 ```
 
 ### Typing changes the draft and makes it the owner's; emptying it leaves no draft
 
-The draft cannot change while it is being sent or while its send's outcome
-is unknown.
+The draft cannot change while it is being sent, while its send's outcome
+is unknown, or while the phone is still clearing the confirmed revision.
 
 ```quint
 pure def bound(c: Composer): bool =
-  c.newSend.revision == 0 and c.outgoing.thread == c.thread and (S::busy(c.outgoing) or S::uncertain(c.outgoing))
+  c.newSend.revision == 0 and c.outgoing.thread == c.thread
+    and (S::busy(c.outgoing) or S::uncertain(c.outgoing) or c.pendingClear.id > 0)
 
 pure def canTypeText(c: Composer, empty: bool): bool = c.thread > 0 and not(bound(c))
 
@@ -138,30 +167,63 @@ pure def typeText(c: Composer, empty: bool): Composer =
 
 ### An edited draft is saved for its conversation, one save at a time
 
+Each save carries the conversation, author, base revision, edit count and
+picture count of its payload. An answer applies only to that save. Edits
+made during the write are still to save.
+
 ```quint
-pure def canSaveDraft(c: Composer): bool = c.thread > 0 and D::canSave(c.slot.draft)
+pure def canSaveDraft(c: Composer): bool = c.thread > 0 and not(c.saveFailed) and D::canSave(c.slot.draft)
 
 pure def saveDraft(c: Composer): Moved =
-  { state: { ...c, slot: { ...c.slot, draft: D::save(c.slot.draft) } }, out: List(SaveDraft({ thread: c.thread, author: c.slot.author })) }
+  val carried = { author: c.slot.author, pictures: c.pictures }
+  { state: { ...c, carriedDraft: carried, slot: { ...c.slot, draft: D::save(c.slot.draft) } },
+    out: List(SaveDraft({ thread: c.thread, author: carried.author, base: c.slot.draft.base,
+      edits: c.slot.draft.edits, pictures: carried.pictures })) }
 
-pure def canDraftSaved(c: Composer): bool = c.thread > 0 and D::canLand(c.slot.draft)
+pure def canDraftSaved(c: Composer, thread: int, base: int, edits: int): bool =
+  c.thread > 0 and thread == c.thread and D::canLand(c.slot.draft)
+    and base == c.slot.draft.base and edits == c.slot.draft.carried
 
-pure def draftSaved(c: Composer): Composer =
-  { ...c, slot: { ...c.slot, draft: D::land(c.slot.draft) }, saved: c.saved.put(c.thread, c.slot.author) }
+pure def draftSaved(c: Composer, thread: int, base: int, edits: int): Composer =
+  { ...c, slot: { ...c.slot, draft: D::land(c.slot.draft) }, saved: c.saved.put(thread, c.carriedDraft.author),
+    savedPictures: c.carriedDraft.pictures, carriedDraft: noSave }
+```
+
+### A failed save keeps the draft edited and waits for the owner to retry
+
+The owner can keep editing after a failure. Retry saves the latest edits.
+
+```quint
+pure def canDraftSaveFailed(c: Composer, thread: int, base: int, edits: int): bool = canDraftSaved(c, thread, base, edits)
+
+pure def draftSaveFailed(c: Composer, thread: int, base: int, edits: int): Composer =
+  { ...c, slot: { ...c.slot, draft: { ...c.slot.draft, sync: D::Edited } }, carriedDraft: noSave, saveFailed: true }
+
+pure def canRetrySave(c: Composer): bool = c.thread > 0 and c.saveFailed and D::canSave(c.slot.draft)
+
+pure def retrySave(c: Composer): Moved = saveDraft({ ...c, saveFailed: false })
+
+pure def alwaysASaveFailureHoldsAnUnsavedDraft(c: Composer): bool =
+  c.saveFailed implies (c.thread > 0 and c.slot.draft.sync == D::Edited)
+
+pure def stepSaveFailureWaitsForARetry(before: Composer, via: str, after: Composer): bool =
+  (before.saveFailed and after.slot.draft.sync == D::Saving) implies via == "retrySave"
 ```
 
 ### A save that finds another draft saved for the conversation meanwhile stops, and the owner chooses which draft to keep
 
 The phone saves a draft only over the revision it was edited from, so a
-draft saved elsewhere meanwhile is never written over. `theirs` is who
-wrote the draft the phone holds.
+draft saved elsewhere meanwhile is never written over. The conflict
+reports the revision, author and picture count of the saved draft.
+Choosing the saved draft takes its text and ordered pictures together.
 
 ```quint
-pure def canDraftCollided(c: Composer, held: int, theirs: Author): bool =
-  c.thread > 0 and D::canLand(c.slot.draft) and held != c.slot.draft.base
+pure def canDraftCollided(c: Composer, thread: int, base: int, edits: int, held: int, theirs: Author, pictures: int): bool =
+  canDraftSaved(c, thread, base, edits) and held != base and validSavedDraft(held, theirs, pictures)
 
-pure def draftCollided(c: Composer, held: int, theirs: Author): Composer =
-  { ...c, slot: { ...c.slot, draft: D::collide(c.slot.draft, held) }, saved: c.saved.put(c.thread, theirs) }
+pure def draftCollided(c: Composer, thread: int, base: int, edits: int, held: int, theirs: Author, pictures: int): Composer =
+  { ...c, slot: { ...c.slot, draft: D::collide(c.slot.draft, held) }, saved: c.saved.put(thread, theirs),
+    savedPictures: pictures, carriedDraft: noSave }
 
 pure def canKeepMine(c: Composer): bool = c.thread > 0 and D::canChoose(c.slot.draft)
 
@@ -171,6 +233,7 @@ pure def canTakeSaved(c: Composer): bool = c.thread > 0 and D::canChoose(c.slot.
 
 pure def takeSaved(c: Composer): Composer =
   { ...c, slot: { author: savedFor(c.thread, c), draft: D::takeSaved(c.slot.draft) },
+    pictures: c.savedPictures,
     suggestion: { ...c.suggestion, status: R::Idle } }
 ```
 
@@ -191,15 +254,17 @@ pure def sometimesTookTheSavedDraft(c: Composer): bool =
     and c.suggestion.status == R::Idle
 ```
 
-### A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has
+### A restart closes the conversation and keeps the saved drafts, the send and its pending clear, access and the SIMs the phone has
 
 A suggestion asked before the restart is not taken after it. A send that
 lacked a final answer becomes unknown. Checking it reads its saved receipt.
+The revision of a New draft stays sealed; its prior visit ends at restart.
 
 ```quint
 pure def restart(c: Composer): Composer =
   { ...initial, saved: c.saved, outgoing: if (S::busy(c.outgoing)) S::lost(c.outgoing) else c.outgoing,
     newSend: { ...c.newSend, visit: 0 },
+    sendRevision: c.sendRevision, pendingClear: { ...c.pendingClear, visit: 0 },
     sending: c.sending, simInfo: c.simInfo, sims: c.sims,
     suggestion: { ...c.suggestion, status: R::Idle } }
 
@@ -207,6 +272,7 @@ pure def stepSavedDraftsSurviveARestart(before: Composer, via: str, after: Compo
   val held = if (S::busy(before.outgoing)) S::lost(before.outgoing) else before.outgoing
   via == "restart" implies (after.saved == before.saved and after.outgoing == held and after.thread == 0
     and after.newSend.revision == before.newSend.revision and after.newSend.visit == 0
+    and after.sendRevision == before.sendRevision and after.pendingClear == { ...before.pendingClear, visit: 0 }
     and after.sending == before.sending and after.simInfo == before.simInfo and after.sims == before.sims
     and after.suggestion.ticket == before.suggestion.ticket and after.suggestion.status == R::Idle)
 ```
@@ -226,7 +292,8 @@ pure def stepADraftIsNotLostByLeaving(before: Composer, via: str, after: Compose
 
 ```quint
 pure def sometimesSavedDraftBack(c: Composer): bool =
-  c.thread > 0 and c.slot.author == OwnerWrote and c.slot.draft == D::blank and c.outgoing.op.id == 0
+  c.thread > 0 and c.slot.author == OwnerWrote and settledDraft(c) and c.slot.draft.base > 0
+    and c.slot.draft.edits == 0 and c.outgoing.op.id == 0
 ```
 
 ## Story: Let Alpha suggest a draft
@@ -377,15 +444,15 @@ attached. Pictures come from the phone's pictures, several at once, or one
 taken with the camera. Several recipients or any picture go as one MMS.
 
 ```quint
-pure val maxPictures = 5
-
 pure def canAttach(c: Composer, fits: bool): bool = c.thread > 0 and c.pictures < maxPictures and not(bound(c)) and fits
 
-pure def attach(c: Composer, fits: bool): Composer = { ...c, pictures: c.pictures + 1 }
+pure def attach(c: Composer, fits: bool): Composer =
+  { ...c, pictures: c.pictures + 1, slot: { ...c.slot, draft: D::edit(c.slot.draft) } }
 
 pure def canDetach(c: Composer): bool = c.pictures > 0 and not(bound(c))
 
-pure def detach(c: Composer): Composer = { ...c, pictures: c.pictures - 1 }
+pure def detach(c: Composer): Composer =
+  { ...c, pictures: c.pictures - 1, slot: { ...c.slot, draft: D::edit(c.slot.draft) } }
 ```
 
 ### What Alpha cannot send is handed to the messaging app
@@ -405,21 +472,24 @@ pure def handOff(c: Composer, supported: bool): Moved = { state: c, out: List(Op
 
 `clear` is Phone's fact that no call which may be an emergency call is
 live. A send whose outcome is unknown is read back instead, including when
-reopening lost the attached pictures or the phone can no longer send. Send goes to
-the open conversation's own numbers, exactly as the phone listed them for
-that conversation, never to a number typed or named elsewhere.
+the phone can no longer send. A new send seals the draft's saved revision
+and waits for any earlier confirmed draft clear. Send goes to the open
+conversation's own numbers, exactly as the phone listed them for that
+conversation, never to a number typed or named elsewhere.
 
 ```quint
 pure def ready(c: Composer, supported: bool, clear: bool): bool =
   c.thread > 0 and (c.slot.author != Nobody or c.pictures > 0) and P::allows(c.sending)
-    and (c.sims == 1 or c.sim > 0) and supported and clear
+    and settledDraft(c) and c.slot.draft.base > 0 and (c.sims == 1 or c.sim > 0) and supported and clear
 
 pure def canSend(c: Composer, supported: bool, clear: bool): bool =
-  (if (S::uncertain(c.outgoing)) clear and c.newSend.revision == 0 else ready(c, supported, clear))
+  c.pendingClear == noClear
+    and (if (S::uncertain(c.outgoing)) clear and c.newSend.revision == 0 else ready(c, supported, clear))
     and S::canSend(c.outgoing, c.thread, c.recipients)
 
 pure def send(c: Composer, supported: bool, clear: bool): Moved =
-  withSend(S::send(c.outgoing, c.thread, c.recipients), { ...c, newSend: noNewSend })
+  val revision = if (S::uncertain(c.outgoing)) c.sendRevision else c.slot.draft.base
+  withSend(S::send(c.outgoing, c.thread, c.recipients), { ...c, sendRevision: revision, newSend: noNewSend })
 ```
 
 ### The owner's New message uses the same send and never takes another draft's place
@@ -431,28 +501,30 @@ New leaves an existing draft for that conversation alone.
 
 ```quint
 pure def canSendNew(c: Composer, thread: int, recipients: int, visit: int, revision: int, supported: bool, clear: bool): bool =
-  c.thread == 0 and visit > 0 and revision > 0 and clear and S::canSend(c.outgoing, thread, recipients)
+  c.pendingClear == noClear and c.thread == 0 and visit > 0 and revision > 0 and clear and S::canSend(c.outgoing, thread, recipients)
     and (if (S::uncertain(c.outgoing)) c.newSend.revision == revision and c.outgoing.recipients == recipients
       else supported and P::allows(c.sending))
 
 pure def sendNew(c: Composer, thread: int, recipients: int, visit: int, revision: int, supported: bool, clear: bool): Moved =
-  withSend(S::send(c.outgoing, thread, recipients), { ...c, newSend: { visit: visit, revision: revision } })
+  withSend(S::send(c.outgoing, thread, recipients), { ...c, sendRevision: 0, newSend: { visit: visit, revision: revision } })
 ```
 
-### The phone's answers move the send, and a message sent clears its conversation's draft
+### The phone's first confirmed send receipt marks only its sealed draft revision for clearing
 
-The conversation then notes, quietly, that the message was sent, or
-delivered, to the person it names.
+The conversation notes, quietly, that the message was sent, or delivered,
+to the person it names. The receipt holds the clear until the phone
+acknowledges it, including after a restart.
 
 ```quint
 pure def sentOff(o: S::Outgoing, c: Composer): Moved =
   val done = { ...c, outgoing: o }
-  if (S::sentAll(o) and not(S::sentAll(c.outgoing)) and c.newSend.revision > 0)
-    { state: done, out: List(FinishNewDraft({ thread: o.thread, visit: c.newSend.visit, revision: c.newSend.revision })) }
-  else if (S::sentAll(o) and not(S::sentAll(c.outgoing)) and o.thread == c.thread)
-    { state: { ...done, pictures: 0, slot: { author: Nobody, draft: D::edit(c.slot.draft) } }, out: List() }
-  else if (S::sentAll(o) and not(S::sentAll(c.outgoing)))
-    { state: { ...done, saved: c.saved.put(o.thread, emptySlot.author) }, out: List(DropDraft({ thread: o.thread })) }
+  val fromNew = c.newSend.revision > 0
+  val source = if (fromNew) NewMessageDraft else ConversationDraft
+  val revision = if (fromNew) c.newSend.revision else c.sendRevision
+  val visit = if (fromNew) c.newSend.visit else 0
+  if (S::sentAll(o) and not(S::sentAll(c.outgoing)) and revision > 0 and o.thread > 0 and o.op.id > 0
+    and o.op.id == c.outgoing.op.id and o.thread == c.outgoing.thread and o.retired < o.op.id)
+    { state: { ...done, pendingClear: { source: source, thread: o.thread, revision: revision, id: o.op.id, visit: visit } }, out: List() }
   else { state: done, out: List() }
 
 pure def canJournaled(c: Composer, id: int): bool = S::canJournaled(c.outgoing, id)
@@ -473,8 +545,59 @@ pure def lost(c: Composer): Moved = sentOff(S::lost(c.outgoing), c)
 pure def canReadBack(c: Composer, id: int): bool = S::canReadBack(c.outgoing, id)
 pure def readBack(c: Composer, id: int, wasSent: bool, known: bool): Moved = sentOff(S::readBack(c.outgoing, id, wasSent, known), c)
 
-pure def canRetire(c: Composer, id: int): bool = S::canRetire(c.outgoing, id)
+pure def canRetire(c: Composer, id: int): bool = c.pendingClear == noClear and S::canRetire(c.outgoing, id)
 pure def retire(c: Composer, id: int): Moved = withSend(S::retire(c.outgoing, id), c)
+```
+
+### The phone clears only the confirmed send's saved revision and acknowledges before the send retires
+
+If clearing fails, the request is kept for retry. The phone can confirm a
+clear at the next revision, or report revision zero after checking that the
+sent revision is no longer held. In that case the composer leaves any
+different draft intact. If the open conversation still shows its replaced
+revision, it first closes and reloads the saved draft. Clearing a New draft
+keeps its receipt's visit and revision for the New form to reconcile its
+own view. Conversation drafts are separate from that form.
+
+```quint
+pure def canClearSentDraft(c: Composer): bool = c.pendingClear.id > 0
+
+pure def clearSentDraft(c: Composer): Moved =
+  val pending = c.pendingClear
+  { state: c, out: List(ClearSentDraft({ source: pending.source, thread: pending.thread, revision: pending.revision, id: pending.id, visit: pending.visit })) }
+
+pure def showsSentDraft(c: Composer, thread: int, revision: int): bool =
+  c.thread == thread and c.slot.draft.base == revision and settledDraft(c)
+
+pure def canSentDraftCleared(c: Composer, source: ClearSource, thread: int, revision: int, id: int, landedRevision: int): bool =
+  val pending = c.pendingClear
+  canClearSentDraft(c) and pending.source == source and pending.thread == thread and pending.revision == revision and pending.id == id
+    and (landedRevision == revision + 1
+      or (landedRevision == 0 and (source == NewMessageDraft or not(showsSentDraft(c, thread, revision)))))
+
+pure def sentDraftCleared(c: Composer, source: ClearSource, thread: int, revision: int, id: int, landedRevision: int): Composer =
+  val clearedSend = { ...c, pendingClear: noClear }
+  val draft = c.slot.draft
+  if (source == ConversationDraft and landedRevision > 0 and showsSentDraft(c, thread, revision)) {
+    { ...clearedSend, slot: { author: Nobody, draft: { ...draft, base: landedRevision } }, pictures: 0, savedPictures: 0,
+      saved: c.saved.put(thread, Nobody) }
+  } else if (source == ConversationDraft and landedRevision > 0 and c.thread != thread) { ...clearedSend, saved: c.saved.put(thread, Nobody) }
+  else clearedSend
+```
+
+### Only an exact successful send can owe a clear, and only the phone's answer releases it
+
+```quint
+pure def alwaysAClearBelongsToItsConfirmedSend(c: Composer): bool =
+  val pending = c.pendingClear
+  pending != noClear implies (S::sentAll(c.outgoing) and pending.id > 0
+    and pending.id == c.outgoing.op.id and c.outgoing.retired < pending.id
+    and pending.thread > 0 and pending.thread == c.outgoing.thread and pending.revision > 0
+    and (if (pending.source == NewMessageDraft) pending.revision == c.newSend.revision and pending.visit == c.newSend.visit
+      else c.newSend.revision <= 0 and pending.revision == c.sendRevision and pending.visit == 0))
+
+pure def stepOnlyAClearAnswerReleasesTheReceipt(before: Composer, via: str, after: Composer): bool =
+  (before.pendingClear != noClear and after.pendingClear == noClear) implies via == "sentDraftCleared"
 ```
 
 ### A new send starts only from the owner's Send
@@ -483,9 +606,13 @@ pure def retire(c: Composer, id: int): Moved = withSend(S::retire(c.outgoing, id
 pure def stepOnlyTheOwnersTapSends(before: Composer, via: str, after: Composer): bool =
   after.outgoing.op.id != before.outgoing.op.id implies (via == "send" or via == "sendNew")
 
-pure def stepNewSendLeavesExistingDraftsAlone(before: Composer, via: str, after: Composer, out: List[Effect]): bool =
-  out.some(e => match e { | FinishNewDraft(finished) => true | _ => false }) implies
-    (before.newSend.revision > 0 and S::sentAll(after.outgoing) and before.saved == after.saved and before.slot == after.slot)
+pure def stepNewSendLeavesExistingDraftsAlone(before: Composer, via: str, after: Composer): bool =
+  val confirmingNew = before.pendingClear == noClear and after.pendingClear.source == NewMessageDraft and after.pendingClear.id > 0
+  val clearingNew = (via == "clearSentDraft" or via == "sentDraftCleared") and before.pendingClear.source == NewMessageDraft
+  if (confirmingNew or clearingNew)
+    before.newSend == after.newSend and before.saved == after.saved
+      and before.slot == after.slot and before.pictures == after.pictures and before.savedPictures == after.savedPictures
+  else true
 ```
 
 ### The composer holds at most five pictures and a SIM the phone has
@@ -493,7 +620,9 @@ pure def stepNewSendLeavesExistingDraftsAlone(before: Composer, via: str, after:
 ```quint
 pure def alwaysTheComposerFits(c: Composer): bool =
   0 <= c.pictures and c.pictures <= maxPictures and c.sims >= 1 and 0 <= c.sim and c.sim <= c.sims
-    and (c.thread == 0 implies c.pictures == 0)
+    and 0 <= c.savedPictures and c.savedPictures <= maxPictures
+    and 0 <= c.carriedDraft.pictures and c.carriedDraft.pictures <= maxPictures
+    and (c.thread == 0 implies (c.pictures == 0 and c.savedPictures == 0))
 ```
 
 ### The send in hand keeps every rule of Sending
@@ -517,6 +646,8 @@ pure def alwaysTheSendKeepsItsRules(c: Composer): bool = and {
 ```quint
 pure def sometimesPicturesOnASim(c: Composer): bool = S::busy(c.outgoing) and c.pictures > 0 and c.sim > 1
 pure def sometimesUnknownKeepsTheDraft(c: Composer): bool = S::uncertain(c.outgoing) and bound(c) and c.slot.author == AlphaWrote
-pure def sometimesSentClearsTheDraft(c: Composer): bool = S::sentAll(c.outgoing) and c.thread == c.outgoing.thread and c.slot.author == Nobody and D::unsaved(c.slot.draft)
+pure def sometimesSentClearsTheDraft(c: Composer): bool =
+  S::sentAll(c.outgoing) and c.thread == c.outgoing.thread and c.slot.author == Nobody and c.pictures == 0
+    and settledDraft(c) and c.sendRevision > 0 and c.slot.draft.base == c.sendRevision + 1 and c.pendingClear == noClear
 pure def sometimesSentElsewhere(c: Composer): bool = S::sentAll(c.outgoing) and c.thread != c.outgoing.thread and c.thread > 0
 ```

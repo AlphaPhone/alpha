@@ -29,6 +29,7 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
   },
   decorator: fullHeight,
   examples: {
+    Browser: { onPhone: false },
     Reading: { read: "reading" },
     Saving: { saving: true },
     "Acts without asking": { askFirst: false },
@@ -43,9 +44,16 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
       onAskFirstChange.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Permissions" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Access setup" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Review access setup" }));
       await userEvent.click(canvas.getByRole("switch", { name: /Ask before Alpha acts/ }));
       await expect([onOpen.mock.calls, onSetUpAccess.mock.calls.length, onAskFirstChange.mock.calls]).toEqual([[["permissions"]], 1, [[false]]]);
+    },
+    Browser: async ({ canvasElement }) => {
+      const canvas = within(canvasElement);
+      expect(canvas.queryByRole("switch", { name: /Location for Alpha/ })).toBeNull();
+      expect(canvas.getByRole("switch", { name: /Browser page for Alpha/ })).toBeTruthy();
+      expect(canvas.getByText(/Hosted models can receive it/)).toBeTruthy();
+      expect(canvas.getByRole("switch", { name: /Gmail changes/ })).toBeTruthy();
     },
     "Acts without asking": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onShareChange.mockClear();

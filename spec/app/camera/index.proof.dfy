@@ -528,7 +528,18 @@ lemma recordingEnded_ensures(s: Camera, ok: bool, video: int, now: int, by_: app
   ensures (inv(s) ==> canRecordingEnded(s, by_) ==> stepTheLockScreenOpensNothingElse(s, recordingEnded(s, ok, video, now, by_).state, recordingEnded(s, ok, video, now, by_).out))
   ensures (inv(s) ==> canRecordingEnded(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingEnded", recordingEnded(s, ok, video, now, by_).state))
 {
-  RememberAll();
+  if inv(s) && canRecordingEnded(s, by_) {
+    var ended := app__camera__recording_ended(s.film, ok, video);
+    assert recordingEnded(s, ok, video, now, by_) == filming(ended, now, s);
+    assert !app__camera__recording_recording(ended) && !ended.stage.Running?;
+    assert app__camera__recording_alwaysWithinLimits(ended);
+    assert app__camera__recording_alwaysSavedIsWhole(ended);
+    FilmReleased(s, ended, now);
+    FilmKeepsAgent(s, ended, now);
+    FilmKeepsSession(s, ended, now, "recordingEnded");
+    FilmKeepsCameraSettings(s, ended, now);
+    FilmKeepsRecording(s, ended, now);
+  }
 }
 
 lemma recordingVerified_ensures(s: Camera, ok: bool, now: int, by_: app__photos__actor_Actor)
@@ -554,4 +565,241 @@ lemma recordingVerified_ensures(s: Camera, ok: bool, now: int, by_: app__photos_
   ensures (inv(s) ==> canRecordingVerified(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingVerified", recordingVerified(s, ok, now, by_).state))
 {
   RememberAll();
+}
+
+lemma StartAccounted(out: seq<Effect>, c: Camera)
+  requires c.preview >= 0 && c.showing
+  requires forall t :: t in c.pending ==> t > 0 && t <= c.preview
+  ensures alwaysStartsAccounted(starting(out, c).state)
+{
+  var n := c.preview + 1;
+  var after := starting(out, c).state;
+  Joined(c.pending, [n]);
+  assert after.pending == c.pending + ProofLib.Filter((set_x: int) => !((set_x in c.pending)), [n]);
+  assert n in after.pending;
+  forall t | t in after.pending ensures t > 0 && t <= after.preview {
+    assert t in c.pending || t == n;
+  }
+}
+
+lemma toggleRatio_ensures(s: Camera, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysNoCameraWithoutAccess(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysNothingHeldAway(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysStartsAccounted(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysTorchBelongsToItsPreview(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysLensSettingsValid(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysFocusFollowsTheNewestTap(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysRecordingHoldsThePreview(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysOneShutterOnTheCamera(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysTheRequestWaitsOnTheCamera(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysSecureShowsOnlyItsSession(toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepALostPreviewFails(s, "toggleRatio", toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepARetiredPreviewIsReleased(s, "toggleRatio", toggleRatio(s, by_).state, toggleRatio(s, by_).out))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepOneFocusWriteAtATime(s, "toggleRatio", toggleRatio(s, by_).state, toggleRatio(s, by_).out))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepSoundOnlyWithTheMicrophone(s, toggleRatio(s, by_).state, toggleRatio(s, by_).out))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepASavedVideoIsTheLast(s, toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepTheShutterNeverFiresCovered(s, toggleRatio(s, by_).state, toggleRatio(s, by_).out))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepEachRequestIsAnsweredOnce(s, toggleRatio(s, by_).state, toggleRatio(s, by_).out))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepTheAgentFailsOnlyForCause(s, "toggleRatio", toggleRatio(s, by_).state))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepTheLockScreenOpensNothingElse(s, toggleRatio(s, by_).state, toggleRatio(s, by_).out))
+  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "toggleRatio", toggleRatio(s, by_).state))
+{
+  if inv(s) && canToggleRatio(s, by_) {
+    var widened := s.(wide := !s.wide);
+    StartAccounted([StopPreview(s.preview)], widened);
+  }
+}
+
+lemma agentLens_ensures(s: Camera, requested: RequestedLens, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysNoCameraWithoutAccess(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysNothingHeldAway(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysStartsAccounted(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysTorchBelongsToItsPreview(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysLensSettingsValid(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysFocusFollowsTheNewestTap(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysRecordingHoldsThePreview(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysOneShutterOnTheCamera(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysTheRequestWaitsOnTheCamera(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysSecureShowsOnlyItsSession(agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepALostPreviewFails(s, "agentLens", agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepARetiredPreviewIsReleased(s, "agentLens", agentLens(s, requested, by_).state, agentLens(s, requested, by_).out))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepOneFocusWriteAtATime(s, "agentLens", agentLens(s, requested, by_).state, agentLens(s, requested, by_).out))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepSoundOnlyWithTheMicrophone(s, agentLens(s, requested, by_).state, agentLens(s, requested, by_).out))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepASavedVideoIsTheLast(s, agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepTheShutterNeverFiresCovered(s, agentLens(s, requested, by_).state, agentLens(s, requested, by_).out))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepEachRequestIsAnsweredOnce(s, agentLens(s, requested, by_).state, agentLens(s, requested, by_).out))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepTheAgentFailsOnlyForCause(s, "agentLens", agentLens(s, requested, by_).state))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepTheLockScreenOpensNothingElse(s, agentLens(s, requested, by_).state, agentLens(s, requested, by_).out))
+  ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "agentLens", agentLens(s, requested, by_).state))
+{
+  if inv(s) && canAgentLens(s, requested, by_) {
+    var chosen := s.(requestedLens := requested);
+    var lens := chosenLens(chosen);
+    var switched := chosen.(lens := lens, zoom := oneTime, flash := false, flashAuto := false, torch := extinguished(s.torch));
+    if lens != s.lens {
+      if s.phase.Ready? {
+        StartAccounted([StopPreview(s.preview)], switched);
+      } else if s.phase.Starting? || mayStart(switched) {
+        StartAccounted([], switched);
+      }
+    }
+  }
+}
+
+lemma FilmPreviewAccounting(s: Camera, after: Camera)
+  requires alwaysStartsAccounted(s)
+  requires after.pending == s.pending && after.showing == s.showing
+  requires (after.phase == s.phase && after.preview == s.preview) || (after.phase.Off? && after.preview == s.preview + 1)
+  ensures alwaysStartsAccounted(after)
+{
+  assert forall t :: t in s.pending ==> t > 0 && t <= s.preview;
+  if after.preview != s.preview {
+    assert after.preview !in s.pending;
+  }
+}
+
+lemma FilmSettlement(s: Camera, f: app__camera__recording_Film)
+  requires alwaysSecureShowsOnlyItsSession(s)
+  ensures alwaysSecureShowsOnlyItsSession(settling(f, s))
+  ensures stepOnlyThisVisitJoinsTheSession(s, "", settling(f, s))
+  ensures stepASavedVideoIsTheLast(s, settling(f, s))
+  ensures settling(f, s).film == f
+  ensures settling(f, s).phase == s.phase && settling(f, s).mode == s.mode
+  ensures settling(f, s).pending == s.pending && settling(f, s).preview == s.preview
+  ensures settling(f, s).showing == s.showing && settling(f, s).covered == s.covered
+  ensures settling(f, s).agent == s.agent && settling(f, s).permission == s.permission
+  ensures settling(f, s).secure == s.secure && settling(f, s).visit == s.visit && settling(f, s).filmVisit == s.filmVisit
+  ensures settling(f, s).shot == s.shot && settling(f, s).lens == s.lens
+  ensures settling(f, s).torch == s.torch && settling(f, s).zoom == s.zoom && settling(f, s).flash == s.flash
+  ensures settling(f, s).focus == s.focus && settling(f, s).taps == s.taps
+  ensures settling(f, s).writing == s.writing && settling(f, s).confirmed == s.confirmed && settling(f, s).waited == s.waited
+{
+  var landed := settling(f, s);
+  if f.stage.Saved? && !s.film.stage.Saved? && (!s.secure || s.filmVisit == s.visit) {
+    if s.secure {
+      assert landed.session == s.session + ProofLib.Filter((set_x: int) => !((set_x in s.session)), [f.video]);
+      Joined(s.session, [f.video]);
+      assert f.video in landed.session;
+    }
+  } else {
+    assert landed.session == s.session;
+  }
+}
+
+lemma FilmShape(s: Camera, f: app__camera__recording_Film, now: int)
+  ensures var landed := settling(f, s);
+    var prefix := if !s.film.stage.Stopping? && f.stage.Stopping? then [Effect.StopRecording]
+      else if f.stage.Checking? && !s.film.stage.Checking? then [CheckRecording(f.video)] else [];
+    filming(f, now, s) == afterRecording(prefix, landed)
+      && (forall e :: e in prefix ==> !e.StopPreview?)
+  ensures var landed := settling(f, s);
+    var after := filming(f, now, s).state;
+    after == landed || (landed.phase.Ready? && !holds(landed) && !recording(landed)
+      && after == landed.(phase := Phase.Off, preview := landed.preview + 1, torch := extinguished(landed.torch)))
+{
+}
+
+lemma FilmReleased(s: Camera, f: app__camera__recording_Film, now: int)
+  requires alwaysStartsAccounted(s) && alwaysSecureShowsOnlyItsSession(s)
+  ensures alwaysStartsAccounted(filming(f, now, s).state)
+  ensures stepARetiredPreviewIsReleased(s, "", filming(f, now, s).state, filming(f, now, s).out)
+{
+  FilmSettlement(s, f);
+  FilmShape(s, f, now);
+  var landed := settling(f, s);
+  var after := filming(f, now, s);
+  var prefix := if !s.film.stage.Stopping? && f.stage.Stopping? then [Effect.StopRecording]
+    else if f.stage.Checking? && !s.film.stage.Checking? then [CheckRecording(f.video)] else [];
+  FilmPreviewAccounting(s, after.state);
+  if landed.phase.Ready? && !holds(landed) && !recording(landed) {
+    assert s.phase.Ready? && s.preview > 0;
+    assert after.out == prefix + [StopPreview(s.preview)];
+  } else {
+    assert after.out == prefix;
+  }
+}
+
+lemma FilmKeepsAgent(s: Camera, f: app__camera__recording_Film, now: int)
+  requires alwaysTheRequestWaitsOnTheCamera(s) && alwaysSecureShowsOnlyItsSession(s)
+  ensures alwaysTheRequestWaitsOnTheCamera(filming(f, now, s).state)
+{
+  FilmSettlement(s, f);
+  FilmShape(s, f, now);
+  if s.agent.stage.Approved? {
+    assert ready(s) && holds(settling(f, s));
+    assert filming(f, now, s).state == settling(f, s);
+  }
+}
+
+lemma FilmKeepsSession(s: Camera, f: app__camera__recording_Film, now: int, via: string)
+  requires alwaysSecureShowsOnlyItsSession(s)
+  ensures alwaysSecureShowsOnlyItsSession(filming(f, now, s).state)
+  ensures stepOnlyThisVisitJoinsTheSession(s, via, filming(f, now, s).state)
+  ensures stepASavedVideoIsTheLast(s, filming(f, now, s).state)
+{
+  FilmSettlement(s, f);
+  FilmShape(s, f, now);
+  var landed := settling(f, s);
+  var after := filming(f, now, s).state;
+  assert after.session == landed.session && after.visit == landed.visit && after.last == landed.last;
+}
+
+lemma FilmKeepsCameraSettings(s: Camera, f: app__camera__recording_Film, now: int)
+  requires alwaysSecureShowsOnlyItsSession(s)
+  requires alwaysLensSettingsValid(s) && alwaysFocusFollowsTheNewestTap(s) && alwaysTorchBelongsToItsPreview(s)
+  ensures alwaysLensSettingsValid(filming(f, now, s).state)
+  ensures alwaysFocusFollowsTheNewestTap(filming(f, now, s).state)
+  ensures alwaysTorchBelongsToItsPreview(filming(f, now, s).state)
+{
+  FilmSettlement(s, f);
+  FilmShape(s, f, now);
+}
+
+lemma FilmKeepsRecording(s: Camera, f: app__camera__recording_Film, now: int)
+  requires alwaysSecureShowsOnlyItsSession(s) && alwaysRecordingHoldsThePreview(s)
+  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
+  requires app__camera__recording_recording(f) ==> recording(s)
+  requires f.stage.Running? ==> holds(s)
+  ensures alwaysRecordingHoldsThePreview(filming(f, now, s).state)
+{
+  FilmSettlement(s, f);
+  FilmShape(s, f, now);
+  if app__camera__recording_recording(f) {
+    assert filming(f, now, s).state == settling(f, s);
+  }
+}
+
+lemma recordingStarted_ensures(s: Camera, ok: bool, now: int, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysNoCameraWithoutAccess(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysNothingHeldAway(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysStartsAccounted(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysTorchBelongsToItsPreview(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysLensSettingsValid(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysFocusFollowsTheNewestTap(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysRecordingHoldsThePreview(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysOneShutterOnTheCamera(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysTheRequestWaitsOnTheCamera(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysSecureShowsOnlyItsSession(recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepALostPreviewFails(s, "recordingStarted", recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepARetiredPreviewIsReleased(s, "recordingStarted", recordingStarted(s, ok, now, by_).state, recordingStarted(s, ok, now, by_).out))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepOneFocusWriteAtATime(s, "recordingStarted", recordingStarted(s, ok, now, by_).state, recordingStarted(s, ok, now, by_).out))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepSoundOnlyWithTheMicrophone(s, recordingStarted(s, ok, now, by_).state, recordingStarted(s, ok, now, by_).out))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepASavedVideoIsTheLast(s, recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepTheShutterNeverFiresCovered(s, recordingStarted(s, ok, now, by_).state, recordingStarted(s, ok, now, by_).out))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepEachRequestIsAnsweredOnce(s, recordingStarted(s, ok, now, by_).state, recordingStarted(s, ok, now, by_).out))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepTheAgentFailsOnlyForCause(s, "recordingStarted", recordingStarted(s, ok, now, by_).state))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepTheLockScreenOpensNothingElse(s, recordingStarted(s, ok, now, by_).state, recordingStarted(s, ok, now, by_).out))
+  ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingStarted", recordingStarted(s, ok, now, by_).state))
+{
+  if inv(s) && canRecordingStarted(s, by_) {
+    var begun := app__camera__recording_started(s.film, ok, now);
+    var held := if begun.stage.Running? && !holds(s) then app__camera__recording_stop(begun, now) else begun;
+    assert recordingStarted(s, ok, now, by_) == filming(held, now, s);
+    assert !held.stage.Saved?;
+    FilmReleased(s, held, now);
+    FilmKeepsAgent(s, held, now);
+    FilmKeepsSession(s, held, now, "recordingStarted");
+    FilmKeepsCameraSettings(s, held, now);
+    FilmKeepsRecording(s, held, now);
+  }
 }

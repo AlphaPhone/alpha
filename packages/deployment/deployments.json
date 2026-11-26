@@ -9,8 +9,8 @@
     "appLinkHost": "staging.eliza.app",
     "profile": "staging",
     "cutoverCandidate": {
-      "cloud": "https://api-staging.alphacompute.cc",
-      "appLinkHost": "cloud-staging.alphacompute.cc"
+      "cloud": "https://api-staging.alphaphone.dev",
+      "appLinkHost": "cloud-staging.alphaphone.dev"
     }
   },
   "production": {
@@ -19,8 +19,8 @@
     "appLinkHost": "eliza.app",
     "profile": "production",
     "cutoverCandidate": {
-      "cloud": "https://api.alphacompute.cc",
-      "appLinkHost": "cloud.alphacompute.cc"
+      "cloud": "https://api.alphaphone.dev",
+      "appLinkHost": "cloud.alphaphone.dev"
     }
   }
 }
