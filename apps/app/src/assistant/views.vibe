@@ -65,7 +65,7 @@ type Place = View | "Home"
 interface SpokenView {
   readonly held: Held | PageHeld
   readonly current: Effect.Effect<boolean>
-  readonly front: (place: Place, keep: boolean) => Effect.Effect<boolean>
+  readonly front: (place: Place, inside: boolean) => Effect.Effect<boolean>
   readonly completed: Deferred.Deferred<void>
 }
 
@@ -80,7 +80,7 @@ function viewPlace(viewId: string): Place | undefined {
 }
 
 // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
-/** Whether a handoff opens a saved note: a new page in Notes, brought forward under Ask Alpha at its height. */
+/** Whether a handoff opens a saved note: a page inside Notes, which keeps a sheet and lowers the full screen. */
 function savedNote(handoff: Handoff): boolean {
   return handoff.subview === "saved-note-v1"
 }
@@ -101,7 +101,7 @@ export service Views {
   current(): number!!
   hold(ticket: number, held: TypedHeld): void!!
   take(ticket: number): Option.Option<TypedHeld>!!
-  spoken(held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, keep: boolean) => Effect.Effect<boolean>): void!!
+  spoken(held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, inside: boolean) => Effect.Effect<boolean>): void!!
   /** The ids of the views this screen can show now: Home and every app the shell has here. */
   shown(): readonly string[]!!
   readonly heard: Queue.Dequeue<SpokenView>
@@ -139,7 +139,7 @@ export const handoffs = Layer.effect(Views, effect {
       typed = undefined
       return Option.some(found)
     }),
-    spoken: effect (held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, keep: boolean) => Effect.Effect<boolean>) => {
+    spoken: effect (held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place, inside: boolean) => Effect.Effect<boolean>) => {
       const completed = try Deferred.make<void>()
       try Queue.offer(heard, { held, current, front, completed })
       try Deferred.await(completed)
@@ -194,15 +194,15 @@ effect function asAllowed(page: AgentPage): AgentPage!!Prefs.Machine {
   return { ...page, atOnce: false }
 }
 
-/** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. `keep` leaves Ask Alpha where it is, as a saved note's opening does. */
-effect function navigated(ticket: number, place: Place, keep = false): boolean!!Conversation.Machine {
+/** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. `inside` opens a page inside the view, as a saved note is: a sheet stays and the full screen lowers. */
+effect function navigated(ticket: number, place: Place, inside = false): boolean!!Conversation.Machine {
   const conversation = try Conversation.Machine
   if (place === "Home") {
     if (!Conversation.canNavigateHome(try conversation.get(), ticket)) return false
     try ignore(conversation.send({ type: "navigateHome", ticket }))
   } else {
-    if (!Conversation.canNavigate(try conversation.get(), ticket, place, keep)) return false
-    try ignore(conversation.send({ type: "navigate", ticket, view: place, keep }))
+    if (!Conversation.canNavigate(try conversation.get(), ticket, place, inside)) return false
+    try ignore(conversation.send({ type: "navigate", ticket, view: place, inside }))
   }
   return try navigationEnded(conversation, ticket)
 }
