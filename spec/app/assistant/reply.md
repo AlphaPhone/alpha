@@ -57,12 +57,15 @@ taken it stays the label until text or the reply arrives. Provisional text
 may still be taken back: a tool call can replace it, and a check of the
 reply can revise it after it was written. So it is never shown, and the
 owner sees one reply that is never contradicted mid-turn (shown, it
-visibly rewrote its first text in 10 of 130 gate turns). The reply the
-agent stored, announced ahead of its last frame, is settled text and shows
-at once. The label stays until settled text or the reply arrives. While a
-reply is still being written, with neither text shown nor a label, it
-shows as replying, with the pulsing dots of a turn at work; once it
-settles or ends the dots go, though the turn may still be finishing.
+visibly rewrote its first text in 10 of 130 gate turns). Settled text is
+the reply the agent decided: it arrives as soon as the agent decides it,
+after its tools and its check of the reply and ahead of the stored reply,
+and it shows and is spoken at once; the stored reply, announced ahead of
+its last frame, is settled text too. The label stays until settled text or
+the reply arrives. While a reply is still being written, with neither text
+shown nor a label, it shows as replying, with the pulsing dots of a turn at
+work; once it settles or ends the dots go, though the turn may still be
+finishing.
 
 ```quint
 pure def canToken(r: Reply, turn: int, units: int, provisional: bool): bool = live(r) and turn == r.turn and units >= 1
@@ -78,6 +81,8 @@ pure def stepProvisionalTextIsNotShown(before: Reply, via: str, after: Reply): b
   (via == "token" and after.provisional) implies after.shown == before.shown
 
 pure def sometimesProvisionalTextIsHeldBack(r: Reply): bool = r.status == Streaming and r.provisional and r.shown == 0
+
+pure def sometimesSettledTextShowsBeforeTheReply(r: Reply): bool = r.status == Streaming and not(r.provisional) and r.shown > 0 and r.final == 0
 ```
 
 ### One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs
