@@ -59,7 +59,7 @@ do next.
   `rounded-dictation-type` is the Type button offered after an unsuccessful transcription.
   `rounded-check` is the check box of a Notes checklist item or action item, `rounded-clip` a 2px bar: a link note's clip, Notes' unavailable slash and a recorder level.
   Everything pressed is at least 44px in both directions.
-- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-note-menu` a Notes menu on the raised surface, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
+- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-chat-actions` chat actions, `shadow-note-menu` a Notes menu on the raised surface, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
   `shadow-sheet` a map's resting sheet, `shadow-lift` a modal sheet or card rising over the page and `shadow-popup` a panel
   ringed by a 1px line, such as Files options. The menu, dialog, sheet, lift, popup,
@@ -310,6 +310,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.lift-dark` | 0 -20px 60px oklch(0 0 0 / 0.45) |
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
 | `shadow.menu-dark` | 0 4px 20px oklch(0 0 0 / 0.45) |
+| `shadow.chat-actions` | 0 10px 35px oklch(0 0 0 / 0.12) |
+| `shadow.chat-actions-dark` | 0 10px 35px oklch(0 0 0 / 0.45) |
 | `shadow.panel` | 0 20px 50px oklch(0 0 0 / 0.12) |
 | `shadow.panel-dark` | 0 20px 50px oklch(0 0 0 / 0.45) |
 | `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |

@@ -1,9 +1,9 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, MessageAttachmentsMenu, SearchField, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
-import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Sparkles, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -533,16 +533,10 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     </div>
   ) : (
     <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-center gap-1">
-      {(canPicture || canSuggest) && <Menu>
-        <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message attachments"><Plus /></Button></MenuTrigger>
-        <MenuContent aria-label="Message actions" side="top" sideOffset={8}>
-          {canPicture && <>
-            <MenuItem onSelect={() => cameraInputRef.current?.click()}><Camera />Camera</MenuItem>
-            <MenuItem onSelect={() => picturesInputRef.current?.click()}><ImagePlus />Add media</MenuItem>
-          </>}
-          {canSuggest && <MenuItem onSelect={() => void send({ type: "suggest" })}><Sparkles />Let Alpha suggest a reply</MenuItem>}
-        </MenuContent>
-      </Menu>}
+      <MessageAttachmentsMenu media={canPicture ? {
+        camera: () => cameraInputRef.current?.click(),
+        files: () => picturesInputRef.current?.click(),
+      } : undefined} onSuggest={canSuggest ? () => void send({ type: "suggest" }) : undefined} />
       <Textarea className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 leading-field shadow-none focus-visible:outline-none" aria-label={`Text ${firstName(title)}`} placeholder={`Text ${firstName(title)}`} rows={1} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
         ref={(element) => {
           fieldRef.current = element;
