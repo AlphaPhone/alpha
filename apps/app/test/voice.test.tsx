@@ -672,6 +672,13 @@ async function switchToKeyboard() {
   await press("Switch to keyboard");
 }
 
+/** Let the startup cover lift, as it does at the latest 2.5 s after start where Home is not drawn under it, before a step that checks nothing is on screen. */
+async function coverLifted(alpha: Alpha) {
+  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
+  for (let waited = 0; waited < 2500 && cover(); waited += 500) await later(alpha, 500);
+  expect(cover()).toBeNull();
+}
+
 async function settleComposer(alpha: Alpha, check: () => boolean) {
   for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
   expect(check()).toBe(true);
@@ -1316,6 +1323,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.onDevice = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.session > 0 && s.phase === "Idle");
@@ -1423,6 +1431,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.grantOnRequest = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
     await settleComposer(alpha, () => button("Talk") !== undefined);
 
     await drawn(() => document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.focus());

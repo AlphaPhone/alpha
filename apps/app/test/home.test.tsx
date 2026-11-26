@@ -470,6 +470,22 @@ describe("Home on a phone", () => {
     await drawn(() => { fromAreas.reminders([]); fromAreas.hidden([]); });
   });
 
+  it("Keeps no place for cards while none is drawn, so the tiles never jump (spec/app/home/cards.md, \"The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is\")", async () => {
+    const world = holdingHome({ ...scene(), phone: true });
+    world.calendar.silent = true;
+    world.workflows.prompts.clear();
+    world.workflows.tasks.splice(0);
+    world.inbox.mail.splice(0);
+    const { alpha } = await open(world, only("home"));
+    const homes = home.runtime(alpha);
+    await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
+    expect([(await homes.runPromise(Cards.Machine.use((cards) => cards.get()))).agent.source, document.querySelectorAll("section[aria-label='Your day'] button").length]).toEqual(["Unanswered", 0]);
+    const scroller = document.querySelector("h1")?.parentElement?.parentElement;
+    const parts = [...(scroller?.children ?? [])].map((part) => part.querySelector("h1") ? "heading" : part.querySelector("[data-home-tile]") ? "tiles" : part.getAttribute("aria-hidden") === "true" ? "space" : "other");
+    const aboveTiles = parts.slice(0, parts.indexOf("tiles"));
+    expect([aboveTiles[0], aboveTiles.filter((part) => part === "space")]).toEqual(["heading", ["space"]]);
+  });
+
   // spec/app/home/cards.md, "Story: See my day at a glance"
   it("See my day as it is where I am, west of UTC and east of it (spec/app/home/cards.md, \"Story: See my day at a glance\")", async () => {
     const hour = 3_600_000;
