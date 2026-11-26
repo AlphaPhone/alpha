@@ -16,7 +16,7 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 import { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
-import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
+import { changedOn, folderLocation, itemCount, parentPath, sized } from "./entries.vibe";
 import { CategoryGroups } from "./category.vibe";
 import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
@@ -166,7 +166,7 @@ export function Files({ runtime, alpha }: FilesProps) {
     return folderLocation(label(item.volume), folder);
   };
   const summary = (item: Item, showFolder: boolean) => {
-    if (item.kind === "Folder") return "";
+    if (item.kind === "Folder") return itemCount(item.children);
     const folder = showFolder ? Option.map(parentOf(item), (path) => path || label(item.volume)) : Option.none();
     return [sized(item.bytes), changedOn(item.revision, today), Option.getOrUndefined(folder)].filter(Boolean).join(" · ");
   };

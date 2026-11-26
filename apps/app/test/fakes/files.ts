@@ -91,7 +91,6 @@ export function filesScene(): FilesScene {
 const parent = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 const leaf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const join = (folder: string, name: string) => (folder === "" ? name : `${folder}/${name}`);
-const entry = (one: Stored): StorageEntry => ({ path: one.path, name: leaf(one.path), directory: one.directory, mimeType: one.mimeType, size: one.size, modified: one.modified });
 
 function authorize(scene: FilesScene, { volume, path }: Stored, canRename: boolean): string {
   const id = crypto.randomUUID();
@@ -109,6 +108,8 @@ export function elizaFiles(scene: FilesScene): Faked {
     const find = (volume: string, path: string) => scene.stored.find((one) => one.volume === volume && one.path === path);
     const inside = (volume: string, path: string) => scene.stored.filter((one) => one.volume === volume && (one.path === path || one.path.startsWith(`${path}/`)));
     const called = (method: string) => scene.calls.push(method);
+    const entry = (one: Stored): StorageEntry => ({ path: one.path, name: leaf(one.path), directory: one.directory, mimeType: one.mimeType, size: one.size, modified: one.modified,
+      ...(one.directory ? { children: scene.stored.filter((other) => other.volume === one.volume && other.path !== one.path && parent(other.path) === one.path).length } : {}) });
     const identity = (one: Stored) => `${one.path}@${one.modified}:${one.size}`.padEnd(43, "_").slice(0, 43).replace(/[^A-Za-z0-9_-]/g, "_");
     const unchanged = (volume: string, paths: readonly string[], reviewed: readonly string[] | undefined) =>
       (path: string) => { const found = find(volume, path); return reviewed === undefined || (found !== undefined && reviewed[paths.indexOf(path)] === identity(found)); };
