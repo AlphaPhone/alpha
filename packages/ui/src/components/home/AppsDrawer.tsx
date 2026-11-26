@@ -138,7 +138,7 @@ export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, 
   }, [inactive]);
   return (
     <section ref={drawerRef} data-alpha-apps-drawer="" role="dialog" aria-modal={modal || undefined} aria-label="Apps" inert={inactive || undefined}
-      className="absolute inset-x-0 top-[max(--spacing(11),var(--alpha-safe-top))] bottom-0 z-10 flex min-h-0 flex-col bg-background pt-3 text-foreground"
+      className="absolute inset-0 z-sheet flex min-h-0 flex-col bg-background pt-[calc(var(--alpha-safe-top)+--spacing(3))] text-foreground"
       onKeyDown={(event) => {
         if (inactive || event.key !== "Escape" || event.defaultPrevented) return;
         const drawer = event.currentTarget;

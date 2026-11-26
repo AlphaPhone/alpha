@@ -149,7 +149,7 @@ export function AssistantComposer({
             event.preventDefault();
             if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
           }}
-          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 rounded-panel border-0 bg-transparent py-2.75 pr-0.5 text-body leading-field", bar ? "pl-2" : "pl-0.5", fieldPull || (bar && draggable) ? "touch-none" : bar ? "touch-pan-y" : "touch-auto", compact && "hidden")}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 rounded-panel border-0 bg-transparent px-3 py-2.75 text-body leading-field", fieldPull || (bar && draggable) ? "touch-none" : bar ? "touch-pan-y" : "touch-auto", compact && "hidden")}
         />
         {onStop || stopping ? (
           <Button variant={compact ? "ghost" : undefined} size="icon" aria-label="Stop reply" loading={stopping} className={compact ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>

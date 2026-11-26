@@ -33,10 +33,10 @@ function ChatActionsMenu({ placement, label, triggerId, disabled, children }: Ch
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button id={triggerId} variant="ghost" size="icon" aria-label={label} disabled={disabled} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
+        <Button id={triggerId} variant="ghost" size="icon" aria-label={label} disabled={disabled} className="hover:bg-transparent disabled:opacity-40"><Plus aria-hidden /></Button>
       </MenuTrigger>
       <MenuContent side="top" align="start" alignOffset={placement === "sheet" ? -16 : -57} sideOffset={sideOffset}
-        className={cn("rounded-tile border-0 bg-background p-2 shadow-chat-actions dark:shadow-chat-actions-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3 [&>[role=menuitem]_svg]:size-5.5", comms ? "min-w-59" : "min-w-55")}>
+        className={cn("rounded-tile border border-border/60 bg-popover p-2 text-popover-foreground shadow-chat-actions dark:border-border dark:shadow-chat-actions-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3 [&>[role=menuitem]_svg]:size-5.5", comms ? "min-w-59" : "min-w-55")}>
         {children}
       </MenuContent>
     </Menu>
