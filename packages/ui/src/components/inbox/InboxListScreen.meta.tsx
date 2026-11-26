@@ -38,13 +38,17 @@ export const meta: ComponentMeta<InboxListScreenProps> = {
       await userEvent.click(canvas.getByRole("button", { name: "Compose" }));
       await expect([onRefresh.mock.calls.length, onCompose.mock.calls.length]).toEqual([1, 1]);
     },
-    Searching: ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    Searching: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      return expect([Boolean(canvas.queryByRole("button", { name: "Back to inbox" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([true, false]);
+      await expect([Boolean(canvas.queryByRole("button", { name: "Back to inbox" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([true, false]);
+      const header = canvasElement.querySelector("header")?.getBoundingClientRect();
+      const back = canvas.getByRole("button", { name: "Back to inbox" }).getBoundingClientRect();
+      const pill = canvas.getByRole("search", { name: "Search Gmail" }).getBoundingClientRect();
+      await expect([canvas.getByRole("button", { name: "Clear search" }).getBoundingClientRect().width, back.left - (header?.left ?? 0), (header?.right ?? 0) - pill.right]).toEqual([40, 16, 16]);
     },
     "Searching on the launcher": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      await expect([canvas.queryByRole("button", { name: /^Back/ }), Boolean(canvas.getByRole("search", { name: "Search Gmail" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([null, true, true]);
+      await expect([canvas.queryByRole("button", { name: /^Back/ }), Boolean(canvas.getByRole("search", { name: "Search Gmail" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([null, true, false]);
       const header = canvasElement.querySelector("header")?.getBoundingClientRect();
       const pill = canvas.getByRole("search", { name: "Search Gmail" }).getBoundingClientRect();
       await expect([canvas.getByRole("button", { name: "Clear search" }).getBoundingClientRect().width, pill.left - (header?.left ?? 0), (header?.right ?? 0) - pill.right]).toEqual([40, 16, 16]);

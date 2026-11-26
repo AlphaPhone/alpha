@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { TurnController, type ConversationRecord, type TurnContext, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
@@ -732,7 +732,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const admittedScreen = direct === undefined ? sameScreen : try atSource
   const sent = effect (files: typeof direct) => {
     output.beginAttempt(files !== undefined)
-    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, files === undefined ? undefined : "direct-files-only-v1")) } : {}
+    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, try views.shown(), files === undefined ? undefined : "direct-files-only-v1")) } : {}
     const headers = sms !== undefined ? { ...sms.opened.headers, "x-eliza-device-capabilities": "sms.send.v1" }
       : review === undefined ? undefined
       : files !== undefined ? try review.turnHeaders(files, true)
@@ -767,7 +767,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     if (origin !== undefined && conversation !== undefined && screen !== undefined && (try atSource)) {
       const open = (source: Effect.Effect<boolean>) => openRouteForVoice(placeOf("Files"), origin.route, session, turn, effect {
         return (try source) && Shell.canAgentOpenFilesFrom(try shell.get(), origin.source, origin.panel, origin.route, true)
-      }, memory, voice, shell)
+      }, memory, voice, shell, true)
       const changes = Stream.merge(Stream.map(conversation.changes, () => undefined), Stream.map(voice.changes, () => undefined))
       try review.spokenFilesFrom(direct, message, { origin, current: stillTalking, report },
         { view: conversation, revision: screen.context.revision, moved: succeed(true), open, changes }, result.reply.actionResults)
@@ -943,12 +943,14 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
 }
 
 // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "An exact spoken Files request may follow its own leased navigation once"; spec/app/shell/index.md, "Only a spoken move from its exact source route is marked as Talk's navigation"
+/** `keepPanel` opens the view under Ask Alpha at its height, as an exact spoken Files request does; otherwise the move shows its view, lowering Ask Alpha where it would hide it. */
 effect function openRouteForVoice(place: number, sourceRoute: number, session: number, turn: number, current: Effect.Effect<boolean>,
-  memory: VoiceMemory, voice: Voice.Machine.Shape, shell: Shell.Machine.Shape): boolean!! {
+  memory: VoiceMemory, voice: Voice.Machine.Shape, shell: Shell.Machine.Shape, keepPanel = false): boolean!! {
   const before = try shell.get()
   if (before.route !== sourceRoute || memory.spokenNavigation !== undefined || !(try current)) return false
   const target = viewOfPlace(place)
-  if (target === undefined ? !Shell.canAgentGoHome(before) : Shell.showing(before, target)) return true
+  if (target === undefined ? !Shell.canAgentGoHome(before)
+    : Shell.showing(before, target) && (keepPanel || !Shell.canAgentShowView(before, target))) return true
   if (!Voice.canAgentNavigates(try voice.get(), session, turn, place, sourceRoute)) return false
   const opened = try Deferred.make<boolean>()
   const allowed = () => Effect.runSync(current)
@@ -963,7 +965,8 @@ effect function openRouteForVoice(place: number, sourceRoute: number, session: n
     }
     return target === undefined
       ? try contained(shell.send({ type: "agentHomeSpoken", route: sourceRoute }, guard), "going Home for Talk")
-      : try contained(shell.send({ type: "agentOpenSpoken", view: target, route: sourceRoute }, guard), "opening the view for Talk")
+      : keepPanel ? try contained(shell.send({ type: "agentOpenSpoken", view: target, route: sourceRoute }, guard), "opening the view for Talk")
+      : try contained(shell.send({ type: "agentShowSpoken", view: target, route: sourceRoute }, guard), "showing the view for Talk")
   }
   const decline = effect {
     if (memory.spokenNavigation !== lease || (try Deferred.isDone(opened))) return
