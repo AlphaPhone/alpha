@@ -57,6 +57,13 @@ async function newNote(world: Scene) {
   return opened;
 }
 
+function expectSavedPinnedNote(world: Scene, runtime: ReturnType<typeof notes.runtime>, beforeRevision: number, beforeCount: number) {
+  expect(world.notes.revision).toBe(beforeRevision + 1);
+  expect(world.notes.notes.length).toBe(beforeCount + 1);
+  expect(world.notes.notes.filter((row) => row.title === "New note").map((row) => (row.format?.data as { readonly pinned?: boolean } | undefined)?.pinned)).toEqual([true]);
+  expect(runtime.runSync(NoteContent).snapshot().draft?.pinned).toBeUndefined();
+}
+
 describe(`The note's header stays steady while its saves land (${steady}; ${fresh})`, () => {
   it("draws More enabled over a new note before its first save, and keeps it in place over a saved note on each edit before the autosave lands", async () => {
     const world = scene();
@@ -104,10 +111,7 @@ describe(`More over a new note offers v119's Share, Pin and Delete (${fresh})`, 
     const beforeCount = world.notes.notes.length;
     await choose("Pin");
     await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0 && !waiting(state));
-    expect(world.notes.revision).toBe(beforeRevision + 1);
-    expect(world.notes.notes.length).toBe(beforeCount + 1);
-    expect(world.notes.notes.filter((row) => row.title === "New note").map((row) => (row.format?.data as { readonly pinned?: boolean } | undefined)?.pinned)).toEqual([true]);
-    expect(runtime.runSync(NoteContent).snapshot().draft?.pinned).toBeUndefined();
+    expectSavedPinnedNote(world, runtime, beforeRevision, beforeCount);
     await rendered(() => expect(header()).toContainEqual(["More", true]));
   });
 
@@ -144,10 +148,7 @@ describe(`More over a new note offers v119's Share, Pin and Delete (${fresh})`, 
     await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh && state.note > 0 && !waiting(state));
     const savedEditor = await runtime.runPromise(Editor.use((machine) => machine.get()));
     expect(canPinNew(savedEditor, "Owner")).toBe(false);
-    expect(world.notes.revision).toBe(beforeRevision + 1);
-    expect(world.notes.notes.length).toBe(beforeCount + 1);
-    expect(world.notes.notes.filter((row) => row.title === "New note").map((row) => (row.format?.data as { readonly pinned?: boolean } | undefined)?.pinned)).toEqual([true]);
-    expect(runtime.runSync(NoteContent).snapshot().draft?.pinned).toBeUndefined();
+    expectSavedPinnedNote(world, runtime, beforeRevision, beforeCount);
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
     await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
     await rendered(() => expect(rows()).toContainEqual(["Unpin", true]));
