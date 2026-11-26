@@ -403,10 +403,6 @@ effect function syncAlphaApps(actionResults: ReadonlyArray<{ readonly action: st
   }
 }
 
-effect function warmPlanner(): void!!Agent {
-  try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
-}
-
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
 /** Retiring the displayed archive also retires the picker's matching preview ticket. */
@@ -1432,12 +1428,9 @@ const submitted = started(effect {
 }, "asking what was typed on the communications dock")
 
 // spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
-function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
+function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   return match (fx) {
-    when { tag: "Raise", let detent }: run("raise", effect {
-      fork.detached warmPlanner()
-      try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha")
-    });
+    when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
     when { tag: "Lower", let steps }: run("lower", effect {
       const shell = try Shell
       for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
@@ -1446,10 +1439,7 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
       const shell = try Shell
       const current = try shell.get()
       for (const ask of Dock.focused(current.assistant)) {
-        if (ask.tag === "Raise") {
-          fork.detached warmPlanner()
-          try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
-        }
+        if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
       }
     });
   }
