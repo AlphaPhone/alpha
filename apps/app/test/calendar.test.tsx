@@ -634,9 +634,11 @@ describe("on a phone", () => {
     await press("New event");
     await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
     await fill("Title", "Office closure");
-    await press("This phone's calendar");
     await press("All day");
+    // v119 45f6bed30 prototype/template.html:1475-1484: Repeat shows on every new event; a repeat moves it off the agent's calendar, which cannot repeat, onto this phone's.
+    expect(button("Your agent's calendar")?.getAttribute("aria-pressed")).toBe("true");
     await press("Weekdays");
+    expect(button("This phone's calendar")?.getAttribute("aria-pressed")).toBe("true");
     await press("Save event");
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
     await until(alpha, runtime, View, (state) => state.phoneRows === 3);

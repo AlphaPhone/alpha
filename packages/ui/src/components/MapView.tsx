@@ -25,7 +25,7 @@ export interface MapPin {
 export type MapCamera =
   | { kind: "keep" }
   | { kind: "follow"; key: string; at: MapPoint }
-  | { kind: "centre"; key: string; at: MapPoint; zoom: number }
+  | { kind: "centre"; key: string; at: MapPoint; zoom: number; lift?: number }
   | { kind: "fit"; key: string; points: readonly MapPoint[]; maxZoom: number }
   | { kind: "northUp"; key: string };
 
@@ -180,7 +180,7 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   if (camera.kind === "keep" || camera.key === painted.camera) return;
   painted.camera = camera.key;
   if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), 16.5), duration: 500 });
-  else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, duration: 0 });
+  else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, offset: [0, -(camera.lift ?? 0)], duration: 0 });
   else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: 350 });
   else if (camera.points.length > 0) {
     const bounds = camera.points.reduce((b, p) => b.extend([p.lng, p.lat]), new maplibregl.LngLatBounds());
