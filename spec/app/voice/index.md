@@ -645,14 +645,16 @@ pure def alwaysPlaybackIsTheCurrentTurns(v: Voice): bool =
 
 ### Mute turns the microphone off, and unmuting opens it again only where Alpha listens
 
-While Alpha answers a turn (transcribing, thinking or speaking) the
-microphone control waits, dimmed, as the Sunday demo build held it
-("Microphone paused while Alpha responds", v119
+The microphone control acts only while Alpha listens. While Talk connects
+it waits, dimmed and unconfirmed, and while Alpha answers a turn
+(transcribing, thinking or speaking) it waits, dimmed, as the Sunday demo
+build held it ("Microphone paused while Alpha responds", v119
 apps/app/src/prototype/voice-adapter.ts:1116-1118 and 1631-1633,
-phone.css:920). Stop and the speaker stay available.
+phone.css:920; demo frames v89-064, v89-072, v89-076). Stop and the
+speaker stay available.
 
 ```quint
-pure def canMute(v: Voice): bool = talking(v) and not(v.muted) and v.mic != Asking and not(alphaResponds(v))
+pure def canMute(v: Voice): bool = talking(v) and not(v.muted) and v.mic != Asking and v.phase == Listening
 
 pure def mute(v: Voice): Change = { state: { ...v, muted: true, mic: closedMic(v.mic) }, out: closeOut(v) }
 

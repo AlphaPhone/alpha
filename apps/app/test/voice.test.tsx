@@ -971,7 +971,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Starting");
     const row = () => [...document.querySelectorAll<HTMLButtonElement>('section[aria-label="Voice conversation"] button')]
       .map((control) => `${control.getAttribute("aria-label")}${control.disabled ? " (dimmed)" : ""}`);
-    expect([row()[0], row().at(-1)]).toEqual(["Mute speaker (dimmed)", "Stop voice conversation"]);
+    expect(row()).toEqual(["Mute speaker (dimmed)", "Microphone status unconfirmed (dimmed)", "Stop voice conversation"]);
     connected.resolve();
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.speaker === "SpeakerOn");
     expect(row()).toEqual(["Mute speaker", "Mute microphone", "Stop voice conversation"]);
