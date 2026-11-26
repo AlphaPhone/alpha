@@ -480,7 +480,7 @@ describe("Files on a phone", () => {
     // v119 live rows read size · date with no leading type word (files-browser-adapter.ts:1315-1324); the kind stays for screen readers.
     const notesRow = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === "notes.txt");
     const notesDetail = notesRow?.querySelector("span.text-muted-foreground")?.textContent ?? "";
-    expect([notesDetail.startsWith("Text"), notesDetail.split(" · ").length, notesRow?.getAttribute("aria-description")?.startsWith("Text · ")]).toEqual([false, 2, true]);
+    expect([notesDetail.startsWith("Document"), notesDetail.split(" · ").length, notesRow?.getAttribute("aria-description")]).toEqual([false, 2, `Document · ${notesDetail}`]);
     // spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it"
     // spec/app/files/preview.md, "What was read of a file is shown only in its own viewer, while it can be read"
     await press("notes.txt");
