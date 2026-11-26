@@ -41,6 +41,7 @@ type MessageView = {
   account: int, message: int, thread: int, position: int, body: R::Read, fromPhone: bool, fault: Fault, revision: int,
   remote: bool, images: bool, link: int, warning: bool,
   attachment: int, handling: Handling, file: A::Attempt, keep: A::Attempt, attempts: int, unsure: List[Held], cancelled: int, pdf: Pdf,
+  unsupported: int,
 }
 
 type Effect =
@@ -59,6 +60,7 @@ pure val initial: MessageView = {
   account: 0, message: 0, thread: 0, position: 0, body: R::unread, fromPhone: false, fault: Fine, revision: 0,
   remote: false, images: false, link: 0, warning: false,
   attachment: 0, handling: Opening, file: A::plan(0), keep: A::plan(0), attempts: 0, unsure: List(), cancelled: 0, pdf: emptyPdf,
+  unsupported: 0,
 }
 
 pure val accountValues = Set(0, 1, 2)
@@ -90,7 +92,7 @@ pure def settledAt(position: int, remote: bool, s: MessageView): MessageView =
   val keptUp = s.keep.outcome == A::Sent
   val unsureNow = (gaveUp and s.handling == Saving) or keptUp
   {
-    ...s, position: position, remote: remote, images: false, link: 0, warning: false, attachment: 0,
+    ...s, position: position, remote: remote, images: false, link: 0, warning: false, attachment: 0, unsupported: 0,
     file: if (gaveUp) A::conclude(s.file, false, false) else s.file,
     keep: if (keptUp) A::conclude(s.keep, false, false) else s.keep,
     unsure: if (unsureNow) remembered(s.unsure, heldOf(s)) else s.unsure,
@@ -344,7 +346,7 @@ pure def canReviewLink(s: MessageView, link: int, secure: bool, mismatch: bool):
   s.body.status == R::Loaded and not(s.fromPhone) and link != 0 and secure and s.link == 0 and s.attachment == 0
 
 pure def reviewLink(s: MessageView, link: int, secure: bool, mismatch: bool): MessageView =
-  { ...s, link: link, warning: mismatch }
+  { ...s, link: link, warning: mismatch, unsupported: 0 }
 
 pure def canOpenLink(s: MessageView): bool = s.link != 0
 
@@ -378,7 +380,7 @@ pure def canReviewAttachment(s: MessageView, attachment: int, handling: Handling
     and not(handling == Saving and s.unsure.includes({ account: s.account, message: s.message, attachment: attachment }))
 
 pure def reviewAttachment(s: MessageView, attachment: int, handling: Handling): MessageView =
-  { ...s, attachment: attachment, handling: handling, file: A::plan(s.attempts + 1), keep: A::plan(0), attempts: s.attempts + 1 }
+  { ...s, attachment: attachment, handling: handling, file: A::plan(s.attempts + 1), keep: A::plan(0), attempts: s.attempts + 1, unsupported: 0 }
 
 pure def inFlight(a: A::Attempt): bool = a.outcome == A::Recorded or a.outcome == A::Sent
 
@@ -401,6 +403,30 @@ pure def stepAnAttachmentIsUsedOnlyFromItsReview(before: MessageView, after: Mes
           h.handling == before.handling and A::canRecord(before.file) and after.file.outcome == A::Sent)
     | _ => true
   })
+```
+
+### An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail
+
+Live v119 drew such an attachment with its size and "Unsupported type or
+size", and kept it tappable; a tap toasted "Open in Gmail" and nothing was
+fetched. The shell decides which attachment that is, as it decides which
+one opens a review for opening or for saving: one it cannot preview and
+cannot save, or one it could save with nowhere on the phone to save it.
+The tap is told on the message's own notice, under its subject, never
+near Ask Alpha and never by voice. It goes once another attachment or a
+link is reviewed, the thread moves, or the message closes. Nothing goes
+out.
+
+```quint
+pure def canUnsupportedAttachment(s: MessageView, attachment: int): bool =
+  s.body.status == R::Loaded and not(s.fromPhone) and attachment != 0 and s.attachment == 0 and s.link == 0
+
+pure def unsupportedAttachment(s: MessageView, attachment: int): MessageView = { ...s, unsupported: attachment }
+
+pure def alwaysAnUnsupportedTapIsToldOnlyOnTheLoadedMessage(s: MessageView): bool =
+  s.unsupported != 0 implies (s.message != 0 and s.body.status == R::Loaded and not(s.fromPhone) and s.attachment == 0 and s.link == 0)
+
+pure def sometimesAnUnsupportedAttachmentIsTapped(s: MessageView): bool = s.unsupported != 0
 ```
 
 ### A review opened for opening also saves the same attachment, once, under the same rules
