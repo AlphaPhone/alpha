@@ -12,14 +12,20 @@ afterEach(async () => {
   document.documentElement.style.removeProperty("font-size");
 });
 
-it("Opens message actions while held and toggles them by tap (spec/app/messages/index.md, \"A tap toggles message actions and a stationary hold opens them\")", async () => {
-  await page.viewport(390, 844);
-  const world = { ...scene(), phone: true, image: true };
+/** Open Messages from Home's tile on the phone image, once its one thread is listed. */
+async function messagesFromHome(world: ReturnType<typeof scene>) {
   const { alpha } = await open(world, only("home", "view:Messages"));
   await until(alpha, alpha.runtime, Shell, (state) => state.image);
   // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited": the tile's name is its app's, with what waits there said after it
   await page.getByRole("button", { name: /^Messages(?![A-Za-z])/ }).click();
   await until(alpha, alpha.runtime, Messages, (state) => state.threads === 1 && state.list.status === "Loaded");
+  return alpha;
+}
+
+it("Opens message actions while held and toggles them by tap (spec/app/messages/index.md, \"A tap toggles message actions and a stationary hold opens them\")", async () => {
+  await page.viewport(390, 844);
+  const world = { ...scene(), phone: true, image: true };
+  const alpha = await messagesFromHome(world);
   await page.getByRole("button", { name: "Maya Chen", exact: true }).click();
   await until(alpha, alpha.runtime, Messages, (state) => state.shown.rows === 1 && state.page.status === "Loaded");
 
@@ -74,10 +80,7 @@ it("Keeps the Messages title in its header at large text (spec/app/shell/keyboar
   await page.viewport(390, 844);
   const world = { ...scene(), phone: true, image: true };
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
-  const { alpha } = await open(world, only("home", "view:Messages"));
-  await until(alpha, alpha.runtime, Shell, (state) => state.image);
-  await page.getByRole("button", { name: /^Messages(?![A-Za-z])/ }).click();
-  await until(alpha, alpha.runtime, Messages, (state) => state.threads === 1 && state.list.status === "Loaded");
+  const alpha = await messagesFromHome(world);
   await expect.element(page.getByRole("button", { name: "Maya Chen", exact: true })).toBeVisible();
   const header = () => {
     const top = document.querySelector<HTMLElement>("[data-alpha-messages-header]");

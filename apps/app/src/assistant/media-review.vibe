@@ -500,9 +500,9 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "messages_read_selected": return { title: "Share open messages", detail: "Share up to 20 recent messages from the open conversation with the agent." }
     case "voicemail_read_selected": return { title: "Share open voicemail", detail: "Share this voicemail’s known caller name, date, duration and any transcript already shown with the agent." }
     case "voicemail_delete_selected": return { title: "Delete open voicemail", detail: "Review the deletion in Phone." }
-    case "sms_latest_sender": return { title: "Share the latest SMS sender", detail: "includeAddress" in value
-      ? "Share the latest incoming SMS sender’s number and Android thread ID with the agent."
-      : "Share the last four digits of the latest incoming SMS sender’s number with the agent." }
+    case "sms_latest_sender": return { title: "Read latest text sender", detail: "includeAddress" in value
+      ? "Read the phone number of your latest incoming text."
+      : "Share the last four digits of the newest incoming SMS sender." }
     case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}` }
     case "sms_compose": {
       const recipient = composeRecipient(value)

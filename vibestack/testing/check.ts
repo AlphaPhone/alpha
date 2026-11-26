@@ -78,7 +78,7 @@ function addVitest(root: string): string {
 /** What a module import reaches: generated code, a test library, or anything else (the shell, a service, a helper). */
 const reaches = (quoted: string) => {
   const module = quoted.replace(/^["'`]|["'`]$/g, "");
-  return /(?:^|\/)gen\//.test(module) ? "gen" : /^(?:vitest|@vitest\/.+|@effect\/vitest|effect(?:\/.+)?|node:test|node:assert(?:\/strict)?|assert|@testing-library\/.+)$/.test(module) ? "library" : "outside";
+  return /(?:^|\/)gen\//.test(module) ? "gen" : /^(?:vitest|@vitest\/.+|@effect\/vitest|effect(?:\/.+)?|node:test|node:assert(?:\/strict)?|assert|@testing-library\/.+|vibestack\/testing(?:\/.+)?)$/.test(module) ? "library" : "outside";
 };
 
 /**
@@ -87,8 +87,8 @@ const reaches = (quoted: string) => {
  * it calls in the same file; it is covered by a citation in it, on the `describe` or layer around it, or in the
  * file's header. Nothing, if the file cannot be read as tokens.
  */
-function readTests(text: string): { generated: boolean; tests: { line: number; generatedOnly: boolean; cited: boolean }[] } | undefined {
-  const tokens = tokenize(text);
+function readTests(text: string, file?: string): { generated: boolean; tests: { line: number; generatedOnly: boolean; cited: boolean }[] } | undefined {
+  const tokens = tokenize(text, file);
   if (!tokens) return undefined;
   const word = (i: number) => /^[A-Za-z_$][\w$]*$/.test(tokens[i]?.text ?? "");
   const closing = new Int32Array(tokens.length).fill(-1);
@@ -219,7 +219,7 @@ function testRules(checking: string, dir: string, specs: Spec[], testEntries: re
   const uncited: string[] = [];
   const said: Reported<"tests">[] = [];
   for (const [file, text] of testEntries) {
-    const read = readTests(text);
+    const read = readTests(text, file);
     if (read?.generated) generatedOnly.push(`${dir}${file}: imports nothing but gen/ and test libraries`);
     for (const t of read?.tests ?? []) {
       if (t.generatedOnly && !read!.generated) generatedOnly.push(`${dir}${file}:${t.line}`);

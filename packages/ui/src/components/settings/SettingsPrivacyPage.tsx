@@ -54,7 +54,7 @@ export function SettingsPrivacyPage({ onPhone = true, read, askFirst, saving, re
   );
   return (
     <SettingsPage title="Privacy" onBack={onBack} backLabel="Back to Settings">
-      <ListGroup className="[&_label>span:first-child>span:first-child]:leading-[normal]">
+      <ListGroup className="[&_label>span:first-child>span:first-child]:leading-plain">
         <SettingsNavRow title="Permissions" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("permissions"))} {...at(0)} />
         <SettingsDeviceSwitch setting="ask-first" read={read} checked={askFirst} saving={saving} recovering={recovering} onChange={onAskFirstChange} onRecover={onRecover} />
         {onPhone ? permissionSwitch("agent-location") : null}
