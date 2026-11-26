@@ -33,7 +33,7 @@ export function InboxReviewDialog({ open, title, children, noLabel = "No", yesLa
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next && !busy) onNo(); }}>
       <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-dialog bg-foreground/45 motion-safe:animate-fade dark:bg-background/70" />
+        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-dialog bg-foreground/45 dark:bg-background/70" />
         <AlertDialogPrimitive.Content
           data-covers-dock=""
           {...(children ? {} : { "aria-describedby": undefined })}

@@ -177,8 +177,11 @@ pure def goBack(s: Shell): Shell =
 
 As in Sunday's v119, which drew an app's Back only when Alpha was not the
 phone's launcher, the first page of Settings and of Workflows has no Back
-control in its header while Alpha is the launcher. A page inside either
-keeps its Back, and away from the launcher the first page keeps it too.
+control in its header while Alpha is the launcher, and nor has the first
+page of Inbox, of Calendar, of Notes, of Files or of Photos (the notes
+list, the top of Files, the photo library or albums). A page inside any
+of them keeps its Back, and
+away from the launcher the first page keeps it too.
 The control is only how Back is drawn: Android's own Back gesture still
 closes the app as the rule above says.
 
@@ -191,17 +194,6 @@ pure def drawsAppBack(s: Shell, launcher: bool, page: AppPage): bool =
 pure def lawAFirstPageOnTheLauncherDrawsNoBack(s: Shell): bool =
   not(drawsAppBack(s, true, FirstPage)) and drawsAppBack(s, false, FirstPage) == canGoBack(s) and drawsAppBack(s, true, InnerPage) == canGoBack(s)
 ```
-
-### On the launcher an app's first page draws no Back, and Android's Back still leaves it
-
-v119 drew that Back for every app alike (`showAppBack`, off the launcher
-only), so the same holds for the first page of Notes, of Files and of
-Photos: the notes list, the top of Files and the photo library or
-albums draw no Back while Alpha is the launcher, by `drawsAppBack` with
-`FirstPage`. A folder, an album, a note, Trash or a selection keeps its
-own way back. On the launcher these screens start under the phone's
-status bar, their first-page title starts 20px in where the Back would
-have been, and their header is 56px high, as v119 drew them.
 
 ### Returning to the prior communications app keeps Ask Alpha open at its current height
 

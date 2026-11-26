@@ -1,4 +1,4 @@
-// spec/app/shell/index.md, "On the launcher an app's first page draws no Back, and Android's Back still leaves it"
+// spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it"
 
 /**
  * On the launcher (`data-alpha-launcher`) an app screen starts under the phone's 44px status bar, or its inset when

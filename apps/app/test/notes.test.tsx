@@ -154,7 +154,7 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
   });
 
-  it("On the launcher the notes list draws no Back, a note keeps its own and Android's Back still leaves (spec/app/shell/index.md, \"On the launcher an app's first page draws no Back, and Android's Back still leaves it\")", async () => {
+  it("On the launcher the notes list draws no Back, a note keeps its own and Android's Back still leaves (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
     const world = { ...scene(), phone: true };
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
     const { alpha, runtime } = await openNotesFromHome(world);
