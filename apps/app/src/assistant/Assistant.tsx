@@ -22,7 +22,7 @@ import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effe
 import { browserFieldPull, focused as dockFocused, isOpen as dockOpen, pill as dockPill, sent as dockSent } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
-import { liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
+import { live as replyLive, liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
@@ -81,7 +81,7 @@ export interface AssistantProps {
   calendarReview?: ReactNode;
 }
 
-function turnOf(talking: Talking, label: string, writing: boolean): AssistantTurnNoteProps["status"] | undefined {
+function turnOf(talking: Talking, label: string, writing: boolean, live: boolean): AssistantTurnNoteProps["status"] | undefined {
   const { turn, check } = talking;
   if (turn.stopping) return "stopping";
   if (check === "Aborting" || talking.recheck.status === "Loading") return "checking";
@@ -90,8 +90,8 @@ function turnOf(talking: Talking, label: string, writing: boolean): AssistantTur
   if (check === "NotRecorded") return "neverArrived";
   if (check === "LookLater") return "lookLater";
   if (turn.send.outcome === "Recorded" || turn.send.outcome === "Sent") return "sending";
-  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": a reply with neither text shown nor a label still shows as replying.
-  if (turn.reply === "Streaming") return label === "" && writing ? undefined : "replying";
+  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": a reply still being written with neither text shown nor a label shows as replying.
+  if (turn.reply === "Streaming") return label !== "" || (!writing && live) ? "replying" : undefined;
   if (turn.reply === "Broken") return "cutOff";
   if (turn.reply === "Stopped") return "stopped";
   if (turn.send.outcome === "Unknown") return "unknown";
@@ -502,10 +502,12 @@ interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageAct
   open: boolean;
   interim: ReactNode;
   retry: () => void;
+  /** Whether the turn's reply is still being written: neither settled nor ended. */
+  writingNow: boolean;
 }
 
 function useAssistantTranscript({ runtime, board, seen, conversation, chats, writing, shell, free, canReadAloud,
-  messageActions, onPreview, open, interim, retry, calendarReview }: TranscriptOptions): AssistantTranscriptProps | undefined {
+  messageActions, onPreview, open, interim, retry, calendarReview, writingNow }: TranscriptOptions): AssistantTranscriptProps | undefined {
   const [talking, shown] = [conversation.state, chats.state];
   const calendar = useSyncExternalStore(asked.subscribe, asked.snapshot);
   const draftCards = useMessagingDrafts(runtime, shell);
@@ -565,7 +567,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const readEarlier = { type: "scroll", around: board.numbered(earlier ?? "") } as const;
   const readLater = { type: "scroll", around: board.numbered(later ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
-  const status = turnOf(talking, seen.label, replyWords !== "");
+  const status = turnOf(talking, seen.label, replyWords !== "", writingNow);
   const onOpenLink = messageActions?.openLink;
   const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
@@ -670,6 +672,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const transcript = useAssistantTranscript({
     runtime, board, seen, conversation, chats, writing, shell, free, messageActions, canReadAloud, open, interim,
     onPreview: canPreview ? preview : undefined, retry: () => type(board.lastSent), calendarReview,
+    writingNow: reply.state !== undefined && replyLive(reply.state),
   });
   const { mail, reviewed, attachMail, dismissMail } = useMailReview(runtime, board, composer, writing?.offeredAt, type, composerRef);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;

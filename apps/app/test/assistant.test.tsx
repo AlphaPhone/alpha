@@ -24,6 +24,7 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, seen, typeInto, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -213,6 +214,34 @@ async function settled(alpha: Awaited<ReturnType<typeof open>>["alpha"], check: 
   for (let turn = 0; turn < 2_000 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
   if (!check()) throw new Error(`did not settle: ${JSON.stringify(detail())}`);
 }
+
+// spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
+it("Hear a brief acknowledgment and still get the whole answer: the replying dots leave with the settled reply while the turn still finishes on an enrolled phone (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
+  const world = { ...scene(), phone: true, image: true };
+  const review = textReview(world.notes.owner, "camera-shot", { type: "camera_capture_photo" });
+  const gate = Promise.withResolvers<void>();
+  review.proposalsGate = gate.promise;
+  world.telephony.textReview = review;
+  const { alpha, runtime } = await openAssistantWithPreferences(world);
+  await until(alpha, alpha.runtime, Shell, (s) => s.image);
+  world.ask.nextReplyChunks = ["Here you go."];
+  world.ask.nextReplyProvisional = true;
+  world.ask.noStatus = true;
+  try {
+    write("Say something");
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled");
+    await vi.waitFor(() => expect(review.pendingReads).toBeGreaterThan(0));
+    const finishing = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+    expect(finishing.turn.reply).toBe("Streaming");
+    await vi.waitFor(() => expect(lines()).toEqual(["Say something", "Here you go."]));
+    expect(replying()).toBe(false);
+  } finally {
+    gate.resolve();
+  }
+  await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+});
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"
