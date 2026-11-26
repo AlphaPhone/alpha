@@ -340,8 +340,8 @@ pure def openTile(h: Home, view: S::View, shell: S::Shell, by: Actor): Moved =
 
 ### An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest
 
-The uncovered Home pane on a landscape phone with a coarse primary pointer
-can open one of Alpha's own apps. The same Shell route and layout must
+The uncovered Home pane on a landscape phone can open one of Alpha's own
+apps. The same Shell route and layout must
 still admit that tap when the app opens. An actual covering layer, voice,
 a protected Android Ask visit, Typing, Full, and the Apps drawer still
 own their input. Cards stay visible without receiving input in this

@@ -15,7 +15,7 @@ import { type Job, answer, contained, due, following, hearing, reacting, run, st
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { coarsePointer, landscapeHomeInput } from "../shell/canvas.vibe"
+import { landscapeHomeInput } from "../shell/canvas.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
@@ -170,7 +170,7 @@ effect function homeInput(beside: boolean) {
   const layers = try Layers.Machine
   const device = try Device
   return () => !Layers.pageInert(Effect.runSync(layers.get())) && Effect.runSync(device.showing())
-    && (!beside || landscapeHomeInput(Effect.runSync(canvas.get()), coarsePointer()))
+    && (!beside || landscapeHomeInput(Effect.runSync(canvas.get())))
 }
 
 // spec/app/home/index.md, "A favorite on bare Home or beside the landscape Ask sheet opens the installed app and leaves Ask where it is"

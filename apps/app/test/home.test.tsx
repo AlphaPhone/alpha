@@ -148,9 +148,9 @@ describe("Home on a phone", () => {
     expect([tiles(), localStorage.getItem(savedKey)]).toEqual([["view:Reminders", "view:Clock", "view:Notes"], chosen]);
   });
 
-  it("Opens an app or Apps beside the landscape Ask sheet (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\"; spec/app/shell/index.md, \"Apps can open beside the landscape Ask sheet and Close leaves Ask open\")", async () => {
+  it.each([false, true])("Opens an app or Apps beside the landscape Ask sheet with coarse pointer %s (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\"; spec/app/shell/index.md, \"Apps can open beside the landscape Ask sheet and Close leaves Ask open\")", async (coarse) => {
     const pointer = window.matchMedia("(pointer: coarse)");
-    Object.defineProperty(pointer, "matches", { configurable: true, value: true });
+    Object.defineProperty(pointer, "matches", { configurable: true, value: coarse });
     const originalMatch = window.matchMedia.bind(window);
     const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(pointer: coarse)" ? pointer : originalMatch(query));
     const width = Object.getOwnPropertyDescriptor(window, "innerWidth");

@@ -169,11 +169,12 @@ export function App({ alpha }: AppProps) {
   };
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
-  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarse;
+  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && (phone || coarse);
+  const nativeHomeSide = phone && side;
   const inboxLandscapeBar = !phone && showing === "Inbox" && state.assistant === "Bar" && state.textAsk.tag === "NoTextAsk"
     && canvas?.landscape === true && coarse;
   const fullScreen = state.assistant === "Full" && (phone || !side);
-  const sheetBeside = layers !== undefined && !inert && adjacentAskSheet(state, landscapeHomeInput(canvas, coarse));
+  const sheetBeside = layers !== undefined && !inert && adjacentAskSheet(state, landscapeHomeInput(canvas));
   const voiceOverHome = phone && side && canvas?.voice === true;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
@@ -195,7 +196,7 @@ export function App({ alpha }: AppProps) {
       onTouchEnd={touchEnded}
       onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
       style={frameStyle}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]", !phone && "sm:pointer-fine:max-w-103", side && "flex-row", nativeHomeSide && "gap-4", preview && "absolute m-0 rounded-panel")}
     >
       <div
         data-alpha-shell-page=""
@@ -204,7 +205,13 @@ export function App({ alpha }: AppProps) {
           const document = node?.ownerDocument.documentElement;
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
-        className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
+        className={cn(
+          "relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]",
+          showing !== undefined && "overflow-auto overscroll-contain",
+          strip && "overflow-hidden",
+          nativeHomeSide && "[--alpha-dock-overlap:0px]",
+          nativeHomeSide && !launcher && "[&_[data-alpha-apps-drawer]]:top-0",
+        )}
         inert={signingIn ? updating : inert || fullScreen || voiceOverHome}
       >
         {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
@@ -245,6 +252,11 @@ export function App({ alpha }: AppProps) {
             "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
             "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",
             "[&>[data-alpha-detent=full]]:inset-0",
+          ],
+          nativeHomeSide && [
+            "[&>[data-alpha-detent=bar]>[data-host-chrome]]:ml-0",
+            "[&>[data-alpha-detent]_[data-alpha-composer]]:min-h-[min(168px,28dvh)] [&>[data-alpha-detent]_[data-alpha-composer]]:rounded-none",
+            "[&>[data-alpha-detent]:not([data-alpha-detent=bar])]:h-full! [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:rounded-none [&>[data-alpha-detent]:not([data-alpha-detent=bar])]:shadow-none",
           ],
         )}
         inert={shellFailed || (layers !== undefined && assistantInert(layers))}

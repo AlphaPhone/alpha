@@ -13,7 +13,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
-import { coarsePointer, landscapeHomeInput, watchPrimaryPointer } from "../shell/canvas.vibe";
+import { landscapeHomeInput } from "../shell/canvas.vibe";
 import { feel } from "../shell/haptics.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
@@ -57,7 +57,6 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const shell = useShell(alpha.runtime);
   const canvas = useCanvas(alpha.runtime).state;
   const layers = useLayers(alpha.runtime).state;
-  const coarse = useSyncExternalStore(watchPrimaryPointer, coarsePointer, () => false);
   const drawer = useDrawer(runtime);
   const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
   const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
@@ -80,7 +79,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const notice = inline && inline.place === Home.noticeAt(h, s) ? inline.notice : undefined;
   const beginEditing = { type: "beginEditing", shell: s } as const;
   const mayEdit = !saving(h.tiles);
-  const landscapePhone = landscapeHomeInput(canvas, coarse);
+  const landscapePhone = landscapeHomeInput(canvas);
   const alongside = Home.besideHomeSheet(s, landscapePhone);
   const showingApps = s.drawer && Home.onPhone(h);
   const paired = showingApps && adjacentAskSheet(s, landscapePhone);
