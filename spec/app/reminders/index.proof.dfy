@@ -532,6 +532,36 @@ lemma expireUndo_ensures(s: Reminders, now: int)
   }
 }
 
+lemma settleUndo_ensures(s: Reminders)
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysDefaultListExists(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysEveryItemWellFormed(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysSelectedItemExists(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysHiddenExactlyWhileDeleteHeld(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysActiveCustomListExists(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysSmartCountsConsistent(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepDeleteOnlyOnExpire(s, "settleUndo", settleUndo(s).state, settleUndo(s).out))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepUndoRestoresExactState(s, "settleUndo", settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepDeleteListKeepsItemsValid(s, "settleUndo", settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepNoSentWriteAfterRestart(s, "settleUndo", settleUndo(s).state, settleUndo(s).out))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepRecurringCompleteAdvancesDue(s, "settleUndo", settleUndo(s).state))
+{
+  if inv(s) && canSettleUndo(s) {
+    var after := settleUndo(s).state;
+    if s.undoData.kind.UndoDelete? {
+      ItemsUniqueFromCounts(s.items);
+      var p := (it: ItemEntry) => (it.id != s.hiddenId);
+      ProofLib.FilterKeepsDistinctBy(p, s.items, (it: ItemEntry) => it.id);
+      ProofLib.FilterSubset(p, s.items);
+      ItemsCountsFromUnique(after.items);
+      if s.selectedId != 0 {
+        var sel :| sel in s.items && sel.id == s.selectedId;
+        ProofLib.FilterMember(p, s.items, sel);
+      }
+    }
+    SmartCountsHold(after);
+  }
+}
+
 lemma ownerChanged_ensures(s: Reminders, owner: int)
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> alwaysDefaultListExists(ownerChanged(s, owner)))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> alwaysEveryItemWellFormed(ownerChanged(s, owner)))

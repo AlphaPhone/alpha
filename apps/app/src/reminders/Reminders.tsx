@@ -624,7 +624,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   }
 
   function handleToggleComplete(id: string) {
-    void runtime.runPromise(toggleReminderComplete(id));
+    void runtime.runPromise(toggleReminderComplete(id, remindersStore.findItem(id)?.revision));
   }
 
   function handleToggleFlag(id: string) {
@@ -632,7 +632,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   }
 
   function handleDeleteItem(id: string) {
-    void runtime.runPromise(deleteReminderItem(id));
+    void runtime.runPromise(deleteReminderItem(id, remindersStore.findItem(id)?.revision));
   }
 
   function handleQuickAdd(title: string, dueDate: string | null) {

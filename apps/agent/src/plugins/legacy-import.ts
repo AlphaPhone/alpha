@@ -1,54 +1,35 @@
-// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"
+// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"; spec/app/platform/adoption.md, "The earlier store is brought in only for the account that signed in to the earlier Alpha"; spec/app/platform/adoption.md, "The earlier store is brought in once, into an empty store, in at most three launches"; spec/app/platform/adoption.md, "Within a launch, a failed bringing-in is tried three times, one and then four seconds apart"; spec/app/platform/adoption.md, "No copy of the earlier store is written to disk: it is read into memory, and an earlier build's copies are removed at start"; spec/app/platform/adoption.md, "What is brought in never acts on its own: every task is paused, a task past its time is marked missed, and earlier grants are left out"
+import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import {
+  type Bringing,
+  bringingOf,
+  broughtTaskOf,
+  isEarlierOwner,
+  maxEarlierStoreBytes,
+  maxStoppedLaunches,
+  retryDelayMs,
+  startOf,
+  triesPerLaunch,
+} from "../../gen/app__platform__adoption.ts";
 
 /** Cache key written atomically inside the target store once import succeeds. */
 export const LEGACY_IMPORT_MARKER_KEY = "legacy-v121-import:v1";
 
+/** File in the account's state directory that counts attempts and records the last outcome. */
+export const LEGACY_IMPORT_RECORD_FILE = "earlier-import.json";
+
+/** Name prefix of the plaintext store copies a build of 89bfcc1a8 left in the state directory. */
+const EARLIER_SCRATCH_PREFIX = ".earlier-import-";
+
+/** Tag of every task brought in; no scheduler of eliza's reads it. */
+export const BROUGHT_TASK_TAG = "earlier-import";
+
+const BROUGHT_TASK_NAME_PREFIX = "earlier-import:";
+
 const BATCH_SIZE = 200;
-const EMBEDDING_COLUMNS = [
-  "dim_384",
-  "dim_512",
-  "dim_768",
-  "dim_1024",
-  "dim_1536",
-  "dim_2048",
-  "dim_3072",
-  "embedding",
-] as const;
-
-const SECRET_KEY_TOKENS = [
-  "auth",
-  "token",
-  "secret",
-  "credential",
-  "password",
-  "passwd",
-  "passphrase",
-  "session",
-  "oauth",
-  "jwt",
-  "bearer",
-  "cookie",
-  "apikey",
-  "api_key",
-  "api-key",
-  "private_key",
-  "private-key",
-  "privatekey",
-  "signing_key",
-  "signing-key",
-  "signingkey",
-  "refresh",
-  "vault",
-  "custody",
-  "pairing",
-  "bootstrap",
-  "jti",
-] as const;
-
 interface SqlQueryable {
   query<Row = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<{ readonly rows: readonly Row[] }>;
 }
@@ -58,8 +39,14 @@ export interface EarlierSqlClient extends SqlQueryable {
   close(): Promise<void>;
 }
 
-/** Opens a copied earlier PGlite directory for read-only inspection. */
-export type LegacyStoreOpener = (dataDir: string) => Promise<EarlierSqlClient>;
+/** Opens an in-memory image of the earlier PGlite directory, never the directory itself. */
+export type LegacyStoreOpener = (image: Blob) => Promise<EarlierSqlClient>;
+
+/** An account named by a user and an organization. */
+export interface CloudAccount {
+  readonly userId: string;
+  readonly organizationId: string;
+}
 
 interface TargetStoreAdapter {
   getConnection(): Promise<unknown>;
@@ -79,25 +66,61 @@ interface LegacyImportCounts {
   readonly tasks: number;
   readonly relationships: number;
   readonly components: number;
-  readonly cache: number;
 }
 
+type SkipReason =
+  | "not_the_owner"
+  | "no_earlier_store"
+  | "already_imported"
+  | "store_in_use"
+  | "gave_up"
+  | "held_after_stopped_launches"
+  | "no_adapter"
+  | "multi_agent_ambiguous";
+
 type LegacyImportResult =
-  | { readonly status: "skipped"; readonly reason: "no_source_dir" | "source_missing" | "no_adapter" | "already_imported" | "target_not_empty" | "multi_agent_ambiguous" }
+  | { readonly status: "skipped"; readonly reason: SkipReason }
   | { readonly status: "imported"; readonly sourceAgentId: string | null; readonly targetAgentId: string; readonly counts: LegacyImportCounts }
   | { readonly status: "failed"; readonly error: string };
 
 interface LegacyImportOptions {
   readonly legacyStoreDir: string | undefined;
-  readonly stateDirectory?: string;
+  readonly owner: CloudAccount | undefined;
+  readonly account: CloudAccount | undefined;
+  readonly stateDirectory: string;
   readonly agentId: string;
   readonly conversationWorldId?: string;
-  readonly embeddingDimensions?: number;
   readonly adapter: TargetStoreAdapter | undefined;
   readonly openLegacyStore: LegacyStoreOpener;
   readonly logger?: ImportLogger;
   readonly now?: () => number;
+  readonly wait?: (ms: number) => Promise<void>;
 }
+
+interface RecordCounts {
+  readonly attempts: number;
+  readonly stopped: number;
+  readonly lastStopAt: number;
+}
+
+interface ImportRecord extends RecordCounts {
+  readonly startedAt: number | null;
+  readonly outcome: LegacyImportResult | { readonly status: "started" };
+  readonly at: number;
+}
+
+interface ReadRecord extends RecordCounts {
+  readonly startedAt: number | null;
+  readonly settled: boolean;
+}
+
+const skipOf: Record<Exclude<Bringing, "BringIn">, SkipReason> = {
+  NotTheOwner: "not_the_owner",
+  NoEarlierStore: "no_earlier_store",
+  AlreadyBroughtIn: "already_imported",
+  StoreInUse: "store_in_use",
+  GaveUp: "gave_up",
+};
 
 interface DeviceRecordWrite {
   readonly key: string;
@@ -195,14 +218,6 @@ interface EarlierComponentRow {
   readonly created_at: unknown;
 }
 
-interface EarlierCacheRow {
-  readonly key: string;
-  readonly agent_id: string | null;
-  readonly value: unknown;
-  readonly created_at: unknown;
-  readonly expires_at: unknown;
-}
-
 interface PreparedImport {
   readonly sourceAgentId: string | null;
   readonly worlds: readonly DeviceRecordWrite[];
@@ -213,7 +228,6 @@ interface PreparedImport {
   readonly tasks: readonly DeviceRecordWrite[];
   readonly relationships: readonly DeviceRecordWrite[];
   readonly components: readonly DeviceRecordWrite[];
-  readonly cache: readonly DeviceRecordWrite[];
 }
 
 /** Strips NUL code units and lone UTF-16 surrogates while preserving valid surrogate pairs. */
@@ -252,16 +266,6 @@ export function sanitizeJsonValue(value: unknown): unknown {
     return cleaned;
   }
   return null;
-}
-
-/** Returns true when a cache key names auth, token, secret, session, or credential material. */
-export function isSecretOrAuthCacheKey(key: string): boolean {
-  const lower = key.trim().toLowerCase();
-  if (lower === "" || lower === LEGACY_IMPORT_MARKER_KEY) return true;
-  for (const token of SECRET_KEY_TOKENS) {
-    if (lower.includes(token)) return true;
-  }
-  return false;
 }
 
 function asPlainObject(value: unknown): Record<string, unknown> {
@@ -303,20 +307,6 @@ function toStringArray(value: unknown): string[] {
   return result;
 }
 
-function parseVectorText(raw: unknown): number[] | undefined {
-  if (Array.isArray(raw)) {
-    const numbers = raw.map((item) => Number(item));
-    return numbers.length > 0 && numbers.every(Number.isFinite) ? numbers : undefined;
-  }
-  if (typeof raw !== "string") return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return undefined;
-  const body = trimmed.slice(1, -1).trim();
-  if (body === "") return undefined;
-  const numbers = body.split(",").map((part) => Number(part.trim()));
-  return numbers.length > 0 && numbers.every(Number.isFinite) ? numbers : undefined;
-}
-
 function normalizeUserState(value: string | null): "FOLLOWED" | "MUTED" | null {
   return value === "FOLLOWED" || value === "MUTED" ? value : null;
 }
@@ -334,31 +324,141 @@ function isTargetAdapter(value: unknown): value is TargetStoreAdapter {
     && typeof (value as TargetStoreAdapter).transaction === "function";
 }
 
-async function copyDirectoryWithoutMutatingSource(sourceDir: string, destDir: string, isRoot: boolean): Promise<void> {
-  await fs.mkdir(destDir, { recursive: true, mode: 0o700 });
-  await fs.chmod(destDir, 0o700);
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+const encoder = new TextEncoder();
+
+function tarHeader(name: string, size: number, type: "0" | "5"): Uint8Array<ArrayBuffer> {
+  const header = new Uint8Array(512);
+  const put = (offset: number, length: number, text: string) => {
+    header.set(encoder.encode(text).subarray(0, length), offset);
+  };
+  const cut = encoder.encode(name).length > 100 ? name.lastIndexOf("/", 155) : -1;
+  if (cut > 0 && encoder.encode(name.slice(cut + 1)).length > 100) throw new Error("An earlier store path is too long to read");
+  put(0, 100, cut > 0 ? name.slice(cut + 1) : name);
+  put(100, 8, type === "5" ? "0000755\0" : "0000644\0");
+  put(108, 8, "0000000\0");
+  put(116, 8, "0000000\0");
+  put(124, 12, `${size.toString(8).padStart(11, "0")}\0`);
+  put(136, 12, "00000000000\0");
+  put(148, 8, "        ");
+  put(156, 1, type);
+  put(257, 6, "ustar\0");
+  put(263, 2, "00");
+  if (cut > 0) put(345, 155, name.slice(0, cut));
+  const sum = header.reduce((total, byte) => total + byte, 0);
+  put(148, 8, `${sum.toString(8).padStart(6, "0")}\0 `);
+  return header;
+}
+
+interface StoreEntry {
+  readonly name: string;
+  readonly full: string;
+  readonly kind: "0" | "5";
+}
+
+async function listStoreEntries(directory: string, relative: string, into: StoreEntry[]): Promise<number> {
+  const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  let bytes = 0;
   for (const entry of entries) {
-    if (isRoot && entry.name === "postmaster.pid") continue;
-    if (entry.isSymbolicLink()) continue;
-    const srcPath = path.join(sourceDir, entry.name);
-    const dstPath = path.join(destDir, entry.name);
+    const name = relative === "" ? entry.name : `${relative}/${entry.name}`;
+    if (name === "postmaster.pid") continue;
+    const full = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      await copyDirectoryWithoutMutatingSource(srcPath, dstPath, false);
+      into.push({ name, full, kind: "5" });
+      bytes += await listStoreEntries(full, name, into);
     } else if (entry.isFile()) {
-      await fs.copyFile(srcPath, dstPath);
-      await fs.chmod(dstPath, 0o600);
-    } else {
-      const stat = await fs.lstat(srcPath);
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) {
-        await copyDirectoryWithoutMutatingSource(srcPath, dstPath, false);
-      } else if (stat.isFile()) {
-        await fs.copyFile(srcPath, dstPath);
-        await fs.chmod(dstPath, 0o600);
-      }
+      into.push({ name, full, kind: "0" });
+      bytes += (await fs.lstat(full)).size;
     }
   }
+  return bytes;
+}
+
+/** Reads the earlier store's files, never opening or writing them, into a PGlite image held in memory; a store over the limit is not read. */
+async function readStoreImage(sourceDir: string): Promise<{ readonly kind: "image"; readonly image: Blob } | { readonly kind: "too_large" }> {
+  const entries: StoreEntry[] = [];
+  if (await listStoreEntries(sourceDir, "", entries) > maxEarlierStoreBytes) return { kind: "too_large" };
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let bytes = 0;
+  for (const entry of entries) {
+    if (entry.kind === "5") {
+      chunks.push(tarHeader(`/${entry.name}`, 0, "5"));
+      continue;
+    }
+    const data = new Uint8Array(await fs.readFile(entry.full));
+    bytes += data.byteLength;
+    if (bytes > maxEarlierStoreBytes) return { kind: "too_large" };
+    chunks.push(tarHeader(`/${entry.name}`, data.byteLength, "0"), data);
+    const padding = (512 - (data.byteLength % 512)) % 512;
+    if (padding > 0) chunks.push(new Uint8Array(padding));
+  }
+  chunks.push(new Uint8Array(1024));
+  return { kind: "image", image: new Blob(chunks) };
+}
+
+/** True only for `<files>/.eliza/workspace/.elizadb` whose every directory is a real one: never the vault. */
+async function isEarlierWorkspaceStore(sourceDir: string | undefined): Promise<boolean> {
+  const dir = sourceDir?.trim();
+  if (!dir || !path.isAbsolute(dir) || dir.includes("\0")) return false;
+  const workspace = path.dirname(dir);
+  const eliza = path.dirname(workspace);
+  if (path.basename(dir) !== ".elizadb" || path.basename(workspace) !== "workspace" || path.basename(eliza) !== ".eliza") return false;
+  for (const step of [eliza, workspace, dir]) {
+    const stat = await fs.lstat(step).catch(() => undefined);
+    if (stat === undefined || !stat.isDirectory()) return false;
+  }
+  return true;
+}
+
+/** Removes the plaintext copies a build of 89bfcc1a8 left in the state directory; safe to run on every start. */
+async function sweepEarlierScratch(stateDirectory: string): Promise<void> {
+  const entries = await fs.readdir(stateDirectory).catch(() => [] as string[]);
+  for (const name of entries) {
+    if (name.startsWith(EARLIER_SCRATCH_PREFIX)) {
+      await fs.rm(path.join(stateDirectory, name), { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+}
+
+async function readImportRecord(stateDirectory: string): Promise<ReadRecord> {
+  const text = await fs.readFile(path.join(stateDirectory, LEGACY_IMPORT_RECORD_FILE), "utf8").catch(() => undefined);
+  const parsed = asPlainObject(text === undefined ? {} : parseJsonColumn(text));
+  const count = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0);
+  const outcome = asPlainObject(parsed.outcome);
+  return {
+    attempts: count(parsed.attempts),
+    stopped: count(parsed.stopped),
+    lastStopAt: count(parsed.lastStopAt),
+    startedAt: typeof parsed.startedAt === "number" && Number.isSafeInteger(parsed.startedAt) ? parsed.startedAt : null,
+    settled: outcome.status === "imported" || (outcome.status === "skipped" && outcome.reason === "gave_up"),
+  };
+}
+
+async function writeImportRecord(stateDirectory: string, record: ImportRecord): Promise<void> {
+  await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  const target = path.join(stateDirectory, LEGACY_IMPORT_RECORD_FILE);
+  const staged = `${target}.next`;
+  await fs.writeFile(staged, JSON.stringify(record), { mode: 0o600 });
+  await fs.rename(staged, target);
+}
+
+function sameAccount(owner: CloudAccount | undefined, account: CloudAccount | undefined): boolean {
+  if (owner === undefined || account === undefined) return false;
+  return isEarlierOwner(
+    owner.userId.toLowerCase(),
+    owner.organizationId.toLowerCase(),
+    account.userId.toLowerCase(),
+    account.organizationId.toLowerCase(),
+  );
+}
+
+/** Parses the phone's `ALPHA_LEGACY_OWNER` value: a user and an organization, or nothing. */
+export function parseEarlierOwner(value: string | undefined): CloudAccount | undefined {
+  if (value === undefined) return undefined;
+  const parsed = asPlainObject(parseJsonColumn(value));
+  const { userId, organizationId } = parsed;
+  return typeof userId === "string" && userId.trim() !== "" && typeof organizationId === "string" && organizationId.trim() !== ""
+    ? { userId, organizationId }
+    : undefined;
 }
 
 async function tableColumns(db: SqlQueryable, tableName: string): Promise<Set<string>> {
@@ -397,31 +497,6 @@ async function resolveSingleSourceAgentId(db: SqlQueryable): Promise<{ readonly 
     return { kind: "ok", agentId: rows.rows[0]?.id ?? null };
   }
   return { kind: "ok", agentId: null };
-}
-
-async function readEmbeddingsByMemoryId(db: SqlQueryable, targetDimensions: number): Promise<Map<string, number[]>> {
-  const vectors = new Map<string, number[]>();
-  if (targetDimensions <= 0 || !await tableExists(db, "embeddings")) return vectors;
-  const cols = await tableColumns(db, "embeddings");
-  if (!cols.has("memory_id")) return vectors;
-  const presentDimCols = EMBEDDING_COLUMNS.filter((col) => cols.has(col));
-  if (presentDimCols.length === 0) return vectors;
-  const selectExprs = presentDimCols.map((col) => `"${col}"::text AS "${col}"`).join(", ");
-  const rows = await db.query<Record<string, unknown>>(
-    `SELECT memory_id::text AS memory_id, ${selectExprs} FROM embeddings WHERE memory_id IS NOT NULL`,
-  );
-  for (const row of rows.rows) {
-    const memoryId = typeof row.memory_id === "string" ? row.memory_id : "";
-    if (!memoryId) continue;
-    for (const col of presentDimCols) {
-      const parsed = parseVectorText(row[col]);
-      if (parsed !== undefined && parsed.length === targetDimensions) {
-        vectors.set(memoryId, parsed);
-        break;
-      }
-    }
-  }
-  return vectors;
 }
 
 function isConversationRoom(row: EarlierRoomRow, metadata: Record<string, unknown>): boolean {
@@ -470,7 +545,10 @@ function worldRecordFromRow(row: EarlierWorldRow, targetAgentId: string, nowMs: 
     name: sanitizeKeepableString(row.name ?? ""),
   };
   if (row.message_server_id) data.messageServerId = row.message_server_id;
-  if (row.metadata !== null && row.metadata !== undefined) data.metadata = sanitizeJsonValue(parseJsonColumn(row.metadata));
+  if (row.metadata !== null && row.metadata !== undefined) {
+    const { roles: _roles, ownership: _ownership, ...kept } = asPlainObject(sanitizeJsonValue(parseJsonColumn(row.metadata)));
+    data.metadata = kept;
+  }
   return { key: row.id, data, createdAt, tableName: null };
 }
 
@@ -650,6 +728,20 @@ async function readEarlierParticipants(
   return participants;
 }
 
+function earlierTaskTime(tags: readonly string[], metadata: Record<string, unknown>, lastAt: number): number | undefined {
+  const trigger = asPlainObject(metadata.trigger);
+  for (const candidate of [metadata.dueAt, metadata.scheduledAt, metadata.nextRunAt, trigger.atIso]) {
+    if (candidate === undefined || candidate === null) continue;
+    const at = toEpochMs(candidate, Number.NaN);
+    if (Number.isFinite(at)) return at;
+  }
+  const interval = metadata.updateInterval;
+  if (tags.includes("repeat") && typeof interval === "number" && Number.isFinite(interval) && interval > 0) {
+    return toEpochMs(metadata.lastRunAt ?? metadata.updatedAt, lastAt) + interval;
+  }
+  return undefined;
+}
+
 async function readEarlierTasks(
   db: SqlQueryable,
   targetAgentId: string,
@@ -673,19 +765,33 @@ async function readEarlierTasks(
   for (const row of rows.rows) {
     if (!row.id) continue;
     const createdAt = toEpochMs(row.created_at, nowMs);
+    const name = sanitizeKeepableString(row.name ?? "");
+    const tags = toStringArray(row.tags);
+    const metadata = asPlainObject(sanitizeJsonValue(parseJsonColumn(row.metadata ?? {})));
+    const updatedAt = row.updated_at !== null && row.updated_at !== undefined ? toEpochMs(row.updated_at, createdAt) : undefined;
+    const dueAt = earlierTaskTime(tags, metadata, updatedAt ?? createdAt);
     const data: Record<string, unknown> = {
       id: row.id,
-      name: sanitizeKeepableString(row.name ?? ""),
+      name: `${BROUGHT_TASK_NAME_PREFIX}${name}`,
       agentId: targetAgentId,
-      tags: toStringArray(row.tags),
-      metadata: asPlainObject(sanitizeJsonValue(parseJsonColumn(row.metadata ?? {}))),
+      tags: [BROUGHT_TASK_TAG],
+      metadata: {
+        paused: true,
+        earlierImport: {
+          name,
+          tags,
+          metadata,
+          ...(dueAt === undefined ? {} : { dueAt }),
+          state: broughtTaskOf(dueAt !== undefined, dueAt ?? 0, nowMs),
+        },
+      },
       createdAt,
     };
     if (row.description !== null && row.description !== undefined) data.description = sanitizeKeepableString(row.description);
     if (row.room_id) data.roomId = row.room_id;
     if (row.world_id) data.worldId = row.world_id;
     if (row.entity_id) data.entityId = remapEntity(row.entity_id) ?? row.entity_id;
-    if (row.updated_at !== null && row.updated_at !== undefined) data.updatedAt = toEpochMs(row.updated_at, createdAt);
+    if (updatedAt !== undefined) data.updatedAt = updatedAt;
     tasks.push({ key: row.id, data, createdAt, tableName: null });
   }
   return tasks;
@@ -762,35 +868,10 @@ async function readEarlierComponents(
   return components;
 }
 
-async function readEarlierCache(db: SqlQueryable, nowMs: number): Promise<DeviceRecordWrite[]> {
-  const cache: DeviceRecordWrite[] = [];
-  if (!await tableExists(db, "cache")) return cache;
-  const cols = await tableColumns(db, "cache");
-  const createdExpr = cols.has("created_at") ? "created_at" : "NULL";
-  const expiresExpr = cols.has("expires_at") ? "expires_at" : "NULL";
-  const rows = await db.query<EarlierCacheRow>(
-    `SELECT key, agent_id::text AS agent_id, value, ${createdExpr} AS created_at, ${expiresExpr} AS expires_at FROM cache`,
-  );
-  for (const row of rows.rows) {
-    if (typeof row.key !== "string" || isSecretOrAuthCacheKey(row.key)) continue;
-    if (row.expires_at !== null && row.expires_at !== undefined && toEpochMs(row.expires_at, nowMs + 1) <= nowMs) continue;
-    const key = sanitizeKeepableString(row.key);
-    if (isSecretOrAuthCacheKey(key)) continue;
-    cache.push({
-      key,
-      data: { value: sanitizeJsonValue(parseJsonColumn(row.value)) },
-      createdAt: toEpochMs(row.created_at, nowMs),
-      tableName: null,
-    });
-  }
-  return cache;
-}
-
 async function readEarlierRows(
   db: SqlQueryable,
   targetAgentId: string,
   conversationWorldId: string | undefined,
-  targetDimensions: number,
   nowMs: number,
 ): Promise<{ readonly kind: "ok"; readonly prepared: PreparedImport } | { readonly kind: "ambiguous" }> {
   const resolved = await resolveSingleSourceAgentId(db);
@@ -804,7 +885,6 @@ async function readEarlierRows(
   const { rooms, remappedRoomWorlds } = await readEarlierRooms(db, targetAgentId, conversationWorldId, latestMessageByRoom, nowMs);
   const entities = await readEarlierEntities(db, targetAgentId, remapEntity, nowMs);
   const participants = await readEarlierParticipants(db, remapEntity, nowMs);
-  const embeddingsByMemoryId = await readEmbeddingsByMemoryId(db, targetDimensions);
   const memories: DeviceRecordWrite[] = rawMemories.map((row) => {
     const tableName = typeof row.type === "string" && row.type.trim() !== "" ? sanitizeKeepableString(row.type.trim()) : "memories";
     const createdAt = toEpochMs(row.created_at, nowMs);
@@ -813,7 +893,6 @@ async function readEarlierRows(
     const worldId = remap !== undefined && (row.world_id === null || row.world_id === remap.from)
       ? remap.to
       : row.world_id ?? undefined;
-    const embedding = embeddingsByMemoryId.get(row.id);
     const data: Record<string, unknown> = {
       id: row.id,
       agentId: targetAgentId,
@@ -825,39 +904,31 @@ async function readEarlierRows(
     };
     if (row.room_id) data.roomId = row.room_id;
     if (worldId) data.worldId = worldId;
-    if (embedding !== undefined) data.embedding = embedding;
     return { key: row.id, data, createdAt, tableName };
   });
   const tasks = await readEarlierTasks(db, targetAgentId, remapEntity, nowMs);
   const relationships = await readEarlierRelationships(db, targetAgentId, remapEntity, nowMs);
   const components = await readEarlierComponents(db, targetAgentId, remapEntity, nowMs);
-  const cache = await readEarlierCache(db, nowMs);
 
   return {
     kind: "ok",
-    prepared: { sourceAgentId, worlds, rooms, entities, participants, memories, tasks, relationships, components, cache },
+    prepared: { sourceAgentId, worlds, rooms, entities, participants, memories, tasks, relationships, components },
   };
 }
 
-async function readTargetEligibility(conn: SqlQueryable, fallbackDimensions: number): Promise<{
+/** The store is in use once it holds a memory, a room, or a world other than the conversation world the host makes at every start. */
+async function readTargetEligibility(conn: SqlQueryable, conversationWorldId: string | undefined): Promise<{
   readonly marked: boolean;
   readonly populated: boolean;
-  readonly embeddingDimensions: number;
 }> {
   const status = await conn.query<{ readonly marked: boolean; readonly populated: boolean }>(
     `SELECT
        EXISTS(SELECT 1 FROM device_records WHERE collection = 'cache' AND key = $1) AS marked,
-       EXISTS(SELECT 1 FROM device_records WHERE collection IN ('memories', 'rooms', 'worlds')) AS populated`,
-    [LEGACY_IMPORT_MARKER_KEY],
+       EXISTS(SELECT 1 FROM device_records WHERE collection IN ('memories', 'rooms')
+         OR (collection = 'worlds' AND key IS DISTINCT FROM $2)) AS populated`,
+    [LEGACY_IMPORT_MARKER_KEY, conversationWorldId ?? null],
   );
-  const owner = await conn.query<{ readonly embedding_dimensions: number }>(
-    "SELECT embedding_dimensions FROM device_owner WHERE singleton",
-  );
-  return {
-    marked: status.rows[0]?.marked === true,
-    populated: status.rows[0]?.populated === true,
-    embeddingDimensions: owner.rows[0]?.embedding_dimensions ?? fallbackDimensions,
-  };
+  return { marked: status.rows[0]?.marked === true, populated: status.rows[0]?.populated === true };
 }
 
 async function writeBatch(conn: SqlQueryable, collection: string, rows: readonly DeviceRecordWrite[]): Promise<void> {
@@ -874,53 +945,93 @@ async function writeBatch(conn: SqlQueryable, collection: string, rows: readonly
 }
 
 /**
- * One-shot importer from an archived earlier PGlite store into a fresh v4 device store.
- * Copies the source directory to a private 0700 temp directory before opening (never mutating
- * the archive), writes all migrated records plus the idempotency marker in one transaction,
- * and logs a warning without failing boot on any unreadable or corrupt earlier database.
+ * Brings the earlier v121 store into this account's empty device store, once, only for its owner.
+ * Reads the store's files into an in-memory image (never opening or writing them), writes every
+ * record plus the marker in one transaction, records the attempt and outcome in the state
+ * directory, and never fails boot.
  */
 export async function importLegacyStore(options: LegacyImportOptions): Promise<LegacyImportResult> {
-  const sourceDir = options.legacyStoreDir?.trim();
-  if (!sourceDir || !path.isAbsolute(sourceDir) || sourceDir.includes("\0")) {
-    return { status: "skipped", reason: "no_source_dir" };
-  }
-  if (!isTargetAdapter(options.adapter)) {
-    return { status: "skipped", reason: "no_adapter" };
-  }
+  await sweepEarlierScratch(options.stateDirectory);
+  if (options.legacyStoreDir === undefined) return { status: "skipped", reason: skipOf.NoEarlierStore };
   const nowMs = (options.now ?? Date.now)();
-  let tempRoot: string | undefined;
-  let sourceClient: EarlierSqlClient | undefined;
+  const record = await readImportRecord(options.stateDirectory);
+  const counts: RecordCounts = record.startedAt === null
+    ? record
+    : { attempts: record.attempts, stopped: record.stopped + 1, lastStopAt: record.startedAt };
+  const { result, kept } = sameAccount(options.owner, options.account)
+    ? await decideAndBringIn(options, nowMs, counts)
+    : { result: { status: "skipped", reason: skipOf.NotTheOwner } as const, kept: counts };
+  if (result.status === "imported" || record.startedAt !== null || !(record.settled || isSettledByAnEarlierLaunch(result))) {
+    await writeImportRecord(options.stateDirectory, { ...kept, startedAt: null, outcome: result, at: nowMs }).catch(() => undefined);
+  }
+  if (result.status !== "imported") {
+    options.logger?.warn({ src: "alpha:earlier-import", outcome: result }, "The earlier store was not brought in");
+  }
+  return result;
+}
+
+function isSettledByAnEarlierLaunch(result: LegacyImportResult): boolean {
+  return result.status === "skipped" && (result.reason === "already_imported" || result.reason === "gave_up");
+}
+
+function failureOf(error: unknown): string {
+  if (!(error instanceof Error)) return "Error";
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${error.name}:${code}` : error.name;
+}
+
+async function decideAndBringIn(
+  options: LegacyImportOptions,
+  nowMs: number,
+  counts: RecordCounts,
+): Promise<{ readonly result: LegacyImportResult; readonly kept: RecordCounts }> {
+  const skipped = (reason: SkipReason) => ({ result: { status: "skipped", reason } as const, kept: counts });
+  const storeHeld = await isEarlierWorkspaceStore(options.legacyStoreDir);
+  if (!storeHeld) return skipped(skipOf.NoEarlierStore);
+  if (!isTargetAdapter(options.adapter)) return skipped("no_adapter");
+  const adapter = options.adapter;
+  const sourceDir = options.legacyStoreDir?.trim() ?? "";
   try {
-    const sourceStat = await fs.lstat(sourceDir).catch(() => undefined);
-    if (sourceStat === undefined || sourceStat.isSymbolicLink() || !sourceStat.isDirectory()) {
-      return { status: "skipped", reason: "source_missing" };
+    const rawConn = await adapter.getConnection();
+    if (!isSqlQueryable(rawConn)) return skipped("no_adapter");
+    const preflight = await readTargetEligibility(rawConn, options.conversationWorldId);
+    const bringing = bringingOf(true, storeHeld, preflight.marked, preflight.populated, counts.attempts);
+    if (bringing !== "BringIn") return skipped(skipOf[bringing]);
+    if (startOf(counts.stopped, nowMs - counts.lastStopAt) === "HeldForADay") return skipped("held_after_stopped_launches");
+    const started: RecordCounts = counts.stopped >= maxStoppedLaunches ? { ...counts, stopped: 0 } : counts;
+    await writeImportRecord(options.stateDirectory, { ...started, startedAt: nowMs, outcome: { status: "started" }, at: nowMs });
+    const finished: RecordCounts = { ...started, attempts: started.attempts + 1, stopped: 0 };
+    const wait = options.wait ?? ((ms: number) => Effect.runPromise(Effect.sleep(ms)));
+    for (let failures = 1; ; failures += 1) {
+      try {
+        return { result: await bringIn(options, adapter, sourceDir, nowMs), kept: finished };
+      } catch (error) {
+        if (failures >= triesPerLaunch) return { result: { status: "failed", error: failureOf(error) }, kept: finished };
+        await wait(retryDelayMs(failures));
+      }
     }
-    const rawConn = await options.adapter.getConnection();
-    if (!isSqlQueryable(rawConn)) return { status: "skipped", reason: "no_adapter" };
-    const preflight = await readTargetEligibility(rawConn, options.embeddingDimensions ?? 0);
-    if (preflight.marked) return { status: "skipped", reason: "already_imported" };
-    if (preflight.populated) return { status: "skipped", reason: "target_not_empty" };
+  } catch (error) {
+    return { result: { status: "failed", error: failureOf(error) }, kept: counts };
+  }
+}
 
-    const tempBase = options.stateDirectory && path.isAbsolute(options.stateDirectory) ? options.stateDirectory : os.tmpdir();
-    await fs.mkdir(tempBase, { recursive: true, mode: 0o700 });
-    tempRoot = await fs.mkdtemp(path.join(tempBase, ".earlier-import-"));
-    await fs.chmod(tempRoot, 0o700);
-    const tempDbDir = path.join(tempRoot, "db");
-    await copyDirectoryWithoutMutatingSource(sourceDir, tempDbDir, true);
-    await fs.rm(path.join(tempDbDir, "postmaster.pid"), { force: true });
+/** Opens the earlier database from its image and lets the image go, so only the open database stays in memory. */
+async function openEarlierImage(options: LegacyImportOptions, sourceDir: string): Promise<EarlierSqlClient | "too_large"> {
+  const read = await readStoreImage(sourceDir);
+  return read.kind === "too_large" ? "too_large" : options.openLegacyStore(read.image);
+}
 
-    sourceClient = await options.openLegacyStore(tempDbDir);
-    const extracted = await readEarlierRows(
-      sourceClient,
-      options.agentId,
-      options.conversationWorldId,
-      preflight.embeddingDimensions,
-      nowMs,
-    );
-    if (extracted.kind === "ambiguous") {
-      options.logger?.warn({ src: "alpha:earlier-import" }, "Skipped earlier store import because multiple agent records were present");
-      return { status: "skipped", reason: "multi_agent_ambiguous" };
-    }
+async function bringIn(
+  options: LegacyImportOptions,
+  adapter: TargetStoreAdapter,
+  sourceDir: string,
+  nowMs: number,
+): Promise<LegacyImportResult> {
+  const sourceClient = await openEarlierImage(options, sourceDir);
+  if (sourceClient === "too_large") return { status: "failed", error: "source_too_large" };
+  try {
+    const extracted = await readEarlierRows(sourceClient, options.agentId, options.conversationWorldId, nowMs);
+    if (extracted.kind === "ambiguous") return { status: "skipped", reason: "multi_agent_ambiguous" };
     const { prepared } = extracted;
     const counts: LegacyImportCounts = {
       worlds: prepared.worlds.length,
@@ -931,30 +1042,19 @@ export async function importLegacyStore(options: LegacyImportOptions): Promise<L
       tasks: prepared.tasks.length,
       relationships: prepared.relationships.length,
       components: prepared.components.length,
-      cache: prepared.cache.length,
     };
-
     const marker: DeviceRecordWrite = {
       key: LEGACY_IMPORT_MARKER_KEY,
-      data: {
-        value: {
-          version: 1,
-          importedAt: nowMs,
-          sourceAgentId: prepared.sourceAgentId,
-          targetAgentId: options.agentId,
-          counts,
-        },
-      },
+      data: { value: { version: 2, importedAt: nowMs, sourceAgentId: prepared.sourceAgentId, targetAgentId: options.agentId, counts } },
       createdAt: nowMs,
       tableName: null,
     };
-
-    const outcome = await options.adapter.transaction(async (tx): Promise<LegacyImportResult> => {
+    return await adapter.transaction(async (tx): Promise<LegacyImportResult> => {
       const txConn = await tx.getConnection();
       if (!isSqlQueryable(txConn)) return { status: "skipped", reason: "no_adapter" };
-      const inside = await readTargetEligibility(txConn, preflight.embeddingDimensions);
+      const inside = await readTargetEligibility(txConn, options.conversationWorldId);
       if (inside.marked) return { status: "skipped", reason: "already_imported" };
-      if (inside.populated) return { status: "skipped", reason: "target_not_empty" };
+      if (inside.populated) return { status: "skipped", reason: "store_in_use" };
       await writeBatch(txConn, "worlds", prepared.worlds);
       await writeBatch(txConn, "rooms", prepared.rooms);
       await writeBatch(txConn, "entities", prepared.entities);
@@ -963,33 +1063,25 @@ export async function importLegacyStore(options: LegacyImportOptions): Promise<L
       await writeBatch(txConn, "tasks", prepared.tasks);
       await writeBatch(txConn, "relationships", prepared.relationships);
       await writeBatch(txConn, "components", prepared.components);
-      await writeBatch(txConn, "cache", [...prepared.cache, marker]);
+      await writeBatch(txConn, "cache", [marker]);
       return { status: "imported", sourceAgentId: prepared.sourceAgentId, targetAgentId: options.agentId, counts };
     });
-    return outcome;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    options.logger?.warn({ src: "alpha:earlier-import", error: message }, "Earlier store import failed; continuing with fresh device store");
-    return { status: "failed", error: message };
   } finally {
-    if (sourceClient !== undefined) {
-      await sourceClient.close().catch(() => undefined);
-    }
-    if (tempRoot !== undefined) {
-      await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
-    }
+    await sourceClient.close().catch(() => undefined);
   }
 }
 
 /** Runs the one-shot importer against an AgentRuntime during Alpha product plugin init. */
 export async function importLegacyStoreForRuntime(options: {
   readonly legacyStoreDir: string | undefined;
-  readonly stateDirectory?: string;
+  readonly owner: CloudAccount | undefined;
+  readonly account: CloudAccount | undefined;
+  readonly stateDirectory: string | undefined;
   readonly runtime: unknown;
   readonly conversationWorldId?: string;
-  readonly embeddingDimensions?: number;
   readonly openLegacyStore: LegacyStoreOpener;
 }): Promise<LegacyImportResult> {
+  if (options.stateDirectory === undefined || !path.isAbsolute(options.stateDirectory)) return { status: "skipped", reason: "no_adapter" };
   const runtimeRecord = asPlainObject(options.runtime);
   const agentId = typeof runtimeRecord.agentId === "string" ? runtimeRecord.agentId : "";
   if (!agentId) return { status: "skipped", reason: "no_adapter" };
@@ -1000,10 +1092,11 @@ export async function importLegacyStoreForRuntime(options: {
     : undefined;
   return importLegacyStore({
     legacyStoreDir: options.legacyStoreDir,
+    owner: options.owner,
+    account: options.account,
     stateDirectory: options.stateDirectory,
     agentId,
     conversationWorldId: options.conversationWorldId,
-    embeddingDimensions: options.embeddingDimensions,
     adapter,
     openLegacyStore: options.openLegacyStore,
     logger,

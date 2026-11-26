@@ -21,6 +21,7 @@ import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
 import { Machine as Files } from "../gen/app__files.effect.vibe";
 import { Machine as FilePreview } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
+import * as Timers from "../gen/app__clock__timers.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
@@ -706,6 +707,60 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
     expect(waveform()).toBeNull();
+  });
+
+  it("a timer the agent starts and cancels, typed or by Talk, shows on Home and leaves it at once (spec/app/clock/timers.md, \"Story: Run multiple countdown timers\")", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await onComposer(world, ...only("home", "home/cards"));
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    const chip = () => document.querySelector("[aria-label^='Clock timer:']")?.getAttribute("aria-label");
+    const agentTimer = (label: string, act: () => void) => () => {
+      act();
+      world.clock.version += 1;
+      return [{ action: "CLOCK_TIMER", data: { text: label } }];
+    };
+    const agentDoes = (reply: string, actions: () => readonly unknown[]) => {
+      world.ask.nextReplyChunks = [reply];
+      world.ask.nextActions = actions;
+    };
+    const starts = (id: string) => agentTimer("Started", () => {
+      world.clock.timers.push({ id, label: "", durationMs: 300_000, remainingMs: 300_000, status: "running",
+        startedAtMs: world.now, endAtMs: world.now + 300_000, ringStartedAtMs: null, revision: 1, updatedAtMs: world.now });
+    });
+    const cancels = (id: string) => agentTimer("Cancelled", () => {
+      world.clock.timers = world.clock.timers.filter((timer) => timer.id !== id);
+      world.clock.deletedTimerIds.push(id);
+    });
+
+    const timersRead = (count: number) => drawn(() => vi.waitFor(() => expect(alpha.runtime.runSync(Timers.Machine.use((m) => m.get())).items).toHaveLength(count), { timeout: 10_000 }));
+    const typed = async (words: string, send: number) => {
+      await fill("Message Alpha", words);
+      await press("Send");
+      await drawnUntil(alpha, area, Conversation, (s) => s.turn.send.id === send && s.turn.reply === "Complete");
+    };
+
+    agentDoes("Your 5-minute timer is running.", starts("timer-1"));
+    await typed("Set a timer for 5 minutes.", 1);
+    await timersRead(1);
+    await drawn(() => vi.waitFor(() => expect(chip()).toBe("Clock timer: Timer 05:00")));
+    agentDoes("The timer is cancelled.", cancels("timer-1"));
+    await typed("Cancel the timer.", 2);
+    await timersRead(0);
+    await drawn(() => vi.waitFor(() => expect(chip()).toBeUndefined()));
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    agentDoes("Your 5-minute timer is running.", starts("timer-2"));
+    speakUtterance(world, "Set a timer for 5 minutes.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
+    await timersRead(1);
+    await drawn(() => vi.waitFor(() => expect(chip()).toBe("Clock timer: Timer 05:00")));
+    agentDoes("The timer is cancelled.", cancels("timer-2"));
+    speakUtterance(world, "Cancel the timer.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 2 && s.phase === "Listening");
+    await timersRead(0);
+    await drawn(() => vi.waitFor(() => expect(chip()).toBeUndefined()));
   });
 
   it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {

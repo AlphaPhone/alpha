@@ -249,6 +249,12 @@ controls while speech runs on the phone. An open sheet or full view stays
 as it is. A hold on a communications bar brings up the sheet before Talk
 starts.
 
+```quint
+pure def talkRaisesTheSheet(typing: bool, resting: bool, network: bool): bool = typing or (resting and network)
+
+pure def lawSpeechOnThePhoneKeepsTheBar(typing: bool): bool = talkRaisesTheSheet(typing, true, false) == typing
+```
+
 ### Before audio first leaves the phone, the owner is shown what is sent and where, and decides
 
 Agreeing uses the network service; declining keeps this conversation, and
@@ -982,6 +988,14 @@ Talk in such a page uses the browser's microphone and the relay at the
 server's own /cloud path, whose server holds the account's key: the page
 never holds one. A page that names no relay, or any path but /cloud, offers
 no Talk.
+
+```quint
+pure val pageSpeechPath = "/cloud"
+
+pure def relaysPageSpeech(named: str): bool = named == pageSpeechPath
+
+pure def lawOnlyTheOwnRelayCarriesPageSpeech(named: str): bool = relaysPageSpeech(named) iff named == "/cloud"
+```
 
 ### After a restart only the account and the owner's answer to the disclosure remain
 

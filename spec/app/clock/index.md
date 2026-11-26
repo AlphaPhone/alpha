@@ -5,6 +5,12 @@ Alpha's built-in Clock: [Alarms](./alarms.md), [Timers](./timers.md),
 screen's navigation between its four tabs, the editor or picker sheet over it,
 Back priority, and the ringing alert priority between alarms and timers.
 
+The alarms, timers and cities live with the resident agent, which the owner
+can also ask to change them. Alpha reads them from the agent when it starts,
+when it comes back to the front, and after each Ask Alpha turn, typed or
+spoken, that ran a Clock action, so a timer cancelled in chat or by Talk
+leaves Home and Clock at once.
+
 ## Story: Move between Clock tabs and sheets
 
 > As the owner, I want to switch cleanly between Alarms, Timers, Stopwatch and

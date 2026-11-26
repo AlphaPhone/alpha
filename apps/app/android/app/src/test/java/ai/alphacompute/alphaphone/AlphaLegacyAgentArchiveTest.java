@@ -1,4 +1,4 @@
-// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"; spec/app/platform/adoption.md, "The earlier agent's store and runtime are moved aside by rename, and never opened, changed or deleted"
+// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"; spec/app/platform/adoption.md, "The earlier store is never moved, changed or deleted, and what an earlier build moved aside is put back"; spec/app/platform/adoption.md, "The earlier store is brought in only for the account that signed in to the earlier Alpha"
 package ai.alphacompute.alphaphone;
 
 import static org.junit.Assert.assertEquals;
@@ -8,6 +8,8 @@ import static org.junit.Assert.assertTrue;
 
 import ai.alphacompute.alphaphone.AlphaLegacyAgentArchive.Move;
 import ai.alphacompute.alphaphone.AlphaLegacyAgentArchive.Outcome;
+import ai.alphacompute.alphaphone.AlphaLegacyAgentArchive.Owner;
+import ai.eliza.os.agent.AgentCredentials;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -19,6 +21,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.stream.Stream;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -26,8 +30,11 @@ import org.junit.rules.TemporaryFolder;
 public final class AlphaLegacyAgentArchiveTest {
   private static final String ACCOUNT_HASH_A =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  private static final String ACCOUNT_HASH_B =
-    "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+  private static final String OWNER_USER = "0b7e6f8a-1c2d-4e3f-8a9b-0c1d2e3f4a5b";
+  private static final String OWNER_ORG = "1c2d3e4f-5a6b-4c7d-9e8f-a0b1c2d3e4f5";
+  private static final String OTHER_USER = "2d3e4f5a-6b7c-4d8e-8f90-b1c2d3e4f5a6";
+  private static final String OTHER_ORG = "3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7";
+  private static final Owner OWNER = new Owner(OWNER_USER, OWNER_ORG);
 
   @Rule public final TemporaryFolder temp = new TemporaryFolder();
 
@@ -39,7 +46,35 @@ public final class AlphaLegacyAgentArchiveTest {
     return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
   }
 
-  @Test public void quintMoveLawsHoldForEveryCombination() {
+  private static Map<String, String> snapshot(Path root) throws IOException {
+    Map<String, String> entries = new TreeMap<>();
+    try (Stream<Path> walk = Files.walk(root)) {
+      for (Path path : (Iterable<Path>) walk::iterator) {
+        String rel = root.relativize(path).toString();
+        BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        entries.put(rel, attrs.isDirectory() ? "dir" : attrs.size() + ":" + attrs.lastModifiedTime() + ":" + readUtf8(path));
+      }
+    }
+    return entries;
+  }
+
+  private static Path earlierWorkspace(Path files) throws IOException {
+    Path elizaDb = Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));
+    writeUtf8(elizaDb.resolve("PG_VERSION"), "17\n");
+    Path vault = Files.createDirectories(files.resolve(".eliza/.vault-pglite"));
+    writeUtf8(vault.resolve("marker"), "vault-bytes");
+    return elizaDb;
+  }
+
+  private static Map<String, String> launch(Path files, Owner owner, String user, String organization) {
+    Map<String, String> variables = new LinkedHashMap<>();
+    variables.put(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV, "/set/elsewhere");
+    variables.put(AlphaLegacyAgentArchive.LEGACY_OWNER_ENV, "{}");
+    AlphaLegacyAgentArchive.prepareLaunch(files, owner, user == null ? null : new AgentCredentials.Account(user, organization), variables);
+    return variables;
+  }
+
+  @Test public void quintMoveAndOwnerLawsHoldForEveryCombination() {
     boolean[] flags = { false, true };
     for (boolean sourceHeld : flags) {
       for (boolean archiveHeld : flags) {
@@ -57,242 +92,160 @@ public final class AlphaLegacyAgentArchiveTest {
         }
       }
     }
-  }
-
-  @Test public void whileOffTheAppMovesNothingAndNeverPassesTheEarlierStoreToTheAgent() throws Exception {
-    assertFalse("the v121 import stays off until it is bound to the v121 owner's account", AlphaLegacyAgentArchive.ENABLED);
-    Path files = temp.newFolder("files").toPath();
-    Path elizaDb = Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));
-    writeUtf8(elizaDb.resolve("PG_VERSION"), "17\n");
-    Path vault = Files.createDirectories(files.resolve(".eliza/.vault-pglite"));
-    writeUtf8(vault.resolve("marker"), "vault-bytes");
-    Path agent = Files.createDirectories(files.resolve("agent"));
-    writeUtf8(agent.resolve("agent-bundle.js"), "legacy-bundle");
-    Files.createDirectories(files.resolve("agent-legacy/eliza-workspace/.elizadb"));
-
-    Outcome outcome = AlphaLegacyAgentArchive.atAppStart(files);
-    Map<String, String> variables = new LinkedHashMap<>();
-    AlphaLegacyAgentArchive.atLaunch(files, variables);
-
-    assertEquals(Move.NOTHING_TO_MOVE, outcome.workspace());
-    assertEquals(Move.NOTHING_TO_MOVE, outcome.vault());
-    assertNull(outcome.legacyStoreDir());
-    assertFalse(variables.containsKey(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV));
-    assertTrue(variables.isEmpty());
-    assertEquals("17\n", readUtf8(elizaDb.resolve("PG_VERSION")));
-    assertEquals("vault-bytes", readUtf8(vault.resolve("marker")));
-    assertEquals("legacy-bundle", readUtf8(agent.resolve("agent-bundle.js")));
-    assertFalse(Files.exists(files.resolve("agent-legacy/vault-pglite"), LinkOption.NOFOLLOW_LINKS));
-    assertFalse(Files.exists(files.resolve("agent-legacy/payload"), LinkOption.NOFOLLOW_LINKS));
-  }
-
-  @Test public void movesWorkspaceVaultAndLegacyPayloadByAtomicRenamePreservingAccountDirs() throws Exception {
-    Path files = temp.newFolder("files").toPath();
-    Path elizaDb = Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));
-    Path pgVersion = writeUtf8(elizaDb.resolve("PG_VERSION"), "17\n");
-    Object dbDirKey = Files.readAttributes(elizaDb, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey();
-    Object pgFileKey = Files.readAttributes(pgVersion, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey();
-
-    Path vault = Files.createDirectories(files.resolve(".eliza/.vault-pglite"));
-    writeUtf8(vault.resolve("marker"), "vault-bytes");
-
-    Path agent = Files.createDirectories(files.resolve("agent"));
-    Path accountA = Files.createDirectories(agent.resolve(ACCOUNT_HASH_A));
-    writeUtf8(accountA.resolve("agent-id"), "11111111-1111-4111-8111-111111111111\n");
-    Path accountB = Files.createDirectories(agent.resolve(ACCOUNT_HASH_B));
-    writeUtf8(accountB.resolve("agent-id"), "22222222-2222-4222-8222-222222222222\n");
-    writeUtf8(agent.resolve("runtime.manifest.json"), "{\"v\":121}");
-    Files.createDirectories(agent.resolve("assets"));
-    writeUtf8(agent.resolve("assets/pglite.wasm"), "wasm");
-    writeUtf8(agent.resolve("agent-bundle.js"), "legacy-bundle");
-
-    List<String> movedNames = new ArrayList<>();
-    Outcome outcome = AlphaLegacyAgentArchive.moveAside(files, (src, dst) -> {
-      movedNames.add(src.getFileName().toString());
-      Files.move(src, dst, StandardCopyOption.ATOMIC_MOVE);
-    });
-
-    assertEquals(Move.MOVED_ASIDE, outcome.workspace());
-    assertEquals(Move.MOVED_ASIDE, outcome.vault());
-    assertEquals(2, outcome.payloadMoved());
-    assertEquals(0, outcome.payloadKept());
-    assertEquals(Move.MOVED_ASIDE, outcome.bundle());
-
-    Path archivedDb = files.resolve("agent-legacy/eliza-workspace/.elizadb");
-    assertEquals(archivedDb.toAbsolutePath(), outcome.legacyStoreDir());
-    assertFalse(Files.exists(files.resolve(".eliza/workspace"), LinkOption.NOFOLLOW_LINKS));
-    assertEquals("17\n", readUtf8(archivedDb.resolve("PG_VERSION")));
-    if (dbDirKey != null) {
-      assertEquals(dbDirKey, Files.readAttributes(archivedDb, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey());
-    }
-    if (pgFileKey != null) {
-      assertEquals(pgFileKey, Files.readAttributes(archivedDb.resolve("PG_VERSION"), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey());
-    }
-
-    assertFalse(Files.exists(files.resolve(".eliza/.vault-pglite"), LinkOption.NOFOLLOW_LINKS));
-    assertEquals("vault-bytes", readUtf8(files.resolve("agent-legacy/vault-pglite/marker")));
-
-    assertEquals("legacy-bundle", readUtf8(files.resolve("agent-legacy/payload/agent-bundle.js")));
-    assertEquals("{\"v\":121}", readUtf8(files.resolve("agent-legacy/payload/runtime.manifest.json")));
-    assertEquals("wasm", readUtf8(files.resolve("agent-legacy/payload/assets/pglite.wasm")));
-    assertFalse(Files.exists(agent.resolve("agent-bundle.js"), LinkOption.NOFOLLOW_LINKS));
-    assertFalse(Files.exists(agent.resolve("runtime.manifest.json"), LinkOption.NOFOLLOW_LINKS));
-    assertFalse(Files.exists(agent.resolve("assets"), LinkOption.NOFOLLOW_LINKS));
-
-    assertTrue(Files.isDirectory(accountA, LinkOption.NOFOLLOW_LINKS));
-    assertTrue(Files.isDirectory(accountB, LinkOption.NOFOLLOW_LINKS));
-    assertEquals("11111111-1111-4111-8111-111111111111\n", readUtf8(accountA.resolve("agent-id")));
-    assertFalse(Files.exists(files.resolve("agent-legacy/payload/" + ACCOUNT_HASH_A), LinkOption.NOFOLLOW_LINKS));
-
-    assertEquals("agent-bundle.js must move last", "agent-bundle.js", movedNames.get(movedNames.size() - 1));
-    assertTrue("assets moved before bundle", movedNames.indexOf("assets") < movedNames.indexOf("agent-bundle.js"));
-    assertTrue("manifest moved before bundle", movedNames.indexOf("runtime.manifest.json") < movedNames.indexOf("agent-bundle.js"));
-  }
-
-  @Test public void partialFailureKeepsBundleInPlaceAndRetriesOnNextLaunch() throws Exception {
-    Path files = temp.newFolder("files").toPath();
-    Path agent = Files.createDirectories(files.resolve("agent"));
-    writeUtf8(agent.resolve("a-first.bin"), "first");
-    writeUtf8(agent.resolve("b-flaky.bin"), "flaky");
-    writeUtf8(agent.resolve("agent-bundle.js"), "bundle");
-
-    Outcome first = AlphaLegacyAgentArchive.moveAside(files, (src, dst) -> {
-      if ("b-flaky.bin".equals(src.getFileName().toString())) {
-        throw new IOException("simulated rename error");
+    String[] ids = { "", OWNER_USER, OWNER_ORG, OTHER_USER };
+    for (String ownerUser : ids) {
+      for (String ownerOrg : ids) {
+        for (String user : ids) {
+          for (String org : ids) {
+            boolean owner = AlphaLegacyAgentArchive.isEarlierOwner(ownerUser, ownerOrg, user, org);
+            if (!user.equals(ownerUser) || !org.equals(ownerOrg)) assertFalse("lawAnotherAccountIsNeverTheOwner", owner);
+          }
+        }
       }
-      Files.move(src, dst, StandardCopyOption.ATOMIC_MOVE);
-    });
-
-    assertEquals(1, first.payloadMoved());
-    assertEquals(1, first.payloadKept());
-    assertEquals(Move.KEPT_IN_PLACE, first.bundle());
-    assertTrue(Files.exists(files.resolve("agent-legacy/payload/a-first.bin"), LinkOption.NOFOLLOW_LINKS));
-    assertTrue(Files.exists(agent.resolve("b-flaky.bin"), LinkOption.NOFOLLOW_LINKS));
-    assertTrue(Files.exists(agent.resolve("agent-bundle.js"), LinkOption.NOFOLLOW_LINKS));
-
-    Outcome second = AlphaLegacyAgentArchive.moveAside(files);
-    assertEquals(1, second.payloadMoved());
-    assertEquals(0, second.payloadKept());
-    assertEquals(Move.MOVED_ASIDE, second.bundle());
-    assertEquals("flaky", readUtf8(files.resolve("agent-legacy/payload/b-flaky.bin")));
-    assertEquals("bundle", readUtf8(files.resolve("agent-legacy/payload/agent-bundle.js")));
-    assertFalse(Files.exists(agent.resolve("agent-bundle.js"), LinkOption.NOFOLLOW_LINKS));
+    }
+    for (String user : ids) {
+      assertFalse("lawAnUnknownOwnerOwnsNothing", AlphaLegacyAgentArchive.isEarlierOwner("", "", user, ""));
+      assertFalse("lawAnUnknownOwnerOwnsNothing", AlphaLegacyAgentArchive.isEarlierOwner(user, "", user, ""));
+    }
   }
 
-  @Test public void neverOverwritesExistingArchiveEntriesIncludingFilesDirectoriesAndDanglingSymlinks() throws Exception {
+  @Test public void onlyTheEarlierOwnerIsPassedTheWorkspaceStoreAndTheStoreIsLeftAsItWas() throws Exception {
     Path files = temp.newFolder("files").toPath();
-    Path workspaceSrc = Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));
-    writeUtf8(workspaceSrc.resolve("PG_VERSION"), "new-source");
-    Path workspaceDst = Files.createDirectories(files.resolve("agent-legacy/eliza-workspace/.elizadb"));
-    writeUtf8(workspaceDst.resolve("PG_VERSION"), "already-archived");
+    Path elizaDb = earlierWorkspace(files);
+    Map<String, String> before = snapshot(files);
 
-    Path vaultSrc = Files.createDirectories(files.resolve(".eliza/.vault-pglite"));
-    writeUtf8(vaultSrc.resolve("data"), "new-vault");
-    Files.createSymbolicLink(files.resolve("agent-legacy/vault-pglite"), files.resolve("does-not-exist"));
-
-    Path agent = Files.createDirectories(files.resolve("agent"));
-    writeUtf8(agent.resolve("dup.txt"), "new-dup");
-    writeUtf8(agent.resolve("agent-bundle.js"), "new-bundle");
-    Path payload = Files.createDirectories(files.resolve("agent-legacy/payload"));
-    writeUtf8(payload.resolve("dup.txt"), "existing-dup");
-
-    Outcome outcome = AlphaLegacyAgentArchive.moveAside(files);
-    assertEquals(Move.KEPT_IN_PLACE, outcome.workspace());
-    assertEquals(Move.KEPT_IN_PLACE, outcome.vault());
-    assertEquals(0, outcome.payloadMoved());
-    assertEquals(1, outcome.payloadKept());
-    assertEquals(Move.KEPT_IN_PLACE, outcome.bundle());
-
-    assertEquals("already-archived", readUtf8(workspaceDst.resolve("PG_VERSION")));
-    assertEquals("new-source", readUtf8(workspaceSrc.resolve("PG_VERSION")));
-    assertTrue(Files.isSymbolicLink(files.resolve("agent-legacy/vault-pglite")));
-    assertTrue(Files.exists(vaultSrc.resolve("data"), LinkOption.NOFOLLOW_LINKS));
-    assertEquals("existing-dup", readUtf8(payload.resolve("dup.txt")));
-    assertEquals("new-dup", readUtf8(agent.resolve("dup.txt")));
-    assertEquals("new-bundle", readUtf8(agent.resolve("agent-bundle.js")));
-  }
-
-  @Test public void movesSymlinkEntriesAsLinksWithoutDereferencing() throws Exception {
-    Path files = temp.newFolder("files").toPath();
-    Path externalTarget = writeUtf8(temp.newFile("outside.txt").toPath(), "untouched");
-    Path elizaDir = Files.createDirectories(files.resolve(".eliza"));
-    Files.createSymbolicLink(elizaDir.resolve("workspace"), externalTarget);
-
-    Path agent = Files.createDirectories(files.resolve("agent"));
-    Files.createSymbolicLink(agent.resolve("dangling-link"), files.resolve("missing-target"));
-    writeUtf8(agent.resolve("agent-bundle.js"), "bundle");
-
-    Outcome outcome = AlphaLegacyAgentArchive.moveAside(files);
-    assertEquals(Move.MOVED_ASIDE, outcome.workspace());
-    assertEquals(1, outcome.payloadMoved());
-    assertEquals(Move.MOVED_ASIDE, outcome.bundle());
-
-    Path archivedWorkspace = files.resolve("agent-legacy/eliza-workspace");
-    assertTrue(Files.isSymbolicLink(archivedWorkspace));
-    assertEquals(externalTarget, Files.readSymbolicLink(archivedWorkspace));
-    assertEquals("untouched", readUtf8(externalTarget));
-    assertNull("symlinked workspace must not be advertised as store dir", outcome.legacyStoreDir());
-
-    Path archivedDangling = files.resolve("agent-legacy/payload/dangling-link");
-    assertTrue(Files.isSymbolicLink(archivedDangling));
-    assertEquals(files.resolve("missing-target"), Files.readSymbolicLink(archivedDangling));
-  }
-
-  @Test public void freshInstallWithoutLegacyArtifactsLeavesFilesCleanAndSetsNoEnvHint() throws Exception {
-    Path files = temp.newFolder("files").toPath();
-    Path agent = Files.createDirectories(files.resolve("agent"));
-    Path account = Files.createDirectories(agent.resolve(ACCOUNT_HASH_A));
-    writeUtf8(account.resolve("agent-id"), "33333333-3333-4333-8333-333333333333\n");
-    writeUtf8(agent.resolve("unrelated-without-bundle.txt"), "keep");
-
-    Map<String, String> variables = new LinkedHashMap<>();
-    AlphaLegacyAgentArchive.prepareLaunch(files, variables);
-
-    assertFalse("must not create empty archive root on fresh install", Files.exists(files.resolve("agent-legacy"), LinkOption.NOFOLLOW_LINKS));
-    assertTrue(Files.exists(agent.resolve("unrelated-without-bundle.txt"), LinkOption.NOFOLLOW_LINKS));
-    assertTrue(Files.isDirectory(account, LinkOption.NOFOLLOW_LINKS));
-    assertFalse(variables.containsKey(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV));
-  }
-
-  @Test public void prepareLaunchSetsLegacyStoreEnvHintAndFallsBackToVaultWithoutOverwritingExistingEnv() throws Exception {
-    Path files = temp.newFolder("files").toPath();
-    Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));
-    Files.createDirectories(files.resolve(".eliza/.vault-pglite"));
-
-    Map<String, String> variables = new LinkedHashMap<>();
-    AlphaLegacyAgentArchive.prepareLaunch(files, variables);
+    Map<String, String> owner = launch(files, OWNER, OWNER_USER.toUpperCase(), OWNER_ORG);
+    assertEquals(elizaDb.toAbsolutePath().toString(), owner.get(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV));
     assertEquals(
-      files.resolve("agent-legacy/eliza-workspace/.elizadb").toAbsolutePath().toString(),
-      variables.get(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV)
+      "{\"userId\":\"" + OWNER_USER + "\",\"organizationId\":\"" + OWNER_ORG + "\"}",
+      owner.get(AlphaLegacyAgentArchive.LEGACY_OWNER_ENV)
     );
 
-    Map<String, String> preset = new LinkedHashMap<>();
-    preset.put(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV, "/custom/path");
-    AlphaLegacyAgentArchive.prepareLaunch(files, preset);
-    assertEquals("/custom/path", preset.get(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV));
+    Map<String, Map<String, String>> refused = new LinkedHashMap<>();
+    refused.put("another user", launch(files, OWNER, OTHER_USER, OWNER_ORG));
+    refused.put("the owner in another organization", launch(files, OWNER, OWNER_USER, OTHER_ORG));
+    refused.put("an unknown owner", launch(files, null, OWNER_USER, OWNER_ORG));
+    refused.put("no account", launch(files, OWNER, null, null));
+    for (Map.Entry<String, Map<String, String>> entry : refused.entrySet()) {
+      assertTrue(entry.getKey(), entry.getValue().isEmpty());
+    }
 
+    assertEquals(before, snapshot(files));
+    assertFalse(Files.exists(files.resolve("agent-legacy"), LinkOption.NOFOLLOW_LINKS));
+  }
+
+  @Test public void theVaultAndALinkedWorkspaceAreNeverASource() throws Exception {
     Path vaultOnly = temp.newFolder("vault-only").toPath();
     Files.createDirectories(vaultOnly.resolve(".eliza/.vault-pglite"));
-    Map<String, String> vaultVars = new LinkedHashMap<>();
-    AlphaLegacyAgentArchive.prepareLaunch(vaultOnly, vaultVars);
-    assertEquals(
-      vaultOnly.resolve("agent-legacy/vault-pglite").toAbsolutePath().toString(),
-      vaultVars.get(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV)
-    );
+    assertTrue(launch(vaultOnly, OWNER, OWNER_USER, OWNER_ORG).isEmpty());
+    assertNull(AlphaLegacyAgentArchive.earlierStoreDir(vaultOnly));
+
+    Path linked = temp.newFolder("linked").toPath();
+    Path outside = Files.createDirectories(temp.newFolder("outside").toPath().resolve(".elizadb"));
+    Files.createDirectories(linked.resolve(".eliza"));
+    Files.createSymbolicLink(linked.resolve(".eliza/workspace"), outside.getParent());
+    assertTrue(launch(linked, OWNER, OWNER_USER, OWNER_ORG).isEmpty());
   }
 
-  @Test public void refusesSymlinkedArchiveDirectoryWithoutTouchingSourceOrThrowing() throws Exception {
+  @Test public void readsTheOwnerTheEarlierAlphaVerifiedAndNothingElse() {
+    String identity = "{\"userId\":\"" + OWNER_USER.toUpperCase() + "\",\"organizationId\":\"" + OWNER_ORG + "\"}";
+    assertEquals(OWNER, AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"elizacloud\",\"verifiedCloudIdentity\":" + identity + "}"));
+    assertEquals(OWNER, AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"cerebras\",\"cloudServices\":{\"verifiedCloudIdentity\":" + identity + "}}"));
+    assertNull(AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"cerebras\",\"verifiedCloudIdentity\":" + identity + "}"));
+    assertNull(AlphaLegacyAgentArchive.ownerOf("{\"verifiedCloudIdentity\":{\"userId\":\"" + OWNER_USER + "\"}}"));
+    assertNull(AlphaLegacyAgentArchive.ownerOf("{\"verifiedCloudIdentity\":{\"userId\":\"owner\",\"organizationId\":\"" + OWNER_ORG + "\"}}"));
+    assertNull(AlphaLegacyAgentArchive.ownerOf("{\"provider\":\"elizacloud\"}"));
+    assertNull(AlphaLegacyAgentArchive.ownerOf("not json"));
+    assertNull(AlphaLegacyAgentArchive.ownerOf(null));
+  }
+
+  @Test public void putsBackWhatAnEarlierBuildMovedAsideByAtomicRenameBundleLast() throws Exception {
     Path files = temp.newFolder("files").toPath();
-    Path decoy = temp.newFolder("decoy").toPath();
-    Files.createSymbolicLink(files.resolve("agent-legacy"), decoy);
-    Path elizaDb = Files.createDirectories(files.resolve(".eliza/workspace/.elizadb"));
-    writeUtf8(elizaDb.resolve("PG_VERSION"), "17\n");
+    Path archivedDb = Files.createDirectories(files.resolve("agent-legacy/eliza-workspace/.elizadb"));
+    Path pgVersion = writeUtf8(archivedDb.resolve("PG_VERSION"), "17\n");
+    Object dbKey = Files.readAttributes(archivedDb, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey();
+    Object fileKey = Files.readAttributes(pgVersion, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey();
+    writeUtf8(Files.createDirectories(files.resolve("agent-legacy/vault-pglite")).resolve("marker"), "vault-bytes");
+    Path payload = Files.createDirectories(files.resolve("agent-legacy/payload"));
+    writeUtf8(payload.resolve("runtime.manifest.json"), "{\"v\":121}");
+    writeUtf8(Files.createDirectories(payload.resolve("assets")).resolve("pglite.wasm"), "wasm");
+    writeUtf8(payload.resolve("agent-bundle.js"), "legacy-bundle");
+    Files.createSymbolicLink(payload.resolve("dangling-link"), files.resolve("missing-target"));
+    Path account = Files.createDirectories(files.resolve("agent").resolve(ACCOUNT_HASH_A));
+    writeUtf8(account.resolve("agent-id"), "11111111-1111-4111-8111-111111111111\n");
 
-    Map<String, String> variables = new LinkedHashMap<>();
-    AlphaLegacyAgentArchive.prepareLaunch(files, variables);
+    List<String> moved = new ArrayList<>();
+    Outcome outcome = AlphaLegacyAgentArchive.putBack(files, (src, dst) -> {
+      moved.add(src.getFileName().toString());
+      Files.move(src, dst, StandardCopyOption.ATOMIC_MOVE);
+    });
 
-    assertTrue(Files.exists(elizaDb.resolve("PG_VERSION"), LinkOption.NOFOLLOW_LINKS));
-    assertFalse(Files.exists(decoy.resolve("eliza-workspace"), LinkOption.NOFOLLOW_LINKS));
-    assertFalse(variables.containsKey(AlphaLegacyAgentArchive.LEGACY_STORE_DIR_ENV));
+    assertEquals(new Outcome(Move.MOVED_ASIDE, Move.MOVED_ASIDE, 3, 0, Move.MOVED_ASIDE), outcome);
+    Path elizaDb = files.resolve(".eliza/workspace/.elizadb");
+    assertEquals("17\n", readUtf8(elizaDb.resolve("PG_VERSION")));
+    if (dbKey != null) assertEquals(dbKey, Files.readAttributes(elizaDb, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey());
+    if (fileKey != null) assertEquals(fileKey, Files.readAttributes(elizaDb.resolve("PG_VERSION"), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey());
+    assertEquals("vault-bytes", readUtf8(files.resolve(".eliza/.vault-pglite/marker")));
+    assertEquals("legacy-bundle", readUtf8(files.resolve("agent/agent-bundle.js")));
+    assertEquals("{\"v\":121}", readUtf8(files.resolve("agent/runtime.manifest.json")));
+    assertEquals("wasm", readUtf8(files.resolve("agent/assets/pglite.wasm")));
+    assertEquals(files.resolve("missing-target"), Files.readSymbolicLink(files.resolve("agent/dangling-link")));
+    assertEquals("11111111-1111-4111-8111-111111111111\n", readUtf8(account.resolve("agent-id")));
+    assertEquals("agent-bundle.js must move last", "agent-bundle.js", moved.get(moved.size() - 1));
+
+    assertEquals(new Outcome(Move.NOTHING_TO_MOVE, Move.NOTHING_TO_MOVE, 0, 0, Move.NOTHING_TO_MOVE), AlphaLegacyAgentArchive.putBack(files));
+  }
+
+  @Test public void aFailedRenameKeepsTheBundleAsideAndIsTriedAgainNextLaunch() throws Exception {
+    Path files = temp.newFolder("files").toPath();
+    Path payload = Files.createDirectories(files.resolve("agent-legacy/payload"));
+    writeUtf8(payload.resolve("a-first.bin"), "first");
+    writeUtf8(payload.resolve("b-flaky.bin"), "flaky");
+    writeUtf8(payload.resolve("agent-bundle.js"), "bundle");
+
+    Outcome first = AlphaLegacyAgentArchive.putBack(files, (src, dst) -> {
+      if ("b-flaky.bin".equals(src.getFileName().toString())) throw new IOException("simulated rename error");
+      Files.move(src, dst, StandardCopyOption.ATOMIC_MOVE);
+    });
+    assertEquals(new Outcome(Move.NOTHING_TO_MOVE, Move.NOTHING_TO_MOVE, 1, 1, Move.KEPT_IN_PLACE), first);
+    assertEquals("bundle", readUtf8(payload.resolve("agent-bundle.js")));
+
+    Outcome second = AlphaLegacyAgentArchive.putBack(files);
+    assertEquals(new Outcome(Move.NOTHING_TO_MOVE, Move.NOTHING_TO_MOVE, 1, 0, Move.MOVED_ASIDE), second);
+    assertEquals("flaky", readUtf8(files.resolve("agent/b-flaky.bin")));
+    assertEquals("bundle", readUtf8(files.resolve("agent/agent-bundle.js")));
+  }
+
+  @Test public void neverWritesOverWhatHoldsTheEarlierNameAndRefusesALinkedArchive() throws Exception {
+    Path files = temp.newFolder("files").toPath();
+    writeUtf8(Files.createDirectories(files.resolve(".eliza/workspace/.elizadb")).resolve("PG_VERSION"), "in-place");
+    writeUtf8(Files.createDirectories(files.resolve("agent-legacy/eliza-workspace/.elizadb")).resolve("PG_VERSION"), "aside");
+    Files.createSymbolicLink(files.resolve(".eliza/.vault-pglite"), files.resolve("does-not-exist"));
+    writeUtf8(Files.createDirectories(files.resolve("agent-legacy/vault-pglite")).resolve("marker"), "vault-bytes");
+
+    Outcome outcome = AlphaLegacyAgentArchive.putBack(files);
+    assertEquals(Move.KEPT_IN_PLACE, outcome.workspace());
+    assertEquals(Move.KEPT_IN_PLACE, outcome.vault());
+    assertEquals("in-place", readUtf8(files.resolve(".eliza/workspace/.elizadb/PG_VERSION")));
+    assertEquals("aside", readUtf8(files.resolve("agent-legacy/eliza-workspace/.elizadb/PG_VERSION")));
+    assertTrue(Files.isSymbolicLink(files.resolve(".eliza/.vault-pglite")));
+
+    Path linkedRoot = temp.newFolder("linked").toPath();
+    Path elsewhere = Files.createDirectories(temp.newFolder("elsewhere").toPath().resolve("eliza-workspace"));
+    Files.createSymbolicLink(linkedRoot.resolve("agent-legacy"), elsewhere.getParent());
+    assertEquals(new Outcome(Move.NOTHING_TO_MOVE, Move.NOTHING_TO_MOVE, 0, 0, Move.NOTHING_TO_MOVE), AlphaLegacyAgentArchive.putBack(linkedRoot));
+    assertTrue(Files.isDirectory(elsewhere, LinkOption.NOFOLLOW_LINKS));
+    assertFalse(Files.exists(linkedRoot.resolve(".eliza"), LinkOption.NOFOLLOW_LINKS));
+  }
+
+  @Test public void aFreshInstallIsLeftAsItIs() throws Exception {
+    Path files = temp.newFolder("files").toPath();
+    Path account = Files.createDirectories(files.resolve("agent").resolve(ACCOUNT_HASH_A));
+    writeUtf8(account.resolve("agent-id"), "33333333-3333-4333-8333-333333333333\n");
+    Map<String, String> before = snapshot(files);
+
+    AlphaLegacyAgentArchive.putBack(files);
+    assertTrue(launch(files, OWNER, OWNER_USER, OWNER_ORG).isEmpty());
+    assertEquals(before, snapshot(files));
   }
 }
