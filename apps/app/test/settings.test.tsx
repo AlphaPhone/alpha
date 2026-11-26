@@ -59,6 +59,28 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
+  it("Opens browser Notifications from App permissions and returns to Privacy", async () => {
+    const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
+    await press("Privacy");
+    await press("Permissions");
+    await vi.waitFor(() => {
+      const panel = document.querySelector('[data-settings-page="App permissions"]');
+      expect(panel?.textContent).toContain("Selected");
+      expect(panel?.textContent).toContain("Chosen files");
+      expect(panel?.textContent).not.toContain("Calendar");
+    });
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "PrivacyNotifications");
+    await press("Back to Privacy");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Privacy");
+    await press("Back to Settings");
+    await press("General");
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Notifications");
+    await press("Back to General");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "General");
+  });
+
   it("Recovers an unavailable browser account only after Try again", async () => {
     const world = { ...scene(), signedIn: false };
     const { alpha } = await settingsOpen(world);

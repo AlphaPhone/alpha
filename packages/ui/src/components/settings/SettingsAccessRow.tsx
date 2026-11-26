@@ -9,7 +9,7 @@ export type SettingsAccessRowProps = {
   /** Which access the row is about. */
   access: Access;
   /** What the phone said about its grant. */
-  grant: AccessWord;
+  grant: AccessWord | Reading;
   /** Opens the access walkthrough to review this one access; the row is pressable only with it. */
   onReview?: () => void;
 };
@@ -50,6 +50,8 @@ const readings: Record<AccessWord, Reading> = {
  */
 export function SettingsAccessRow({ access, grant, onReview }: SettingsAccessRowProps) {
   const title = names[access];
-  if (!onReview) return <SettingsFactRow title={title} reading={readings[grant]} />;
-  return <SettingsNavRow title={title} icon={icons[access]} value={<SettingsReading reading={readings[grant]} />} onOpen={onReview} />;
+  const reading = typeof grant === "string" ? readings[grant] : grant;
+  if (!onReview) return <SettingsFactRow title={title} reading={reading} />;
+  const value = reading.word === "unavailable" ? { ...reading, compact: true } : reading;
+  return <SettingsNavRow title={title} icon={icons[access]} value={<SettingsReading reading={value} />} onOpen={onReview} className="[&>span:last-child]:gap-3.5" />;
 }
