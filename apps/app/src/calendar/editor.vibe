@@ -13,6 +13,7 @@ import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os-bridges"
+import { launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
 import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { civilDateAt, formatCivilDate } from "../reminders/recurrence.ts"
@@ -36,6 +37,7 @@ export schema Fields {
   readonly video?: boolean
   readonly repeat?: "NoRepeat" | "Daily" | "Weekdays" | "Weekly" | "Monthly" | "Yearly"
   readonly calendar?: "Agent" | "Phone" | "Reminders"
+  readonly noteOrigin?: { readonly version: 2; readonly noteId: string; readonly revision: string; readonly agent: string; readonly owner: string }
   readonly reminderId?: string
   readonly reminderSpecId?: number
   readonly reminderRevision?: number
@@ -471,11 +473,24 @@ const scanned = started(effect {
   const entry = try ScanEntry
   const shell = try Shell.Machine
   try Stream.runForEach(Stream.zipLatest(shell.changes, entry.events), effect ([where, event]) => {
-    if (event === undefined || !Shell.showing(where, "Calendar")) return
-    const review = try entry.takeEvent()
-    if (review !== undefined && !(try fromNote(review.fields, review.day))) {
-      try say("Calendar already has a draft. Finish it before opening this scan’s event.", true)
+    if (event === undefined) return
+    const note = event.noteSource
+    if (!Shell.showing(where, "Calendar")) {
+      if (note !== undefined && where.route >= note.route) try entry.releaseEvent(event)
+      return
     }
+    const review = try entry.takeEvent()
+    if (review === undefined) return
+    const offered = review.noteSource
+    if (offered !== undefined) {
+      const owner = launchOwnerAt() catch () => undefined
+      const latest = try shell.get()
+      if (latest.route !== offered.route || !Shell.showing(latest, "Calendar") || !sameResidentOwner(offered.owner, owner)) return
+    }
+    if (!(try fromNote(review.fields, review.day))) {
+      try say(offered === undefined ? "Calendar already has a draft. Finish it before opening this scan’s event."
+        : "Calendar couldn’t open the note’s draft. Finish any open draft first.", true)
+    } else if (offered !== undefined) try say("Check time")
   })
 }, "opening a scanned Calendar draft")
 
