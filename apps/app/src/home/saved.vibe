@@ -13,7 +13,7 @@ const earlierKey = "alpha.launcher.favorites.v1"
 const earlierViews: Readonly<Record<string, View>> = {
   phone: "Phone", messages: "Messages", inbox: "Inbox", telegram: "Telegram", slack: "Slack", calendar: "Calendar",
   clock: "Clock", reminders: "Reminders", browser: "Browser", camera: "Camera", photos: "Photos", maps: "Maps",
-  notes: "Notes", contacts: "Contacts", files: "Files", workflows: "Workflows", automations: "Workflows", wallet: "Wallet", settings: "Settings",
+  notes: "Notes", contacts: "Contacts", files: "Files", workflows: "Workflows", automations: "Workflows", wallet: "Wallet", inventory: "Wallet", settings: "Settings",
 }
 
 schema OwnTile { readonly tag: "Own"; readonly view: string }

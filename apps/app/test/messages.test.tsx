@@ -179,7 +179,8 @@ describe("Messages on an Alpha image", () => {
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded" && s.threads === 1);
     const listHeading = document.querySelector("[data-alpha-messages-header] h1");
-    expect([listHeading?.textContent, listHeading?.classList.contains("sr-only")]).toEqual(["Messages", true]);
+    // Sunday's v119 (Alpha 45f6bed30 `prototype/template.html:566-568`) titles the list "Messages".
+    expect([listHeading?.textContent, listHeading?.classList.contains("sr-only")]).toEqual(["Messages", false]);
 
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
     await press("Maya Chen");
@@ -724,7 +725,7 @@ describe("Messages on an Alpha image", () => {
 
     await ask(review.proposal.id, "Use SIM 1 to send +14155550100 the text Meet at the front door");
     await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
-    expect(document.body.textContent).toContain(`To ${displayNumber(sms.recipients[0])}`);
+    expect(document.body.textContent).toContain(`To: ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
     await press("Send this text");
@@ -933,7 +934,7 @@ describe("Messages on an Alpha image", () => {
     const review = textReview(world.notes.owner, draft ? "draft-to-number" : "text-to-number", compose);
     await proposeText(world, review, draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?", "The proposal is read");
     await vi.waitFor(() => expect(button(draft ? "Open draft" : "Send this text")).toBeDefined());
-    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To ${displayNumber("+12025550142")}`);
+    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To: ${displayNumber("+12025550142")}`);
     expect(document.body.textContent).not.toContain(draft ? "Review this text on your phone" : "Open an editable text draft");
     expect(button(draft ? "Send this text" : "Open draft")).toBeUndefined();
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);

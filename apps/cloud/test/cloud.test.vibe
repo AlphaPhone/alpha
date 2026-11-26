@@ -1,4 +1,4 @@
-// spec/cloud/local.md, "Story: Check Alpha's contract on my computer"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Come back to Alpha after authorizing a connection in my browser"
+// spec/cloud/local.md, "Story: Check Alpha's contract on my computer"; spec/cloud/index.md, "Story: Operate Alpha's own cloud"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Come back to Alpha after authorizing a connection in my browser"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { createCloudClient } from "@elizaos/cloud"
@@ -10,14 +10,14 @@ import { alphaName, alphaPackage, assetLinksNameAlpha, profileFits, releaseSigne
 import { Machine, type Gate, gateAt, gates, machine } from "../gen/cloud__local.effect.vibe"
 import { Machine as Rollout, machine as rollout } from "../gen/cloud__rollout.effect.vibe"
 import { assetLinks, entryOf, loopbackOnly, profileNamed, registrationAt, stagingSeed, statementsIn } from "../src/alpha.vibe"
-import { candidateProblems, candidates } from "../src/candidate.vibe"
+import { hostedClouds, hostedProfileProblems } from "../src/hosted.vibe"
 import { reconcileResources } from "../src/cloudflare.vibe"
 import { operate } from "../src/commands.vibe"
 import { sha256Hex } from "../src/digest.ts"
 import edgeWorker, { edgeRouteOf, type EdgeEnv } from "../src/edge.vibe"
 import { EdgeHeaders, EdgeRequest, EdgeResponse, forwardedHeaders } from "../src/edge-platform.ts"
 import { entitlementPublicKey } from "../src/keys.ts"
-import { generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
+import { elizaosCloud, generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
 import { PROFILE_ASSET, readProfileAsset } from "../src/profile-asset.ts"
 import { elizaCloudRoutes, tableProblems } from "../src/routes.vibe"
 import { smoke } from "../src/smoke.vibe"
@@ -230,13 +230,15 @@ describe(`Check Alpha's contract on my computer (spec/cloud/local.md, "Story: Ch
     const run = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-" })
     const local = { ...settings, billing: { ...settings.billing!, apiUrl: prices.origin } }
     try files.writeFileString(`${run}/profile.json`, JSON.stringify({ ...profile, environments: { ...profile.environments, staging: local } }))
+    const registration = registrationAt("Staging", new URL(settings.web).hostname)
+    try holds(() => assert.deepStrictEqual(stagingSeed.clients, [entryOf(registration)]))
     try files.writeFileString(`${run}/seed.json`, JSON.stringify(stagingSeed))
     const fixture = try files.readFileString(`${cloud}/test/fixtures/secrets.env`)
     try files.writeFileString(`${run}/secrets.env`, `${fixture}\nSTRIPE_SECRET_KEY=sk_test_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\n`)
     provide machine() {
       const check = try Machine
       // spec/cloud/local.md, "The local cloud starts only for a profile whose database, mail, text messages and providers are all on this computer, and stops with every part together"
-      const hosted = (try profileNamed("production")).environments.staging
+      const hosted = (try profileNamed("candidate")).environments.staging
       const refused = check.send({ type: "start", loopback: loopbackOnly(hosted) }) catch (failure) => failure._tag
       try Effect.try(() => assert.strictEqual(refused, "Rejected"))
       try check.send({ type: "start", loopback: loopbackOnly(local) })
@@ -259,11 +261,11 @@ describe(`Check Alpha's contract on my computer (spec/cloud/local.md, "Story: Ch
 
 const holds = (assertion: () => void) => Effect.try(assertion)
 
-describe(`Alpha's own cloud waits, ready, for the cutover (spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover")`, () => {
-  it.effect("accepts the candidate's profile at the candidates' hosts with Alpha's services, sender and model, and refuses one that strays", () => effect {
-    const hosts = try candidates()
+describe(`Alpha Cloud at its hosted origins (spec/cloud/index.md, "Story: Operate Alpha's own cloud")`, () => {
+  it.effect("accepts the hosted profile at Alpha Cloud's hosts with Alpha's services, sender and model, and refuses one that strays", () => effect {
+    const hosts = try hostedClouds()
     const profile = try profileNamed("candidate")
-    try holds(() => assert.deepStrictEqual(candidateProblems(profile, hosts), []))
+    try holds(() => assert.deepStrictEqual(hostedProfileProblems(profile, hosts), []))
     const production = profile.environments.production
     const [model] = production.inference!.models
     const strayed: typeof profile = { ...profile, environments: { ...profile.environments, production: {
@@ -271,13 +273,17 @@ describe(`Alpha's own cloud waits, ready, for the cutover (spec/cloud/index.md, 
       mailSender: "sign-in@mail.alphacompute.invalid",
       inference: { ...production.inference!, models: [{ ...model, defaultMaxTokens: 4096 }] },
     } } }
-    try holds(() => assert.deepStrictEqual(candidateProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production", "production"]))
+    try holds(() => assert.deepStrictEqual(hostedProfileProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production", "production"]))
     const staging = profile.environments.staging
     const alternatives: ReadonlyArray<typeof staging.mail> = [{ kind: "binding", binding: "OTHER_EMAIL" }, { kind: "https", url: "https://email.example.com/messages", apiKeyEnv: "OTHER_EMAIL_KEY" }]
-    try holds(() => assert.deepStrictEqual(alternatives.map((mail) => candidateProblems({
+    try holds(() => assert.deepStrictEqual(alternatives.map((mail) => hostedProfileProblems({
       ...profile, environments: { ...profile.environments, staging: { ...staging, mail } },
     }, hosts)), alternatives.map(() => ["staging: the profile must use Alpha's own Cloudflare email binding and sender"])))
-    try holds(() => assert.deepStrictEqual(candidateProblems(profile, { production: hosts.production, staging: hosts.production }).length > 0, true))
+    const colliding = { ...hosts, staging: { ...hosts.staging, appLinkHost: new URL(hosts.production.cloud).hostname } }
+    try holds(() => assert.deepStrictEqual(hostedProfileProblems(profile, colliding), [
+      "production and staging share an API or App Link hostname",
+      `staging: the profile answers at ${staging.api} for ${staging.web}, and @repo/deployment names ${colliding.staging.cloud} for ${colliding.staging.appLinkHost}`,
+    ]))
     const shipped = (profiled("profile/staging.json") catch (failure) => failure._tag)
     try holds(() => assert.strictEqual(shipped, "CandidateRefused"))
   } |> Effect.provide(%, NodeServices.layer))
@@ -315,7 +321,7 @@ const templates = { api: apiTemplate, edge: edgeTemplate }
 const paths = { apiMain: "../dist/src/worker.js", edgeMain: "../dist/src/edge.js", assets: "./assets.production" }
 
 describe(`Alpha's own cloud is rendered only when provisioned (spec/cloud/rollout.md, "Story: Render a deployment only when it is provisioned")`, () => {
-  it.effect("renders both Workers of a provisioned environment on the candidate's hosts, refuses a placeholder resource, and catches a shipped Eliza Cloud host", () => effect {
+  it.effect("renders both Workers of a provisioned environment on Alpha Cloud's hosts, refuses a placeholder resource, and catches a shipped Eliza Cloud host", () => effect {
     const profile = try profileNamed("candidate")
     const registration = registrationOn(profile, "production")
     const rendered = try renderEnvironment(templates, profile, "production", resources.production, registration, paths)
@@ -441,18 +447,31 @@ describe(`Provisioning creates only what is missing (spec/cloud/rollout.md, "Sto
 })
 
 describe(`A deployed environment is ready when every public gate passes (spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready")`, () => {
-  it.live("serves the candidate's staging profile from eliza's own cloud command, and every gate passes through the API host and the web host Worker", () => effect {
+  it.live(`checks Alpha Cloud's staged prices and serves every public gate through the API host and web host Worker (spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command")`, () => effect {
     const files = try FileSystem.FileSystem
     const cloud = try Effect.try(() => prepared().cloud)
     const profile = try profileNamed("candidate")
     const settings = profile.environments.staging
     const prices = try acquireRelease(tryPromise(() => catalog(settings.billing!.plans)), (opened) => promise(() => opened.close()))
-    const run = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-candidate-" })
-    const local = { ...settings, mail: { kind: "loopback" as const }, billing: { ...settings.billing!, apiUrl: prices.origin } }
+    const run = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-hosted-" })
+    const priced = { ...settings, billing: { ...settings.billing!, apiUrl: prices.origin } }
+    const local = { ...priced, mail: { kind: "loopback" as const } }
     try files.writeFileString(`${run}/profile.json`, JSON.stringify({ ...profile, environments: { ...profile.environments, staging: local } }))
     try files.writeFileString(`${run}/seed.json`, JSON.stringify({ clients: [entryOf(registrationOn(profile, "staging"))] }))
     const fixture = try files.readFileString(`${cloud}/test/fixtures/secrets.env`)
-    try files.writeFileString(`${run}/secrets.env`, [fixture, ...Object.entries({ ...provided, STRIPE_SECRET_KEY: "sk_test_local" }).filter(([name]) => name !== "DATABASE_URL").map(([name, value]) => `${name}=${value}`)].join("\n") + "\n")
+    const profileFile = `${run}/operator-profile.json`
+    const secretsFile = `${run}/secrets.env`
+    const store = `pglite:${run}/cloud.pglite`
+    const values = { ...provided, DATABASE_URL: store, STRIPE_SECRET_KEY: "sk_test_local" }
+    const flags = ["--environment", "staging", "--profile", profileFile, "--env-file", secretsFile]
+    try files.writeFileString(profileFile, JSON.stringify({ ...profile, environments: { ...profile.environments, staging: priced } }))
+    try files.writeFileString(secretsFile, [fixture, ...Object.entries(values).map(([name, value]) => `${name}=${value}`)].join("\n") + "\n", { mode: 0o600 })
+    try operate("migrate", flags)
+    const secrets = try readSecrets(secretsFile)
+    for (const model of settings.inference!.models) {
+      try elizaosCloud(["prices", "set", "--model", model.id, "--input-per-1k", "150", "--output-per-1k", "600", "--profile", profileFile, "--environment", "staging", "--store", store], secrets)
+    }
+    try operate("prices", flags)
     const origin = try serving(cloud, run)
     const reach = hosting(origin, { api: settings.api, web: settings.web })
     const gates = try (smoke("staging", { api: settings.api, web: settings.web }, settings.name) |> Effect.provide(%, FetchHttpClient.layer) |> Effect.provideService(%, FetchHttpClient.Fetch, reach))
@@ -463,10 +482,11 @@ describe(`A deployed environment is ready when every public gate passes (spec/cl
 
 describe(`Alpha's app is registered with each cloud it talks to (spec/cloud/index.md, "Story: Register Alpha's app with the cloud")`, () => {
   it.effect("registers Alpha's package once per hosted environment at its App Link host, with the release signer in production and its returns off the API origin, and serves asset links that name it alone", () => effect {
+    const profile = try profileNamed("candidate")
     for (const [name, environment] of [["staging", "Staging"], ["production", "Production"]] as const) {
       const row = try deployment(name)
       if (row.kind !== "hosted") throw new NotHosted({ name })
-      const settings = (try profileNamed(row.profile)).environments[row.profile]
+      const settings = profile.environments[name]
       try holds(() => assert.ok(profileFits(row, { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }), `${name}: the profile answers at its deployment's cloud`))
       const registration = registrationAt(environment, row.appLinkHost)
       try holds(() => assert.deepStrictEqual(
@@ -478,7 +498,6 @@ describe(`Alpha's app is registered with each cloud it talks to (spec/cloud/inde
       const debugSigned = { ...registration, certFingerprints: [...registration.certFingerprints, "00:".repeat(31) + "00"] }
       const debugLinks = try assetLinks(debugSigned, settings.api)
       try holds(() => assert.ok(!assetLinksNameAlpha(debugLinks, environment), `${name}: a signer the environment does not trust is refused`))
-      if (environment === "Staging") try holds(() => assert.deepStrictEqual(stagingSeed.clients, [entryOf(registration)]))
     }
   } |> Effect.provide(%, NodeServices.layer))
 })

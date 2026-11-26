@@ -25,7 +25,8 @@ do next.
   are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
   `caption` and `sm` the quieter line beside it, `xl` a shared app header title in the browser, `3xl` a screen title
   (also the shared app header title in `font-display` on an app's first page on the launcher, drawn no larger than lets
-  a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher, on
+  a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher (in `font-sans` bold
+  on a page inside Workflows, such as Add or an automation, as Alpha's v119 build drew it), on
   one line and cut with an ellipsis until above 150% text, where every header title takes its own row and wraps, and
   `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
   is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `tracking-loose` with `text-xs` is the uppercase "Needs approval" over a request the owner approves; `text-label` names an app tile on

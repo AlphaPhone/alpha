@@ -43,6 +43,7 @@ export function useSheetFollow(dock: Dock, detent: Detent, section: RefObject<HT
     onRelease: ({ direction, flick, y }: AssistantRelease) => {
       const g = gestureRef.current;
       done();
+      if (g && !g.moved) void dock.send({ type: "drag" });
       const height = g ? Math.max(0, Math.round(g.height + g.y - y)) : Math.max(0, Math.round(window.innerHeight - y));
       void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
     },

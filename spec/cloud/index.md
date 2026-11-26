@@ -12,7 +12,7 @@ The profiles, the seed and the commands that check them are `apps/cloud`.
 
 - [Local cloud](./local.md): eliza's own server on this computer, and the gates Alpha's contract passes on it
 - [Provisioning](./provisioning.md): the operator's commands, in order, each read back before the next
-- [Rollout](./rollout.md): Alpha's own cloud on Cloudflare, the candidate's serve step
+- [Rollout](./rollout.md): Alpha's own cloud on Cloudflare, the serve step
 
 ## Story: Know which cloud the app talks to
 
@@ -23,8 +23,8 @@ The profiles, the seed and the commands that check them are `apps/cloud`.
 ### A hosted environment's profile answers at its deployment's cloud and keeps its returns on its deployment's App Link host
 
 `@repo/deployment` names the cloud and the App Link host of each
-environment; the profile that environment's deployment names says the same
-API origin and has its web origin on that host. The local environment runs
+hosted environment. Alpha's hosted profile uses the same API origin and web
+host, where Alpha's registration sends its sign-in and billing returns. The local environment runs
 the staging profile on this computer, where the cloud's origin is known only
 once it listens.
 
@@ -36,15 +36,17 @@ pure def profileFits(deployment: Hosts, profile: ProfileHosts): bool =
   profile.api == deployment.cloud and profile.webHost == deployment.appLinkHost
 ```
 
-### A cut-over candidate names neither the cloud nor the App Link host it would replace
+### Hosted production and staging share no API or App Link hostname
 
-The candidate is the product's own cloud, recorded and not used until the
-decision on where Alpha's cloud runs is taken.
+Production and staging each use their own API and App Link hostnames.
+An API hostname in either environment also differs from the other
+environment's App Link hostname.
 
 ```quint
-pure def candidateApart(serving: Hosts, candidate: Hosts): bool =
-  candidate.cloud != serving.cloud and candidate.appLinkHost != serving.appLinkHost
-    and candidate.cloud != serving.appLinkHost and candidate.appLinkHost != serving.cloud
+type HostNames = { apiHost: str, appLinkHost: str }
+
+pure def hostedSeparate(production: HostNames, staging: HostNames): bool =
+  Set(production.apiHost).union(Set(production.appLinkHost)).intersect(Set(staging.apiHost).union(Set(staging.appLinkHost))).size() == 0
 ```
 
 ## Story: Register Alpha's app with the cloud
@@ -139,33 +141,14 @@ pure def assetLinksNameAlpha(statements: List[Statement], environment: Environme
   statements.select(s => s.packageName == alphaPackage) == List({ packageName: alphaPackage, fingerprints: signersOf(environment) })
 ```
 
-## Story: Keep Alpha's own cloud ready for the cutover
+## Story: Operate Alpha's own cloud
 
-> As the owner, I want Alpha's own cloud to stand at the hosts the
-> candidate names, serving eliza's cloud under Alpha's name, model and
-> services, so that taking the cutover changes only which cloud my phone
-> signs in to.
+> As the owner, I want my phone to use Alpha Cloud at the hosts Alpha
+> names, with Alpha's model, sign-in and services.
 
-The candidate is Alpha's own deployment of eliza's cloud on Cloudflare
-([Rollout](./rollout.md)), under the profile the operator completes from
-`apps/cloud/profile/candidate.example.json`. Phones keep the cloud
-`@repo/deployment` names until the owner takes the cutover.
-
-### The candidates of production and staging share no host
-
-A staging change can then never reach a production phone, nor a production
-credential a staging Worker.
-
-```quint
-pure def candidatesSeparate(production: Hosts, staging: Hosts): bool =
-  Set(production.cloud).union(Set(production.appLinkHost)).intersect(Set(staging.cloud).union(Set(staging.appLinkHost))).size() == 0
-```
-
-### The candidate's profile answers at the candidate's cloud and keeps its returns on the candidate's App Link host
-
-```quint
-pure def candidateProfileFits(candidate: Hosts, profile: ProfileHosts): bool = profileFits(candidate, profile)
-```
+Alpha deploys eliza's cloud on Cloudflare ([Rollout](./rollout.md)) at the
+hosted origins in `@repo/deployment`. The operator completes the profile
+from `apps/cloud/profile/candidate.example.json` for those environments.
 
 ### Alpha's own cloud offers inference, speech, maps, managed Google and billing, under Alpha's name, its entitlements for Alpha's package
 

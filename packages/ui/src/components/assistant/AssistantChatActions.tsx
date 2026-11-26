@@ -29,7 +29,7 @@ interface ChatActionsMenuProps {
 
 function ChatActionsMenu({ placement, label, triggerId, disabled, children }: ChatActionsMenuProps) {
   const comms = placement === "comms";
-  const sideOffset = placement === "bar" ? 4 : comms ? 19 : 20;
+  const sideOffset = comms ? 19 : 20;
   return (
     <Menu>
       <MenuTrigger asChild>

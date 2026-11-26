@@ -83,7 +83,11 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
   const includesSpeech = hosted.some(({ name }) => name === localSpeechModule)
   const localScope = nativeSpeechRoutes.find(({ method }) => method === "Get")?.path ?? ""
   return [
+    'import { existsSync } from "node:fs"',
+    'import { dirname, join } from "node:path"',
+    'import { fileURLToPath, pathToFileURL } from "node:url"',
     `import { runAgentCli } from "../../packages/agent-host/dist/src/cli.js"`,
+    'import { startStore as openEarlierPGlite } from "../../packages/agent-host/dist/src/storage/migrate.js"',
     'import { workflowDeviceOffer } from "../../packages/agent-host/dist/src/device-actions/workflow-offer.js"',
     'import { Service } from "@elizaos/core"',
     'import { Effect } from "effect"',
@@ -93,6 +97,9 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
     ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index}${name === product.name ? ", makeNativeNotesCleanup, notesTranscriptionRoutes" : name === localSpeechModule ? ", localInferenceProvider" : ""} } from ${JSON.stringify(name)}`),
     `const notesCleanup = makeNativeNotesCleanup(${JSON.stringify(nativeNotesCleanup)})`,
+    'const earlierVectorPath = join(dirname(fileURLToPath(import.meta.url)), "vector.tar.gz")',
+    'const earlierVectorExtension = { name: "pgvector", setup: async (_pg, emscriptenOpts) => ({ emscriptenOpts, bundlePath: pathToFileURL(earlierVectorPath) }) }',
+    'const openEarlierStore = (dataDir) => openEarlierPGlite({ dataDir, ...(existsSync(earlierVectorPath) ? { extensions: { vector: earlierVectorExtension } } : {}) })',
     "",
     ...(includesSpeech ? [
       'const speechEngine = (context) => {',
@@ -149,7 +156,7 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
       }
       if (name === product.name) {
         const privateRoutes = includesSpeech ? "nativeSpeechScope(context), nativeRuntimeScope(context), ...browserNoteRoutes(context)" : "nativeRuntimeScope(context)"
-        factory = `(context) => Effect.map(host${index}(context), (module) => ({
+        factory = `(context) => Effect.map(host${index}({ openLegacyStore: openEarlierStore })(context), (module) => ({
           ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), ${privateRoutes}, notesCleanup.route(context), notesCleanup.browserRoute(context, ${JSON.stringify(browserNotesCleanup)}, ${nativeNotesCleanupLimit})] }
         }))`
       }
@@ -294,7 +301,7 @@ effect function build(name: string) {
   const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
   const unbuilt = hosted.filter(({ module }) => module === "")
   if (unbuilt.length > 0) throw new Refused({ message: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
-  const product = { name: productPluginName, module: "alphaAppsModule" }
+  const product = { name: productPluginName, module: "alphaAppsModuleWith" }
   const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted, product), { name: productPluginName, dir: `${at.app}/dist/src/plugins` }) catch effect (cause) => {
     throw new Refused({ message: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
   }
