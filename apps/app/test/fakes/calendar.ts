@@ -59,6 +59,8 @@ export interface CalendarScene {
   readonly calendars: AndroidCalendarRow[];
   phoneEvents: AndroidCalendarEvent[];
   granted: boolean;
+  /** Android's prompt is answered no. */
+  denies?: boolean;
   /** A read of the agent's calendar feed is taken and never answered, as by an agent still busy starting. */
   silent: boolean;
   asked: number;
@@ -277,8 +279,8 @@ export function elizaCalendar(scene: CalendarScene): Faked {
     checkPermissions: () => Promise.resolve({ calendar: scene.granted ? "granted" : "prompt" }),
     requestAccess() {
       scene.asked += 1;
-      scene.granted = true;
-      return Promise.resolve({ status: "granted" });
+      scene.granted = scene.denies !== true;
+      return Promise.resolve({ status: scene.granted ? "granted" : "denied" });
     },
     list({ begin, end }): Promise<AndroidCalendarList> {
       if (!scene.granted) return Promise.resolve({ status: "permission-required" });

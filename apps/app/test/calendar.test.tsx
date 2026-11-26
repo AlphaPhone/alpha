@@ -612,23 +612,14 @@ it("Shows the newly verified Google grant when Calendar Settings reopens (spec/a
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my days (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/calendar/index.md, \"Story: Move through the days\")", async () => {
     const world = morning(phone);
+    world.calendar.granted = true;
     const { alpha } = await open(world, only("view:Calendar"));
     const runtime = calendar.runtime(alpha);
 
-    // spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
+    // spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"; spec/app/calendar/index.md, "The phone's calendar and Google can be shown together": only a phone has a calendar of its own.
     await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
-    expect(titles()).toEqual(["Standup", "Team lunch"]);
-
-    // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": only a phone has a calendar of its own, and New event asks for it, with no notice asking.
-    expect(Boolean(button("Allow"))).toBe(false);
-    if (phone) {
-      await press("New event");
-      await until(alpha, runtime, View, (s) => s.phoneRows === 1);
-      await press("Back to calendar");
-      await until(alpha, runtime, Editor, (s) => !s.shown);
-      expect([titles(), world.calendar.asked]).toEqual([["Standup", "Team lunch", "Gym"], 1]);
-    }
+    await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2 && (!phone || s.phoneRows === 1));
+    expect([titles(), world.calendar.asked, Boolean(button("Allow"))]).toEqual([phone ? ["Standup", "Team lunch", "Gym"] : ["Standup", "Team lunch"], 0, false]);
 
     // spec/app/calendar/index.md, "Picking a day in the week strip or the month dialog shows that day's timeline"
     const later = world.today + 2;

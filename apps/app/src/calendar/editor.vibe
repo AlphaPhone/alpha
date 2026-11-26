@@ -105,7 +105,8 @@ export effect function startForm(edit: Event, day: number, row?: Row) {
       : { title: row.title, place: row.place, notes: row.notes, begin: row.begin, end: row.end, allDay: row.allDay, people: "" }
     try ignore(keep(fields, state.owner))
   }
-  if ((try contained(editor.send(edit), "opening the form")) && edit.type === "newEvent") try askForPhone()
+  if (!(try contained(editor.send(edit), "opening the form")) || edit.type !== "newEvent") return
+  if (View.asksAtNewEvent(try (try View.Machine).get())) try askForPhone()
 }
 
 // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once"
@@ -118,9 +119,12 @@ effect function askForPhone() {
   try Stream.runHead(Stream.filter(view.changes, (state) => state.access.grant !== "Unasked"))
 }
 
-/** Save the form; one going to the phone's calendar first asks Android for it while Calendar still may, as live v119 did. */
+/** Save the form; one going to the phone's calendar first asks Android for it while Calendar still may, as live v119 did, and is not sent once Android said no. */
 export effect function saveEvent(toPhone: boolean) {
-  if (toPhone) try askForPhone()
+  if (toPhone) {
+    try askForPhone()
+    if (!(try PhoneCalendar).present || !View.phoneTakesASave(try (try View.Machine).get())) return
+  }
   const editor = try Editor.Machine
   if (Editor.canSave(try editor.get())) try contained(editor.send({ type: "save" }), "saving the event")
 }
