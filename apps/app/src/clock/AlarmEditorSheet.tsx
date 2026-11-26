@@ -68,7 +68,9 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
 
   const handleDelete = () => {
     if (existing === undefined) return;
-    void runtime.runPromise(deleteAlarmWithUndo(existing.id)).then(() => onClose());
+    void runtime.runPromise(deleteAlarmWithUndo(existing.id)).then((deleted) => {
+      if (deleted) onClose();
+    });
   };
 
   return (

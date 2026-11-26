@@ -737,4 +737,51 @@ describe("The call strip on an Alpha image", () => {
     expect(document.querySelector("[data-home-tile='view:Phone'], [data-home-tile='view:Messages'], [data-home-tile='view:Contacts']")).toBeNull();
     expect(button("End call")).toBeUndefined();
   });
+
+  it("Refuses direct emergency phone_dial without dialing (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
+    const world = image();
+    const { alpha } = await openPhoneWorld(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
+    await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "NoCall" && s.carrier === "CarrierReady");
+    const emergencyDial = await alpha.runtime.runPromise(phoneAction({ type: "phone_dial", target: { kind: "number", number: "911" } }, () => Promise.resolve(true)));
+    expect([emergencyDial, world.telephony.dialed]).toEqual([expect.objectContaining({ kind: "refused" }), []]);
+  });
+
+  const openRecents = async (world = image()) => {
+    const running = await openPhoneWorld(world);
+    await until(running.alpha, running.alpha.runtime, Shell, (s) => s.image && s.contacts);
+    await openPhone(running.alpha);
+    await until(running.alpha, running.alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
+    return running;
+  };
+
+  it("Resyncs Comms subject when returning to the same Phone tab from Contacts (spec/app/phone/comms.md, \"A view change while the conversation is open keeps the sheet's height and remembers the view it left\")", async () => {
+    const { alpha } = await openRecents();
+    await until(alpha, alpha.runtime, Comms, (s) => s.app === "PhoneApp" && s.key === "phone:recents:");
+    await tab("Contacts");
+    await until(alpha, alpha.runtime, Comms, (s) => s.app === "ContactsApp");
+    await drawn(() => {
+      const target = document.querySelector<HTMLButtonElement>('[data-alpha-phone-tab="recents"]');
+      if (!target) throw new Error("no Phone recents tab");
+      target.focus();
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    });
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.recents.status === "Loaded");
+    await vi.waitFor(async () => {
+      const state = await alpha.runtime.runPromise(Comms.use((m) => m.get()));
+      expect([state.app, state.key]).toEqual(["PhoneApp", "phone:recents:"]);
+    }, { timeout: 3_000 });
+  });
+
+  it("Clears stale Recents search filter when opening Missed (spec/app/phone/index.md, \"Story: See my recent calls\")", async () => {
+    const { alpha } = await openRecents();
+    await fill("Call or ask", "0111");
+    await until(alpha, alpha.runtime, Phone, (s) => s.sought && s.recents.status === "Loaded" && s.rows === 1);
+    await drawn(() => alpha.runtime.runPromise(Phone.use((m) => m.send({ type: "missedReported", count: 1 }))));
+    await drawn(() => alpha.runtime.runPromise(Phone.use((m) => m.send({ type: "openMissed" }))));
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.chip === "MissedCalls" && s.recents.status === "Loaded");
+    const missedState = await alpha.runtime.runPromise(Phone.use((m) => m.get()));
+    const queryField = document.querySelector<HTMLInputElement>('input[aria-label="Call or ask"]');
+    expect([missedState.sought, missedState.rows, queryField?.value ?? ""]).toEqual([false, 1, ""]);
+  });
 });

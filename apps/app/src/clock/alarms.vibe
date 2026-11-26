@@ -36,11 +36,6 @@ function alarmTimers(state: Alarms.Alarms) {
       const target = Alarms.dueAtOf(item)
       if (target > 0) deadlines.push(due<Event, []>(`ring ${item.id}`, target, { type: "trigger", id: item.id, now: untimed }))
     }
-    if (item.phase === "Ringing") {
-      const silenceAt = item.fireAt + Alarms.ringTimeout
-      const nextFireAt = item.daysMask > 0 ? nextAlarmFireAt(item.hour, item.minute, item.daysMask, silenceAt) : 0
-      deadlines.push(due<Event, []>(`silence ${item.id}`, silenceAt, { type: "autoSilence", id: item.id, nextFireAt, now: untimed }))
-    }
   }
   if (state.hasHidden && state.undo.holding === "Held") {
     deadlines.push(due<Event, []>("commitDelete", state.undo.until, { type: "commitDelete", now: untimed }))
@@ -133,12 +128,14 @@ export effect function toggleAlarm(id: number, enabled: boolean): boolean!!(Alar
 export effect function deleteAlarmWithUndo(id: number): boolean!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore | Said | Toasts.Machine) {
   const machine = try Alarms.Machine
   const now = try (try Time).now()
+  const before = try machine.get()
   clockRecords.markAlarmDeleted(id)
   const sent = try contained(machine.send({ type: "requestDelete", id, now: untimed }), "deleting an alarm")
   if (!sent) {
     clockRecords.unmarkAlarmDeleted(id)
     return false
   }
+  if (before.hasHidden) try withdraw(undoArea, before.hidden.id)
   try persistClockMeta()
   const store = try KeyValueStore.KeyValueStore
   const undo = effect {
@@ -223,6 +220,45 @@ const withdrawCommitted = started(effect {
   })
 }, "withdrawing Clock deletion Undo toast")
 
+const rescheduleSettled = started(effect {
+  const machine = try Alarms.Machine
+  const time = try Time
+  try Stream.runForEach(machine.changes, effect (state) => {
+    for (const item of state.items) {
+      if (item.enabled && item.phase === "Idle" && item.daysMask > 0 && item.fireAt === 0) {
+        const now = try time.now()
+        const fireAt = nextAlarmFireAt(item.hour, item.minute, item.daysMask, now)
+        try contained(machine.send({ type: "reschedule", id: item.id, fireAt }), "rescheduling settled repeating alarm")
+      }
+    }
+  })
+}, "rescheduling settled repeating Clock alarms")
+
+const silenceRinging = started(Effect.scoped(effect {
+  const machine = try Alarms.Machine
+  const time = try Time
+  const active = try FiberMap.make<string>()
+  const ringing = Stream.changesWith(
+    Stream.map(machine.changes, (state) => state.items.filter((a) => a.phase === "Ringing")),
+    (a, b) => a.length === b.length && a.every((x, i) => x.id === b[i]?.id && x.fireAt === b[i]?.fireAt),
+  )
+  try Stream.runForEach(ringing, effect (items) => {
+    const first = items[0]
+    if (first === undefined) {
+      try FiberMap.remove(active, "silence")
+      return
+    }
+    const earliest = items.reduce((best, cur) => (cur.fireAt < best.fireAt ? cur : best), first)
+    const silenceAt = earliest.fireAt + Alarms.ringTimeout
+    try FiberMap.run(active, "silence", effect {
+      try time.until(silenceAt)
+      const now = try time.now()
+      const nextFireAt = earliest.daysMask > 0 ? nextAlarmFireAt(earliest.hour, earliest.minute, earliest.daysMask, now) : 0
+      try contained(machine.send({ type: "autoSilence", id: earliest.id, nextFireAt, now }), "auto-silencing ringing alarm")
+    })
+  })
+}), "auto-silencing ringing Clock alarms")
+
 const keptAlarms = reacting(Alarms, {
   keep: 1,
   open: [{ type: "reopen", now: untimed }],
@@ -230,4 +266,4 @@ const keptAlarms = reacting(Alarms, {
 })
 
 /** Resident alarms machine with persistent state, deadline timers, metadata restore, and Undo toast cleanup. */
-export const alarms = together(keptAlarms, restoredMeta, withdrawCommitted)
+export const alarms = together(keptAlarms, restoredMeta, withdrawCommitted, rescheduleSettled, silenceRinging)

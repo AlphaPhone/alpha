@@ -351,14 +351,17 @@ When the owner sends a turn carrying a reviewed email from Inbox or a saved
 voice-note transcript attached from Notes, the turn's `text` carries strictly
 the owner's trimmed typed text (including `""` when the owner sent only the
 attachment), never email headers, email body JSON, or a synthetic voice-note
-instruction prefix. The revalidated, decoded email goes in structured turn
-context (`metadata.reviewedEmail`) and the voice-note transcript goes as
-`metadata.useSelectedVoiceNoteTranscript: true` bound to the non-sensitive
-selected `canonical-note` observation, both encoded through
-`encodeTurnContext` only for a peer that takes optional turn-context fields.
-When the peer does not take optional turn-context fields, Alpha refuses to
-post a turn carrying a reviewed email or voice-note transcript rather than
-concatenating untrusted data into `text` or silently dropping the attachment.
+instruction prefix. The reviewed email is normalized and validated against the
+agent's `ReviewedEmail` schema at review time and revalidated on send so it
+goes in structured turn context (`metadata.reviewedEmail`), while the
+voice-note transcript goes as `metadata.useSelectedVoiceNoteTranscript: true`
+bound to the non-sensitive selected `canonical-note` observation, both encoded
+through `encodeTurnContext` only for a peer that takes optional turn-context
+fields. When peer support has not yet loaded or failed transiently on this
+connection, Alpha re-checks `/api/status` before refusing; when the peer does
+not take optional turn-context fields, Alpha refuses to post a turn carrying a
+reviewed email or voice-note transcript rather than concatenating untrusted
+data into `text` or silently dropping the attachment.
 
 ```quint
 pure def sendsReviewedEmail(hasMail: bool, validMail: bool, peerTakes: bool): bool =
@@ -371,12 +374,11 @@ pure def turnContextCarriesAttachment(hasMail: bool, validMail: bool, hasTranscr
   (not(hasMail) or sendsReviewedEmail(hasMail, validMail, peerTakes))
     and (not(hasTranscript) or sendsVoiceNoteTranscript(hasTranscript, exactNote, sensitive, peerTakes))
 
-pure def lawReviewedEmailNeedsValidPeerContext(hasMail: bool, validMail: bool, peerTakes: bool): bool =
-  sendsReviewedEmail(hasMail, validMail, peerTakes) implies (hasMail and validMail and peerTakes)
+pure def lawInvalidReviewedEmailRefusesTurn(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(true, false, hasTranscript, exactNote, sensitive, peerTakes))
 
-pure def lawVoiceNoteTranscriptNeedsNonSensitiveCanonicalNoteAndPeer(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
-  sendsVoiceNoteTranscript(hasTranscript, exactNote, sensitive, peerTakes)
-    implies (hasTranscript and exactNote and not(sensitive) and peerTakes)
+pure def lawSensitiveScreenRefusesVoiceNoteTranscript(hasMail: bool, validMail: bool, exactNote: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(hasMail, validMail, true, exactNote, true, peerTakes))
 
 pure def lawUnsupportedPeerRefusesStructuredContextAttachment(hasMail: bool, hasTranscript: bool, validMail: bool, exactNote: bool, sensitive: bool): bool =
   (hasMail or hasTranscript) implies not(turnContextCarriesAttachment(hasMail, validMail, hasTranscript, exactNote, sensitive, false))

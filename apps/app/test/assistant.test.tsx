@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Attachments } from "../gen/app__assistant__attachments.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
@@ -14,6 +15,8 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
+import { Talk } from "../src/assistant/talk.vibe";
+import { MailQuestions } from "../src/inbox/mail-context.vibe";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, typeInto, underAct, until } from "./alpha.tsx";
@@ -78,6 +81,7 @@ async function openAssistant(world: ReturnType<typeof scene>, ready = true) {
   const runtime = assistant.runtime(alpha);
   await until(alpha, runtime, Composer, (s) => s.slot === "Open");
   if (ready) await until(alpha, runtime, Conversation, (s) => s.ready);
+  await drawn(() => vi.waitFor(() => expect(document.querySelector("textarea[aria-label='Message Alpha']")).not.toBeNull()));
   return { alpha, runtime };
 }
 
@@ -369,7 +373,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   it("Hear a brief acknowledgment and still get the whole answer: the acknowledgment stays the label while tools run (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
     const world = { ...scene(), phone };
     const { alpha, runtime } = await openAssistantWithPreferences(world);
-    // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
+    // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
     world.ask.acknowledgment = "Let me look";
     world.ask.holdAfterTools = true;
     write("What's on today?");
@@ -383,6 +387,27 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
     expect(document.body.textContent?.includes("Let me look")).toBe(false);
+  });
+
+  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
+  it("Hear a brief acknowledgment and still get the whole answer: text that may still be taken back is never shown, and the settled reply is (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistantWithPreferences(world);
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["I can't open the Camera", " for you."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.holdDoneAfterReady = done.promise;
+    try {
+      write("Open the camera");
+      await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+      await press("Send");
+      await until(alpha, runtime, Reply, (s) => s.provisional && s.shown === 0);
+      expect(document.body.textContent?.includes("I can't open the Camera")).toBe(false);
+    } finally {
+      done.resolve();
+    }
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "I can't open the Camera for you.".length);
+    await vi.waitFor(() => expect(lines()).toEqual(["Open the camera", "I can't open the Camera for you."]));
   });
 
   // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
@@ -787,5 +812,119 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(cardSend).toBeDefined();
     await drawn(() => { cardSend?.click(); });
     expect(sentBodies).toEqual(["Joining in 5"]);
+  });
+});
+
+describe("Ask Alpha edge flows", () => {
+  const openKeptChat = async (world: ReturnType<typeof scene>, title: string) => {
+    world.ask.kept.set("c1", { roomId: "r1", title, messages: [] });
+    const opened = await openAssistant(world);
+    await chatsList(opened.runtime);
+    await until(opened.alpha, opened.runtime, Chats, (s) => s.list.status === "Loaded");
+    row("Chats", title);
+    return opened;
+  };
+
+  // spec/app/assistant/composer.md, "A message that may already have been sent offers Check for reply, and what the read found settles it"
+  it("Check for reply keeps LookLater without a turn receipt and restores an unrecorded unsettled draft into the editor and slot", async () => {
+    const world = { ...scene(), phone: true };
+    const key = draftKey(world.notes.ownerIdentity, world.notes.owner, "c1", "r1");
+    world.ask.drafts.set(key, JSON.stringify({ revision: 1, text: "Unsent important draft", sending: true }));
+    const { alpha, runtime } = await openKeptChat(world, "Ask Alpha");
+    await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open" && s.unsettled);
+
+    await press("Check for reply");
+    await until(alpha, runtime, Conversation, (s) => s.recheck.status !== "Loading" && s.check === "LookLater");
+    await drawn(() => runtime.runPromise(Effect.flatMap(Conversation, (machine) => Effect.gen(function* () {
+      const checked = yield* machine.send({ type: "checkForReply" });
+      yield* machine.send({ type: "reconcile", ticket: checked.state.recheck.ticket, found: "Unrecorded" });
+    }))));
+    await until(alpha, runtime, Composer, (s) => !s.unsettled && s.editor.text && s.draft.sync === "Kept");
+    expect(composerText()).toBe("Unsent important draft");
+    expect(JSON.parse(world.ask.drafts.get(key) ?? "{}")).toMatchObject({ text: "Unsent important draft", sending: false });
+  });
+
+  // spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"; spec/app/assistant/composer.md, "Story: Send what I wrote"
+  it("a failed first-send conversation creation does not auto-send when opening another chat", async () => {
+    const world = { ...scene(), phone: false };
+    world.ask.kept.set("c1", { roomId: "r1", title: "Earlier chat", messages: [] });
+    const { alpha, runtime } = await openAssistant(world);
+    await until(alpha, runtime, Composer, (s) => s.binding.conversation === 0 && s.slot === "Open");
+
+    world.ask.down = true;
+    write("First attempt");
+    await until(alpha, runtime, Composer, (s) => s.editor.text && s.draft.sync === "Kept");
+    await press("Send");
+    await until(alpha, runtime, Chats, (s) => s.make.id > 0 && s.make.outcome !== "Sent");
+
+    write("");
+    await until(alpha, runtime, Composer, (s) => !s.editor.text && s.draft.sync === "Kept");
+    world.ask.down = false;
+    await chatsList(runtime);
+    await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
+    row("Chats", "Earlier chat");
+    await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
+
+    write("Draft only");
+    await until(alpha, runtime, Composer, (s) => s.editor.text && s.draft.sync === "Kept");
+    for (let turn = 0; turn < 20; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+    expect([world.ask.said, box?.value]).toEqual([[], "Draft only"]);
+  });
+
+  // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"
+  it("closing search discards in-flight search hits instead of writing them to the board", async () => {
+    const world = { ...scene(), phone: false };
+    world.ask.kept.set("c1", { roomId: "r1", title: "Notes", messages: [{ id: "m1", role: "user", text: "secret phrase" }] });
+    const { alpha, runtime } = await openAssistant(world);
+
+    await runtime.runPromise(Effect.flatMap(Search, (m) => Effect.all([
+      m.send({ type: "openSearch" }),
+      m.send({ type: "find", words: "secret" }),
+      m.send({ type: "closeSearch" }),
+    ])));
+    for (let turn = 0; turn < 40; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    expect(runtime.runSync(Talk).board.snapshot().hits).toEqual([]);
+  });
+
+  // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
+  it("Ask Alpha offers a Back step to Layers while an email question review is open", async () => {
+    const world = { ...scene(), phone: false };
+    const { alpha, runtime } = await openAssistant(world);
+    const mail = runtime.runSync(MailQuestions);
+    const review = {
+      accountId: "g1", messageId: "msg-1", revision: "1", from: "Ada", to: ["Me"], subject: "Hello", bodyText: "Body",
+      destination: { kind: "assistant" as const },
+    };
+    await drawn(() => mail.show({
+      question: {
+        review: review as never,
+        current: () => Effect.succeed({ source: review, destination: review.destination } as never),
+      },
+    }));
+    for (let turn = 0; turn < 40; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    const offered = await alpha.runtime.runPromise(Effect.flatMap(Layers, (m) => m.get()));
+    expect(offered.steps.includes("assistant")).toBe(true);
+    await drawn(() => alpha.back());
+    for (let turn = 0; turn < 40; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    const after = await alpha.runtime.runPromise(Effect.flatMap(Layers, (m) => m.get()));
+    expect([mail.snapshot().question, after.steps.includes("assistant")]).toEqual([undefined, false]);
+  });
+
+  // spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"
+  it("Attach media opens with remaining file room when three files and an email are attached", async () => {
+    const world = { ...scene(), phone: false };
+    const { alpha, runtime } = await openKeptChat(world, "Ask Alpha");
+    await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
+
+    await runtime.runPromise(Effect.flatMap(Composer, (m) => Effect.all([
+      m.send({ type: "attach", count: 3 }),
+      m.send({ type: "offer", kind: "Mail", revision: 1 }),
+    ])));
+    await drawn(() => undefined);
+    chatAction("Attach media");
+    for (let turn = 0; turn < 40; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    const picker = await runtime.runPromise(Effect.flatMap(Attachments, (m) => m.get()));
+    expect([picker.open, picker.room]).toEqual([true, 1]);
   });
 });

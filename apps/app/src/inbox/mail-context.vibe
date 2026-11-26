@@ -1,7 +1,7 @@
 // spec/app/inbox/message.md, "Story: Ask Alpha about a message"; spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
 import { decodeReviewedEmail, type ReviewedEmail } from "@elizaos/agent"
 import type { MailMessage } from "@elizaos/cloud"
-import { validateMailContext, type MailContextDestination, type MailContextSource, type ReviewedMailContext } from "@elizaos/plugin-inbox-client"
+import { MailContextRefused, reviewMailContext, validateMailContext, type MailContextDestination, type MailContextSource, type ReviewedMailContext } from "@elizaos/plugin-inbox-client"
 import { externalStore } from "../runtime/store.ts"
 
 export interface MailQuestion {
@@ -35,10 +35,40 @@ export const mailQuestions = Layer.sync(MailQuestions, () => {
   }
 })
 
-/** The exact headers and plain body shown for review, with Gmail's actual revision. */
+const MAX_EMAIL_RECIPIENTS = 50
+const MAX_EMAIL_HEADER_LENGTH = 512
+const MAX_EMAIL_SUBJECT_LENGTH = 1000
+
+function cleanHeaderLine(value: string, maxLength: number): string {
+  return value.toWellFormed().replace(/[\p{Cc}\u2028\u2029]/gu, " ").slice(0, maxLength).toWellFormed()
+}
+
+function cleanEmailBody(value: string): string {
+  return value.toWellFormed().replace(/[\u2028\u2029]/gu, "\n").replace(/[^\P{Cc}\t\n\r]/gu, "")
+}
+
+/** The exact normalized headers and plain body shown for review, with Gmail's actual revision. */
 export function sourceOf(grant: string, mail: MailMessage): MailContextSource {
   const { message, bodyText } = mail
-  return { accountId: grant, messageId: message.id, revision: message.metadata.historyId ?? "", from: message.from, to: [...message.to, ...message.cc], subject: message.subject, bodyText }
+  return {
+    accountId: grant,
+    messageId: message.id,
+    revision: message.metadata.historyId ?? "",
+    from: cleanHeaderLine(message.from, MAX_EMAIL_HEADER_LENGTH),
+    to: [...message.to, ...message.cc].slice(0, MAX_EMAIL_RECIPIENTS).map((entry) => cleanHeaderLine(entry, MAX_EMAIL_HEADER_LENGTH)),
+    subject: cleanHeaderLine(message.subject, MAX_EMAIL_SUBJECT_LENGTH),
+    bodyText: cleanEmailBody(bodyText),
+  }
+}
+
+// spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"; spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+/** Review and decode against the agent's ReviewedEmail schema before offering the email to the owner. */
+export effect function reviewMail(source: MailContextSource, destination: MailContextDestination): ReviewedMailContext!MailContextRefused {
+  const review = try reviewMailContext(source, destination)
+  const { from, to, subject, bodyText } = review.source
+  const decoded = decodeReviewedEmail({ from, to, subject, bodyText }) catch () => undefined
+  if (decoded === undefined) throw new MailContextRefused({ reason: "too-large" })
+  return review
 }
 
 // spec/app/inbox/notices.md, "Ask Alpha from a notice checks the same email again before spending the tap"
