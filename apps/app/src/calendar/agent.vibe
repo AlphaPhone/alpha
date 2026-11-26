@@ -141,10 +141,10 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
 }
 
 // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
-/** Tell Ask Alpha what the card has to show there: a change under way, or how one a reply filed ended. */
+/** Tell Ask Alpha what the card has to show there, a change under way or how one a reply filed ended, and the request it holds. */
 function tellAskAlpha(s: AgentCalendar): void {
   const id = requests.find(s.filing)?.id
-  asked.show(inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)))
+  asked.show(inAskAlpha(s, id !== undefined && asked.snapshot().filed.some((one) => one.request === id)), id ?? "")
 }
 
 /** Read the agent's approvals list once a reply filed a Calendar request, so its card shows in Ask Alpha. */
