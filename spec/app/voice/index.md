@@ -546,9 +546,10 @@ recipient the agent proposed, for the owner to check before Send. A spoken
 turn from another screen such as Messages keeps the session's capabilities
 and non-Files review cards even when direct Files actions are allowed, and
 a direct Files result from Messages is still spoken aloud. A review the
-reply proposed from a Messages chat that Talk cannot show ends the turn
-quietly without setting the review notice: any queued speech is hushed and
-Talk says nothing of its own about it.
+reply proposed from a Messages chat that Talk cannot show, or a direct
+device action the reply claimed that did not run on the phone, ends the
+turn quietly without setting the review notice: any queued speech is
+hushed and Talk says nothing of its own about it.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool, says: bool): bool =
