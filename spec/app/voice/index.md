@@ -531,7 +531,9 @@ Nothing the owner says decides a review, and the owner's words are never
 matched against a phrase. The review stays shown with its Send and Decline
 while Talk listens, and the owner decides it there by touch, as typed chat
 does. Silence decides nothing. The owner's next words are a turn for the
-agent like any other, and the model reads what they mean.
+agent like any other, and the model reads what they mean. When the agent's
+reply to them names that same pending text again, unchanged, its review is
+shown again for that turn, with its Send and Decline; otherwise it leaves.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool): bool =

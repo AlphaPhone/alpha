@@ -1185,13 +1185,13 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
   it.each([
-    { answer: "Send this text.", by: "voice", outcome: "agent" },
-    { answer: "I think I want to send it.", by: "voice", outcome: "agent" },
-    { answer: "Yep, go ahead and send the message to +1 (415) 555-0100.", by: "voice", outcome: "agent" },
-    { answer: "No, don't send it.", by: "voice", outcome: "agent" },
-    { answer: "Send this text", by: "touch", outcome: "send" },
-    { answer: "Decline Keep things as they are.", by: "touch", outcome: "decline" },
-  ] as const)("decides the displayed text review only by touch, never by matching what I say: $by $answer", async ({ answer, by, outcome }) => {
+    { answer: "Send this text.", by: "voice", again: true, outcome: "send" },
+    { answer: "I think I want to send it.", by: "voice", again: true, outcome: "shown" },
+    { answer: "Yep, go ahead and send the message to +1 (415) 555-0100.", by: "voice", again: true, outcome: "shown" },
+    { answer: "No, don't send it.", by: "voice", again: false, outcome: "withdrawn" },
+    { answer: "Send this text", by: "touch", again: false, outcome: "send" },
+    { answer: "Decline Keep things as they are.", by: "touch", again: false, outcome: "decline" },
+  ] as const)("decides the displayed text review only by touch, never by matching what I say: $by $answer", async ({ answer, by, again, outcome }) => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: 1 } as const;
     const review = textReview(world.notes.owner, "spoken-reviewed-sms", operation);
@@ -1228,18 +1228,34 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(document.body.textContent).toContain(operation.body);
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
 
+    const propose = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+    } }];
+    const tapSend = async () => {
+      await press("Send this text");
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
+      await drawn(() => review.confirmations[0]?.confirm());
+      await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: review.proposal.id })]));
+    };
     try {
       if (by === "voice") {
+        // The agent reads the words; when its reply names the same pending text again, that review is drawn again with its Send.
+        world.ask.nextReplyChunks = ["Tap Send when you are ready."];
+        world.ask.nextActions = again ? propose : () => [];
         await drawn(() => speakUtterance(world, answer));
         await drawnUntil(alpha, area, Voice.Machine, (state) =>
-          state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
-      } else {
-        await press(answer);
+          state.sent === 2 && state.reviewPending === again && state.phase === "Listening" && state.mic === "On");
+        expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+        expect(button("Send this text") !== undefined).toBe(again);
         if (outcome === "send") {
-          await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
-          await drawn(() => review.confirmations[0]?.confirm());
-          await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: review.proposal.id })]));
-        } else {
+          await tapSend();
+          await drawnUntil(alpha, area, Voice.Machine, (state) =>
+            state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
+        }
+      } else {
+        if (outcome === "send") await tapSend();
+        else {
+          await press(answer);
           await vi.waitFor(() => expect(review.proposal.state).toBe("rejected"));
         }
         await drawnUntil(alpha, area, Voice.Machine, (state) =>
@@ -1249,7 +1265,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       for (const confirmation of review.confirmations) confirmation.confirm();
     }
     expect(world.ask.said).toEqual(by === "voice" ? ["Start this chat", text, answer] : ["Start this chat", text]);
-    expect(button("Send this text")).toBeUndefined();
+    expect(button("Send this text") !== undefined).toBe(outcome === "shown");
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual(outcome === "send" ? [
       [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
     ] : outcome === "decline" ? [[review.proposal.id], [], []] : [[], [], []]);

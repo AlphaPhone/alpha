@@ -296,11 +296,8 @@ After a call proposal is approved the stage switches to the call with a
 before the tap. An approved proposal is done and can never be approved
 again.
 
-The addressed SMS review may also take the owner's next explicit spoken
-confirmation, for the same fully visible card in the same Talk session.
-The phone checks the exact approved text and SIM against the claimed
-operation before dispatching it. The voice rule for this exception is in
-[Talk](../voice/).
+A text review shown during Talk is approved the same way, by the owner's
+tap; nothing the owner says approves it ([Talk](../voice/)).
 
 ```quint
 pure def canProposalApproved(c: Comms, proposalId: str, by: Actor): bool =

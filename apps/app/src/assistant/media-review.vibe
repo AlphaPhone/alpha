@@ -555,7 +555,8 @@ export service MediaReview {
   decideWorkflow(offer: WorkflowDeviceOffer, approve: boolean, current: Effect.Effect<boolean>, authorized: Effect.Effect<boolean>): boolean!!
   filesOrigin(spoken?: boolean): (FilesOrigin | undefined)!!
   filesContext(): (FilesReadContext | undefined)!!
-  spokenSms(session: Session, message: string, actions: DeviceActionReply["actionResults"], source: SpokenSmsReview): (MediaCard | undefined)!!
+  /** The text review a spoken turn's reply proposed; with `again`, only that same pending proposal, unchanged, that a later spoken turn's reply named again. */
+  spokenSms(session: Session, message: string, actions: DeviceActionReply["actionResults"], source: SpokenSmsReview, again?: Pick<MediaCard, "id" | "digest" | "message">): (MediaCard | undefined)!!
   /** Checks for a matching pending proposal while Talk is compact, without staging a review. */
   hasSpokenReview(session: Session, message: string, reply: DeviceActionReply): boolean!!
   spokenFiles(session: Session, message: string, request: DirectFiles, actions: DeviceActionReply["actionResults"]): boolean!!
@@ -1269,13 +1270,14 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         && (try enrollmentIsCurrent(opened)) && isLatest(opened) && (try source.current)
     },
     // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-    effect spokenSms(opened, message, results, source) {
+    effect spokenSms(opened, message, results, source, again) {
       const actions = repliedDeviceActions(results)
       if (actions.size !== 1 || !opened.capabilities.has("sms.send.v1") || !(try source.current)
         || !(try enrollmentIsCurrent(opened)) || !isLatest(opened)) return undefined
       const candidates = (try proposals(opened))?.filter((proposal) => proposal.state === "pending" && proposal.payload.workflow === undefined
         && actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
-        && (proposal.payload.requestMessageId === undefined || proposal.payload.requestMessageId === message))
+        && (again === undefined || (proposal.id === again.id && proposal.digest === again.digest))
+        && (proposal.payload.requestMessageId === undefined || proposal.payload.requestMessageId === (again?.message ?? message)))
       const proposal = candidates?.length === 1 ? candidates[0] : undefined
       if (proposal === undefined) return undefined
       const op = operation(proposal.payload.operation)
@@ -1291,7 +1293,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         || !(try sameSms(source.selection)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try source.current)
         || (try Clock.currentTimeMillis) >= expiresAt) return undefined
       const review = words(op)
-      return { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation: source.conversation,
+      return { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message: again?.message ?? message, conversation: source.conversation,
         revision: source.revision, enrollmentId: opened.identity.enrollmentId, ...review,
         detail: `SIM ${source.selection.subscription.slot + 1}\n${review.detail}`, sms: source.selection, spokenSms: source }
     },
