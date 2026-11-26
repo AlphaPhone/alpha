@@ -20,7 +20,8 @@ effect function owner(): (string | undefined)!! {
 }
 
 function onPage(shell: Shell.Shell, page: Settings.Settings, layers: Layers.Layers): boolean {
-  return Shell.showing(shell, "Settings") && shell.assistant !== "Full" && page.page === "Notifications" && !Layers.pageInert(layers)
+  const notifications = page.page === "Notifications" || page.page === "PrivacyNotifications"
+  return page.phone && notifications && Shell.showing(shell, "Settings") && shell.assistant !== "Full" && !Layers.pageInert(layers)
 }
 
 effect function inFront(): boolean!!Surroundings {

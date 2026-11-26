@@ -18,6 +18,7 @@ export interface Row {
   readonly source: Source;
   readonly key: string;
   readonly calendarId: string;
+  readonly creationId?: string;
   /** The calendar's number as Calendar and Home hide it: 0 is the agent's, any other one of the phone's. */
   readonly calendar: number;
   readonly title: string;

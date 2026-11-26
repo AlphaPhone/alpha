@@ -11,6 +11,8 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
 import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
+import { Machine as Messages } from "../gen/app__messages.effect.vibe";
+import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
@@ -427,6 +429,91 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
   await press("Open last photo");
   await waitForScreen(() => expect(document.querySelector('[data-alpha-subview="photos-viewer"] img[alt="Agent capture.jpg"]')).not.toBeNull());
+}, 300_000);
+
+it('Approve the resident agent’s exact text once and read its recorded outcome (spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once"; spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  const enrollment: NonNullable<typeof world.telephony.enrollment> = { journal: new Map() };
+  world.telephony.enrollment = enrollment;
+  const agent = forward(mine.agent.origin, mine.agent.token);
+  const proposalsPath = "/api/client-devices/proposals";
+  let enrolled: Headers | undefined;
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: (request) => {
+      if (new URL(request.url).pathname === proposalsPath) enrolled = new Headers(request.headers);
+      return agent(request);
+    },
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "assistant", "view:Messages", "notice"));
+  const runtime = assistant.runtime(alpha);
+  const onScreen = (check: () => void) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    check();
+  }, { timeout: 30_000 });
+
+  await until(alpha, alpha.runtime, Shell, (state) => state.image);
+  await until(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+  const messages = () => document.querySelector<HTMLButtonElement>('[data-home-tile="view:Messages"]');
+  await onScreen(() => expect(messages()).not.toBeNull());
+  await drawn(() => messages()?.click());
+  await until(alpha, alpha.runtime, Messages, (state) => state.pane === "Threads" && state.list.status === "Loaded");
+  await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Messages");
+  await press("Open conversation");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
+
+  const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } satisfies DeviceOperation;
+  const prompt = "Send an SMS to +14155550100 saying Meet at the front door";
+  await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation } }, prompt);
+  await mine.script({ kind: "text", parts: ["[answer] Review this send on your phone."] }, prompt);
+  await fill("Message Alpha", prompt);
+  await onScreen(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
+
+  const proposalList = Schema.decodeUnknownSync(Schema.Struct({ proposals: Schema.Array(Schema.Unknown) }));
+  const proposalIdentity = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.NonEmptyString, digest: Schema.NonEmptyString }));
+  const readProposals = async () => {
+    if (!enrolled) throw new Error("The app has not asked for its enrolled proposals");
+    const response = await agent(new Request(new URL(proposalsPath, mine.agent.origin), { headers: enrolled }));
+    expect(response.status).toBe(200);
+    return proposalList(await response.json()).proposals;
+  };
+  await onScreen(() => expect(button("Send this text")?.disabled).toBe(false));
+  const review = button("Send this text")?.closest("[data-alpha-sms-review]");
+  expect(review?.textContent).toContain(operation.body);
+  expect(review?.textContent).toContain("(415) 555-0100");
+  expect(review?.textContent).toContain("SIM 1");
+  const proposals = await readProposals();
+  const pending = proposals.find((one) => typeof one === "object" && one !== null && "id" in one && one.id === review?.getAttribute("data-alpha-review"));
+  expect(pending).toMatchObject({ state: "pending", payload: { operation } });
+  const { id, digest } = proposalIdentity(pending);
+  expect(world.telephony.sent).toEqual([]);
+
+  const native = Promise.withResolvers<void>();
+  world.telephony.hold = native.promise;
+  const settled = (state: string) => expect.objectContaining({ id, digest, state });
+  try {
+    await press("Send this text");
+    await vi.waitFor(async () => {
+      expect(await readProposals()).toContainEqual(settled("executing"));
+    }, { timeout: 30_000 });
+    expect(world.telephony.sent).toEqual([]);
+  } finally {
+    native.resolve();
+  }
+  await vi.waitFor(async () => {
+    expect(await readProposals()).toContainEqual(expect.objectContaining({
+      id, digest, state: "done", execution: expect.objectContaining({
+        providerIdempotencyKey: id,
+        providerReceipt: expect.objectContaining({
+          outcome: "applied", operationId: id,
+          result: expect.objectContaining({ kind: "sms-send", operationId: id, subscriptionId: 1, status: "sent" }),
+        }),
+      }),
+    }));
+  }, { timeout: 30_000 });
+  await onScreen(() => expect(enrollment.journal.get(id)?.acknowledged).toBe(true));
+  expect(world.telephony.sent).toEqual([{ operationId: id, recipients: operation.recipients, body: operation.body }]);
 }, 300_000);
 
 it('Filter Files from Home and open the named file with the resident agent (spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"); (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {

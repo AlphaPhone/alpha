@@ -156,6 +156,25 @@ pure def stepTheSheetHoldsItsHeightWhenTheStageChanges(before: Comms, via: str, 
 pure def sometimesTheStageCanReturn(c: Comms): bool = c.stage.length() > 0 and c.subject == CallSubject
 ```
 
+### Returning through an embedded Contacts tab follows the Phone stage without adding history
+
+Once the shell has returned to Phone from its embedded Contacts tab at the
+same Ask Alpha height, the Phone subject replaces Contacts on stage. A
+staged Phone entry is consumed if Contacts still owns it.
+
+```quint
+pure def canPhoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): bool =
+  by == Device and key != "" and (subject == KeypadSubject or subject == RecentsSubject)
+
+pure def phoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): Comms =
+  val shown = subjectShown(c, PhoneApp, subject, key, by)
+  val recentStage = c.stage.nthOr(c.stage.length() - 1, { app: ContactsApp, subject: ListSubject, key: "" })
+  { ...shown, stage: if (c.app == ContactsApp and recentStage.app == PhoneApp) c.stage.removeAt(c.stage.length() - 1) else c.stage }
+
+pure def stepPhoneTabReturnDoesNotAddHistory(before: Comms, via: str, after: Comms): bool =
+  via == "phoneTabReturned" implies after.stage.length() <= before.stage.length()
+```
+
 ### The sheet is closed, open or full, and full never compacts an emergency call
 
 Full shows the live strip: avatar, name and app, Mute and End during a call,

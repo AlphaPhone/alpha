@@ -16,6 +16,7 @@ import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
 import * as World from "../../gen/app__clock__world.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
+import * as Messages from "../../gen/app__messages.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
@@ -27,6 +28,7 @@ import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
 import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
+import { Conversations } from "../messages/messages.vibe"
 import type { Telephony } from "../platform/telephony.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
@@ -1527,6 +1529,31 @@ const retireContactSearch = started(effect {
   })
 }, "retiring search after leaving its contact")
 
+// spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"; spec/app/messages/index.md, "Returning from Phone restores the conversation the Ask Alpha stage held"
+effect function stageRestoration(previous: Comms.StageEntry): (((current: () => boolean) => void!!) | undefined)!!(Contacts.Machine | Messages.Machine | Conversations) {
+  if (previous.app === "ContactsApp" && previous.subject === "ContactSubject") {
+    const contacts = try Contacts.Machine
+    const before = try contacts.get()
+    const event = { type: "restoreStageContact", contact: before.contact, ticket: before.list.ticket } as const
+    if (previous.key !== `contacts:contact:${event.contact}` || !Contacts.canRestoreStageContact(before, event.contact, event.ticket)) return undefined
+    return effect (current: () => boolean) => {
+      try contained(contacts.send(event, current), "reading the earlier Contacts card")
+    }
+  }
+  if (previous.app === "MessagesApp" && previous.subject === "ThreadSubject") {
+    const thread = Number(/^messages:thread:([1-9]\d*)$/.exec(previous.key)?.[1])
+    if (!Number.isSafeInteger(thread) || Option.isNone(try (try Conversations).get(thread))) return undefined
+    const messages = try Messages.Machine
+    const before = try messages.get()
+    const event = { type: "restoreStageThread", thread, ticket: before.list.ticket } as const
+    if (!Messages.canRestoreStageThread(before, event.thread, event.ticket)) return undefined
+    return effect (current: () => boolean) => {
+      try contained(messages.send(event, current), "reading the earlier Messages conversation")
+    }
+  }
+  return undefined
+}
+
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
   const summary = (try Talk).board.snapshot().recordingSummary
@@ -1562,22 +1589,15 @@ export const assistantBack = effect {
         return fromSameRoute() && entry?.app === previous.app && entry.subject === previous.subject && entry.key === previous.key
       }), "returning to the earlier communications stage")
       if (!returned) return true
-      const contacts = try Contacts.Machine
-      const contact = try contacts.get()
-      if (try contained(shell.send({ type: "returnCommsView", previous: view }, (state) => state.route === where.route), "returning to the earlier communications app")) {
-        // spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"
-        const prefix = "contacts:contact:"
-        if (view === "Contacts" && previous.subject === "ContactSubject" && previous.key === prefix + contact.contact) {
-          const device = try Device
-          const exactVisit = () => {
-            const current = Effect.runSync(shell.get())
-            return current.route === where.route + 1 && showing(current, "Contacts") && current.assistant === "Sheet" && Effect.runSync(device.showing())
-          }
-          const event = { type: "restoreStageContact", contact: contact.contact, ticket: contact.list.ticket } as const
-          if (exactVisit() && Contacts.canRestoreStageContact(contact, event.contact, event.ticket)) {
-            try contained(contacts.send(event, exactVisit), "reading the earlier Contacts card")
-          }
+      const restoration = try stageRestoration(previous)
+      const opened = try contained(shell.send({ type: "returnCommsView", previous: view }, (state) => state.route === where.route), "returning to the earlier communications app")
+      if (opened && restoration !== undefined) {
+        const device = try Device
+        const exactVisit = () => {
+          const current = Effect.runSync(shell.get())
+          return current.route === where.route + 1 && showing(current, view) && current.assistant === "Sheet" && Effect.runSync(device.showing())
         }
+        if (exactVisit()) try restoration(exactVisit)
       }
       return true
     }

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Machine as CalendarForm } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
@@ -12,8 +13,11 @@ import { Machine as Talk } from "../gen/app__voice.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { Views } from "../src/assistant/views.vibe";
+import calendar from "../src/calendar/index.tsx";
+import { kept } from "../src/calendar/editor.vibe";
 import home from "../src/home/index.tsx";
 import { agentOpen } from "../src/notes/agent.vibe";
+import { reviewNoteSchedule } from "../src/notes/calendar.vibe";
 import notes from "../src/notes/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { button, closeAll, drawn, fill, hardware, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
@@ -73,6 +77,45 @@ async function openNotesFromHome(world: Scene) {
 }
 
 describe("Notes", () => {
+  it.each([
+    { row: "Enclave launch", kind: "event", destination: undefined, words: "Confirm attestation flow" },
+    { row: "Design sync", kind: "reminder", destination: "Reminders", words: "Book a review with Jordan" },
+  ] as const)('Reviews a Calendar draft from $row before any write (spec/app/notes/note.md, "Story: Review a Calendar draft from a note")', async ({ row, kind, destination, words }) => {
+    const world = scene();
+    const { alpha } = await open(world, only("home", "view:Notes", "view:Calendar", "notice"));
+    const notesArea = notes.runtime(alpha);
+    await press("Notes");
+    await until(alpha, notesArea, List, (state) => state.read.status === "Loaded");
+    await press(`Open ${row}`);
+    if (kind === "event") await until(alpha, notesArea, Editor, (state) => state.showing);
+    else await until(alpha, notesArea, Voice, (state) => state.showing);
+    const viewed = kind === "event"
+      ? await notesArea.runPromise(Editor.use((machine) => machine.get())).then((state) => ({ number: state.note, revision: state.draft.base, view: "editor" as const }))
+      : await notesArea.runPromise(Voice.use((machine) => machine.get())).then((state) => ({ number: state.note, revision: state.revision, view: "voice" as const }));
+    await drawn(() => notesArea.runPromise(reviewNoteSchedule(viewed, kind)));
+    const target = calendar.runtime(alpha);
+    await until(alpha, target, CalendarForm, (state) => state.shown && state.kept);
+    const state = await target.runPromise(CalendarForm.use((form) => form.get()));
+    const fields = await target.runPromise(kept(state.day, state.owner));
+    expect(fields).toMatchObject({ title: row, notes: expect.stringContaining(words), noteOrigin: {
+      agent: world.notes.owner, owner: world.notes.ownerIdentity, version: 2, revision: expect.any(String),
+    } });
+    expect(fields.calendar).toBe(destination);
+    expect(new Date(fields.begin).getHours()).toBe(9);
+    expect(world.calendar.writes).toEqual([]);
+    if (destination === "Reminders") {
+      await rendered(() => expect(button("Save")?.disabled).toBe(false));
+      await press("Save");
+      await until(alpha, target, CalendarForm, (draft) => !draft.shown);
+      await rendered(() => expect(button(/Design sync/)).toBeDefined());
+      await press(/Design sync/);
+      await control("Open source note");
+      await press("Open source note");
+      await until(alpha, alpha.runtime, Shell, (where) => showing(where, "Notes"));
+      await until(alpha, notesArea, Voice, (voice) => voice.showing);
+    }
+  });
+
   it("See my notes (spec/app/notes/index.md, \"Story: See my notes\")", async () => {
     const world = scene();
     // spec/app/notes/index.md, "Opening Notes, or trying again, reads the owner's notes"
