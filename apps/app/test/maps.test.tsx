@@ -9,7 +9,7 @@ import { handToMaps } from "../src/maps/handoff.ts";
 import maps from "../src/maps/index.tsx";
 import { atlas } from "../src/maps/atlas.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { cloudRoute, gallery, harbour, move } from "./fakes/maps.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -19,7 +19,7 @@ afterEach(closeAll);
 const withMaps = only("home", "view:Maps");
 
 /** Press Enter in the field whose accessible name is `name`. */
-const enter = (name: string) => act(async () => {
+const enter = (name: string) => drawn(() => {
   const field = [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name);
   if (!field?.form) throw new Error(`no form around ${name}`);
   field.form.requestSubmit();
@@ -37,7 +37,7 @@ async function onMaps(world: ReturnType<typeof scene>) {
 }
 
 async function typeMapSearch(text: string) {
-  await act(async () => { document.querySelector<HTMLInputElement>('input[aria-label="Search Maps"]')?.focus(); });
+  await drawn(() => { document.querySelector<HTMLInputElement>('input[aria-label="Search Maps"]')?.focus(); });
   await fill("Search Maps", text);
 }
 
@@ -163,7 +163,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => !s.trip.away && s.trip.guidance === "Going");
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("notification"); });
+    await drawn(() => { world.maps.guidance.stop?.("notification"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "StoppedFromNotification" && s.link.locator === "Nobody");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);
@@ -174,7 +174,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.trip.service === "Running" && s.guideNotice === "Quiet");
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("task-removed"); });
+    await drawn(() => { world.maps.guidance.stop?.("task-removed"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "PausedAway");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);
@@ -201,7 +201,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
 
     // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a places card's Map button, with the disclosure unread, searches at once, as v119 did
-    await act(async () => { handToMaps("harbour"); });
+    await drawn(() => { handToMaps("harbour"); });
     await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
     expect(results()).toEqual(["Harbour Cafe", "Harbour Gallery"]);
     expect([(await now(runtime)).link.disclosed, document.body.textContent?.includes(why)]).toEqual([false, false]);
@@ -218,7 +218,7 @@ describe("Maps on a phone", () => {
     await press("Continue");
     await until(alpha, runtime, Screen, (s) => s.link.prompting && s.owedLocate && !s.explaining);
     expect([Boolean(button("Recenter")), document.body.textContent?.includes(why)]).toEqual([true, false]);
-    await act(async () => { answer(); });
+    await drawn(() => { answer(); });
     await until(alpha, runtime, Screen, (s) => !s.link.prompting && s.link.session > shown.link.session && !s.owedLocate);
     expect(Boolean(button("Recenter"))).toBe(true);
   });
@@ -343,6 +343,56 @@ describe("Maps in a browser", () => {
     await until(second.alpha, again, Screen, (s) => s.directions);
     await fill("Starting point", "Off");
     expect([document.querySelector("input[aria-label='Starting point']")?.getAttribute("placeholder"), Boolean(button("From Office"))]).toEqual(["My location", true]);
+  });
+
+  it("A dropped pin is named before it is saved, and a place found never offers Rename (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
+    const world = scene();
+    world.maps.routes = [cloudRoute("there", harbour.coordinate, { latitude: 43.73, longitude: 7.42 }, 300, 2)];
+    const { alpha, runtime } = await onMaps(world);
+    const now = () => runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
+    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    await typeMapSearch("43.73, 7.42");
+    await enter("Search Maps");
+    await until(alpha, runtime, Screen, (s) => s.place !== 0 && !s.pinning);
+    const pin = (await now()).place;
+
+    // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": a start found by search, swapped onto the card, offers no Rename, as v119 offered none on an unsaved place it found
+    await press("Directions");
+    await fill("Starting point", "cafe");
+    await enter("Starting point");
+    await until(alpha, runtime, Screen, (s) => s.origins.status === "Loaded" && s.originsFound === 1);
+    await press("From Harbour Cafe");
+    await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.startPlace !== 0);
+    await press("Swap starting point and destination");
+    await until(alpha, runtime, Screen, (s) => s.place !== pin && s.startPlace === pin && s.trip.route !== 0);
+    await hardware("back");
+    await hardware("back");
+    await until(alpha, runtime, Screen, (s) => !s.directions && s.place !== 0 && s.place !== pin);
+    expect([document.querySelector("h2")?.textContent, button("Rename place")]).toEqual(["Harbour Cafe", undefined]);
+
+    // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": the pin's name only names it until Save keeps it under that name, as v119's applyName did
+    await hardware("back");
+    await until(alpha, runtime, Screen, (s) => s.place === 0);
+    await typeMapSearch("43.73, 7.42");
+    await enter("Search Maps");
+    await until(alpha, runtime, Screen, (s) => s.place === pin && !s.pinning);
+    await press("Rename place");
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Place name']")?.value).toBe("Dropped pin");
+    await fill("Place name", "Quay");
+    await press("Apply place name");
+    await until(alpha, runtime, Screen, (s) => s.notice === "PinNamed" && !s.renaming);
+    expect([document.querySelector("h2")?.textContent, (await now()).saved, document.body.textContent?.includes("Name updated. Tap Save to keep this place."), Boolean(button("Save"))])
+      .toEqual(["Quay", [], true, true]);
+    // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": the pin's name is told on its card only, and Directions clears it, as v119's openDirections replaced its message
+    await press("Directions");
+    await until(alpha, runtime, Screen, (s) => s.directions);
+    expect([(await now()).notice, document.body.textContent?.includes("Name updated. Tap Save to keep this place.")]).toEqual(["NoNotice", false]);
+    await hardware("back");
+    await until(alpha, runtime, Screen, (s) => !s.directions && s.place === pin);
+    expect([document.querySelector("h2")?.textContent, document.body.textContent?.includes("Name updated. Tap Save to keep this place.")]).toEqual(["Quay", false]);
+    await press("Save");
+    await until(alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Quay" && s.notice === "PlaceSaved");
+    expect([document.querySelector("h2")?.textContent, document.body.textContent?.includes("Place saved on this device.")]).toEqual(["Quay", true]);
   });
 
   it("A saved list Alpha cannot read is never written over (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
