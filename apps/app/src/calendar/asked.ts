@@ -1,4 +1,5 @@
 // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+import { createContext } from "react";
 import type { InAskAlpha } from "../../gen/app__calendar__agent.ts";
 import { externalStore } from "../runtime/store.ts";
 
@@ -9,10 +10,11 @@ export interface Filed {
   readonly request: string;
 }
 
-/** The requests replies filed, and what the agent's calendar has to show of them in Ask Alpha. */
+/** The requests replies filed, what the agent's calendar has to show of them in Ask Alpha, and the request it holds; "" for none. */
 export interface Asked {
   readonly filed: ReadonlyArray<Filed>;
   readonly shown: InAskAlpha;
+  readonly holds: string;
 }
 
 /** One action a reply ran, as the agent reports it. */
@@ -29,7 +31,18 @@ export function filedRequests(ran: ReadonlyArray<Ran>): string[] {
   });
 }
 
-const store = externalStore<Asked>({ filed: [], shown: "NothingToShow" });
+/** The card of the newest reply of `conversation` that filed a request: that reply, and the request it is bound to while the calendar holds one that reply filed. @throws {never} */
+export function cardOf(now: Asked, conversation: number): { readonly message: string; readonly request: string | undefined } | undefined {
+  const newest = now.filed.findLast((one) => one.conversation === conversation);
+  if (newest === undefined) return undefined;
+  const own = now.holds !== "" && now.filed.some((one) => one.conversation === conversation && one.message === newest.message && one.request === now.holds);
+  return { message: newest.message, request: own ? now.holds : undefined };
+}
+
+/** The request the Calendar card in Ask Alpha is bound to: it shows, and decides, that request only. */
+export const AskedRequest = createContext<string | undefined>(undefined);
+
+const store = externalStore<Asked>({ filed: [], shown: "NothingToShow", holds: "" });
 
 /** What Ask Alpha shows of the agent's Calendar requests, as a store its screen reads, and Calendar tells. */
 export const asked = {
@@ -43,8 +56,9 @@ export const asked = {
     if (added.length > 0) store.set({ ...now, filed: [...now.filed, ...added] });
     return ids.length > 0;
   },
-  /** Calendar says what it has to show. @throws {never} */
-  show(shown: InAskAlpha): void {
-    if (store.snapshot().shown !== shown) store.set({ ...store.snapshot(), shown });
+  /** Calendar says what it has to show, and the request it holds. @throws {never} */
+  show(shown: InAskAlpha, holds: string): void {
+    const now = store.snapshot();
+    if (now.shown !== shown || now.holds !== holds) store.set({ ...now, shown, holds });
   },
 };

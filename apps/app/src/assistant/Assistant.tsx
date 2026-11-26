@@ -62,7 +62,7 @@ import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
-import { asked } from "../calendar/asked.ts";
+import { AskedRequest, asked, cardOf } from "../calendar/asked.ts";
 import { shownInAskAlpha } from "../../gen/app__calendar__agent.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
@@ -575,10 +575,11 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
   // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
-  const filedHere = calendar.filed.filter((one) => one.conversation === shown.chosen);
+  const filedCard = cardOf(calendar, shown.chosen);
   const calendarCard = calendarReview !== undefined && !talking.context.sensitive
-    && shownInAskAlpha(calendar.shown, filedHere.length > 0, filedHere.some((one) => one.message === lines.at(-1)?.id))
-    ? [{ id: "calendar review", author: "alpha" as const, text: "", children: calendarReview }] : [];
+    && shownInAskAlpha(calendar.shown, filedCard?.request !== undefined, filedCard?.message === lines.at(-1)?.id)
+    ? [{ id: `calendar review ${filedCard?.request ?? ""}`, author: "alpha" as const, text: "",
+      children: <AskedRequest.Provider value={filedCard?.request}>{calendarReview}</AskedRequest.Provider> }] : [];
   const offer = seen.recordingSummary;
   const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
     && lines.some((line) => !line.mine && line.id === offer.message)

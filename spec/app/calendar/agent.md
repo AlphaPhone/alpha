@@ -187,10 +187,14 @@ pure def alwaysAnApprovableCardShowsTheEventAsItIs(s: AgentCalendar): bool =
 
 ### Only the owner approves, and approving sends the change once, under a new number
 
-```quint
-pure def canApprove(s: AgentCalendar, by: Actor): bool = by == Owner and s.stage == Awaiting and V::canConfirm(s.card) and s.complete
+An approval names the request its card shows, so it approves nothing once
+the calendar holds another request.
 
-pure def approve(s: AgentCalendar, by: Actor): Acted =
+```quint
+pure def canApprove(s: AgentCalendar, filing: int, by: Actor): bool =
+  by == Owner and s.stage == Awaiting and V::canConfirm(s.card) and s.complete and filing == s.filing
+
+pure def approve(s: AgentCalendar, filing: int, by: Actor): Acted =
   val w = A::dispatch(A::record(A::plan(s.write.id + 1)))
   { state: { ...s, stage: Sending, card: V::confirm(s.card), write: w },
     out: List(Send({ attempt: w.id, filing: s.filing, change: s.change, reply: s.reply, id: s.id, series: s.series, revision: s.bound })) }
@@ -199,12 +203,12 @@ pure def approve(s: AgentCalendar, by: Actor): Acted =
 ### The owner declines, or the agent withdraws, and nothing is sent
 
 A decline tells the agent to drop its request; nothing reaches the
-calendar.
+calendar. Like an approval, it names the request its card shows.
 
 ```quint
-pure def canDecline(s: AgentCalendar, by: Actor): bool = by == Owner and s.stage == Awaiting
+pure def canDecline(s: AgentCalendar, filing: int, by: Actor): bool = by == Owner and s.stage == Awaiting and filing == s.filing
 
-pure def decline(s: AgentCalendar, by: Actor): Acted =
+pure def decline(s: AgentCalendar, filing: int, by: Actor): Acted =
   { state: { ...s, stage: Idle, card: V::dismiss(s.card), result: Declined }, out: List(Reject({ filing: s.filing }), Report({ result: Declined })) }
 
 pure def canWithdraw(s: AgentCalendar, by: Actor): bool = by == Agent and s.stage == Awaiting
@@ -264,6 +268,15 @@ own result, never from the owner's words. While a change is under way its
 card stays at the foot of each conversation where a reply filed one. Once
 it ends, how it ended shows there until the owner asks something else.
 
+The card at the foot of a conversation is the card of the newest reply
+there that filed a request, and it is bound to the request the calendar
+holds: it shows, and its Approve and Decline act, only while that request
+is one this reply filed. While the calendar still holds an earlier
+request, this reply shows no card at all, so nothing under it approves or
+declines the earlier one; a card for the earlier request belongs to the
+reply that filed it. Once the earlier request ends and the calendar holds
+this reply's own, its card shows.
+
 ```quint
 type InAskAlpha = NothingToShow | ChangeUnderWay | ChangeEnded
 
@@ -272,12 +285,15 @@ pure def inAskAlpha(s: AgentCalendar, filedByAReply: bool): InAskAlpha =
   else if (filedByAReply and s.result != NoResult and s.result != Withdrawn) ChangeEnded
   else NothingToShow
 
-pure def shownInAskAlpha(shown: InAskAlpha, filedHere: bool, latestReply: bool): bool =
-  filedHere and (shown == ChangeUnderWay or (shown == ChangeEnded and latestReply))
+pure def shownInAskAlpha(shown: InAskAlpha, itsOwnRequest: bool, latestReply: bool): bool =
+  itsOwnRequest and (shown == ChangeUnderWay or (shown == ChangeEnded and latestReply))
 
 pure def lawACardUnderWayShowsWhereItWasAsked(latestReply: bool): bool = shownInAskAlpha(ChangeUnderWay, true, latestReply)
 
-pure def lawNothingShowsWhereNoReplyFiledOne(shown: InAskAlpha, latestReply: bool): bool = not(shownInAskAlpha(shown, false, latestReply))
+pure def lawNoCardShowsUnderAReplyForARequestItDidNotFile(shown: InAskAlpha, latestReply: bool): bool = not(shownInAskAlpha(shown, false, latestReply))
+
+pure def lawACardDecidesOnlyTheRequestItShows(s: AgentCalendar, filing: int): bool =
+  (canApprove(s, filing, Owner) or canDecline(s, filing, Owner)) implies filing == s.filing
 
 pure def lawAnEndedChangeLeavesWithTheNextQuestion(filedHere: bool): bool = not(shownInAskAlpha(ChangeEnded, filedHere, false))
 ```
