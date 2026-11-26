@@ -10,6 +10,17 @@ import type { AssistantAttachment } from "./AssistantAttachmentChip.tsx";
 import { AssistantPendingAttachments } from "./AssistantPendingAttachments.tsx";
 import { AssistantQuoteBar } from "./AssistantQuoteBar.tsx";
 import { type AssistantPull, useAssistantPull } from "./assistant-pull.ts";
+import tokens from "@repo/design-system/tokens.json" with { type: "json" };
+
+/** The design system's rise (tokens.json `animate.rise`, `keyframes.rise`) as a Web Animation, so the bar and the pill can replay it on the one element they share. */
+const rise = (() => {
+  const [, duration = "460", easing = "ease"] = /(\d+)ms\s+(cubic-bezier\([^)]*\)|\S+)/.exec(tokens.animate.rise) ?? [];
+  const [, from = "1.75rem"] = /translateY\(([^)]+)\)/.exec(tokens.keyframes.rise) ?? [];
+  return {
+    keyframes: [{ opacity: 0, transform: `translateY(${from})` }, { opacity: 1, transform: "none" }],
+    options: { duration: Number(duration), easing },
+  };
+})();
 
 export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "onChange"> & {
   /** Where the composer sits: in the Ask Alpha bar, raised on its own, or at the foot of the conversation sheet. */
@@ -123,10 +134,7 @@ export function AssistantComposer({
     if (!node || enter === 0 || playedRef.current === enter || typeof node.animate !== "function") return;
     playedRef.current = enter;
     if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    const motion = node.animate(
-      [{ opacity: 0, transform: "translateY(28px)" }, { opacity: 1, transform: "none" }],
-      { duration: 460, easing: "cubic-bezier(0.19, 1, 0.22, 1)" },
-    );
+    const motion = node.animate(rise.keyframes, rise.options);
     motion.finished.catch(() => undefined);
     return () => { motion.cancel(); };
   }, [enter]);

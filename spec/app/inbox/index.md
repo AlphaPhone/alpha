@@ -201,6 +201,11 @@ pure def search(s: Mailbox, query: str): Moved = asking(0, turned({ ...s.selecte
 
 ### Back from a search shows its folder without the search, before Back leaves Inbox
 
+Off the launcher the open search field draws its own Back to the folder. On
+the launcher Inbox's first page draws no Back, so the search field fills the
+header and the folders stay under it, as the Sunday demo build drew them;
+the phone's Back still clears a search.
+
 ```quint
 pure def canClearSearch(s: Mailbox): bool = s.selected.query != "" and canSearch(s, "")
 
