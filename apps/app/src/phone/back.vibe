@@ -20,11 +20,11 @@ export const phoneBack = effect {
   return try stepped(voicemail, state.confirming ? { type: "keep" } as const : state.open ? { type: "close" } as const : undefined)
 }
 
-/** Back on Messages: a delete question first, then the open search, then the conversation or the picker. */
+/** Back on Messages: a delete question first, then the conversation or the picker, then the search they were opened from. */
 export const messagesBack = effect {
   const messages = try Messages.Machine
   const state = try messages.get()
-  return try stepped(messages, state.confirming ? { type: "keep" } as const : state.searching ? { type: "closeSearch" } as const : state.pane !== "Threads" ? { type: "back" } as const : undefined)
+  return try stepped(messages, state.confirming ? { type: "keep" } as const : state.pane !== "Threads" ? { type: "back" } as const : state.searching ? { type: "closeSearch" } as const : undefined)
 }
 
 /** Back on Contacts: a delete question, the form, then the open contact. */

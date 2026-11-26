@@ -21,7 +21,7 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
@@ -644,6 +644,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         toolRan = true
         if (labelled()) board.change({ label: label ?? `Using ${name}` })
       },
+      // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": the reply the agent stored is settled text, shown at once, so Stop keeps it.
+      onReady: (fullText: string) => { if (fullText !== "") preview(fullText, false) },
     }
     board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNote: undefined })
     const views = try Views
@@ -656,8 +658,9 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const asksDirect = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
     const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const sent = effect (direct: boolean) => {
-      const metadata = { ...screen, ...(effectiveTold ? delivery(views.clientId, direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
-      return tryPromise(() => controller.send({ text, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
+      const metadata = { ...screen, ...(effectiveTold ? delivery(views.clientId, try views.shown(), direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+      const headers = enrolled === undefined ? undefined : try review.turnHeaders(enrolled, false)
+      return tryPromise(() => controller.send({ text, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(headers === undefined ? {} : { headers }) })) catch () => undefined
     }
     if (contact !== undefined && (!(try contactFileSendCurrent(contact)) || board.snapshot().contactDraft !== contactDraft)) {
       board.drop(pageTicket, mine)
@@ -957,9 +960,11 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
     when { tag: "Kept", let messages }: run("kept", effect { try contained((try Chats.Machine).send({ type: "kept", messages }), "counting kept messages") });
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
     when { tag: "Arrived", let recorded }: run("arrived", arrived(recorded));
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
     when { tag: "Navigate", let turn, let view }: answer("navigate", effect {
       const shell = try Shell
-      const shown = showing(try shell.get(), view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view the agent named"))
+      const before = try shell.get()
+      const shown = (showing(before, view) && !canAgentShowView(before, view)) || (try contained(shell.send({ type: "agentShowView", view }), "opening the view the agent named"))
       return { type: "navigated", ticket: turn, opened: shown } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });
     when { tag: "NavigateHome", let turn }: answer("navigate", effect {
@@ -1658,6 +1663,10 @@ const rested = started(effect {
     last = shown
     if (shown.assistant === "Bar" && (wasOpen || viewChanged)) {
       try ignore(dock.send({ type: "putAway", now: untimed }))
+    }
+    // spec/app/assistant/dock.md, "A bar or pill a drag left in place changes between them without an entrance until the sheet next opens"
+    if (!wasOpen && (shown.assistant === "Sheet" || shown.assistant === "Full")) {
+      try ignore(dock.send({ type: "opened" }))
     }
   })
 }, "resting the Ask Alpha dock")

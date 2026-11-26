@@ -386,8 +386,8 @@ describe("Ask Alpha dock and shell navigation", () => {
     await restsOverCalendar(runtime);
   });
 
-  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
-  it("agent navigation moves between admitted apps and Home while keeping Ask Alpha raised (spec/app/shell/index.md, \"Agent navigation shows an admitted app or Home without lowering Ask Alpha\")", async () => {
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
+  it("agent navigation moves between admitted apps and Home while keeping Ask Alpha raised (spec/app/shell/index.md, \"Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it\")", async () => {
     const { runtime } = await mountDock({ view: "Home", withToast: true, flush: underAct });
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "raise", detent: "Sheet" })));
@@ -665,6 +665,46 @@ describe("Ask Alpha dock and shell navigation", () => {
     await expect.poll(async () => (await runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()))).tucked).toBe(true);
     await vi.waitFor(() => expect(bar.hasAttribute("data-alpha-pill")).toBe(true));
     expect([cleared, bar.style.transform, bar.style.opacity, risen]).toEqual([[true], "", "", []]);
+  });
+
+  // spec/app/assistant/dock.md, "A bar or pill a drag left in place changes between them without an entrance until the sheet next opens"
+  it("Type on a pill a drag tucked shows the bar in place at once, until the sheet next opens", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const dockState = () => runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()));
+    const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+    const mark = named("Open conversation");
+    expect([bar, mark].includes(null)).toBe(false);
+    if (!bar || !mark) return;
+    const risen: Parameters<HTMLElement["animate"]>[] = [];
+    bar.animate = (...args: Parameters<HTMLElement["animate"]>) => {
+      risen.push(args);
+      return { finished: Promise.resolve(), cancel: () => undefined } as unknown as Animation;
+    };
+    const send = (type: string, y: number) =>
+      underAct(() => { mark.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 61, pointerType: "touch", isPrimary: true })); });
+    await send("pointerdown", 700);
+    await send("pointermove", 740);
+    await send("pointermove", 770);
+    await send("pointerup", 770);
+    await expect.poll(async () => [(await dockState()).tucked, (await dockState()).placed]).toEqual([true, true]);
+    await vi.waitFor(() => expect(bar.hasAttribute("data-alpha-pill")).toBe(true));
+    await act(async () => { await Effect.runPromise(Effect.sleep("450 millis")); });
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await resting(runtime, "Typing");
+    });
+    expect([bar.hasAttribute("data-alpha-input-bar"), risen]).toEqual([true, []]);
+
+    await act(async () => {
+      bar.querySelector("textarea")?.blur();
+      await resting(runtime, "Bar");
+    });
+    await act(async () => {
+      named<HTMLButtonElement>("Open conversation")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    });
+    await expect.poll(async () => (await dockState()).placed).toBe(false);
   });
 
   // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": the bar Type raises from the pill rises on the design system's rise

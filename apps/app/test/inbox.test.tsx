@@ -774,10 +774,13 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await menu("Forward");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Forward");
   expect(told()).toContain("actions.txt");
+  const toPlaceholder = () => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.placeholder;
+  const emptyTo = toPlaceholder();
   await fill("To", "reader@example.test");
   await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1 && s.stored && !s.pending && s.write.status === "Loaded");
+  expect([emptyTo, toPlaceholder()]).toEqual(["Email address", "Email address"]);
   await press("Send email");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
   expect(document.querySelector("[role=dialog]")?.textContent).toContain("actions.txt");

@@ -164,8 +164,12 @@ pure def pick(s: Contacts, chip: Chip): Moved = relisted(s.sought, chip, s)
 
 ### Back from the search field clears the query and returns to Contacts
 
-The search field opens from the list. Back clears its query and returns
-to All contacts. A filter that Alpha applied can be cleared from the list
+The search field opens from the list. Back, Android's or the field's own
+where one is drawn, closes the field first, even with nothing typed, clears
+its query and returns to All contacts; only the next Back leaves Contacts.
+As in Sunday's v119, while Alpha is the phone's launcher the field draws no
+Back of its own and runs the full width, in Contacts and on Phone's
+Contacts tab alike. A filter that Alpha applied can be cleared from the list
 without opening the field.
 
 ```quint
