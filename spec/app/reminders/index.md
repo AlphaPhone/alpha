@@ -521,8 +521,13 @@ pure def agentChanged(s: Reminders): Moved =
 
 A reminder made in chat, or before Alpha last opened, is held like one made
 here: what the agent holds is taken under its number, with its list, and a
-reminder the agent no longer holds is forgotten. The reminder an Undo holds
-is left as it is until the hold ends.
+reminder the agent no longer holds is forgotten, however many it holds: the
+cap on reminders made here does not drop one the agent already has. The
+reminder an Undo holds is left as it is until the hold ends. A reminder
+keeps its number when Alpha opens again, so a hold resumed after a restart
+commits the reminder it held. A change made while an Undo is held or a write
+is still answering waits for the hold to end and the write to answer, so
+two quick deletes both happen, each with its own Undo.
 
 ```quint
 pure def canTakeList(s: Reminders, listId: int): bool =
@@ -536,7 +541,7 @@ pure def heldBack(s: Reminders, itemId: int): bool =
   itemId == s.hiddenId or (undoHeld(s) and s.undoData.itemId == itemId)
 
 pure def canTakeItem(s: Reminders, itemId: int, spec: ItemSpec, completed: bool): bool =
-  itemId >= 1 and not(heldBack(s, itemId)) and (hasItem(s.items, itemId) or s.items.length() < 200)
+  itemId >= 1 and not(heldBack(s, itemId))
     and hasList(s.lists, spec.listId) and validTiming(spec.hasDue, spec.hasDueTime, spec.dueMinute, spec.repeat)
 
 pure def takeItem(s: Reminders, itemId: int, spec: ItemSpec, completed: bool): Reminders =

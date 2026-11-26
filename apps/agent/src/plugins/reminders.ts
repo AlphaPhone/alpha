@@ -50,7 +50,7 @@ function taskSteps(kept: boolean, dated: boolean, completed: boolean, wasComplet
   if (!hasTask) return kept && dated && !completed ? ["MakeTask"] : [];
   if (!kept || !dated) return ["DismissTask"];
   if (completed) return wasCompleted ? [] : ["CompleteTask"];
-  if (wasCompleted) return retimed ? ["ReopenTask", "MoveTask"] : ["ReopenTask"];
+  if (wasCompleted) return ["ReopenTask", "MoveTask"];
   return retimed ? ["MoveTask"] : [];
 }
 
@@ -248,14 +248,15 @@ function isItemOverdue(item: ReminderItemRecord, nowMs: number, timeZone: string
   return dueMs !== null && dueMs < nowMs;
 }
 
-function formatDueSummary(item: ReminderItemRecord): string {
-  if (item.dueDate === null) return "";
-  if (item.dueMinute === null) return ` due ${item.dueDate}`;
+function formatDueSummary(item: ReminderItemRecord, nowMs: number, timeZone: string): string {
+  const state = item.completed ? "completed" : isItemOverdue(item, nowMs, timeZone) ? "overdue" : "pending";
+  if (item.dueDate === null) return ` (${state}, no due time)`;
+  if (item.dueMinute === null) return ` due ${item.dueDate} (${timeZone}; ${state})`;
   const hour = Math.floor(item.dueMinute / 60);
   const minute = item.dueMinute % 60;
   const suffix = hour >= 12 ? "PM" : "AM";
   const displayHour = hour % 12 === 0 ? 12 : hour % 12;
-  return ` due ${item.dueDate} ${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`;
+  return ` due ${item.dueDate} ${displayHour}:${String(minute).padStart(2, "0")} ${suffix} (${timeZone}; ${state})`;
 }
 
 function queryReminders(store: AlphaAppsStore, params: Record<string, unknown>, timeZone: string): readonly ReminderItemRecord[] {
@@ -303,6 +304,37 @@ async function handleListOp(store: AlphaAppsStore, runtime: AgentRuntimeLike | u
   return { success: true, text: `Deleted list "${removed.name}".`, data: { op, list: removed } };
 }
 
+const readOps = new Set(["list", "query"]);
+
+/** An applied effect receipt, in eliza's receipt contract, for the reminder or list a write changed. */
+function appliedReceipt(op: string, resource: { readonly kind: string; readonly id: string; readonly version?: string }, atMs: number) {
+  const at = new Date(atMs).toISOString();
+  return {
+    receiptId: `alpha-reminders-receipt-v1:${op}:${resource.id}:${resource.version ?? ""}:${atMs}`,
+    operation: `alpha.reminder.${op}`,
+    resource,
+    artifacts: [],
+    idempotency: { key: null, replayed: false },
+    observedAt: at,
+    outcome: "applied" as const,
+    commit: { kind: "durable" as const, id: resource.id, committedAt: at },
+  };
+}
+
+function withReceipt<R extends { readonly success: boolean; readonly data?: unknown }>(result: R, atMs: number) {
+  const data = asRecord(result.data);
+  const op = readString(data, "op");
+  if (!result.success || op === undefined || readOps.has(op)) return result;
+  const item = asRecord(data.item);
+  const list = asRecord(data.list);
+  const itemId = readString(item, "id");
+  const listId = readString(list, "id");
+  const resource = itemId !== undefined
+    ? { kind: "alpha.reminder", id: itemId, version: String(readNumber(item, "revision") ?? 0) }
+    : listId !== undefined ? { kind: "alpha.reminder-list", id: listId } : undefined;
+  return resource === undefined ? result : { ...result, effectReceipts: [appliedReceipt(op, resource, atMs)] };
+}
+
 async function handleRemindersManage(
   store: AlphaAppsStore, runtime: AgentRuntimeLike | undefined, timeZone: string,
   params: Record<string, unknown>,
@@ -312,7 +344,8 @@ async function handleRemindersManage(
   if (op === "create_list" || op === "rename_list" || op === "delete_list") return handleListOp(store, runtime, timeZone, op, params);
   if (op === "list" || op === "query") {
     const items = queryReminders(store, params, timeZone);
-    const lines = items.map((item) => `- ${item.title}${formatDueSummary(item)}${item.flagged ? " [flagged]" : ""}${item.priority !== "none" ? ` [${item.priority}]` : ""} (${item.id})`);
+    const nowMs = store.now();
+    const lines = items.map((item) => `- ${item.title}${formatDueSummary(item, nowMs, timeZone)}${item.flagged ? " [flagged]" : ""}${item.priority !== "none" ? ` [${item.priority}]` : ""} (${item.id})`);
     return { success: true, text: lines.length === 0 ? "No matching reminders." : `Reminders:\n${lines.join("\n")}`, data: { op, items, lists: store.getReminders().lists, readOnlyOperation: true } };
   }
   if (op === "create") {
@@ -331,7 +364,7 @@ async function handleRemindersManage(
       subtasks: parseSubtasksParam(params.subtasks) ?? [],
     });
     const mirrored = (await followTask(store, runtime, undefined, created, timeZone)).item ?? created;
-    return { success: true, text: `Added reminder "${mirrored.title}"${formatDueSummary(mirrored)}.`, data: { op, item: mirrored } };
+    return { success: true, text: `Added reminder "${mirrored.title}"${formatDueSummary(mirrored, store.now(), timeZone)}.`, data: { op, item: mirrored } };
   }
   const target = findReminderTarget(store, params);
   if (target === undefined) return { success: false, text: "No matching reminder found." };
@@ -439,7 +472,7 @@ export function remindersAction(store: AlphaAppsStore, timeZone: string): AgentA
     validate: () => Promise.resolve(true),
     handler: async (runtime, _message, _state, options) => {
       const params = asRecord(asRecord(options).parameters ?? asRecord(options));
-      return handleRemindersManage(store, runtime, timeZone, params);
+      return withReceipt(await handleRemindersManage(store, runtime, timeZone, params), store.now());
     },
   };
   showsApp(action, "reminders");
@@ -467,16 +500,16 @@ export function remindersProvider(store: AlphaAppsStore, timeZone: string): Agen
       ];
       if (overdue.length > 0) {
         lines.push("## Overdue");
-        for (const item of overdue.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item)}`);
+        for (const item of overdue.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item, nowMs, timeZone)}`);
       }
       if (dueToday.length > 0) {
         lines.push("## Due today");
-        for (const item of dueToday.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item)}`);
+        for (const item of dueToday.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item, nowMs, timeZone)}`);
       }
       const later = open.filter((item) => !overdue.includes(item) && !dueToday.includes(item));
       if (later.length > 0) {
         lines.push("## Other open reminders");
-        for (const item of later.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item)}`);
+        for (const item of later.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item, nowMs, timeZone)}`);
       }
       lines.push("## Lists");
       for (const list of snapshot.lists) {
@@ -488,7 +521,7 @@ export function remindersProvider(store: AlphaAppsStore, timeZone: string): Agen
       const selectedId = readString(selected, "id");
       const selectedItem = selectedId === undefined ? undefined : snapshot.items.find((item) => item.id === selectedId);
       if (selectedItem !== undefined) {
-        lines.push(`Selected reminder: [${selectedItem.id}] ${selectedItem.title}${formatDueSummary(selectedItem)}`);
+        lines.push(`Selected reminder: [${selectedItem.id}] ${selectedItem.title}${formatDueSummary(selectedItem, nowMs, timeZone)}`);
       }
       return {
         text: lines.join("\n"),

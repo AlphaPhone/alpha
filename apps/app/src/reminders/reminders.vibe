@@ -27,7 +27,7 @@ import {
   civilDayNumber,
   formatCivilDate,
 } from "./recurrence.ts"
-import { persistReminderSnapshot, pushToHomeAgenda, snapshotKey } from "./snapshot.vibe"
+import { numbersKey, persistReminderSnapshot, pushToHomeAgenda, snapshotKey } from "./snapshot.vibe"
 import {
   DEFAULT_LIST_ID,
   normalizeSnapshot,
@@ -36,6 +36,11 @@ import {
   remindersStore,
   completeReminderOccurrence,
 } from "./store.ts"
+
+const NumbersSchema = Schema.fromJsonString(Schema.Struct({
+  items: Schema.Array(Schema.Tuple([Schema.String, Schema.Number])),
+  lists: Schema.Array(Schema.Tuple([Schema.String, Schema.Number])),
+}))
 
 const ListColorSchema = Schema.Literals(["accent", "blue", "green", "amber", "rose", "violet"])
 const ListIconSchema = Schema.Literals(["list", "home", "work", "shopping", "heart", "star", "bookmark", "bolt"])
@@ -284,16 +289,19 @@ function timers(state: Reminders.Reminders) {
     : []
 }
 
+effect function writeAnswered(): void!!Reminders.Machine {
+  const machine = try Reminders.Machine
+  const { write } = try machine.get()
+  if (write.outcome === "Sent") try Stream.runHead(Stream.filter(machine.changes, (state) => state.write.id === write.id && state.write.outcome !== "Sent"))
+}
+
 effect function settlePendingUndoBeforeWrite(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time | PhoneReminders) {
   const machine = try Reminders.Machine
-  const cur = try machine.get()
-  if (cur.undo.holding === "Held" && cur.write.outcome !== "Sent") {
-    const held = activeUndo
-    if (held !== undefined) {
-      try withdraw("reminders", held.about)
-      if (held.kind === "complete") activeUndo = undefined
-    }
-    try contained(machine.send({ type: "expireUndo", now: cur.undo.until }), "settling active undo")
+  try writeAnswered()
+  const { undo } = try machine.get()
+  if (undo.holding === "Held") {
+    try Stream.runHead(Stream.filter(machine.changes, (state) => !(state.undo.holding === "Held" && state.undo.until === undo.until)))
+    try writeAnswered()
   }
 }
 
@@ -792,6 +800,9 @@ export function resetReminderStores(): void {
 
 const hydrated = started(effect {
   const now = try (try Time).now()
+  const kept = (try KeyValueStore.KeyValueStore).get(numbersKey) catch () => undefined
+  const numbers = kept === undefined ? Option.none() : Schema.decodeUnknownOption(NumbersSchema)(kept)
+  if (Option.isSome(numbers)) remindersStore.keepNumbers(numbers.value.items, numbers.value.lists)
   const raw = (try KeyValueStore.KeyValueStore).get(snapshotKey) catch () => undefined
   if (raw !== undefined) {
     const decoded = Schema.decodeUnknownOption(SnapshotJsonSchema)(raw)
