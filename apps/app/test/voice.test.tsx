@@ -528,8 +528,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     ]);
   });
 
-  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("keeps Talk listening during a confirmed chat review and its decision", async () => {
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a reply ready before its turn ends is not spoken while the proposal waits, even when a later tool's progress replaced the proposal's own
+  it("keeps Talk listening during a confirmed chat review and its decision, and never speaks the reply ready beside it", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const review = textReview(world.notes.owner, "spoken-folder", { type: "files_folder_create", parent: "Download", name: "Review folder" });
     world.telephony.textReview = review;
@@ -543,10 +543,13 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
-    world.ask.nextReplyChunks = [""];
+    world.ask.nextReplyChunks = ["Your Review folder is ready for you to look over."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
       proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
-    } }];
+    } }, { action: "VIEWS", data: {} }];
+    world.ask.nextReplyProvisional = true;
+    world.ask.nextNewestProgressOnly = true;
+    world.ask.holdDoneAfterReady = Promise.resolve();
 
     speakUtterance(world, "Create a Review folder in Downloads");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && state.reviewPending);
