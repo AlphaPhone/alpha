@@ -45,3 +45,23 @@ pure def lawAnOlderAnswerIsRefused(ticket: int, earlier: int, ok: bool): bool =
 pure def lawAnAnswerIsTakenOnce(ticket: int, ok: bool): bool =
   not(canAnswer(answer({ status: Loading, ticket: ticket }, ok), ticket))
 ```
+
+### A read left behind returns to idle under its ticket, and one retired while loading fails
+
+```quint
+pure def drop(r: Read): Read = { ...r, status: Idle }
+
+pure def retire(r: Read): Read = if (r.status == Loading) { ...r, status: Failed } else r
+```
+
+### A dropped or retired read refuses later answers and keeps its ticket
+
+```quint
+pure def lawADroppedOrRetiredReadRefusesAnswers(status: Status, ticket: int, offered: int): bool =
+  val r = { status: status, ticket: ticket }
+  val d = drop(r)
+  val t = retire(r)
+  not(canAnswer(d, offered)) and d.ticket == ticket
+    and not(canAnswer(t, offered)) and t.ticket == ticket
+    and (status != Loading implies t == r)
+```
