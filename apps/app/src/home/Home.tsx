@@ -8,14 +8,16 @@ import { useMachine as useDrawer } from "../../gen/app__home__drawer.react.ts";
 import { type Tile, badged, ready, saving } from "../../gen/app__home__tiles.ts";
 import type { View } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
+import { coarsePointer, landscapeHomeInput, watchPrimaryPointer } from "../shell/canvas.vibe";
 import { feel } from "../shell/haptics.vibe";
 import { back } from "../shell/shell.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
-import { chooseApp, told } from "./home.vibe";
+import { chooseApp, openOwnTile, told } from "./home.vibe";
 import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
@@ -52,6 +54,8 @@ function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>, said?: s
 export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const home = useHome(runtime);
   const shell = useShell(alpha.runtime);
+  const canvas = useCanvas(alpha.runtime).state;
+  const coarse = useSyncExternalStore(watchPrimaryPointer, coarsePointer, () => false);
   const drawer = useDrawer(runtime);
   const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
   const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
@@ -74,6 +78,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const notice = inline && inline.place === Home.noticeAt(h, s) ? inline.notice : undefined;
   const beginEditing = { type: "beginEditing", shell: s } as const;
   const mayEdit = !saving(h.tiles);
+  const alongside = Home.besideHomeSheet(s, landscapeHomeInput(canvas, coarse));
   const openDrawer = { type: "openDrawer", phone: Home.onPhone(h) } as const;
   const closeDrawer = { type: "closeDrawer" } as const;
   const showingApps = s.drawer && Home.onPhone(h);
@@ -101,12 +106,16 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
       appCards={Home.showsCards(h) && alpha.slot("home/cards")}
-      tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
+      tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => ({
+        ...tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing),
+        inert: alongside && tile.tag === "Installed",
+      })) : undefined}
+      ownTilesOnly={alongside}
       editing={h.editing}
       onOpenTile={(id) => {
         const tile = tileOf(id);
-        const event: Home.Event = tile.tag === "Own" ? { type: "openTile", view: tile.view, shell: s } : { type: "openApp", app: tile.app, now: untimed };
-        if (can(event)) send(event);
+        if (tile.tag === "Own") void runtime.runPromise(openOwnTile(tile.view, s.route, alongside));
+        else if (!alongside) openInstalled(tile.app);
       }}
       onOpenDrawer={Home.offersDrawer(h) ? () => {
         if (shell.can(openDrawer)) void shell.send(openDrawer);

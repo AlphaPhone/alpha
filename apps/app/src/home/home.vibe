@@ -8,12 +8,14 @@ import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { coarsePointer, landscapeHomeInput } from "../shell/canvas.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
@@ -153,18 +155,44 @@ effect function tell(fx: Out) {
   for (const listener of [...listeners]) listener()
 }
 
-// spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"
-effect function go(view: View) {
-  try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from Home")
+// spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"; spec/app/home/index.md, "An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest"
+effect function ownTileVisit(view: View, route: number, beside: boolean) {
+  const canvas = try Canvas
+  const layers = try Layers.Machine
+  const device = try Device
+  return (home: Home.Home, shell: Shell.Shell) => {
+    if (shell.route !== route || Layers.pageInert(Effect.runSync(layers.get())) || !Effect.runSync(device.showing())) return undefined
+    const event = beside
+      ? { type: "openTileBeside", view, shell, landscapePhone: landscapeHomeInput(Effect.runSync(canvas.get()), coarsePointer()) } as const
+      : { type: "openTile", view, shell } as const
+    return Home.enabled(home, event, owner) ? event : undefined
+  }
 }
 
-function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Device | Shell.Machine | Home.Machine | Toasts | Said, [Actor]> {
+export effect function openOwnTile(view: View, route: number, beside: boolean) {
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const admits = try ownTileVisit(view, route, beside)
+  const event = admits(try home.get(), try shell.get())
+  if (event !== undefined) {
+    try contained(home.send(event, owner, (state) => admits(state, Effect.runSync(shell.get())) !== undefined), "choosing an app on Home")
+  }
+}
+
+effect function go(view: View, route: number, beside: boolean) {
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const admits = try ownTileVisit(view, route, beside)
+  try contained(shell.send({ type: "openView", view }, (where) => admits(Effect.runSync(home.get()), where) !== undefined), "opening an app from Home")
+}
+
+function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Device | Shell.Machine | Home.Machine | Canvas | Layers.Machine | Toasts | Said, [Actor]> {
   return match (fx) {
     when { tag: "ReadSaved", let ticket }: answer("saved", readSaved(ticket), { type: "savedRead", ticket, found: "Unreadable", tiles: [] }, owner);
     when { tag: "SaveHome", let tiles, let ticket }: answer("save", saveTiles(tiles, ticket), { type: "homeSaved", ticket, ok: false }, owner);
     when { tag: "ReadApps", let ticket }: answer("apps", readApps(ticket), { type: "appsRead", ticket, ok: false, listed: [], visible: false }, owner);
     when { tag: "AskAndroid", let ask, let ticket }: answer("android", asked(ask, ticket), { type: "answered", ticket, opened: false, why: "Unable" }, owner);
-    when { tag: "Go", let view }: run("go", go(view), owner);
+    when { tag: "Go", let view, let route, let beside }: run("go", go(view, route, beside), owner);
     default: run(`tell ${fx.tag}`, tell(fx), owner);
   }
 }

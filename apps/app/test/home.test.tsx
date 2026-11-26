@@ -7,6 +7,8 @@ import { Machine as DigestSchedules } from "../gen/app__digests__schedules.effec
 import { Machine as WorkflowList } from "../gen/app__workflows__list.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
@@ -144,6 +146,43 @@ describe("Home on a phone", () => {
     const { alpha } = await open(world, only("home"));
     await until(alpha, home.runtime(alpha), Home.Machine, (state) => state.host === "AsLauncher" && state.tiles.load.status === "Loaded");
     expect([tiles(), localStorage.getItem(savedKey)]).toEqual([["view:Reminders", "view:Clock", "view:Notes"], chosen]);
+  });
+
+  it("Opens a Home tile beside the landscape Ask sheet and lowers Ask Alpha (spec/app/home/index.md, \"An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest\")", async () => {
+    const pointer = window.matchMedia("(pointer: coarse)");
+    Object.defineProperty(pointer, "matches", { configurable: true, value: true });
+    const originalMatch = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(pointer: coarse)" ? pointer : originalMatch(query));
+    const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    const height = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    onTestFinished(() => {
+      media.mockRestore();
+      if (width) Object.defineProperty(window, "innerWidth", width);
+      if (height) Object.defineProperty(window, "innerHeight", height);
+    });
+    const world = holdingHome({ ...scene(), phone: true });
+    const { alpha } = await open(world, only("home", "assistant", "view:Notes"));
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 844 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 390 });
+    await drawn(() => window.dispatchEvent(new Event("resize")));
+    await until(alpha, alpha.runtime, Canvas, (state) => state.landscape);
+    await until(alpha, home.runtime(alpha), Home.Machine, (state) => state.tiles.load.status === "Loaded");
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    expect(tileButton("view:Notes")?.closest("[inert]")).toBeNull();
+    expect(button("Apps")?.closest("[inert]")).not.toBeNull();
+
+    await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "openLayer", id: "review", kind: "DialogLayer", covers: true })));
+    await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 1);
+    expect(tileButton("view:Notes")?.closest("[inert]")).not.toBeNull();
+    await press("Notes");
+    expect(await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).toMatchObject({ trail: [], assistant: "Sheet" });
+    await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "review" })));
+    await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 0);
+
+    await press("Notes");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
+    expect(document.querySelector("[data-alpha-detent=sheet]")).toBeNull();
   });
 
   it('Find an installed app in Apps (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {

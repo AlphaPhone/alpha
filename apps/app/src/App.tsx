@@ -2,6 +2,7 @@
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
 import { type PointerEvent, type TouchEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
+import { besideHomeSheet } from "../gen/app__home.ts";
 import { askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
@@ -12,7 +13,7 @@ import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
 import { BrowserFrames } from "./browser/BrowserFrames.tsx";
-import { desktopPreview } from "./shell/canvas.vibe";
+import { coarsePointer, desktopPreview, landscapeHomeInput, watchPrimaryPointer } from "./shell/canvas.vibe";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { AppBack } from "./shell/AppBack.tsx";
@@ -61,16 +62,6 @@ function touchScroll(target: Element, shell: HTMLElement) {
   return () => vertical.some(({ element, top }) => element.scrollTop !== top);
 }
 
-function primaryPointer() {
-  return typeof window === "undefined" ? undefined : window.matchMedia?.("(pointer: coarse)");
-}
-
-function watchPrimaryPointer(changed: () => void) {
-  const media = primaryPointer();
-  media?.addEventListener("change", changed);
-  return () => media?.removeEventListener("change", changed);
-}
-
 /**
  * Alpha: Home, or the app on top of the trail under its title, with Back offered exactly when the rules allow it, and
  * over them Ask Alpha, whatever covers the screen, and the notices. Each screen is its area's, drawn at its place.
@@ -85,7 +76,7 @@ export function App({ alpha }: AppProps) {
   const phone = native();
   const preview = phone ? undefined : fitted;
   const launcher = canvas?.launcher ?? false;
-  const coarsePointer = useSyncExternalStore(watchPrimaryPointer, () => primaryPointer()?.matches ?? false, () => false);
+  const coarse = useSyncExternalStore(watchPrimaryPointer, coarsePointer, () => false);
   const startedRef = useRef<StartedSwipe | undefined>(undefined);
   const frame = useCallback((node: HTMLElement | null) => {
     if (node) return watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
@@ -183,8 +174,10 @@ export function App({ alpha }: AppProps) {
   };
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
-  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarsePointer;
-  const fullScreen = state.assistant === "Full" && !side;
+  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarse;
+  const fullScreen = state.assistant === "Full" && (phone || !side);
+  const homeBesideSheet = layers !== undefined && !inert && besideHomeSheet(state, landscapeHomeInput(canvas, coarse));
+  const voiceOverHome = phone && side && canvas?.voice === true;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
   const canGoBack = String(!shellFailed && (accessMayShow || (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
@@ -215,7 +208,7 @@ export function App({ alpha }: AppProps) {
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
         className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
-        inert={signingIn ? updating : inert || fullScreen}
+        inert={signingIn ? updating : inert || fullScreen || voiceOverHome}
       >
         {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
         {accessMayShow && !accessShowing ? <StartupMark /> : null}
@@ -243,6 +236,7 @@ export function App({ alpha }: AppProps) {
           "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
           "in-[body:has([data-alpha-covers-assistant])]:invisible",
           comms && "shrink-0",
+          homeBesideSheet && "[&>[data-alpha-chat-scrim]]:hidden",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           phone && canvas?.landscape && showing !== undefined && !comms && [
             "[&&>[data-alpha-detent]]:start-auto [&>[data-alpha-detent]]:w-[min(400px,46%)]",
