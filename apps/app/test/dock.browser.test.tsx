@@ -223,6 +223,33 @@ describe("Ask Alpha dock", () => {
     expect(blackOnTheBar).toEqual([]);
   });
 
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet that grew as a reply arrived is put away from the height it was drawn at, never snapping back first
+  it("Put a sheet that grew away from the height it was drawn at (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Home" });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    await page.getByRole("button", { name: "Open conversation" }).click();
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await Effect.runPromise(Effect.sleep("600 millis"));
+    const fitted = section()?.getBoundingClientRect().height ?? 0;
+    section()?.querySelector("[role='log'] > div")?.append(Object.assign(document.createElement("div"), { style: "height: 400px; flex-shrink: 0" }));
+    await expect.poll(() => section()?.getBoundingClientRect().height ?? 0).toBeGreaterThan(fitted + 100);
+    const grown = section()?.getBoundingClientRect().height ?? 0;
+    const closing: number[] = [];
+    const watch = async () => {
+      for (const until = performance.now() + 600; performance.now() < until; await Effect.runPromise(Effect.sleep("8 millis"))) {
+        const copy = document.querySelector<HTMLElement>("[data-alpha-ghost]");
+        if (copy) closing.push(Math.round(copy.getBoundingClientRect().height));
+      }
+    };
+    const watched = watch();
+    await page.getByRole("button", { name: "Minimize chat" }).click();
+    await watched;
+    expect(closing.length).toBeGreaterThan(0);
+    expect(closing[0]).toBeGreaterThan(grown - 40);
+    expect(closing.every((height, at) => at === 0 || height <= (closing[at - 1] ?? height) + 1)).toBe(true);
+  });
+
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
   it("The resting bar's controls keep their presses and a written field scrolls (spec/app/assistant/dock.md, \"A press does one thing: a tap is never also a drag, and a late click never taps\")", async () => {
     await page.viewport(390, 844);

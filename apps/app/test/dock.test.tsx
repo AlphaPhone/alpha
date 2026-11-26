@@ -269,7 +269,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     const at = (type: string, y: number, target: EventTarget = window) =>
       underAct(() => { target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 5, pointerType: "touch", isPrimary: true })); });
     const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
-    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Pressed"))));
+    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture !== "Idle"))));
 
     const mark = document.querySelector<HTMLElement>("button[aria-label='Open conversation']");
     expect(mark).not.toBeNull();

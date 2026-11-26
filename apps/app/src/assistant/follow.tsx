@@ -124,7 +124,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const barRef = useRef(0);
   if (seen.detent !== detent) {
     const tap = live === undefined && !voice && !comms && animates();
-    const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: shownRef.current || undefined } : undefined);
+    const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: sectionRef.current?.getBoundingClientRect().height || undefined } : undefined);
     setSeen({
       detent,
       growing: leaving ? undefined : !tap || !isOpen(detent) ? seen.growing : isOpen(seen.detent) ? { from: "shown" } : {},
@@ -216,7 +216,6 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     sectionRef.current = element;
     if (!element || !animates()) return;
     const drawnHeight = element.getBoundingClientRect().height;
-    const moving = motionsRef.current.length > 0;
     for (const motion of motionsRef.current.splice(0)) {
       motion.finished.catch(() => undefined);
       motion.cancel();
@@ -243,7 +242,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       return;
     }
     if (!handing) return;
-    const from = moving ? drawnHeight : handing.height ?? drawnHeight;
+    const from = handing.height ?? drawnHeight;
     const to = handing.tap ? block : 0;
     const ghost = ghostOf(element);
     ghostRef.current?.remove();
