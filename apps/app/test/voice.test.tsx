@@ -954,6 +954,61 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
   });
 
+  // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
+  it("draws a Talk turn as the Sunday demo build did: the speaker dimmed while connecting, what was said with working dots at once, and the microphone paused while Alpha answers", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.voice.credentialId = "cred-owner-9";
+    const { alpha, area } = await onComposer(world);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.revision > 0);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await raiseSheet(alpha);
+
+    const connected = Promise.withResolvers<void>();
+    world.voice.cloudStartGate = () => connected.promise;
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Starting");
+    const row = () => [...document.querySelectorAll<HTMLButtonElement>('section[aria-label="Voice conversation"] button')]
+      .map((control) => `${control.getAttribute("aria-label")}${control.disabled ? " (dimmed)" : ""}`);
+    expect(row()).toEqual(["Mute speaker (dimmed)", "Microphone status unconfirmed (dimmed)", "Stop voice conversation"]);
+    connected.resolve();
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.speaker === "SpeakerOn");
+    expect(row()).toEqual(["Mute speaker", "Mute microphone", "Stop voice conversation"]);
+
+    const said = () => document.querySelector("[data-alpha-voice-said]")?.textContent;
+    const dots = () => document.querySelector('[role="status"][aria-label="Sending"]');
+    const asked = "What is on my calendar?";
+    const recorded = () => [...document.querySelectorAll("[data-alpha-message-id]")].filter((one) => one.textContent?.includes(asked)).length;
+    const done = Promise.withResolvers<void>();
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["Nothing is on your calendar today."];
+    world.ask.holdDoneAfterReady = done.promise;
+    const sessionId = world.voice.activeMicSession;
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "speech-start", sessionId });
+      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: asked });
+    });
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Thinking" && s.sent === 1);
+    await settleComposer(alpha, () => world.ask.turns.size === 1);
+    expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
+    expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
+
+    await drawn(() => [...world.ask.turns.values()][0]?.());
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Speaking");
+    expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
+    expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
+
+    done.resolve();
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.turn === 2 && s.mic === "On");
+    await settleComposer(alpha, () => recorded() === 1);
+    expect([said(), dots(), world.ask.said]).toEqual([undefined, null, [asked]]);
+    expect(row()).toEqual(["Mute speaker", "Mute microphone", "Stop voice conversation"]);
+
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
   const openPhoneTalk = async (talking: boolean) => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await onComposer(world);

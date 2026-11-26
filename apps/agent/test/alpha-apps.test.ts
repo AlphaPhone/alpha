@@ -45,7 +45,7 @@ function makeFakeRuntime(initialTasks: readonly {
             const at = tasks.findIndex((task) => task.taskId === taskId);
             if (at < 0) return Promise.resolve({ kind: "notFound" });
             const verb = request.kind === "edit" ? "edit" : request.verb?.tag ?? "";
-            const next = refusing.has(verb) ? undefined : answers[verb]?.(tasks[at]!, request);
+            const next = refusing.has(verb) ? undefined : answers[verb]?.(tasks[at], request);
             if (next === undefined) return Promise.resolve({ kind: "refused", reason: { tag: "NotApplicable" } });
             tasks[at] = next;
             return Promise.resolve({ kind: "applied", task: next });
@@ -732,9 +732,9 @@ describe("Notes transcription for the local browser", () => {
     const routes = notesTranscriptionRoutes(transcriptionContext(), "local-inference", () => Promise.resolve(false));
     expect(routes.map(({ method, path }) => `${method} ${path}`)).toEqual(["GET /api/alpha/notes/transcription", "POST /api/alpha/notes/transcription"]);
     const signal = new AbortController().signal;
-    expect(await routes[0]!.handler({ signal } as never)).toEqual({ status: 200, body: { local: false } });
+    expect(await routes[0].handler({ signal } as never)).toEqual({ status: 200, body: { local: false } });
     const pcm = Buffer.from(new Uint8Array(3_200)).toString("base64");
-    expect(await routes[1]!.handler({ body: { pcm }, signal } as never)).toEqual({ status: 503, body: { error: "LOCAL_TRANSCRIPTION_UNAVAILABLE" } });
+    expect(await routes[1].handler({ body: { pcm }, signal } as never)).toEqual({ status: 503, body: { error: "LOCAL_TRANSCRIPTION_UNAVAILABLE" } });
   });
 
   // spec/agent/index.md, "The local browser can request a private transcription of a reviewed note"

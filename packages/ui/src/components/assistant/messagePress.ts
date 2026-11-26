@@ -64,15 +64,14 @@ export function useMessageText(
     const origin = caretAt(document, transcript, x, y);
     let finger: number | undefined;
     let held = false;
-    let cancelHold: (() => void) | undefined;
     const longPress = () => {
       if (signal.aborted || !selectable(text)) return;
       held = true;
       suppressClick.current = true;
       open();
     };
-    contact.current = { claim: longPress, release: () => { listeners.abort(); cancelHold?.(); } };
-    cancelHold = hold(longPress);
+    const cancelHold = hold(longPress);
+    contact.current = { claim: longPress, release: () => { listeners.abort(); cancelHold(); } };
 
     const moved = (nextX: number, nextY: number, claim: () => void) => {
       if (Math.hypot(nextX - x, nextY - y) <= 8 && document.getSelection()?.isCollapsed !== false) return;

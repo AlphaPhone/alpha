@@ -154,7 +154,7 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
         scene.watches.add(watchId);
         scene.listeners.add(told);
         const here = scene.here;
-        if (here) queueMicrotask(() => told({ coords: { ...here, timestamp: now() }, cached: false }));
+        if (here) void Promise.resolve().then(() => told({ coords: { ...here, timestamp: now() }, cached: false }));
         return Promise.resolve({ watchId });
       },
       clearWatch: ({ watchId }) => {

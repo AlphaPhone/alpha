@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+
 /**
  * The browser's IndexedDB, which happy-dom does not draw: databases of out-of-line keyed object stores, kept in memory
  * for one journey. It answers as a WebView does, a turn later, and holds a structured clone of each value; it offers
@@ -13,7 +15,7 @@ class Request<T> {
   onupgradeneeded: Listener = null;
 }
 
-const later = (work: () => void) => void setTimeout(work, 0);
+const later = (work: () => void) => void Effect.runFork(Effect.andThen(Effect.yieldNow, Effect.sync(work)));
 
 export function memoryIndexedDB() {
   const databases = new Map<string, Map<string, Map<IDBValidKey, unknown>>>();

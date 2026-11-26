@@ -86,6 +86,11 @@ export interface VoiceMemory {
   interimSnapshot(): InterimWords | undefined
   subscribeInterim(listener: () => void): () => void
   publishInterim(value: InterimWords | undefined): void
+  /** What the owner said for the turn Alpha is answering, shown as their message until the conversation records it. */
+  readonly saidSnapshot: () => InterimWords | undefined
+  readonly subscribeSaid: (listener: () => void) => () => void
+  readonly publishSaid: (value: InterimWords | undefined) => void
+  readonly retireSaid: (session: number, turn: number) => void
   chat: SpokenChat | undefined
   heardText: { readonly session: number; readonly turn: number; readonly text: string } | undefined
   lastReply: string
@@ -139,6 +144,8 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
   const playLock = try Semaphore.make(1)
   let interim: InterimWords | undefined
   const interimListeners = new Set<() => void>()
+  let said: InterimWords | undefined
+  const saidListeners = new Set<() => void>()
   const memory: VoiceMemory = {
     prepareInterim: undefined,
     interimCapture: undefined,
@@ -151,6 +158,19 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
       if (interim?.session === value?.session && interim?.turn === value?.turn && interim?.text === value?.text) return
       interim = value
       for (const listener of interimListeners) listener()
+    },
+    saidSnapshot: () => said,
+    subscribeSaid: (listener) => {
+      saidListeners.add(listener)
+      return () => { saidListeners.delete(listener) }
+    },
+    publishSaid: (value) => {
+      if (said?.session === value?.session && said?.turn === value?.turn && said?.text === value?.text) return
+      said = value
+      for (const listener of saidListeners) listener()
+    },
+    retireSaid: (session, turn) => {
+      if (said?.session === session && said.turn === turn) memory.publishSaid(undefined)
     },
     chat: undefined,
     heardText: undefined,
@@ -736,6 +756,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     return { type: "refusedForFunds", session, turn }
   }
   if (result?.kind === "Replied") try lease.settle(result, spoken)
+  memory.retireSaid(session, turn)
   let filesReport: string | undefined
   if (output.usedDirect && direct !== undefined && review !== undefined && output.awaitingFiles && streamed
     && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined) {
@@ -903,10 +924,11 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const { memory } = try VoiceWords
     const shared = memory.chat
     if (shared !== undefined) {
-      try Effect.provideContext(send(queue, shared), shared.context)
+      try Effect.ensuring(Effect.provideContext(send(queue, shared), shared.context), sync(() => memory.retireSaid(session, turn)))
       return
     }
     memory.heardText = undefined
+    memory.retireSaid(session, turn)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
   })
@@ -1206,6 +1228,8 @@ const bridgeEvents = hearing(
         const state = try voice.get()
         if (Voice.canTurnEnded(state, event.session)) {
           memory.heardText = { session: state.session, turn: state.turn, text: event.text }
+          // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it"
+          memory.publishSaid({ session: state.session, turn: state.turn, text: event.text.trim() })
         }
       }
       return match (event) {
