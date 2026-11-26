@@ -1659,6 +1659,10 @@ const rested = started(effect {
     if (shown.assistant === "Bar" && (wasOpen || viewChanged)) {
       try ignore(dock.send({ type: "putAway", now: untimed }))
     }
+    // spec/app/assistant/dock.md, "A bar or pill a drag left in place changes between them without an entrance until the sheet next opens"
+    if (!wasOpen && (shown.assistant === "Sheet" || shown.assistant === "Full")) {
+      try ignore(dock.send({ type: "opened" }))
+    }
   })
 }, "resting the Ask Alpha dock")
 
