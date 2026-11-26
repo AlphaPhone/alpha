@@ -22,16 +22,16 @@ import { reserve } from web
 
 export interface GmailAuthorizationWindow {
   open(url: URL): boolean!!
-  close(): void
+  close(): void!!
 }
 
 /** Reserve a web tab on the tap, or use the phone's external browser once the URL is answered. */
 export function gmailAuthorizationWindow(): GmailAuthorizationWindow | undefined {
-  if (native()) return { open: openGoogleAuthorization, close: () => {} }
+  if (native()) return { open: openGoogleAuthorization, close: () => succeed(undefined) }
   const popup = reserve()
   if (popup === undefined) return undefined
   return {
     open: (url) => Effect.orElseSucceed(Effect.try(() => popup.visit(url.href)), () => false),
-    close: popup.close,
+    close: () => Effect.ignore(Effect.try(() => popup.close())),
   }
 }

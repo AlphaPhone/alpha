@@ -3,6 +3,7 @@ import { CloudError } from "@elizaos/cloud"
 import { gmailConsentCapabilities, protocolFailure } from "@elizaos/plugin-inbox-client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe"
 import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
 import type { Effect as Out, Event, Folder } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
@@ -26,7 +27,9 @@ import { savedBodies } from "./saved-bodies.vibe"
 const owner = "alpha/inbox/owner"
 type Owner = { readonly stamp: string; readonly saved: string | undefined }
 type MailSession = Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore
-type MailConsent = Cloud | Mail | Inbox.Machine | Shell | Toasts | Said
+type MailConsent = Cloud | Mail | Inbox.Machine | Drafts | Sending.Machine | Shell | Toasts | Said
+type ConsentIntent = { readonly kind: "Connect"; readonly route: number }
+  | { readonly kind: "Send"; readonly route: number; readonly account: number; readonly draft: number; readonly session: number }
 
 /** Each new owner session, including a different owner who is already signed in. */
 export const ownerChanges = Stream.unwrap(effect {
@@ -161,18 +164,23 @@ effect function signInForMail(usual: () => void): void!!(Cloud | Mail | Inbox.Ma
 }
 
 // spec/app/inbox/index.md, "The owner authorizes Gmail in Google and Inbox checks access on return"
-effect function authorizeGmail(route: number, popup: GmailAuthorizationWindow | undefined): boolean!!MailConsent {
+effect function authorizeGmail(intent: ConsentIntent, popup: GmailAuthorizationWindow | undefined): boolean!!MailConsent {
   const shell = try Shell
   const mailbox = try Inbox.Machine
   const ledger = try Mail
-  const before = try mailbox.get()
-  const { account } = before.selected
+  const drafts = try Drafts
+  const operations = try Sending.Machine
+  const account = intent.kind === "Send" ? intent.account : (try mailbox.get()).selected.account
   const generation = ledger.generation()
   const active = effect {
     const view = try shell.get()
     const list = try mailbox.get()
-    return view.route === route && showing(view, "Inbox") && list.selected.account === account && list.signedIn &&
-      list.failure !== "LeaseNeeded" && !Inbox.readable(list) && ledger.ownerConfirmed() && ledger.generation() === generation
+    if (view.route !== intent.route || !showing(view, "Inbox") || !list.signedIn || list.failure === "LeaseNeeded" ||
+      !ledger.ownerConfirmed() || ledger.generation() !== generation) return false
+    if (intent.kind === "Connect") return list.selected.account === account && !Inbox.readable(list)
+    const draft = try drafts.get()
+    return draft.open && draft.letter.id === intent.draft && draft.letter.account === account && draft.session === intent.session &&
+      Sending.canTurnOnSending(try operations.get(), Inbox.accessOf(list, account), account)
   }
   if (!(try active)) return false
   if (popup === undefined) {
@@ -180,6 +188,11 @@ effect function authorizeGmail(route: number, popup: GmailAuthorizationWindow | 
     return false
   }
   const started = effect {
+    if (intent.kind === "Send") {
+      const access = Inbox.accessOf(try mailbox.get(), account)
+      const moved = try operations.send({ type: "turnOnSending", access, account }, "Owner")
+      if (!moved.out.some((emitted) => emitted.tag === "OpenGoogleAccess" && emitted.account === account)) return false
+    }
     const owner = try currentOwner()
     if (owner?.saved === undefined || !(try active)) return false
     const client = provider(try Cloud)
@@ -187,7 +200,7 @@ effect function authorizeGmail(route: number, popup: GmailAuthorizationWindow | 
     const held = connection === undefined ? [] : (try client.gmailAccounts()).find((item) => item.connectionId === connection)?.grantedCapabilities ?? []
     if (!(try active)) return false
     const { authUrl } = try client.gmailConnect([
-      ...gmailConsentCapabilities("modify", held), ...held.filter((name) => name.startsWith("google.calendar.")),
+      ...gmailConsentCapabilities(intent.kind === "Send" ? "send" : "modify", held), ...held.filter((name) => name.startsWith("google.calendar.")),
     ])
     const current = try currentOwner()
     if (current?.stamp !== owner.stamp || current.saved !== owner.saved || !(try active)) return false
@@ -204,7 +217,7 @@ export service MailSignIn {
   /** The owner tapped Connect Eliza Cloud or Reconnect, whose action is otherwise `usual`. */
   signIn(usual: () => void): void!!
   retry(): void!!
-  connect(route: number, popup: GmailAuthorizationWindow | undefined): void!!
+  consent(intent: ConsentIntent, popup: GmailAuthorizationWindow | undefined): void!!
 }
 
 const signIns = Layer.effect(MailSignIn, effect {
@@ -213,11 +226,11 @@ const signIns = Layer.effect(MailSignIn, effect {
   return {
     signIn: (usual: () => void) => flatMap(whole.context, (context) => Effect.provideContext(signInForMail(usual), context as Context.Context<MailSession>)),
     retry: () => flatMap(whole.context, (context) => Effect.provideContext(recheck(), context as Context.Context<MailSession>)),
-    effect connect(route, popup) {
+    effect consent(intent, popup) {
       const context = try whole.context
-      const work = Effect.provideContext(authorizeGmail(route, popup), context as Context.Context<MailConsent>)
+      const work = Effect.provideContext(authorizeGmail(intent, popup), context as Context.Context<MailConsent>)
       const opened = try opening.withPermitsIfAvailable(1)(work)
-      if (!Option.getOrElse(opened, () => false)) popup?.close()
+      if (!Option.getOrElse(opened, () => false) && popup !== undefined) try popup.close()
     },
   }
 })

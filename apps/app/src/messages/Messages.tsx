@@ -767,7 +767,7 @@ function Picker({ runtime, messages: { state, can, send }, handoff, discardHando
         )}
         {showChoices && can({ type: "loadMoreChoices" }) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</button>}
       </div>
-      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} textarea={messageRef}
+      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} contactsAllowed={state.book.grant === "Granted"} draft={kept} textarea={messageRef}
         minHeight={selecting ? composingHeight : undefined}
         body={textSave?.edit.body ?? kept.body} saveStatus={textSave?.status ?? (prefill?.phase === "Saving" ? "Saving" : prefill?.phase === "SaveFailed" ? "Failed" : undefined)} textIsSaved={textIsSaved}
         onBody={(body) => { setComposingHeight(undefined); saveText(fresh.visit, { body }); }}

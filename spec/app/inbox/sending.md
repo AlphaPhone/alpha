@@ -278,7 +278,11 @@ pure def stepLosingAGrantKeepsARequestSent(before: Operations, via: str, after: 
   (via == "accessChanged" and before.attempt.outcome == A::Sent) implies after.attempt == before.attempt
 ```
 
-### While the account's grant lacks consent to send, nothing is sent, and Turn on hands over to Google access in Settings
+### While the account's grant lacks consent to send, nothing is sent, and Turn on opens Google authorization
+
+The draft stays open. The request asks to send from its From account
+and keeps the access that account already has. Send becomes available
+after an account check confirms that Google granted it for that account.
 
 ```quint
 pure def canTurnOnSending(s: Operations, access: Access, account: int): bool =
