@@ -38,7 +38,7 @@ export effect function clearJournal(testBuild: boolean = testMocks()): boolean!!
 
 // spec/app/startup/journal.md, "Each exit Android reports is recorded once, at the time it happened"
 /** Read Android's problem log and harvest any crash or ANR exits newer than the last recorded exit. */
-export effect function harvestSystemProblems(): void!!(Journal.Machine | SystemSettings) {
+effect function harvestSystemProblems(): void!!(Journal.Machine | SystemSettings) {
   const found = try (try SystemSettings).problems()
   if (Option.isNone(found)) return
   const journal = try Journal.Machine

@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ChevronLeft, Link } from "lucide-react";
+import { Link } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { NoteFrame } from "./NoteFrame.tsx";
 
 export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
   title: string;
@@ -21,12 +22,7 @@ export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
 /** An open link note: the page's title, its site to visit, and the passages kept from it. */
 export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisit, onBack, className, ...props }: LinkNoteViewProps) {
   return (
-    <section aria-label={title} className={cn("absolute inset-0 z-10 flex flex-col bg-background", className)} {...props}>
-      <div className="flex h-14 shrink-0 items-center gap-0.5 px-2">
-        <button type="button" aria-label="Back to notes" onClick={onBack} className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-full active:bg-accent")}><ChevronLeft aria-hidden className="size-5.5" /></button>
-        <div className="grow" />
-        {menu}
-      </div>
+    <NoteFrame title={title} menu={menu} onBack={onBack} className={className} {...props}>
       <div className="min-h-0 grow touch-pan-y overflow-y-auto px-6 pt-1 pb-37.5">
         <h1 className="m-0 font-display text-headline font-light">{title}</h1>
         <button type="button" aria-label={`Open ${domain}`} disabled={!onVisit} onClick={onVisit} className={cn(focusRing, "mt-3.5 inline-flex h-12 items-center gap-2 rounded-full bg-secondary px-4 text-sm text-primary")}>
@@ -43,6 +39,6 @@ export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisi
           ))}
         </div>
       </div>
-    </section>
+    </NoteFrame>
   );
 }

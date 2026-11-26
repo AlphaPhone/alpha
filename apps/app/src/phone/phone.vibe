@@ -191,7 +191,7 @@ export function prefilled(number: string): { readonly digits: string; readonly e
 const Reading = Schema.Struct({ inCall: Schema.NullOr(Schema.Boolean), emergency: Schema.NullOr(Schema.Boolean), emergencyLive: Schema.Boolean, carrier: Schema.optional(Schema.Boolean) })
 
 /** Telecom's call-state reading as Phone takes it: a call it cannot rule out as an emergency call may be one, and without a reading Alpha cannot tell. */
-export function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly carrier: Carrier } {
+function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly carrier: Carrier } {
   const row = Option.getOrUndefined(Schema.decodeUnknownOption(Reading)(raw))
   const carrier = row?.carrier === true ? "CarrierReady" : row?.carrier === false ? "CarrierUnavailable" : "CarrierUnknown"
   if (row === undefined || row.inCall === null) return { telecom: "CallUnknown", carrier }

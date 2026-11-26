@@ -63,6 +63,16 @@ async function fromMonth(pill: string) {
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
 const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Calendar" })));
 
+/** Open Calendar in a morning world, optionally configuring the world before launching. */
+async function openMorningCalendar(phone: boolean, configure?: (world: ReturnType<typeof morning>) => void) {
+  const world = morning(phone);
+  configure?.(world);
+  const { alpha } = await open(world, only("view:Calendar"));
+  const runtime = calendar.runtime(alpha);
+  await openCalendar(alpha);
+  return { alpha, runtime, world };
+}
+
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
@@ -122,11 +132,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
 describe("on a phone", () => {
   it("Look at an event (spec/app/calendar/index.md, \"Story: Look at an event\")", async () => {
-    const world = morning(true);
-    world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
+    const { alpha, runtime, world } = await openMorningCalendar(true, (w) => { w.calendar.granted = true; });
     await until(alpha, runtime, View, (s) => s.googleRows === 2 && s.phoneRows === 1);
 
     // spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"; spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes"
@@ -146,11 +152,7 @@ describe("on a phone", () => {
   });
 
   it("Write an event (spec/app/calendar/editor.md, \"Story: Write an event\"; spec/app/calendar/editor.md, \"Story: Never create an event twice\"; spec/app/calendar/editor.md, \"Story: Delete an event, or answer an invitation\")", async () => {
-    const world = morning(true);
-    world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
+    const { alpha, runtime, world } = await openMorningCalendar(true, (w) => { w.calendar.granted = true; });
     await until(alpha, runtime, View, (s) => s.phoneRows === 1);
 
     // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"
@@ -297,10 +299,7 @@ describe("on a phone", () => {
 
 describe("in a browser", () => {
   it("Search my events and choose which calendars I see (spec/app/calendar/index.md, \"Story: Search my events and choose which calendars I see\")", async () => {
-    const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
+    const { alpha, runtime, world } = await openMorningCalendar(false);
     await until(alpha, runtime, View, (s) => s.googleRows === 2);
 
     // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
@@ -324,10 +323,7 @@ describe("in a browser", () => {
   });
 
   it("Answer an invitation (spec/app/calendar/editor.md, \"Story: Delete an event, or answer an invitation\")", async () => {
-    const world = morning(false);
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
+    const { alpha, runtime, world } = await openMorningCalendar(false);
     await until(alpha, runtime, View, (s) => s.googleRows === 2);
 
     // spec/app/calendar/editor.md, "An invitation is answered Going or Maybe once, at the revision shown, and Decline is the deletion's decline"; spec/app/calendar/editor.md, "A confirmed answer holds its event until a read shows it"; spec/app/calendar/writing.md, "An applied create, change or answer is read back; only a read back that finds it as asked says saved"

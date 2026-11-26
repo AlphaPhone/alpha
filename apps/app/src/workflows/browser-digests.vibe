@@ -84,13 +84,15 @@ const checks = started(effect {
       const current = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
       return sameResidentOwner(identity, current) && (try allowed)
     }
-    const checked: WorkflowRequest = effect (path: string, body: unknown) => {
+    const verifyOwnership = effect {
       if (!(try ownsRequest)) throw workflowHttpError(0, {})
-      const received = try request(path, body)
-      if (!(try ownsRequest)) throw workflowHttpError(0, {})
-      return received
     }
-    const protocol = hostedDigestProtocol(checked)
+    const protocol = hostedDigestProtocol(effect (path: string, body: unknown) => {
+      try verifyOwnership
+      const reply = try request(path, body)
+      try verifyOwnership
+      return reply
+    })
     const capabilities = protocol.capabilities() catch () => undefined
     if (capabilities?.digests && (try allowed)) try inbox.sync(identity, protocol)
   }

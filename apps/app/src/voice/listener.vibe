@@ -6,7 +6,7 @@ import { Device } from "../platform/index.vibe"
 import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 
 /** The phone's always-on wake listener, available only on an Alpha image. */
-export service ListenerPort {
+service ListenerPort {
   status(): Listener.Report!!
   pause(): Listener.Report!!
   turnOff(): Listener.Report!!

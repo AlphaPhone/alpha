@@ -280,17 +280,10 @@ const coordinator = started(effect {
   const holder = try ApprovalDesk
   const layers = try Layers.Machine
   const time = try Time
-  try Stream.runForEach(machine.changes, effect (state) => {
+  try Stream.runForEach(machine.changes, effect () => {
     const ctx = holder.context()
     const now = try time.now()
-    for (const id of state.interrupted) {
-      const current = try machine.get()
-      const p = Approvals.entry(current, id)
-      if (p.stage === "Reconciling" && holder.detail(id) === undefined) continue
-      if (Approvals.canRecover(current, id, "Phone")) {
-        try contained(machine.send({ type: "recover", id }, "Phone"), "recovering interrupted proposal")
-      }
-    }
+    try recoverPending()
     const latest = try machine.get()
     if (latest.running === 0) {
       for (const id of latest.ids) {
@@ -381,14 +374,6 @@ export effect function submitDirect(detail: ProposalDetail, input: { readonly me
   return proposed ? "proposed" : "rejected"
 }
 
-/** Present a pending proposal card to the owner if permitted by owner and screen protection. */
-export effect function presentProposal(id: number): boolean!!(Approvals.Machine | ApprovalDesk) {
-  const machine = try Approvals.Machine
-  const ctx = (try ApprovalDesk).context()
-  if (!Approvals.canPresent(try machine.get(), id, ctx.signedIn, ctx.protectedScreen, "Phone")) return false
-  return try contained(machine.send({ type: "present", id, signedIn: ctx.signedIn, protectedScreen: ctx.protectedScreen }, "Phone"), "presenting proposal")
-}
-
 /** Update owner, screen protection, or review-first preference, shielding cards, retiring proposals and dropping leases as required. */
 export effect function setApprovalContext(next: Partial<ApprovalContext>): void!!(Approvals.Machine | ApprovalDesk) {
   const holder = try ApprovalDesk
@@ -420,18 +405,6 @@ export effect function fetchPendingApprovals(blocked = false): boolean!!Approval
   const machine = try Approvals.Machine
   if (!Approvals.canFetch(try machine.get(), blocked, "Phone")) return false
   return try contained(machine.send({ type: "fetch", blocked }, "Phone"), "requesting waiting approvals")
-}
-
-/** Rebind to a new conversation so a failed listing can be retried and active leases are given up. */
-export effect function bindConversation(): void!!Approvals.Machine {
-  const machine = try Approvals.Machine
-  const state = try machine.get()
-  for (const id of state.ids) {
-    if (Approvals.canGiveUp(try machine.get(), id, "Phone")) {
-      try contained(machine.send({ type: "giveUp", id }, "Phone"), "giving up lease on conversation switch")
-    }
-  }
-  try contained(machine.send({ type: "bind" }, "Phone"), "binding approvals conversation")
 }
 
 /** Trigger recovery for any interrupted proposals whose details/read-back handlers are now registered. */

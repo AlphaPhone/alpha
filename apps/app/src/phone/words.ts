@@ -16,9 +16,6 @@ export function matches(query: string, names: string, number = ""): boolean {
     /\d/.test(word) ? digits.includes(word.replace(/\D/g, "")) : words.some((name) => name.startsWith(word)));
 }
 
-/** When a call, message or voicemail was, short. */
-export const when = (date: number) => new Date(date).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-
 /** Caller name as held by the address book or provider, with a readable fallback for a number. */
 export function callerTitle(number: string, name: string | null): string {
   if (number === "") return "Unknown";

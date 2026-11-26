@@ -320,51 +320,38 @@ function changeErrorResult(cause: unknown): Change.Result {
   return "NotKnown"
 }
 
-effect function confirmQuotedChange(attempt: number): Change.Event!!ChangePorts {
+effect function sendSubscriptionCommand(attempt: number, path: string, payload: Record<string, unknown>): Change.Event!!ChangePorts {
   const cloud = try Cloud
-  const shelf = try AccountShelf
-  const attempts = try Attempts
-  const quote = shelf.snapshot().quote
-  if (quote === undefined) return { type: "concluded", attempt, result: "NotMade" }
-  const key = try attempts.key(attempt)
-  const path = quote.kind === "upgrade" ? "/api/v1/subscriptions/upgrade/confirm" : "/api/v1/subscriptions/downgrade/confirm"
   return effect {
-    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), { quoteId: quote.quoteId, idempotencyKey: key }))
+    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), payload))
     const command = try commandFromResponse(body)
     const result = try mapCommandResult(command)
     return { type: "concluded", attempt, result } satisfies Change.Event
   } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
+}
+
+effect function confirmQuotedChange(attempt: number): Change.Event!!ChangePorts {
+  const quote = (try AccountShelf).snapshot().quote
+  if (quote === undefined) return { type: "concluded", attempt, result: "NotMade" }
+  const key = try (try Attempts).key(attempt)
+  const path = quote.kind === "upgrade" ? "/api/v1/subscriptions/upgrade/confirm" : "/api/v1/subscriptions/downgrade/confirm"
+  return try sendSubscriptionCommand(attempt, path, { quoteId: quote.quoteId, idempotencyKey: key })
 }
 
 effect function cancelSubscriptionAtEnd(attempt: number, revision: number): Change.Event!!ChangePorts {
-  const cloud = try Cloud
-  const shelf = try AccountShelf
-  const attempts = try Attempts
-  const subscriptionId = shelf.snapshot().snapshot?.subscription?.id
+  const subscriptionId = (try AccountShelf).snapshot().snapshot?.subscription?.id
   if (subscriptionId === undefined) return { type: "concluded", attempt, result: "NotMade" }
-  const key = try attempts.key(attempt)
-  return effect {
-    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/v1/subscriptions/cancel"), { subscriptionId, expectedSubscriptionRevision: revision, idempotencyKey: key }))
-    const command = try commandFromResponse(body)
-    const result = try mapCommandResult(command)
-    return { type: "concluded", attempt, result } satisfies Change.Event
-  } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
+  const key = try (try Attempts).key(attempt)
+  return try sendSubscriptionCommand(attempt, "/api/v1/subscriptions/cancel", { subscriptionId, expectedSubscriptionRevision: revision, idempotencyKey: key })
 }
 
 effect function keepSubscriptionGoing(attempt: number, revision: number): Change.Event!!ChangePorts {
-  const cloud = try Cloud
-  const shelf = try AccountShelf
-  const attempts = try Attempts
-  const subscriptionId = shelf.snapshot().snapshot?.subscription?.id
+  const subscriptionId = (try AccountShelf).snapshot().snapshot?.subscription?.id
   if (subscriptionId === undefined) return { type: "concluded", attempt, result: "NotMade" }
-  const key = try attempts.key(attempt)
-  return effect {
-    const review = try ask(Cloud, HttpClientRequest.get("/api/v1/subscriptions/cancel/undo/review"), UndoReviewReply)
-    const body = try cloud.call(HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/v1/subscriptions/cancel/undo"), { subscriptionId, expectedSubscriptionRevision: revision, idempotencyKey: key, quoteId: review.quoteId }))
-    const command = try commandFromResponse(body)
-    const result = try mapCommandResult(command)
-    return { type: "concluded", attempt, result } satisfies Change.Event
-  } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
+  const key = try (try Attempts).key(attempt)
+  const review = ask(Cloud, HttpClientRequest.get("/api/v1/subscriptions/cancel/undo/review"), UndoReviewReply) catch (cause) => cause
+  if (!("quoteId" in review)) return { type: "concluded", attempt, result: changeErrorResult(review) }
+  return try sendSubscriptionCommand(attempt, "/api/v1/subscriptions/cancel/undo", { subscriptionId, expectedSubscriptionRevision: revision, idempotencyKey: key, quoteId: review.quoteId })
 }
 
 effect function payChangeInvoice(): void!!Billing.Machine {

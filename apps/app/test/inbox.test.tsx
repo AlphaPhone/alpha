@@ -44,12 +44,6 @@ const menu = (item: string, label = "More actions") => drawn(() => {
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
   found.click();
 }));
-const write = (name: string, text: string) => drawn(() => {
-  const found = [...document.querySelectorAll("textarea, input")].find((field) => field.getAttribute("aria-label") === name);
-  if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
-});
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
@@ -64,6 +58,16 @@ const action = (name: string) => drawn(() => {
   found.click();
 });
 const search = (text: string) => fill("Search mail", text).then(() => document.querySelector("form[role=search]")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+
+/** Reopen Alpha over `world`, wait for `count` shelved drafts, and open the shelf list. */
+async function reopenShelvedDrafts(world: ReturnType<typeof scene>, count: number) {
+  const again = await open(world);
+  const restored = inbox.runtime(again.alpha);
+  await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === count);
+  if (button(`${count} drafts set aside`)) await press(`${count} drafts set aside`);
+  else await menu(`Drafts set aside (${count})`, "Mail options");
+  return { alpha: again.alpha, runtime: restored };
+}
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
@@ -262,7 +266,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply" && s.letter.recipients === 1);
 
   // spec/app/inbox/drafts.md, "Every change to the text, recipients or attachments is an edit, counted at once"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket"
-  await write("Message", "Thanks, it is all in order.");
+  await fill("Message", "Thanks, it is all in order.");
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded" && s.letter.revision >= 2);
 
@@ -340,18 +344,14 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open);
   await fill("To", "unfinished@");
-  await write("Message", "Keep these words.");
+  await fill("Message", "Keep these words.");
   await hardware("back");
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await close();
 
-  const again = await open(world);
-  const restored = inbox.runtime(again.alpha);
-  await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
-  if (button("1 drafts set aside")) await press("1 drafts set aside");
-  else await menu("Drafts set aside (1)", "Mail options");
+  const restored = await reopenShelvedDrafts(world, 1);
   await press("Keep these words.No recipient");
-  await until(again.alpha, restored, Writing, (s) => s.open);
+  await until(restored.alpha, restored.runtime, Writing, (s) => s.open);
   expect([
     document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value,
     document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
@@ -395,13 +395,9 @@ it("Keep the drafts the earlier Alpha kept (spec/app/inbox/drafts.md, \"Story: K
   expect([...world.platform.earlier.keys()]).toEqual([slots.unsaved]);
   await close();
 
-  const again = await open(world);
-  const restored = inbox.runtime(again.alpha);
-  await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 3);
-  if (button("3 drafts set aside")) await press("3 drafts set aside");
-  else await menu("Drafts set aside (3)", "Mail options");
+  const restored = await reopenShelvedDrafts(world, 3);
   await press("Contract signedlee@example.test");
-  await until(again.alpha, restored, Writing, (s) => s.open && s.letter.doubt.attempt === 0 && s.letter.doubt.revision === 1);
+  await until(restored.alpha, restored.runtime, Writing, (s) => s.open && s.letter.doubt.attempt === 0 && s.letter.doubt.revision === 1);
   expect([
     document.querySelector<HTMLInputElement>('input[aria-label="Subject"]')?.value,
     told(),
@@ -442,7 +438,7 @@ async function drafting(alpha: Parameters<typeof inbox.runtime>[0], to: string, 
   await fill("To", to);
   await drawn(() => document.querySelector("input[aria-label='To']")?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1);
-  await write("Subject", subject);
+  await fill("Subject", subject);
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 }

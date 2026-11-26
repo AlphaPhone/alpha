@@ -6,6 +6,7 @@ import type * as Posting from "../../gen/app__notices__posting.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { SystemSettings } from "../platform/index.vibe"
 import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
 import { type NoticeDesk, askAboutWaitingTap, tapNotice } from "./notices.vibe"
 import { markNoticeSpent } from "./posting.vibe"
 
@@ -87,26 +88,17 @@ const shadeShelf = Layer.sync(ShadeShelf, () => {
   let pendingRow: ShadeRow | undefined
   let pendingOwnId: number | undefined
   let hooks: Partial<CollectionHooks> = {}
-  const listeners = new Set<() => void>()
-  const buildSnap = (): ShadeSnapshot => ({
+  const { snapshot, subscribe, emit } = createDeskStore((): ShadeSnapshot => ({
     rows: [...shownRows],
     ownRows: [...ownRows],
     history: [...history],
     openedIds: [...openedIds],
     dismissedIds: [...dismissedIds],
     settingsOpened,
-  })
-  let current: ShadeSnapshot = buildSnap()
-  const emit = () => {
-    current = buildSnap()
-    for (const listener of [...listeners]) listener()
-  }
+  }))
   return {
-    snapshot: () => current,
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
+    snapshot,
+    subscribe,
     setHooks(next: Partial<CollectionHooks>): void {
       hooks = { ...hooks, ...next }
     },
@@ -362,13 +354,6 @@ export effect function dismissOwnRow(id: number, by: Actor = "Owner"): boolean!!
   if (!Collection.canDismissOwn(try machine.get(), by)) return false
   ;(try ShadeShelf).setPendingOwnDismiss(id)
   return try contained(machine.send({ type: "dismissOwn" }, by), "dismissing own notice")
-}
-
-// spec/app/notices/collection.md, "A restart keeps the consent and the history, drops the rows shown, Alpha's own included until the phone lists them again, and asks for a new listing"
-/** Restart collection, preserving consent and history while dropping displayed rows and re-listing. */
-export effect function restartCollection(): boolean!!Collection.Machine {
-  const machine = try Collection.Machine
-  return try contained(machine.send({ type: "restart" }, "Phone"), "restarting collection")
 }
 
 // spec/app/notices/index.md, "Story: Ask Alpha about a notice"

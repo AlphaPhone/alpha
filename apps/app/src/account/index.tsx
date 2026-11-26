@@ -7,12 +7,12 @@ import { useMachine } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
 import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/ui.tsx";
 import { together } from "../runtime/index.vibe";
-import { accountMachines, accountResident } from "./account.vibe";
+import { accountResident } from "./account.vibe";
 import { AccountPanel } from "./AccountPanel.tsx";
 import { accountLayer, profileLive, profileShelf } from "./profile.vibe";
 import { recordsMachine } from "./resident.vibe";
 
-export { accountMachines, accountResident };
+export { accountResident };
 
 const profiles = new WeakMap<Alpha, ReturnType<typeof profileShelf>>();
 

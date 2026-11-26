@@ -4,9 +4,10 @@ import type * as Deletion from "../../gen/app__notices__deletion.effect.vibe"
 import * as Deletions from "../../gen/app__notices__deletions.effect.vibe"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed, Time } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
 import { type Said, offer, say, withdraw } from "./toasts.vibe"
 
-export { DELETION_NOTICE_TEXT, UNDO_TOO_LATE }
+export { DELETION_NOTICE_TEXT }
 
 /** Metadata describing a deferred deletion queued from any area (calendar, reminders, notes, messages, etc.). */
 export interface DeletionDetail {
@@ -62,27 +63,18 @@ const deletionDesk = Layer.sync(DeletionDesk, () => {
   let dismissed: number[] = []
   let counter = 0
   let hooks: Partial<DeletionHooks> = {}
-  const listeners = new Set<() => void>()
-  const buildSnap = (): DeletionDeskSnapshot => ({
+  const { snapshot, subscribe, emit } = createDeskStore((): DeletionDeskSnapshot => ({
     details: new Map(details),
     committed: [...committed],
     restored: [...restored],
     readBacks: [...readBacks],
     dismissed: [...dismissed],
-  })
-  let current: DeletionDeskSnapshot = buildSnap()
-  const emit = () => {
-    current = buildSnap()
-    for (const listener of [...listeners]) listener()
-  }
+  }))
   const fallback = (number: number): DeletionDetail =>
     details.get(number) ?? { number, itemId: number, area: "deletions", title: `Item #${number}`, message: `Deleted item #${number}` }
   return {
-    snapshot: () => current,
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
+    snapshot,
+    subscribe,
     setHooks(next: Partial<DeletionHooks>): void {
       hooks = { ...hooks, ...next }
     },
@@ -315,14 +307,6 @@ export effect function dismissDeletion(number: number): boolean!!Deletions.Machi
   return try contained(machine.send({ type: "dismiss", number }), "dismissing deletion outcome")
 }
 
-// spec/app/notices/deletions.md, "Alpha reads which deletions are pending quietly, and says the status is unavailable only when it knows of a deletion the owner can see"
-/** Check pending deletion status quietly. */
-export effect function checkDeletionsStatus(): boolean!!Deletions.Machine {
-  const machine = try Deletions.Machine
-  if (!Deletions.canCheckStatus(try machine.get())) return false
-  return try contained(machine.send({ type: "checkStatus" }), "checking deletions status")
-}
-
 // spec/app/notices/deletions.md, "The phone says who is signed in; another owner then sees none of the notice, and each Undo offered to the owner before is withdrawn"
 /** Switch the signed-in owner and conceal any Undo offered to the prior owner. */
 export effect function switchDeletionsOwner(owner: number): void!!Deletions.Machine {
@@ -356,11 +340,6 @@ export effect function recoverDeletions(): void!!Deletions.Machine {
       try ignore(machine.send({ type: "recover", number }))
     }
   }
-}
-
-/** Tell the owner plainly when an Undo tap arrived too late. */
-export effect function warnUndoTooLate(): void!!(Toasts.Machine | Said) {
-  try say(UNDO_TOO_LATE, true)
 }
 
 /** Concurrent deferred-deletion Undo queue with scale-adjusted timing and restart recovery. */

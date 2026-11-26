@@ -7,9 +7,3 @@ import { allowsTestMocks } from "../platform/index.vibe";
 export function development(): boolean {
   return import.meta.env.DEV || allowsTestMocks();
 }
-
-/** The version this build of Alpha names, and the mode it was built in, for the diagnostics it exports. @throws {never} */
-export function versions(): { readonly app: string; readonly mode: string } {
-  const version: unknown = import.meta.env.VITE_ALPHA_VERSION;
-  return { app: typeof version === "string" ? version : "development", mode: import.meta.env.MODE };
-}

@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -25,15 +24,28 @@ afterEach(closeAll);
 
 const listed = () => [...document.querySelectorAll("[aria-label=Notes] button")].flatMap((row) => row.getAttribute("aria-label")?.startsWith("Open ") ? [row.getAttribute("aria-label")] : []);
 
+/** Open Alpha, navigate to Notes, and wait until the notes list has loaded. */
+async function openNotes(loaded: (state: { readonly read: { readonly status: string }; readonly rows: readonly unknown[] }) => boolean = (s) => s.read.status === "Loaded") {
+  const world = scene();
+  const { alpha } = await open(world);
+  await press("Notes");
+  const runtime = notes.runtime(alpha);
+  await until(alpha, runtime, List, loaded);
+  return { alpha, runtime, world };
+}
+
+/** Open Ask Alpha and Notes with a shopping-list note ready as the agent target. */
+async function openShoppingAssistant(world = scene()) {
+  world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
+  world.notes.target = "shopping";
+  const { alpha } = await open(world, only("assistant", "view:Notes"));
+  return { alpha, runtime: assistant.runtime(alpha), world };
+}
+
 describe("Notes", () => {
   it("See my notes (spec/app/notes/index.md, \"Story: See my notes\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world);
-
     // spec/app/notes/index.md, "Opening Notes, or trying again, reads the owner's notes"
-    await press("Notes");
-    const runtime = notes.runtime(alpha);
-    await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
+    const { alpha, runtime, world } = await openNotes((s) => s.read.status === "Loaded" && s.rows.length === 6);
 
     // spec/app/notes/index.md, "Pinned notes come first, then the rest, narrowed to the chosen folder"
     expect(listed()).toEqual(["Open Enclave launch", "Open Design sync", "Open Groceries", "Open The case for on-device agents", "Open Gift ideas · Priya", "Open Radiator"]);
@@ -100,11 +112,7 @@ describe("Notes", () => {
   });
 
   it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world);
-    await press("Notes");
-    const runtime = notes.runtime(alpha);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    const { alpha, runtime, world } = await openNotes();
     await press("New note");
     await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
     await fill("Title", "Studio invoice");
@@ -121,11 +129,7 @@ describe("Notes", () => {
   });
 
   it("Write a note (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world);
-    await press("Notes");
-    const runtime = notes.runtime(alpha);
-    await until(alpha, runtime, List, (s) => s.read.status === "Loaded");
+    const { alpha, runtime, world } = await openNotes();
 
     // spec/app/notes/index.md, "A voice note opens only as a voice note, a link note only in its dialog, and text and checklists only in the editor"
     await press("Open Enclave launch");
@@ -237,11 +241,7 @@ describe("Notes", () => {
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
-    const world = scene();
-    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
-    world.notes.target = "shopping";
-    const { alpha } = await open(world, only("assistant", "view:Notes"));
-    const runtime = assistant.runtime(alpha);
+    const { alpha, runtime, world } = await openShoppingAssistant();
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
     const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
@@ -257,12 +257,7 @@ describe("Notes", () => {
         await press("Type");
         await until(alpha, runtime, Shell, (s) => s.assistant === "Typing");
       }
-      act(() => {
-        const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
-        if (!box) throw new Error("no composer");
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
-        box.dispatchEvent(new Event("input", { bubbles: true }));
-      });
+      await fill("Message Alpha", text);
       await press("Send");
       await until(alpha, runtime, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
     };
@@ -354,10 +349,7 @@ describe("Notes", () => {
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
     const world = { ...scene(), phone: true };
     for (const kind of ["draft", "folders"]) world.slots.add(`notes-${kind}:${numberOf("owner", world.notes.owner)}`);
-    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
-    world.notes.target = "shopping";
-    const { alpha } = await open(world, only("assistant", "view:Notes"));
-    const runtime = assistant.runtime(alpha);
+    const { alpha, runtime } = await openShoppingAssistant(world);
     await until(alpha, runtime, Conversation, (s) => s.ready && s.observing);
     await until(alpha, runtime, Talk, (s) => s.warmed);
     await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "chooseNetworkSpeech", agree: false }))));

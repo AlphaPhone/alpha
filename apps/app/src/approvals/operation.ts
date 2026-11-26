@@ -1,7 +1,7 @@
 // spec/app/approvals/operation.md, "Story: Know what the agent is asking for"; spec/app/approvals/proposal.md, "Story: Be asked before Alpha acts"
 import type { Operation, Preference } from "../../gen/app__approvals__operation.ts";
 import { emergency, provable } from "../../gen/app__approvals__operation.ts";
-import type { Proposal, Result } from "../../gen/app__approvals__proposal.ts";
+import type { Result } from "../../gen/app__approvals__proposal.ts";
 
 /** Display details and execution hooks for one agent proposal held beside the approvals machine. */
 export interface ProposalDetail {
@@ -110,34 +110,4 @@ export function describeProposal(detail: ProposalDetail): ProposalCardSummary {
     actionLabel,
     danger: provable(detail.operation),
   };
-}
-
-/** Human-readable status describing where a proposal stands in its lifecycle. */
-export function stageSummary(proposal: Proposal): string {
-  switch (proposal.stage) {
-    case "Unproposed": return "Not proposed";
-    case "Forbidden": return "Emergency calls must be dialed yourself";
-    case "Pending": return "Waiting for approval";
-    case "Reserving": return "Recording approval";
-    case "Unrecorded": return "Could not record approval";
-    case "Clashed": return "Number taken by another action";
-    case "Declined": return "Declined";
-    case "Lapsed": return "Expired";
-    case "Unavailable": return "No longer available";
-    case "Approved": return "Claiming action";
-    case "Claimed": return "Queued to run";
-    case "Cancelled": return "Cancelled";
-    case "Reconciling": return "Checking outcome";
-    case "Sent":
-      if (proposal.attempt.outcome === "Confirmed") return "Finished";
-      if (proposal.attempt.outcome === "Refused") {
-        return proposal.refusal === "ByAndroid" ? "Denied by Android" : "Action failed";
-      }
-      if (proposal.attempt.outcome === "Unknown") {
-        if (proposal.verdict === "Happened") return "Confirmed by owner";
-        if (proposal.verdict === "DidNotHappen") return "Marked did not happen";
-        return "Outcome unknown";
-      }
-      return "Running";
-  }
 }

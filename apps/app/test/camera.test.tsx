@@ -6,20 +6,45 @@ import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
 import camera from "../src/camera/index.tsx";
-import { photosArea } from "../src/photos/index.tsx";
+import photosArea from "../src/photos/index.tsx";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
+/** Open Camera on a phone and wait until the preview is ready. */
+async function openCamera(world = { ...scene(), phone: true }, mounts = only("home", "view:Camera", "view:Photos", "notice")) {
+  const { alpha } = await open(world, mounts);
+  const runtime = camera.runtime(alpha);
+  await press("Camera");
+  await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+  return { alpha, runtime, world };
+}
+
+/** Record a video or take a photo and wait for the capture to finish. */
+async function capture(
+  alpha: Awaited<ReturnType<typeof open>>["alpha"],
+  runtime: ReturnType<typeof camera.runtime>,
+  world: ReturnType<typeof scene>,
+  kind: "photo" | "video",
+) {
+  if (kind === "video") {
+    await press("Video mode");
+    await until(alpha, runtime, Machine, (state) => state.mode === "Video");
+    await press("Record video");
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    await press("Stop recording");
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
+  } else {
+    await press("Take photo");
+    await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
+  }
+}
+
 describe("Camera on a phone", () => {
   it("Frame the shot and take photos and videos (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
-    const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    const { alpha, runtime, world } = await openCamera({ ...scene(), phone: true }, only("home", "view:Camera", "notice"));
 
     await press("Framing grid");
     await until(alpha, runtime, Machine, (state) => state.grid);
@@ -35,12 +60,7 @@ describe("Camera on a phone", () => {
     expect(world.camera.photos).toMatchObject([{ saveToGallery: true, thumbnailOnly: true }]);
 
     // spec/app/camera/index.md, "Story: Take photos and videos"
-    await press("Video mode");
-    await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-    await press("Record video");
-    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
-    await press("Stop recording");
-    await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
+    await capture(alpha, runtime, world, "video");
     expect(world.camera.savedVideos).toHaveLength(1);
 
     // spec/app/camera/index.md, "Story: Leave and come back"
@@ -53,22 +73,8 @@ describe("Camera on a phone", () => {
   });
 
   it.each(["photo", "video"] as const)("Open the last owned %s without library access (spec/app/camera/index.md, \"The last capture opens in Photos\")", async (kind) => {
-    const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-    if (kind === "video") {
-      await press("Video mode");
-      await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-      await press("Record video");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
-      await press("Stop recording");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    } else {
-      await press("Take photo");
-      await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
-    }
+    const { alpha, runtime, world } = await openCamera();
+    await capture(alpha, runtime, world, kind);
 
     const playback = "https://localhost/_alpha_video_/capture.mp4";
     world.photos.rows.unshift({
@@ -88,12 +94,8 @@ describe("Camera on a phone", () => {
   it("An aggregate camera URI cannot choose a permitted row on another volume (spec/app/camera/index.md, \"The last capture opens in Photos\")", async () => {
     const world = { ...scene(), phone: true };
     world.photos.access = { scope: "full", images: "full", videos: "full" };
-    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-    await press("Take photo");
-    await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
+    const { alpha, runtime } = await openCamera(world);
+    await capture(alpha, runtime, world, "photo");
 
     world.photos.rows.unshift({
       id: "m:a0b1-c2d3:i:1", name: "Different still.jpg", owned: false, kind: "image", image: "",
@@ -108,22 +110,8 @@ describe("Camera on a phone", () => {
   it.each(["photo", "video"] as const)("Open the exact owned %s with full Photos access (spec/app/camera/index.md, \"The last capture opens in Photos\")", async (kind) => {
     const world = { ...scene(), phone: true };
     world.photos.access = { scope: "full", images: "full", videos: "full" };
-    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
-    const runtime = camera.runtime(alpha);
-    await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
-
-    if (kind === "video") {
-      await press("Video mode");
-      await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-      await press("Record video");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
-      await press("Stop recording");
-      await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    } else {
-      await press("Take photo");
-      await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
-    }
+    const { alpha, runtime } = await openCamera(world);
+    await capture(alpha, runtime, world, kind);
 
     const playback = "https://localhost/_alpha_video_/owned.mp4";
     const fixture = {

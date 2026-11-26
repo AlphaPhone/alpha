@@ -123,17 +123,15 @@ let version = 0;
 /** The requests the card was given, by the number the machine names each by, as a store the screen reads. */
 export const requests = {
   snapshot: (): number => version,
-  subscribe(listener: () => void): () => void {
+  subscribe: (listener: () => void): () => void => {
     listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
+    return () => { listeners.delete(listener); };
   },
   /** @throws {never} */
   keep(request: Request): void {
     held.set(request.filing, request);
     version += 1;
-    for (const listener of [...listeners]) listener();
+    listeners.forEach((notify) => notify());
   },
   /** @throws {never} */
   find: (filing: number): Request | undefined => held.get(filing),

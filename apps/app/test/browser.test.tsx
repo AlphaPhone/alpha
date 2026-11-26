@@ -44,6 +44,12 @@ const go = async (text: string) => {
   });
 };
 
+const selectedPage = (runtime: ReturnType<typeof browser.runtime>) => {
+  const tab = runtime.runSync(Effect.map(Effect.flatMap(Tabs, (m) => m.get()), (s) => s.selected));
+  const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+  return { tab, page };
+};
+
 const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   const tab = button(name);
   if (!tab) throw new Error(`no Library tab ${name}`);
@@ -76,8 +82,7 @@ describe("The Browser on a phone", () => {
     const bookmark = [...document.querySelectorAll("button")].find((row) => row.textContent?.includes("Keys in the chip"));
     if (!bookmark) throw new Error("saved bookmark is missing");
     await drawn(() => bookmark.click());
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const { page } = selectedPage(runtime);
     await until(alpha, page, Page, (s) => s.phase === "Shown");
     expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["https://enclave.example/keys-in-hardware"]);
 
@@ -115,8 +120,7 @@ describe("The Browser on a phone", () => {
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual(history);
     await press("Cancel editing");
     await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const { page } = selectedPage(runtime);
     // spec/app/browser/address.md, "Only the latest load of the page commits it or fails it"; spec/app/browser/address.md, "The secure mark shows only on a page that committed over HTTPS"
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
@@ -192,8 +196,7 @@ describe("The Browser on a phone", () => {
     const { alpha, runtime } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const { tab, page } = selectedPage(runtime);
     await until(alpha, page, Page, (p) => p.phase === "Shown");
 
     // spec/app/browser/share.md, "Story: Share the page"

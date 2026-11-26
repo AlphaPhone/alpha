@@ -109,13 +109,14 @@ function formatHourMinute(hour: number, minute: number): string {
 }
 
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
-  if (minutes > 0) return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
-  return `${seconds}s`;
+  const secs = Math.max(0, Math.ceil(ms / 1000));
+  const hrs = Math.floor(secs / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
+  const rem = secs % 60;
+  const tail = rem > 0 ? ` ${rem}s` : "";
+  if (hrs > 0) return `${hrs}h ${mins}m${tail}`;
+  if (mins > 0) return `${mins}m${tail}`;
+  return `${rem}s`;
 }
 
 function parseDaysMask(input: unknown, fallbackText: string): number {

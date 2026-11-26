@@ -182,12 +182,6 @@ function PasswordsBody({ runtime, machine }: { runtime: Shown<Resident>["runtime
   );
 }
 
-/** Full Password Manager panel (unlock, list, search, edit, autofill settings, damaged vault recovery). */
-export function PasswordsScreen({ runtime }: { runtime: Shown<Resident>["runtime"] }) {
-  const machine = usePasswords(runtime);
-  return <PasswordsBody runtime={runtime} machine={machine} />;
-}
-
 /** Browser autofill bar offered strictly for the focused site's saved credentials. */
 export function AutofillPrompt({ runtime }: { runtime: Shown<Resident>["runtime"] }) {
   const { state, can, send } = usePasswords(runtime);

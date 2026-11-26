@@ -71,6 +71,7 @@ export default {
     "packages/eliza-harness": {
       "entry": [
         "src/index.ts",
+        "src/providers/cli.ts",
         "scripts/no-bun.ts",
         "test/**/*.test.{ts,vibe}"
       ],
@@ -86,11 +87,11 @@ export default {
     "apps/agent": {
       "entry": [
         "src/main.vibe",
+        "src/plugins/index.ts",
         "test/**/*.test.{ts,vibe}"
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
-        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
@@ -142,16 +143,18 @@ export default {
     },
     "apps/*": {
       "entry": [
-        "test/**/*.test.{ts,tsx,vibe}",
-        "test/drivers/*.ts",
-        "src/**/*.{schema,contract}.{ts,vibe}"
+        "test/**/*.test.{ts,tsx,vibe}"
       ],
       "project": [
         "src/**/*.{ts,tsx,vibe,vibex,css}",
         "test/**/*.{ts,tsx,vibe,vibex}"
       ],
       "ignoreDependencies": [
-        "tailwindcss"
+        "@capacitor/android",
+        "@tesseract.js-data/eng",
+        "tailwindcss",
+        "tesseract.js",
+        "tesseract.js-core"
       ],
       "ignoreBinaries": [
         "adb",

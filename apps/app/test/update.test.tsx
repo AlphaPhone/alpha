@@ -45,6 +45,16 @@ async function general(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
   await press("General");
 }
 
+/** Open a phone offering release `version`, wait for the offer, and open Settings → General. */
+async function openOfferInGeneral(permission: ReturnType<typeof phoneWith>["update"]["permission"], version = 121) {
+  const world = phoneWith([release(version)]);
+  world.update.permission = permission;
+  const { alpha } = await open(world);
+  await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === version);
+  await general(alpha);
+  return { alpha, world };
+}
+
 describe("Updates", () => {
   it("Check for updates and install the one offered (spec/app/update/index.md, \"Story: Check for updates\"; spec/app/update/index.md, \"Story: Install an update\")", async () => {
     const world = phoneWith([release(121, { notes: "Fixes the clock." }), release(122, { signerSha256: "d".repeat(64) })]);
@@ -86,11 +96,7 @@ describe("Updates", () => {
   });
 
   it("Install update that Android refuses says why at once (spec/app/update/index.md, \"Story: Install an update\")", async () => {
-    const world = phoneWith([release(121)]);
-    world.update.permission = "unsupported";
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
-    await general(alpha);
+    const { alpha, world } = await openOfferInGeneral("unsupported");
     // spec/app/update/index.md, "An install Android refused for its permission offers Allow automatic updates at once"
     world.update.installAnswer = "permission-required";
     await pressRow("Install update");
@@ -150,11 +156,7 @@ describe("Updates", () => {
   });
 
   it("Only a complete manifest of well-formed releases is understood, and a check that never answers is unreadable (spec/app/update/index.md, \"Story: Read the update channel\")", async () => {
-    const world = phoneWith([release(121)]);
-    world.update.permission = "permission-required";
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
-    await general(alpha);
+    const { alpha, world } = await openOfferInGeneral("permission-required");
     const checking = async (manifest: unknown) => {
       world.update.manifest = JSON.stringify(manifest);
       const before = world.update.checks.length;

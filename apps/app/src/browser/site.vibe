@@ -4,7 +4,7 @@ import * as Site from "../../gen/app__browser__site.effect.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
 
 /** Host callbacks for site permission prompts, HTTP authentication and per-site storage clearing. */
-export service SitePort {
+service SitePort {
   askAndroid(want: Site.Want): boolean!!
   grant(page: number, want: Site.Want): void!!
   refuse(page: number): void!!
@@ -13,7 +13,7 @@ export service SitePort {
 }
 
 /** Default site port used when the native browser plugin does not supply custom site prompts. */
-export const defaultSitePort = Layer.succeed(SitePort, {
+const defaultSitePort = Layer.succeed(SitePort, {
   askAndroid: () => succeed(false),
   grant: () => Effect.void,
   refuse: () => Effect.void,

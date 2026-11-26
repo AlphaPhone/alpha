@@ -22,11 +22,16 @@ export function useAccountTimed<M extends { readonly state: unknown; readonly ca
   runtime: AccountRuntime,
   use: (runtime: AccountRuntime) => M,
 ): M {
-  const machine = use(runtime);
-  if (machine.state === undefined) return machine;
-  const now = currentSeconds(runtime);
-  const can = machine.can as (event: unknown, ...by: unknown[]) => boolean;
-  return { ...machine, can: (event: unknown, ...by: unknown[]) => can(stamped(event, now), ...by) };
+  const hook = use(runtime);
+  if (hook.state === undefined) return hook;
+  const seconds = currentSeconds(runtime);
+  const check = hook.can as (event: unknown, ...args: unknown[]) => boolean;
+  return {
+    ...hook,
+    can(event: unknown, ...args: unknown[]) {
+      return check(stamped(event, seconds), ...args);
+    },
+  };
 }
 
 /** Subscribes to non-machine display metadata held in AccountShelf. */

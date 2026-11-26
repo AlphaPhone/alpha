@@ -25,12 +25,17 @@ afterEach(async () => {
 
 const approvalMounts = () => only("home", "overlay", "notice");
 
+async function openApprovals(world = scene(), setup?: (harness: ReturnType<typeof approvalsHarness>) => void) {
+  const running = await open(world, approvalMounts());
+  const harness = approvalsHarness();
+  setup?.(harness);
+  await running.alpha.runtime.runPromise(Effect.flatMap(ApprovalDesk, (d) => Effect.sync(() => d.setHooks(harness.hooks))));
+  return { ...running, world, harness };
+}
+
 describe("approvals", () => {
   it("runs one approved action at a time and queues the next (spec/app/approvals/index.md, \"Story: One action at a time\"; spec/app/approvals/proposal.md, \"Story: Decide\"; spec/app/approvals/proposal.md, \"Story: Have it done once\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world, approvalMounts());
-    const harness = approvalsHarness();
-    await alpha.runtime.runPromise(Effect.flatMap(ApprovalDesk, (d) => Effect.sync(() => d.setHooks(harness.hooks))));
+    const { alpha, world, harness } = await openApprovals();
 
     const firstExec = deferredExecution();
     const secondExec = deferredExecution();
@@ -64,10 +69,7 @@ describe("approvals", () => {
   });
 
   it("expires a pending proposal before the owner taps Approve (spec/app/approvals/proposal.md, \"Story: Decide\"; spec/app/approvals/index.md, \"Story: One action at a time\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world, approvalMounts());
-    const harness = approvalsHarness();
-    await alpha.runtime.runPromise(Effect.flatMap(ApprovalDesk, (d) => Effect.sync(() => d.setHooks(harness.hooks))));
+    const { alpha, world, harness } = await openApprovals();
 
     await alpha.runtime.runPromise(submitProposal({
       id: 10, proposalId: "prop-expire", title: "Delete file", detail: "Remove old report", operation: "Change", available: true,
@@ -80,10 +82,7 @@ describe("approvals", () => {
   });
 
   it("caps direct allow-listed runs at four per message and requires review for the fifth or non-allow-listed (spec/app/approvals/direct.md, \"Story: Let Alpha show me things without asking each time\"; spec/app/approvals/operation.md, \"Story: Know what the agent is asking for\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world, approvalMounts());
-    const harness = approvalsHarness();
-    await alpha.runtime.runPromise(Effect.flatMap(ApprovalDesk, (d) => Effect.sync(() => d.setHooks(harness.hooks))));
+    const { alpha, world } = await openApprovals();
 
     expect(classifyOperation("phone.emergency")).toBe("EmergencyCall");
     expect(classifyOperation("calendar.glance")).toBe("Glance");
@@ -107,10 +106,7 @@ describe("approvals", () => {
   });
 
   it("forbids emergency calls immediately without creating a claim or execution (spec/app/approvals/proposal.md, \"Story: Be asked before Alpha acts\"; spec/app/approvals/operation.md, \"Story: Know what the agent is asking for\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world, approvalMounts());
-    const harness = approvalsHarness();
-    await alpha.runtime.runPromise(Effect.flatMap(ApprovalDesk, (d) => Effect.sync(() => d.setHooks(harness.hooks))));
+    const { alpha, world, harness } = await openApprovals();
 
     let executed = false;
     await alpha.runtime.runPromise(submitProposal({
@@ -130,11 +126,7 @@ describe("approvals", () => {
   });
 
   it("completes a read lease when approved and cancels leases and cards on owner switch (spec/app/approvals/lease.md, \"Story: Get the answer a read was for\"; spec/app/approvals/index.md, \"Story: Change owner with an approval in hand\"; spec/app/approvals/index.md, \"Story: Get the answer a read was for\")", async () => {
-    const world = scene();
-    const { alpha } = await open(world, approvalMounts());
-    const harness = approvalsHarness();
-    harness.setAnswer({ ok: true, answer: "You have 2 meetings today." });
-    await alpha.runtime.runPromise(Effect.flatMap(ApprovalDesk, (d) => Effect.sync(() => d.setHooks(harness.hooks))));
+    const { alpha, world } = await openApprovals(scene(), (harness) => harness.setAnswer({ ok: true, answer: "You have 2 meetings today." }));
 
     const expires = world.now + 60_000;
     await alpha.runtime.runPromise(submitProposal({
@@ -158,9 +150,7 @@ describe("approvals", () => {
 
   it("reads back an in-flight change after a restart before reporting completion (spec/app/approvals/index.md, \"Story: Pick up the cards after a restart\"; spec/app/approvals/proposal.md, \"Story: Pick up after a restart\")", async () => {
     const world = scene();
-    const first = await open(world, approvalMounts());
-    const harness1 = approvalsHarness();
-    await first.alpha.runtime.runPromise(Effect.flatMap(ApprovalDesk, (d) => Effect.sync(() => d.setHooks(harness1.hooks))));
+    const first = await openApprovals(world);
 
     const stuckExec = deferredExecution();
     await first.alpha.runtime.runPromise(submitProposal({

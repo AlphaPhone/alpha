@@ -1,5 +1,5 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Be asked before Alpha acts"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
-import { AssistantReceiptCard, Banner, Button, Card, Sheet, SheetContent, StatusDot } from "@repo/ui";
+import { Banner, Button, Sheet, SheetContent } from "@repo/ui";
 import { Effect } from "effect";
 import { ShieldAlert, X } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
@@ -10,76 +10,7 @@ import { listed, top } from "../../gen/app__shell__layers.ts";
 import { type Resident, type Shown, useTimed } from "../runtime/ui.tsx";
 import { untimed } from "../runtime/index.vibe";
 import { ApprovalDesk, approvalLayer } from "./approvals.vibe";
-import { describeProposal, stageSummary } from "./operation.ts";
-
-/** Inline card for a single proposal, offering exactly the actions the machine allows. */
-export function ApprovalCard({ id, runtime }: { id: number; runtime: Shown<Resident>["runtime"] }) {
-  const { state, can, send } = useTimed(runtime, useApprovals);
-  const desk = useMemo(() => runtime.runSync(Effect.flatMap(ApprovalDesk, (found) => Effect.succeed(found))), [runtime]);
-  const snap = useSyncExternalStore((listener) => desk.subscribe(listener), () => desk.snapshot(), () => desk.snapshot());
-  if (!state || !state.ids.includes(id)) return null;
-  const proposal = entry(state, id);
-  const detail = snap.details.get(id) ?? { id, proposalId: `proposal-${id}`, title: "Agent action", detail: "", operation: proposal.operation, available: true };
-  const summary = describeProposal(detail);
-  const { signedIn, protectedScreen } = snap.context;
-  const approveEv = { type: "approve", id, seen: proposal.review.shown, now: untimed, available: detail.available, signedIn, protectedScreen } as const;
-  const declineEv = { type: "decline", id, signedIn } as const;
-  const retryEv = { type: "retry", id, signedIn } as const;
-  const cancelEv = { type: "cancel", id, signedIn } as const;
-  const happenedEv = { type: "attest", id, signedIn, happened: true } as const;
-  const didNotEv = { type: "attest", id, signedIn, happened: false } as const;
-
-  if (proposal.stage === "Sent" && proposal.attempt.outcome === "Confirmed") {
-    return (
-      <AssistantReceiptCard
-        title={summary.title}
-        lines={detail.lines ? [...detail.lines] : [stageSummary(proposal)]}
-        settled
-      />
-    );
-  }
-
-  return (
-    <Card>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-base font-medium text-foreground">{summary.title}</p>
-          {summary.summary ? <p className="text-sm text-muted-foreground">{summary.summary}</p> : null}
-        </div>
-        <StatusDot
-          status={proposal.stage === "Forbidden" || proposal.stage === "Unrecorded" ? "warn" : proposal.stage === "Pending" ? "ok" : "off"}
-          label={stageSummary(proposal)}
-          showLabel
-        />
-      </div>
-      {!detail.available && proposal.stage === "Pending" ? (
-        <Banner variant="info">Unavailable on this phone. This action cannot be run on this device.</Banner>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        {can(approveEv, "Owner") ? (
-          <Button variant={summary.danger ? "destructive" : "primary"} onClick={() => void send(approveEv, "Owner")}>
-            {summary.actionLabel}
-          </Button>
-        ) : null}
-        {can(declineEv, "Owner") ? (
-          <Button variant="secondary" onClick={() => void send(declineEv, "Owner")}>Decline</Button>
-        ) : null}
-        {can(retryEv, "Owner") ? (
-          <Button variant="outline" onClick={() => void send(retryEv, "Owner")}>Try again</Button>
-        ) : null}
-        {can(cancelEv, "Owner") ? (
-          <Button variant="outline" onClick={() => void send(cancelEv, "Owner")}>Cancel</Button>
-        ) : null}
-        {can(happenedEv, "Owner") ? (
-          <Button variant="secondary" onClick={() => void send(happenedEv, "Owner")}>It happened</Button>
-        ) : null}
-        {can(didNotEv, "Owner") ? (
-          <Button variant="outline" onClick={() => void send(didNotEv, "Owner")}>Did not happen</Button>
-        ) : null}
-      </div>
-    </Card>
-  );
-}
+import { describeProposal } from "./operation.ts";
 
 /** Overlay approval sheet that keeps the page behind it inert while a proposal card is open. */
 export function ApprovalsOverlay({ runtime }: Shown<Resident>) {

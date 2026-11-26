@@ -1,7 +1,8 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Check, ChevronLeft, Pause, Play } from "lucide-react";
+import { Check, Pause, Play } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
+import { NoteFrame } from "./NoteFrame.tsx";
 
 /** One line of a voice note's transcript: who said it, when, and what. */
 export interface VoiceNoteLine {
@@ -57,12 +58,7 @@ const card = "mt-5.5 flex flex-col gap-3 rounded-panel bg-secondary p-4.5";
 /** An open voice note: its title and length, playback, the summary and action items, and the transcript. */
 export function VoiceNoteView({ title, meta, time = "", playing = false, summary = [], actions = [], lines = [], menu, feedback, onPlay, onAction, onSeek, onAskTranscript, onBack, className, ...props }: VoiceNoteViewProps) {
   return (
-    <section aria-label={title} className={cn("absolute inset-0 z-10 flex flex-col bg-background", className)} {...props}>
-      <div className="flex h-14 shrink-0 items-center gap-0.5 px-2">
-        <button type="button" aria-label="Back to notes" onClick={onBack} className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-full active:bg-accent")}><ChevronLeft aria-hidden className="size-5.5" /></button>
-        <div className="grow" />
-        {menu}
-      </div>
+    <NoteFrame title={title} menu={menu} onBack={onBack} className={className} {...props}>
       <div className="mx-auto min-h-0 w-full max-w-3xl grow touch-pan-y overflow-y-auto px-6 pt-1 pb-37.5">
         <h1 className="py-1 font-display text-headline font-light">{title}</h1>
         <div className="mt-0.5 text-sm leading-normal text-muted-foreground">{meta}</div>
@@ -116,6 +112,6 @@ export function VoiceNoteView({ title, meta, time = "", playing = false, summary
           ))}
         </div>
       </div>
-    </section>
+    </NoteFrame>
   );
 }

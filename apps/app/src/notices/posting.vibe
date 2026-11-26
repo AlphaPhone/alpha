@@ -1,6 +1,7 @@
 // spec/app/notices/posting.md, "Story: Be told by Alpha's own notices"; spec/app/notices/posting.md, "A channel in a group the owner blocked is off, and reminder, call and text channels are in no group"; spec/app/notices/posting.md, "Story: Change owner or restart with a notice out"
 import * as Posting from "../../gen/app__notices__posting.effect.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
 
 /** Alpha's four Android notification channel groups, declared before any notice is posted. */
 export const ALPHA_CHANNEL_GROUPS = [
@@ -74,28 +75,19 @@ const postingDesk = Layer.sync(PostingDesk, () => {
   let blocked: number[] = []
   let checked: number[] = []
   let hooks: Partial<PostingHooks> = {}
-  const listeners = new Set<() => void>()
-  const buildSnap = (): PostingSnapshot => ({
+  const { snapshot, subscribe, emit } = createDeskStore((): PostingSnapshot => ({
     details: new Map(details),
     posted: [...posted],
     withdrawn: [...withdrawn],
     acknowledged: [...acknowledged],
     blocked: [...blocked],
     checked: [...checked],
-  })
-  let current: PostingSnapshot = buildSnap()
-  const emit = () => {
-    current = buildSnap()
-    for (const listener of [...listeners]) listener()
-  }
+  }))
   const fallbackDetail = (id: number): PostedNoticeDetail =>
     details.get(id) ?? { id, title: "Alpha notice", body: "", channel: "AssistantChannel", owner: 1 }
   return {
-    snapshot: () => current,
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
+    snapshot,
+    subscribe,
     setHooks(next: Partial<PostingHooks>): void {
       hooks = { ...hooks, ...next }
     },
@@ -144,24 +136,21 @@ const postingDesk = Layer.sync(PostingDesk, () => {
   }
 })
 
+function postNoticeAnswer(label: string, id: number, work: (desk: PostingDeskService) => { readonly shown: boolean; readonly known: boolean }!!) {
+  return answer(
+    label,
+    effect {
+      const result = try work(try PostingDesk)
+      return { type: "posted", id, shown: result.shown, known: result.known } as const
+    },
+    { type: "posted", id, shown: false, known: false } as const,
+  )
+}
+
 function carry(fx: Posting.Effect): Job<Posting.Event, PostingDesk, []> {
   return match (fx.act) {
-    when "Post": answer(
-      `posting-post-${fx.number}`,
-      effect {
-        const result = try (try PostingDesk).performPost(fx.number)
-        return { type: "posted", id: fx.number, shown: result.shown, known: result.known } as const
-      },
-      { type: "posted", id: fx.number, shown: false, known: false } as const,
-    );
-    when "CheckPosted": answer(
-      `posting-check-${fx.number}`,
-      effect {
-        const result = try (try PostingDesk).performCheck(fx.number)
-        return { type: "posted", id: fx.number, shown: result.shown, known: result.known } as const
-      },
-      { type: "posted", id: fx.number, shown: false, known: false } as const,
-    );
+    when "Post": postNoticeAnswer(`posting-post-${fx.number}`, fx.number, (desk) => desk.performPost(fx.number));
+    when "CheckPosted": postNoticeAnswer(`posting-check-${fx.number}`, fx.number, (desk) => desk.performCheck(fx.number));
     when "Withdraw": run(`posting-withdraw-${fx.number}`, effect { try (try PostingDesk).performWithdraw(fx.number) });
     when "Acknowledge": run(`posting-ack-${fx.number}`, effect { try (try PostingDesk).performAcknowledge(fx.number) });
     when "CannotShow": run(`posting-blocked-${fx.number}`, effect { try (try PostingDesk).performCannotShow(fx.number) });

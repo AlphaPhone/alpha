@@ -343,12 +343,7 @@ function accountPlugins(scene: AccountScene): Record<string, Faked> {
         }
         return startCode();
       },
-      startGoogle: () => {
-        requestCounter += 1;
-        attemptCounter += 1;
-        activeAttempts.set(attemptCounter, { secondFactorPending: false });
-        return Promise.resolve({ request: requestCounter, attempt: attemptCounter, verdict: "code-on-its-way", expiresAt: scene.now + 600_000, resendAt: scene.now + 60_000 });
-      },
+      startGoogle: () => startCode(),
       upgradeMailLease: () => Promise.resolve({ request: ++requestCounter, attempt: ++attemptCounter, verdict: "account-confirmed" }),
       cancelMailLeaseUpgrade: () => Promise.resolve({ cancelled: true }),
       reauthenticate: () => startCode(),

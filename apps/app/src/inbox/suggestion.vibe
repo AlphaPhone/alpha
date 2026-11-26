@@ -11,7 +11,7 @@ import { Mail } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 /** The longest text a draft takes, in characters: Gmail's own limit on a message, with room to spare. */
-export const longest = 100_000
+const longest = 100_000
 
 /** Whether `text` fits the draft whose text is `before`, added to it or in its place. */
 export function fits(before: string, text: string, appends: boolean): boolean {
@@ -26,7 +26,7 @@ export service Offers {
   add(text: string, source: string | undefined): number
 }
 
-export const offers = Layer.sync(Offers, () => {
+const offers = Layer.sync(Offers, () => {
   const texts = new Map<number, { readonly text: string; readonly source: string | undefined }>()
   return {
     text: (number: number) => texts.get(number)?.text ?? "",
@@ -124,7 +124,7 @@ export effect function useInEmail(text: string, source: string, aim: Aim, alread
 }
 
 /** Alpha suggests `text` for the draft `draft`, at the revision the composer holds it at. Whether it is offered. */
-export effect function suggest(text: string, draft: number): boolean!!(Offers | Suggestion.Machine | Drafts.Machine) {
+effect function suggest(text: string, draft: number): boolean!!(Offers | Suggestion.Machine | Drafts.Machine) {
   const composer = try (try Drafts.Machine).get()
   const aside = composer.shelf.shelved.includes(draft) ? held(composer.shelf, draft) : undefined
   const letter = composer.open && composer.letter.id === draft ? composer.letter : aside

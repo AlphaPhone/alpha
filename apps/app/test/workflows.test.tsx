@@ -22,13 +22,26 @@ const choose = (name: string) => drawn(() => {
   row.click();
 });
 
+/** Open Workflows and wait until the workflow listing finishes loading. */
+async function openWorkflows(world = scene(), complete = false) {
+  const { alpha } = await open(world);
+  await press("Workflows");
+  const area = workflows.runtime(alpha);
+  await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && (!complete || state.complete));
+  return { alpha, area, world };
+}
+
+/** Open Workflows and select the Monthly statement definition. */
+async function openMonthlyStatement(world = scene()) {
+  const opened = await openWorkflows(world);
+  await choose("Monthly statement");
+  await until(opened.alpha, opened.area, Definition, (state) => state.detail.status === "Loaded");
+  return opened;
+}
+
 describe("Workflows", () => {
   it('Filters the owner’s work and keeps removed history (spec/app/workflows/list.md, "Story: Find a workflow")', async () => {
-    const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { alpha, area, world } = await openWorkflows(scene(), true);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Monthly statement", "Desk check"]);
 
     await press("Filter workflows");
@@ -49,12 +62,8 @@ describe("Workflows", () => {
   });
 
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
-    const world = scene();
-    world.phone = true;
-    const { alpha } = await open(world);
-    await press("Workflows");
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    const world = { ...scene(), phone: true };
+    const { alpha, area } = await openWorkflows(world);
 
     const opener = button("Clock alarms");
     expect(opener?.textContent).toBe("Alarms");
@@ -92,10 +101,7 @@ describe("Workflows", () => {
     for (const prompt of existing) world.workflows.prompts.set(prompt.id, {
       ...prompt, instructions: "Review the details.", enabled: false, revision: 1, timezone: "America/Los_Angeles",
     });
-    const { alpha } = await open(world);
-    await press("Workflows");
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { alpha, area } = await openWorkflows(world, true);
 
     for (const { id, displayName, ...timing } of existing) {
       await choose(displayName);
@@ -139,12 +145,7 @@ describe("Workflows", () => {
   it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
     const world = scene();
     world.workflows.stage = "Running";
-    const { alpha } = await open(world);
-    await press("Workflows");
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
-    await choose("Monthly statement");
-    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
+    const { alpha, area } = await openMonthlyStatement(world);
     await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
     await press("Run now");
     await pressOnTop("Run now");
@@ -185,13 +186,7 @@ describe("Workflows", () => {
   });
 
   it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {
-    const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
-    await choose("Monthly statement");
-    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
+    const { alpha, area, world } = await openMonthlyStatement();
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded");
 
     await press("Remove");

@@ -4,6 +4,7 @@ import * as Notices from "../../gen/app__notices.effect.vibe"
 import type * as Posting from "../../gen/app__notices__posting.effect.vibe"
 import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
 import { markNoticeSpent } from "./posting.vibe"
 import { type Said, say } from "./toasts.vibe"
 
@@ -77,7 +78,7 @@ export interface NoticeDeskService {
 export service NoticeDesk: NoticeDeskService {}
 
 /** Build the default "Ask Alpha about this notice" prompt from a reviewed notice detail. */
-export function questionPromptFor(detail: Pick<TapDetail, "appLabel" | "title" | "text">): string {
+function questionPromptFor(detail: Pick<TapDetail, "appLabel" | "title" | "text">): string {
   const parts = [detail.appLabel, detail.title, detail.text].map((part) => part.trim()).filter((part) => part !== "")
   return parts.length > 0 ? `Ask Alpha about this notice: ${parts.join(" — ")}` : "Ask Alpha about this notice"
 }
@@ -94,8 +95,7 @@ const noticeDesk = Layer.sync(NoticeDesk, () => {
   let drafts: NoticeQuestionDraft[] = []
   let closedCount = 0
   let hooks: Partial<NoticeTapHooks> = {}
-  const listeners = new Set<() => void>()
-  const buildSnap = (): NoticeDeskSnapshot => ({
+  const { snapshot, subscribe, emit } = createDeskStore((): NoticeDeskSnapshot => ({
     signedIn,
     blocked,
     composerAvailable,
@@ -104,20 +104,12 @@ const noticeDesk = Layer.sync(NoticeDesk, () => {
     spentTokens: [...spentTokens],
     drafts: [...drafts],
     closedCount,
-  })
-  let current: NoticeDeskSnapshot = buildSnap()
-  const emit = () => {
-    current = buildSnap()
-    for (const listener of [...listeners]) listener()
-  }
+  }))
   const fallback = (token: number, source: Notices.Source): TapDetail =>
     details.get(token) ?? { token, source, title: "Notice", appLabel: "Alpha", text: "", asks: false, reviewable: true, owner: signedIn }
   return {
-    snapshot: () => current,
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
+    snapshot,
+    subscribe,
     setHooks(next: Partial<NoticeTapHooks>): void {
       hooks = { ...hooks, ...next }
     },
@@ -210,6 +202,24 @@ const noticeDesk = Layer.sync(NoticeDesk, () => {
   }
 })
 
+function spendNoticeAnswer(
+  label: string,
+  token: number,
+  work: (desk: NoticeDeskService) => boolean!!Posting.Machine,
+) {
+  return answer(
+    label,
+    effect {
+      const desk = try NoticeDesk
+      const ok = try work(desk)
+      const ctx = desk.snapshot()
+      return { type: "spent", token, ok, signedIn: ctx.signedIn, composer: ctx.composerAvailable } as const
+    },
+    { type: "spent", token, ok: false, signedIn: 0, composer: false } as const,
+    "Phone" as Actor,
+  )
+}
+
 function carry(fx: Notices.Effect): Job<Notices.Event, NoticeDesk | Posting.Machine | Toasts.Machine | Said, [Actor]> {
   return match (fx.does) {
     when "Open": answer(
@@ -221,28 +231,8 @@ function carry(fx: Notices.Effect): Job<Notices.Event, NoticeDesk | Posting.Mach
       { type: "shown", token: fx.token, showed: "Unreadable" } as const,
       "Phone" as Actor,
     );
-    when "Spend": answer(
-      `notice-spend-${fx.token}`,
-      effect {
-        const desk = try NoticeDesk
-        const ok = try desk.performSpend(fx.token, fx.source)
-        const ctx = desk.snapshot()
-        return { type: "spent", token: fx.token, ok, signedIn: ctx.signedIn, composer: ctx.composerAvailable } as const
-      },
-      { type: "spent", token: fx.token, ok: false, signedIn: 0, composer: false } as const,
-      "Phone" as Actor,
-    );
-    when "CheckSpend": answer(
-      `notice-check-spend-${fx.token}`,
-      effect {
-        const desk = try NoticeDesk
-        const ok = try desk.performCheckSpend(fx.token, fx.source)
-        const ctx = desk.snapshot()
-        return { type: "spent", token: fx.token, ok, signedIn: ctx.signedIn, composer: ctx.composerAvailable } as const
-      },
-      { type: "spent", token: fx.token, ok: false, signedIn: 0, composer: false } as const,
-      "Phone" as Actor,
-    );
+    when "Spend": spendNoticeAnswer(`notice-spend-${fx.token}`, fx.token, (desk) => desk.performSpend(fx.token, fx.source));
+    when "CheckSpend": spendNoticeAnswer(`notice-check-spend-${fx.token}`, fx.token, (desk) => desk.performCheckSpend(fx.token, fx.source));
     when "ReadExcerpt": answer(
       `notice-excerpt-${fx.ticket}`,
       effect {
@@ -316,15 +306,6 @@ export effect function closeNoticeQuestion(by: Actor = "Owner"): boolean!!Notice
   const machine = try Notices.Machine
   if (!Notices.canCloseQuestion(try machine.get(), by)) return false
   return try contained(machine.send({ type: "closeQuestion" }, by), "closing notice question")
-}
-
-// spec/app/notices/index.md, "The phone says when taps cannot be acted on, and that puts down the tap in hand and closes the question"
-/** Block tap handling (e.g. screen hidden or protected), putting down any tap in hand. */
-export effect function blockNoticeTaps(): boolean!!(Notices.Machine | NoticeDesk) {
-  ;(try NoticeDesk).setContext({ blocked: true })
-  const machine = try Notices.Machine
-  if (!Notices.canBlock(try machine.get(), "Phone")) return false
-  return try contained(machine.send({ type: "block" }, "Phone"), "blocking notice taps")
 }
 
 // spec/app/notices/index.md, "The notice can change while its question is under review, and the review then no longer counts until it is read again"

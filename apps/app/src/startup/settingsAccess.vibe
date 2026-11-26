@@ -15,7 +15,7 @@ import { Cloud, Device, native, SystemSettings } from "../platform/index.vibe"
 import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { home } from "../shell/index.vibe"
 
-export const reviewKeys: Record<Permission, Steps.Key> = {
+const reviewKeys: Record<Permission, Steps.Key> = {
   CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
   PhotosAccess: "Photos", FilesAccess: "Files", NotificationsAccess: "Notifications",
 }
@@ -65,6 +65,12 @@ const accessDesk = Layer.sync(AccessDesk, () => {
   const settingsOpened: Steps.Key[] = []
   const prompted: Steps.Key[] = []
   let hooks: Partial<AccessHooks> = {}
+  effect function openAndReadAccess(key: Steps.Key): Option.Option<AccessCheckResult>!!SystemSettings {
+    const system = try SystemSettings
+    if (native()) try system.open(reviewed[key].target, "")
+    const grant = try system.access(reviewed[key].access)
+    return Option.map(grant, (value) => ({ grant: value.grant, on: value.on, requestable: false }))
+  }
   return {
     settingsOpened,
     prompted,
@@ -85,18 +91,12 @@ const accessDesk = Layer.sync(AccessDesk, () => {
     askAccess: (key: Steps.Key) => effect {
       prompted.push(key)
       if (hooks.ask !== undefined) return try hooks.ask(key)
-      const system = try SystemSettings
-      if (native()) try system.open(reviewed[key].target, "")
-      const grant = try system.access(reviewed[key].access)
-      return Option.map(grant, (value) => ({ grant: value.grant, on: value.on, requestable: false }))
+      return try openAndReadAccess(key)
     },
     openAccessSettings: (key: Steps.Key) => effect {
       settingsOpened.push(key)
       if (hooks.openSettings !== undefined) return try hooks.openSettings(key)
-      const system = try SystemSettings
-      if (native()) try system.open(reviewed[key].target, "")
-      const grant = try system.access(reviewed[key].access)
-      return Option.map(grant, (value) => ({ grant: value.grant, on: value.on, requestable: false }))
+      return try openAndReadAccess(key)
     },
     saveChoices: (choices: Record<number, Access.Choice>) => effect {
       if (hooks.save !== undefined) return try hooks.save(choices)
@@ -145,30 +145,23 @@ function carry(result: Access.Effect): Job<Access.Event, AccessDesk | Access.Mac
   }
 }
 
-effect function refreshed(): void!!Access.Machine {
+effect function checkStaleKeys(): void!!Access.Machine {
   const access = try Access.Machine
-  try ignore(access.send({ type: "resumed" }, "Owner"))
   for (const key of Steps.everyKey) if ((try access.get()).stale.includes(key)) {
     try ignore(access.send({ type: "check", key }, "Owner"))
   }
+}
+
+effect function refreshed(): void!!Access.Machine {
+  try ignore((try Access.Machine).send({ type: "resumed" }, "Owner"))
+  try checkStaleKeys()
 }
 
 // spec/app/startup/access.md, "Alpha starts, or starts again, with the choices last saved and every asking Android showed, and reads every access again"
 /** Begin or restart the walkthrough for `phone` and `pregrants`, then check every offered access. */
 export effect function beginWalkthrough(phone: boolean, pregrants: boolean): void!!Access.Machine {
-  const access = try Access.Machine
-  try ignore(access.send({ type: "begin", phone, pregrants, now: untimed }, "Owner"))
-  for (const key of Steps.everyKey) if ((try access.get()).stale.includes(key)) {
-    try ignore(access.send({ type: "check", key }, "Owner"))
-  }
-}
-
-// spec/app/startup/access.md, "A walkthrough an earlier version of Alpha finished counts the accesses it covered as passed, as continued"
-/** Carry over completed steps up to `upTo` from an earlier version before welcome. */
-export effect function carryOverWalkthrough(upTo: number): boolean!!Access.Machine {
-  const access = try Access.Machine
-  if (!Access.canCarriedOver(try access.get(), upTo)) return false
-  return try contained(access.send({ type: "carriedOver", upTo }, "Owner"), "carrying over walkthrough")
+  try ignore((try Access.Machine).send({ type: "begin", phone, pregrants, now: untimed }, "Owner"))
+  try checkStaleKeys()
 }
 
 // spec/app/startup/access.md, "The account area says when the owner is set up, whether this sign-in created the account, and when they sign out"
@@ -179,36 +172,12 @@ export effect function welcomeOwner(created: boolean): boolean!!Access.Machine {
   return try contained(access.send({ type: "welcome", created, now: untimed }, "Owner"), "welcoming owner to walkthrough")
 }
 
-// spec/app/startup/access.md, "The account area says when the owner is set up, whether this sign-in created the account, and when they sign out"
-/** Notify Access that the owner signed out. */
-export effect function signOutOwner(): boolean!!Access.Machine {
-  const access = try Access.Machine
-  if (!Access.canSignedOut(try access.get())) return false
-  return try contained(access.send({ type: "signedOut" }, "Owner"), "signing out of walkthrough")
-}
-
-// spec/app/startup/access.md, "Sign-in, another panel or a running connection covers the walkthrough"
-/** Update whether another panel covers the walkthrough. */
-export effect function setWalkthroughCovered(covered: boolean): boolean!!Access.Machine {
-  const access = try Access.Machine
-  if (!Access.canContext(try access.get(), covered)) return false
-  return try contained(access.send({ type: "context", covered, now: untimed }, "Owner"), "updating walkthrough context")
-}
-
 // spec/app/startup/access.md, "Story: Hear that all is set"
 /** Report a late connection or sign-in trouble after a quiet finish. */
 export effect function reportFinishTrouble(why: Trouble): boolean!!Access.Machine {
   const access = try Access.Machine
   if (!Access.canTrouble(try access.get(), why)) return false
   return try contained(access.send({ type: "trouble", why }, "Owner"), "reporting walkthrough finish trouble")
-}
-
-// spec/app/startup/access.md, "Story: Hear that all is set"
-/** Mark the sign-in as settled so a quiet finish hears of no further trouble. */
-export effect function markSignInSettled(): boolean!!Access.Machine {
-  const access = try Access.Machine
-  if (!Access.canSignInSettled(try access.get())) return false
-  return try contained(access.send({ type: "signInSettled" }, "Owner"), "settling walkthrough sign-in")
 }
 
 /** Open a reviewed permission or the list, only once the phone has confirmed the Cloud account exists. */

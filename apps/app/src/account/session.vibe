@@ -228,6 +228,38 @@ effect function sendOtpCode(ticket: number, method: Session.Method, address: str
   return { type: "sent", ticket, accepted: true, now: untimed }
 }
 
+effect function storePendingSignIn(
+  account: number,
+  credentialId: string,
+  method: Session.Method,
+  address: string,
+  created: boolean,
+  endsAt: number,
+): void!!AccountShelf {
+  try (try AccountShelf).setPendingSignIn({
+    account,
+    userId: `user-${account}`,
+    organizationId: `org-${account}`,
+    credentialId,
+    email: method === "Email" ? address : "",
+    phone: method === "Phone" ? address : "",
+    name: "",
+    method,
+    created,
+    endsAt,
+  })
+}
+
+effect function storeNativeVerdict(
+  mapped: ReturnType<typeof verdictFromNative>,
+  method: Session.Method,
+  address: string,
+): void!!AccountShelf {
+  if (mapped.verdict === "Passed" || mapped.verdict === "Created") {
+    try storePendingSignIn(mapped.account, mapped.credentialId, method, address, mapped.verdict === "Created", mapped.endsAt)
+  }
+}
+
 effect function verifyOtpCode(ticket: number, attempt: number, code: string): SignIn.Event!!SignInPorts {
   const shelf = try AccountShelf
   const session = try Session.Machine
@@ -243,18 +275,7 @@ effect function verifyOtpCode(ticket: number, attempt: number, code: string): Si
   if (bridge === undefined) {
     const acct = accountIdNumber(state.address || "owner@alpha.test")
     const nowSec = try nowSeconds()
-    try shelf.setPendingSignIn({
-      account: acct,
-      userId: `user-${acct}`,
-      organizationId: `org-${acct}`,
-      credentialId: `cred-${acct}`,
-      email: state.method === "Email" ? state.address : "",
-      phone: state.method === "Phone" ? state.address : "",
-      name: "",
-      method: state.method,
-      created: false,
-      endsAt: nowSec + 30 * 86400,
-    })
+    try storePendingSignIn(acct, `cred-${acct}`, state.method, state.address, false, nowSec + 30 * 86400)
     return { type: "verified", ticket, verdict: "Passed", account: acct, factor: state.factor, free, now: untimed }
   }
   const nativeId = try shelf.nativeAttempt(attempt)
@@ -267,20 +288,7 @@ effect function verifyOtpCode(ticket: number, attempt: number, code: string): Si
     return { type: "verified", ticket, verdict: "Unreachable", account: 0, factor: state.factor, free, now: untimed }
   }
   const mapped = verdictFromNative(receipt.verdict)
-  if (mapped.verdict === "Passed" || mapped.verdict === "Created") {
-    try shelf.setPendingSignIn({
-      account: mapped.account,
-      userId: `user-${mapped.account}`,
-      organizationId: `org-${mapped.account}`,
-      credentialId: mapped.credentialId,
-      email: state.method === "Email" ? state.address : "",
-      phone: state.method === "Phone" ? state.address : "",
-      name: "",
-      method: state.method,
-      created: mapped.verdict === "Created",
-      endsAt: mapped.endsAt,
-    })
-  }
+  try storeNativeVerdict(mapped, state.method, state.address)
   return { type: "verified", ticket, verdict: mapped.verdict, account: mapped.account, factor: mapped.factor, free, now: untimed }
 }
 
@@ -297,20 +305,7 @@ effect function openGoogleSignIn(tab: number): void!!SignInPorts {
   const free = (try session.get()).work === "Resting"
   if (receipt.verdict.kind === "CodeOnItsWay") return
   const mapped = verdictFromNative(receipt.verdict)
-  if (mapped.verdict === "Passed" || mapped.verdict === "Created") {
-    try shelf.setPendingSignIn({
-      account: mapped.account,
-      userId: `user-${mapped.account}`,
-      organizationId: `org-${mapped.account}`,
-      credentialId: mapped.credentialId,
-      email: "",
-      phone: "",
-      name: "",
-      method: "Google",
-      created: mapped.verdict === "Created",
-      endsAt: mapped.endsAt,
-    })
-  }
+  try storeNativeVerdict(mapped, "Google", "")
   if (SignIn.canReturned(current, tab, mapped.verdict, mapped.account)) {
     try contained(signIn.send({ type: "returned", tab, verdict: mapped.verdict, account: mapped.account, factor: mapped.factor, free, now: untimed }), "google sign-in returned")
   }
@@ -380,20 +375,7 @@ const watchSignInSettled = started(effect {
     const free = (try session.get()).work === "Resting"
     const mapped = verdictFromNative(receipt.verdict)
     if (state.step === "Browser" && state.tab.open && SignIn.canReturned(state, state.tab.number, mapped.verdict, mapped.account)) {
-      if (mapped.verdict === "Passed" || mapped.verdict === "Created") {
-        try shelf.setPendingSignIn({
-          account: mapped.account,
-          userId: `user-${mapped.account}`,
-          organizationId: `org-${mapped.account}`,
-          credentialId: mapped.credentialId,
-          email: "",
-          phone: "",
-          name: "",
-          method: "Google",
-          created: mapped.verdict === "Created",
-          endsAt: mapped.endsAt,
-        })
-      }
+      try storeNativeVerdict(mapped, "Google", "")
       try contained(signIn.send({ type: "returned", tab: state.tab.number, verdict: mapped.verdict, account: mapped.account, factor: mapped.factor, free, now: untimed }), "google sign-in settled")
     } else if (state.tab.orphan && SignIn.canReturnedCold(state, state.tab.number)) {
       try contained(signIn.send({ type: "returnedCold", tab: state.tab.number }), "google sign-in returned cold")

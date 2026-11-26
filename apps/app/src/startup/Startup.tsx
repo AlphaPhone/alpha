@@ -2,21 +2,15 @@
 import {
   Banner,
   Button,
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  EmptyState,
-  ListGroup,
-  ListRow,
   StartupAccessPanel,
   type StartupAccessRowState,
+  StartupAllSet,
   StartupFailureScreen,
+  StartupJournal,
   StartupMark,
-  startupMainAction,
-  startupPanel,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { Check, RefreshCw, X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
 import type { Machine as StartupMachine } from "../../gen/app__startup.effect.vibe";
 import { useMachine as useStartup } from "../../gen/app__startup.react.ts";
@@ -27,7 +21,7 @@ import { busy, count, flow, grantOf, nextKey, offered, panel, place } from "../.
 import type { Trouble } from "../../gen/app__startup__finish.ts";
 import type { Machine as JournalMachine } from "../../gen/app__startup__journal.effect.vibe";
 import { useMachine as useJournal } from "../../gen/app__startup__journal.react.ts";
-import { type Kind as JournalKind, visible as visibleJournal } from "../../gen/app__startup__journal.ts";
+import { visible as visibleJournal } from "../../gen/app__startup__journal.ts";
 import type { Machine as RecoveryMachine } from "../../gen/app__startup__recovery.effect.vibe";
 import { useMachine as useRecovery } from "../../gen/app__startup__recovery.react.ts";
 import { type Side, risky, sideOf } from "../../gen/app__startup__recovery.ts";
@@ -39,33 +33,19 @@ import { StartupDesk, retryAgentConnection } from "./boot.vibe";
 
 const ordered: readonly Key[] = ["Notifications", "Microphone", "Camera", "Location", "Calendar", "Photos", "Files"];
 
-const troubles: Record<Exclude<Trouble, "NoTrouble">, string> = {
-  ConnectionFailed: "Connection failed",
-  SignInNeedsAttention: "Check sign-in",
-};
-
 const connectionMessages: Partial<Record<Outcome, string>> = {
   Unreachable: "Alpha could not reach your assistant",
   Offline: "You are offline",
   Recovering: "Recovering your assistant",
 };
 
-const journalKindLabels: Record<JournalKind, string> = {
-  FailedToStart: "Failed to start",
-  FailedToDraw: "Failed to draw",
-  Uncaught: "Uncaught error",
-  KeptFailing: "Kept failing",
-  Crashed: "Crashed",
-  StoppedAnswering: "Stopped answering",
-};
-
-export type StartupRuntime = ManagedRuntime.ManagedRuntime<
+type StartupRuntime = ManagedRuntime.ManagedRuntime<
   StartupMachine | StartupDesk | AccessMachine | RecoveryMachine | JournalMachine | Agent | Time,
   unknown
 >;
 
 /** Banner shown on every surface whenever mock mode is active in a test build. */
-export function MockModeBanner({ onExit }: { onExit?: () => void }) {
+function MockModeBanner({ onExit }: { onExit?: () => void }) {
   return (
     <div
       role="status"
@@ -88,7 +68,7 @@ export function MockModeBanner({ onExit }: { onExit?: () => void }) {
 }
 
 /** Completion panel shown after the walkthrough for a new account or a late trouble. */
-export function AllSetPanel({
+function AllSetPanel({
   trouble,
   notSaved = false,
   onDone,
@@ -97,35 +77,7 @@ export function AllSetPanel({
   notSaved?: boolean;
   onDone?: () => void;
 }) {
-  const attention = trouble !== undefined || notSaved;
-  return (
-    <Dialog open>
-      <DialogContent
-        className={startupPanel}
-        aria-describedby={undefined}
-        onInteractOutside={(event) => event.preventDefault()}
-        onEscapeKeyDown={(event) => {
-          event.preventDefault();
-          onDone?.();
-        }}
-      >
-        <div className="m-auto flex w-full max-w-90 flex-col items-center text-center">
-          <span aria-hidden className="relative mb-7 grid size-20 place-items-center rounded-full bg-secondary">
-            <Check className="size-9" />
-            {attention ? <span className="absolute top-1.5 right-1.5 size-3.5 rounded-full border-2 border-background bg-warn" /> : null}
-          </span>
-          <DialogTitle className="mb-5 font-display text-4xl font-light">All set</DialogTitle>
-          <div className="flex flex-col items-center gap-2 text-sm">
-            {trouble ? <p role="alert">{troubles[trouble]}</p> : null}
-            {notSaved ? <p role="alert">Not saved</p> : null}
-          </div>
-          <div className="mt-9 min-h-27 w-full">
-            <Button className={startupMainAction} disabled={!onDone} onClick={onDone}>Done</Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+  return <StartupAllSet trouble={trouble} notSaved={notSaved} onDone={onDone} />;
 }
 
 /** Bounded failure journal view (capacity 50, 30-day retention), visible only in development builds. */
@@ -138,21 +90,19 @@ export function StartupJournalView({
 }) {
   const { state, can, send } = useTimed(runtime, useJournal);
   if (!state || !testBuild) return null;
-  const entries = visibleJournal(state, testBuild);
+  const entries = visibleJournal(state, testBuild).map((entry) => ({
+    at: entry.at,
+    when: String(entry.at),
+    kind: entry.kind,
+  }));
   const clearEv = { type: "clear", testBuild } as const;
   return (
-    <div className="flex flex-col gap-3" data-alpha-startup-journal="">
-      {entries.length === 0 ? (
-        <EmptyState title="No failures" />
-      ) : (
-        <ListGroup heading="Failures">
-          {entries.map((entry) => (
-            <ListRow key={`${entry.at}-${entry.kind}`} title={journalKindLabels[entry.kind]} trailing={String(entry.at)} />
-          ))}
-        </ListGroup>
-      )}
-      {state.dropped > 0 ? <p className="px-4 text-sm text-muted-foreground">{state.dropped} older dropped</p> : null}
-      {can(clearEv) ? <Button variant="outline" onClick={() => void send(clearEv)}>Clear</Button> : null}
+    <div data-alpha-startup-journal="">
+      <StartupJournal
+        entries={entries}
+        dropped={state.dropped}
+        onClear={can(clearEv) ? () => void send(clearEv) : undefined}
+      />
     </div>
   );
 }

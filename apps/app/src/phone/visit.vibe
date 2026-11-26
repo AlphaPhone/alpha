@@ -6,9 +6,6 @@ import { contained, started } from "../runtime/index.vibe"
 /** Whether `view` is the app on top of the shell's trail. */
 export const on = (view: View) => (state: Where) => showing(state, view)
 
-/** Whether Home is in front: no app on the trail. */
-export const home = (state: Where) => state.trail.length === 0
-
 /**
  * Tell the machine `target` names whether what `inFront` picks out of the shell is in front while the page is
  * visible, which a locked phone or another app in front hides. `told` makes the fact its event, or none; each change

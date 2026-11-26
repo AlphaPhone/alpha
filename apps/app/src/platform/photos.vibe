@@ -578,16 +578,16 @@ module browser {
     const database = await storage()
     try {
       return await new Promise((resolve, reject) => {
-        const tx = database.transaction(edits, "readwrite")
-        const results = tx.objectStore(edits)
-        let result: BrowserEditReceipt = { status: "not-started" }
-        tx.oncomplete = () => resolve(result)
-        tx.onabort = () => reject(tx.error)
-        const request = results.get(operation)
-        request.onsuccess = () => {
-          const receipt = readReceipt(request.result)
-          if (receipt !== undefined) result = receipt
-          else results.put(result, operation)
+        const transaction = database.transaction(edits, "readwrite")
+        const table = transaction.objectStore(edits)
+        let answer: BrowserEditReceipt = { status: "not-started" }
+        transaction.onabort = () => reject(transaction.error)
+        transaction.oncomplete = () => resolve(answer)
+        const lookup = table.get(operation)
+        lookup.onsuccess = () => {
+          const found = readReceipt(lookup.result)
+          if (found !== undefined) answer = found
+          else table.put(answer, operation)
         }
       })
     } finally { database.close() }

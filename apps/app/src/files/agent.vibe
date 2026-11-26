@@ -31,7 +31,7 @@ export interface Receipt {
  * The agent's requests and the approvals waiting on what Files answers, each by its number: an answer is handed to
  * the one waiting for it, and one nobody waits for, such as a request a restart cut off, is dropped.
  */
-export interface ReviewedItem {
+interface ReviewedItem {
   readonly path: string
   readonly token: string
 }

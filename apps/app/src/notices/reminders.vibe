@@ -5,6 +5,7 @@ import * as NoticeReminders from "../../gen/app__notices__reminders.effect.vibe"
 import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { PhoneReminders } from "../platform/index.vibe"
 import { Whole, contained, Time } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
 import { type Said, say } from "./toasts.vibe"
 
 /** Metadata for a notice-side scheduled reminder. */
@@ -64,28 +65,19 @@ const noticeRemindersDesk = Layer.sync(NoticeRemindersDesk, () => {
   let armed: Array<{ readonly number: number; readonly revision: number; readonly at: number }> = []
   let readFailures = 0
   let hooks: Partial<NoticeRemindersHooks> = {}
-  const listeners = new Set<() => void>()
-  const buildSnap = (): NoticeRemindersSnapshot => ({
+  const { snapshot, subscribe, emit } = createDeskStore((): NoticeRemindersSnapshot => ({
     details: new Map(details),
     operated: [...operated],
     readBacks: [...readBacks],
     withdrawn: [...withdrawn],
     armed: [...armed],
     readFailures,
-  })
-  let current: NoticeRemindersSnapshot = buildSnap()
-  const emit = () => {
-    current = buildSnap()
-    for (const listener of [...listeners]) listener()
-  }
+  }))
   const fallback = (number: number): NoticeReminderDetail =>
     details.get(number) ?? { number, title: `Reminder #${number}`, body: "" }
   return {
-    snapshot: () => current,
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
+    snapshot,
+    subscribe,
     setHooks(next: Partial<NoticeRemindersHooks>): void {
       hooks = { ...hooks, ...next }
     },

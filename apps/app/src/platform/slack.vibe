@@ -19,7 +19,7 @@ import {
 import { type Listening, type Wired, remoteAt } from "./remote.vibe"
 
 /** Default OAuth2 user scopes requested for first-class Slack user-account access (`user_scope`, never bot `scope`). */
-export const SLACK_DEFAULT_USER_SCOPES = [
+const SLACK_DEFAULT_USER_SCOPES = [
   "channels:read",
   "channels:history",
   "groups:read",
@@ -449,7 +449,7 @@ const SLACK_FORBIDDEN_ERRORS = ["cant_update_message", "cant_delete_message", "m
 const SLACK_BOT_ERRORS = ["bot_token_not_allowed", "bot_tokens_not_supported"]
 
 /** Reject Slack bot (`xoxb-`) and app (`xapp-`) tokens at the client boundary. */
-export effect function assertSlackUserToken(token: string): string!BotTokenRejected {
+effect function assertSlackUserToken(token: string): string!BotTokenRejected {
   if (token.startsWith("xoxb-") || token.startsWith("xapp-")) {
     throw new BotTokenRejected({ provider: "slack", reason: "Slack bot and app tokens are not allowed; use an xoxp- user token" })
   }

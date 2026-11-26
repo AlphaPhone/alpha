@@ -70,14 +70,39 @@ const confirm = (name: string) => drawn(() => {
   found.click();
 });
 
+/** Open an Alpha image, wait for Shell image admission, and open Phone. */
+async function openPhoneApp(world = image()) {
+  const running = await openPhoneWorld(world);
+  await until(running.alpha, running.alpha.runtime, Shell, (s) => s.image);
+  await openPhone(running.alpha);
+  return { ...running, world };
+}
+
+/** Open Phone and switch to its Keypad or Voicemail tab. */
+async function openPhoneTab(target: "Keypad" | "Voicemail", world = image()) {
+  const opened = await openPhoneApp(world);
+  if (target === "Voicemail") await until(opened.alpha, opened.alpha.runtime, Phone, (s) => s.front && s.voicemail);
+  await tab(target);
+  return opened;
+}
+
+/** Open the Voicemail tab, wait for its single item to load, and open that voicemail row. */
+async function openFirstVoicemail(world = image()) {
+  const opened = await openPhoneTab("Voicemail", world);
+  await until(opened.alpha, opened.alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
+  await pressVoicemailRow();
+  return opened;
+}
+
+/** Assert that neither Telecom placement nor the system dialer was invoked. */
+function expectNoCalls(world: ReturnType<typeof image>) {
+  expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+}
+
 describe("Phone on an Alpha image", () => {
   it("See my recent calls, and call a number (spec/app/phone/index.md, \"Story: See my recent calls\"; spec/app/phone/index.md, \"Story: Call a number\")", async () => {
-    const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-
     // spec/app/phone/index.md, "Phone reads the call log whenever Recents comes to the front"
-    await openPhone(alpha);
+    const { alpha, world } = await openPhoneApp();
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.telecom === "NoCall" && s.recents.status === "Loaded" && s.rows === 2);
     expect(world.telephony.dialed).toEqual([]);
 
@@ -91,11 +116,7 @@ describe("Phone on an Alpha image", () => {
   });
 
   it("Type a number, and call it only when the phone can dial it (spec/app/phone/index.md, \"Story: Type a number\"; spec/app/phone/index.md, \"Story: Call a number\")", async () => {
-    const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await tab("Keypad");
+    const { alpha, world } = await openPhoneTab("Keypad");
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad");
 
     // spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it": without the role the dial screen opens with the number.
@@ -194,7 +215,7 @@ describe("Phone on an Alpha image", () => {
       });
     });
     await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Keypad" && s.digits === 12);
-    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+    expectNoCalls(world);
   });
 
   it(`Does not dispatch an expired call approval (spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call")`, async () => {
@@ -245,10 +266,7 @@ describe("Phone on an Alpha image", () => {
   });
 
   it("Gates ordinary calls on Android's carrier and emergency readings (spec/app/phone/index.md, \"Story: Know when a call is live\")", async () => {
-    const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
+    const { alpha, world } = await openPhoneApp();
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.recents.status === "Loaded");
     expect(button("Call Maya Chen")?.disabled).toBe(false);
 
@@ -263,15 +281,13 @@ describe("Phone on an Alpha image", () => {
     act(() => world.telephony.report());
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.telecom === "MaybeEmergencyCall");
     expect(button("Call Maya Chen")?.disabled).toBe(true);
-    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+    expectNoCalls(world);
   });
 
   it("Hands off to the system dialer when cell service or call state is unknown (spec/app/phone/index.md, \"Story: Call a number\")", async () => {
     const world = image();
     world.telephony.mobileService = undefined;
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
+    const { alpha } = await openPhoneApp(world);
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierUnknown" && s.telecom === "NoCall" && s.recents.status === "Loaded");
     await press("Call Maya Chen");
     await until(alpha, alpha.runtime, Phone, (s) => s.dial.status === "Loaded");
@@ -297,10 +313,7 @@ describe("Phone on an Alpha image", () => {
     const world = image();
     world.telephony.mobileService = false;
     world.telephony.emergencyNumbers.add("09");
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await tab("Keypad");
+    const { alpha } = await openPhoneTab("Keypad", world);
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad" && s.carrier === "CarrierUnavailable");
     await press("0");
     await press("9");
@@ -349,11 +362,7 @@ describe("Phone on an Alpha image", () => {
   it("See my voicemail, listen to one, and delete it (spec/app/phone/voicemail.md, \"Story: See my voicemail\"; spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
     const world = image();
     world.voice.onDevice = false;
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.voicemail);
-    await tab("Voicemail");
+    const { alpha } = await openPhoneTab("Voicemail", world);
 
     // spec/app/phone/voicemail.md, "Voicemail reads the list each time its tab comes to the front"
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1 && s.unheard === 1);
@@ -390,14 +399,7 @@ describe("Phone on an Alpha image", () => {
       requests.push({ id, requestId });
       return requests.length === 1 ? first.promise : reopened.promise;
     };
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.voicemail);
-    await tab("Voicemail");
-    await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
-
-    await pressVoicemailRow();
+    const { alpha } = await openFirstVoicemail(world);
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     await pressVoicemailRow(true);
     await vi.waitFor(() => expect(world.voice.canceledVoicemailTranscriptions).toEqual([requests[0]?.requestId]));
@@ -417,13 +419,7 @@ describe("Phone on an Alpha image", () => {
   it(`Keeps a voicemail only when Android confirms Undo (spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open")`, async () => {
     const world = image();
     world.telephony.holdVoicemailDeletion = true;
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.voicemail);
-    await tab("Voicemail");
-    await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
-    await pressVoicemailRow();
+    const { alpha } = await openFirstVoicemail(world);
     await until(alpha, alpha.runtime, Voicemail, (s) => s.open);
     await press("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.confirming);
