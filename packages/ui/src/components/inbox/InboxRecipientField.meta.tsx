@@ -16,10 +16,10 @@ export const meta: ComponentMeta<InboxRecipientFieldProps> = {
     "Half typed": { value: "elena.fa" },
   },
   play: {
-    Empty: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("textbox", { name: "To" })).toHaveAttribute("placeholder", "To"),
+    Empty: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("textbox", { name: "To" })).toHaveAttribute("placeholder", "Email address"),
     Cc: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("textbox", { name: "Cc" })).toHaveAttribute("placeholder", "Cc"),
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      await expect(within(canvasElement).getByRole("textbox", { name: "To" })).toHaveAttribute("placeholder", "Add");
+      await expect(within(canvasElement).getByRole("textbox", { name: "To" })).toHaveAttribute("placeholder", "Email address");
       onRemove.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Remove bruno@costa.example" }));
       await expect(onRemove.mock.calls).toEqual([["bruno@costa.example"]]);

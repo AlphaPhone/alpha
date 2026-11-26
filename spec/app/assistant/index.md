@@ -889,6 +889,31 @@ pure def navigateHome(c: Conversation, ticket: int): Moved =
   { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(NavigateHome({ turn: ticket })) }
 ```
 
+### A turn tells the agent the views this screen can show, so a reply never promises one it cannot open
+
+A view the shell does not have here never opens: Phone and Messages exist
+only on an Alpha image, and Contacts only where that image admits it
+([Shell](../shell/index.md), "Phone and Messages exist only on an Alpha
+image, and Contacts only where that image admits it"). So each turn that
+carries the view claim also names, by the id the agent declares each view
+by, Home and every app this shell has now (`uiViews`, `spec/agent/views.md`
+in eliza). The agent refuses any other view before it replies, so on a
+browser preview "open my messages" is answered that Messages can't open
+here, instead of a promise that it is opening. Which view a request means
+stays the model's choice; nothing matches the owner's words.
+
+```quint
+pure val everyView: List[S::View] = List(S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Clock, S::Reminders,
+  S::Browser, S::Camera, S::Photos, S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings)
+pure def screenViews(image: bool, contacts: bool): List[S::View] =
+  everyView.select(v => S::available({ ...S::initial, image: image, contacts: contacts }, v))
+pure def lawAViewIsNamedExactlyWhenTheShellHasIt(image: bool, contacts: bool, view: S::View): bool =
+  screenViews(image, contacts).includes(view) == S::available({ ...S::initial, image: image, contacts: contacts }, view)
+pure def lawABrowserPreviewNamesNoMessages(contacts: bool): bool =
+  not(screenViews(false, contacts).includes(S::Messages)) and not(screenViews(false, contacts).includes(S::Phone))
+pure def lawAnImageNamesMessages(contacts: bool): bool = screenViews(true, contacts).includes(S::Messages)
+```
+
 ### An explicit Files continuation opens only from the same app trail and Ask Alpha panel
 
 The completed turn names its source trail and panel in the shell request.
