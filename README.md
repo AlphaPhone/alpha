@@ -199,8 +199,9 @@ deploy: the app's sign-in callback and App Link host come from them.
   staging build.
 - **From GitHub:** Cloud release changes pushed to `vibestack-develop` deploy
   both Workers in staging, check its public gates, and then deploy the same
-  commit in production. An active rollout finishes before the latest queued
-  deploy runs. For a manual bundle or component deploy, dispatch
+  commit in production. Public checks retry while routes and certificates
+  propagate. An active rollout finishes before the latest queued deploy
+  runs. For a manual bundle or component deploy, dispatch
   `.github/workflows/cloud-deploy.yml` from a branch admitted by the selected
   GitHub environment. `bundle` needs only `ALPHA_CLOUD_PROFILE`. `deploy`
   also needs `ALPHA_CLOUD_ENV`, `CLOUDFLARE_API_TOKEN` and

@@ -154,7 +154,15 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Public readiness
         if: github.event_name == 'push' || inputs.action == 'deploy'
-        run: pnpm cloud smoke --environment "$E"
+        timeout-minutes: 25
+        run: |
+          for ((attempt = 1; attempt < 8; attempt++)); do
+            if pnpm cloud smoke --environment "$E"; then
+              exit 0
+            fi
+            sleep 30
+          done
+          pnpm cloud smoke --environment "$E"
       - name: Remove the private inputs
         if: always()
         run: rm -f "$RUNNER_TEMP/alpha-cloud.env" "$RUNNER_TEMP/alpha-cloud-profile.json" "$RUNNER_TEMP/alpha-cloud-db.env" "$RUNNER_TEMP/alpha-cloud-db-ca.pem"
