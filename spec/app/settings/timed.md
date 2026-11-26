@@ -49,7 +49,7 @@ pure def lawAnAnswerAfterGivingUpIsRefused(ticket: int, at: int, limit: int, now
 ### Leaving a screen retires its asking: nothing is waited for, and a late answer is refused
 
 ```quint
-pure def retire(t: Timed): Timed = if (busy(t)) { ...t, read: { ...t.read, status: R::Idle } } else t
+pure def retire(t: Timed): Timed = if (busy(t)) { ...t, read: R::drop(t.read) } else t
 
 pure def lawARetiredAskingTakesNoAnswer(ticket: int, at: int, limit: int): bool =
   val asked = ask({ read: { status: R::Idle, ticket: ticket }, due: 0 }, at, limit)

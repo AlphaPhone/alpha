@@ -3,20 +3,16 @@
 The camera of the phone: a viewfinder that focuses where the owner taps,
 zooms by pinch or by its chips, flips between the lenses and lights the
 flash; it takes photos and records videos, and shows the last one taken. Its
-header holds back, flip and flash, as Alpha's approved build drew it; the
-self-timer, framing grid and photo aspect ratio have no header control. Camera is a first page: on the launcher it draws no Back,
+header holds back, flip and flash, as Alpha's approved build drew it. Camera is a first page: on the launcher it draws no Back,
 and Android's Back still leaves it, as the [shell](../shell/) says for
-Settings and Workflows.
-Opened from the lock screen of an Alpha image it is the secure camera,
-which shows only what was taken there and opens nothing else. A video's
+Settings and Workflows. A video's
 timer, limits and ending are the [Recording](./recording.md); a photo taken
 for Alpha's agent is [Capture for Alpha](./agent.md), which shares the one
 shutter with the owner. Camera does not scan: Alpha's approved build drew
 no scan control in Camera, so a document is scanned from Files' "Scan
 document" and a picture's text from Photos' "Scan text". What is taken is
 kept in [Photos](../photos/). The shell
-decides when Camera is showing, when Ask Alpha covers it, and which apps the
-lock screen admits.
+decides when Camera is showing and when Ask Alpha covers it.
 
 ## Domain
 
@@ -61,21 +57,18 @@ pure val grace = 10000
 
 ### What Camera asks of the phone
 
-Android's camera and microphone prompts and its Settings, and the shell's
-"Unlock to continue"; a preview started or stopped, each under its own
-number; the flash, the zoom and the focus point; a photo, for the owner or
-for the agent's request; a recording started, stopped or checked; the last capture opened in Photos, limited on the lock
-screen to what was taken there; Ask Alpha about the live frame or the last
-capture; asking the shell to lower Ask Alpha so the owner sees the
-viewfinder the agent asks to use; and the agent's answer: how its request
-ended, why, and the photo taken.
+Android's camera and microphone prompts and its Settings; a preview started or
+stopped, each under its own number; the flash, the zoom and the focus point; a
+photo, for the owner or for the agent's request; a recording started, stopped
+or checked; the last capture opened in Photos; asking the shell to lower Ask
+Alpha so the owner sees the viewfinder the agent asks to use; and the agent's
+answer: how its request ended, why, and the photo taken.
 
 ```quint
 type Effect =
   | AskAccess
   | AskMicrophone
   | OpenSettings
-  | Unlock
   | StartPreview({ ticket: int, lens: Lens })
   | StopPreview({ ticket: int })
   | SetFlash({ on: bool, auto: bool, video: bool })
@@ -86,48 +79,44 @@ type Effect =
   | StartRecording({ sound: bool })
   | StopRecording
   | CheckRecording({ video: int })
-  | OpenLast({ photo: int, only: Set[int] })
-  | AskAbout({ photo: int })
+  | OpenLast({ photo: int })
   | Uncover
   | Answer({ request: int, result: G::Result, cause: Cause, photo: int })
 ```
 
 ### The camera
 
-The camera and microphone permissions; whether Camera is showing, from the
-lock screen, in which visit, and covered by Ask Alpha since when; the
-preview and the starts the phone has not answered; the controls; focus taps;
-the photo being taken and for whom; the recording and the visit it started
-in; the agent's request; the banner; and the last capture with those taken
-in this secure session. Nothing is kept through a restart.
+The camera and microphone permissions; whether Camera is showing, in which
+visit, and covered by Ask Alpha since when; the preview and the starts the
+phone has not answered; the controls; focus taps; the photo being taken and
+for whom; the recording and the visit it started in; the agent's request; the
+banner; and the last capture. Nothing is kept through a restart.
 
 ```quint
 type Camera = {
   permission: P::Permission, mic: P::Permission,
-  showing: bool, secure: bool, visit: int, covered: bool, coveredAt: int,
+  showing: bool, visit: int, covered: bool, coveredAt: int,
   phase: Phase, preview: int, pending: Set[int],
   mode: Mode, lens: Lens, flash: bool, flashAuto: bool, torch: Torch, zoom: int,
-  grid: bool, wide: bool, delay: int, countdown: int, nextCount: int,
   taps: int, focus: int, writing: int, confirmed: int, waited: int,
   shots: int, shot: int, shotFor: int,
   film: F::Film, filmVisit: int,
   agent: G::Capture, requestedLens: RequestedLens, cause: Cause,
-  said: Said, last: int, session: Set[int],
+  said: Said, last: int,
 }
 
 type Done = { state: Camera, out: List[Effect] }
 
 pure val initial: Camera = {
   permission: P::unasked, mic: P::unasked,
-  showing: false, secure: false, visit: 0, covered: false, coveredAt: 0,
+  showing: false, visit: 0, covered: false, coveredAt: 0,
   phase: Off, preview: 0, pending: Set(),
   mode: Photo, lens: Back, flash: false, flashAuto: false, torch: { lit: false, write: 0, issued: 0 }, zoom: oneTime,
-  grid: false, wide: false, delay: 0, countdown: 0, nextCount: 0,
   taps: 0, focus: 0, writing: 0, confirmed: 0, waited: 0,
   shots: 0, shot: 0, shotFor: 0,
   film: F::initial, filmVisit: 0,
   agent: G::initial, requestedLens: AsShown, cause: NoCause,
-  said: Quiet, last: 0, session: Set(),
+  said: Quiet, last: 0,
 }
 
 pure def extinguished(torch: Torch): Torch = { ...torch, lit: false, write: 0 }
@@ -201,10 +190,10 @@ pure def mayStart(c: Camera): bool = holds(c) and not(c.covered) and (c.phase ==
 
 pure def canOpen(s: Camera, by: Actor): bool = by == Phone and not(s.showing)
 
-pure def open(s: Camera, secure: bool, newest: int, by: Actor): Done =
+pure def open(s: Camera, newest: int, by: Actor): Done =
   val shown = {
-    ...s, showing: true, secure: secure, visit: s.visit + 1, covered: false,
-    session: Set(), last: if (secure) 0 else newest, said: Quiet,
+    ...s, showing: true, visit: s.visit + 1, covered: false,
+    last: newest, said: Quiet,
   }
   if (mayStart(shown)) starting(List(), shown) else emit(List(), shown)
 ```
@@ -212,7 +201,7 @@ pure def open(s: Camera, secure: bool, newest: int, by: Actor): Done =
 ### An older library read never replaces a photo taken while it was pending
 
 Camera reads a one-item Camera album page when opening. This may fill its
-last-capture tile only for the unlocked visit and last capture that asked.
+last-capture tile only for the visit and last capture that asked.
 The still capture owns the tile as soon as its checked receipt arrives.
 
 ```quint
@@ -220,7 +209,7 @@ pure val visitValues = Set(1, 2, 3)
 pure val previousValues = Set(0, 3, 8)
 
 pure def canLastSeen(s: Camera, visit: int, previous: int, by: Actor): bool =
-  by == Phone and s.showing and not(s.secure) and s.visit == visit and s.last == previous and free(s)
+  by == Phone and s.showing and s.visit == visit and s.last == previous and free(s)
 
 pure def lastSeen(s: Camera, visit: int, previous: int, newest: int, by: Actor): Camera = { ...s, last: newest }
 ```
@@ -231,17 +220,17 @@ A video records sound only with the microphone allowed; without it the owner
 can record without sound.
 
 ```quint
-pure def canAskAccess(s: Camera, by: Actor): bool = by == Owner and s.showing and not(s.secure) and P::canAsk(s.permission)
+pure def canAskAccess(s: Camera, by: Actor): bool = by == Owner and s.showing and P::canAsk(s.permission)
 
 pure def askAccess(s: Camera, by: Actor): Done = emit(List(AskAccess), { ...s, permission: P::ask(s.permission) })
 
 pure def canAskMicrophone(s: Camera, by: Actor): bool =
-  by == Owner and s.showing and not(s.secure) and s.mode == Video and P::canAsk(s.mic)
+  by == Owner and s.showing and s.mode == Video and P::canAsk(s.mic)
 
 pure def askMicrophone(s: Camera, by: Actor): Done = emit(List(AskMicrophone), { ...s, mic: P::ask(s.mic) })
 
 pure def canOpenSettings(s: Camera, by: Actor): bool =
-  by == Owner and s.showing and not(s.secure) and (P::needsSettings(s.permission) or P::needsSettings(s.mic))
+  by == Owner and s.showing and (P::needsSettings(s.permission) or P::needsSettings(s.mic))
 
 pure def openSettings(s: Camera, by: Actor): Done = emit(List(OpenSettings), s)
 
@@ -259,7 +248,7 @@ a recording under way is stopped and finished first.
 ```quint
 pure def retiring(now: int, out: List[Effect], c: Camera): Done =
   val released = {
-    ...c, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0, torch: extinguished(c.torch),
+    ...c, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, torch: extinguished(c.torch),
     agent: if (c.agent.stage == G::Shooting) G::lost(c.agent, Phone) else c.agent,
   }
   if (c.film.stage == F::Running) emit(out.append(StopRecording), { ...released, film: F::stop(c.film, now) })
@@ -309,7 +298,7 @@ pure def canPreviewLost(s: Camera, ticket: int, by: Actor): bool =
 
 pure def previewLost(s: Camera, ticket: int, by: Actor): Done =
   val failed = blocking(PreviewFailed, {
-    ...s, phase: Failed, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0, torch: extinguished(s.torch),
+    ...s, phase: Failed, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, torch: extinguished(s.torch),
     said: if (s.shot != 0 and s.shotFor == 0) NotTaken else s.said,
     agent: if (s.agent.stage == G::Shooting) G::lost(s.agent, Phone) else s.agent,
   })
@@ -387,7 +376,7 @@ a recording, a photo or an agent's request holds it.
 ```quint
 pure def canCovered(s: Camera, by: Actor): bool = by == Phone and s.showing and not(s.covered)
 
-pure def covered(s: Camera, at: int, by: Actor): Camera = { ...s, covered: true, coveredAt: at, agent: seen(s.agent), countdown: 0, nextCount: 0 }
+pure def covered(s: Camera, at: int, by: Actor): Camera = { ...s, covered: true, coveredAt: at, agent: seen(s.agent) }
 
 pure def canUncovered(s: Camera, by: Actor): bool = by == Phone and s.covered
 
@@ -476,7 +465,7 @@ pure def sometimesReleasedUnderAskAlpha(s: Camera): bool = s.showing and s.cover
 pure def canSetMode(s: Camera, mode: Mode, by: Actor): bool =
   by == Owner and s.showing and not(s.covered) and mode != s.mode and free(s)
 
-pure def setMode(s: Camera, mode: Mode, by: Actor): Camera = { ...s, mode: mode, flash: false, flashAuto: false, countdown: 0, nextCount: 0, agent: seen(s.agent) }
+pure def setMode(s: Camera, mode: Mode, by: Actor): Camera = { ...s, mode: mode, flash: false, flashAuto: false, agent: seen(s.agent) }
 ```
 
 ### Flipping the lens turns the flash off, returns to one time and starts the other lens's preview
@@ -486,7 +475,7 @@ pure def canFlip(s: Camera, by: Actor): bool = by == Owner and ready(s) and free
 
 pure def flip(s: Camera, by: Actor): Done =
   starting(List(StopPreview({ ticket: s.preview })),
-    { ...s, lens: if (s.lens == Back) Front else Back, flash: false, flashAuto: false, zoom: oneTime, countdown: 0, nextCount: 0 })
+    { ...s, lens: if (s.lens == Back) Front else Back, flash: false, flashAuto: false, zoom: oneTime })
 ```
 
 ### Photo flash cycles off, auto and on; the back lens lights video with a torch
@@ -529,7 +518,7 @@ pure def alwaysTorchBelongsToItsPreview(s: Camera): bool =
 pure def sometimesTorchIsLit(s: Camera): bool = s.torch.lit
 
 pure val eval_witness_sometimesTorchIsLit = (
-  ("open", false, 0, Phone), ("accessIs", P::Granted, 0, Phone),
+  ("open", 0, Phone), ("accessIs", P::Granted, 0, Phone),
   ("previewStarted", 1, true, Phone), ("toggleTorch", Owner),
   ("torchWritten", 1, 1, true, Phone))
 ```
@@ -608,34 +597,6 @@ pure def sometimesFocusAfterWaiting(s: Camera): bool = s.confirmed != 0 and s.co
 pure def sometimesZoomed(s: Camera): bool = ready(s) and s.zoom > oneTime and s.flash
 ```
 
-### The grid turns on and off without restarting the preview
-
-```quint
-pure def canToggleGrid(s: Camera, by: Actor): bool = by == Owner and ready(s)
-
-pure def toggleGrid(s: Camera, by: Actor): Camera = { ...s, grid: not(s.grid) }
-```
-
-### With both photo ratios available, changing ratio starts a preview of the same lens
-
-```quint
-pure def canToggleRatio(s: Camera, by: Actor): bool =
-  by == Owner and ready(s) and free(s) and s.mode == Photo and s.countdown == 0
-
-pure def toggleRatio(s: Camera, by: Actor): Done =
-  starting(List(StopPreview({ ticket: s.preview })), { ...s, wide: not(s.wide) })
-```
-
-### The photo timer cycles off, three seconds and ten seconds
-
-```quint
-pure def canCycleDelay(s: Camera, by: Actor): bool =
-  by == Owner and ready(s) and free(s) and s.mode == Photo and s.countdown == 0
-
-pure def cycleDelay(s: Camera, by: Actor): Camera =
-  { ...s, delay: if (s.delay == 0) 3 else if (s.delay == 3) 10 else 0 }
-```
-
 ## Story: Take photos and videos
 
 > As the owner, I want to take a photo with one press, record a video with
@@ -645,36 +606,11 @@ pure def cycleDelay(s: Camera, by: Actor): Camera =
 ### A photo is taken in Photo mode over a ready preview, one shutter at a time
 
 ```quint
-pure def canShutter(s: Camera, by: Actor): bool = by == Owner and ready(s) and s.mode == Photo and free(s) and s.countdown == 0
+pure def canShutter(s: Camera, by: Actor): bool = by == Owner and ready(s) and s.mode == Photo and free(s)
 
 pure def shutter(s: Camera, by: Actor): Done =
   val n = s.shots + 1
   emit(List(Capture({ ticket: n, request: 0 })), { ...s, shots: n, shot: n, shotFor: 0 })
-```
-
-### A timed shutter counts down, and pressing again cancels it
-
-The owner can cancel a countdown by pressing the shutter again. Leaving,
-losing the preview, being covered, changing mode or flipping the lens cancels
-it too, so no delayed shot can be taken on a different viewfinder.
-
-```quint
-pure def canStartDelay(s: Camera, by: Actor): bool = canShutter(s, by) and s.delay > 0 and s.agent.stage != G::Approved
-
-pure def startDelay(s: Camera, now: int, by: Actor): Camera =
-  { ...s, countdown: s.delay, nextCount: now + F::second }
-
-pure def canCancelDelay(s: Camera, by: Actor): bool = by == Owner and s.countdown > 0
-
-pure def cancelDelay(s: Camera, by: Actor): Camera = { ...s, countdown: 0, nextCount: 0 }
-
-pure def canDelayTick(s: Camera, now: int, by: Actor): bool =
-  by == Phone and ready(s) and s.mode == Photo and free(s) and s.countdown > 0 and now >= s.nextCount
-
-pure def delayTick(s: Camera, now: int, by: Actor): Done =
-  val remaining = s.countdown - (now - s.nextCount) / F::second - 1
-  if (remaining <= 0) shutter({ ...s, countdown: 0, nextCount: 0 }, Owner)
-  else emit(List(), { ...s, countdown: remaining, nextCount: now + F::second })
 ```
 
 ### A capture answers the shutter in flight: the agent's goes to its request, and every photo saved becomes the last
@@ -682,8 +618,7 @@ pure def delayTick(s: Camera, now: int, by: Actor): Done =
 A photo the phone could not save is said in the banner.
 
 ```quint
-pure def remember(photo: int, c: Camera): Camera =
-  { ...c, last: photo, session: if (c.secure) c.session.union(Set(photo)) else c.session }
+pure def remember(photo: int, c: Camera): Camera = { ...c, last: photo }
 
 pure def canCaptured(s: Camera, ticket: int, by: Actor): bool = by == Phone and s.shot != 0 and ticket == s.shot
 
@@ -724,9 +659,8 @@ pure def stepSoundOnlyWithTheMicrophone(before: Camera, after: Camera, out: List
 
 A recording the phone opens after Camera was left, or lost access, is
 stopped at once. When a recording ends away from Camera, the preview it kept
-is released. A video saved while Camera is unlocked becomes the last
-capture, whichever opening of Camera started it; on the lock screen only one
-started in this opening does. The recorder may report its cumulative size
+is released. A saved video becomes the last capture, whichever opening of
+Camera started it. The recorder may report its cumulative size
 again as it finishes, so only new data counts toward the limit.
 
 ```quint
@@ -738,7 +672,7 @@ pure def afterRecording(out: List[Effect], c: Camera): Done =
 pure def settling(f: F::Film, before: Camera): Camera =
   val c = { ...before, film: f }
   val landed = c.film.stage == F::Saved and before.film.stage != F::Saved
-  if (landed and (not(c.secure) or c.filmVisit == c.visit)) remember(c.film.video, c)
+  if (landed) remember(c.film.video, c)
   else if (c.film.stage == F::Empty and c.showing and c.filmVisit == c.visit) { ...c, said: NothingRecorded }
   else if (c.film.stage == F::Broken and c.showing and c.filmVisit == c.visit) { ...c, said: NotSaved }
   else c
@@ -809,11 +743,11 @@ microphone, or reviewing a capture request.
 ```quint
 pure def volumeShutter(s: Camera): bool =
   ready(s) and not(G::open(s.agent))
-    and (if (s.mode == Photo) canCancelDelay(s, Owner) or canShutter(s, Owner)
+    and (if (s.mode == Photo) canShutter(s, Owner)
       else s.film.stage == F::Running or (P::allows(s.mic) and canStartRecording(s, true, Owner)))
 ```
 
-### A video saved while Camera is unlocked becomes the last capture
+### A saved video becomes the last capture
 
 The last capture can open as soon as the phone saves it. While Camera shows
 that newly saved video, the tile can fill in its thumbnail from that same
@@ -821,10 +755,10 @@ owned video. If the thumbnail is unavailable, the tile shows the video icon.
 
 ```quint
 pure def savedVideoThumbnail(s: Camera): int =
-  if (s.showing and not(s.secure) and not(s.covered) and s.film.stage == F::Saved and s.last == s.film.video) s.last else 0
+  if (s.showing and not(s.covered) and s.film.stage == F::Saved and s.last == s.film.video) s.last else 0
 
 pure def stepASavedVideoIsTheLast(before: Camera, after: Camera): bool =
-  (before.film.stage != F::Saved and after.film.stage == F::Saved and not(before.secure)) implies after.last == after.film.video
+  (before.film.stage != F::Saved and after.film.stage == F::Saved) implies after.last == after.film.video
 ```
 
 ### A recording runs only over a preview in Video mode, while no photo is taken, and follows the recording's own rules
@@ -860,7 +794,7 @@ pure val fair_recordingEnded = "weak"
 pure def canOpenLast(s: Camera, by: Actor): bool = by == Owner and s.showing and s.last != 0 and not(recording(s))
 
 pure def openLast(s: Camera, by: Actor): Done =
-  emit(List(OpenLast({ photo: s.last, only: if (s.secure) s.session else Set() })), s)
+  emit(List(OpenLast({ photo: s.last })), s)
 ```
 
 ### A recording that hit the limit can be saved
@@ -869,7 +803,7 @@ pure def openLast(s: Camera, by: Actor): Done =
 pure def sometimesTruncatedSaved(s: Camera): bool = s.film.stage == F::Saved and s.film.truncated and s.last == s.film.video
 
 pure val eval_witness_sometimesTruncatedSaved = (
-  ("open", false, 0, Phone), ("accessIs", P::Granted, 0, Phone),
+  ("open", 0, Phone), ("accessIs", P::Granted, 0, Phone),
   ("previewStarted", 1, true, Phone), ("setMode", Video, Owner),
   ("startRecording", false, Owner), ("recordingStarted", true, 0, Phone),
   ("chunk", F::maxBytes - 1, 1, Phone), ("chunk", 2, 2, Phone),
@@ -913,8 +847,8 @@ pure def chosenLens(s: Camera): Lens =
   if (s.requestedLens == WantsFront) Front else if (s.requestedLens == WantsBack) Back else s.lens
 
 pure def canAgentLens(s: Camera, requested: RequestedLens, by: Actor): bool =
-  G::canAsk(s.agent, by) and s.showing and not(s.secure) and P::allows(s.permission)
-    and s.phase != Failed and free(s) and s.countdown == 0
+  G::canAsk(s.agent, by) and s.showing and P::allows(s.permission)
+    and s.phase != Failed and free(s)
 
 pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done =
   val choice = { ...s, requestedLens: requested }
@@ -926,7 +860,7 @@ pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done =
   else emit(List(), switched)
 ```
 
-### The agent asks only over a Camera that is showing, unlocked and allowed; an idle preview is started for it, and Ask Alpha over it is lowered
+### The agent asks only over a Camera that is showing and allowed; an idle preview is started for it, and Ask Alpha over it is lowered
 
 The agent usually asks while the owner talks to Alpha in Ask Alpha over
 Camera: the shell lowers Ask Alpha, which it owns, and says when Camera is
@@ -936,7 +870,7 @@ not live waits to be shown.
 
 ```quint
 pure def canAgentAsk(s: Camera, by: Actor): bool =
-  G::canAsk(s.agent, by) and s.showing and not(s.secure) and P::allows(s.permission) and s.phase != Failed and free(s) and s.countdown == 0
+  G::canAsk(s.agent, by) and s.showing and P::allows(s.permission) and s.phase != Failed and free(s)
 
 pure def agentAsk(s: Camera, by: Actor): Done =
   val request = G::ask(s.agent, by)
@@ -995,7 +929,7 @@ last capture.
 ```quint
 pure def canAgentShoot(s: Camera, sensitive: bool, by: Actor): bool = G::canShoot(s.agent, by)
 
-pure def agentShutterReady(s: Camera): bool = ready(s) and free(s) and s.countdown == 0 and chosenLens(s) == s.lens
+pure def agentShutterReady(s: Camera): bool = ready(s) and free(s) and chosenLens(s) == s.lens
 
 pure def agentShoot(s: Camera, sensitive: bool, by: Actor): Done =
   val n = s.shots + 1
@@ -1036,19 +970,18 @@ pure def alwaysOneShutterOnTheCamera(s: Camera): bool =
     and G::alwaysResultsAreHonest(s.agent)
 ```
 
-### An open request waits on a Camera that is showing, unlocked and allowed; an approved one, on the live viewfinder approved
+### An open request waits on a Camera that is showing and allowed; an approved one, on the live viewfinder approved
 
 ```quint
 pure def alwaysTheRequestWaitsOnTheCamera(s: Camera): bool =
-  (G::open(s.agent) implies (s.showing and not(s.secure) and P::allows(s.permission)))
+  (G::open(s.agent) implies (s.showing and P::allows(s.permission)))
     and (s.agent.stage == G::Approved implies ready(s))
     and G::alwaysApprovedViewIsShown(s.agent) and G::alwaysApprovedByTheOwner(s.agent)
 ```
 
 ### A request fails only for a cause Camera names: left, no access, a failed preview, a busy camera or a protected screen
 
-A running countdown reserves the shutter for the owner. The phone reports
-Busy when it cannot fire the shutter on the reviewed viewfinder.
+The phone reports Busy when it cannot fire the shutter on the reviewed viewfinder.
 
 ```quint
 pure def stepTheAgentFailsOnlyForCause(before: Camera, via: str, after: Camera): bool =
@@ -1082,78 +1015,4 @@ pure def sometimesBusy(s: Camera): bool = s.agent.result == G::Blocked and s.cau
 
 ```quint
 pure def sometimesLetGo(s: Camera): bool = s.agent.result == G::Uncertain and not(s.showing)
-```
-
-## Story: Ask Alpha about what I see
-
-> As the owner, I want to ask Alpha about the live frame or the photo I just
-> took.
-
-### Only the owner asks Alpha about the live frame or the last capture, and never from the lock screen
-
-```quint
-pure def canAskAboutFrame(s: Camera, by: Actor): bool = by == Owner and ready(s) and free(s) and not(s.secure)
-
-pure def askAboutFrame(s: Camera, by: Actor): Done = emit(List(AskAbout({ photo: 0 })), s)
-
-pure def canAskAboutLast(s: Camera, by: Actor): bool =
-  by == Owner and s.showing and s.last != 0 and not(recording(s)) and not(s.secure)
-
-pure def askAboutLast(s: Camera, by: Actor): Done = emit(List(AskAbout({ photo: s.last })), s)
-```
-
-## Story: Use the camera on the lock screen
-
-> As the owner of an Alpha image, I want to take photos from the lock screen
-> without unlocking, and nobody holding my locked phone to see or open
-> anything else.
-
-### On the lock screen, Camera shows only what was taken there, and anything else asks the owner to unlock
-
-Opening the last capture from the lock screen opens Photos limited to the
-captures of this session. Settings, permission prompts and Ask Alpha
-need the phone unlocked, which the shell asks for with "Unlock to
-continue".
-
-```quint
-pure def canUnlockToContinue(s: Camera, by: Actor): bool = by == Owner and s.showing and s.secure
-
-pure def unlockToContinue(s: Camera, by: Actor): Done = emit(List(Unlock), s)
-
-pure def alwaysSecureShowsOnlyItsSession(s: Camera): bool =
-  (s.secure implies (s.last == 0 or s.session.contains(s.last))) and (not(s.secure) implies s.session.size() == 0)
-
-pure def stepTheLockScreenOpensNothingElse(before: Camera, after: Camera, out: List[Effect]): bool =
-  out.every(e => match e {
-    | OpenLast(o) => before.secure implies (o.only.contains(o.photo) and o.only.subseteq(before.session))
-    | OpenSettings => not(before.secure)
-    | AskAccess => not(before.secure)
-    | AskMicrophone => not(before.secure)
-    | AskAbout(a) => not(before.secure)
-    | _ => true
-  })
-```
-
-### Only what this visit took joins the lock screen's session
-
-A photo still being taken when Camera was left is let go, and a recording
-started in an earlier visit is kept in Photos but not shown here.
-
-```quint
-pure def stepOnlyThisVisitJoinsTheSession(before: Camera, via: str, after: Camera): bool =
-  not(after.session.subseteq(before.session))
-    implies (after.visit == before.visit
-      and ((via == "captured" and before.shot != 0 and before.showing) or before.filmVisit == before.visit))
-```
-
-### A photo can be taken on the lock screen
-
-```quint
-pure def sometimesSecureCapture(s: Camera): bool = s.secure and s.last != 0
-```
-
-### A recording from before can finish while the lock screen's camera is open
-
-```quint
-pure def sometimesEarlierRecordingFinishing(s: Camera): bool = s.secure and s.showing and s.film.stage == F::Stopping and s.filmVisit != s.visit
 ```

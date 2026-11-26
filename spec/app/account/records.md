@@ -1,10 +1,11 @@
 # Kept records
 
-What a failure of the resident [agent](./index.md) kept for the owner to
-see, and archiving it so that the agent can start again. The agent waits
-in review while this is under way; the agent's machine opens a review
-here with `Kept` and takes `Cleared` to start again. Whether the agent is
-in review and whether something holds it arrive as event parameters.
+What a failure of the resident agent kept for the owner to
+see, and archiving it so that the agent can start again. Settings
+([Activity](../settings/activity.md)) opens a review here when the
+agent's recovery surface needs it, and starts the agent again on
+`Cleared`. Whether the agent is in review and whether something holds
+it arrive as event parameters.
 
 ## Story: Restart after a failure that kept records
 
@@ -16,7 +17,6 @@ in review and whether something holds it arrive as event parameters.
 ```quint
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
-import outside as O from "./outside"
 
 type Archived = AllArchived | SomeArchived | NoneArchived | ArchiveUnknown
 type Effect = ReadRecords({ check: int }) | Archive({ attempt: int }) | Cleared
@@ -47,7 +47,7 @@ pure def opened(r: Records): Moved = asking(0, { ...r, attempt: A::plan(r.attemp
 ```quint
 pure def canCloseReview(r: Records): bool = r.showing
 
-pure def closeReview(r: Records): Records = { ...r, showing: false, review: O::retire(r.review) }
+pure def closeReview(r: Records): Records = { ...r, showing: false, review: R::retire(r.review) }
 ```
 
 ### The owner is shown how many records the failure kept, as the phone reads them
@@ -133,7 +133,7 @@ pure def sometimesArchived(r: Records): bool = r.attempt.outcome == A::Confirmed
 pure def reopened(r: Records, rebooted: bool, reviewing: bool): Moved =
   val lost = if (r.attempt.outcome == A::Sent) A::conclude(r.attempt, false, false) else r.attempt
   val fresh = if (rebooted and lost.outcome == A::Unknown) A::plan(lost.id + 1) else lost
-  val q = { ...r, review: O::retire(r.review), attempt: fresh, showing: reviewing }
+  val q = { ...r, review: R::retire(r.review), attempt: fresh, showing: reviewing }
   if (reviewing) asking(q.kept, q) else { state: q, out: List() }
 
 pure def lawAPhoneRestartEndsAnUnknownArchive(id: int, count: int): bool =
@@ -169,5 +169,5 @@ pure def sometimesArchivingAgainAfterARestart(r: Records): bool =
 ### Erasing Alpha drops the review and refuses every answer still in flight
 
 ```quint
-pure def erase(r: Records): Records = { ...r, review: O::retire(r.review), kept: 0, showing: false, attempt: A::plan(r.attempt.id + 1) }
+pure def erase(r: Records): Records = { ...r, review: R::retire(r.review), kept: 0, showing: false, attempt: A::plan(r.attempt.id + 1) }
 ```

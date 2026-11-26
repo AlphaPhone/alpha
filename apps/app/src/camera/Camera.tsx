@@ -148,13 +148,7 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
         className={cn("pointer-events-none absolute inset-0 size-full object-cover", native && "invisible")}
         style={native ? undefined : { scale: `${(state.lens === "Front" ? -1 : 1) * state.zoom / 10} ${state.zoom / 10}` }}
       />
-      <span aria-hidden className={cn("pointer-events-none absolute top-1/2 -left-[4%] block w-[108%] -translate-y-1/2", state.wide && state.mode === "Photo" ? "aspect-9/16" : "aspect-3/4")}>
-        {state.grid && ready(state) && (
-          <span className="absolute inset-0 grid grid-cols-3 grid-rows-3">
-            {Array.from({ length: 9 }, (_, cell) => <span key={cell} className={cn(cell % 3 > 0 && "border-l border-foreground/45", cell >= 3 && "border-t border-foreground/45")} />)}
-          </span>
-        )}
-      </span>
+      <span aria-hidden className="pointer-events-none absolute top-1/2 -left-[4%] block aspect-3/4 w-[108%] -translate-y-1/2" />
       {state.focus > 0 && target !== undefined && target.preview === state.preview && (
         <span
           key={state.focus}
@@ -280,7 +274,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
     if (next !== state.zoom) fire({ type: "zoomTo", level: next });
   };
   const click = () => void runtime.runPromiseExit(shutter());
-  const photoShutter = can({ type: "shutter" }) || can({ type: "cancelDelay" });
+  const photoShutter = can({ type: "shutter" });
   const light = { type: port.nativePreview ? "toggleFlash" : "toggleTorch" } as const;
   const canLight = can(light);
   const writingLight = !port.nativePreview && state.torch.write !== 0;
@@ -333,11 +327,6 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         )}
       </header>
 
-      {state.countdown > 0 && (
-        <span role="timer" aria-label={`Photo in ${state.countdown} ${state.countdown === 1 ? "second" : "seconds"}`} className="pointer-events-none absolute inset-x-0 top-75 z-10 flex justify-center text-camera-countdown font-light text-foreground tabular-nums drop-shadow-md landscape:right-33">
-          {state.countdown}
-        </span>
-      )}
       {state.said !== "Quiet" && (
         <button type="button" data-alpha-camera="said" aria-label="Dismiss camera message" className={cn("absolute inset-x-4 top-27 z-20 flex items-center rounded-tile bg-background/62 px-4 py-3 text-left text-foreground motion-safe:animate-drop landscape:right-37", focusRing)} onClick={() => fire({ type: "dismiss" })}>
           <span className="text-subject leading-normal">{notices[state.said]}</span>
@@ -380,7 +369,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         ) : <span aria-hidden className="size-13" />}
         <button
           type="button"
-          aria-label={!video ? (state.countdown > 0 ? "Cancel timer" : "Take photo") : state.film.stage === "Running" ? "Stop recording" : "Start recording"}
+          aria-label={!video ? "Take photo" : state.film.stage === "Running" ? "Stop recording" : "Start recording"}
           aria-busy={state.shot !== 0 || inProgress && state.film.stage !== "Running"}
           disabled={!active || (video ? !videoShutter : !photoShutter)}
           onClick={click}

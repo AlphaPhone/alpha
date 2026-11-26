@@ -186,8 +186,6 @@ function effects(refresh: () => void, publishCatalog: (catalog: Catalog | undefi
       try recheckPlan()
     });
     when { tag: "ReadOffers", let check }: run("read offered plans", readCatalog(check, publishCatalog));
-    when { tag: "OpenFunds" }: run("unmounted balance checkout", Effect.void);
-    when { tag: "OpenInvoice" }: run("unmounted invoice checkout", Effect.void);
   }
 }
 

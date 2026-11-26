@@ -7,8 +7,7 @@ Alpha and Android. Alpha cannot change any of them here. It reads them,
 says what the phone reported, and hands over to Android's own settings for
 the rest ([Android](./android.md)). The one request it makes is Set as
 Home. Asking for an access is the access walkthrough's, in the startup
-area ([Settings](./index.md)); what Alpha does about the Home role on its
-own is the [Home role](./roles.md).
+area ([Settings](./index.md)).
 
 ## Story: See what the phone says
 
@@ -566,4 +565,27 @@ pure def alwaysVaultRemovalBelongsToAnUnlockedVisit(s: Facts): bool =
     | VaultSelected(x) => s.vault.front and s.vault.phase == VaultReady and
       s.vault.rows.some(row => row.id == x.id and row.revision == x.revision)
   }
+```
+
+### Passwords also shows Android's checked status for an external password provider and hands off only while Passwords is in front
+
+While Passwords is visible, Settings reads Android's checked installation
+status (`ProviderInstalled`, `ProviderDisabled`, `ProviderAbsent`,
+`ProviderUnrecognized`, or `ProviderUnknown`), autofill support, and selection
+for Proton Pass. Only a verified installation offers Open and only an absent
+one offers Install; any other installation state offers neither, and handoffs
+run only while Passwords is in front.
+
+```quint
+type ProviderInstall = ProviderInstalled | ProviderDisabled | ProviderAbsent | ProviderUnrecognized | ProviderUnknown
+type ProviderExtra = NoProviderExtra | OpenProvider | InstallProvider
+
+pure def providerExtra(install: ProviderInstall): ProviderExtra =
+  if (install == ProviderInstalled) OpenProvider
+  else if (install == ProviderAbsent) InstallProvider
+  else NoProviderExtra
+
+pure def lawUnverifiedProviderOffersNoLaunch(install: ProviderInstall): bool =
+  (providerExtra(install) == OpenProvider iff install == ProviderInstalled)
+    and (providerExtra(install) == InstallProvider iff install == ProviderAbsent)
 ```

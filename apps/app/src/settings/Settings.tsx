@@ -167,9 +167,7 @@ const shareNames: Record<PrefsGen.Share, SettingsShare> = {
 const sharesNamed = Object.fromEntries(Object.entries(shareNames).map(([share, name]) => [name, share])) as Record<SettingsShare, PrefsGen.Share>;
 
 const saidNames: Record<ResetGen.Said, SettingsResetNoticeProps["said"] | undefined> = {
-  Quiet: undefined, NotConfirmedItsYou: "not-confirmed-its-you", EraseUnavailable: "erase-unavailable", ReviewExpired: "review-expired",
-  ReviewAlreadyOpen: "review-already-open", SetAScreenLock: "set-a-screen-lock", NoDeviceAuth: "no-device-auth", MayStillGoAhead: "may-still-go-ahead",
-  NotErased: "not-erased", CouldNotTell: "could-not-tell", Erased: "erased",
+  Quiet: undefined, EraseUnavailable: "erase-unavailable",
 };
 
 const loading = (timed: { readonly read: { readonly status: string } }) => timed.read.status === "Loading";

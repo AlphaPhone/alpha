@@ -7,14 +7,13 @@ session: Alpha Cloud's own spec proves it is the owner with an emailed
 code, holds it for at most an hour and says whether it holds, which
 arrives here as `authorized`; when it lapses, this machine asks for it
 with `VerifyOwner`. Cloud's answer is never trusted alone: the
-[Plan](./plan.md) is checked after every outcome with `CheckPlan`, and a
-payment a change needs opens Stripe's invoice through
-[Billing](./billing.md) with `PayInvoice`. The plan's facts (whether the
-owner is a member, the tier, whether the plan ends at the end of its
-period and the subscription's revision) arrive as event parameters from
-[Plan](./plan.md), and `elsewhere`, whether a payment or a code is under
-way or has an unknown outcome, from [Billing](./billing.md) and
-[Codes](./codes.md).
+plan is checked after every outcome with `CheckPlan`, and a
+payment a change needs opens Stripe's invoice with `PayInvoice`. The
+plan's facts (whether the owner is a member, the tier, whether the plan
+ends at the end of its period and the subscription's revision) arrive as
+event parameters from the Account snapshot, and `elsewhere`, whether a
+payment or a code is under way or has an unknown outcome, from
+[Billing](./billing.md) and [Codes](./codes.md).
 
 ## Story: Change or cancel my plan
 
@@ -27,7 +26,7 @@ way or has an unknown outcome, from [Billing](./billing.md) and
 ```quint
 import attempt as A from "../../kit/attempt"
 import review as V from "../../kit/review"
-import plan as P from "./plan"
+import outside as O from "./outside"
 
 type Act = ChangePlan | CancelPlan | KeepPlan
 type Step = Idle | Quoting | Quoted | Settling
@@ -36,17 +35,17 @@ type Notice =
   Quiet | Changed | ChangesAtRenewal | Ending | Continues | FinishPayment | NotFinished | NotChanged | PlanMoved
   | OutcomeUnknown | ConfirmItIsYou
 type Effect =
-  AskQuote({ ticket: int, tier: P::Tier, revision: int }) | ConfirmChange({ attempt: int, quote: int })
+  AskQuote({ ticket: int, tier: O::Tier, revision: int }) | ConfirmChange({ attempt: int, quote: int })
   | CancelAtEnd({ attempt: int, revision: int }) | KeepGoing({ attempt: int, revision: int })
   | PayInvoice | VerifyOwner | CheckPlan
 type Change = {
-  step: Step, act: Act, target: P::Tier, ticket: int, quote: int, quoteEnds: int,
+  step: Step, act: Act, target: O::Tier, ticket: int, quote: int, quoteEnds: int,
   change: V::Review, leave: V::Review, attempt: A::Attempt, unsettled: bool, notice: Notice,
 }
 type Moved = { state: Change, out: List[Effect] }
 
 pure val initial: Change = {
-  step: Idle, act: ChangePlan, target: P::Plus, ticket: 0, quote: 0, quoteEnds: 0,
+  step: Idle, act: ChangePlan, target: O::Plus, ticket: 0, quote: 0, quoteEnds: 0,
   change: V::unreviewed, leave: V::unreviewed, attempt: A::plan(0), unsettled: false, notice: Quiet,
 }
 
@@ -85,10 +84,10 @@ pure def askToVerify(c: Change, member: bool, authorized: bool): Moved = { state
 ### A member asks Cloud what a change to the other tier costs, on the revision of the plan last checked
 
 ```quint
-pure def canReviewChange(c: Change, tier: P::Tier, member: bool, tierNow: P::Tier, revision: int, authorized: bool, elsewhere: bool): bool =
+pure def canReviewChange(c: Change, tier: O::Tier, member: bool, tierNow: O::Tier, revision: int, authorized: bool, elsewhere: bool): bool =
   member and tier != tierNow and authorized and quiet(c) and not(elsewhere)
 
-pure def reviewChange(c: Change, tier: P::Tier, member: bool, tierNow: P::Tier, revision: int, authorized: bool, elsewhere: bool): Moved =
+pure def reviewChange(c: Change, tier: O::Tier, member: bool, tierNow: O::Tier, revision: int, authorized: bool, elsewhere: bool): Moved =
   { state: { ...c, step: Quoting, act: ChangePlan, target: tier, ticket: c.ticket + 1, notice: Quiet },
     out: List(AskQuote({ ticket: c.ticket + 1, tier: tier, revision: revision })) }
 ```
@@ -162,7 +161,7 @@ An outcome that is unknown holds every further plan action until the
 plan has been checked.
 
 ```quint
-pure def told(act: Act, result: Result, target: P::Tier): Notice =
+pure def told(act: Act, result: Result, target: O::Tier): Notice =
   if (result == NotKnown) OutcomeUnknown
   else if (result == NotMade) NotChanged
   else if (result == NotAuthorized) ConfirmItIsYou
@@ -170,7 +169,7 @@ pure def told(act: Act, result: Result, target: P::Tier): Notice =
   else if (result == NotYet) NotFinished
   else if (act == CancelPlan) Ending
   else if (act == KeepPlan) Continues
-  else if (target == P::Pro) Changed
+  else if (target == O::Pro) Changed
   else ChangesAtRenewal
 
 pure def canConcluded(c: Change, attempt: int): bool = A::canConclude(c.attempt, attempt)
@@ -219,7 +218,7 @@ pure def sometimesAQuoteIsShown(c: Change): bool = c.step == Quoted and c.change
 ### A member can move to Pro
 
 ```quint
-pure def sometimesUpgraded(c: Change): bool = c.notice == Changed and c.target == P::Pro
+pure def sometimesUpgraded(c: Change): bool = c.notice == Changed and c.target == O::Pro
 ```
 
 ### An upgrade can need a payment on Stripe's invoice page, and is not told as done

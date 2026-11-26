@@ -1,4 +1,4 @@
-// spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
+// spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
 import type { CredentialId } from "@elizaos/os-bridges"
 import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, type PlanOffer, type SnapshotSubscription, subscriptionView } from "@elizaos/cloud"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"

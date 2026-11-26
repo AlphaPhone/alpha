@@ -117,10 +117,15 @@ pure def alwaysTheSearchNarrowsTheLoadedList(s: Licences): bool =
 
 ### A licence is shown with its name, version and terms, and each flag by Alpha's name for it, or as written when Alpha has none
 
-The names are Copyleft, Network copyleft, Weak copyleft, Share-alike data,
-Unknown license, No license file in package, License unverified,
-Permissive, newly listed, Not open-source terms, Proprietary, license held
-by owner, and Proprietary, no license recorded.
+The six licence-family flags defined in [Licences](../image/licences.md) map
+to display labels: `CopyleftStrongFlag` ("Copyleft"), `NetworkCopyleftFlag`
+("Network copyleft"), `CopyleftWeakFlag` ("Weak copyleft"),
+`ShareAlikeDataFlag` ("Share-alike data"), `UnknownLicenceFlag` ("Unknown
+license"), and `PermissiveNotPreviouslyListedFlag` ("Permissive, newly
+listed"). Five additional package-level flags from the licence report also
+have display labels: "No license file in package", "License unverified",
+"Not open-source terms", "Proprietary, license held by owner", and
+"Proprietary, no license recorded". Any other flag is shown as written.
 
 ```quint
 pure def flagShown(listed: bool, label: str, flag: str): str = if (listed) label else flag

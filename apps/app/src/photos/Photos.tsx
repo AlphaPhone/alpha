@@ -200,7 +200,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const talk = (event: Event) => { if (owner(event)) void library.send(event, "Owner"); };
   const binTalk = (event: TrashEvent) => { if (binOwner(event)) void trash.send(event, "Owner"); };
   const openBin = { type: "enter", allowed: state.access.grant === "Granted" || state.access.grant === "Limited", secure: state.secure } satisfies TrashEvent;
-  const narrow = (filter: Filter, words = "") => ({ type: "narrow", narrowing: filter, query: words, person: 0 } satisfies Event);
+  const narrow = (filter: Filter, words = "") => ({ type: "narrow", narrowing: filter, query: words } satisfies Event);
   const canStart = inTrash ? binOwner({ type: "startSelect" }) : owner({ type: "startSelect" });
   const canMore = inTrash ? binOwner({ type: "loadMore" }) : owner({ type: "loadMore" });
   const start = () => inTrash ? binTalk({ type: "startSelect" }) : talk({ type: "startSelect" });
