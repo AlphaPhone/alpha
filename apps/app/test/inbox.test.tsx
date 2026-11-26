@@ -48,7 +48,8 @@ const menu = (item: string, label = "More actions") => drawn(() => {
   found.click();
 }));
 const told = () => document.body.textContent ?? "";
-const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
+const title = () => (document.querySelector('[data-alpha-subview="inbox-detail"] main[aria-label]') ??
+  document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]"))?.getAttribute("aria-label");
 async function openInboxFromHome(alpha: Alpha) {
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   await homeIsReady(alpha);
@@ -224,6 +225,7 @@ it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {
     const world = { ...scene(), phone };
+    if (phone) world.slots.add("inbox-saved-bodies");
     const attachmentText = '<strong data-attachment-fixture>Review agenda</strong>';
     for (let at = 10; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
     const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
@@ -430,6 +432,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Refresh");
     await until(alpha, runtime, List, (s) => s.list.status === "Failed");
     expect([rows().length, told()]).toEqual([25, expect.stringContaining("You are offline")]);
+    if (phone) await vi.waitFor(() => expect(world.secrets.has("inbox-saved-bodies")).toBe(true));
     await first.close();
 
     // spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest"; spec/app/inbox/index.md, "The saved list can be on screen while Gmail cannot be reached"
@@ -438,12 +441,23 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Failed");
     expect([rows().length, told()]).toEqual([25, expect.stringContaining("Saved list")]);
 
+    // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked or offline, a message saved on the phone opens from there, marked as saved"
+    if (phone) {
+      await row("Revised term sheet");
+      await until(second.alpha, again, Shown, (s) => s.fromPhone);
+      expect([told().includes("Need your eyes by Friday"), document.querySelector("iframe[title='Formatted email']"),
+        button("Open agenda.txt"), button("https://northpoint.test/room")]).toEqual([true, null, undefined, undefined]);
+      await press("Back to the list");
+      await until(second.alpha, again, Shown, (s) => s.message === 0);
+    }
+
     // spec/app/inbox/index.md, "Only the newest read's answer is shown, and only while reading is allowed": a read Google refuses as withdrawn empties the screen and asks to reconnect.
     world.inbox.offline = false;
     world.inbox.revoked = true;
     await press("Refresh");
     await until(second.alpha, again, List, (s) => s.failure === "Revoked");
     expect([rows(), told()]).toEqual([[], expect.stringContaining("Gmail access was withdrawn")]);
+    if (phone) await vi.waitFor(() => expect(world.secrets.has("inbox-saved-bodies")).toBe(false));
   });
 });
 
@@ -627,7 +641,8 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Forward");
   expect(told()).toContain("actions.txt");
   await fill("To", "reader@example.test");
-  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  // happy-dom submits no form on an Enter keydown, so the address is submitted as Enter would in a browser.
+  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1 && s.stored && !s.pending && s.write.status === "Loaded");
   await press("Send email");
@@ -692,7 +707,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   const restored = inbox.runtime(again.alpha);
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await menu("Drafts", "More folders");
-  await press("Draft, (No subject)");
+  await row("(No subject)");
   await until(again.alpha, restored, Writing, (s) => s.open);
   expect([
     document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value,

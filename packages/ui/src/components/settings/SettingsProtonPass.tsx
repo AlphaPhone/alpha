@@ -25,7 +25,7 @@ export function SettingsProtonPass({ installation, selection, autofill, extra, o
   const extraTitle = extra === "open" ? "Open Proton Pass" : "Get Proton Pass";
   return (
     <ListGroup heading="Other">
-      <ListRow title="Proton Pass" aria-label="Proton Pass" aria-expanded={expanded} leading={<SlidersHorizontal />}
+      <ListRow title="Proton Pass" aria-expanded={expanded} leading={<SlidersHorizontal />}
         trailing={<span className="flex items-center gap-3.5"><SettingsReading reading={installation} /><ChevronRight aria-hidden /></span>}
         onClick={() => setExpanded((value) => !value)} />
       {expanded ? (

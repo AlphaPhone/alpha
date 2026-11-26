@@ -154,12 +154,13 @@ function mailRoute(method: string, target: string): boolean {
  * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
  * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, opened?: (url: string) => void): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, credential: () => string, opened?: (url: string) => void): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
-    async request({ method, target, headers, body }: NativeCloudRequest) {
+    async request({ method, target, headers, body, expectedCredentialId }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
       if (!signedIn()) throw rejection("sign-in-required");
       const mail = mailRoute(method, target);
+      if (expectedCredentialId !== undefined && (expectedCredentialId !== credential() || mail)) throw rejection("sign-in-required");
       if (mail && !lease.held) {
         lease.heldBack += 1;
         throw rejection("mail-lease-upgrade-required");
@@ -203,6 +204,49 @@ export function elizaSecureStore(secrets: Map<string, string>, permits: (key: st
   }));
 }
 
+type NativeMethods = Record<string, (options: unknown) => unknown>;
+
+function legacySmsSlot(input: unknown, fields: number): string {
+  if (typeof input === "object" && input !== null && Object.keys(input).length === fields && "threadId" in input) {
+    const { threadId } = input;
+    if (threadId === null) return "sms-draft:v1:new";
+    if (typeof threadId === "string" && /^thread:[1-9][0-9]{0,18}$/.test(threadId)) return `sms-draft:v1:${threadId}`;
+  }
+  throw rejection("Invalid saved Messages draft", "invalid");
+}
+
+function legacySmsDrafts(earlier: NativeMethods | undefined) {
+  const target = new EventTarget();
+  const reply = (payload: object) => target.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(payload) }));
+  async function receive(data: string) {
+    let message: unknown;
+    try { message = JSON.parse(data); } catch { return; }
+    if (typeof message !== "object" || message === null || !("requestId" in message) || typeof message.requestId !== "string") return;
+    const { requestId, ...input } = message as { requestId: string; kind?: unknown; threadId?: unknown; expected?: unknown };
+    const { kind, ...fields } = input;
+    try {
+      if (kind === "read") {
+        const slot = legacySmsSlot(fields, 1);
+        const result = await (earlier?.secureRead?.({ slot }) ?? { value: null });
+        reply({ requestId, result });
+        return;
+      }
+      const slot = legacySmsSlot(fields, 2);
+      const expected = fields.expected;
+      if (kind !== "retire" || typeof expected !== "string" || expected.length === 0 || expected.length > 8 * 1024 * 1024) {
+        throw rejection("Invalid saved Messages draft", "invalid");
+      }
+      const retired = await earlier?.secureCompareExchange?.({ slot, expectedValue: expected, value: null });
+      const status = typeof retired === "object" && retired !== null && "status" in retired && retired.status === "saved" ? "removed" : "conflict";
+      reply({ requestId, result: { status } });
+    } catch (reason) {
+      const invalid = typeof reason === "object" && reason !== null && "code" in reason && reason.code === "invalid";
+      reply({ requestId, error: { code: invalid ? "invalid" : "unavailable", message: "Saved Messages draft refused" } });
+    }
+  }
+  return Object.assign(target, { postMessage: (data: string) => { void receive(data); } });
+}
+
 type Hear = (data: unknown) => void;
 interface Capacitor {
   PluginHeaders?: { name: string; methods: { name: string; rtype?: string }[] }[];
@@ -221,7 +265,10 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   const capacitor = (page.Capacitor ??= {});
   const hearing = new Map<string, Map<string, Hear>>();
   const heard = (name: string, event: string) => hearing.get(`${name} ${event}`) ?? hearing.set(`${name} ${event}`, new Map()).get(`${name} ${event}`)!;
-  const made = Object.fromEntries(Object.entries(plugins).map(([name, make]) => [name, make((event, data) => { for (const hear of [...heard(name, event).values()]) hear(data); }) as Record<string, (options: unknown) => unknown>]));
+  const made = Object.fromEntries(Object.entries(plugins).map(([name, make]) => [name, make((event, data) => { for (const hear of [...heard(name, event).values()]) hear(data); }) as NativeMethods]));
+  const web = typeof window === "undefined" ? undefined : window as Window & { alphaLegacySmsDrafts?: ReturnType<typeof legacySmsDrafts> };
+  const legacy = made.ElizaTelephony === undefined ? undefined : legacySmsDrafts(made.AlphaConnection);
+  if (web && legacy) web.alphaLegacySmsDrafts = legacy;
   let listeners = 0;
   page.androidBridge = {};
   capacitor.PluginHeaders = Object.entries(made).map(([name, methods]) => ({ name, methods: [...Object.keys(methods).map((method) => ({ name: method, rtype: "promise" })), { name: "addListener" }, { name: "removeListener" }] }));
@@ -238,6 +285,7 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   };
   return () => {
     hearing.clear();
+    if (web && web.alphaLegacySmsDrafts === legacy) delete web.alphaLegacySmsDrafts;
     delete page.androidBridge;
     delete capacitor.PluginHeaders;
     delete capacitor.nativePromise;

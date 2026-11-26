@@ -137,6 +137,29 @@ it("Shows native Access after sign-in and keeps the owner's place through restar
   }
 });
 
+it("Stops the Alpha image Access walkthrough at its first ungranted permission (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
+  const world = { ...scene(), phone: true, image: true, signedIn: true };
+  world.settings.hostFacts.startupPermissionDefaults = true;
+  world.settings.permissionStates.notifications = "granted";
+  world.settings.permissionStates.camera = "prompt";
+  world.voice.permission = "granted";
+  underAct();
+  try {
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    const dialog = () => document.querySelector('[role="dialog"]');
+    await vi.waitFor(() => {
+      expect(dialog()?.textContent).toContain("Step 3 of 7");
+      expect(dialog()?.querySelector('[aria-current="step"]')?.textContent).toContain("Camera");
+    });
+    expect(button("Allow")).toBeDefined();
+    expect(button("Settings")).toBeUndefined();
+    expect(world.settings.permissionRequests).toEqual([]);
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
 it("Shows All set only for the account result that calls for it (spec/app/startup/access.md, \"Story: Hear that all is set\")", async () => {
   const world = { ...scene(), phone: true, signedIn: true };
   underAct();

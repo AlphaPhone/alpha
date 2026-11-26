@@ -616,16 +616,34 @@ describe("The call strip on an Alpha image", () => {
     world.telephony.report();
     await until(alpha, alpha.runtime, Strip, (s) => s.calls.length === 1);
     expect(button("End call")).toBeUndefined();
+    await openPhone(alpha);
+    expect(document.querySelector("[data-alpha-call-strip]")).toBeNull();
+    expect(button("End call")).toBeUndefined();
 
     // spec/app/phone/index.md, "The phone says whether a call is live, whether it may be an emergency call, and whether the carrier is ready"
     world.telephony.live = [{ id: "c1", state: "active", connectedAt: world.now }];
     world.telephony.report();
     await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "OrdinaryCall");
     await until(alpha, alpha.runtime, Strip, (s) => s.shown && s.calls[0]?.phase === "Active");
+    const topStrip = () => document.querySelector('[data-alpha-call-strip="over"]');
+    const dock = () => document.querySelector('[data-alpha-comms-dock]');
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(topStrip()?.querySelector('button[aria-label="End call"]')).toBeInstanceOf(HTMLButtonElement);
+      expect(dock()?.querySelector('[aria-label="Call or ask"]')).toBeInstanceOf(HTMLInputElement);
+      expect(dock()?.querySelector('[aria-label="End call"]')).toBeNull();
+    });
+    await press("Talk");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Talk is unavailable right now");
+    }, { timeout: 12_000 });
+    expect(world.voice.startLiveCaptureCalls).toBe(0);
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
 
     // spec/app/phone/call.md, "Return and End act only on the call the bar shows, and End is asked once"
     await drawn(() => {
-      const bar = document.querySelector("[role=region][aria-label='Ongoing call'] button");
+      const bar = topStrip()?.querySelector('button[aria-label^="Return to call, On call"]');
       if (!(bar instanceof HTMLButtonElement)) throw new Error("no call bar");
       bar.click();
     });
@@ -634,12 +652,18 @@ describe("The call strip on an Alpha image", () => {
     await press("End call");
     await until(alpha, alpha.runtime, Strip, (s) => !s.shown);
     expect(world.telephony.ended).toEqual(["c1"]);
+    expect(topStrip()?.querySelector("button")?.getAttribute("aria-label")).toBe("Call ended");
+    expect((topStrip()?.querySelector("button") as HTMLButtonElement | null)?.disabled).toBe(true);
 
     // spec/app/phone/index.md, "Alpha acts outside only when the phone has ruled out an emergency call"
     world.telephony.live = [{ id: "c2", state: "active", connectedAt: world.now }];
     world.telephony.emergency = null;
     world.telephony.report();
     await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "MaybeEmergencyCall");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.querySelector('[data-alpha-call-strip="stage"] button[aria-label="End call"]')).not.toBeNull();
+    });
     await alpha.runtime.runPromise(propose({ type: "phone_call", target: { kind: "number", number: "+14155550122" } }, true));
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "Dial");
     expect([inReview("Call"), world.telephony.dialed]).toEqual([undefined, []]);
