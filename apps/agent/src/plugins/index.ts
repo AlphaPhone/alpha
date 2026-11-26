@@ -58,21 +58,16 @@ export function createAlphaAppsPlugin(options: {
 
 /**
  * Hosted module factory builder for `runAgentCli`'s `hostModules`, binding the Alpha product plugin
- * and optional one-shot importer to the agent's state directory, timezone, and launch environment.
+ * to the agent's state directory and timezone. The earlier v121 import is off: `ALPHA_LEGACY_STORE_DIR`
+ * is ignored until the import is bound to the v121 owner's account (alpha#1697 review, B1).
  * @public
  */
-export function alphaAppsModuleWith(options: { readonly openLegacyStore?: LegacyStoreOpener } = {}): ModuleFactory<never> {
+export function alphaAppsModuleWith(_options: { readonly openLegacyStore?: LegacyStoreOpener } = {}): ModuleFactory<never> {
   return (context: ModuleContext) => {
     const { plugin } = createAlphaAppsPlugin({
       stateDirectory: context.stateDirectory,
       timeZone: context.timeZone,
       runtime: context.runtime,
-      earlierImport: {
-        legacyStoreDir: context.launch.environment?.ALPHA_LEGACY_STORE_DIR,
-        conversationWorldId: context.conversationOwner?.world,
-        embeddingDimensions: context.launch.embeddingDimensions,
-        openLegacyStore: options.openLegacyStore,
-      },
     });
     return Effect.succeed({ name: alphaAppsPluginName, plugin });
   };
