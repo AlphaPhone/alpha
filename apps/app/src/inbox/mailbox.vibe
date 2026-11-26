@@ -101,9 +101,12 @@ effect function deviceOwner() {
 effect function currentOwner(): (Owner | null | undefined)!!Cloud {
   const { client } = try Cloud
   const phone = native()
+  const cloudCheck = effect {
+    return asked((signal) => client.account({ signal }))
+      catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? null : undefined)
+  }
   const { cloud, device } = try all({
-    cloud: effect { return try asked((signal) => client.account({ signal })) }
-      catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? null : undefined),
+    cloud: cloudCheck,
     device: phone ? deviceOwner() : succeed(undefined),
   }, { concurrency: "unbounded" })
   if (cloud === null || device === null) return null
