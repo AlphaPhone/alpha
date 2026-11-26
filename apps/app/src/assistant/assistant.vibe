@@ -1555,8 +1555,31 @@ export const assistantBack = effect {
     const shell = try Shell
     const view = commsViewOf(previous.app)
     const where = try shell.get()
-    if (where.assistant === "Sheet" && canReturnCommsView(where, view) && (try contained(comms.send({ type: "stageReturned" }, "Owner"), "returning to the earlier communications stage"))) {
-      return try contained(shell.send({ type: "returnCommsView", previous: view }), "returning to the earlier communications app")
+    if (where.assistant === "Sheet" && canReturnCommsView(where, view)) {
+      const fromSameRoute = () => Effect.runSync(shell.get()).route === where.route
+      const returned = try contained(comms.send({ type: "stageReturned" }, "Owner", (state) => {
+        const entry = state.stage.at(-1)
+        return fromSameRoute() && entry?.app === previous.app && entry.subject === previous.subject && entry.key === previous.key
+      }), "returning to the earlier communications stage")
+      if (!returned) return true
+      const contacts = try Contacts.Machine
+      const contact = try contacts.get()
+      if (try contained(shell.send({ type: "returnCommsView", previous: view }, (state) => state.route === where.route), "returning to the earlier communications app")) {
+        // spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"
+        const prefix = "contacts:contact:"
+        if (view === "Contacts" && previous.subject === "ContactSubject" && previous.key === prefix + contact.contact) {
+          const device = try Device
+          const exactVisit = () => {
+            const current = Effect.runSync(shell.get())
+            return current.route === where.route + 1 && showing(current, "Contacts") && current.assistant === "Sheet" && Effect.runSync(device.showing())
+          }
+          const event = { type: "restoreStageContact", contact: contact.contact, ticket: contact.list.ticket } as const
+          if (exactVisit() && Contacts.canRestoreStageContact(contact, event.contact, event.ticket)) {
+            try contained(contacts.send(event, exactVisit), "reading the earlier Contacts card")
+          }
+        }
+      }
+      return true
     }
   }
   return false
