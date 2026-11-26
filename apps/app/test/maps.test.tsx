@@ -223,6 +223,46 @@ describe("Maps on a phone", () => {
     expect(Boolean(button("Recenter"))).toBe(true);
   });
 
+  it("A search handed over before Maps opens runs on the first open, on a later open and through another account (spec/app/maps/index.md, \"A query another app hands to Maps opens as a search, never over navigation\")", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, withMaps);
+    const runtime = maps.runtime(alpha);
+    const searched = () => [results(), document.querySelector<HTMLInputElement>('input[aria-label="Search Maps"]')?.value];
+    const handThenOpen = async () => {
+      act(() => { handToMaps("harbour"); });
+      await showMaps(alpha);
+    };
+    const leave = async () => {
+      await hardware("back");
+      await until(alpha, runtime, Screen, (s) => !s.searching);
+      await hardware("back");
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    };
+
+    // spec/app/maps/index.md, "Another account hides every route, place and search of the last one, and ends its guidance": the first open reads the account after the query arrives, and the query waits through it
+    await handThenOpen();
+    await until(alpha, runtime, Screen, (s) => s.link.known && s.search.status === "Loaded" && s.results === 2);
+    expect(searched()).toEqual([["Harbour Cafe", "Harbour Gallery"], "harbour"]);
+
+    // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a later open takes the query once the machine is back on screen, though React first draws the last visit's state
+    await leave();
+    await handThenOpen();
+    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+    expect(searched()).toEqual([["Harbour Cafe", "Harbour Gallery"], "harbour"]);
+
+    // spec/app/maps/index.md, "Another account hides every route, place and search of the last one, and ends its guidance": signing out keeps the query unanswered, and signing in again sends it through the account's provider
+    await leave();
+    world.signedIn = false;
+    await handThenOpen();
+    await until(alpha, runtime, Screen, (s) => s.link.account === 0 && s.searching && s.query === "harbour" && s.waitingProvider);
+    world.signedIn = true;
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    await showMaps(alpha);
+    await until(alpha, runtime, Screen, (s) => s.link.account !== 0 && s.search.status === "Loaded" && s.results === 2);
+    expect(results()).toEqual(["Harbour Cafe", "Harbour Gallery"]);
+  });
+
   it("The location disclosure closes on Back, on leaving Maps and once Android allows location, and Recenter shows it again (spec/app/maps/index.md, \"Story: Use my location\")", async () => {
     const world = { ...scene(), phone: true };
     world.maps.allowed = "prompt";
