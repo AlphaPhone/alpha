@@ -44,7 +44,8 @@ Account 0 is no account, and credential 0 none. What is kept through a
 restart is whether the owner is signed in, the selection, the last list
 read for it and its credential, whether Spam and Trash can be searched,
 and the unread count, as no longer fresh; the reads, the connected
-accounts, the messages chosen and what is on screen are not.
+accounts, the messages chosen, whether the search field is open and what
+is on screen are not.
 
 ```quint
 import read as R from "../../kit/read"
@@ -59,7 +60,7 @@ type Mailbox = {
   signedIn: bool, accounts: R::Read, connected: List[Linked], checked: int, selected: Selection,
   list: R::Read, further: bool, failure: Failure, searchable: bool,
   pages: int, total: int, cursor: int, spent: Set[int], saved: bool, moved: bool,
-  chosen: Set[int], revision: int, doubtful: bool,
+  chosen: Set[int], revision: int, doubtful: bool, searching: bool,
   kept: Selection, keptPages: int, keptTotal: int, keptCredential: int, count: Count,
 }
 
@@ -76,7 +77,7 @@ pure val initial: Mailbox = {
   signedIn: false, accounts: R::unread, connected: List(), checked: 0, selected: nowhere,
   list: R::unread, further: false, failure: Fine, searchable: false,
   pages: 0, total: 0, cursor: 0, spent: Set(), saved: false, moved: false,
-  chosen: Set(), revision: 0, doubtful: false,
+  chosen: Set(), revision: 0, doubtful: false, searching: false,
   kept: nowhere, keptPages: 0, keptTotal: 0, keptCredential: 0, count: noCount,
 }
 
@@ -201,15 +202,36 @@ pure def search(s: Mailbox, query: str): Moved = asking(0, turned({ ...s.selecte
 
 ### Back from a search shows its folder without the search, before Back leaves Inbox
 
-Off the launcher the open search field draws its own Back to the folder. On
-the launcher Inbox's first page draws no Back, so the search field fills the
-header and the folders stay under it, as the Sunday demo build drew them;
-the phone's Back still clears a search.
+As in Sunday's v119, Search opens the search field in place of the folder's
+title, and the field stays open while it is empty. While it is open the
+folders are not drawn under it. Back, the phone's or the field's own where
+one is drawn, closes the field first, empty or not, drops what it typed and
+reads the folder again without the search; only the next Back leaves
+Inbox. A search that can no longer be read again without it, once access
+is withdrawn or its folder cannot be searched, is not closed by Back, which
+then leaves Inbox. Emptying the field reads the folder without the search
+and keeps the field open, a search kept through a restart too. Leaving Inbox closes a field with nothing searched, so the
+next visit opens on the folder. Off the launcher the field draws its own Back; on the
+launcher Inbox draws no Back, so the field runs the full width.
 
 ```quint
+pure def searchOpen(s: Mailbox): bool = s.searching or s.selected.query != ""
+
+pure def canOpenSearch(s: Mailbox): bool = not(searchOpen(s))
+
+pure def openSearch(s: Mailbox): Moved = { state: { ...s, searching: true }, out: List() }
+
 pure def canClearSearch(s: Mailbox): bool = s.selected.query != "" and canSearch(s, "")
 
-pure def clearSearch(s: Mailbox): Moved = search(s, "")
+pure def clearSearch(s: Mailbox): Moved = search({ ...s, searching: true }, "")
+
+pure def canCloseSearch(s: Mailbox): bool = (s.searching and s.selected.query == "") or canClearSearch(s)
+
+pure def closeSearch(s: Mailbox): Moved =
+  val closed = { ...s, searching: false }
+  if (canClearSearch(closed)) search(closed, "") else { state: closed, out: List() }
+
+pure def sometimesAnEmptySearchIsOpen(s: Mailbox): bool = s.searching and s.selected.query == ""
 ```
 
 ### Refresh reads the first page again, one read at a time, and keeps the list on screen until it answers
@@ -717,7 +739,7 @@ pure def restart(s: Mailbox): Mailbox = {
   ...s, accounts: { ...s.accounts, status: R::Idle }, connected: List(), checked: 0, list: { ...s.list, status: R::Idle },
   further: false, failure: Fine,
   pages: 0, total: 0, cursor: 0, spent: Set(), saved: false, moved: false,
-  chosen: Set(), revision: s.revision + 1, doubtful: false, count: { ...s.count, fresh: false },
+  chosen: Set(), revision: s.revision + 1, doubtful: false, searching: false, count: { ...s.count, fresh: false },
 }
 
 pure def stepARestartKnowsNoGrant(before: Mailbox, via: str, after: Mailbox): bool =
