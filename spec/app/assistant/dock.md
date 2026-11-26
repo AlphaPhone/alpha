@@ -477,8 +477,13 @@ pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
 > As the owner, I want Ask Alpha at rest inside an app to take as little of
 > the screen as it did before VibeStack: a small pill centred above the
 > bottom edge with Alpha's mark, Type and Talk, while Home and the Browser
-> start with the whole bar to type in and tuck into that same pill whenever
-> I swipe down on the resting bar.
+> start with the whole bar to type in.
+
+The Browser's bar tucks into that same pill when it is swiped down, as
+v119's did. Home's bar tucks too, as #1733 left it. That departs from v119's
+`!home` rule (45f6bed30 chat-overlay-motion-adapter.ts:337-339, :866-869)
+and is pending the owner's decision, so it is not part of the owner's story
+yet.
 
 ### Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet
 
