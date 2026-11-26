@@ -1,7 +1,14 @@
 // spec/app/startup/index.md, "Until the connection has resolved, Home shows only the Alpha mark"; spec/app/startup/index.md, "The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home"
 import { Launcher } from "../platform/launcher.vibe"
+import { homeFrame } from "../home/firstFrame.ts"
 
 module page {
+  /** The assistant-only surface is whole under `main`: Home, `told` it has drawn, holds nothing, and Ask Alpha is drawn. @throws {never} */
+  export function alone(main: HTMLElement, told: boolean): boolean {
+    const home = main.querySelector("[data-alpha-home-layer]")
+    const assistant = main.querySelector<HTMLElement>("[data-alpha-assistant-host]")
+    return told && home !== null && home.childElementCount === 0 && assistant !== null && !assistant.hasAttribute("hidden") && assistant.childElementCount > 0
+  }
   /** Home's first frame is complete under `main`: Home has drawn, nothing in the page is still loading, and Ask Alpha is drawn wherever it shows. @throws {never} */
   export function complete(main: HTMLElement): boolean {
     const page = main.querySelector("[data-alpha-shell-page]")
@@ -19,7 +26,7 @@ module page {
     return () => observer.disconnect()
   }
 }
-import { complete, watch } from page
+import { alone, complete, watch } from page
 
 /** How long Home stays still before its first frame counts as complete, and the longest the startup cover waits for it. */
 const settling = { quiet: "120 millis", longest: "2500 millis" } as const
@@ -28,10 +35,15 @@ const settling = { quiet: "120 millis", longest: "2500 millis" } as const
  * Home under `main` has drawn its first complete frame: it is complete and has not changed for a moment, or
  * `settling.longest` has passed. v119 kept Home under its startup cover until it was whole and then showed it in one
  * frame (45f6bed30 apps/app/src/main.tsx:262-275, 357). The assistant-only surface draws nothing of Home, so there
- * nothing waits for it and chat shows at once.
+ * it waits only until Home has said so by drawing nothing and chat has drawn, never for Home to settle.
  */
 export effect function firstFrame(main: HTMLElement): void!!Launcher {
-  if ((try (try Launcher).presentation()).assistant) return
+  const assistant = (try (try Launcher).presentation()).assistant
   const changes = Stream.callback<void>((queue) => acquireRelease(sync(() => watch(main, () => { Queue.offerUnsafe(queue, undefined) })), (stop) => sync(stop)))
+  if (assistant) {
+    const told = Stream.callback<void>((queue) => acquireRelease(sync(() => homeFrame.subscribe(() => { Queue.offerUnsafe(queue, undefined) })), (stop) => sync(stop)))
+    try (Stream.merge(changes, told) |> Stream.prepend(%, [undefined]) |> Stream.filter(%, () => alone(main, homeFrame.snapshot())) |> Stream.runHead(%) |> timeoutOption(%, settling.longest))
+    return
+  }
   try (changes |> Stream.prepend(%, [undefined]) |> Stream.debounce(%, settling.quiet) |> Stream.filter(%, () => complete(main)) |> Stream.runHead(%) |> timeoutOption(%, settling.longest))
 }

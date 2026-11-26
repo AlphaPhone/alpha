@@ -196,14 +196,20 @@ it("Shows chat at once on the assistant-only surface, and elsewhere a white cove
   try {
     const alone = { ...scene(), phone: true };
     alone.launcher.assistant = true;
+    let homeUncovered = false;
+    const watching = new MutationObserver(() => {
+      if (!cover() && (document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0) > 0) homeUncovered = true;
+    });
+    watching.observe(document.body, { subtree: true, childList: true, attributes: true });
     const assistant = await openOver(fakeWorld(alone), only("home", "assistant"));
     await until(assistant.alpha, assistant.alpha.runtime, Shell, () => true);
-    // spec/app/startup/index.md, "The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home": chat does not wait behind the cover for a Home the surface never draws, with no time passing.
+    // spec/app/startup/index.md, "The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home": chat does not wait behind the cover for Home to settle, with no time passing, and no frame shows Home without the cover.
     await vi.waitFor(() => {
       expect(document.querySelector("[data-alpha-assistant-host]")?.childElementCount).toBeGreaterThan(0);
       expect(cover()).toBeNull();
     }, { timeout: 5_000 });
-    expect(document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0).toBe(0);
+    watching.disconnect();
+    expect([homeUncovered, document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0]).toEqual([false, 0]);
     await closeAll();
 
     // spec/app/startup/index.md, "Until the connection has resolved, Home shows only the Alpha mark": on the launcher an owner who keeps Dark sees the same white cover, and it stays until Home has drawn.

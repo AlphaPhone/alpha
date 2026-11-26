@@ -337,7 +337,8 @@ shell, sign-in and the walkthrough are still to answer, and until Home has
 drawn its first complete frame, its tiles, cards and Ask Alpha together;
 Home is laid out under it and takes no input, and shows whole the moment it
 goes. The assistant-only surface draws nothing of Home, so there the mark
-does not wait for Home.
+waits only until Home is known to draw nothing and chat has drawn, never
+for Home to settle.
 
 ```quint
 pure def marked(s: Boot): bool = s.connection == Pending
