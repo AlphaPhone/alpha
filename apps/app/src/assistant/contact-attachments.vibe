@@ -1,0 +1,38 @@
+// spec/app/assistant/index.md, "A selected Contact can send the files its owner reviewed for that Contact"
+import * as Contacts from "../../gen/app__contacts.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Conversation, selectedContact } from "../../gen/app__assistant.effect.vibe"
+import { sameArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
+import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
+import { type ContactFileSend, type ContactFileTarget, Talk } from "./talk.vibe"
+
+export type ContactAttachmentScope = Shell | Contacts.Machine | Conversation | Comms | Talk
+
+export function sameContactFileTarget(left: ContactFileTarget, right: ContactFileTarget): boolean {
+  return left.person === right.person && left.card === right.card
+    && left.about === right.about && left.revision === right.revision && sameArchiveAuthority(left.authority, right.authority)
+}
+
+/** Captures the current selection and account, whether the Contact's dock is closed or raised. */
+export effect function contactFileTarget(person: string): (ContactFileTarget | undefined)!!ContactAttachmentScope {
+  const shell = try (try Shell).get()
+  const card = try (try Contacts.Machine).get()
+  const comms = try (try Comms).get()
+  const conversation = try (try Conversation).get()
+  const seat = (try Talk).board.draftSeat
+  if (seat === undefined || !showing(shell, "Contacts") || !card.front || !Contacts.shown(card)
+    || card.contact !== person || card.form !== "Shut" || card.confirming || comms.app !== "ContactsApp"
+    || comms.subject !== "ContactSubject" || comms.key !== `contacts:contact:${person}` || conversation.context.sensitive
+    || !selectedContact(conversation)) return undefined
+  return { person, card: card.card.ticket, about: comms.key, revision: conversation.context.revision, authority: seat.authority }
+}
+
+export effect function contactFileTargetCurrent(target: ContactFileTarget): boolean!!ContactAttachmentScope {
+  const current = try contactFileTarget(target.person)
+  return current !== undefined && sameContactFileTarget(target, current)
+}
+
+/** A Send on a closed or replaced sheet cannot use a still-valid card draft. */
+export effect function contactFileSendCurrent(send: ContactFileSend): boolean!!ContactAttachmentScope {
+  return (try (try Shell).get()).route === send.route && (try contactFileTargetCurrent(send.draft.target))
+}
