@@ -776,11 +776,11 @@ const opened = started(effect {
       store.conversations.close(currentThread)
     }
     if (thread === taken && newVisit === fresh && !forThread) return
+    const needsOpen = thread > 0 && (try composer.get()).thread !== thread
+    if (needsOpen && !(try openMessageDraft(thread))) return
     taken = thread
     newVisit = fresh
     if (thread === 0 && fresh === 0) return
-    const needsOpen = thread > 0 && (try composer.get()).thread !== thread
-    if (needsOpen && !(try openMessageDraft(thread))) return
     if (!needsOpen && !forThread) try refreshMessageSending()
     if (forThread && queued !== undefined && taken === thread) {
       const choosing = try messages.get()
