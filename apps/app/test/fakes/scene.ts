@@ -98,10 +98,11 @@ export function services(world: Scene) {
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
       ...clockRoutes(world.clock, () => world.now),
-      ...remindersRoutes(world.reminders, () => world.now),
       ...(review === undefined ? [] : [textReviewRoute(review, world.notes.ownerIdentity)]),
-      ...notesRoutes(world.notes),
+      ...notesRoutes(world.notes, () => world.now),
+      // Workflows answers the inbox's workflow category read (eliza's workflowApprovalOffers) and passes every other read on to Reminders.
       ...workflowRoutes(world.workflows),
+      ...remindersRoutes(world.reminders, () => world.now),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
       ...walletRoutes(world.wallet, () => world.now),

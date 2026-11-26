@@ -50,9 +50,9 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
       return Promise.resolve({ session });
     } }),
     ElizaNotifications: (emit) => ({ ...elizaNotices(world.settings)(emit),
-      ...(world.workflows.nativeNotices === undefined ? {} : workflowNoticesHost(world.workflows.nativeNotices, () => world.signedIn
+      ...workflowNoticesHost(world.workflows.nativeNotices, () => world.signedIn
         ? { kind: "owned", userId: world.notes.ownerIdentity, organizationId: "organization", agentId: world.notes.owner, epoch: 1 }
-        : { kind: "signedOut" })(emit)) }),
+        : { kind: "signedOut" })(emit) }),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),

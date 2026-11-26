@@ -106,7 +106,17 @@ export function nativeApprovalNotices(): NativeApprovalNotices {
 // spec/app/workflows/approvals.md, "Story: Open the run a notice names"
 type WorkflowHostScope = { kind: "signedOut" } | { kind: "owned"; userId: string; organizationId: string; agentId: string; epoch: number };
 
-export const workflowNoticesHost = (scene: NativeApprovalNotices, scope: () => WorkflowHostScope): Faked => (emit) => {
+/**
+ * The Workflow notice calls of Alpha's `ElizaNotifications`, which the native plugin always declares. A journey without
+ * `scene` gets them unimplemented: Capacitor reads a plugin's methods once for the life of the page, and Alpha keeps
+ * that registration across the journeys of a file, so the methods are declared all the same.
+ */
+export const workflowNoticesHost = (scene: NativeApprovalNotices | undefined, scope: () => WorkflowHostScope): Faked => (emit) => {
+  if (scene === undefined) {
+    const declared = workflowNoticesHost(nativeApprovalNotices(), scope)(emit) as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(declared).map((method) =>
+      [method, () => Promise.reject(rejection(`ElizaNotifications.${method} is not implemented`, "UNIMPLEMENTED"))]));
+  }
   scene.tap = (request) => {
     scene.pending = { ...request.route, operationId: request.id, bindingHash: request.bindingHash, token: "tap-1", retained: true };
     emit("pendingWorkflowTap", {});
