@@ -1,0 +1,42 @@
+// spec/cloud/index.md, "Story: Operate Alpha's own cloud"; spec/cloud/index.md, "Hosted production and staging share no API or App Link hostname"; spec/cloud/index.md, "A hosted environment's profile answers at its deployment's cloud and keeps its returns on its deployment's App Link host"; spec/cloud/index.md, "Alpha's own cloud offers inference, speech, maps, managed Google and billing, under Alpha's name, its entitlements for Alpha's package"; spec/cloud/index.md, "Alpha's own cloud uses Cloudflare to mail sign-in codes from its own address"; spec/cloud/index.md, "Chat on Alpha's own cloud is Alpha's model, and a request that names no cap is quoted and sent at the longest reply its provider generates"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud"
+import { deployment } from "@repo/deployment"
+import { chatModelFits, hostedSeparate, mailsAsAlpha, offersAlphasServices, profileFits, returnsOffApi, type Hosts } from "../gen/cloud.effect.vibe"
+import { registrationAt } from "./alpha.vibe"
+
+/** `@repo/deployment` names no hosted row for an environment. */
+export error HostedCloudUnknown { environment: string }
+
+/** Alpha Cloud's API origin and App Link host for each hosted environment. */
+export effect function hostedClouds(): Record<CloudEnvironment, Hosts>!HostedCloudUnknown {
+  const cloudOf = (environment: CloudEnvironment) => effect {
+    const row = deployment(environment) catch effect () => { throw new HostedCloudUnknown({ environment }) }
+    if (row.kind !== "hosted") throw new HostedCloudUnknown({ environment })
+    return { cloud: row.cloud, appLinkHost: row.appLinkHost }
+  }
+  return { production: try cloudOf("production"), staging: try cloudOf("staging") }
+}
+
+const hostNamesOf = (hosts: Hosts) => ({ apiHost: new URL(hosts.cloud).hostname, appLinkHost: hosts.appLinkHost })
+
+/** Problems a profile has with its hosted origins, name, services, audience, mail sender, returns or chat model. */
+export function hostedProfileProblems(profile: CloudProfile, hosts: Record<CloudEnvironment, Hosts>): ReadonlyArray<string> {
+  const problems: string[] = []
+  if (!hostedSeparate(hostNamesOf(hosts.production), hostNamesOf(hosts.staging))) problems.push("production and staging share an API or App Link hostname")
+  for (const environment of ["production", "staging"] as const) {
+    const settings = profile.environments[environment]
+    const cloud = hosts[environment]
+    if (!profileFits(cloud, { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }))
+      problems.push(`${environment}: the profile answers at ${settings.api} for ${settings.web}, and @repo/deployment names ${cloud.cloud} for ${cloud.appLinkHost}`)
+    if (!offersAlphasServices(settings.name, settings.entitlementAudience, [...settings.capabilities]))
+      problems.push(`${environment}: the profile is not Alpha's own cloud, with its name, its services and Alpha's package as the audience`)
+    if (settings.mail.kind !== "binding" || !mailsAsAlpha(settings.mailSender, settings.mail.binding))
+      problems.push(`${environment}: the profile must use Alpha's own Cloudflare email binding and sender`)
+    if (!returnsOffApi(registrationAt(environment === "production" ? "Production" : "Staging", cloud.appLinkHost), settings.api))
+      problems.push(`${environment}: a return of Alpha's registration lies on the API origin ${settings.api}`)
+    const models = settings.inference?.models ?? []
+    if (models.length !== 1 || !models.every((model) => chatModelFits(model.id, model.upstreamModel, model.defaultMaxTokens ?? 0)))
+      problems.push(`${environment}: chat is not Alpha's model at the longest reply its provider generates`)
+  }
+  return problems
+}

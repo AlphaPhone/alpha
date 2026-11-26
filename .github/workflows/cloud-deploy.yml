@@ -1,9 +1,9 @@
 name: Cloud deploy
 run-name: Alpha Cloud ${{ github.event_name == 'push' && 'staging then production' || format('{0} ({1})', inputs.action, inputs.environment) }} on ${{ github.sha }}
-# Deploys Alpha's own cloud (spec/cloud/rollout.md), the cut-over candidate: the API Worker (apps/cloud/src/worker.vibe)
+# Deploys Alpha Cloud (spec/cloud/rollout.md): the API Worker (apps/cloud/src/worker.vibe)
 # and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Pushes on vibestack-develop promote the same
 # commit only after staging passes. Manual runs follow the selected environment's deployment branch policy. Deploying the Cloud
-# never moves a phone: each environment's phones address the cloud packages/deployment names until the cutover.
+# leaves the hosts bundled in each installed app in place.
 #
 # Each GitHub environment (alpha-cloud-staging, alpha-cloud-production) holds:
 #   secret CLOUDFLARE_API_TOKEN   Workers Scripts and Routes, Hyperdrive edit, and Zone DNS edit
