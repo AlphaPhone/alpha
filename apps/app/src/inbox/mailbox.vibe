@@ -10,12 +10,14 @@ import { Time } from "../runtime/time.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { civilDay } from "../calendar/time.ts"
 import { fromAreas } from "../home/cards.vibe"
-import { Device } from "../platform/device.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
 import { afterMailSignIn, leaseRefusalReason } from "../../gen/app__platform.effect.vibe"
 import { Cloud, mailSignIn } from "../platform/cloud.vibe"
 import { type Job, Whole, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { InboxAhead, aheadKey, prefetch } from "./ahead.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
+import { savedBodies } from "./saved-bodies.vibe"
 
 const owner = "alpha/inbox/owner"
 
@@ -80,6 +82,16 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | InboxAhead | 
 // spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest"
 const kept = reacting(Inbox, { keep: 1, open: [{ type: "restart" }], carry })
 
+/** The phone can still identify its previously signed-in owner when Cloud cannot be reached. */
+effect function deviceOwner() {
+  const device = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
+  const owner = device?.account
+  if (owner?.kind === "signedOut") return null
+  if (owner?.kind !== "signedIn" || !owner.userId || !owner.organizationId || !owner.credentialId ||
+    owner.keyExpiresAt <= (try Clock.currentTimeMillis)) return undefined
+  return owner
+}
+
 // spec/app/inbox/index.md, "A new cloud session starts from nothing, and checks the accounts only once signed in"
 effect function recheck(): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
   const { client } = try Cloud
@@ -87,18 +99,28 @@ effect function recheck(): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.K
   const machine = try Inbox.Machine
   const ledger = try Mail
   const generation = ledger.generation()
-  const who = effect {
-    const account = try asked((signal) => client.account({ signal }))
-    return account.id
-  } catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? "" : undefined)
+  const phone = native()
+  const { cloud, device } = try all({
+    cloud: effect { return try asked((signal) => client.account({ signal })) }
+      catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? null : undefined),
+    device: phone ? deviceOwner() : succeed(undefined),
+  }, { concurrency: "unbounded" })
   if (ledger.generation() !== generation) return
   const state = try machine.get()
   const before = (store.get(owner) catch () => undefined) ?? ""
+  const who = cloud === null || device === null ? "" : cloud?.id ?? device?.userId
+  if (who !== undefined && who !== before) try ledger.forget()
+  if (phone) {
+    const matched = who !== "" && device !== undefined && device !== null &&
+      (cloud === undefined || (cloud !== null && cloud.id === device.userId && cloud.organization_id === device.organizationId))
+    try ledger.savedOwner(matched ? JSON.stringify([device.organizationId, device.userId, device.credentialId]) : undefined)
+  } else if (cloud !== undefined) {
+    try ledger.savedOwner(cloud?.id && cloud.organization_id ? JSON.stringify([cloud.organization_id, cloud.id]) : undefined)
+  }
   if (who === undefined || (who === before && state.signedIn === (who !== ""))) {
     if (state.signedIn) try contained(machine.send({ type: "checkAccess" }), "checking Gmail access")
     return
   }
-  if (who !== before) try ledger.forget()
   try ignore(store.set(owner, who))
   try contained(machine.send({ type: "sessionChanged", signedIn: who !== "" }), "the cloud session")
 }
@@ -175,4 +197,4 @@ const home = started(effect {
 }, "telling Home")
 
 /** Gmail's list, from launch: kept across restarts, read through the owner's cloud, and checked again each time Inbox opens. */
-export const mailbox = together(Layer.provideMerge(kept, mail), session, home, signIns, prefetch)
+export const mailbox = together(Layer.provideMerge(kept, Layer.provide(mail, savedBodies)), session, home, signIns, prefetch)
