@@ -112,11 +112,14 @@ export const told = {
 
 // spec/app/home/index.md, "The app in the menu can be added to Home or handed to Android as App info"
 /** Choose an action for the installed app the owner is still looking at. */
-export effect function chooseApp(app: string, action: "Pin" | "Info"): void!!(Home.Machine | Drawer.Machine | Shell.Machine) {
+export effect function chooseApp(app: string, action: "Pin" | "Info", route: number, beside: boolean) {
   const home = try Home.Machine
   const drawer = try Drawer.Machine
   const shell = try Shell.Machine
   const showing = try shell.get()
+  const admitted = try appsVisit(route, beside)
+  const current = () => admitted(Effect.runSync(shell.get()))
+  if (!admitted(showing)) return
   const menu = try drawer.get()
   const state = try home.get()
   const allowed = action === "Pin" ? Home.canPinInstalled(state, app, showing, menu, owner) : Home.canShowAppInfo(state, app, showing, menu, owner)
@@ -124,9 +127,9 @@ export effect function chooseApp(app: string, action: "Pin" | "Info"): void!!(Ho
   const event: Event = action === "Pin"
     ? { type: "pinInstalled", app, shell: showing, drawer: menu }
     : { type: "showAppInfo", app, shell: showing, drawer: menu, now: untimed }
-  if (!(try contained(home.send(event, owner), "choosing an installed app's action"))) return
-  if (action === "Pin") try contained(shell.send({ type: "closeDrawer" }), "closing Apps after adding a tile")
-  else try contained(drawer.send({ type: "closeMenu" }), "closing the Apps menu")
+  if (!(try contained(home.send(event, owner, current), "choosing an installed app's action"))) return
+  if (action === "Pin") try contained(shell.send({ type: "closeDrawer" }, admitted), "closing Apps after adding a tile")
+  else try contained(drawer.send({ type: "closeMenu" }, current), "closing the Apps menu")
 }
 
 // spec/app/home/drawer.md, "The menu names a current app and closes before Apps"; spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
@@ -155,15 +158,59 @@ effect function tell(fx: Out) {
   for (const listener of [...listeners]) listener()
 }
 
-// spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"; spec/app/home/index.md, "An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest"
-effect function ownTileVisit(view: View, route: number, beside: boolean) {
+effect function homeInput(beside: boolean) {
   const canvas = try Canvas
   const layers = try Layers.Machine
   const device = try Device
+  return () => !Layers.pageInert(Effect.runSync(layers.get())) && Effect.runSync(device.showing())
+    && (!beside || landscapeHomeInput(Effect.runSync(canvas.get()), coarsePointer()))
+}
+
+// spec/app/shell/index.md, "Apps can open beside the landscape Ask sheet and Close leaves Ask open"; spec/app/shell/index.md, "The Apps drawer opens on phone Home with Ask Alpha at rest"
+effect function appsVisit(route: number, beside: boolean) {
+  const free = try homeInput(beside)
+  return (where: Shell.Shell) => where.route === route && where.drawer && where.textAsk.tag === "NoTextAsk"
+    && (beside ? Shell.adjacentAskSheet(where, true) : where.assistant === "Bar") && free()
+}
+
+export effect function openApps(route: number, beside: boolean) {
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const free = try homeInput(beside)
+  const event = beside
+    ? { type: "openDrawerBeside", phone: true, landscapePhone: true } as const
+    : { type: "openDrawer", phone: true } as const
+  const current = (where: Shell.Shell) => where.route === route && where.textAsk.tag === "NoTextAsk"
+    && Home.offersDrawer(Effect.runSync(home.get())) && free()
+  if (current(try shell.get())) try contained(shell.send(event, current), "opening Apps")
+}
+
+export effect function closeApps(route: number, beside: boolean) {
+  const shell = try Shell.Machine
+  const current = try appsVisit(route, beside)
+  if (current(try shell.get())) try contained(shell.send({ type: "closeDrawer" }, current), "closing Apps")
+}
+
+export type AppsInput = Extract<Drawer.Event, { type: "search" | "openMenu" | "closeMenu" }>
+  | Extract<Event, { type: "openApp" | "tryAgain" }>
+
+export effect function actInApps(route: number, beside: boolean, event: AppsInput) {
+  const shell = try Shell.Machine
+  const admitted = try appsVisit(route, beside)
+  const current = () => admitted(Effect.runSync(shell.get()))
+  if (!current()) return false
+  if (event.type === "openApp" || event.type === "tryAgain")
+    return try contained((try Home.Machine).send(event, owner, current), "using Apps")
+  return try contained((try Drawer.Machine).send(event, current), "using Apps")
+}
+
+// spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"; spec/app/home/index.md, "An Alpha tile beside the landscape Ask sheet opens its app and lowers Ask Alpha to rest"
+effect function ownTileVisit(view: View, route: number, beside: boolean) {
+  const free = try homeInput(beside)
   return (home: Home.Home, shell: Shell.Shell) => {
-    if (shell.route !== route || Layers.pageInert(Effect.runSync(layers.get())) || !Effect.runSync(device.showing())) return undefined
+    if (shell.route !== route || !free()) return undefined
     const event = beside
-      ? { type: "openTileBeside", view, shell, landscapePhone: landscapeHomeInput(Effect.runSync(canvas.get()), coarsePointer()) } as const
+      ? { type: "openTileBeside", view, shell, landscapePhone: true } as const
       : { type: "openTile", view, shell } as const
     return Home.enabled(home, event, owner) ? event : undefined
   }

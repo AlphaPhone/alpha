@@ -343,13 +343,13 @@ The uncovered Home pane on a landscape phone with a coarse primary pointer
 can open one of Alpha's own apps. The same Shell route and layout must
 still admit that tap when the app opens. An actual covering layer, voice,
 a protected Android Ask visit, Typing, Full, and the Apps drawer still
-own their input. Cards, installed-app tiles and Apps stay visible without
-receiving input in this visit.
+own their input. Cards and installed-app tiles stay visible without
+receiving input in this visit. The Apps tile follows the shell's drawer
+rule.
 
 ```quint
 pure def besideHomeSheet(shell: S::Shell, landscapePhone: bool): bool =
-  landscapePhone and shell.textAsk == S::NoTextAsk and shell.trail.length() == 0
-    and not(shell.drawer) and shell.assistant == S::Sheet
+  not(shell.drawer) and S::adjacentAskSheet(shell, landscapePhone)
 
 pure def canOpenTileBeside(h: Home, view: S::View, shell: S::Shell, landscapePhone: bool, by: Actor): bool =
   by == Owner and not(h.editing) and onPhone(h) and besideHomeSheet(shell, landscapePhone)
