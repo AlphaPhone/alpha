@@ -337,6 +337,12 @@ title, time, all-day flag and the revision of those fields.
 
 ### Calendar asks for the phone's calendar only while it lacks it, and only once
 
+As live v119 did, Calendar shows no notice asking for it: opening New event
+on a phone with calendars of its own asks Android, and so does Save to the
+phone's calendar, which waits for the answer before it goes out. Either
+asks only while Calendar may still ask; after that, Calendar's settings
+notice is the way to grant it.
+
 ```quint
 pure def canAskAccess(s: Calendar): bool = P::canAsk(s.access)
 
