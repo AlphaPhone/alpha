@@ -105,7 +105,18 @@ change as the request holds it: the title, the day and times with their
 time zone, the place, the calendar, the people and that no invitations are
 sent unless the request says so, all day, and this occurrence or every one.
 A request gone from the list is withdrawn; a new revision of the same
-request is a change of its event.
+request is a change of its event. A change the owner declined, the agent
+withdrew or Google refused reads the list again at once, so the next
+pending request's card shows without waiting for Calendar's next read; the
+request just declined is not proposed again while its decline is on its
+way to the agent.
+
+```quint
+pure def readsRequestsAgain(result: Result): bool = result == Declined or result == Withdrawn or result == Refused
+
+pure def lawAnEndedCardMakesWayForTheNext(change: Change): bool =
+  readsRequestsAgain(Declined) and readsRequestsAgain(Withdrawn) and readsRequestsAgain(Refused) and not(readsRequestsAgain(NoResult))
+```
 
 ```quint
 pure def canPropose(s: AgentCalendar, change: Change, reply: Reply, complete: bool, filing: int, id: int, series: bool, managed: bool, revision: int, by: Actor): bool =
@@ -268,14 +279,13 @@ own result, never from the owner's words. While a change is under way its
 card stays at the foot of each conversation where a reply filed one. Once
 it ends, how it ended shows there until the owner asks something else.
 
-The card at the foot of a conversation is the card of the newest reply
-there that filed a request, and it is bound to the request the calendar
-holds: it shows, and its Approve and Decline act, only while that request
-is one this reply filed. While the calendar still holds an earlier
-request, this reply shows no card at all, so nothing under it approves or
-declines the earlier one; a card for the earlier request belongs to the
-reply that filed it. Once the earlier request ends and the calendar holds
-this reply's own, its card shows.
+The card at the foot of a conversation is bound to the request the
+calendar holds: it shows, and its Approve and Decline act, only while that
+request is one a reply of this conversation filed, as Sunday's v119 kept a
+card for each reply's own request. While the calendar holds a request no
+reply here filed, no card shows here, so nothing here approves or declines
+it. When two replies here filed requests, the card shows the one the
+calendar holds, then the next once that one ends.
 
 ```quint
 type InAskAlpha = NothingToShow | ChangeUnderWay | ChangeEnded
@@ -285,12 +295,12 @@ pure def inAskAlpha(s: AgentCalendar, filedByAReply: bool): InAskAlpha =
   else if (filedByAReply and s.result != NoResult and s.result != Withdrawn) ChangeEnded
   else NothingToShow
 
-pure def shownInAskAlpha(shown: InAskAlpha, itsOwnRequest: bool, latestReply: bool): bool =
-  itsOwnRequest and (shown == ChangeUnderWay or (shown == ChangeEnded and latestReply))
+pure def shownInAskAlpha(shown: InAskAlpha, filedHere: bool, latestReply: bool): bool =
+  filedHere and (shown == ChangeUnderWay or (shown == ChangeEnded and latestReply))
 
 pure def lawACardUnderWayShowsWhereItWasAsked(latestReply: bool): bool = shownInAskAlpha(ChangeUnderWay, true, latestReply)
 
-pure def lawNoCardShowsUnderAReplyForARequestItDidNotFile(shown: InAskAlpha, latestReply: bool): bool = not(shownInAskAlpha(shown, false, latestReply))
+pure def lawNoCardShowsWhereNoReplyFiledTheRequestHeld(shown: InAskAlpha, latestReply: bool): bool = not(shownInAskAlpha(shown, false, latestReply))
 
 pure def lawACardDecidesOnlyTheRequestItShows(s: AgentCalendar, filing: int): bool =
   (canApprove(s, filing, Owner) or canDecline(s, filing, Owner)) implies filing == s.filing

@@ -202,6 +202,8 @@ export interface SpokenReview {
   readonly session: number
   readonly turn: number
   readonly current: Effect.Effect<boolean>
+  /** The turn asked Files directly, so only a page open's card may show: voice shows no Files review card. */
+  readonly pagesOnly?: boolean
 }
 
 interface DeviceActionReply {
@@ -346,6 +348,7 @@ function spokenOperation(proposal: Proposal, opened: Session, message: string, r
   const expires = Date.parse(proposal.expiresAt)
   const op = operation(proposal.payload.operation)
   if (op === undefined || op.type === "sms_send" || !Number.isFinite(expires) || expires <= at) return undefined
+  if (reply.spoken?.pagesOnly === true && op.type !== "browser_navigate") return undefined
   const request = proposal.payload.requestMessageId
   if (request !== undefined && request !== message) return undefined
   if (reviewedRead(op)) return acceptsRead(opened, op) && exactReadOrigin(proposal, message, reply) !== undefined ? op : undefined

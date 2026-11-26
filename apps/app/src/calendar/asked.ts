@@ -31,12 +31,9 @@ export function filedRequests(ran: ReadonlyArray<Ran>): string[] {
   });
 }
 
-/** The card of the newest reply of `conversation` that filed a request: that reply, and the request it is bound to while the calendar holds one that reply filed. @throws {never} */
-export function cardOf(now: Asked, conversation: number): { readonly message: string; readonly request: string | undefined } | undefined {
-  const newest = now.filed.findLast((one) => one.conversation === conversation);
-  if (newest === undefined) return undefined;
-  const own = now.holds !== "" && now.filed.some((one) => one.conversation === conversation && one.message === newest.message && one.request === now.holds);
-  return { message: newest.message, request: own ? now.holds : undefined };
+/** The request the Calendar card of `conversation` is bound to: the one the calendar holds, while a reply there filed it. @throws {never} */
+export function boundIn(now: Asked, conversation: number): string | undefined {
+  return now.holds !== "" && now.filed.some((one) => one.conversation === conversation && one.request === now.holds) ? now.holds : undefined;
 }
 
 /** The request the Calendar card in Ask Alpha is bound to: it shows, and decides, that request only. */

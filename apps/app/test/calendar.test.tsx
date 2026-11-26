@@ -987,31 +987,29 @@ describe("on a phone", () => {
       };
       await send(`Put ${title} on my calendar tomorrow.`);
     };
-    /** The owner declines in Calendar the request `id` it holds, and Calendar reads its requests again. */
-    const declineInCalendar = async (id: string) => {
+    /** The owner declines in Calendar the request it holds; Calendar reads nothing again by hand. */
+    const declineInCalendar = async () => {
       await agent.runPromise(Effect.flatMap(Changes, (machine) => Effect.flatMap(machine.get(), (a) => machine.send({ type: "decline", filing: a.filing }, "Owner"))));
       await until(alpha, agent, Changes, (a) => a.result === "Declined");
-      await vi.waitFor(() => expect(world.calendar.writes).toContain(`reject ${id}`));
-      await agent.runPromise(relistRequests);
     };
     return { alpha, agent, file, request, declineInCalendar };
   }
 
   const askedCard = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
 
-  it("Approve under a reply decides only the request that reply filed, while an earlier reply's request still waits (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+  it("Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
     const world = morning(true);
-    const { alpha, agent, file, declineInCalendar } = await askingCalendar(world);
+    const { alpha, agent, file } = await askingCalendar(world);
     await file("approval-earlier-reply", "camera setup", 9);
     await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
 
     await file("approval-newer-reply", "lens check", 11);
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
     await drawn(() => {});
-    expect([askedCard(), button("Approve"), button("Decline")]).toEqual(["", undefined, undefined]);
+    expect(["camera setup", "lens check"].map((text) => askedCard().includes(text))).toEqual([true, false]);
     expect(world.calendar.writes).toEqual([]);
 
-    await declineInCalendar("approval-earlier-reply");
+    await press("Decline");
     await vi.waitFor(() => expect(askedCard()).toContain("lens check"));
     expect(askedCard()).not.toContain("camera setup");
     await press("Approve");
@@ -1035,7 +1033,7 @@ describe("on a phone", () => {
     await drawn(() => {});
     expect([tried._tag, (await agent.runPromise(Effect.flatMap(Changes, (machine) => machine.get()))).stage, world.calendar.writes]).toEqual(["Failure", "Awaiting", []]);
 
-    await declineInCalendar("approval-filed-before");
+    await declineInCalendar();
     await vi.waitFor(() => expect(askedCard()).toContain("studio call"));
     await press("Approve");
     await until(alpha, agent, Changes, (a) => a.result === "Done");
