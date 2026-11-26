@@ -533,8 +533,8 @@ card, as v119 asked first for every direct run. So a typed or spoken turn
 declares `browser.open-direct.v1` only while such a page would open at
 once, read as the turn is sent, as v119 dropped its direct request while it
 asked first: the agent then keeps the open for review, and its card shows
-in Ask Alpha for a spoken request too. Every page still opens only under
-the rule above.
+in Ask Alpha for a spoken request too, from Files as from any other
+screen. Every page still opens only under the rule above.
 
 ```quint
 pure val directOpenCapability: str = "browser.open-direct.v1"

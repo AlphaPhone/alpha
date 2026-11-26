@@ -86,14 +86,15 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     returningRef.current = request;
     void runtime.runPromiseExit(returnPhoneTab(() => request.tab)).then(() => { returningRef.current = undefined; });
   };
+  const applied = held.filteredBy === "Alpha";
   const actions = (
     <>
-      {can({ type: "beginSearch" }) && <Button variant="ghost" size="icon" aria-label="Search contacts" onClick={() => void send({ type: "beginSearch" })}><Search className="size-5" /></Button>}
+      {can({ type: "beginSearch", applied }) && <Button variant="ghost" size="icon" aria-label="Search contacts" onClick={() => void send({ type: "beginSearch", applied })}><Search className="size-5" /></Button>}
       {can({ type: "compose" }) && <Button variant="ghost" size="icon" aria-label="New contact" onClick={() => { set({ form: blankForm, editBase: undefined, problem: undefined }); void send({ type: "compose" }); }}><Plus className="size-5" /></Button>}
       {can({ type: "composeElsewhere" }) && <Button variant="ghost" size="icon" aria-label="New contact" onClick={() => void send({ type: "composeElsewhere" })}><Plus className="size-5" /></Button>}
     </>
   );
-  const filtered = state.sought && !searching && held.filteredBy === "Alpha";
+  const filtered = state.sought && !searching && applied;
   const chip = filtered && (
     <>
       <Chip className="min-w-0 [&>button:first-child]:min-w-0" onClear={() => void send({ type: "endSearch" })} clearLabel={`Clear filter ${query}`}><span className="truncate">{query} · {state.rows}</span></Chip>

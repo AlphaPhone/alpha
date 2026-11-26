@@ -37,7 +37,7 @@ import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agen
 import { type Request, requests } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
 import { releasedReach } from "./deletions.vibe";
-import { type Fields, confirmCalendarReschedule, kept, saveCalendarReminder, startForm, takeSaved, typed } from "./editor.vibe";
+import { type Fields, confirmCalendarReschedule, kept, saveCalendarReminder, saveEvent, startForm, takeSaved, typed } from "./editor.vibe";
 import { type Row, onDay, shown } from "./shown.ts";
 import { type CalendarRow, type DatedReminder, calendarRowKey, datedReminders } from "./reminders.ts";
 import { remindersStore } from "../reminders/store.ts";
@@ -562,9 +562,6 @@ function Access({ runtime }: CalendarProps) {
   const view = useView(runtime);
   useSyncExternalStore((listener) => shown.subscribe(listener), () => shown.snapshot(), () => shown.snapshot());
   if (!view.state || !shown.present()) return null;
-  if (view.can({ type: "askAccess" })) {
-    return <CalendarNotice actions={<CalendarNoticeAction onClick={() => void view.send({ type: "askAccess" })}>Allow</CalendarNoticeAction>}>Calendar needs access to your phone's calendar.</CalendarNotice>;
-  }
   if (view.can({ type: "openSettings" })) {
     return (
       <CalendarNotice tone="caution" actions={<CalendarNoticeAction aria-label="Open Calendar settings" onClick={() => void view.send({ type: "openSettings" })}><Settings aria-hidden />Settings</CalendarNoticeAction>}>
@@ -799,7 +796,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const onAgent = destination === "Agent";
   // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on this phone's calendar; its live adapter left them off the agent's (prototype/agent-calendar-adapter.ts:312, :328).
-  const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
+  const choosesOptions = !reminder && e.form === "NewEvent";
   const offersVideo = choosesOptions && (fields.video === true || offeredOn(onAgent, false, false, true));
   const offeredRepeats = repeats.filter(({ repeat }) => offeredOn(onAgent, repeat !== "NoRepeat", false, false));
   const offeredAlerts = alerts.filter(({ minutes }) => offeredOn(onAgent, false, minutes !== undefined, false));
@@ -809,7 +806,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const picked = (next: Fields) => withExtras({ ...next, calendar: destination });
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   const submit = () => {
-    if (!reminder) { void editor.send(save); return; }
+    if (!reminder) { void runtime.runPromise(saveEvent(destination === "Phone")); return; }
     saveButtonRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void runtime.runPromise(saveCalendarReminder());
   };
@@ -966,7 +963,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                   {reminder ? reminderRepeats.map(({ repeat, label }) => (
                     <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat}
                       onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
-                  )) : offeredRepeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
+                  )) : offeredRepeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={onAgent && repeat === "NoRepeat" ? "No repeat" : label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
                     disabled={!editor.can(plain)} onClick={() => (repeat === "NoRepeat" ? withExtras : picked)({ ...fields, repeat })} />)}
                 </div>
               </CalendarFormRow>
@@ -1010,17 +1007,21 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
 }
 
 // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number"; spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"
-/** The agent's change waiting for the owner, under way, or how it ended: over the days, and in Ask Alpha (sheet.tsx) with `className` placing it there. */
-export function Proposal({ runtime, className = "mx-4 mb-2" }: CalendarProps & { className?: string }) {
+/** The agent's change waiting for the owner, under way, or how it ended: over the days, and in Ask Alpha (sheet.tsx) with `className` placing it there and `bound` naming the one request it may show and decide. */
+export function Proposal({ runtime, className = "mx-4 mb-2", request: bound }: CalendarProps & { className?: string; request?: string }) {
   const agent = useChanges(runtime);
   const a = agent.state;
   if (!a) return null;
+  const request = requests.find(a.filing);
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+  if (bound !== undefined && request?.id !== bound) return null;
   if (a.stage === "Idle") return a.result in results ? <CalendarNotice>{results[a.result]}</CalendarNotice> : null;
   const row = shown.find(a.id);
-  const request = requests.find(a.filing);
   const f = request?.fields;
   const start = f ? Date.parse(f.startAt) : NaN;
   const end = f ? Date.parse(f.endAt) : NaN;
+  // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number": the decision names the request this card shows
+  const [approve, decline] = [{ type: "approve", filing: a.filing } as const, { type: "decline", filing: a.filing } as const];
   return (
     <section aria-label="Calendar change" className={`${className} shrink-0 rounded-chip bg-secondary px-5 py-4.5 text-base leading-normal`}>
       <strong>{`${changes[a.change]}${a.reply === "NoReply" ? "" : `: ${replies[a.reply]}`}${a.updated ? " (updated)" : ""}`}</strong>
@@ -1041,8 +1042,8 @@ export function Proposal({ runtime, className = "mx-4 mb-2" }: CalendarProps & {
       {a.complete ? null : <p className="text-meta text-muted-foreground">Alpha can't check this whole change, so it can't be approved.</p>}
       {a.stage === "Sending" || a.stage === "ReadingBack" ? <Spinner size="sm" /> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {agent.can({ type: "decline" }, "Owner") ? <button type="button" className="min-h-11 rounded-full bg-background px-4.5" onClick={() => void agent.send({ type: "decline" }, "Owner")}>Decline</button> : null}
-        {agent.can({ type: "approve" }, "Owner") ? <button type="button" className="min-h-11 rounded-full bg-alpha px-4.5 text-alpha-foreground" onClick={() => void agent.send({ type: "approve" }, "Owner")}>Approve</button> : null}
+        {agent.can(decline, "Owner") ? <button type="button" className="min-h-11 rounded-full bg-background px-4.5" onClick={() => void agent.send(decline, "Owner")}>Decline</button> : null}
+        {agent.can(approve, "Owner") ? <button type="button" className="min-h-11 rounded-full bg-alpha px-4.5 text-alpha-foreground" onClick={() => void agent.send(approve, "Owner")}>Approve</button> : null}
       </div>
     </section>
   );
