@@ -131,12 +131,17 @@ export function freedom(conversation: Conversation.Conversation, composer: Compo
   }
 }
 
-// spec/app/assistant/index.md, "The screen is told only to an agent that said, on this connection, that it takes it"
-effect function supported(ticket: number): Conversation.Event!!Agent {
+effect function readOptionalSupport(): { readonly ok: boolean; readonly takes: boolean }!!Agent {
   return effect {
     const read = statusRead(try ask(Agent, HttpClientRequest.get("/api/status"), Schema.Unknown))
-    return { type: "supported", ticket, ok: true, takes: sendsOptionalFields(learnPeer(notLearned, read), read) }
-  } catch () => ({ type: "supported", ticket, ok: false, takes: false })
+    return { ok: true, takes: sendsOptionalFields(learnPeer(notLearned, read), read) }
+  } catch () => ({ ok: false, takes: false })
+}
+
+// spec/app/assistant/index.md, "The screen is told only to an agent that said, on this connection, that it takes it"
+effect function supported(ticket: number): Conversation.Event!!Agent {
+  const probed = try readOptionalSupport()
+  return { type: "supported", ticket, ok: probed.ok, takes: probed.takes }
 }
 
 function ended(ticket: number, heard: boolean, result: TurnResult | undefined): Conversation.Event {
@@ -426,6 +431,21 @@ effect function bindArchiveAuthority(board: Board, authority: Attachments.Archiv
 }
 
 // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+effect function ensureOptionalFieldsSupport(told: boolean, needsStructured: boolean): boolean!!(Agent | Conversation.Machine) {
+  if (told || !needsStructured) return told
+  const conversation = try Conversation.Machine
+  const current = try conversation.get()
+  if (current.observing) return true
+  if (current.support.status === "Loaded") return false
+  const probed = try readOptionalSupport()
+  const after = try conversation.get()
+  if (probed.ok && Conversation.canSupported(after, after.support.ticket)) {
+    try ignore(conversation.send({ type: "supported", ticket: after.support.ticket, ok: true, takes: probed.takes }))
+  }
+  return (probed.ok && probed.takes) || (try conversation.get()).observing
+}
+
+// spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
 effect function reviewedEmailForSend(heldMail: boolean, attachment: MailQuestion | undefined, told: boolean): { readonly ok: boolean; readonly email?: ReviewedEmail }!!MailQuestions {
   const mail = try MailQuestions
   const email = heldMail
@@ -522,7 +542,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const voicemail = enrolled === undefined ? undefined : try review.voicemailTarget()
     try ignore(reply.send({ type: "begin", turn: ticket }))
     const transcript = staged?.transcript
-    const mailReview = try reviewedEmailForSend(held.mail, staged?.mail, told)
+    const effectiveTold = try ensureOptionalFieldsSupport(told, held.mail || held.transcript)
+    const mailReview = try reviewedEmailForSend(held.mail, staged?.mail, effectiveTold)
     if (!mailReview.ok) return try endRefused(queue, ticket, true)
     const authority = staged?.authority
     const observed = files.length === 0 ? undefined : try attachmentAuthority()
@@ -531,14 +552,14 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       return try endRefused(queue, ticket, true)
     }
     // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
-    const { metadata: screen, sms, attachment: openFile } = try screenTold(told, context, transcript?.offered, mailReview.email)
+    const { metadata: screen, sms, attachment: openFile } = try screenTold(effectiveTold, context, transcript?.offered, mailReview.email)
     const selected = screen?.observation?.selectedObject
     const owns = try ownsSeat(board, seat)
     const checkedOwner = owns ? seat?.authority : undefined
     const current = try conversation.get()
     const currentComposer = try (try Composer.Machine).get()
     const exactNote = sameStagedTranscript(transcript, staged, board, composer, currentComposer, current, selected)
-    const { exact, carried } = structuredAttachmentsReady(held, exactNote, screen, current.context.sensitive, told)
+    const { exact, carried } = structuredAttachmentsReady(held, exactNote, screen, current.context.sensitive, effectiveTold)
     const onContact = contact === undefined || (staged === board.staged
       && board.snapshot().contactDraft === contactDraft && (try contactFileSendCurrent(contact)))
     if (!owns || !exact || !carried || !onContact || (authority !== undefined && (checkedOwner === undefined || !Attachments.sameArchiveAuthority(authority, checkedOwner))) ||
@@ -567,10 +588,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       if (board.draftSeat !== seat) return
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
       heard = true
-      board.change({ reply: written, label: "" })
+      // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": text that may still be taken back keeps the working label.
+      if (!provisional) board.change({ reply: written, label: "" })
       show({ type: "token", turn: ticket, units: written.length, provisional })
     }
-    // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once the acknowledgment is taken it stays the label until text or the reply arrives.
+    // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": once the acknowledgment is taken it stays the label until text or the reply arrives.
     let acknowledged = false
     let toolRan = false
     const labelled = () => !acknowledged && board.snapshot().reply === ""
@@ -602,15 +624,12 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const asksDirect = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
     const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const sent = effect (direct: boolean) => {
-      const metadata = { ...screen, ...(told ? delivery(views.clientId, direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+      const metadata = { ...screen, ...(effectiveTold ? delivery(views.clientId, direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
       return tryPromise(() => controller.send({ text, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
     }
     if (contact !== undefined && (!(try contactFileSendCurrent(contact)) || board.snapshot().contactDraft !== contactDraft)) {
       board.drop(pageTicket, mine)
-      try ignore(reply.send({ type: "decline", turn: ticket }))
-      if (Conversation.canRefuse(try conversation.get(), ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
-      Queue.endUnsafe(queue)
-      return
+      return try endRefused(queue, ticket, true, Conversation.canRefuse(try conversation.get(), ticket))
     }
     const first = try sent(asksDirect)
     const directFiles = asksDirect && !resendWithoutMode(first, asksDirect)

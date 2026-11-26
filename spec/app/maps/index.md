@@ -26,7 +26,8 @@ follows the phone, what the owner was last told of guidance, and whether a
 number was copied. It also keeps whether the name field is open, whether
 the location being found is the quiet fix on opening and whether that was
 taken this visit, whether the owner's own locate found nothing, whether a
-locate waits for Android's answer, whether a search waits for a provider,
+locate waits for Android's answer, whether the location disclosure is
+showing, whether a search waits for a provider,
 whether the last fix of guidance could not guide, and whether this build has
 Phone.
 
@@ -239,7 +240,7 @@ Leaving navigation ends guidance and keeps the route; an open name field
 closes, then the starting places listed, before the directions; leaving a
 place forgets its route; leaving the search clears it. Back from the place
 a Calendar event opened goes back to that event. The agent's question is
-dropped.
+dropped, and the location disclosure closes unread.
 
 ```quint
 pure def withoutFinder(c: C::Connection): C::Connection =
@@ -251,7 +252,7 @@ pure def finderStops(c: C::Connection): List[Effect] =
 pure def canGoBack(m: Maps): bool = layers(m) > 0
 
 pure def goBack(m: Maps): Stepped =
-  val dropped = { ...m, question: NoQuestion, review: V::dismiss(m.review) }
+  val dropped = { ...m, question: NoQuestion, review: V::dismiss(m.review), explaining: false }
   if (m.trip.guidance != N::Stopped) endGuidance(dropped)
   else if (m.renaming) { state: { ...dropped, renaming: false }, out: List() }
   else if (choosingStart(m)) { state: { ...dropped, origins: cleared(m.origins), originsFound: 0 }, out: List() }
@@ -1156,8 +1157,8 @@ pure def sometimesRerouting(m: Maps): bool = m.trip.rerouting
 Maps is left when another view is shown, when the page is hidden, and when
 the phone locks over it: what the agent may read follows the same. Leaving
 withdraws the search, details, starting places and route still on their
-way and keeps what had arrived; the typing pause ends, and the map's
-surface is released. Coming back asks again for the search leaving
+way and keeps what had arrived; the typing pause ends, the location
+disclosure closes unread, and the map's surface is released. Coming back asks again for the search leaving
 withdrew, and for a locate Android allowed while Maps was away.
 
 ```quint
@@ -1171,7 +1172,7 @@ pure def leaveMaps(m: Maps): Stepped =
   { state: { ...m, trip: kept, link: link,
       fromEvent: 0, sheet: if (ended) Half else m.sheet, guideNotice: if (ended) PausedAway else m.guideNotice,
       search: N::withdrawn(m.search), details: N::withdrawn(m.details), origins: N::withdrawn(m.origins),
-      pausing: false, quiet: false, quietDone: false, imprecise: false },
+      pausing: false, quiet: false, quietDone: false, imprecise: false, explaining: false },
     out: (if (ended) List(StopGuidance) else finderStops(m.link)).concat(drawn(m.link, link)) }
 
 pure def canComeBack(m: Maps): bool = N::canComeBack(m.trip)
@@ -1417,10 +1418,17 @@ location and the disclosure is unread, shows the disclosure and nothing
 else. A search needs no location, so the disclosure never holds one back,
 nor a query another app hands to Maps. Recenter stays on the map whenever
 Maps is not guiding; while Maps is locating or Android's prompt is open,
-tapping it does nothing.
+tapping it does nothing. The disclosure belongs to the tap that showed it:
+it closes unread when the owner leaves Maps or presses Back, and once
+Android allows location, so Maps never opens on it.
 
 ```quint
 pure def alwaysExplainingOnlyBeforeTheDisclosure(m: Maps): bool = m.explaining implies not(m.link.disclosed)
+
+pure def alwaysExplainingOnlyWhileLocationIsNotAllowed(m: Maps): bool = m.explaining implies not(P::allows(m.link.location))
+
+pure def stepTheDisclosureClosesWithTheVisit(before: Maps, via: str, after: Maps): bool =
+  Set("leaveMaps", "goBack").contains(via) implies not(after.explaining)
 ```
 
 ### Continuing past the disclosure asks Android, once, and then locates
@@ -1511,7 +1519,7 @@ pure def observeLocation(m: Maps, grant: P::Grant): Stepped =
   val found = C::locate(link, C::Finder)
   { state: { ...m, link: if (now) found else link, trip: if (lost) N::endGuidance(m.trip) else m.trip,
       sheet: if (lost) Half else m.sheet, owedLocate: allowed and not(now), quiet: if (now) false else m.quiet and link.locator == C::Finder,
-      imprecise: if (lost) false else m.imprecise },
+      imprecise: if (lost) false else m.imprecise, explaining: m.explaining and not(P::allows(link.location)) },
     out: (if (lost) List(StopGuidance) else List())
       .concat(if (now) List(StartLocation({ session: found.session, once: true })) else List()) }
 

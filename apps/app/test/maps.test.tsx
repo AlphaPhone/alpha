@@ -223,6 +223,47 @@ describe("Maps on a phone", () => {
     expect(Boolean(button("Recenter"))).toBe(true);
   });
 
+  it("The location disclosure closes on Back, on leaving Maps and once Android allows location, and Recenter shows it again (spec/app/maps/index.md, \"Story: Use my location\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.maps.allowed = "prompt";
+    const why = "Maps uses your location to show where you are";
+    const now = (runtime: Awaited<ReturnType<typeof onMaps>>["runtime"]) => runtime.runPromise(Effect.flatMap(Screen, (machine) => machine.get()));
+    const told = (runtime: Awaited<ReturnType<typeof onMaps>>["runtime"], grant: "Unasked" | "Granted") =>
+      act(async () => { await runtime.runPromise(Effect.ignore(Effect.flatMap(Screen, (machine) => machine.send({ type: "observeLocation", grant })))); });
+    const card = () => Boolean(document.body.textContent?.includes(why));
+
+    const { alpha, runtime } = await onMaps(world);
+    await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
+    await act(async () => { handToMaps("harbour"); });
+    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+
+    // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Back closes it with the search
+    await press("Recenter");
+    await until(alpha, runtime, Screen, (s) => s.explaining);
+    expect(card()).toBe(true);
+    await hardware("back");
+    await until(alpha, runtime, Screen, (s) => !s.searching);
+    expect([(await now(runtime)).explaining, card()]).toEqual([false, false]);
+
+    // Leaving Maps closes it, so the next visit opens on the bare map with Recenter
+    await press("Recenter");
+    await until(alpha, runtime, Screen, (s) => s.explaining);
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    await showMaps(alpha);
+    await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
+    expect([(await now(runtime)).explaining, card(), Boolean(button("Recenter"))]).toEqual([false, false, true]);
+
+    // An answer that leaves location unasked keeps it; one that allows location closes it
+    await press("Recenter");
+    await until(alpha, runtime, Screen, (s) => s.explaining);
+    await told(runtime, "Unasked");
+    expect([(await now(runtime)).explaining, card()]).toEqual([true, true]);
+    await told(runtime, "Granted");
+    await until(alpha, runtime, Screen, (s) => !s.explaining);
+    expect([(await now(runtime)).link.disclosed, card()]).toEqual([false, false]);
+  });
+
   it("Signed out, Maps asks Cloud nothing and says to sign in (spec/app/maps/index.md, \"Story: Connect through my cloud account\")", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, runtime } = await onMaps(world);
