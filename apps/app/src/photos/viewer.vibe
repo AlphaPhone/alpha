@@ -9,7 +9,7 @@ import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, photoEmailMaxBytes, t
 import { photoRefusal, renderBrowserPhoto, type BrowserEditFrame, type PhotoLook } from "../platform/photoCanvas.vibe"
 import { clipRefusal, renderBrowserClip } from "../platform/videoCanvas.vibe"
 import { Catalog } from "./catalog.vibe"
-import { answer, applying, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
+import { answer, applying, reacting, run, started, together, type Job, migratedStore } from "../runtime/reactor.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { handOver } from "../inbox/adding.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
@@ -465,14 +465,7 @@ effect function viewerRecord(raw: string | undefined): (string | undefined)!! {
 }
 
 function storedViewer(key: string, start = Viewer.initial) {
-  return Layer.unwrap(effect {
-    const store = try KeyValueStore.KeyValueStore
-    const compatible = KeyValueStore.make({
-      ...store,
-      get: (name: string) => name === key ? Effect.flatMap(store.get(name), viewerRecord) : store.get(name),
-    })
-    return Layer.provide(Viewer.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, compatible))
-  })
+  return Layer.provide(Viewer.stored(key, start), migratedStore(key, viewerRecord))
 }
 
 /** The viewer's hands, over its rule-owned playback and edit state. */

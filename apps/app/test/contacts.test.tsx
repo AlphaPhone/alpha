@@ -21,13 +21,10 @@ import home from "../src/home/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { placeOf } from "../src/voice/voice.vibe";
 import { button, chatAction, closeAll, drawn, fill, filledPhoneKeypad, hardware, later, only, open as openAlpha, press, underAct, until } from "./alpha.tsx";
-import { type Scene, scene } from "./fakes/scene.ts";
+import { alphaImage as image, type Scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
-
-/** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
-const image = () => ({ ...scene(), phone: true, image: true });
 
 const mounts = [
   ...only("home", "view:Contacts", "view:Phone", "view:Messages", "assistant", "phone/stage", "notice"),
@@ -70,6 +67,13 @@ describe("Contacts on an Alpha image", () => {
       await drawn(() => undefined);
       expect(button(name)?.disabled).toBe(false);
     }, { timeout: 12_000, interval: 50 });
+    /** Return to Contacts on the Ask Alpha stage, and wait until it reads Maya's card again. */
+    const returnToCard = async () => {
+      await enabled("Return to Contacts");
+      await press("Return to Contacts");
+      await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts" && state.assistant === "Sheet");
+      await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.opened && state.contact === "7" && state.card.status === "Loaded");
+    };
 
     // spec/app/messages/index.md, "New message reads the contacts that have a number and brings back the owner's unsent New draft"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
     await show("Maya Chen");
@@ -100,10 +104,8 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Messages" && state.assistant === "Sheet");
     await enabled("Return to Contacts");
     expect(button("Return to Contacts")?.closest('section[aria-label="Ask Alpha"]')).toBeInstanceOf(HTMLElement);
-    await press("Return to Contacts");
-    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts" && state.assistant === "Sheet");
     // spec/app/contacts/index.md, "Leaving Contacts forgets the rows and the open contact, and keeps a form the owner was filling in"
-    await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.opened && state.contact === "7" && state.card.status === "Loaded");
+    await returnToCard();
     expect(button("Message +14155550100")).toBeDefined();
 
     // spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
@@ -114,10 +116,7 @@ describe("Contacts on an Alpha image", () => {
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
 
     // spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"
-    await enabled("Return to Contacts");
-    await press("Return to Contacts");
-    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts" && state.assistant === "Sheet");
-    await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.opened && state.contact === "7" && state.card.status === "Loaded");
+    await returnToCard();
     expect(button("Call +14155550100")).toBeDefined();
 
     await hardware("home");

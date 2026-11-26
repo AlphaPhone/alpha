@@ -303,8 +303,14 @@ async function startProvider(key: string, real: RealModel | undefined) {
     const system = typeof character === "string" ? character : "";
     listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
-    const last = messages.findLast((message) => message.role === "user")?.content;
-    const pending = listed(replies, scripted(system));
+    const content = messages.findLast((message) => message.role === "user")?.content;
+    // A message with pictures is a list of parts: its words are its text parts, so a script can still be bound to them.
+    const last = Array.isArray(content)
+      ? content.flatMap((part: unknown) => typeof part === "object" && part !== null && "type" in part && part.type === "text"
+        && "text" in part && typeof part.text === "string" ? [part.text] : []).join("\n")
+      : content;
+    // Only reading: a call made before this owner's first script must not leave an empty list that later shadows it.
+    const pending = replies.get(scripted(system)) ?? [];
     const prompt = typeof last === "string" ? ownerWords(last) : undefined;
     const choice = pending.findIndex((entry) => entry.prompt === undefined || entry.prompt === prompt);
     const queued = choice < 0 ? undefined : pending.splice(choice, 1)[0]?.reply;
@@ -432,7 +438,7 @@ export async function startCloud(state: string, emails: readonly string[], credi
       apiUrl: `${provider.origin}/stripe`, secretKeyEnv: "STRIPE_SECRET_KEY", webhookSecretEnv: "STRIPE_WEBHOOK_SECRET", publishableKey: "pk_test_local",
       plans: Object.fromEntries(Object.entries(plans).map(([plan, { priceId, productId }]) => [plan, { priceId, productId }])),
     },
-    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: real?.defaultMaxTokens ?? 1024 }] },
+    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: real === undefined, defaultMaxTokens: real?.defaultMaxTokens ?? 1024 }] },
   };
   const signInReturn = `${web}/alphaphone/auth/callback`;
   const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/alphaphone/billing/return` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };

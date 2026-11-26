@@ -72,6 +72,7 @@ export effect function settleDraftRecord(held: HeldDraft, sent: SentDraft): { re
 
 module legacy {
   import { allowsTestMocks } from "../platform/build.ts"
+  import { replyTo } from "../platform/portReply.ts"
 
   interface DraftPort extends EventTarget { postMessage(data: string): void }
   type Request = { kind: "read"; threadId: string | null }
@@ -97,10 +98,8 @@ module legacy {
         reject(new Error("The installed Messages draft could not be confirmed."))
       }
       function received(event: Event) {
-        if (!(event instanceof MessageEvent) || typeof event.data !== "string" || event.data.length > 16 * 1024 * 1024) return
-        let reply: unknown
-        try { reply = JSON.parse(event.data) } catch { return }
-        if (typeof reply !== "object" || reply === null || !("requestId" in reply) || reply.requestId !== requestId) return
+        const reply = replyTo(event, requestId, 16 * 1024 * 1024)
+        if (reply === undefined) return
         cleanup()
         if (Object.keys(reply).length === 2 && "result" in reply) resolve(reply.result)
         else reject(new Error("The installed Messages draft request was refused."))

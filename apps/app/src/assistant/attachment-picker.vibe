@@ -189,6 +189,12 @@ effect function sameVisit(visit: Visit): boolean!!PickerShell {
     && (try targetCurrent(visit.target))
 }
 
+/** The board's visit while it is still `visitId`, not preparing a document, and still the one on screen. */
+effect function readyVisit(visitId: number): (Visit | undefined)!!PickerShell {
+  const visit = (try AttachmentPicker).board.current()
+  return visit !== undefined && visit.id === visitId && !visit.preparing && (try sameVisit(visit)) ? visit : undefined
+}
+
 effect function releaseSystemChoices(choices: readonly Choice[]): void!!Documents {
   const { client } = try Documents
   if (Option.isNone(client)) return
@@ -378,8 +384,8 @@ export effect function importPickerFiles(files: readonly File[], visitId: number
   const { board, writer } = try AttachmentPicker
   const machine = try Picker.Machine
   return try writer.withPermits(1)(effect {
-    const visit = board.current()
-    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit))) return false
+    const visit = try readyVisit(visitId)
+    if (visit === undefined) return false
     const remaining = (try machine.get()).room - visit.selection.length
     const chosen: Choice[] = files.slice(0, remaining).map((file) => ({ kind: "imported", file, view: {
       id: `picked:${fresh()}`, kind: file.type.startsWith("image/") ? "photo" : "file", name: file.name, bytes: file.size,
@@ -422,10 +428,10 @@ export effect function pickSystemDocument(visitId: number): boolean!!(PickerShel
 }
 
 export effect function clearPickerChoice(visitId: number): boolean!!(PickerShell | Documents) {
-  const { board, writer } = try AttachmentPicker
+  const { writer } = try AttachmentPicker
   const removed = try writer.withPermits(1)(effect {
-    const visit = board.current()
-    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit))) return undefined
+    const visit = try readyVisit(visitId)
+    if (visit === undefined) return undefined
     const selected = visit.selection
     return (try recordChoice(visit, [], false)) ? selected : undefined
   })
@@ -434,29 +440,27 @@ export effect function clearPickerChoice(visitId: number): boolean!!(PickerShell
   return true
 }
 
-export effect function upPickerFolder(visitId: number): boolean!!PickerShell {
-  const { board, writer } = try AttachmentPicker
+/** Open the folder `locate` finds in the ready visit `visitId`; nothing where the visit moved on or there is none. */
+effect function openPickerFolder(visitId: number, locate: (visit: Visit, state: Picker.Attachments) => AttachmentDocumentLocation | undefined, what: string): boolean!!PickerShell {
+  const { writer } = try AttachmentPicker
   const machine = try Picker.Machine
   return try writer.withPermits(1)(effect {
-    const visit = board.current()
-    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit))) return false
-    const state = try machine.get()
-    const located = visit.listing?.request.ticket === state.rows.ticket ? visit.listing?.location : undefined
-    if (!located?.path) return false
-    const folder = folderNumber(visit, { path: located.path.split("/").slice(0, -1).join("/"), volume: located.volume })
-    return try contained(machine.send({ type: "setFolder", folder }), "going up an attachment folder")
+    const visit = try readyVisit(visitId)
+    const location = visit === undefined ? undefined : locate(visit, try machine.get())
+    if (visit === undefined || location === undefined) return false
+    return try contained(machine.send({ type: "setFolder", folder: folderNumber(visit, location) }), what)
   })
 }
 
+export effect function upPickerFolder(visitId: number): boolean!!PickerShell {
+  return try openPickerFolder(visitId, (visit, state) => {
+    const located = visit.listing?.request.ticket === state.rows.ticket ? visit.listing?.location : undefined
+    return located?.path ? { path: located.path.split("/").slice(0, -1).join("/"), volume: located.volume } : undefined
+  }, "going up an attachment folder")
+}
+
 export effect function selectPickerVolume(id: string, visitId: number): boolean!!PickerShell {
-  const { board, writer } = try AttachmentPicker
-  const machine = try Picker.Machine
-  return try writer.withPermits(1)(effect {
-    const visit = board.current()
-    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit)) || !visit.volumes.some((volume) => volume.id === id)) return false
-    const folder = folderNumber(visit, { path: "", volume: id })
-    return try contained(machine.send({ type: "setFolder", folder }), "opening an attachment volume")
-  })
+  return try openPickerFolder(visitId, (visit) => visit.volumes.some((volume) => volume.id === id) ? { path: "", volume: id } : undefined, "opening an attachment volume")
 }
 
 const filesRead = ({ attempt }: ReadFiles, accepted: number) => ({ type: "filesRead", attempt, accepted } as const)
