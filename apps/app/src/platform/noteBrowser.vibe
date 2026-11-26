@@ -72,10 +72,10 @@ module browser {
   /** The browser retains only its original connection's recordings, in the installed audio store. */
   export function browserNoteDevice() {
     const audio = createNotesAudioStore({ databaseName: audioDatabase })
-    const playback = browserNotePlayback(audio)
     const journal = createBrowserRecordingJournal(journalDatabase)
     const listeners = new Set<(value: Tape) => void>()
     let owner: string | undefined
+    const playback = browserNotePlayback(audio, () => owner)
     let active: Capture | undefined
     let opening = false
     let permission: PermissionState = "prompt"
