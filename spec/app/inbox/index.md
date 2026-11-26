@@ -207,8 +207,10 @@ title, and the field stays open while it is empty. While it is open the
 folders are not drawn under it. Back, the phone's or the field's own where
 one is drawn, closes the field first, empty or not, drops what it typed and
 reads the folder again without the search; only the next Back leaves
-Inbox. Emptying the field reads the folder without the search and keeps
-the field open. Leaving Inbox closes a field with nothing searched, so the
+Inbox. A search that can no longer be read again without it, once access
+is withdrawn or its folder cannot be searched, is not closed by Back, which
+then leaves Inbox. Emptying the field reads the folder without the search
+and keeps the field open, a search kept through a restart too. Leaving Inbox closes a field with nothing searched, so the
 next visit opens on the folder. Off the launcher the field draws its own Back; on the
 launcher Inbox draws no Back, so the field runs the full width.
 
@@ -221,9 +223,9 @@ pure def openSearch(s: Mailbox): Moved = { state: { ...s, searching: true }, out
 
 pure def canClearSearch(s: Mailbox): bool = s.selected.query != "" and canSearch(s, "")
 
-pure def clearSearch(s: Mailbox): Moved = search(s, "")
+pure def clearSearch(s: Mailbox): Moved = search({ ...s, searching: true }, "")
 
-pure def canCloseSearch(s: Mailbox): bool = s.searching or canClearSearch(s)
+pure def canCloseSearch(s: Mailbox): bool = (s.searching and s.selected.query == "") or canClearSearch(s)
 
 pure def closeSearch(s: Mailbox): Moved =
   val closed = { ...s, searching: false }
