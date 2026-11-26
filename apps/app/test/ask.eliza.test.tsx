@@ -369,8 +369,8 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await press("Send");
   await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
   await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
-  expect(received[0]).toHaveProperty("text", expect.stringContaining(prompt));
   expect(received).toEqual([expect.objectContaining({
+    text: expect.stringContaining(prompt),
     images: [
       { data: replacement.image.slice(replacement.image.indexOf(",") + 1), mimeType: "image/jpeg", name: replacement.name },
       { data: ordinaryData, mimeType: "image/png", name: ordinary },
