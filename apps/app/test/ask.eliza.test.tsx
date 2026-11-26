@@ -252,16 +252,37 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   const library = photos.runtime(alpha);
   const chat = assistant.runtime(alpha);
   await until(alpha, chat, Conversation, (state) => state.ready);
+  await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
   await press("Photos");
   await until(alpha, library, Library, (state) => state.library.status === "Loaded");
-  await press(source.name);
-  await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
-  await drawn(() => button("Photo actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
-  await drawn(() => {
-    const action = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Ask Alpha");
-    if (!action) throw new Error("Ask Alpha was not offered for the photo");
-    action.click();
-  });
+  const openPhoto = async () => {
+    await press(source.name);
+    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+  };
+  const askAbout = async () => {
+    await drawn(() => button("Photo actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    await drawn(() => {
+      const action = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Ask Alpha");
+      if (!action) throw new Error("Ask Alpha was not offered for the photo");
+      action.click();
+    });
+  };
+  await openPhoto();
+  const priorReads = world.photos.readCount;
+  const gate = Promise.withResolvers<void>();
+  world.photos.readGate = gate.promise;
+  try {
+    await askAbout();
+    await drawn(() => vi.waitFor(() => expect(world.photos.readCount).toBe(priorReads + 1)));
+    await press("Back to photos");
+    await until(alpha, library, Viewer, (state) => state.open === 0);
+  } finally {
+    delete world.photos.readGate;
+    await drawn(async () => { gate.resolve(); await gate.promise; });
+  }
+  expect([button(`Remove ${source.name}`), received]).toEqual([undefined, []]);
+  await openPhoto();
+  await askAbout();
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
   await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
   expect(received).toEqual([]);
