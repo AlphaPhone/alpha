@@ -9,6 +9,7 @@ import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
@@ -17,6 +18,7 @@ import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
+import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import photos from "../src/photos/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
@@ -217,8 +219,22 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   }), only("home", "view:Inbox", "assistant", "notice"));
   const mail = inbox.runtime(alpha);
   const chat = assistant.runtime(alpha);
-  await drawn(() => vi.waitFor(() => expect(button("Inbox")).toBeDefined()));
-  await press("Inbox");
+  const inboxTile = () => document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+  const waitForScreen = (check: () => void | Promise<void>) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    await check();
+  }, { timeout: 120_000 });
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+  await waitForScreen(async () => {
+    const state = await home.runtime(alpha).runPromise(Home.use((machine) => machine.get()));
+    expect(state.tiles.load.status).toBe("Loaded");
+    expect(inboxTile()).not.toBeNull();
+  });
+  await drawn(() => {
+    const tile = inboxTile();
+    if (!tile) throw new Error("The Inbox tile was not shown on Home");
+    tile.click();
+  });
   await until(alpha, mail, Mailbox, (state) => state.list.status === "Loaded");
   await press(/Standup notes/u);
   await until(alpha, mail, Message, (state) => state.body.status === "Loaded");
@@ -229,7 +245,7 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
     action.click();
   });
   const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
-  await drawn(() => vi.waitFor(() => expect(review()).toContain(source.body)));
+  await waitForScreen(() => expect(review()).toContain(source.body));
   const before = (await mine.asked()).length;
   await pressOnTop("Add to chat");
   await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
@@ -239,10 +255,10 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
   const reply = "Maya owns the onboarding copy.";
   await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
   await fill("Message Alpha", prompt);
-  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
-  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  await waitForScreen(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply));
   const requests = (await mine.asked()).slice(before);
   const received = requests[0]?.findLast((message) => message.role === "user")?.content;
   expect([requests.length, received, world.inbox.changes]).toEqual([1, expect.stringContaining(JSON.stringify({
