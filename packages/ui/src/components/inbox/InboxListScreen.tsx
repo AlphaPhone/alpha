@@ -83,6 +83,12 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     aside?: { id: string; onOpen?: () => void }[];
   };
 
+/** v119 45f6bed30 prototype/template.html:874 and prototype.css:13: on the launcher the list header is 56px tall, 20px in from the left with no Back, and its actions are 44px. */
+const launcherHeader = cn(
+  "in-data-[alpha-launcher]:[&>header]:min-h-14 in-data-[alpha-launcher]:[&>header:not(:has(>button[aria-label^=Back]))]:pl-5",
+  "in-data-[alpha-launcher]:[&>header>button[aria-label]:not([aria-label^=Back])]:size-11 in-data-[alpha-launcher]:[&>header>button[aria-label]:not([aria-label^=Back])]:min-w-11",
+);
+
 /**
  * The Inbox screen: the folder's messages for one account and search, with its folders, search, what is chosen, the
  * saved-list and access notices, and the way to compose, refresh, choose an account and read further back.
@@ -144,7 +150,7 @@ export function InboxListScreen({
       leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5.5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className="@container [&_main>div]:gap-0 [&_main>div]:pt-1 in-data-[alpha-wide]:[&>header]:max-w-none"
+      className={cn("@container [&_main>div]:gap-0 [&_main>div]:pt-1 in-data-[alpha-wide]:[&>header]:max-w-none", launcherHeader)}
     >
       {!searching && hasAccount && state !== "signedOut" ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
       {!searching && (aside.length > 0 || accounts.length > 1) ? (
