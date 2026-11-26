@@ -132,11 +132,17 @@ export function freedom(conversation: Conversation.Conversation, composer: Compo
 }
 
 // spec/app/assistant/index.md, "The screen is told only to an agent that said, on this connection, that it takes it"
-effect function supported(ticket: number): Conversation.Event!!Agent {
+/** One read of the agent's status on this connection: whether it answered, and whether it takes optional turn-context fields. */
+effect function supportRead(): { readonly ok: boolean; readonly takes: boolean }!!Agent {
   return effect {
     const read = statusRead(try ask(Agent, HttpClientRequest.get("/api/status"), Schema.Unknown))
-    return { type: "supported", ticket, ok: true, takes: sendsOptionalFields(learnPeer(notLearned, read), read) }
-  } catch () => ({ type: "supported", ticket, ok: false, takes: false })
+    return { ok: true, takes: sendsOptionalFields(learnPeer(notLearned, read), read) }
+  } catch () => ({ ok: false, takes: false })
+}
+
+effect function supported(ticket: number): Conversation.Event!!Agent {
+  const { ok, takes } = try supportRead()
+  return { type: "supported", ticket, ok, takes }
 }
 
 function ended(ticket: number, heard: boolean, result: TurnResult | undefined): Conversation.Event {
@@ -432,7 +438,7 @@ effect function reviewedEmailForSend(heldMail: boolean, attachment: MailQuestion
     ? (attachment !== undefined && attachment === mail.attached() ? (reviewedMail(attachment) catch () => undefined) : undefined)
     : undefined
   if (heldMail && !Locator.sendsReviewedEmail(true, email !== undefined, told)) {
-    if (email === undefined) mail.show({ failure: "changed" })
+    mail.show({ failure: email === undefined ? "changed" : "unavailable" })
     return { ok: false }
   }
   return { ok: true, email }
@@ -478,7 +484,7 @@ effect function endRefused(queue: Queue.Queue<Conversation.Event, Cause.Done>, t
   Queue.endUnsafe(queue)
 }
 
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore> {
+function posted(ticket: number, observing: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore> {
   const post = (queue: Queue.Queue<Conversation.Event, Cause.Done>, request: CommsRequest | undefined) => effect {
     const { controller, streamed } = try Turns
     const { board } = try Talk
@@ -509,6 +515,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     if (known === undefined || (text.trim() === "" && files.length === 0 && !held.mail && !held.transcript) || (held.quote > 0 && quoted === undefined) || expectedFiles !== files.length) {
       return try endRefused(queue, ticket, false)
     }
+    // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text": a held email or transcript reads the status again for itself when the conversation's answer has not come, failed or said no.
+    const told = observing || ((held.mail || held.transcript) && (try supportRead()).takes)
     if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
     const review = try MediaReview
     const enrolled = context.sensitive ? undefined : try review.session()

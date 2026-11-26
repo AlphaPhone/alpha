@@ -536,6 +536,15 @@ it into the owner's typed request text, refuses one too long to send in
 full or one that changed since, and decides what Alpha may do next with
 [what it may do with mail](./agent.md).
 
+What is reviewed is the email as the agent takes it, so an email the owner
+accepted is never refused afterward for its shape: a control character or
+line separator in the sender, a recipient or the subject is shown and sent
+as a space, a header longer than the agent's bound is cut to it, and a
+message with more than fifty recipients (To and Cc together) shows and sends
+the first forty-nine and how many more there are. The body keeps its line
+breaks and tabs; any other control character in it is shown and sent as a
+space, and a line separator as a line break.
+
 ```quint
 pure def canAskAlpha(s: MessageView): bool = s.body.status == R::Loaded and s.message != 0
 

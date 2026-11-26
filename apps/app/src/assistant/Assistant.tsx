@@ -286,7 +286,8 @@ function MailReviewDialogs({ open, review, attach, dismiss }: MailReviewDialogsP
           {source.subject || "(no subject)"}{"\n"}{source.from}{"\n"}{source.to.join(", ")}{"\n\n"}{source.bodyText}
         </span>}
       </ConfirmDialog>
-      <ConfirmDialog open={open && review.failure !== undefined} title={review.failure === "tooLarge" ? "This email is too long to share in full" : "Review this email again before sharing"}
+      <ConfirmDialog open={open && review.failure !== undefined} title={review.failure === "tooLarge" ? "This email is too long to share in full"
+        : review.failure === "unavailable" ? "Alpha can't read this email right now" : "Review this email again before sharing"}
         confirmLabel="OK" onConfirm={dismiss} onCancel={dismiss} />
     </>
   );

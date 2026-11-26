@@ -16,7 +16,7 @@ import { InboxBrowserLinks } from "../platform/browser.vibe"
 import { Device, native, registered } from "../platform/device.vibe"
 import type { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
-import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
+import { MailQuestions, emailOf, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together, migratedStore } from "../runtime/reactor.vibe"
@@ -145,6 +145,7 @@ export const questionAbout = (account: number, message: number, revision: number
     if (JSON.stringify({ ...seen, revision: fresh.revision }) !== JSON.stringify(fresh)) throw new MailContextRefused({ reason: "changed" })
     const target = try destination
     const review = try reviewMailContext(fresh, target)
+    try emailOf(fresh)
     if (!(try live)) throw new MailContextRefused({ reason: "changed" })
     const current: MailQuestion["current"] = effect () => {
       if (!(try live)) throw new MailContextRefused({ reason: "changed" })

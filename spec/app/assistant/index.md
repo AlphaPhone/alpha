@@ -209,8 +209,10 @@ pure def stepARestartNeverPostsAgain(before: Conversation, via: str, after: Conv
 ### The screen is told only to an agent that said, on this connection, that it takes it
 
 An agent that does not, or whose answer has not come, gets the plain
-message. Only an agent within reach is asked, and losing it forgets its
-answer.
+message; a message holding a reviewed email or a voice-note transcript reads
+the status again for itself instead
+([context](./context.md)). Only an agent within reach is asked, and losing it
+forgets its answer.
 
 ```quint
 pure def canSupported(c: Conversation, ticket: int): bool = R::canAnswer(c.support, ticket)

@@ -360,6 +360,14 @@ When the peer does not take optional turn-context fields, Alpha refuses to
 post a turn carrying a reviewed email or voice-note transcript rather than
 concatenating untrusted data into `text` or silently dropping the attachment.
 
+Whether the peer takes them is the conversation's answer when it said yes.
+When that answer has not come, failed, or said no, a turn holding a reviewed
+email or a voice-note transcript reads the agent's status again for itself
+just before it is posted, on the same connection, and goes on only if that
+read says the peer takes them. A turn refused this way keeps the owner's
+draft and the attached email, and the email review says that Alpha can't
+read this email right now, so a later send can carry it.
+
 ```quint
 pure def sendsReviewedEmail(hasMail: bool, validMail: bool, peerTakes: bool): bool =
   hasMail and validMail and peerTakes

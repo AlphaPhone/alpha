@@ -10,7 +10,7 @@ export interface MailQuestion {
   readonly notice?: { accept(): boolean!!; dismiss(): void!! }
 }
 
-type MailReview = { readonly question?: MailQuestion; readonly failure?: "tooLarge" | "changed" }
+type MailReview = { readonly question?: MailQuestion; readonly failure?: "tooLarge" | "changed" | "unavailable" }
 
 export service MailQuestions {
   snapshot(): MailReview
@@ -35,10 +35,45 @@ export const mailQuestions = Layer.sync(MailQuestions, () => {
   }
 })
 
-/** The exact headers and plain body shown for review, with Gmail's actual revision. */
+/** The agent's ReviewedEmail bounds: one header line, recipients counted To and Cc together. */
+const headerMax = 512
+const subjectMax = 1000
+const recipientsMax = 50
+
+/** One header as the agent takes it: well formed, every control or line separator a space, cut to its bound without splitting a pair. */
+function headerLine(value: string, max: number): string {
+  const plain = value.toWellFormed().replace(/[\p{Cc}\u2028\u2029]/gu, " ")
+  if (plain.length <= max) return plain
+  const end = plain.charCodeAt(max - 1) >= 0xd800 && plain.charCodeAt(max - 1) <= 0xdbff ? max - 1 : max
+  return plain.slice(0, end)
+}
+
+/** More than the agent takes are shown and sent as the first ones and how many more there are. */
+function recipientLines(all: readonly string[]): string[] {
+  const lines = all.map((one) => headerLine(one, headerMax))
+  return lines.length <= recipientsMax ? lines : [...lines.slice(0, recipientsMax - 1), `and ${lines.length - recipientsMax + 1} more`]
+}
+
+/** The body keeps line breaks and tabs; a line separator is a line break and any other control a space. */
+function bodyLines(value: string): string {
+  return value.toWellFormed().replace(/[\u2028\u2029]/gu, "\n").replace(/[^\P{Cc}\t\n\r]/gu, " ")
+}
+
+// spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
+/** The headers and plain body shown for review, already in the shape the agent takes, with Gmail's actual revision: what the owner accepts is what is sent. */
 export function sourceOf(grant: string, mail: MailMessage): MailContextSource {
   const { message, bodyText } = mail
-  return { accountId: grant, messageId: message.id, revision: message.metadata.historyId ?? "", from: message.from, to: [...message.to, ...message.cc], subject: message.subject, bodyText }
+  return {
+    accountId: grant, messageId: message.id, revision: message.metadata.historyId ?? "",
+    from: headerLine(message.from, headerMax), to: recipientLines([...message.to, ...message.cc]),
+    subject: headerLine(message.subject, subjectMax), bodyText: bodyLines(bodyText),
+  }
+}
+
+/** The email the agent will take, decoded as the agent decodes it; a review is offered only for one that passes. */
+export effect function emailOf(source: MailContextSource): ReviewedEmail!unknown {
+  const { from, to, subject, bodyText } = source
+  return try decodeReviewedEmail({ from, to, subject, bodyText })
 }
 
 // spec/app/inbox/notices.md, "Ask Alpha from a notice checks the same email again before spending the tap"
@@ -56,6 +91,5 @@ export effect function acceptMailReview(item: MailQuestion): boolean!! {
 export effect function reviewedMail(item: MailQuestion): ReviewedEmail!unknown {
   const { source, destination } = try item.current()
   try validateMailContext(item.review, source, destination)
-  const { from, to, subject, bodyText } = source
-  return try decodeReviewedEmail({ from, to, subject, bodyText })
+  return try emailOf(source)
 }
