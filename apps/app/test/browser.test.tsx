@@ -22,6 +22,7 @@ import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -396,6 +397,9 @@ describe("The Browser on a phone", () => {
   });
 
   it.each([false, true])("Opens Password manager and returns through Settings (spec/app/settings/index.md, \"The owner can open Password manager from the Browser menu\") on phone %s", async (phone) => {
+    // The web host keeps the Browser's session in the WebView's IndexedDB, which happy-dom does not draw.
+    vi.stubGlobal("indexedDB", memoryIndexedDB());
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const world = { ...scene(), phone, image: phone };
     const { alpha } = await open(world, only("home", "view:Browser", "view:Settings"));
     await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
