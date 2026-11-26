@@ -18,8 +18,9 @@ recipients it has, when this machine opens one.
 ### What Messages holds
 
 Whether Messages is showing and which pane; SMS read access and address-book
-access; the conversation list as last read, with its search, filter chip and
-"Older conversations"; the unread count the phone reports; the open
+access; the conversation list as last read, with its search, whether the
+search field is open over the list, the filter chip and "Older
+conversations"; the unread count the phone reports; the open
 conversation's messages as last read; a "Delete message?" question and the
 last removal; whether Alpha is the phone's SMS app; and the recipient
 picker's choices. A New visit holds its own draft revision and recipient,
@@ -38,7 +39,7 @@ type Page = { rows: int, failed: int, partial: int }
 type NewDraft = { visit: int, revision: int, recipient: int, picking: bool }
 type Messages = {
   front: bool, pane: Pane, sms: P::Permission, book: P::Permission,
-  list: R::Read, threads: int, moreThreads: bool, sought: bool, chip: Filter, unread: int,
+  list: R::Read, threads: int, moreThreads: bool, sought: bool, searching: bool, chip: Filter, unread: int,
   thread: int, page: R::Read, shown: Page, earlier: bool, smsApp: bool,
   confirming: bool, removal: A::Attempt,
   picker: R::Read, choices: int, moreChoices: bool, offeredPicture: int,
@@ -50,7 +51,7 @@ pure val blankNew: NewDraft = { visit: 0, revision: 0, recipient: 0, picking: fa
 
 pure val initial: Messages = {
   front: false, pane: Threads, sms: P::unasked, book: P::unasked,
-  list: R::unread, threads: 0, moreThreads: false, sought: false, chip: AllThreads, unread: 0,
+  list: R::unread, threads: 0, moreThreads: false, sought: false, searching: false, chip: AllThreads, unread: 0,
   thread: 0, page: R::unread, shown: blankPage, earlier: false, smsApp: false,
   confirming: false, removal: A::plan(0),
   picker: R::unread, choices: 0, moreChoices: false, offeredPicture: 0,
@@ -146,7 +147,7 @@ pure def show(s: Messages): Moved = askThreads(false, { ...s, front: true, pane:
 
 ```quint
 pure def cleared(pane: Pane, s: Messages): Messages =
-  { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false,
+  { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false, searching: false,
     choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker), offeredPicture: 0,
     newDraft: { ...blankNew, visit: s.newDraft.visit } }
 
@@ -174,6 +175,28 @@ pure def search(s: Messages, typed: bool): Moved = relisted(typed, s.chip, s)
 pure def canRetryThreads(s: Messages): bool = showingPane(s, Threads) and s.list.status == R::Failed
 
 pure def retryThreads(s: Messages): Moved = askThreads(false, s)
+```
+
+### The search field opens over the list, and Back closes it with what it typed
+
+As in Sunday's v119, Search opens a search field in place of the list's
+title, and Back, Android's or the field's own where one is drawn, closes
+the field first and drops what it typed, so the whole list shows again. Only
+the next Back leaves Messages. While Alpha is the phone's launcher the field
+draws no Back of its own and runs the full width.
+
+```quint
+pure def canOpenSearch(s: Messages): bool = showingPane(s, Threads) and readable(s) and not(s.searching)
+
+pure def openSearch(s: Messages): Messages = { ...s, searching: true }
+
+pure def canCloseSearch(s: Messages): bool = s.searching
+
+pure def closeSearch(s: Messages): Moved =
+  val closed = { ...s, searching: false }
+  if (s.sought and canSearch(s, false)) search(closed, false) else { state: closed, out: List() }
+
+pure def alwaysTheSearchOpensOverTheList(s: Messages): bool = s.searching implies showingPane(s, Threads)
 ```
 
 ### "Older conversations" reads further only when the phone said there are more
