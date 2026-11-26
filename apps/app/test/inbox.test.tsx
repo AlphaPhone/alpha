@@ -129,7 +129,6 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   await confirm("Cancel");
   await afterDraw(() => expect(notices.released).toEqual(["dismissed"]));
   expect([notices.spent, world.ask.said]).toEqual([["ordinary"], []]);
-  await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
   await afterDraw(async () => {
     const state = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
     expect([state.assistant, showing(state, "Inbox")]).toEqual(["Bar", true]);
