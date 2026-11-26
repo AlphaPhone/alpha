@@ -525,17 +525,24 @@ to open at once opens with no card. Whether the message asked for that
 address is the agent's grounding; the phone reads nothing of the owner's
 words. Any other page, such as a link of the page or an address the agent
 proposed, waits for the owner's Open on its card, in Ask Alpha or on the
-Browser's card, as before. Every page still opens only under the rule
-above.
+Browser's card, as before. While the owner has "Ask before Alpha acts" on,
+or the phone has not read that preference or is still reading or saving it
+(`asksBeforeActing(WebAction)` in [Preferences](../settings/preferences.md)),
+even a page the whole message asked for waits for the owner's Open on its
+card, as v119 asked first for every direct run. Every page still opens only
+under the rule above.
 
 ```quint
 pure val directOpenCapability: str = "browser.open-direct.v1"
-pure def opensWithoutCard(askedWhole: bool): bool = askedWhole
-pure def pageOpens(askedWhole: bool, ownerChoseOpen: bool, secure: bool, userInfo: bool): bool =
-  (opensWithoutCard(askedWhole) or ownerChoseOpen) and secure and not(userInfo)
-pure def lawAPageNotAskedWholeWaitsForTheOwner(secure: bool, userInfo: bool): bool = not(pageOpens(false, false, secure, userInfo))
-pure def lawNoPageOpensOutsideHttps(askedWhole: bool, ownerChoseOpen: bool, userInfo: bool): bool =
-  not(pageOpens(askedWhole, ownerChoseOpen, false, userInfo))
+pure def opensWithoutCard(askedWhole: bool, asksFirst: bool): bool = askedWhole and not(asksFirst)
+pure def pageOpens(askedWhole: bool, asksFirst: bool, ownerChoseOpen: bool, secure: bool, userInfo: bool): bool =
+  (opensWithoutCard(askedWhole, asksFirst) or ownerChoseOpen) and secure and not(userInfo)
+pure def lawAPageNotAskedWholeWaitsForTheOwner(asksFirst: bool, secure: bool, userInfo: bool): bool =
+  not(pageOpens(false, asksFirst, false, secure, userInfo))
+pure def lawAskingFirstWaitsForTheOwner(askedWhole: bool, secure: bool, userInfo: bool): bool =
+  not(pageOpens(askedWhole, true, false, secure, userInfo))
+pure def lawNoPageOpensOutsideHttps(askedWhole: bool, asksFirst: bool, ownerChoseOpen: bool, userInfo: bool): bool =
+  not(pageOpens(askedWhole, asksFirst, ownerChoseOpen, false, userInfo))
 ```
 
 ### "Stop and take over" stops the agent and gives its tab to the owner

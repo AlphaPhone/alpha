@@ -30,7 +30,7 @@ import { nativeReadingAvailable } from "../platform/voice.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Telephony } from "../platform/telephony.vibe"
 import { Talk } from "./talk.vibe"
-import { navigateFilesForReply } from "./views.vibe"
+import { navigateFilesForReply, opensAtOnce } from "./views.vibe"
 
 /** Area-owned equipment and approved executors. The resident protocol never receives a media bridge handle. */
 export service MediaExecutors {
@@ -284,10 +284,13 @@ function reviewFromReply(proposal: Proposal, opened: Session, actions: ReadonlyM
   return proposal.payload.requestMessageId === undefined && actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
 }
 
-/** The reply to `message` offered this page open as asked by the owner's whole message, to run at once on this enrollment. */
-function askedOpen(proposal: Proposal, opened: Session, message: string, actions: ReadonlyMap<string, ReplyAction>, at: number): boolean {
+/**
+ * The reply to `message` offered this page open as asked by the owner's whole message, to run at once on this enrollment
+ * while `atOnce`: the owner's preferences let Alpha act on the web without asking.
+ */
+function askedOpen(proposal: Proposal, opened: Session, message: string, actions: ReadonlyMap<string, ReplyAction>, at: number, atOnce: boolean): boolean {
   const expires = Date.parse(proposal.expiresAt)
-  return proposal.state === "pending" && proposal.payload.workflow === undefined && Number.isFinite(expires) && expires > at
+  return atOnce && proposal.state === "pending" && proposal.payload.workflow === undefined && Number.isFinite(expires) && expires > at
     && proposal.payload.requestMessageId === message && actions.get(proposal.id) === "Direct" && fromThisEnrollment(proposal, opened)
     && readOperation(proposal.payload.operation)?.operation.type === "browser_navigate"
 }
@@ -851,6 +854,7 @@ function filesActions(context: FilesReviewContext) {
 }
 
 interface AskedOpenContext {
+  readonly preferences: Prefs.Machine.Shape
   readonly lock: Semaphore.Semaphore
   readonly scopes: Map<string, ApprovalScope>
   readonly isLatest: (opened: Session) => boolean
@@ -860,20 +864,21 @@ interface AskedOpenContext {
 
 // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
 function askedOpens(context: AskedOpenContext): MediaReview.Shape["openAsked"] {
-  const { lock, scopes, isLatest, enrollmentIsCurrent, proposals } = context
+  const { preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals } = context
+  const atOnce = Effect.map(preferences.get(), opensAtOnce)
   return effect (opened: Session, message: string, results: DeviceActionReply["actionResults"], current: Effect.Effect<boolean>) => {
     const actions = repliedDeviceActions(results)
-    if (![...actions.values()].some((action) => action === "Direct") || !(try current)) return false
+    if (![...actions.values()].some((action) => action === "Direct") || !(try current) || !(try atOnce)) return false
     const answer = try proposals(opened)
     const at = try Clock.currentTimeMillis
-    const asked = answer?.filter((proposal) => askedOpen(proposal, opened, message, actions, at))
+    const asked = answer?.filter((proposal) => askedOpen(proposal, opened, message, actions, at, true))
     const offer = asked?.length === 1 ? asked[0] : undefined
     const exact = offer === undefined ? undefined : readOperation(offer.payload.operation)
     if (offer === undefined || exact === undefined || exact.operation.type !== "browser_navigate" || !mayRunDirectly(exact, "NoBinding", true)) return false
     const { id, digest } = offer
     const expiresAt = Date.parse(offer.expiresAt)
     return try lock.withPermits(1)(effect {
-      const active = effect { return isLatest(opened) && (try current) && (try enrollmentIsCurrent(opened)) && (try Clock.currentTimeMillis) < expiresAt }
+      const active = effect { return isLatest(opened) && (try current) && (try atOnce) && (try enrollmentIsCurrent(opened)) && (try Clock.currentTimeMillis) < expiresAt }
       if (!(try active)) return false
       scopes.set(id, { active })
       const done = (tryPromise(() => opened.execute.approve({ id, digest, expiresAt, operation: exact.operation }, {
@@ -903,11 +908,12 @@ interface PendingReviewContext {
   readonly pinnedFiles: Map<string, PinnedFileReview>
   readonly actOnFiles: ReturnType<typeof filesActions>["actOnFiles"]
   readonly continueInFiles: ReturnType<typeof filesActions>["continueInFiles"]
+  readonly preferences: Prefs.Machine.Shape
 }
 
 function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pending"] {
   const { proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles } = context
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences } = context
   return effect (opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) => {
     const view = try Conversation
     const spoken = reply.spoken
@@ -938,6 +944,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       outside.hold(Effect.asVoid(continueInFiles(opened, continued, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
     }
     for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
+    const atOnce = opensAtOnce(try preferences.get())
     const cards = try Effect.forEach(answer, effect (proposal) => {
       if (proposal.state !== "pending" || proposal.payload.workflow !== undefined) return undefined
       const op = spoken === undefined ? operation(proposal.payload.operation) : spokenOperation(proposal, opened, message, reply, actions, at)
@@ -945,7 +952,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
       const filesOperation = op.type.startsWith("files_")
       const request = proposal.payload.requestMessageId
-      if (proposal.id === continued?.id || askedOpen(proposal, opened, message, actions, at)) return undefined
+      if (proposal.id === continued?.id || askedOpen(proposal, opened, message, actions, at, atOnce)) return undefined
       const readsContent = reviewedRead(op)
       const origin = readsContent ? exactReadOrigin(proposal, message, reply) : undefined
       if (readsContent && !acceptsRead(opened, op)) return undefined
@@ -1242,11 +1249,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   })
   const pending = pendingProposals({
     proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles,
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences,
   })
   return {
     session,
-    openAsked: askedOpens({ lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
+    openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
     effect hasSpokenReview(opened, message, reply) {
       const source = reply.spoken
       const actions = repliedDeviceActions(reply.actionResults)
