@@ -326,8 +326,9 @@ pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sh
 
 When the page the agent asked for opens in Browser, at once or after the
 owner's Open, Ask Alpha lowers to its bar so the page fills the screen, as
-on Sunday's v119 demo phone. Only a page opening does this; any other
-agent navigation keeps Ask Alpha where it is (above).
+on Sunday's v119 demo phone. Only a page opening lowers it to the bar this
+way; any other agent navigation keeps Ask Alpha where it is unless it would
+hide the view asked for (above).
 
 ```quint
 pure def canAgentShowPage(s: Shell): bool = s.textAsk == NoTextAsk and showing(s, Browser) and s.assistant != Bar
