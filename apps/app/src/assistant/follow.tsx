@@ -3,7 +3,7 @@ import {
   type AssistantPull, type AssistantRelease, barDismissPaint, useAssistantBarDrag, type ChatDrag, CLOSE_FADE_MS, CLOSE_MS, CLOSED_COMPOSER_BLOCK, dockOpacity, dragPaint, FALLBACK_BAR, FLOOR_GAP,
   moveDrag, PANEL_TRANSITION, pressDrag, RESIZE_TRANSITION, restingHeight, revealFrames, rowReveal, SHEET_EASE, sheetBounds, TAP_SLOP,
 } from "@repo/ui";
-import { type CSSProperties, type ReactNode, type RefObject, useCallback, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { isOpen, keptShare, landing, shareScale, stays } from "../../gen/app__assistant__dock.ts";
 import type { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
@@ -143,10 +143,10 @@ function unpaintBar(paintedBar: RefObject<HTMLElement | null>, spring = false) {
  * v119 retire (:613-651): the header and the bar or pill under the sheet shown in place again. The sheet's own height,
  * opacity and corners go back with the render that ends the drag, which drew them too.
  */
-function unpaint(section: HTMLElement | null, paintedBar: RefObject<HTMLElement | null>, springBar = false) {
+function unpaint(section: HTMLElement | null, paintedBar: RefObject<HTMLElement | null>, springBar = false, keepBar = false) {
   document.querySelector<HTMLElement>("[data-alpha-underlay]")?.style.removeProperty("opacity");
   section?.querySelector<HTMLElement>("[data-alpha-chat-header]")?.style.removeProperty("opacity");
-  unpaintBar(paintedBar, springBar);
+  if (!keepBar) unpaintBar(paintedBar, springBar);
 }
 
 /**
@@ -173,6 +173,16 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const ghostRef = useRef<HTMLElement | undefined>(undefined);
   const barRef = useRef(0);
   const paintedBarRef = useRef<HTMLElement | null>(null);
+  /** A bar pulled down to tuck keeps the finger's paint until the pill is drawn in its place, as v119's bar left with the drag (COA:640-648), so it never shows at rest for a frame first. */
+  const tuckingRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const handOver = () => {
+    clearTimeout(tuckingRef.current);
+    tuckingRef.current = undefined;
+    unpaintBar(paintedBarRef, false);
+  };
+  useLayoutEffect(() => {
+    if (pill && tuckingRef.current !== undefined) handOver();
+  });
   if (seen.detent !== detent) {
     const tap = live === undefined && !voice && !comms && animates();
     const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: sectionRef.current?.getBoundingClientRect().height || undefined } : undefined);
@@ -190,10 +200,12 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const viewport = () => (comms ? window.innerHeight - 52 : window.innerHeight);
   const done = (springBar = false) => {
     heldRef.current = undefined;
-    unpaint(sectionRef.current, paintedBarRef, springBar);
+    unpaint(sectionRef.current, paintedBarRef, springBar, tuckingRef.current !== undefined);
     setLive(undefined);
   };
   const drop = () => {
+    clearTimeout(tuckingRef.current);
+    tuckingRef.current = undefined;
     done(true);
     void dock.send({ type: "shift", now: untimed });
   };
@@ -205,7 +217,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   };
   const gesture: AssistantPull = {
     onPress: ({ y }) => {
-      if (paintedBarRef.current) unpaintBar(paintedBarRef, false);
+      if (paintedBarRef.current) handOver();
       const form: Form = isOpen(detent) ? "open" : pill ? "pill" : "bar";
       const floor = floorOf();
       const shown = sectionRef.current?.getBoundingClientRect().height ?? 0;
@@ -250,7 +262,12 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
         document.activeElement.blur();
       }
       const painted = dragPaint(d);
-      unpaint(sectionRef.current, paintedBarRef);
+      // A pull down from the bar or typing tucks it to the pill; the bar is handed over when the pill is drawn, or after CLOSE_MS if it never is.
+      if (!comms && held.form === "bar" && direction === "down" && !isOpen(held.start) && !isOpen(landed.detent) && paintedBarRef.current) {
+        clearTimeout(tuckingRef.current);
+        tuckingRef.current = setTimeout(handOver, CLOSE_MS);
+      }
+      unpaint(sectionRef.current, paintedBarRef, false, tuckingRef.current !== undefined);
       if (held.form === "open" && !isOpen(landed.detent) && !comms && animates()) {
         setSeen((s) => ({ ...s, growing: undefined, leaving: { tap: false, height: painted.height, opacity: painted.opacity } }));
         setLive(undefined);
