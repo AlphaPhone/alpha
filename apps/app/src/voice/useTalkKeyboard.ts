@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Stop and switch to keyboard shut the conversation down; the keyboard then takes over"
+// spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
 import { type RefObject, useCallback, useRef, useState } from "react";
 
 export type DictationKeyboard = (trigger: HTMLButtonElement, ticket: number, close: () => Promise<boolean>, stillClosed: () => boolean) => void;
