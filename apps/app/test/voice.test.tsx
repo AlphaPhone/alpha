@@ -32,6 +32,7 @@ import { publish } from "./fakes/platform.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
 import { textReview } from "./fakes/text-review.ts";
+import { agentRequest } from "./fakes/calendar.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
 type VoiceRuntime = ManagedRuntime.ManagedRuntime<
@@ -651,8 +652,8 @@ async function onComposer(world: Scene, ...otherMounts: Mount[]) {
 const raiseSheet = (alpha: Alpha) => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
 
 /** Ask Alpha alone on `world`, raised to its sheet once its composer is open. */
-async function onSheet(world: Scene) {
-  const { alpha, area } = await onComposer(world);
+async function onSheet(world: Scene, ...otherMounts: Mount[]) {
+  const { alpha, area } = await onComposer(world, ...otherMounts);
   await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
   await raiseSheet(alpha);
   return { alpha, area };
@@ -762,6 +763,33 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 2 && s.phase === "Listening");
     await timersRead(0);
     await drawn(() => vi.waitFor(() => expect(chip()).toBeUndefined()));
+  });
+
+  it("a Calendar change asked by Talk shows its card in the sheet and is made on Approve (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await onSheet(world, ...only("assistant/calendar"));
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    const start = new Date(world.now + 86_400_000).toISOString();
+    const end = new Date(world.now + 86_400_000 + 1_800_000).toISOString();
+    world.ask.nextReplyChunks = ["I've proposed camera setup for tomorrow. It's waiting for your approval."];
+    world.ask.nextActions = () => {
+      world.calendar.approvals.push(agentRequest("approval-1", {
+        action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+        fields: { title: "camera setup", description: "", location: "", startAt: start, endAt: end, isAllDay: false, timeZone: "UTC" },
+      }));
+      return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: "approval-1" } }];
+    };
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    speakUtterance(world, "Put a 30 minute event called camera setup in that slot.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1);
+    await drawn(() => vi.waitFor(() => expect(button("Approve")).toBeDefined(), { timeout: 10_000 }));
+    expect(document.querySelector("section[aria-label='Calendar change']")?.textContent).toContain("camera setup");
+    expect(world.calendar.writes).toEqual([]);
+    await press("Approve");
+    await drawn(() => vi.waitFor(() => expect(world.calendar.writes).toEqual(["approve approval-1", "create ev-camera-setup"]), { timeout: 10_000 }));
   });
 
   it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {
