@@ -2,6 +2,8 @@
 import { Effect } from "effect";
 import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
@@ -11,6 +13,7 @@ import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
 import { Machine as Reminders } from "../gen/app__reminders.effect.vibe";
 import { Machine as Alerts } from "../gen/app__reminders__alerts.effect.vibe";
+import assistant from "../src/assistant/index.tsx";
 import calendar from "../src/calendar/index.tsx";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
@@ -916,6 +919,45 @@ describe("on a phone", () => {
     await until(mounted.alpha, runtime, View, (s) => s.phone.status === "Loaded" && s.google.status === "Loaded");
     await drawn(() => {});
     expect((await runtime.runPromise(Held.use((d) => d.get()))).hiding).toBe(0);
+  });
+
+  it("Approve in Ask Alpha what a reply asked for (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
+    const world = morning(true);
+    const { alpha } = await open(world, only("home", "assistant", "assistant/calendar"));
+    const ask = assistant.runtime(alpha);
+    await until(alpha, ask, Composer, (s) => s.slot === "Open");
+    await until(alpha, ask, Conversation, (s) => s.ready);
+    const card = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
+    const send = async (text: string) => {
+      const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      if (document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.hidden) await press("Type");
+      await fill("Message Alpha", text);
+      await press("Send");
+      await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+    };
+    const start = new Date(world.at(1, 9)).toISOString();
+    const end = new Date(world.at(1, 9.5)).toISOString();
+    world.ask.nextReplyChunks = ["I've proposed camera setup for 9:00 tomorrow. It's waiting for your approval."];
+    world.ask.nextActions = () => {
+      world.calendar.approvals.push(agentRequest("approval-1", {
+        action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+        fields: { title: "camera setup", description: "", location: "", startAt: start, endAt: end, isAllDay: false, timeZone: "UTC" },
+      }));
+      return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: "approval-1" } }];
+    };
+    await send("Put a 30 minute event called camera setup at 9 tomorrow.");
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(["camera setup", "Waiting for you"].map((text) => card().includes(text))).toEqual([true, true]);
+    expect(world.calendar.writes).toEqual([]);
+
+    await press("Approve");
+    await until(alpha, calendar.runtime(alpha), Changes, (a) => a.result === "Done");
+    expect(world.calendar.writes).toEqual(["approve approval-1", "create ev-camera-setup"]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Done, and seen in your calendar."));
+
+    world.ask.nextReplyChunks = ["You're welcome."];
+    await send("Thanks.");
+    expect([card(), document.body.textContent?.includes("Done, and seen in your calendar.")]).toEqual(["", false]);
   });
 });
 

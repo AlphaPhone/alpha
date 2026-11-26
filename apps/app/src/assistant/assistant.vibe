@@ -24,6 +24,8 @@ import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, type View, canAgentGoHome, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
+import { CalendarReviews } from "../calendar/reviews.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
@@ -367,7 +369,7 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
     settle: effect (result, spoken) => {
       try Effect.provideService(Effect.provideService(
         settleSpoken(board, seat, chosen, record, result, spoken, current), Chats.Machine, chats), Agent, agent)
-      fork.detached Effect.provideContext(syncAlphaApps(result.reply.actionResults), apps)
+      fork.detached Effect.provideContext(syncAlphaApps(result.reply.actionResults, { conversation: chosen, message: result.reply.messageId }), apps)
     },
   }
 }
@@ -396,11 +398,16 @@ effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, re
     && now.chosen === selected && now.around === 0 && now.page.ticket === page))
 }
 
-effect function syncAlphaApps(actionResults: ReadonlyArray<{ readonly action: string }>): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+// spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+/** Bring the apps a reply's actions changed up to date: the clock, reminders, and Calendar's card for a request it filed in `reply`. */
+effect function syncAlphaApps(actionResults: ReadonlyArray<Ran>, reply: { readonly conversation: number; readonly message: string }): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
   const ranClock = actionResults.some((result) => result.action.startsWith("CLOCK_"))
   const ranReminders = actionResults.some((result) => result.action === "REMINDERS_MANAGE" || result.action === "OWNER_REMINDERS")
-  if (!ranClock && !ranReminders) return
+  const filed = calendarAsks.file(reply.conversation, reply.message, actionResults)
+  if (!ranClock && !ranReminders && !filed) return
   const ctx = try Effect.context<never>()
+  const reviews = Context.getOption(ctx, CalendarReviews)
+  if (filed && Option.isSome(reviews)) try reviews.value.relist()
   if (ranClock) {
     const alarms = Context.getOption(ctx, Alarms.Machine)
     const timers = Context.getOption(ctx, Timers.Machine)
@@ -684,7 +691,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chats.chosen,
           conversationId: known.record.id, message: result.reply.messageId }, result.reply.text)
       if (board.draftSeat === seat) board.change({ recordingSummary })
-      fork.detached syncAlphaApps(result.reply.actionResults)
+      fork.detached syncAlphaApps(result.reply.actionResults, { conversation: chats.chosen, message: result.reply.messageId })
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
         const stillAuthored = effect {
