@@ -15,7 +15,7 @@ const shellReaches = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"],
   runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, ok))));
 
 describe("Ask Alpha dock", () => {
-  // spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
+  // spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
   it("Drag the Browser composer (spec/app/assistant/dock.md, \"An empty Browser composer can start a drag without taking focus\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Browser" });
@@ -73,7 +73,7 @@ describe("Ask Alpha dock", () => {
     await page.getByRole("button", { name: "Open conversation" }).click();
     await shellReaches(runtime, (s) => s.assistant === "Sheet");
 
-    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "agentOpenView", view: "Calendar" })));
     const afterAgentNav = await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
     expect([afterAgentNav.trail.at(-1), afterAgentNav.assistant]).toEqual(["Calendar", "Sheet"]);
