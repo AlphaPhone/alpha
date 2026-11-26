@@ -67,6 +67,11 @@ const launcherHeader = {
   page: cn(launcherFrame, launcherBack, "in-data-[alpha-launcher]:[&>header]:gap-0 in-data-[alpha-launcher]:[&>header]:px-3 in-data-[alpha-launcher]:[&>header>h1]:font-sans in-data-[alpha-launcher]:[&>header>h1]:text-home-display in-data-[alpha-launcher]:[&>header>h1]:leading-plain in-data-[alpha-launcher]:[&>header>h1]:font-bold in-data-[alpha-launcher]:[&>header>h1]:tracking-tight in-data-[alpha-launcher]:[&>header>h1]:wrap-anywhere"),
   routine: cn(launcherFrame, launcherBack),
 };
+/**
+ * On the launcher an app's first page has no Back: v119 drew it only when Alpha was not the system shell
+ * (prototype/model.js:6415, template.html:3698); Android's own Back still leaves the app.
+ */
+const firstPageBack = "in-data-[alpha-launcher]:hidden";
 /** The body of a page inside Workflows, at develop's 24px sides. */
 const inset = "-mx-4 -mt-1 flex flex-col px-6 pt-2";
 const fullDate = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" });
@@ -132,9 +137,10 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   const openDigests: Event = { type: "openDigests" };
   const filter = { type: "openFilters" } as const;
   const add = { type: "openAdd" } as const;
+  const listing = place?.tag === "ListingRows" || place === undefined;
   const screen = (
-    <Screen title={title} inert={clock.state?.open === true} leading={<AppBack alpha={alpha} />}
-      className={place?.tag === "ListingRows" || place === undefined ? launcherHeader.list : selected?.kind === "Routine" ? launcherHeader.routine : launcherHeader.page}
+    <Screen title={title} inert={clock.state?.open === true} leading={<AppBack alpha={alpha} className={listing ? firstPageBack : undefined} />}
+      className={listing ? launcherHeader.list : selected?.kind === "Routine" ? launcherHeader.routine : launcherHeader.page}
       actions={<>
       {place?.tag === "ListingRows" && <Button variant="ghost" size="icon" aria-label="Add to Workflows" className="in-data-[alpha-launcher]:size-11! in-data-[alpha-launcher]:min-w-11!" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
       {selected?.kind === "Prompt" && state && <AutomationPower runtime={runtime} row={selected} owner={state.owner} />}
