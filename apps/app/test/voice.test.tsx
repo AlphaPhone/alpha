@@ -371,6 +371,31 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     }
   });
 
+  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
+  it("says the reply the agent decided as soon as it arrives, before the stored reply, never its provisional text, and each sentence once", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const ready = Promise.withResolvers<void>();
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["You're clear tomorrow. ", "Nothing is booked."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.nextReplySettled = true;
+    world.ask.holdReady = ready.promise;
+    world.ask.holdDoneAfterReady = done.promise;
+    const runtime = await startListening(world);
+    try {
+      speakUtterance(world, "What's on tomorrow");
+      await untilCondition(runtime, () => world.voice.spoken.length === 1, () => world.voice.spoken);
+      expect(world.voice.spoken.map((one) => one.text)).toEqual(["You're clear tomorrow."]);
+      ready.resolve();
+      done.resolve();
+      await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+      expect(world.voice.spoken.map((one) => one.text)).toEqual(["You're clear tomorrow.", "Nothing is booked."]);
+    } finally {
+      ready.resolve();
+      done.resolve();
+    }
+  });
+
   // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
   it("says the agent's acknowledgment at once, before the reply it was waiting for, and only once", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
