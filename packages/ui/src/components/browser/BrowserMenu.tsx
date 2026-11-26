@@ -24,15 +24,17 @@ export type BrowserMenuProps = {
 
 /**
  * The Browser's menu, dropped below its bar at the right: what can be done with the tab and its page.
- * As v119 (Alpha 45f6bed30 apps/app/src/prototype/template.html:4416): 98px down, 10px from the right, 236px wide,
- * as tall as its rows up to the view less 120px (and never under Ask Alpha), 24px corners, 6px padding, 50px rows with 20px icons 14px apart.
+ * As v119 (Alpha 45f6bed30 apps/app/src/prototype/template.html:4416): 98px down on the launcher, 2px into the bottom of
+ * its 44px status room and 56px bar, so off the launcher, where the bar is 52px at the top, 50px down, under the bar the
+ * same way; 10px from the right, 236px wide, as tall as its rows up to the view less 120px (and never under Ask Alpha),
+ * 24px corners, 6px padding, 50px rows with 20px icons 14px apart.
  */
 export function BrowserMenu({ items, onClose }: BrowserMenuProps) {
   return (
     <>
       <button type="button" tabIndex={-1} aria-label="Close menu" onClick={onClose} className="absolute inset-x-0 top-0 bottom-[max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))] z-20 bg-transparent" />
       <div role="dialog" aria-label="Browser menu"
-        className="absolute top-24.5 right-2.5 z-20 flex max-h-[min(calc(100%-7.5rem),calc(100%-6.125rem-max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))))] w-59 max-w-[calc(100%-1.25rem)] animate-drop flex-col overflow-y-auto rounded-panel bg-card p-1.5 shadow-panel ring-1 ring-border dark:shadow-panel-dark">
+        className="absolute top-12.5 right-2.5 z-20 flex max-h-[min(calc(100%-7.5rem),calc(100%-3.125rem-max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))))] in-data-[alpha-launcher]:top-24.5 in-data-[alpha-launcher]:max-h-[min(calc(100%-7.5rem),calc(100%-6.125rem-max(--spacing(27),calc(var(--alpha-dock-clearance,--spacing(25.5))+--spacing(1.5)))))] w-59 max-w-[calc(100%-1.25rem)] animate-drop flex-col overflow-y-auto rounded-panel bg-card p-1.5 shadow-panel ring-1 ring-border dark:shadow-panel-dark">
         {items.map((item) => item.reason !== undefined ? (
           <p key={item.name ?? item.label} role="note" aria-label={item.name ?? item.label} className="m-0 flex shrink-0 items-center gap-3.5 px-3.5 pt-1.5 pb-3 text-caption leading-normal text-muted-foreground">
             <span aria-hidden className="relative flex shrink-0 [&_svg]:size-5">

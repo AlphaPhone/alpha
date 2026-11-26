@@ -11,6 +11,9 @@ when it comes back to the front, and after each Ask Alpha turn, typed or
 spoken, that ran a Clock action, so a timer cancelled in chat or by Talk
 leaves Home and Clock at once.
 
+Before Clock has its first answer, it shows its row of tabs, never a blank
+screen.
+
 ## Story: Move between Clock tabs and sheets
 
 > As the owner, I want to switch cleanly between Alarms, Timers, Stopwatch and

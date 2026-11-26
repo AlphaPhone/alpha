@@ -1,7 +1,7 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os-bridges";
 import { AppsDrawer, type AppsDrawerProps, type DrawerApp, HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
 import { useMachine as useDrawer } from "../../gen/app__home__drawer.react.ts";
@@ -17,6 +17,7 @@ import { homeEditFrame, landscapeHomeInput } from "../shell/canvas.vibe";
 import { feel } from "../shell/haptics.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
+import { homeFrame } from "./firstFrame.ts";
 import { actOnAddHome, addLayerAt, openAddHome, reconcileAddHome } from "./addHome.vibe";
 import { catalog, labelOf } from "./catalog.vibe";
 import { type AppsInput, type HomeEditInput, actInApps, chooseApp, closeApps, editHome, openApps, openHomeFavorite, openOwnInApps, openOwnTile, told } from "./home.vibe";
@@ -66,7 +67,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const s = shell.state;
   const landscapePhone = landscapeHomeInput(canvas);
   const alongside = s !== undefined && Home.besideHomeSheet(s, landscapePhone);
-  const day = useDayCards(runtime, s, alongside);
+  const { cards: day, settled } = useDayCards(runtime, s, alongside);
   const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: false, now: untimed }, owner);
   const [mount, setMount] = useState<{ frame: HTMLElement; current: () => boolean }>();
   const homeScroller = useCallback((node: HTMLDivElement | null) => {
@@ -85,6 +86,11 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     const fiber = alpha.runtime.runFork(launcherHeld(held));
     return () => fiber.interruptUnsafe();
   }, [alpha]);
+  // Home's first complete frame: the tiles read and the cards' place known, told before the browser paints it.
+  const whole = h !== undefined && s !== undefined && (h.host === "AssistantOnly" || (ready(h.tiles) && (!Home.showsCards(h) || settled)));
+  useLayoutEffect(() => {
+    if (whole) homeFrame.drawn();
+  }, [whole]);
   if (!h || !s || h.host === "AssistantOnly") return null;
   const can = (event: Home.Event) => home.can(event, owner);
   const editVisible = Home.editSite(s, alongside) && homeEditFrame(canvas) && layers !== undefined && !pageInert(layers);
@@ -137,6 +143,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <HomeScreen
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
+      cardsAwaited={Home.showsCards(h) && !settled}
       appCards={Home.showsCards(h) && alpha.slot("home/cards")}
       tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => ({
         ...tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing),
@@ -146,8 +153,9 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       appCardsInert={s.assistant !== "Bar"}
       drawerInert={s.assistant !== "Bar" && !alongside}
       covered={h.editing && !editVisible}
-      editing={editing}
+      editing={editing || (h.editing && addLayer !== undefined)}
       tileGestureScope={`${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}`}
+      onPressTile={(id) => { if (id.startsWith("view:")) homeFrame.want(id as `view:${View}`); }}
       onOpenTile={(id) => {
         const tile = tileOf(id);
         if (tile.tag === "Own") void runtime.runPromise(openOwnTile(tile.view, s.route, alongside));
