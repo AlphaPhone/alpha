@@ -2,11 +2,13 @@ import { type Context, Effect, type Layer, type ManagedRuntime, Stream } from "e
 import { TestClock } from "effect/testing";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { App } from "../src/App.tsx";
 import { type Mount, type Place, mounts as every } from "../src/areas.ts";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
+import type inbox from "../src/inbox/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { pressButton } from "./fakes/phone.ts";
 import type { Scene } from "./fakes/scene.ts";
@@ -138,6 +140,20 @@ export const pressOnTop = (name: string) => drawn(() => {
 export function typeInto(field: HTMLInputElement | HTMLTextAreaElement, text: string) {
   Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field) as object, "value")?.set?.call(field, text);
   field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** Press the Home tile that opens `view`. */
+const pressTile = (view: string) => drawn(() => {
+  const tile = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+  if (!tile) throw new Error(`No ${view} home tile`);
+  tile.click();
+});
+
+/** Open Inbox from Home, wait until `letters`, its runtime, has read the owner's mail, and go back Home. */
+export async function readInboxFirst(alpha: Alpha, letters: ReturnType<typeof inbox.runtime>) {
+  await pressTile("Inbox");
+  await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
+  await hardware("back");
 }
 
 /** Type `text` into the field whose accessible name is `name`, as a person does: React hears the input event. */
