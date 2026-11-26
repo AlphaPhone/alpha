@@ -318,10 +318,10 @@ describe("Calendar without a connected account", () => {
     await until(alpha, runtime, View, (state) => state.front && state.connected);
     await press("Resume event draft");
     await until(alpha, runtime, Editor, (state) => state.shown && state.receipts.status === "Loaded");
-    const drawnOptions = () => ["Once", "Daily", "Weekdays", "Weekly", "Video link", "None", "10 min"].filter((name) => button(name) !== undefined);
-    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/agent-calendar-adapter.ts:328 kept only a chip that sets the repeat back.
-    expect([button("Your agent's calendar")?.getAttribute("aria-pressed"), drawnOptions(), button("Once")?.getAttribute("aria-pressed")]).toEqual(["true", ["Once"], "false"]);
-    await press("Once");
+    const drawnOptions = () => ["Once", "No repeat", "Daily", "Weekdays", "Weekly", "Video link", "None", "10 min"].filter((name) => button(name) !== undefined);
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/agent-calendar-adapter.ts:328 kept only a No repeat chip that sets the repeat back.
+    expect([button("Your agent's calendar")?.getAttribute("aria-pressed"), drawnOptions(), button("No repeat")?.getAttribute("aria-pressed")]).toEqual(["true", ["No repeat"], "false"]);
+    await press("No repeat");
     await until(alpha, runtime, Editor, (state) => state.kept);
     expect(drawnOptions()).toEqual([]);
     await press("Save event");
@@ -620,12 +620,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.connected && s.google.status === "Loaded" && s.googleRows === 2);
     expect(titles()).toEqual(["Standup", "Team lunch"]);
 
-    // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": only a phone has a calendar of its own.
-    expect(Boolean(button("Allow"))).toBe(phone);
+    // spec/app/calendar/index.md, "Calendar asks for the phone's calendar only while it lacks it, and only once": only a phone has a calendar of its own, and New event asks for it, with no notice asking.
+    expect(Boolean(button("Allow"))).toBe(false);
     if (phone) {
-      await press("Allow");
+      await press("New event");
       await until(alpha, runtime, View, (s) => s.phoneRows === 1);
-      expect([titles(), world.calendar.asked, Boolean(button("Allow"))]).toEqual([["Standup", "Team lunch", "Gym"], 1, false]);
+      await press("Back to calendar");
+      await until(alpha, runtime, Editor, (s) => !s.shown);
+      expect([titles(), world.calendar.asked]).toEqual([["Standup", "Team lunch", "Gym"], 1]);
     }
 
     // spec/app/calendar/index.md, "Picking a day in the week strip or the month dialog shows that day's timeline"
