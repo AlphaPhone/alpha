@@ -135,7 +135,7 @@ describe("Workflows", () => {
     expect(fromAreas.snapshot().flows.freshness).toBe("UpToDate");
     const told: string[] = [];
     onTestFinished(fromAreas.subscribe(() => { told.push(fromAreas.snapshot().flows.freshness); }));
-    // Back to Home reads Workflows again: the card keeps "up to date" through the read, with no "Not current" between.
+    // spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row": Back to Home reads Workflows again; the card keeps "up to date" through the read, with no "Not current" between.
     await drawn(() => alpha.back());
     await until(alpha, area, Listing, (state) => state.list.ticket > asked && state.list.status === "Loaded");
     await drawn(() => undefined);

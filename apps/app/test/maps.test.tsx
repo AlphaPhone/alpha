@@ -184,7 +184,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.link.known && s.link.provider !== 0);
 
     // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a places card's Map button, with the disclosure unread, searches at once, as v119 did
-    await act(async () => { handToMaps("harbour"); });
+    await drawn(() => { handToMaps("harbour"); });
     await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
     expect(results()).toEqual(["Harbour Cafe", "Harbour Gallery"]);
     expect([(await now(runtime)).link.disclosed, document.body.textContent?.includes(why)]).toEqual([false, false]);
@@ -201,7 +201,7 @@ describe("Maps on a phone", () => {
     await press("Continue");
     await until(alpha, runtime, Screen, (s) => s.link.prompting && s.owedLocate && !s.explaining);
     expect([Boolean(button("Recenter")), document.body.textContent?.includes(why)]).toEqual([true, false]);
-    await act(async () => { answer(); });
+    await drawn(() => { answer(); });
     await until(alpha, runtime, Screen, (s) => !s.link.prompting && s.link.session > shown.link.session && !s.owedLocate);
     expect(Boolean(button("Recenter"))).toBe(true);
   });

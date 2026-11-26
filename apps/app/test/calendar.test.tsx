@@ -257,7 +257,7 @@ describe("Calendar without a connected account", () => {
     await press("Back to calendar");
     await until(alpha, runtime, Editor, (state) => !state.shown && state.banner === "Available");
 
-    // Google connects while the draft waits; Calendar reads it when it comes forward again.
+    // spec/app/calendar/editor.md, "Story: Keep my draft through a restart": Google connects while the draft waits; Calendar reads it when it comes forward again.
     world.calendar.down = false;
     await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" })));
     await until(alpha, runtime, View, (state) => !state.front);
@@ -668,8 +668,7 @@ describe("on a phone", () => {
     await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
     await fill("Title", "Office closure");
     await press("All day");
-    // v119 45f6bed30 prototype/template.html:1423-1497: Video link, Repeat and Alert show on every new event.
-    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 shows Video link, Repeat and Alert on every new event.
     const agentChosen = () => button("Your agent's calendar")?.getAttribute("aria-pressed") === "true";
     const offered = () => ["Once", "Weekdays", "Video link", "None", "10 min"].map((name) => button(name)?.disabled);
     expect([agentChosen(), offered()]).toEqual([true, [false, true, true, false, true]]);
@@ -680,7 +679,7 @@ describe("on a phone", () => {
     expect([agentChosen(), button("Once")?.getAttribute("aria-pressed"), button("Video link")?.getAttribute("aria-checked"), button("None")?.getAttribute("aria-pressed")])
       .toEqual([true, "true", "false", "true"]);
     expect([button("Save event")?.getAttribute("aria-disabled"), Boolean(button("Open in Android Calendar"))]).toEqual(["false", false]);
-    // On this phone's calendar every repeat, the video link and the alerts are offered; going back to the agent's sets them back, in view.
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": on this phone's calendar every repeat, the video link and the alerts are offered; going back to the agent's sets them back, in view.
     await press("This phone's calendar");
     expect(offered()).toEqual([false, false, false, false, false]);
     await press("Weekdays");

@@ -132,7 +132,7 @@ describe("Camera on a phone", () => {
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
     const { alpha, runtime } = await onCamera(world);
     await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
-    // v119's header (template.html at 45f6bed30, lines 1861-1868) drew back only off the launcher and had no Scan document.
+    // spec/app/camera/index.md, "Story: Open the camera": v119's header (template.html at 45f6bed30, lines 1861-1868) drew back only off the launcher and had no Scan document.
     expect(button("Back to apps")).toBeUndefined();
     expect(button("Scan document")).toBeUndefined();
     expect(button("Switch camera")).toBeDefined();
