@@ -292,8 +292,8 @@ describe("Settings", () => {
     const world = { ...scene(), phone: true, checkout: { starts: [], confirmations: [], opened: [], returned: null, paid: true, change } };
     const emailed: string[] = [];
     world.voice.startupSignIn = {
-      reauthenticate: async ({ email }) => {
-        emailed.push(email ?? "");
+      reauthenticate: async (options) => {
+        emailed.push("email" in options ? options.email : "");
         return { request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 60_000, resendAt: world.now + 10_000 };
       },
       verify: async ({ code }) => {
