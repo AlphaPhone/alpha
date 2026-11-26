@@ -32,7 +32,7 @@ const TABS: ReadonlyArray<{ readonly value: Tab; readonly label: string }> = [
 export function Clock({ runtime }: ClockProps) {
   const view = useClockView(runtime);
   const state = view.state;
-  if (!state) return null;
+  if (!state) return <div aria-busy className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28"><Tabs><ClockTabs /></Tabs></div>;
 
   const closeSheet = () => void view.send({ type: "closeSheet" });
 
@@ -45,13 +45,7 @@ export function Clock({ runtime }: ClockProps) {
           if (view.can({ type: "selectTab", tab })) void view.send({ type: "selectTab", tab });
         }}
       >
-        <TabsList aria-label="Clock sections">
-          {TABS.map((item) => (
-            <TabsTrigger key={item.value} value={item.value} className="px-2 text-xs sm:px-3 sm:text-sm">
-              {item.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <ClockTabs />
 
         <TabsContent value="Alarms">
           <AlarmsTab runtime={runtime} />
@@ -74,5 +68,18 @@ export function Clock({ runtime }: ClockProps) {
         <AlarmEditorSheet runtime={runtime} alarmId={state.sheet.alarmId} onClose={closeSheet} />
       )}
     </div>
+  );
+}
+
+/** The row of Clock's tabs, drawn from the first frame so Clock opens with its frame in place. */
+function ClockTabs() {
+  return (
+    <TabsList aria-label="Clock sections">
+      {TABS.map((item) => (
+        <TabsTrigger key={item.value} value={item.value} className="px-2 text-xs sm:px-3 sm:text-sm">
+          {item.label}
+        </TabsTrigger>
+      ))}
+    </TabsList>
   );
 }

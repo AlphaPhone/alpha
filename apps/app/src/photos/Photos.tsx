@@ -160,7 +160,9 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const state = library.state;
   const bin = trash.state;
   if (library.cause || viewer.cause || trash.cause) return <Alert variant="destructive" className="m-4">Photos could not open.</Alert>;
-  if (!state || !bin) return <Spinner className="m-auto" aria-label="Opening Photos" />;
+  if (!state || !bin) return <section aria-label="Photos" aria-busy className="relative flex min-h-0 flex-1 flex-col bg-background">
+    <AppHeader title="Photos" className="shrink-0" leading={<Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft /></Button>} />
+  </section>;
   const content = runtime.runSync(Effect.flatMap(Catalog, (catalog) => catalog.displayed()));
   const inTrash = bin.open;
   const secure = state.secure;
@@ -282,7 +284,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       {browser && state.choosingImage && <ImageChoice key={state.imageChoice} runtime={runtime} choice={state.imageChoice} canScan={canScan}
         close={() => talk({ type: "closeImageChoice", choice: state.imageChoice })} focusTools={() => toolsRef.current?.focus({ preventScroll: true })} />}
       <Scan runtime={runtime} alpha={alpha} />
-      <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
+      <div key={album ? `album-${state.album}` : "photos"} inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className={cn("flex min-h-0 flex-1 flex-col", album && "motion-safe:animate-rise")} data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
           <div role="group" aria-label="Photos sections" className={cn("mx-4 flex shrink-0 gap-0.75 rounded-segment bg-secondary p-1", state.tab === "Library" && allow === undefined ? "mb-6" : "mb-3")}>

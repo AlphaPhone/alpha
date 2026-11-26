@@ -121,12 +121,12 @@ export function Files({ runtime, alpha }: FilesProps) {
   const scanner = <Scan runtime={runtime} alpha={alpha} />;
   const header = (title: string) => <AppHeader title={title} leading={back} />;
   if (cause) return <>{header("Files")}<Alert variant="destructive" className="m-4">Alpha could not open Files</Alert></>;
-  if (!state) return null;
+  if (!state) return <section aria-label="Files" aria-busy className="relative flex min-h-0 flex-1 flex-col">{header("Files")}</section>;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
   const shown = browse(state);
   const label = (handle: number) => labelOf(runtime, handle);
-  if (shown === "Closed") return null;
+  if (shown === "Closed") return <section aria-label="Files" aria-busy className="relative flex min-h-0 flex-1 flex-col">{header("Files")}</section>;
   if (shown === "Unsupported") return <>{header("Files")}<StorageStatus title="Storage unavailable" />{scanner}</>;
   if (shown === "NotAsked" || shown === "NoAccess") {
     const allow = owner({ type: "allow" }) ? () => tell({ type: "allow" }) : undefined;
@@ -223,7 +223,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
     <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div key={atTop ? "top" : "folder"} className={cn("flex min-h-0 flex-1 flex-col", !atTop && "motion-safe:animate-rise")}>
         <AppHeader title={title} detail={selecting || !atTop} className={cn(selecting || !atTop ? "[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0" : undefined, selecting && "[&>h1]:font-display [&>h1]:text-2xl [&>h1]:font-light")} leading={selecting && (choosing || owner({ type: "cancelSelection" })) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={endChoosing}><X /></Button> : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
           {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}

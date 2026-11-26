@@ -18,6 +18,10 @@ as an archive, and the browser build keeps no file library of its own.
 - [Scan](./scan.md): pages made into a PDF
 - [Shared](./shared.md): the file vocabulary and the free-name rule
 
+A place opened from the start of Files rises over it as Alpha's earlier
+build drew it, and Back to the start shows it at once. Before Files has its
+first answer, it shows its header, never a blank screen.
+
 ## Story: Browse my storage
 
 > As the owner, I want to see my volumes, how full they are and my

@@ -60,7 +60,7 @@ import type { Machine as PrefsMachine } from "../../gen/app__settings__preferenc
 import type * as ResetGen from "../../gen/app__settings__reset.ts";
 import { useMachine as useReset } from "../../gen/app__settings__reset.react.ts";
 import type { Machine as ResetMachine } from "../../gen/app__settings__reset.effect.vibe";
-import { type Neighbour, type Page, passwordPage } from "../../gen/app__settings.ts";
+import { type Neighbour, type Page, parent, passwordPage, row as placeOn } from "../../gen/app__settings.ts";
 import { useMachine as usePages } from "../../gen/app__settings.react.ts";
 import type { Machine as PagesMachine } from "../../gen/app__settings.effect.vibe";
 import { useMachine as useDeveloper } from "../../gen/app__settings__developer.react.ts";
@@ -82,6 +82,7 @@ import { ListenerControls } from "./ListenerControls.tsx";
 import type { AccessSurface } from "../startup/settingsAccess.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { Layers, Over, Under } from "../shell/Layers.tsx";
 import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 import { PasswordEntries } from "./PasswordEntries.tsx";
@@ -601,10 +602,13 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const { state, cause, can, send } = usePages(runtime);
   const android = useTimed(runtime, useAndroid);
   const facts = useTimed(runtime, useFacts);
-  const [entered, setEntered] = useState<{ page?: Page; depth: number; opened: boolean }>({ depth: 0, opened: false });
-  if (state && entered.page !== state.page) setEntered({ page: state.page, depth: state.places.length, opened: state.places.length > entered.depth });
+  const [entered, setEntered] = useState<{ page?: Page; depth: number; opened: boolean; returns: number }>({ depth: 0, opened: false, returns: 0 });
+  if (state && entered.page !== state.page) {
+    const opened = state.places.length > entered.depth;
+    setEntered({ page: state.page, depth: state.places.length, opened, returns: opened ? entered.returns : entered.returns + 1 });
+  }
   if (cause) return <Banner variant="destructive" className="m-4">Alpha could not open Settings</Banner>;
-  if (!state) return null;
+  if (!state) return <section aria-label="Settings" aria-busy className="relative flex h-full min-h-0 flex-col"><SettingsPage title="Settings" top leading={<AppBack alpha={alpha} firstPage />} /></section>;
   const page = state.page;
   const goBack = { type: "goBack" } as const;
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
@@ -634,11 +638,20 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
       if (focused !== (state.places[state.places.length - 1] ?? 0)) void send({ type: "focus", focused });
     },
   };
-  const Shown = further[page] ?? drawn[page];
+  const stack = [page];
+  while (stack[0] !== "Top") stack.unshift(parent(stack[0] ?? "Top"));
+  const layer = (shown: Page) => {
+    const Shown = further[shown] ?? drawn[shown];
+    if (!Shown) return null;
+    const drawnPage = <Shown runtime={runtime} alpha={alpha} common={shown === page ? common : { ...common, place: placeOn(state, shown) }} />;
+    const key = `${shown}:${entered.returns}`;
+    return shown === "Top" ? <Under key={key} covered={page !== "Top"}>{drawnPage}</Under>
+      : <Over key={key} inert={shown !== page} aria-hidden={shown !== page || undefined}>{drawnPage}</Over>;
+  };
   return (
     <section aria-label="Settings" className="relative flex h-full min-h-0 flex-col">
       {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn">The phone did not answer</Banner> : null}
-      {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
+      <Layers>{stack.map(layer)}</Layers>
       <AccessReview runtime={runtime} />
     </section>
   );
