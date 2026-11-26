@@ -364,6 +364,13 @@ pure def speechHeard(v: Voice, session: int): Voice = { ...v, heard: true }
 
 ### When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically
 
+Over Cloud streaming speech, the owner has finished speaking once 400 ms
+pass after the relay's final words with no new speech, as the Sunday demo
+build timed a Cloud turn (v119, apps/app/src/prototype/voice-adapter.ts:987,
+and its voice session's long gap). Speech that starts again within them
+continues the same turn: its words join the ones before, so a pause inside
+a sentence never sends half of it. Speech on the phone keeps its own timing.
+
 ```quint
 pure def canTurnEnded(v: Voice, session: int): bool =
   v.phase == Listening and v.mic == On and v.heard and session == v.session
@@ -389,15 +396,20 @@ pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, 
   })
 ```
 
-### What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it
+### What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it
 
 When the owner finishes speaking, the words heard for that turn stay in the
 open conversation as the owner's own message, and three dots under it show
 Alpha at work, as the Sunday demo build did (v119,
 apps/app/src/prototype/template.html:4721-4726). They show while that turn
-is transcribed, thought about and spoken, and go the moment the recorded
-message and reply take their place, the turn ends unsent, or Talk leaves it.
-The words are not a draft and not history: only the recorded rows are kept.
+is transcribed and thought about. What Alpha speaks takes the dots' place
+in the same moment it is queued to be spoken, as the Sunday demo build set
+the spoken text and the chat text together (v119,
+apps/app/src/prototype/agent-adapter.ts:2253-2254): an acknowledgment as
+the turn's label, as a typed turn shows one, then the reply's text. Words and reply go the
+moment the recorded message and reply take their place, the turn ends
+unsent, or Talk leaves it. They are not a draft and not history: only the
+recorded rows are kept.
 
 ```quint
 pure def showsWhatWasSaid(v: Voice, session: int, turn: int): bool =
@@ -542,14 +554,24 @@ shown again for that turn, with its Send and Decline; otherwise it leaves.
 
 Whether a spoken turn asks for a text is the model's to read: Talk matches
 nothing in the owner's words to route a turn, and a text review names the
-recipient the agent proposed, for the owner to check before Send. A spoken
+recipient the agent proposed, for the owner to check before Send: by the
+contact's name with its number where Messages names that number, as v119's
+review did, and by its number otherwise. A spoken
 turn from another screen such as Messages keeps the session's capabilities
 and non-Files review cards even when direct Files actions are allowed, and
-a direct Files result from Messages is still spoken aloud. A review the
-reply proposed from a Messages chat that Talk cannot show, or a direct
-device action the reply claimed that did not run on the phone, ends the
-turn quietly without setting the review notice: any queued speech is
-hushed and Talk says nothing of its own about it.
+a direct Files result from Messages is still spoken aloud.
+
+What Talk says of a reply that proposed a phone step follows what that
+step did, never what the reply claims. A reply that proposed none is said
+as written. A step that ran here, a direct Files filter or open or a page
+the owner asked for, lets the reply be said, and a direct Files step says
+its own result. A review shown as a card is decided there, so the reply
+beside it is not said. A step Talk neither showed as a card nor ran, such
+as a review Talk cannot show from a Messages chat, a text proposed off
+Messages, or a step the agent marked to run at once that nothing here
+runs, means the reply speaks of something that did not happen: the turn
+ends quietly without setting the review notice, any queued speech is
+hushed, and Talk says nothing of its own about it.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool, says: bool): bool =
@@ -570,6 +592,18 @@ pure def lawAReviewSaidBesideIsNeverHushed(session: int, played: int): bool =
 pure def lawAQuietEndingHushesWithoutAReviewNotice(session: int, played: int): bool =
   val ended = replyEnds({ ...initial, phase: Speaking, mic: Off, session: session, turn: 1, queued: 2, played: played }, session, 1, false, false)
   ended.out.includes(Hush({ turn: 1 })) and not(ended.state.reviewPending) and ended.state.phase == Listening
+
+pure def replySaid(proposed: bool, shown: bool, ran: bool, reported: bool): bool =
+  reported or (not(shown) and (not(proposed) or ran))
+
+pure def lawAStepThatNeitherShowedNorRanIsNeverClaimed(reported: bool): bool =
+  replySaid(true, false, false, reported) == reported
+
+pure def lawAReplyWithNoStepOrAStepThatRanIsSaid(proposed: bool, ran: bool): bool =
+  (not(proposed) or ran) implies replySaid(proposed, false, ran, false)
+
+pure def lawAShownReviewSaysOnlyAStepResult(proposed: bool, ran: bool, reported: bool): bool =
+  replySaid(proposed, true, ran, reported) == reported
 
 pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
 

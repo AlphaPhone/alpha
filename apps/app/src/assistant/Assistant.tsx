@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/assistant/dock.md, "Sending from the bar opens the sheet, where the reply shows"; spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
-  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
+  Alert, AssistantCard, AssistantCardFrame, AssistantDeviceReceipt, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTranscriptProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
@@ -145,6 +145,7 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
       : undefined;
   const line = card.sms?.subscription ?? card.composeLine?.subscription;
   const textCard = text !== undefined && card.phone?.tag !== "Choices" && card.phone?.tag !== "Unavailable" && card.notice === undefined;
+  const decisionCard = text === undefined && card.phone?.tag !== "Choices" && card.phone?.tag !== "Unavailable" && card.notice === undefined;
   return (
     <div className="grid gap-2" aria-busy={deciding}>
       {card.phone?.tag === "Choices" ? (
@@ -164,18 +165,19 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
       ) : text !== undefined ? (
         <SmsReviewCard review={card.id} body={text.body}
-          to={card.phone?.tag === "Exact" ? card.phone.selected.name : text.recipients.map(displayNumber).join(", ")}
-          number={card.phone?.tag === "Exact" ? displayNumber(card.phone.selected.number) : undefined}
+          to={card.phone?.tag === "Exact" ? card.phone.selected.name : card.recipientName ?? text.recipients.map(displayNumber).join(", ")}
+          number={card.phone?.tag === "Exact" ? displayNumber(card.phone.selected.number) : card.recipientName !== undefined ? text.recipients.map(displayNumber).join(", ") : undefined}
           note={line === undefined ? undefined : `SIM ${line.slot + 1} · ${line.displayName}`}
           sendDisabled={deciding || unavailable} declineDisabled={deciding}
           onSend={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)} onDecline={unavailable ? undefined : () => decide(false)} />
       ) : (
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve" }}
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve",
+          ...(unavailable ? {} : { onDecline: () => decide(false), declineDisabled: deciding }) }}
           onHandOn={unavailable ? undefined : () => decide(true)} />
       )}
       {unavailable
         ? <Alert role="status">Alpha couldn’t confirm the decision. Check Activity before trying again.</Alert>
-        : !textCard && <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
+        : !textCard && !decisionCard && <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
     </div>
   );
 }
@@ -666,8 +668,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const calendarCard = calendarReview !== undefined && !talking.context.sensitive && shownInAskAlpha(calendar.shown, bound !== undefined, latestFiled)
     ? [{ id: `calendar review ${bound ?? ""}`, author: "alpha" as const, text: "",
       children: <AskedRequest.Provider value={bound}>{calendarReview}</AskedRequest.Provider> }] : [];
-  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": how a change ended draws under the reply that filed it, as v119 kept each reply's own card, so it never reads as a later reply's.
-  // A filing reply that draws no row here, blank or off this page, keeps the outcome at the foot, so it is never lost.
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": how a change ended draws under the reply that filed it, as v119 kept each reply's own card, so it never reads as a later reply's; a filing reply that draws no row here keeps the outcome at the foot so it is never lost.
   const filer = calendar.shown === "ChangeEnded" ? filedBy(calendar, shown.chosen) : undefined;
   const endedUnder = filer !== undefined && [...rows.messages, ...(rows.messagesAfterLater ?? [])].some((row) => row.id === filer) ? filer : undefined;
   const under = (placed: typeof rows.messages) => endedUnder === undefined ? placed
@@ -678,7 +679,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     ? [{ id: `recording summary ${offer.message}`, author: "alpha" as const, text: "",
       children: <RecordingSummaryReview runtime={runtime} offer={offer} /> }] : [];
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
-    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
+    ? [] : [{ id: "media result", author: "alpha" as const, text: "", children: <AssistantDeviceReceipt text={seen.mediaNote.text} /> }];
   const failure = seen.failure;
   const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
   const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
