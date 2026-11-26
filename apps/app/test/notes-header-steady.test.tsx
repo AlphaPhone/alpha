@@ -218,7 +218,6 @@ describe(`More over a saved note waits for its save, as v119's did (${waits})`, 
       await choose("Delete");
       await until(alpha, runtime, Editor, (state) => state.binning && state.draft.sync === "Saving");
       await later(alpha, 1_000);
-      // Nothing is deleted before the save lands.
       const waitingNow = await runtime.runPromise(Editor.use((machine) => machine.get()));
       expect([waitingNow.showing, waitingNow.deleting, world.notes.trash.length, world.notes.revision]).toEqual([true, false, 0, before]);
     } finally {
@@ -265,7 +264,6 @@ describe(`An editor kept before a Delete could wait on a save is read back (${wa
     const first = await openRadiator(world);
     await fill("Note", edited);
     await until(first.alpha, first.runtime, Editor, (state) => state.showing && waiting(state));
-    // Close as the phone does, keeping what it stored.
     const stored = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key) ?? ""]));
     await closeAll();
     for (const [key, value] of Object.entries(stored)) localStorage.setItem(key, value);

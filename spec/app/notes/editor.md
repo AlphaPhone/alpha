@@ -455,10 +455,10 @@ pure def sometimesASharedNewNoteIsSaved(e: Editor): bool = e.asked and not(e.fre
 v119 drew More enabled over a saved note while the owner typed and while
 the save was on its way; a Delete chosen then waited for the save, and the
 follow-up save of edits typed meanwhile, to land before it deleted
-(45f6bed30 canonical-notes-ui.ts, remove awaits settle). Here Share and
-Delete are offered over a saved note with no source whose draft is edited
-or being saved, and not over one that met a conflict or was found deleted
-meanwhile. Asking either sends the owner's save at once when the edit has
+(45f6bed30 canonical-notes-ui.ts, remove awaits settle). Here Delete, and
+Share when the note has no source, are offered over a saved note whose
+draft is edited or being saved, and not over one that met a conflict or
+was found deleted meanwhile. Asking either sends the owner's save at once when the edit has
 not gone yet. Nothing is shared or deleted before the save lands: once the
 editor shows the note saved, with nothing left unsaved, the phone opens the
 share over the saved revision ("More over a new note offers Share, Pin and
