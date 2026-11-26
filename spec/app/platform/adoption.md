@@ -126,9 +126,14 @@ the same transaction as everything brought in, so it is never brought in
 twice. It is brought in only while the agent's store holds no memory, no
 room and no world but the conversation world the agent makes at every
 start, so nothing the owner wrote since is mixed with it. Each launch that
-tries counts an attempt in `earlier-import.json` in the account's state
-directory before it starts, so a launch stopped part way counts too; after
-three, it is not tried again. What a launch found is written there and
+reaches the end of its tries counts an attempt in `earlier-import.json` in
+the account's state directory; after three, it is not tried again. A
+launch stopped part way, as when the phone ends the agent for memory, is
+not an attempt: it is counted as stopped, and after three stopped launches
+in a row the import waits a day after the last before it is tried again,
+with the count of stopped launches started over, so a store that keeps the
+agent from starting stops it at most three times a day and is never given
+up for it. What a launch found is written there and
 logged: brought in with the counts, not the owner, no earlier store (which
 is all an account the phone passes nothing to can find), the store in use,
 or failed with the kind of error only, never its text. Once a record says
@@ -155,6 +160,21 @@ pure def lawItIsBroughtInOnceIntoAnEmptyStore(owner: bool, storeHeld: bool, mark
 
 pure def lawAttemptsAreBounded(owner: bool, storeHeld: bool, marked: bool, populated: bool, attempts: int): bool =
   attempts >= maxImportAttempts implies bringingOf(owner, storeHeld, marked, populated, attempts) != BringIn
+
+type Start = TryNow | HeldForADay
+
+pure val maxStoppedLaunches: int = 3
+
+pure val stoppedHoldMs: int = 86400000
+
+pure def startOf(stopped: int, sinceLastStopMs: int): Start =
+  if (stopped >= maxStoppedLaunches and sinceLastStopMs < stoppedHoldMs) HeldForADay else TryNow
+
+pure def lawStoppedLaunchesNeverEndTheImport(stopped: int, sinceLastStopMs: int): bool =
+  sinceLastStopMs >= stoppedHoldMs implies startOf(stopped, sinceLastStopMs) == TryNow
+
+pure def lawThreeStoppedLaunchesWaitADay(stopped: int, sinceLastStopMs: int): bool =
+  (stopped >= maxStoppedLaunches and sinceLastStopMs < stoppedHoldMs) implies startOf(stopped, sinceLastStopMs) == HeldForADay
 ```
 
 ### Within a launch, a failed bringing-in is tried three times, one and then four seconds apart
@@ -176,8 +196,11 @@ pure def lawARetryWaitsAtMostFourSeconds(failures: int): bool =
 
 The earlier store's files are read, never opened or written, into an image
 in memory, and the earlier database is opened from that image in memory, so
-a stopped launch leaves nothing behind. A store whose files add up to more
-than 512 MiB is not read, and the attempt is recorded as failed. A build
+a stopped launch leaves nothing behind. The image is let go as soon as the
+earlier database is open, and a store whose files add up to more than
+192 MiB is not read, and the attempt is recorded as failed: opening holds
+about three to four times the store in memory, and an earlier store of tens
+of thousands of memories with their embeddings is about 100 MiB. A build
 that ran before this rule copied the store to `.earlier-import-*`
 directories in an account's state directory; every start of the agent
 removes any it finds in its own account's directory before it looks for the
@@ -186,7 +209,7 @@ earlier store.
 ```quint
 pure val scratchOnDisk: bool = false
 
-pure val maxEarlierStoreBytes: int = 536870912
+pure val maxEarlierStoreBytes: int = 201326592
 ```
 
 ### What is brought in never acts on its own: every task is paused, a task past its time is marked missed, and earlier grants are left out

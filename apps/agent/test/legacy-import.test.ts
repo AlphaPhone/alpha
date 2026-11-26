@@ -772,6 +772,47 @@ describe("Earlier v121 PGlite one-shot importer", () => {
     }
   }, 120_000);
 
+  it("never gives up for launches stopped part way: three stopped launches wait a day, then it is tried again", async () => {
+    const { storage, openEarlier } = await loadElizaStorageTools();
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: makeTempDir("v4-stopped-state-"),
+      persistMemory: true,
+      account: { userId: "owner-7", organizationId: "org-7" },
+      embeddingDimensions: 0,
+    });
+    try {
+      const stateDir = makeTempDir("v4-stopped-record-");
+      const hour = 3_600_000;
+      const start = Date.parse("2026-11-26T08:00:00.000Z");
+      const launch = (now: number, openLegacyStore: (image: Blob) => Promise<EarlierSqlClient>) => importLegacyStore({
+        legacyStoreDir: sharedFixtureDir,
+        conversationWorldId: CONVERSATION_WORLD_ID,
+        owner: account("owner-7", "org-7"),
+        account: account("owner-7", "org-7"),
+        stateDirectory: stateDir,
+        agentId: opened.agentId,
+        adapter: opened.adapter,
+        wait: noWait,
+        now: () => now,
+        openLegacyStore,
+      });
+      const stoppedPartWay = () => new Promise<EarlierSqlClient>(() => undefined);
+      for (const [index, now] of [start, start + hour, start + 2 * hour].entries()) {
+        void launch(now, stoppedPartWay);
+        await expect.poll(() => readRecord(stateDir), { timeout: 30_000 }).toMatchObject({ attempts: 0, stopped: index, startedAt: now });
+      }
+      expect(await launch(start + 3 * hour, openEarlier)).toEqual({ status: "skipped", reason: "held_after_stopped_launches" });
+      expect(readRecord(stateDir)).toMatchObject({ attempts: 0, stopped: 3, lastStopAt: start + 2 * hour, startedAt: null });
+      expect(await opened.adapter.getAllWorlds()).toEqual([]);
+
+      const result = await launch(start + 27 * hour, openEarlier);
+      expect(result.status).toBe("imported");
+      expect(readRecord(stateDir)).toMatchObject({ attempts: 1, stopped: 0, startedAt: null, outcome: { status: "imported" } });
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+
   it("logs a warning and lets fresh store-v4 boot cleanly when the earlier fixture is corrupt", async () => {
     const { storage, openEarlier } = await loadElizaStorageTools();
     const corruptDir = makeEarlierStoreDir("v121-corrupt-fixture-");
