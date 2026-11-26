@@ -46,6 +46,13 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }, notic
   return { ...running, world, runtime };
 }
 
+/** The Browser opened from Home, once its tabs are read back. */
+async function onHydratedBrowser(world = { ...scene(), phone: true, image: true }) {
+  const opened = await onBrowser(world);
+  await until(opened.alpha, opened.runtime, Tabs, (s) => s.hydrated);
+  return opened;
+}
+
 /** Ask Alpha and the Browser on `world`, once Ask Alpha's composer is open and its conversation ready. */
 async function askingBeside(world: ReturnType<typeof scene>) {
   const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
@@ -178,9 +185,7 @@ const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
 
 describe("The Browser on a phone", () => {
   it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/address.md, \"Story: Go where I typed\")", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const { world, alpha, runtime } = await onHydratedBrowser();
     // spec/app/browser/address.md, "A tab with no page says \"Search or address\" in its bar, a private tab as a normal one, and only the private mark tells them apart"
     expect(button(/^Edit address/)?.textContent).toBe("Edit addressSearch or address");
     await press("Search or type address");
@@ -360,8 +365,7 @@ describe("The Browser on a phone", () => {
   it("Explains unavailable Android page reading (spec/app/browser/reading.md, \"An explicit reading starts from the current committed HTTPS page\")", async () => {
     const world = { ...scene(), phone: true, image: true };
     world.browser.readingAvailable = false;
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (state) => state.hydrated);
+    const { alpha, runtime } = await onHydratedBrowser(world);
     await press("Menu");
     await drawn(() => vi.waitFor(() => expect(document.querySelector("[role='note'][aria-label='Page reading unavailable']")).not.toBeNull()));
     await pressOnTop("Read aloud");
@@ -790,9 +794,7 @@ describe("The Browser on a phone", () => {
   });
 
   it("Toggles desktop site per native tab from the Browser menu", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const { world, alpha, runtime } = await onHydratedBrowser();
     await go("example.com");
     await vi.waitFor(async () => expect(await committedAddress(runtime, world.browser.tabs)).toBe("https://example.com"));
     const firstTab = (await runtime.runPromise(Effect.flatMap(Tabs, (model) => model.get()))).selected;
