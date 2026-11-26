@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { DeviceExecution } from "@elizaos/agent";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine } from "../gen/app__camera.effect.vibe";
+import * as CameraModel from "../gen/app__camera.ts";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
@@ -125,6 +126,28 @@ describe("Camera on a phone", () => {
 
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => !state.showing);
+  });
+
+  it("On the launcher Camera's header holds flip alone and Android's Back still leaves (spec/app/camera/index.md, \"Story: Open the camera\"; spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
+    const { alpha, runtime } = await onCamera(world);
+    await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
+    // v119's header (template.html at 45f6bed30, lines 1861-1868) drew back only off the launcher and had no Scan document.
+    expect(button("Back to apps")).toBeUndefined();
+    expect(button("Scan document")).toBeUndefined();
+    expect(button("Switch camera")).toBeDefined();
+    await hardware("back");
+    await until(alpha, runtime, Machine, (state) => !state.showing);
+  });
+
+  it("Camera has no scan of its own, as v119 drew none, and its shutter still takes a photo (spec/app/camera/index.md, \"Story: Open the camera\")", async () => {
+    expect(Object.keys(CameraModel).filter((name) => /scan/i.test(name))).toEqual([]);
+    const session = await onCamera();
+    expect(button("Scan document")).toBeUndefined();
+    expect(document.querySelector("[role='dialog']")).toBeNull();
+    await takeCapture(session, "photo");
+    expect(button("Switch camera")).toBeDefined();
   });
 
   it("Volume stays with Android while Camera asks about the microphone (spec/app/camera/index.md, \"Volume keys fire the available shutter while Camera is ready for the owner\")", async () => {

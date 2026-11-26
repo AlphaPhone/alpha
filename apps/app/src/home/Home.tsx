@@ -153,7 +153,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       appCardsInert={s.assistant !== "Bar"}
       drawerInert={s.assistant !== "Bar" && !alongside}
       covered={h.editing && !editVisible}
-      editing={editing}
+      editing={editing || (h.editing && addLayer !== undefined)}
       tileGestureScope={`${s.route}:${editVisible}:${editing}:${canvas?.width}:${canvas?.visible}`}
       onPressTile={(id) => { if (id.startsWith("view:")) homeFrame.want(id as `view:${View}`); }}
       onOpenTile={(id) => {

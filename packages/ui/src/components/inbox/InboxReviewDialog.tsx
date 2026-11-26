@@ -33,11 +33,11 @@ export function InboxReviewDialog({ open, title, children, noLabel = "No", yesLa
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next && !busy) onNo(); }}>
       <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-dialog bg-foreground/45 motion-safe:animate-fade dark:bg-background/70" />
+        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-dialog bg-foreground/45 dark:bg-background/70" />
         <AlertDialogPrimitive.Content
           data-covers-dock=""
           {...(children ? {} : { "aria-describedby": undefined })}
-          className="fixed inset-x-4 bottom-18 z-dialog mx-auto max-h-[calc(100dvh-5.5rem)] max-w-md overflow-auto rounded-tile bg-background p-5 text-foreground outline-none motion-safe:animate-rise"
+          className="fixed inset-x-4 bottom-18 z-dialog mx-auto max-h-[calc(100dvh-5.5rem)] max-w-md overflow-auto rounded-tile bg-background p-5 text-foreground outline-none"
         >
           <AlertDialogPrimitive.Title className="text-xl leading-tight font-bold">{title}</AlertDialogPrimitive.Title>
           {children ? <AlertDialogPrimitive.Description asChild><div className="mt-3 text-base">{children}</div></AlertDialogPrimitive.Description> : null}

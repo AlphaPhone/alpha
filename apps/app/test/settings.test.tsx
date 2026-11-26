@@ -124,6 +124,18 @@ describe("Settings", () => {
     expect(button("Back")).toBeUndefined();
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    for (const app of ["Inbox", "Calendar"] as const) {
+      await drawn(() => {
+        const tile = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${app}']`);
+        if (!tile) throw new Error(`No ${app} home tile`);
+        tile.click();
+      });
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === app);
+      expect(button("Back")).toBeUndefined();
+      expect(button("Back to apps")).toBeUndefined();
+      await hardware("back");
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    }
   });
 
   it("Off the launcher, Settings' first page keeps its Back (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {

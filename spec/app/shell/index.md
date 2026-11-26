@@ -177,8 +177,11 @@ pure def goBack(s: Shell): Shell =
 
 As in Sunday's v119, which drew an app's Back only when Alpha was not the
 phone's launcher, the first page of Settings and of Workflows has no Back
-control in its header while Alpha is the launcher. A page inside either
-keeps its Back, and away from the launcher the first page keeps it too.
+control in its header while Alpha is the launcher, and nor has the first
+page of Inbox, of Calendar, of Notes, of Files or of Photos (the notes
+list, the top of Files, the photo library or albums). A page inside any
+of them keeps its Back, and
+away from the launcher the first page keeps it too.
 The control is only how Back is drawn: Android's own Back gesture still
 closes the app as the rule above says.
 

@@ -634,9 +634,34 @@ describe("on a phone", () => {
     await press("New event");
     await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
     await fill("Title", "Office closure");
-    await press("This phone's calendar");
     await press("All day");
+    // v119 45f6bed30 prototype/template.html:1423-1497: Video link, Repeat and Alert show on every new event.
+    // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
+    const agentChosen = () => button("Your agent's calendar")?.getAttribute("aria-pressed") === "true";
+    const offered = () => ["Once", "Weekdays", "Video link", "None", "10 min"].map((name) => button(name)?.disabled);
+    expect([agentChosen(), offered()]).toEqual([true, [false, true, true, false, true]]);
     await press("Weekdays");
+    await press("Video link");
+    await press("10 min");
+    await until(alpha, runtime, Editor, (e) => e.titled && e.allDay && e.kept);
+    expect([agentChosen(), button("Once")?.getAttribute("aria-pressed"), button("Video link")?.getAttribute("aria-checked"), button("None")?.getAttribute("aria-pressed")])
+      .toEqual([true, "true", "false", "true"]);
+    expect([button("Save event")?.getAttribute("aria-disabled"), Boolean(button("Open in Android Calendar"))]).toEqual(["false", false]);
+    // On this phone's calendar every repeat, the video link and the alerts are offered; going back to the agent's sets them back, in view.
+    await press("This phone's calendar");
+    expect(offered()).toEqual([false, false, false, false, false]);
+    await press("Weekdays");
+    await press("Video link");
+    await press("10 min");
+    await until(alpha, runtime, Editor, (e) => e.extras);
+    await press("Your agent's calendar");
+    await until(alpha, runtime, Editor, (e) => !e.extras);
+    expect([agentChosen(), button("Once")?.getAttribute("aria-pressed"), button("Video link")?.getAttribute("aria-checked"), button("None")?.getAttribute("aria-pressed")])
+      .toEqual([true, "true", "false", "true"]);
+    expect(button("Save event")?.getAttribute("aria-disabled")).toBe("false");
+    await press("This phone's calendar");
+    await press("Weekdays");
+    expect(button("This phone's calendar")?.getAttribute("aria-pressed")).toBe("true");
     await press("Save event");
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
     await until(alpha, runtime, View, (state) => state.phoneRows === 3);

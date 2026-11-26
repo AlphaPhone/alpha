@@ -1,6 +1,6 @@
 // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "A short, slow pull of the bar or the pill leaves Ask Alpha where it was"; spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A sheet keeps the share of the screen it was left at"; spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
 import {
-  type AssistantPull, type AssistantRelease, useAssistantBarDrag, type ChatDrag, CLOSE_FADE_MS, CLOSE_MS, CLOSED_COMPOSER_BLOCK, dockOpacity, dragPaint, FALLBACK_BAR, FLOOR_GAP,
+  type AssistantPull, type AssistantRelease, barDismissPaint, useAssistantBarDrag, type ChatDrag, CLOSE_FADE_MS, CLOSE_MS, CLOSED_COMPOSER_BLOCK, dockOpacity, dragPaint, FALLBACK_BAR, FLOOR_GAP,
   moveDrag, PANEL_TRANSITION, pressDrag, RESIZE_TRANSITION, restingHeight, revealFrames, rowReveal, SHEET_EASE, sheetBounds, TAP_SLOP,
 } from "@repo/ui";
 import { type CSSProperties, type ReactNode, type RefObject, useCallback, useRef, useState } from "react";
@@ -90,13 +90,51 @@ function ghostOf(section: HTMLElement) {
   return ghost;
 }
 
+/** COA:339-346 direct paint for pulling the resting bar down toward the pill: follows the finger downward and fades out. */
+function paintBarDismiss(d: ChatDrag) {
+  const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+  if (!bar) return;
+  const dismiss = barDismissPaint(d);
+  if (!dismiss) {
+    bar.style.removeProperty("transition");
+    bar.style.removeProperty("animation");
+    bar.style.removeProperty("transform");
+    bar.style.removeProperty("opacity");
+    return;
+  }
+  bar.style.transition = "none";
+  bar.style.animation = "none";
+  bar.style.transform = `translateY(${dismiss.translateY}px)`;
+  bar.style.opacity = String(dismiss.opacity);
+}
+
+/** Clears downward bar-drag styling; if `spring` is true, eases the bar smoothly back to rest. */
+function unpaintBar(spring = false) {
+  const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
+  if (!bar) return;
+  const fromTransform = bar.style.transform;
+  const fromOpacity = bar.style.opacity;
+  bar.style.removeProperty("transition");
+  bar.style.removeProperty("animation");
+  bar.style.removeProperty("transform");
+  bar.style.removeProperty("opacity");
+  if (spring && (fromTransform || fromOpacity) && animates()) {
+    const motion = bar.animate(
+      [{ transform: fromTransform || "none", opacity: fromOpacity ? Number(fromOpacity) : 1 }, { transform: "none", opacity: 1 }],
+      { duration: 240, easing: SHEET_EASE },
+    );
+    motion.finished.catch(() => undefined);
+  }
+}
+
 /**
  * v119 retire (:613-651): the header and the bar or pill under the sheet shown in place again. The sheet's own height,
  * opacity and corners go back with the render that ends the drag, which drew them too.
  */
-function unpaint(section: HTMLElement | null) {
+function unpaint(section: HTMLElement | null, springBar = false) {
   document.querySelector<HTMLElement>("[data-alpha-underlay]")?.style.removeProperty("opacity");
   section?.querySelector<HTMLElement>("[data-alpha-chat-header]")?.style.removeProperty("opacity");
+  unpaintBar(springBar);
 }
 
 /**
@@ -137,13 +175,13 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   };
   if (live?.landed && (detent !== live.start || (detent === live.landed.detent && kept === live.landed.kept))) settle(live.painted);
   const viewport = () => (comms ? window.innerHeight - 52 : window.innerHeight);
-  const done = () => {
+  const done = (springBar = false) => {
     heldRef.current = undefined;
-    unpaint(sectionRef.current);
+    unpaint(sectionRef.current, springBar);
     setLive(undefined);
   };
   const drop = () => {
-    done();
+    done(true);
     void dock.send({ type: "shift", now: untimed });
   };
   /** v119's floor (chat-overlay-motion-adapter.ts:1037-1039): the input bar's height, measured where it was last drawn, plus 28. */
@@ -167,16 +205,24 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       if (!held) return;
       const first = !held.drag.moved;
       if (first && voice) return;
-      if (!moveDrag(held.drag, y - held.y, held.form === "bar")) return;
-      if (first) void dock.send({ type: "drag" });
+      if (!moveDrag(held.drag, y - held.y)) return;
+      if (first) {
+        if (held.form === "bar" && document.activeElement instanceof HTMLTextAreaElement) document.activeElement.blur();
+        void dock.send({ type: "drag" });
+      }
       const drawn = held.form === "open" || held.drag.height > 0;
       // eslint-disable-next-line @eslint-react/dom-no-flush-sync -- v119 drew the sheet for the first move before the next frame (chat-overlay-motion-adapter.ts:836), so the bar never shows under the finger's first paint
       if (first || drawn !== live?.drawn) flushSync(() => setLive({ form: held.form, start: held.start, drawn, painted: dragPaint(held.drag) }));
-      if (drawn) paint(sectionRef.current, held.drag);
+      if (drawn) {
+        unpaintBar(false);
+        paint(sectionRef.current, held.drag);
+      } else if (held.form === "bar") {
+        paintBarDismiss(held.drag);
+      }
     },
     onRelease: ({ direction, flick, quick, travel, y }: AssistantRelease) => {
       const held = heldRef.current;
-      if (held && !held.drag.moved && !voice && moveDrag(held.drag, y - held.y, held.form === "bar")) void dock.send({ type: "drag" });
+      if (held && !held.drag.moved && !voice && moveDrag(held.drag, y - held.y)) void dock.send({ type: "drag" });
       if (!held || !held.drag.moved || stays(held.start, held.form === "pill", Math.round(travel), quick)) return drop();
       const d = held.drag;
       const full = d.full;
@@ -197,6 +243,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
         return;
       }
       const next = { detent: landed.detent, kept: landed.detent === "Sheet" ? keptShare(landed.height, full) : landed.detent === "Full" ? kept : 0 };
+      if (!isOpen(held.start) && !isOpen(landed.detent) && painted.height === 0) return done();
       if (next.detent === held.start && next.kept === kept) {
         if (painted.height === 0) return done();
         heldRef.current = undefined;
@@ -238,7 +285,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       const grow = element.animate([{ height: `${from}px`, minHeight: "0px", maxHeight: "none" }, { height: `${target}px`, minHeight: "0px", maxHeight: "none" }], { ...resize, fill: "forwards" });
       motions.push(grow);
       grow.finished.then(finish, finish);
-      if (header) motions.push(header.animate(revealFrames(from, target, fit), resize));
+      if (header) motions.push(header.animate(revealFrames(from, target, fit), { duration: resize.duration, easing: "linear" }));
       return;
     }
     if (!handing) return;
@@ -249,7 +296,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     ghostRef.current = ghost;
     const ghostHeader = ghost.querySelector<HTMLElement>("[data-alpha-chat-header]");
     ghost.animate([{ height: `${from}px`, minHeight: "0px", maxHeight: "none" }, { height: `${to}px`, minHeight: "0px", maxHeight: "none" }], { ...resize, fill: "forwards" });
-    ghostHeader?.animate(revealFrames(from, to, fit), { ...resize, fill: "forwards" });
+    ghostHeader?.animate(revealFrames(from, to, fit), { duration: resize.duration, easing: "linear", fill: "forwards" });
     const fade = handing.tap
       ? ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: CLOSE_FADE_MS, delay: CLOSE_MS - CLOSE_FADE_MS, easing: "linear", fill: "forwards" })
       : ghost.animate([{ opacity: handing.opacity ?? 1 }, { opacity: 0 }], { duration: 200, easing: "ease", fill: "forwards" });
