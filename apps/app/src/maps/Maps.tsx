@@ -155,14 +155,14 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const credits = useCredits(runtime);
   const seen = useSyncExternalStore((wake) => atlas.subscribe(wake), () => atlas.snapshot(), () => atlas.snapshot());
   const [typed, setTyped] = useState("");
-  const [whyAsked, setWhyAsked] = useState(false);
   const { state, can, send } = screen;
   const handed = useSyncExternalStore(watchHandoff, handedQuery, handedQuery);
   const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length } as const;
   // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a search not taken is dropped when Maps leaves
   useEffect(() => () => { takeHandedQuery(); }, []);
+  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": a search needs no location, so the disclosure never holds a handed query back, as v119 handed it over (prototype/maps-adapter.ts:237-243)
   useEffect(() => {
-    if (handOver === undefined || !can(handOver) || can({ type: "continueDisclosure" })) return;
+    if (handOver === undefined || !can(handOver)) return;
     takeHandedQuery();
     setTyped(handOver.query);
     void send(handOver);
@@ -225,10 +225,9 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const retryMap = offer(screen, { type: "retryMap" });
   const refused = now === "Browse" && needsSettings(state.link);
   const myLocation = offer(screen, { type: "useMyLocation" });
-  const disclosable = can({ type: "continueDisclosure" }) && myLocation === undefined;
-  // spec/app/maps/connection.md, "The owner reads Alpha's location disclosure before Android asks": Recenter is always shown, as on v119 (template.html:2407-2408), and its first tap shows the disclosure
-  const locate = myLocation ?? (disclosable ? () => setWhyAsked(true) : undefined);
-  const disclosing = disclosable && whyAsked && now !== "Navigating";
+  // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it": Recenter stays whenever Maps is not guiding, as on v119 (prototype/maps-adapter.ts:455), and does nothing while Maps is locating or Android's prompt is open
+  const locate = () => myLocation?.();
+  const disclosing = can({ type: "continueDisclosure" }) && now !== "Navigating";
   // spec/app/maps/index.md, "Story: Use my location": every state Maps reports stands in one card under the search field, as on develop.
   const said: string[] = [
     ...(disclosing ? ["Maps uses your location to show where you are and to plan routes from it. Searches and route points go to the Maps provider; your agent is never told where you are."] : []),
@@ -313,7 +312,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         </button>
       )}
 
-      {now === "Directions" && spot !== undefined && <DirectionsCard screen={screen} state={state} seen={seen} spot={spot} kept={kept} saved={saved} back={back} locate={locate} />}
+      {now === "Directions" && spot !== undefined && <DirectionsCard screen={screen} state={state} seen={seen} spot={spot} kept={kept} saved={saved} back={back} locate={myLocation} />}
       {now === "Navigating" && spot !== undefined && <Guidance screen={screen} state={state} seen={seen} spot={spot} kept={kept} way={way} />}
 
       {state.question !== "NoQuestion" && state.review.showing && (
@@ -336,7 +335,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           actions={statusActions.length > 0 ? statusActions : undefined} />
       )}
 
-      {now !== "Navigating" && locate && !(now === "Search" && state.sheet === "Full") && (
+      {now !== "Navigating" && !(now === "Search" && state.sheet === "Full") && (
         <MapsRoundButton tone="float" size="md" aria-label="Recenter" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard" style={{ bottom: `min(${floatBottom}px, calc(100% - 176px))` }} onClick={locate}><LocateFixed /></MapsRoundButton>
       )}
       {now === "Navigating" && can({ type: "recenter" }) && (
