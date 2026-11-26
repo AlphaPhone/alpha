@@ -438,7 +438,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     }
 
     // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the owner's own words keep it, and a link's words stay.
-    const tagged = [[["Sure.\n[answer] Paris"], "Sure.Paris", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"], [["[answer", "](https://example.com)"], "[answer](https://example.com)", "answer (https://example.com/)"]] as const;
+    const tagged = [[["Sure.\n[answer] Paris"], "Sure.\nParis", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"], [["[answer", "](https://example.com)"], "[answer](https://example.com)", "answer (https://example.com/)"]] as const;
     for (const [said, drawn, plain] of tagged) {
       const { turn } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
       world.ask.nextReplyChunks = said;
