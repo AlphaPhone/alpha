@@ -1126,7 +1126,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     });
     await settleComposer(alpha, () => world.voice.spoken.length === 1);
     for (let turn = 0; turn < 15; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
-    // v119 45f6bed30 voice-adapter.ts:778 only spoke the acknowledgment in Talk, and model.js:6443 kept the dots until reply text came.
+    // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it": v119 45f6bed30 voice-adapter.ts:778 only spoke the acknowledgment in Talk, and model.js:6443 kept the dots until reply text came.
     expect([world.voice.spoken.map((one) => one.text), tail()]).toEqual([["Let me check your calendar."], { dots: true, written: false, reply: undefined }]);
     await drawn(() => [...world.ask.turns.values()][0]?.());
     await settleComposer(alpha, () => tail().reply !== undefined);
@@ -1191,7 +1191,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       world.voice.emitCloud?.({ type: "speech-end", sessionId, text: name });
     });
     await later(alpha, CLOUD_TURN_GAP_MS - 200);
-    // The owner goes on before the gap ends, and is still speaking long after it would have ended: v119 cleared its timers on new speech (voice-assistant-session.ts:827-830).
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": the owner goes on before the gap ends, and is still speaking long after it would have ended; v119 cleared its timers on new speech (voice-assistant-session.ts:827-830).
     await drawn(() => world.voice.emitCloud?.({ type: "speech-start", sessionId }));
     await later(alpha, 2000);
     expect([(await state()).sent, (await state()).phase, world.ask.said]).toEqual([0, "Listening", []]);
@@ -1220,7 +1220,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Mute microphone");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
     expect([(await state()).sent, world.ask.said]).toEqual([0, []]);
-    // v119 setMuted closed the capture, then still sent the utterance at its long gap (voice-assistant-session.ts:596-611).
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": v119 setMuted closed the capture, then still sent the utterance at its long gap (voice-assistant-session.ts:596-611).
     await later(alpha, CLOUD_TURN_GAP_MS);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.muted && s.mic === "Off");
     expect(world.ask.said).toEqual([asked]);
