@@ -166,7 +166,6 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     hasLibrary && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System", binding)) },
     canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy", binding)) },
-    canMail && { label: "Email", name: "Email this page", icon: <Mail />, onSelect: () => void runtime.runPromise(offerShare("Email", binding)) },
     native && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => {
       void runtime.runPromise(openFindFromMenu(tab)).then((opened) => { if (opened) setFinding(""); });
     } },
@@ -175,9 +174,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && cannotRead && { label: "Read aloud", name: "Page reading unavailable", icon: <AudioLines />, reason: READING_UNSUPPORTED_MESSAGE },
     { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
     native && canShare && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ArrowUpRight />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
-    native && tabs.native.includes(tab) && { label: desktopSite ? "Mobile site" : "Desktop site", name: desktopSite ? "Request mobile site" : "Request desktop site", icon: desktopSite ? <Smartphone /> : <Monitor />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => runtime.runPromise(toggleDesktopSite(tab))); } },
     clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable); void browser.send({ type: "uncover" }); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
+    canMail && { label: "Email", name: "Email this page", icon: <Mail />, onSelect: () => void runtime.runPromise(offerShare("Email", binding)) },
+    native && tabs.native.includes(tab) && { label: desktopSite ? "Mobile site" : "Desktop site", name: desktopSite ? "Request mobile site" : "Request desktop site", icon: desktopSite ? <Smartphone /> : <Monitor />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => runtime.runPromise(toggleDesktopSite(tab))); } },
   ];
   const seek = (text: string) => {
     setFinding(text);
