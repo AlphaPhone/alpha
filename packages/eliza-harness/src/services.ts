@@ -501,7 +501,7 @@ export const characterOf = (email: string) => ({ name: "Alpha", system: `You are
  * the phone, and the views the phone declares, so the agent can show its apps; `persist` keeps its conversations in `state`.
  */
 export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string },
-  persist: boolean, browserNotesSpeech?: string,
+  persist: boolean, browserNotesSpeech?: string, timeZone?: string,
 ): Promise<Agent> {
   const pack = await builtPack();
   const launch = path.join(owned(state), "launch.json");
@@ -514,6 +514,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
     account: { userId: key.accountId, organizationId: key.organizationId },
     embeddings: "none", persistMemory: persist, callerRole: "owner",
     ...(browserNotesSpeech === undefined ? {} : { environment: { ALPHA_BROWSER_NOTES_SPEECH_SOCKET: browserNotesSpeech } }),
+    ...(timeZone === undefined ? {} : { timeZone }),
     ...(pack.hostContextRevision === undefined ? {} : { hostContextRevision: pack.hostContextRevision }),
     ...(pack.views === undefined ? {} : { views: pack.views }),
   }), { mode: 0o600 });
@@ -521,7 +522,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
   const port = await freePort();
   const home = owned(path.join(state, "agent"));
   const child = spawn(node, [pack.bundle, "serve", "--launch", launch, "--state", home, "--http", `127.0.0.1:${port}`], {
-    env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, TZ: "UTC", NODE_EXTRA_CA_CERTS: cloud.caFile },
+    env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, TZ: timeZone ?? "UTC", NODE_EXTRA_CA_CERTS: cloud.caFile },
     stdio: ["pipe", "ignore", "pipe"],
   });
   children.add(child);
@@ -541,6 +542,8 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
  * `real`, and whose agent is the pack's with the phone's own character, so a real model is given the phone's system
  * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
  * directory to keep both in instead, so a restart over it signs the same owner in again and reopens the agent's store.
+ * The agent runs in the owner's time zone, the dev server's own, as the phone's does (its launch and its process
+ * clock), so "6 PM" is the owner's 6 PM; the journeys' agents keep UTC.
  */
 export async function startEliza(keep?: string, real?: RealModel, speech?: RealSpeech) {
   const { character } = await builtPack();
@@ -549,6 +552,6 @@ export async function startEliza(keep?: string, real?: RealModel, speech?: RealS
   const key = cloud.owners.get(owner.email)!;
   const socket = process.env.ALPHA_LOCAL_SPEECH_SOCKET;
   const browserNotesSpeech = socket === undefined || !path.isAbsolute(socket) ? undefined : socket;
-  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, browserNotesSpeech);
+  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined, browserNotesSpeech, Intl.DateTimeFormat().resolvedOptions().timeZone);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); if (keep === undefined) fs.rmSync(state, { recursive: true, force: true }); } };
 }

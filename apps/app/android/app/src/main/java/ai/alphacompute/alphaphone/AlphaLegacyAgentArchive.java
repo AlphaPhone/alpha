@@ -1,7 +1,10 @@
-// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"; spec/app/platform/adoption.md, "The earlier agent's store and runtime are moved aside by rename, and never opened, changed or deleted"
+// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"; spec/app/platform/adoption.md, "The earlier store is never moved, changed or deleted, and what an earlier build moved aside is put back"; spec/app/platform/adoption.md, "The earlier store is brought in only for the account that signed in to the earlier Alpha"
 package ai.alphacompute.alphaphone;
 
+import ai.eliza.os.agent.AgentCredentials;
+import ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots;
 import android.content.Context;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -13,31 +16,34 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.json.JSONObject;
 
 /**
- * Moves the earlier on-device agent's store and runtime aside into {@code files/agent-legacy}
- * using atomic renames only (never copying, opening, rewriting, or deleting), and supplies the
- * read-only {@code ALPHA_LEGACY_STORE_DIR} hint for one-shot import on fresh launches.
+ * Keeps the earlier on-device agent's store where the earlier Alpha left it, puts back what a
+ * build of 89bfcc1a8 moved into {@code files/agent-legacy} (atomic renames only, never copying,
+ * opening, rewriting or deleting), and passes the agent the earlier workspace store and its owner
+ * only when the account signing in is the one the earlier Alpha last verified with the cloud.
  */
 final class AlphaLegacyAgentArchive {
   static final String LEGACY_STORE_DIR_ENV = "ALPHA_LEGACY_STORE_DIR";
+  static final String LEGACY_OWNER_ENV = "ALPHA_LEGACY_OWNER";
   static final String ARCHIVE_DIR_NAME = "agent-legacy";
   static final String WORKSPACE_ARCHIVE_NAME = "eliza-workspace";
   static final String VAULT_ARCHIVE_NAME = "vault-pglite";
   static final String PAYLOAD_ARCHIVE_NAME = "payload";
   static final String LEGACY_BUNDLE_NAME = "agent-bundle.js";
+  static final String PROVIDER_SLOT =
+    "cloud-deployment:897efc6f09b9d4db345c61226d8301a9f1257ad98f0491e8591f63d4f4515874:local-agent-provider:v1";
+  static final String SLOT_DIRECTORY = "connection-credentials";
+  static final String SLOT_KEY_ALIAS = "alpha.connection.aes.v1";
+  private static final int PROVIDER_SLOT_BYTES = 1024 * 1024;
 
-  /**
-   * Off: the app never moves the earlier store aside and never passes {@code ALPHA_LEGACY_STORE_DIR},
-   * until the import is bound to the v121 owner's account and a rollback to v121 still finds its store
-   * (alpha#1697 review, B1 and M6).
-   */
-  static final boolean ENABLED = false;
-
-  private static final Pattern ACCOUNT_STATE_DIR = Pattern.compile("[0-9a-f]{64}");
+  private static final Pattern CLOUD_ID =
+    Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
   private static final Object LOCK = new Object();
 
   @FunctionalInterface
@@ -54,154 +60,170 @@ final class AlphaLegacyAgentArchive {
     KEPT_IN_PLACE
   }
 
-  record Outcome(
-    Move workspace,
-    Move vault,
-    int payloadMoved,
-    int payloadKept,
-    Move bundle,
-    Path legacyStoreDir
-  ) {}
+  record Outcome(Move workspace, Move vault, int payloadMoved, int payloadKept, Move bundle) {}
+
+  /** The account the earlier Alpha last verified with the cloud, both ids canonical lowercase UUIDs. */
+  record Owner(String userId, String organizationId) {}
 
   private static final Outcome EMPTY_OUTCOME =
-    new Outcome(Move.NOTHING_TO_MOVE, Move.NOTHING_TO_MOVE, 0, 0, Move.NOTHING_TO_MOVE, null);
+    new Outcome(Move.NOTHING_TO_MOVE, Move.NOTHING_TO_MOVE, 0, 0, Move.NOTHING_TO_MOVE);
 
   private AlphaLegacyAgentArchive() {}
 
-  /** Quint model transition for moving one source into one archive slot. */
+  /** Quint model transition for moving one entry into one free name. */
   static Move moveOf(boolean sourceHeld, boolean archiveHeld, boolean renamed) {
     if (!sourceHeld) return Move.NOTHING_TO_MOVE;
     if (archiveHeld || !renamed) return Move.KEPT_IN_PLACE;
     return Move.MOVED_ASIDE;
   }
 
-  static Outcome moveAside(Context context) {
+  /** Quint model {@code isEarlierOwner}. */
+  static boolean isEarlierOwner(String ownerUser, String ownerOrganization, String user, String organization) {
+    return !ownerUser.isEmpty() && !ownerOrganization.isEmpty()
+      && ownerUser.equals(user) && ownerOrganization.equals(organization);
+  }
+
+  static Outcome putBack(Context context) {
     if (context == null) return EMPTY_OUTCOME;
     try {
       var files = context.getFilesDir();
       if (files == null) return EMPTY_OUTCOME;
-      return atAppStart(files.toPath());
+      return putBack(files.toPath(), ATOMIC_MOVER);
     } catch (RuntimeException ignored) {
       return EMPTY_OUTCOME;
     }
   }
 
-  /** What {@code AlphaApplication.onCreate} does with the app's files: nothing while {@link #ENABLED} is off. */
-  static Outcome atAppStart(Path filesDir) {
-    if (!ENABLED) return EMPTY_OUTCOME;
-    return moveAside(filesDir, ATOMIC_MOVER);
+  static Outcome putBack(Path filesDir) {
+    return putBack(filesDir, ATOMIC_MOVER);
   }
 
-  static Outcome moveAside(Path filesDir) {
-    return moveAside(filesDir, ATOMIC_MOVER);
-  }
-
-  static Outcome moveAside(Path filesDir, Mover mover) {
+  static Outcome putBack(Path filesDir, Mover mover) {
     if (filesDir == null || mover == null) return EMPTY_OUTCOME;
     synchronized (LOCK) {
       try {
         Path root = filesDir.toAbsolutePath();
         Path archiveRoot = root.resolve(ARCHIVE_DIR_NAME);
+        if (!Files.isDirectory(archiveRoot, LinkOption.NOFOLLOW_LINKS)) return EMPTY_OUTCOME;
         Path elizaDir = root.resolve(".eliza");
 
-        Move workspace = renameIntoFree(
-          elizaDir.resolve("workspace"),
-          archiveRoot.resolve(WORKSPACE_ARCHIVE_NAME),
-          mover
-        );
-        Move vault = renameIntoFree(
-          elizaDir.resolve(".vault-pglite"),
-          archiveRoot.resolve(VAULT_ARCHIVE_NAME),
-          mover
-        );
+        Move workspace = renameIntoFree(archiveRoot.resolve(WORKSPACE_ARCHIVE_NAME), elizaDir.resolve("workspace"), mover);
+        Move vault = renameIntoFree(archiveRoot.resolve(VAULT_ARCHIVE_NAME), elizaDir.resolve(".vault-pglite"), mover);
 
         int payloadMoved = 0;
         int payloadKept = 0;
         Move bundle = Move.NOTHING_TO_MOVE;
-
-        Path agentDir = root.resolve("agent");
-        Path bundleSource = agentDir.resolve(LEGACY_BUNDLE_NAME);
-        if (Files.isDirectory(agentDir, LinkOption.NOFOLLOW_LINKS) && existsNoFollow(bundleSource)) {
-          Path payloadDir = archiveRoot.resolve(PAYLOAD_ARCHIVE_NAME);
-          List<Path> entries = listSortedDirectEntries(agentDir);
+        Path payloadDir = archiveRoot.resolve(PAYLOAD_ARCHIVE_NAME);
+        if (Files.isDirectory(payloadDir, LinkOption.NOFOLLOW_LINKS)) {
+          Path agentDir = root.resolve("agent");
+          List<Path> entries = listSortedDirectEntries(payloadDir);
           if (entries == null) {
             bundle = Move.KEPT_IN_PLACE;
           } else {
+            Path bundleSource = null;
             for (Path entry : entries) {
               String name = entry.getFileName().toString();
-              if (LEGACY_BUNDLE_NAME.equals(name) || isAccountStateDirectory(entry, name)) continue;
-              Move step = renameIntoFree(entry, payloadDir.resolve(name), mover);
+              if (LEGACY_BUNDLE_NAME.equals(name)) {
+                bundleSource = entry;
+                continue;
+              }
+              Move step = renameIntoFree(entry, agentDir.resolve(name), mover);
               if (step == Move.MOVED_ASIDE) payloadMoved++;
               else if (step == Move.KEPT_IN_PLACE) payloadKept++;
             }
-            if (payloadKept == 0) {
-              bundle = renameIntoFree(bundleSource, payloadDir.resolve(LEGACY_BUNDLE_NAME), mover);
-            } else {
-              bundle = Move.KEPT_IN_PLACE;
+            if (bundleSource != null) {
+              bundle = payloadKept == 0
+                ? renameIntoFree(bundleSource, agentDir.resolve(LEGACY_BUNDLE_NAME), mover)
+                : Move.KEPT_IN_PLACE;
             }
           }
         }
-
-        return new Outcome(workspace, vault, payloadMoved, payloadKept, bundle, archivedStoreDir(archiveRoot));
+        return new Outcome(workspace, vault, payloadMoved, payloadKept, bundle);
       } catch (RuntimeException ignored) {
         return EMPTY_OUTCOME;
       }
     }
   }
 
-  static void prepareLaunch(Context context, Map<String, String> variables) {
-    if (context == null || variables == null) return;
+  static void prepareLaunch(Context context, AgentCredentials.Account account, Map<String, String> variables) {
+    if (variables == null) return;
+    variables.remove(LEGACY_STORE_DIR_ENV);
+    variables.remove(LEGACY_OWNER_ENV);
+    if (context == null || account == null) return;
     try {
       var files = context.getFilesDir();
-      if (files == null) return;
-      atLaunch(files.toPath(), variables);
-    } catch (RuntimeException ignored) {
-      // Never block or refuse agent launch on archive inspection.
+      var noBackup = context.getNoBackupFilesDir();
+      if (files == null || noBackup == null) return;
+      putBack(files.toPath(), ATOMIC_MOVER);
+      prepareLaunch(files.toPath(), earlierOwner(noBackup), account, variables);
+    } catch (RuntimeException launchGoesOn) {
+      return;
     }
   }
 
-  /** What {@code AlphaAgentService.configureLaunch} does with the launch: nothing while {@link #ENABLED} is off. */
-  static void atLaunch(Path filesDir, Map<String, String> variables) {
-    if (!ENABLED) return;
-    prepareLaunch(filesDir, variables, ATOMIC_MOVER);
+  static void prepareLaunch(Path filesDir, Owner owner, AgentCredentials.Account account, Map<String, String> variables) {
+    if (variables == null) return;
+    variables.remove(LEGACY_STORE_DIR_ENV);
+    variables.remove(LEGACY_OWNER_ENV);
+    if (filesDir == null || owner == null || account == null) return;
+    String user = account.userId().toLowerCase(Locale.ROOT);
+    String organization = account.organizationId().toLowerCase(Locale.ROOT);
+    if (!isEarlierOwner(owner.userId(), owner.organizationId(), user, organization)) return;
+    Path store = earlierStoreDir(filesDir);
+    if (store == null) return;
+    String value = store.toString();
+    if (value.isEmpty() || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0 || value.indexOf('\0') >= 0) return;
+    variables.put(LEGACY_STORE_DIR_ENV, value);
+    variables.put(LEGACY_OWNER_ENV, "{\"userId\":\"" + owner.userId() + "\",\"organizationId\":\"" + owner.organizationId() + "\"}");
   }
 
-  static void prepareLaunch(Path filesDir, Map<String, String> variables) {
-    prepareLaunch(filesDir, variables, ATOMIC_MOVER);
-  }
-
-  static void prepareLaunch(Path filesDir, Map<String, String> variables, Mover mover) {
-    if (filesDir == null || variables == null) return;
-    try {
-      Outcome outcome = moveAside(filesDir, mover);
-      Path storeDir = outcome.legacyStoreDir();
-      if (storeDir == null || variables.containsKey(LEGACY_STORE_DIR_ENV)) return;
-      String value = storeDir.toString();
-      if (value.isEmpty() || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0 || value.indexOf('\0') >= 0) return;
-      variables.put(LEGACY_STORE_DIR_ENV, value);
-    } catch (RuntimeException ignored) {
-      // Never block or refuse agent launch on archive hint wiring.
-    }
-  }
-
-  static Path archivedStoreDir(Path archiveRoot) {
-    if (archiveRoot == null || !Files.isDirectory(archiveRoot, LinkOption.NOFOLLOW_LINKS)) return null;
-    Path workspace = archiveRoot.resolve(WORKSPACE_ARCHIVE_NAME);
+  /** The earlier workspace store, never the vault, while every directory on its path is a real one. */
+  static Path earlierStoreDir(Path filesDir) {
+    if (filesDir == null) return null;
+    Path root = filesDir.toAbsolutePath();
+    Path eliza = root.resolve(".eliza");
+    Path workspace = eliza.resolve("workspace");
     Path elizaDb = workspace.resolve(".elizadb");
-    if (Files.isDirectory(workspace, LinkOption.NOFOLLOW_LINKS)
-        && Files.isDirectory(elizaDb, LinkOption.NOFOLLOW_LINKS)) {
-      return elizaDb.toAbsolutePath();
+    for (Path step : new Path[] { eliza, workspace, elizaDb }) {
+      if (!Files.isDirectory(step, LinkOption.NOFOLLOW_LINKS)) return null;
     }
-    Path vaultDb = archiveRoot.resolve(VAULT_ARCHIVE_NAME);
-    if (Files.isDirectory(vaultDb, LinkOption.NOFOLLOW_LINKS)) {
-      return vaultDb.toAbsolutePath();
-    }
-    return null;
+    return elizaDb;
   }
 
-  private static boolean isAccountStateDirectory(Path entry, String name) {
-    return ACCOUNT_STATE_DIR.matcher(name).matches()
-      && Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS);
+  /**
+   * The owner the earlier Alpha's provider slot names, or null unless it names a user and an
+   * organization: the selection's own verified account, or for a direct Cerebras selection the
+   * Cloud account it keeps under {@code cloudServices}.
+   */
+  static Owner ownerOf(String providerSlot) {
+    if (providerSlot == null) return null;
+    try {
+      JSONObject provider = new JSONObject(providerSlot);
+      JSONObject cloud = "cerebras".equals(provider.optString("provider")) ? provider.optJSONObject("cloudServices") : provider;
+      JSONObject identity = cloud == null ? null : cloud.optJSONObject("verifiedCloudIdentity");
+      if (identity == null) return null;
+      String user = cloudId(identity.opt("userId"));
+      String organization = cloudId(identity.opt("organizationId"));
+      return user == null || organization == null ? null : new Owner(user, organization);
+    } catch (Exception unreadable) {
+      return null;
+    }
+  }
+
+  private static Owner earlierOwner(File noBackupDir) {
+    File slots = new File(noBackupDir, SLOT_DIRECTORY);
+    if (!slots.isDirectory()) return null;
+    try {
+      return ownerOf(new JsonCredentialSlots(slots, SLOT_KEY_ALIAS, slot -> PROVIDER_SLOT_BYTES).read(PROVIDER_SLOT));
+    } catch (Exception unreadable) {
+      return null;
+    }
+  }
+
+  private static String cloudId(Object value) {
+    if (!(value instanceof String id)) return null;
+    String canonical = id.toLowerCase(Locale.ROOT);
+    return CLOUD_ID.matcher(canonical).matches() ? canonical : null;
   }
 
   private static List<Path> listSortedDirectEntries(Path directory) {
