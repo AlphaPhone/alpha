@@ -25,7 +25,7 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
-import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openFindFromMenu, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";
+import { Pages, type PageRuntime, addressOf, overPageChrome, idOf, inputOf, openDownloads, openFindFromMenu, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";
 import { LibraryRows, cancelHistory, editHistory, markPage, setMark } from "./library.vibe";
 import { reviewPage, cancelReading, confirmQuestion, editPageExcerpt, editQuestion, PageReading, readPageExcerpt, sensitiveReadingText, READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE } from "./reading.vibe";
 import { SharePages, cancelExternal, confirmExternal, mailTarget, offerNativeHandoff, offerShare } from "./share.vibe";
@@ -77,8 +77,28 @@ function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
     viewport?.addEventListener("resize", notify);
     viewport?.addEventListener("scroll", notify);
     if (typeof window !== "undefined") window.addEventListener("resize", notify);
+    const root = place.ownerDocument;
+    const below = () => root.documentElement.dataset.alphaBrowserUnder !== undefined;
+    const sized = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => { if (below()) notify(); });
+    const measureChrome = () => {
+      sized?.disconnect();
+      for (const element of root.querySelectorAll(overPageChrome)) sized?.observe(element);
+    };
+    const chromeIn = (node: Node) => node instanceof Element && (node.closest(overPageChrome) !== null || node.querySelector(overPageChrome) !== null);
+    const changed = typeof MutationObserver === "undefined" ? undefined : new MutationObserver((records) => {
+      if (!records.some((record) => record.type === "attributes" ? chromeIn(record.target) : [...record.addedNodes, ...record.removedNodes].some(chromeIn))) return;
+      measureChrome();
+      if (below()) notify();
+    });
+    changed?.observe(root.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "hidden", "inert", "aria-hidden"] });
+    measureChrome();
+    const settled = (event: Event) => { if (below() && event.target instanceof Node && chromeIn(event.target)) notify(); };
+    for (const type of ["transitionend", "animationend"]) root.addEventListener(type, settled, true);
     return () => {
       observer?.disconnect();
+      sized?.disconnect();
+      changed?.disconnect();
+      for (const type of ["transitionend", "animationend"]) root.removeEventListener(type, settled, true);
       viewport?.removeEventListener("resize", notify);
       viewport?.removeEventListener("scroll", notify);
       if (typeof window !== "undefined") window.removeEventListener("resize", notify);

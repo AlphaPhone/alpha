@@ -43,6 +43,8 @@ module page {
   type Place = { x: number; y: number; width: number; height: number }
   type HostRect = Place & { cornerRadius: number }
   const findBar = '[role="search"][aria-label="Find in page"]'
+  /** What of Alpha may be drawn over a page below it: the find bar and Alpha's marked chrome. */
+  export const overPageChrome = `${findBar}, [data-host-chrome]`
   /** Whether `element` is drawn on screen. @throws {never} */
   function drawn(element: HTMLElement): boolean {
     const style = getComputedStyle(element)
@@ -65,7 +67,7 @@ module page {
    */
   export function overPage(page: Place): HostRect[] {
     if (typeof document === "undefined") return []
-    const shown = [...document.querySelectorAll<HTMLElement>(`${findBar}, [data-host-chrome]`)].filter(touchable)
+    const shown = [...document.querySelectorAll<HTMLElement>(overPageChrome)].filter(touchable)
     return shown.filter((element) => !shown.some((inner) => inner !== element && element.contains(inner))).flatMap((element) => {
       const { left, top, right, bottom, width, height } = element.getBoundingClientRect()
       if (right <= page.x || left >= page.x + page.width || bottom <= page.y || top >= page.y + page.height) return []
@@ -135,8 +137,8 @@ module page {
     return address && address.hostname && (address.protocol === "http:" || address.protocol === "https:") && !address.username && !address.password ? address.href : undefined
   }
 }
-import { addressOf, findBarDrawn, inputOf, messageHref, overPage, placeOfPage, presented, presenting, secure } from page
-export { addressOf, inputOf }
+import { addressOf, findBarDrawn, inputOf, messageHref, overPage, overPageChrome, placeOfPage, presented, presenting, secure } from page
+export { addressOf, inputOf, overPageChrome }
 
 /** The native tab of a tab number: numbers are never used twice, so neither is an id. */
 export const idOf = (tab: number): string => `tab${tab}`
@@ -676,9 +678,8 @@ effect function present(tab: number, host: TabHost.Shape, assistantRaised: boole
     try ignore(drawPage(host, idOf(tab), place, assistantRaised))
     return
   }
-  const ticket = presenting(undefined)
+  presented(presenting(undefined), false)
   try ignore(tryPromise(() => plugin.value.present({ session: host.session.session, id: null })))
-  presented(ticket, false)
 }
 
 // spec/app/browser/address.md, "The find bar opens over a shown page"
