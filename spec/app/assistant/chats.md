@@ -99,6 +99,8 @@ As in Alpha's Sunday v119 build (old-line Alpha 45f6bed30,
 settings-adapter.ts:1038-1043), the owner lists the conversations, restores
 one and starts a new one from Agent activity in Settings. Ask Alpha's own
 chat actions offer only Attach media and Search chat (template.html:59-67).
+Once that menu closes, a + a touch opened keeps its focus with no ring, as
+v119's + showed none; a + opened from the keyboard keeps its ring.
 
 ```quint
 pure def browse(c: Chats): Moved =

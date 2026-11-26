@@ -41,7 +41,16 @@ closes it from the bar grows it from the bar or shrinks it onto the bar the
 same way, keeping its composer until the bar shows. A sheet put away
 shrinks and fades over the bar or pill already drawn under it, which then
 stays in place with its own controls in their own colours: no control of
-the sheet's, such as its black Talk, is carried onto the bar. A resting
+the sheet's, such as its black Talk, is carried onto the bar. As v119's
+one field did, which stayed in the sheet until the bar took it (old-line
+Alpha 45f6bed30, chat-overlay-motion-adapter.ts:1356-1360), only one field
+shows words at a time: the bar or pill drawn under a sheet being pulled
+down shows none, and a sheet put away, by a tap or by a drag, shrinks or
+fades with its field empty over the bar's own words, which show at once.
+A drag on the conversation
+that reaches its end moves nothing else: the sheet stays where it is, as
+v119's did. Alpha's mark at the start of the open sheet's header is tapped
+in v119's box, 46 points wide. A resting
 bar dragged down and let go becomes the pill where it is, with no entrance:
 as v119 left the bar or pill in place after any drag (45f6bed30
 chat-overlay-motion-adapter.ts:637-646), it does not drop and rise again.

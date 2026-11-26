@@ -65,7 +65,9 @@ function paint(section: HTMLElement | null, d: ChatDrag) {
 /**
  * The sheet as it was drawn when it was put away, left over the bar as v119 left its panel over the bar already in place
  * (resizeForTap, :530-546; retire, :613-651): a copy that takes no input, scrolled and filled as the sheet was, so the
- * bar under it is Ask Alpha at once and keeps its own controls, never the sheet's.
+ * bar under it is Ask Alpha at once and keeps its own controls, never the sheet's. v119 had one field, which a tap or a
+ * released drag moved to the bar at once (retire clears the drag before the state, :864-877; the one editor, :1346), so a
+ * sheet put away shrinks or fades with its field empty over the bar's own words.
  */
 function ghostOf(section: HTMLElement) {
   const ghost = section.cloneNode(true) as HTMLElement;
@@ -85,8 +87,9 @@ function ghostOf(section: HTMLElement) {
     const copy = copied[at];
     if (!copy) return;
     if (element.scrollTop) copy.scrollTop = element.scrollTop;
-    if (element instanceof HTMLTextAreaElement && copy instanceof HTMLTextAreaElement) copy.value = element.value;
+    if (element instanceof HTMLTextAreaElement && copy instanceof HTMLTextAreaElement) copy.value = "";
   });
+  for (const field of ghost.querySelectorAll("textarea")) field.placeholder = "";
   return ghost;
 }
 
