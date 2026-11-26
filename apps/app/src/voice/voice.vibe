@@ -849,8 +849,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     }
   }
   memory.lastReply = finalText
-  if (!asks) output.finishSpeech(finalText)
-  return { type: "replyEnds", session, turn, asks }
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a direct Files result is said even beside a page's card.
+  const says = !asks || filesReport !== undefined
+  if (says) output.finishSpeech(finalText)
+  return { type: "replyEnds", session, turn, asks: !says }
 }
 
 function namesReviewedRecipient(card: MediaCard, spoken: string): boolean {
