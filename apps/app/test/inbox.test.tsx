@@ -335,6 +335,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       const expectedEmail = {
         from: termSheet.card.from, to: [...termSheet.card.to, ...termSheet.card.cc], subject: termSheet.card.subject, bodyText: termSheet.body,
       };
+      /** Wait for the reply to finish, then lower Ask Alpha back to the bar over Inbox. */
+      const backToInbox = async () => {
+        await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
+        await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+        await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
+      };
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
       await afterDraw(() => expect(document.querySelector("[role=alertdialog]")?.textContent ?? "").toContain("Share this email with Alpha?"));
@@ -353,11 +359,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       expect(sent).not.toContain(termSheet.card.from);
       expect(sent).not.toContain("Use the following user-reviewed email");
       expect(world.ask.metadata[0]).toMatchObject({ reviewedEmail: expectedEmail });
-      await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
+      await backToInbox();
 
       // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
-      await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
       await confirm("Add to chat");
@@ -368,10 +372,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await afterDraw(() => expect(world.ask.said).toHaveLength(2));
       expect(world.ask.said[1]).toBe("");
       expect(world.ask.metadata[1]).toMatchObject({ reviewedEmail: expectedEmail });
-      await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
-
-      await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
+      await backToInbox();
     }
 
     // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
