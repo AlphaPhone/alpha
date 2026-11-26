@@ -45,7 +45,7 @@ import { type Job, answer, applying, contained, following, reacting, run, starte
 import { Time } from "../runtime/time.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
-import { MediaReview, mediaReview } from "./media-review.vibe"
+import { MediaReview, mediaReview, ranDirect } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type ContactAttachmentScope, contactFileSendCurrent, contactFileTargetCurrent } from "./contact-attachments.vibe"
 import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, Talk, talk } from "./talk.vibe"
@@ -655,6 +655,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
       const page = told ? pageIn(result.reply.actionResults, views.clientId) : undefined
       let continueFiles: Effect.Effect<void> | undefined
+      let openAsked: Effect.Effect<void> | undefined
       if (result.reply.userMessageId !== undefined) {
         board.messageNumber(result.reply.userMessageId)
         board.rename(pageTicket, mine, result.reply.userMessageId)
@@ -695,6 +696,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
             actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
             ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
             ...(outsideFiles === undefined ? {} : { outsideFiles }) })
+        // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+        if (eligible && ranDirect(result.reply.actionResults)) openAsked = Effect.asVoid(review.openAsked(enrolled, result.reply.userMessageId, result.reply.actionResults, continued))
         if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
           && (try history.get()).chosen === chats.chosen) {
           const deciding = board.snapshot().media.filter((card) => card.decision === "Deciding")
@@ -703,6 +706,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       }
       if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
       else if (page !== undefined) try views.hold(ticket, { asked, page })
+      else if (openAsked !== undefined && (prepared === undefined || prepared.navigationBinding.viewId.toLowerCase() === "browser")) try views.hold(ticket, { asked, openAsked })
       else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)

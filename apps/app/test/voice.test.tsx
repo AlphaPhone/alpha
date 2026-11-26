@@ -1119,6 +1119,27 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     ] : [[], [], []]);
   });
 
+  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+  it("opens from Talk, with no card, a page the spoken request asked for whole, and lowers Ask Alpha over it", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const url = "https://www.alphacompute.ai/";
+    const review = textReview(world.notes.owner, "spoken-page", { type: "browser_navigate", url });
+    world.telephony.textReview = review;
+    const { alpha, area } = await onComposer(world, { at: "view:Browser", load: () => import("../src/browser/index.tsx") });
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await startTalkWithAskFirstOff({ alpha, area });
+    review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+    world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: "spoken-page", state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
+    } }];
+    speakUtterance(world, "Visit alphacompute.ai.");
+    await drawnUntil(alpha, alpha.runtime, Shell.Machine, (s) => Shell.showing(s, "Browser") && s.assistant === "Bar");
+    expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]);
+    await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
+    expect(button("Open")).toBeUndefined();
+  });
+
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
   it("runs the agent's own terminal Files action from compact Talk, and nothing for a turn that proposes none", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };

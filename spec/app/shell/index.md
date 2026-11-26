@@ -292,6 +292,22 @@ pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell
 pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
 ```
 
+### A page the agent opens in Browser lowers Ask Alpha to its bar
+
+When the page the agent asked for opens in Browser, at once or after the
+owner's Open, Ask Alpha lowers to its bar so the page fills the screen, as
+on Sunday's v119 demo phone. Only a page opening does this; any other
+agent navigation keeps Ask Alpha where it is (above).
+
+```quint
+pure def canAgentShowPage(s: Shell): bool = s.textAsk == NoTextAsk and showing(s, Browser) and s.assistant != Bar
+
+pure def agentShowPage(s: Shell): Shell = recordRoute({ before: s, after: { ...s, assistant: Bar } })
+
+pure def stepAnAgentsPageLowersAskAlpha(before: Shell, via: str, after: Shell): bool =
+  via == "agentShowPage" implies (after.assistant == Bar and after.trail == before.trail and showing(after, Browser))
+```
+
 ### Only a spoken move from its exact source route is marked as Talk's navigation
 
 An agent's spoken move can open the destination only from the route the
