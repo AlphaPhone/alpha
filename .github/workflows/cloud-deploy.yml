@@ -124,11 +124,14 @@ jobs:
           database.searchParams.set('sslmode', 'verify-ca');
           database.searchParams.set('uselibpqcompat', 'true');
           database.searchParams.set('sslrootcert', caPath);
+          const databaseUrl = database.href;
+          const mask = databaseUrl.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+          process.stdout.write(`::add-mask::${mask}\n`);
           const databaseEnv = source.split(/\r?\n/).filter((line) => !/^\s*DATABASE_URL\s*=/.test(line));
           const privateFile = { mode: 0o600 };
           writeFileSync(caPath, `${ca}\n`, privateFile);
           writeFileSync(join(temp, 'alpha-cloud.env'), `${source}\n`, privateFile);
-          writeFileSync(join(temp, 'alpha-cloud-db.env'), [...databaseEnv, `DATABASE_URL=${database.href}`, ''].join('\n'), privateFile);
+          writeFileSync(join(temp, 'alpha-cloud-db.env'), [...databaseEnv, `DATABASE_URL=${databaseUrl}`, ''].join('\n'), privateFile);
           JS
       - name: Verify the secrets, never generating one
         if: github.event_name == 'push' || inputs.action == 'deploy'
