@@ -236,7 +236,7 @@ it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can 
   await until(alpha, runtime, Writing, (state) => state.shelf.shelved.length === 0 && state.shelfSelection.account === 0);
   expect(world.inbox.changes).toEqual([]);
   await first.close();
-  const restored = await openInbox(world);
+  const restored = await open(world, inboxMounts);
   await until(restored.alpha, inbox.runtime(restored.alpha), Writing, (state) => state.load.status === "Loaded" && state.shelf.shelved.length === 0);
 }, 90_000);
 
@@ -406,7 +406,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const history = String(world.inbox.history);
     await action("More messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
-    expect(title()).toBe("Revised term sheet");
+    expect([title(), told()]).toEqual(["Revised term sheet", expect.stringContaining(termSheet.body)]);
     await action("Earlier messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
     expect([title(), world.inbox.threadReads.slice(-2)]).toEqual(["Earlier lunch plan", [{ offset: 1, history }, { offset: 0, history }]]);
