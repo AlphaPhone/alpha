@@ -88,8 +88,8 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
       interim: <VoiceInterim runtime={runtime} />,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
-      voice: ({ compactDock, atBar, onKeyboard }) => voice.state !== undefined && !quiet(voice.state)
-          ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} onKeyboard={onKeyboard} trailing={<VoiceEnd runtime={runtime} />} />
+      voice: ({ compactDock, atBar }) => voice.state !== undefined && !quiet(voice.state)
+          ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} trailing={<VoiceEnd runtime={runtime} />} />
           : undefined,
     }}
   />;
