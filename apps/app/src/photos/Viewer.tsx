@@ -266,8 +266,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
       className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", fadeIn, !clipEditor && (state.editing ? dockClearance : viewerReserve))}>
       <div className={state.editing ? "contents" : cn(viewerTop, launcherTop, !chrome && "opacity-0 focus-within:opacity-100")}>
-      <header data-host-chrome="" className={cn("motion-safe:transition-opacity", clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : cn("pointer-events-auto flex min-h-13 shrink-0 items-center gap-1.5 px-2", launcherInnerHeader), !chrome && hiddenChrome)}>
-        <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : state.editing ? undefined : "size-11 rounded-tile"} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
+      <header data-host-chrome="" className={cn("motion-safe:transition-opacity", clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : cn("pointer-events-auto flex min-h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:gap-1.5", launcherInnerHeader), !chrome && hiddenChrome)}>
+        <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : state.editing ? undefined : "size-13 rounded-tile in-data-[alpha-launcher]:size-11"} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
         {clipEditor ? <h1 className="flex-1 text-base font-normal">Edit video</h1> : state.editing ? <div className="flex-1"><h1 className="sr-only">Edit photo</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
           {expiry !== undefined ? <span className="block truncate text-caption text-muted-foreground">{trashDaysLabel(expiry)}</span>
@@ -530,7 +530,7 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
         onDoubleClick={() => action({ type: "zoomTo", level: state.zoom > 1 ? 1 : 2 })}>
         {showing && (state.kind === "Clip"
           ? <div className="grid size-full place-items-center [container-type:size]">
-              <div className={cn("relative overflow-hidden", !state.editing && cn(mediaFrame, "landscape:size-full"),
+              <div className={cn("relative overflow-hidden", !state.editing && mediaFrame,
                 state.editing && videoRatio === undefined && "size-full")}
                 style={videoRatio === undefined ? undefined : { width: `min(100cqw, calc(100cqh * ${videoRatio}))`, aspectRatio: videoRatio }}>
                 <video ref={attachVideo} key={state.open} src={current.uri} poster={current.item?.image ?? current.browser?.item.thumbnail}
