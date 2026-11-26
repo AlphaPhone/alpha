@@ -1692,11 +1692,46 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual([]);
     expect(button("Send this text")).toBeUndefined();
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
+    expect([...world.ask.kept.values()].some((room) => room.messages.some((line) => line.text === "I've prepared the text. Tap Send to send it."))).toBe(true);
+    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("I've prepared the text. Tap Send to send it.")));
 
     world.ask.nextReplyChunks = ["It is sunny today."];
     world.ask.nextActions = () => [];
     await drawn(() => speakUtterance(world, "What is the weather?"));
     await drawn(() => vi.waitFor(() => expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(["It is sunny today."])));
+
+    world.ask.nextReplyChunks = ["Maya lands at six."];
+    world.ask.nextActions = () => [kept("not-a-text")];
+    await drawn(() => speakUtterance(world, "When does Maya land?"));
+    await drawn(() => vi.waitFor(() => expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(["It is sunny today.", "Maya lands at six."])));
+  });
+
+  // spec/app/assistant/cards.md, "What each kind offers"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"
+  it("declines a page's card from its last row: nothing opens, nothing is claimed, and the result chip says Declined", async () => {
+    const url = "https://www.alphacompute.ai/";
+    const { world, review, alpha, area } = await openSpokenBrowserWorld(url);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded");
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.askFirst);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
+    speakUtterance(world, "Visit alphacompute.ai.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending);
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    const row = decline();
+    expect(row).toHaveLength(1);
+    expect(row[0]?.parentElement?.textContent).toBe("Keep things as they are.Decline");
+    const from = world.voice.spoken.length;
+    await drawn(() => row[0]?.click());
+    await drawn(() => vi.waitFor(() => expect(review.proposal.state).toBe("rejected")));
+    await drawn(() => vi.waitFor(() => expect(document.querySelector("[data-alpha-device-receipt]")?.textContent).toBe("Declined")));
+    await later(alpha, 500);
+    expect([review.claims, review.receipts]).toEqual([[], []]);
+    expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(false);
+    expect(button("Open")).toBeUndefined();
+    expect(world.voice.spoken.slice(from)).toEqual([]);
   });
 
   // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"
