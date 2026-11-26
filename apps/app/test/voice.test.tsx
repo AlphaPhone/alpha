@@ -1013,6 +1013,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.holdAfterTools = true;
     world.ask.nextReplyChunks = ["Nothing is on your calendar today."];
     world.ask.holdDoneAfterReady = done.promise;
+    // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read": what was said and the dots stay in place, never loading rows, while the page of the conversation made for the first turn is read.
+    world.ask.holdPages = true;
+    const loadingRows = () => document.querySelector("section[aria-label='Ask Alpha'] [role=log] [aria-busy]");
     const sessionId = world.voice.activeMicSession;
     await drawn(() => {
       world.voice.emitCloud?.({ type: "speech-start", sessionId });
@@ -1024,6 +1027,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     };
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Thinking" && s.sent === 1);
     await settleComposer(alpha, () => world.ask.turns.size === 1);
+    await drawnUntil(alpha, area, Chats, (s) => s.chosen > 0 && s.page.status === "Loading");
+    expect([said(), dots() !== null, recorded(), loadingRows()]).toEqual([asked, true, 0, null]);
+    world.ask.holdPages = false;
+    for (const release of world.ask.heldPages.splice(0)) release();
+    await drawnUntil(alpha, area, Chats, (s) => s.page.status === "Loaded");
     expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
     expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
 

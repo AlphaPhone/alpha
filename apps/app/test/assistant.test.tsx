@@ -227,8 +227,16 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       const key = draftKey(world.notes.ownerIdentity, world.notes.owner, conversation, room);
       return phone ? world.ask.drafts.get(key) ?? null : localStorage.getItem(`alpha/assistant/slot-v2/${encodeURIComponent(key)}`);
     };
+    // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read": the first send stays in place, never loading rows, while the page of the conversation made for it is read.
+    world.ask.holdPages = true;
+    const loadingRows = () => document.querySelector("section[aria-label='Ask Alpha'] [role=log] [aria-busy]");
     write("Hello ");
     await press("Send");
+    await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loading");
+    await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 1);
+    expect([loadingRows(), document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent?.includes("Hello")]).toEqual([null, true]);
+    world.ask.holdPages = false;
+    for (const release of world.ask.heldPages.splice(0)) release();
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
     // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"
@@ -266,7 +274,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "A fork is asked for from a message of the conversation showing"
+    // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read": a fork shows as loading until its page answers.
+    world.ask.holdPages = true;
     onMessage("Hello", "New chat from here");
+    await until(alpha, runtime, Chats, (s) => s.origin === 1 && s.page.status === "Loading");
+    expect(loadingRows()).not.toBeNull();
+    world.ask.holdPages = false;
+    for (const release of world.ask.heldPages.splice(0)) release();
     await until(alpha, runtime, Chats, (s) => s.origin === 1 && s.page.status === "Loaded");
     expect(lines()).toEqual(["Hello"]);
     // spec/app/assistant/chats.md, "Back to the original leaves the fork for the conversation it came from"

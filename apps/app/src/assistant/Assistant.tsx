@@ -12,6 +12,7 @@ import { useMachine as useConversation } from "../../gen/app__assistant.react.ts
 import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
+import { loading as pageLoading } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
@@ -594,7 +595,8 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
     position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
     visible: open,
-    status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
+    // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read"
+    status: pageLoading(shown) ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
     turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
     onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
     onEarlier: earlier !== undefined && chats.can(readEarlier) ? () => void chats.send(readEarlier) : undefined,
@@ -806,8 +808,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           opener: !open ? grabber : undefined,
           onOpen: !open && !grabber ? openSheet : undefined,
           onType: compact ? revealComposer : undefined,
-          // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a bar tucked by a drag is the pill where it is, with no entrance, as v119's
-          still: compact && dock.state?.tucked === true,
+          // spec/app/assistant/dock.md, "A bar or pill a drag left in place changes between them without an entrance until the sheet next opens"
+          still: dock.state?.placed === true,
           onSend: sendable && !inFlight(talking.turn) ? () => {
             if (!open) openSheet();
             send();
