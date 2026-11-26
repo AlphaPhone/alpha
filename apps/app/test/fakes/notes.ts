@@ -187,8 +187,9 @@ function interact(scene: NotesScene, input: unknown, now: () => number): Respons
     scene.deleteRequests?.push({ id: present.id, expectedRevision: params.expectedRevision });
     if (present.id === scene.refuseDiscardId) return refused(409);
     scene.notes = scene.notes.filter((item) => item !== present);
-    // The store and the phone share one clock, as the resident agent does on the device: a deletion is stamped at the world's time.
-    scene.trash.push({ note: present, deletedAt: iso(now()) });
+    /** The store and the phone share one clock, as the resident agent does on the device: a deletion is stamped at the world's time. */
+    const deletedAt = iso(now());
+    scene.trash.push({ note: present, deletedAt });
     scene.revision += 1;
     return result(scene, present);
   }

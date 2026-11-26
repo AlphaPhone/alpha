@@ -268,7 +268,11 @@ function review(world: WorkflowsScene) {
   };
 }
 
-/** The boundaries exercised by Workflows, with one current definition, removed history and an agent-run receipt. */
+/**
+ * The boundaries exercised by Workflows, with one current definition, removed history and an agent-run receipt. Of the
+ * notice inbox it answers only the Workflow read (eliza's workflowApprovalOffers) and leaves every other read to the
+ * routes after it, such as Reminders'.
+ */
 export function workflowRoutes(world: WorkflowsScene): Route[] {
   return [
     (request, url) => {
