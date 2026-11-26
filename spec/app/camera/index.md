@@ -4,16 +4,17 @@ The camera of the phone: a viewfinder that focuses where the owner taps,
 zooms by pinch or by its chips, flips between the lenses and lights the
 flash; it takes photos and records videos, and shows the last one taken. Its
 header holds back, flip and flash, as Alpha's approved build drew it; the
-self-timer, framing grid, photo aspect ratio and document scan have no
-header control. Camera is a first page: on the launcher it draws no Back,
+self-timer, framing grid and photo aspect ratio have no header control. Camera is a first page: on the launcher it draws no Back,
 and Android's Back still leaves it, as the [shell](../shell/) says for
 Settings and Workflows.
 Opened from the lock screen of an Alpha image it is the secure camera,
 which shows only what was taken there and opens nothing else. A video's
 timer, limits and ending are the [Recording](./recording.md); a photo taken
 for Alpha's agent is [Capture for Alpha](./agent.md), which shares the one
-shutter with the owner. Scanning a document belongs to Files, which "Scan
-document" opens; what is taken is kept in [Photos](../photos/). The shell
+shutter with the owner. Camera does not scan: Alpha's approved build drew
+no scan control in Camera, so a document is scanned from Files' "Scan
+document" and a picture's text from Photos' "Scan text". What is taken is
+kept in [Photos](../photos/). The shell
 decides when Camera is showing, when Ask Alpha covers it, and which apps the
 lock screen admits.
 
@@ -63,8 +64,7 @@ pure val grace = 10000
 Android's camera and microphone prompts and its Settings, and the shell's
 "Unlock to continue"; a preview started or stopped, each under its own
 number; the flash, the zoom and the focus point; a photo, for the owner or
-for the agent's request; a recording started, stopped or checked; the
-transient scanner's live frame; the last capture opened in Photos, limited on the lock
+for the agent's request; a recording started, stopped or checked; the last capture opened in Photos, limited on the lock
 screen to what was taken there; Ask Alpha about the live frame or the last
 capture; asking the shell to lower Ask Alpha so the owner sees the
 viewfinder the agent asks to use; and the agent's answer: how its request
@@ -86,7 +86,6 @@ type Effect =
   | StartRecording({ sound: bool })
   | StopRecording
   | CheckRecording({ video: int })
-  | OpenScan({ ticket: int })
   | OpenLast({ photo: int, only: Set[int] })
   | AskAbout({ photo: int })
   | Uncover
@@ -110,7 +109,7 @@ type Camera = {
   mode: Mode, lens: Lens, flash: bool, flashAuto: bool, torch: Torch, zoom: int,
   grid: bool, wide: bool, delay: int, countdown: int, nextCount: int,
   taps: int, focus: int, writing: int, confirmed: int, waited: int,
-  shots: int, shot: int, shotFor: int, readingFrame: bool,
+  shots: int, shot: int, shotFor: int,
   film: F::Film, filmVisit: int,
   agent: G::Capture, requestedLens: RequestedLens, cause: Cause,
   said: Said, last: int, session: Set[int],
@@ -125,7 +124,7 @@ pure val initial: Camera = {
   mode: Photo, lens: Back, flash: false, flashAuto: false, torch: { lit: false, write: 0, issued: 0 }, zoom: oneTime,
   grid: false, wide: false, delay: 0, countdown: 0, nextCount: 0,
   taps: 0, focus: 0, writing: 0, confirmed: 0, waited: 0,
-  shots: 0, shot: 0, shotFor: 0, readingFrame: false,
+  shots: 0, shot: 0, shotFor: 0,
   film: F::initial, filmVisit: 0,
   agent: G::initial, requestedLens: AsShown, cause: NoCause,
   said: Quiet, last: 0, session: Set(),
@@ -260,7 +259,7 @@ a recording under way is stopped and finished first.
 ```quint
 pure def retiring(now: int, out: List[Effect], c: Camera): Done =
   val released = {
-    ...c, shot: 0, shotFor: 0, readingFrame: false, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0, torch: extinguished(c.torch),
+    ...c, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0, torch: extinguished(c.torch),
     agent: if (c.agent.stage == G::Shooting) G::lost(c.agent, Phone) else c.agent,
   }
   if (c.film.stage == F::Running) emit(out.append(StopRecording), { ...released, film: F::stop(c.film, now) })
@@ -310,7 +309,7 @@ pure def canPreviewLost(s: Camera, ticket: int, by: Actor): bool =
 
 pure def previewLost(s: Camera, ticket: int, by: Actor): Done =
   val failed = blocking(PreviewFailed, {
-    ...s, phase: Failed, shot: 0, shotFor: 0, readingFrame: false, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0, torch: extinguished(s.torch),
+    ...s, phase: Failed, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0, torch: extinguished(s.torch),
     said: if (s.shot != 0 and s.shotFor == 0) NotTaken else s.said,
     agent: if (s.agent.stage == G::Shooting) G::lost(s.agent, Phone) else s.agent,
   })
@@ -686,7 +685,7 @@ A photo the phone could not save is said in the banner.
 pure def remember(photo: int, c: Camera): Camera =
   { ...c, last: photo, session: if (c.secure) c.session.union(Set(photo)) else c.session }
 
-pure def canCaptured(s: Camera, ticket: int, by: Actor): bool = by == Phone and s.shot != 0 and ticket == s.shot and not(s.readingFrame)
+pure def canCaptured(s: Camera, ticket: int, by: Actor): bool = by == Phone and s.shot != 0 and ticket == s.shot
 
 pure def captured(s: Camera, ticket: int, photo: int, by: Actor): Done =
   val answered = {
@@ -805,11 +804,11 @@ pure def recordingTakesBack(s: Camera): bool = F::pending(s.film)
 ### Volume keys fire the available shutter while Camera is ready for the owner
 
 The hardware keys adjust volume while Camera is covered, asking about the
-microphone, reviewing a capture request, or scanning a frame.
+microphone, or reviewing a capture request.
 
 ```quint
 pure def volumeShutter(s: Camera): bool =
-  ready(s) and not(G::open(s.agent)) and not(s.readingFrame)
+  ready(s) and not(G::open(s.agent))
     and (if (s.mode == Photo) canCancelDelay(s, Owner) or canShutter(s, Owner)
       else s.film.stage == F::Running or (P::allows(s.mic) and canStartRecording(s, true, Owner)))
 ```
@@ -1033,7 +1032,6 @@ pure def alwaysOneShutterOnTheCamera(s: Camera): bool =
     and ((s.agent.stage == G::Shooting) iff (s.shot != 0 and s.shotFor != 0))
     and (s.shotFor != 0 implies s.shotFor == s.agent.request)
     and (s.shot == 0 implies s.shotFor == 0)
-    and (s.readingFrame implies (s.shot != 0 and s.shotFor == 0 and not(s.secure)))
     and (s.shot != 0 implies (s.showing and not(recording(s))))
     and G::alwaysResultsAreHonest(s.agent)
 ```
@@ -1113,8 +1111,8 @@ pure def askAboutLast(s: Camera, by: Actor): Done = emit(List(AskAbout({ photo: 
 ### On the lock screen, Camera shows only what was taken there, and anything else asks the owner to unlock
 
 Opening the last capture from the lock screen opens Photos limited to the
-captures of this session. Settings, permission prompts, scanning and Ask
-Alpha need the phone unlocked, which the shell asks for with "Unlock to
+captures of this session. Settings, permission prompts and Ask Alpha
+need the phone unlocked, which the shell asks for with "Unlock to
 continue".
 
 ```quint
@@ -1128,7 +1126,6 @@ pure def alwaysSecureShowsOnlyItsSession(s: Camera): bool =
 pure def stepTheLockScreenOpensNothingElse(before: Camera, after: Camera, out: List[Effect]): bool =
   out.every(e => match e {
     | OpenLast(o) => before.secure implies (o.only.contains(o.photo) and o.only.subseteq(before.session))
-    | OpenScan(o) => not(before.secure)
     | OpenSettings => not(before.secure)
     | AskAccess => not(before.secure)
     | AskMicrophone => not(before.secure)
@@ -1159,35 +1156,4 @@ pure def sometimesSecureCapture(s: Camera): bool = s.secure and s.last != 0
 
 ```quint
 pure def sometimesEarlierRecordingFinishing(s: Camera): bool = s.secure and s.showing and s.film.stage == F::Stopping and s.filmVisit != s.visit
-```
-
-## Story: Scan a document
-
-> As the owner, I want to read and review text in the current viewfinder frame,
-> and return to Camera when I close it.
-
-### Scanning takes the current live Photo frame without adding a capture to Photos
-
-The unlocked owner holds the same shutter as a photo until the phone answers.
-A scan covers Camera during review and leaves the last photo alone. Leaving
-Camera releases that shutter and the later frame is discarded. Camera's
-header draws no control for it, as Alpha's approved build did; Files' "Scan
-document" is where the owner starts a scan.
-
-```quint
-pure def canScanDocument(s: Camera, by: Actor): bool =
-  by == Owner and ready(s) and s.mode == Photo and not(s.secure) and free(s)
-    and s.countdown == 0 and not(G::open(s.agent))
-
-pure def scanDocument(s: Camera, by: Actor): Done =
-  val ticket = s.shots + 1
-  emit(List(OpenScan({ ticket: ticket })), { ...s, shots: ticket, shot: ticket, readingFrame: true })
-
-pure def canScannedFrame(s: Camera, ticket: int, by: Actor): bool =
-  by == Phone and s.readingFrame and s.shot == ticket
-
-pure def scannedFrame(s: Camera, ticket: int, ok: bool, by: Actor): Camera =
-  { ...s, shot: 0, readingFrame: false, said: if (ok) Quiet else NotTaken }
-
-pure val fair_scannedFrame = "weak"
 ```
