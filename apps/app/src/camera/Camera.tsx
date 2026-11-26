@@ -9,8 +9,6 @@ import { useMachine } from "../../gen/app__camera.react.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import { Scan } from "../files/Scan.tsx";
-import type { cameraScan } from "../files/scan.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { drawsAppBack } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
@@ -18,7 +16,7 @@ import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts
 import { approveCapture, CameraAssets, focus, shutter, type CameraThumbnails, type camera } from "./camera.vibe";
 import { Effect, type Layer } from "effect";
 
-type Runtime = Layer.Success<typeof camera> | Layer.Success<typeof cameraScan> | Resident;
+type Runtime = Layer.Success<typeof camera> | Resident;
 type Can = (event: Event) => boolean;
 type Fire = (event: Event) => void;
 
@@ -379,7 +377,6 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         </button>
         <span aria-hidden className="size-13" />
       </div>
-      <Scan runtime={runtime} alpha={alpha} />
     </section>
   );
 }
