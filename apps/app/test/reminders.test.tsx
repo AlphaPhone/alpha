@@ -210,8 +210,7 @@ describe("Reminders full journeys", () => {
     return { world, recorder, platform, ...opened, runtime };
   }
 
-  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
-  // Reminders left the default Home tiles; Workflows' More options still opens a phone reminder (#1592)
+  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists": Reminders left the default Home tiles; Workflows' More options still opens a phone reminder (#1592)
   it("opens a phone reminder from Workflows' More options", async () => {
     const world = { ...scene(), now: baseNow };
     const { layer: agentHttp } = makeFakeAgentReminders(world.now);

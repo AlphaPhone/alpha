@@ -1025,10 +1025,11 @@ public class AlphaBrowserPlugin extends Plugin {
   View branch=TabInputRouter.hostBranch(host,getBridge().getWebView());
   float x=call.getFloat("x",0f),y=call.getFloat("y",0f),width=call.getFloat("width",0f),height=call.getFloat("height",0f);
   ArrayList<HostRect> hostRects=new ArrayList<>();
-  if(next!=null&&layer==TabLayer.BELOW_HOST){
-   JSArray rawRects=call.getArray("hostRects");
+  // Above Alpha the rects are optional holes for Alpha's controls drawn over the full-size page, such as the find bar.
+  JSArray rawRects=next==null?null:call.getArray("hostRects");
+  if(next!=null&&(layer==TabLayer.BELOW_HOST||rawRects!=null)){
    float density=getContext().getResources().getDisplayMetrics().density;
-   if(branch==null||rawRects==null||rawRects.length()>128||!(call.getData().opt("x") instanceof Number)||!(call.getData().opt("y") instanceof Number)||!(call.getData().opt("width") instanceof Number)||!(call.getData().opt("height") instanceof Number)||!Float.isFinite(x*density)||!Float.isFinite(y*density)||!Float.isFinite(width*density)||!Float.isFinite(height*density)||width<0||height<0){rejectPresentation(call,"Below-host browser requires current host geometry");return;}
+   if((layer==TabLayer.BELOW_HOST&&branch==null)||rawRects==null||rawRects.length()>128||!(call.getData().opt("x") instanceof Number)||!(call.getData().opt("y") instanceof Number)||!(call.getData().opt("width") instanceof Number)||!(call.getData().opt("height") instanceof Number)||!Float.isFinite(x*density)||!Float.isFinite(y*density)||!Float.isFinite(width*density)||!Float.isFinite(height*density)||width<0||height<0){rejectPresentation(call,layer==TabLayer.BELOW_HOST?"Below-host browser requires current host geometry":"Invalid browser host rectangle");return;}
    for(int index=0;index<rawRects.length();index++){
     org.json.JSONObject rect=rawRects.optJSONObject(index);
     if(rect==null){rejectPresentation(call,"Invalid browser host rectangle");return;}

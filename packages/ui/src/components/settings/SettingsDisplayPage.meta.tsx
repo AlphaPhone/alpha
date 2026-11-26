@@ -18,11 +18,11 @@ export const meta: ComponentMeta<SettingsDisplayPageProps> = {
     Largest: { size: 150 },
   },
   play: {
-    Browser: ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    Browser: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      expect(canvas.queryByRole("button", { name: "Manage brightness in Android" })).toBeNull();
-      expect(canvas.queryByRole("button", { name: "Display settings" })).toBeNull();
-      expect(canvas.getByRole("switch", { name: "Legible text" })).toBeTruthy();
+      await expect(canvas.queryByRole("button", { name: "Manage brightness in Android" })).toBeNull();
+      await expect(canvas.queryByRole("button", { name: "Display settings" })).toBeNull();
+      await expect(canvas.getByRole("switch", { name: "Legible text" })).toBeTruthy();
     },
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onChooseTheme.mockClear();

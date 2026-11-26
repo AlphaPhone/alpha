@@ -328,8 +328,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
     expect([title(), told(), world.inbox.threadReads.length]).toEqual(["Revised term sheet", expect.stringContaining("https://northpoint.test/room"), threadReads]);
     expect(told()).not.toContain(termSheet.threadBody);
-    // The divergent thread copy only proves the selected read wins above. Gmail returns one body per message and history
-    // revision, so later thread pages carry the message's own text, which the phone may then keep as its saved copy.
+    // spec/app/inbox/message.md, "A thread control selects an exact position from the message and thread currently shown": the divergent thread copy only proves the selected read wins above; Gmail returns one body per message and history revision, so later thread pages carry the message's own text, which the phone may then keep as its saved copy.
     delete termSheet.threadBody;
 
     if (!phone) {
@@ -337,6 +336,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       world.ask.metadata = [];
       const expectedEmail = {
         from: termSheet.card.from, to: [...termSheet.card.to, ...termSheet.card.cc], subject: termSheet.card.subject, bodyText: termSheet.body,
+      };
+      /** Wait for the reply to finish, then lower Ask Alpha back to the bar over Inbox. */
+      const backToInbox = async () => {
+        await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
+        await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+        await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
       };
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
@@ -356,11 +361,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       expect(sent).not.toContain(termSheet.card.from);
       expect(sent).not.toContain("Use the following user-reviewed email");
       expect(world.ask.metadata[0]).toMatchObject({ reviewedEmail: expectedEmail });
-      await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
+      await backToInbox();
 
       // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
-      await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
       await confirm("Add to chat");
@@ -371,10 +374,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await afterDraw(() => expect(world.ask.said).toHaveLength(2));
       expect(world.ask.said[1]).toBe("");
       expect(world.ask.metadata[1]).toMatchObject({ reviewedEmail: expectedEmail });
-      await until(alpha, assistant.runtime(alpha), Conversation, (s) => s.turn.reply === "Complete");
-
-      await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
-      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
+      await backToInbox();
     }
 
     // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"

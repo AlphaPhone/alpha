@@ -517,6 +517,7 @@ describe("Files on a phone", () => {
     world.files.texts[updated.path] = "These are the revised notes";
     await choose("Ask Alpha", "File actions");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    expect([document.querySelector("[data-alpha-subview=files-preview]") !== null, document.querySelector("pre")?.textContent]).toEqual([true, "These are the revised notes"]);
     await press("Remove notes.txt");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
@@ -537,7 +538,7 @@ describe("Files on a phone", () => {
     // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
     const [leaseSelection] = [...world.files.selections].find(([, selection]) => selection.path === "Download/lease.pdf") ?? [];
     if (!leaseSelection) throw new Error("the phone did not authorize the PDF preview");
-    await choose("Open elsewhere", "File actions");
+    await choose("Open in Android", "File actions");
     await vi.waitFor(() => expect(world.files.opened).toContain(leaseSelection));
     // spec/app/files/preview.md, "Forget removes the file from Recent, with or without access, and closes the viewer"
     await choose("Forget", "File actions");
@@ -553,7 +554,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
     await openMenu("File actions");
     expect(menuItem("Ask Alpha")).toBeUndefined();
-    await drawn(() => menuItem("Open elsewhere")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await drawn(() => menuItem("Open in Android")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     await press("Close");
 
     // spec/app/files/recent.md, "Opening a row again asks the phone first: it opens, moves to the front and is the document open, or its access has ended and it must be selected again, or its provider cannot be reached and it stays"

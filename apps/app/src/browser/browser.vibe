@@ -38,6 +38,20 @@ module page {
     const { left, top, width, height } = place.getBoundingClientRect()
     return width > 0 && height > 0 ? { x: left, y: top, width, height } : undefined
   }
+  /**
+   * Alpha's controls drawn over the page, in the same pixels as `placeOfPage`, rounded as drawn: the find bar while it is open
+   * (spec/app/browser/address.md, "The find bar opens over a shown page"). The phone leaves these places to Alpha.
+   * @throws {never}
+   */
+  export function overPage(): { x: number; y: number; width: number; height: number; cornerRadius: number }[] {
+    if (typeof document === "undefined") return []
+    return [...document.querySelectorAll<HTMLElement>('[role="search"][aria-label="Find in page"]')].flatMap((element) => {
+      const { left, top, width, height } = element.getBoundingClientRect()
+      if (width <= 0 || height <= 0) return []
+      const scale = element.offsetWidth > 0 ? width / element.offsetWidth : 1
+      return [{ x: left, y: top, width, height, cornerRadius: (Number.parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0) * scale }]
+    })
+  }
   /** The facts of what was typed that the address bar's rules read. @throws {never} */
   export function inputOf(typed: string): Input {
     const text = typed.trim()
@@ -72,7 +86,7 @@ module page {
     return address && address.hostname && (address.protocol === "http:" || address.protocol === "https:") && !address.username && !address.password ? address.href : undefined
   }
 }
-import { addressOf, inputOf, messageHref, placeOfPage, secure } from page
+import { addressOf, inputOf, messageHref, overPage, placeOfPage, secure } from page
 export { addressOf, inputOf }
 
 /** The native tab of a tab number: numbers are never used twice, so neither is an id. */
@@ -545,9 +559,10 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
   }
   const plugin = host.plugin
   if (Option.isNone(plugin)) return
+  const over = overPage()
   try ignore(tryPromise(() => tab === 0 || place === undefined
     ? plugin.value.present({ session: host.session.session, id: null })
-    : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
+    : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place, ...(over.length > 0 ? { hostRects: over } : {}) })))
 }
 
 // spec/app/settings/index.md, "The owner can open Password manager from the Browser menu"
