@@ -397,6 +397,14 @@ describe("The Browser on a phone", () => {
       return measured;
     });
     onTestFinished(() => laidOut.mockRestore());
+    const computed = globalThis.getComputedStyle.bind(globalThis);
+    const styled = vi.spyOn(globalThis, "getComputedStyle").mockImplementation((element, pseudo) => {
+      const style = computed(element, pseudo);
+      if (!element.matches('[role="search"][aria-label="Find in page"]')) return style;
+      const drawn = { boxShadow: "currentcolor 0px 12px 34px 0px, currentcolor 0px 0px 0px 1px", borderTopLeftRadius: "20px" };
+      return new Proxy(style, { get: (target, key): unknown => typeof key === "string" && key in drawn ? drawn[key as keyof typeof drawn] : Reflect.get(target, key) });
+    });
+    onTestFinished(() => styled.mockRestore());
     const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
     const full = { id: `tab${tab}`, x: 0, y: 104, width: 390, height: 650 };
     await drawn(() => vi.waitFor(() => expect(world.browser.shown).toEqual(full)));
@@ -405,7 +413,8 @@ describe("The Browser on a phone", () => {
     await press("Menu");
     await press("Find in page");
     await until(alpha, page, Page, (p) => p.finding);
-    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([{ x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 }])));
+    // spec/app/browser/address.md, "The find bar opens over a shown page": the hole takes the bar's ring and its shadow (0 12px 34px), which v119 drew over the page
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([{ x: -24, y: 84, width: 438, height: 120, cornerRadius: 42 }])));
     expect(world.browser.shown).toEqual(full);
 
     await press("Close find in page");

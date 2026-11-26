@@ -68,7 +68,8 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
     for (const { line, cards, reply: { words: text, choices } } of prepared) {
       const rows = pastLater ? messagesAfterLater : messages;
       if (line.id === later) pastLater = true;
-      if (!line.mine && text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length) continue;
+      // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text": a send of only the reviewed email or transcript draws no empty bubble of the owner's.
+      if (text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length && line.quote === undefined) continue;
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const open = live && onOpenMaps !== undefined && opened?.has(message) !== true ? onOpenMaps : undefined;

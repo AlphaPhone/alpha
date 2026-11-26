@@ -527,9 +527,13 @@ notice follows the last matching review still shown, including while the
 decision is being confirmed. When that review settles or leaves this
 chat, the notice clears without stopping Talk.
 
-For an addressed text alone, saying “Send this text” immediately after the
-proposal in the same Talk session confirms it while the entire review and
-its Send control are visible. The phone handles that confirmation locally.
+Nothing the owner says decides a review, and the owner's words are never
+matched against a phrase. The review stays shown with its Send and Decline
+while Talk listens, and the owner decides it there by touch, as typed chat
+does. Silence decides nothing. The owner's next words are a turn for the
+agent like any other, and the model reads what they mean. When the agent's
+reply to them names that same pending text again, unchanged, its review is
+shown again for that turn, with its Send and Decline; otherwise it leaves.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool): bool =
@@ -545,9 +549,6 @@ pure def replyEnds(v: Voice, session: int, turn: int, asks: bool): Change =
 pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
 
 pure def reviewSettled(v: Voice): Voice = { ...v, reviewPending: false }
-
-pure def addressedTextConfirmation(v: Voice, session: int, reviewTurn: int, visible: bool): bool =
-  v.phase == Thinking and v.reviewPending and v.session == session and reviewTurn + 1 == v.turn and visible
 
 pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   ((via == "replyEnds" and after.reviewPending and not(after.replied)) implies

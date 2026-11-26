@@ -102,7 +102,7 @@ export function Preview({ runtime, today }: PreviewProps) {
   const modified = changed === "" ? undefined : new Date(revision);
   const bytes = facts?.bytes;
   const kind = { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind];
-  const caption = [kind, bytes === undefined ? "" : sized(bytes), changed, location].filter(Boolean).join(" · ");
+  const caption = [facts?.mimeType, "selected on this device", location].filter(Boolean).join(" · ");
   const destination = inbox.state && drafts.state ? emailAccount(inbox.state, drafts.state) : undefined;
   const offer = { type: "useInEmail", account: destination?.account ?? 0 } as const;
   const email = file !== undefined && destination !== undefined && owner(offer);

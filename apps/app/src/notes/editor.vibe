@@ -10,7 +10,7 @@ import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { type Collection, type DraftWords, NoteContent, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
-export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind">
+export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind" | "pinned">
 
 const phone: Actor = "Phone"
 
@@ -33,9 +33,9 @@ export function startingTitle(collection: Collection): string {
   return highest > 0 ? `New note ${highest + 1}` : "New note"
 }
 
-/** A new note holding only the title it started with, and no words or items: nothing of it is the owner's, so it is never saved or kept. */
-function startedOnly(draft: DraftWords, collection: Collection): boolean {
-  return draft.id === "" && draft.title === startingTitle(collection) && !hasContent({ ...draft, title: "" })
+/** A new note holding only the title it started with, no words or items, and no pin, that the owner has not asked to share: nothing of it is the owner's, so it is never saved or kept. */
+function startedOnly(draft: DraftWords, collection: Collection, current: Editor.Editor): boolean {
+  return draft.id === "" && draft.pinned !== true && !current.asked && draft.title === startingTitle(collection) && !hasContent({ ...draft, title: "" })
 }
 
 effect function freshEditor(kind: Fields["kind"], available: boolean, folder: number, covered: boolean) {
@@ -72,7 +72,7 @@ effect function saveDraft(by: "Owner" | "Phone") {
   const content = try NoteContent
   const draft = try content.draft()
   const current = try editor.get()
-  if (draft === undefined || !Editor.canSave(current, by) || !hasContent(draft) || startedOnly(draft, try content.collection())) return
+  if (draft === undefined || !Editor.canSave(current, by) || !hasContent(draft) || startedOnly(draft, try content.collection(), current)) return
   const ticket = current.ticket + 1
   try content.capture(ticket, draft)
   const sent = editor.send({ type: "save" }, by) catch () => undefined
@@ -88,6 +88,8 @@ export service NoteEditor {
   keepMine(): void!!(Editor.Machine | NoteContent)
   keepAsNew(): void!!(Editor.Machine | NoteContent)
   discard(): void!!Agent
+  pinNew(pinned: boolean): void!!(Editor.Machine | NoteContent)
+  shareNew(): void!!(Editor.Machine | NoteContent)
   settled(initial: DraftWords, id: string, revision: number): void!!
 }
 
@@ -108,25 +110,27 @@ const typing = Layer.effect(NoteEditor, effect {
     const current = try editor.get()
     if (!Editor.canClose(current)) return
     const draft = try read.draft()
-    const untouched = draft !== undefined && startedOnly(draft, try read.collection())
+    const untouched = draft !== undefined && startedOnly(draft, try read.collection(), current)
     if (!untouched) try saveDraft("Owner")
     const moved = (editor.send({ type: "close" }, "Owner") catch () => undefined)?.state
     if (moved !== undefined && untouched && Editor.waiting(moved)) try letGo(moved)
     else if (moved !== undefined && !Editor.waiting(moved)) try read.showDraft(undefined)
   }
 
+  effect function typed(fields: Partial<Fields>) {
+    const current = try editor.get()
+    const draft = try read.draft()
+    if (draft === undefined || !Editor.canEdit(current, "Owner")) return
+    const next = { ...draft, ...fields }
+    try read.showDraft(next)
+    const kept = try read.keepDraft(next)
+    const event: Editor.Event = next.kind === current.kind ? { type: "edit", kept } : { type: "formatNote", kind: next.kind, kept }
+    try ignore(editor.send(event, "Owner"))
+  }
+
   return {
     newNote: (kind: Fields["kind"], available: boolean, folder: number, covered: boolean) => turn.withPermit(freshEditor(kind, available, folder, covered)),
-    typed: (fields: Partial<Fields>) => turn.withPermit(effect {
-      const current = try editor.get()
-      const draft = try read.draft()
-      if (draft === undefined || !Editor.canEdit(current, "Owner")) return
-      const next = { ...draft, ...fields }
-      try read.showDraft(next)
-      const kept = try read.keepDraft(next)
-      const event: Editor.Event = next.kind === current.kind ? { type: "edit", kept } : { type: "formatNote", kind: next.kind, kept }
-      try ignore(editor.send(event, "Owner"))
-    }),
+    typed: (fields: Partial<Fields>) => turn.withPermit(typed(fields)),
     save: () => turn.withPermit(saveDraft("Owner")),
     close: () => turn.withPermit(close()),
     takeSaved: () => turn.withPermit(oldEditor()),
@@ -149,10 +153,25 @@ const typing = Layer.effect(NoteEditor, effect {
       try saveDraft("Owner")
     }),
     discard: () => turn.withPermit(effect { try letGo(try editor.get()) }),
+    pinNew: (pinned: boolean) => turn.withPermit(effect {
+      const current = try editor.get()
+      if (!current.fresh || current.draft.sync === "Saving") return
+      try typed({ pinned })
+      try saveDraft("Owner")
+    }),
+    shareNew: () => turn.withPermit(effect {
+      const current = try editor.get()
+      const draft = try read.draft()
+      if (draft === undefined || !Editor.canShareNew(current, "Owner")) return
+      const kept = Editor.waiting(current) || (try read.keepDraft(draft))
+      try ignore(editor.send({ type: "shareNew", kept }, "Owner"))
+      try saveDraft("Owner")
+    }),
     settled: (initial: DraftWords, id: string, revision: number) => turn.withPermit(effect {
       const current = try read.draft()
       if (current === undefined || current.owner !== initial.owner || current.creation !== initial.creation) return
-      const saved = { ...current, id, base: revision, folder: 0, made: 0 }
+      const { pinned: _pinned, ...words } = current
+      const saved = { ...words, id, base: revision, folder: 0, made: 0 }
       try read.showDraft(saved)
       if (current === initial) try ignore(read.dropDraft(initial.owner))
       else try ignore(read.keepDraft(saved))

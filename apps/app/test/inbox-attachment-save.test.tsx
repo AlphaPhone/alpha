@@ -51,11 +51,14 @@ it("Save an attachment from inside its review, with one button per attachment", 
   await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
   expect([world.inbox.savedAttachments.size, document.querySelector("[aria-label='Attachment contents']")?.textContent]).toEqual([0, text]);
 
-  await confirm("Save");
+  await confirm("Save as…");
   await until(alpha, runtime, Shown, (s) => s.keep.outcome === "Confirmed");
-  await drawn(() => expect(told()).toContain("Saved to Files"));
-  expect([world.inbox.savedAttachments.get("agenda.txt"), document.querySelector("[aria-label='Attachment contents']")?.textContent, inDialog("Save")])
-    .toEqual([text, text, []]);
+  await drawn(() => expect(told()).toContain("Saved."));
+  const status = [...document.querySelectorAll("[role=dialog] [role=status]")].find((one) => one.textContent === "Saved.");
+  const contents = document.querySelector("[aria-label='Attachment contents']");
+  expect(Boolean(status && contents && status.compareDocumentPosition(contents) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  expect([world.inbox.savedAttachments.get("agenda.txt"), document.querySelector("[aria-label='Attachment contents']")?.textContent, inDialog("Save as…").map((one) => one.disabled)])
+    .toEqual([text, text, [true]]);
   await confirm("Close");
   await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 });

@@ -226,7 +226,9 @@ is offered only where that calendar would take the event with it. One it
 would not take is left off the form, not drawn dimmed, as the live v119
 phone left it off; a draft that still holds one there shows only the way
 to clear it, a single No repeat chip for a repeat, as the live v119 agent
-calendar drew it. The phone's calendar names that choice Once. Picking one never switches the event to another calendar, and
+calendar drew it. The phone's calendar names that choice Once. The options
+are drawn only for a calendar the form offers, so a browser with no
+calendar of its own and no agent's calendar shows none. Picking one never switches the event to another calendar, and
 Save stays in reach.
 
 ```quint
@@ -285,17 +287,31 @@ pure def lawEveryRuleRepeats(repeat: Repeat): bool = repeating(repeat) iff repea
 
 > As the owner, I want one short reason when an event cannot be saved yet.
 
-### Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order
+### Save is off while loading, while saving, for another account, for an event that changed, without a title, with no calendar to take a new event, and for the phone's calendar once Android said no, in that order
+
+A new event's calendar is a real one: the agent's while it is connected,
+or the phone's on a phone. With neither, as in a browser without an
+account, Save says Calendar unavailable, v119's words when it had no
+calendar to write to, and a save is never refused unsaid. Once Android
+said no to the phone's calendar, Save is off and the form says No access,
+as v119 did after asking at Save, beside the way to Calendar's settings.
 
 ```quint
-type SaveBlock = SaveAllowed | WaitLoading | WaitSaving | OtherAccount | CheckEvent | AddTitle
+type SaveBlock = SaveAllowed | WaitLoading | WaitSaving | OtherAccount | CheckEvent | AddTitle | NoCalendar | NoAccess
 
-pure def saveBlock(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool, titleBlank: bool): SaveBlock =
+pure def saveBlock(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool, titleBlank: bool, noCalendar: bool, noAccess: bool): SaveBlock =
   if (loading) WaitLoading else if (saving) WaitSaving else if (otherAccount) OtherAccount
-  else if (eventChanged) CheckEvent else if (titleBlank) AddTitle else SaveAllowed
+  else if (eventChanged) CheckEvent else if (titleBlank) AddTitle else if (noCalendar) NoCalendar
+  else if (noAccess) NoAccess else SaveAllowed
 
-pure def lawBlankTitleNeverSaves(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool): bool =
-  saveBlock(loading, saving, otherAccount, eventChanged, true) != SaveAllowed
+pure def lawBlankTitleNeverSaves(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool, noCalendar: bool, noAccess: bool): bool =
+  saveBlock(loading, saving, otherAccount, eventChanged, true, noCalendar, noAccess) != SaveAllowed
+
+pure def lawNoCalendarNeverSaves(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool, titleBlank: bool, noAccess: bool): bool =
+  saveBlock(loading, saving, otherAccount, eventChanged, titleBlank, true, noAccess) != SaveAllowed
+
+pure def lawNoAccessNeverSaves(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool, titleBlank: bool, noCalendar: bool): bool =
+  saveBlock(loading, saving, otherAccount, eventChanged, titleBlank, noCalendar, true) != SaveAllowed
 ```
 
 ### A missing or repeated wall time is refused, and nothing is saved

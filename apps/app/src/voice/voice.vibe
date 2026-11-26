@@ -14,11 +14,9 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
 export { placeOf, viewOfPlace }
-import { type MediaCard, MediaReview, ranDirect, sameFiles, spokenText } from "../assistant/media-review.vibe"
+import { MediaReview, ranDirect, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
-import { composeRecipient } from "../messages/agent.vibe"
-import { sendShowing } from "../contacts/requests.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { interruptedByCall, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/voice.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -379,26 +377,6 @@ module pure {
     return number !== null && number.replace(/\D/g, "").length >= 7 ? number : undefined
   }
 
-  const textConfirmation = /^(?:(?:yes|okay|ok|please)[,\s]+)*send\s+this\s+text[.!?]?$/iu
-  const confirmationLead = /^(?:(?:yes|yeah|yep|okay|ok|sure|hmm+|um+|uh)[,.!]?\s+)*(?:go ahead and )?/iu
-  const explicitConfirmation = /^send this (?:text|message|draft)[.!]?$/iu
-  const reviewedConfirmation = /^(?:(?:i think )?i (?:want to|wanna|would like to|want you to) |i['’]d like to |let['’]s )?send (?:it|this(?: (?:text|message|draft))?|the (?:text|message|draft))(?:\s+to\s+(.+?))?[.!?]?$/iu
-
-  /** An explicit instruction, or wording that only refers to a text with a pending review. @throws {never} */
-  export function smsConfirmation(spoken: string): { readonly explicit: boolean; readonly recipient?: string } | undefined {
-    const command = spoken.replace(confirmationLead, "")
-    if (textConfirmation.test(spoken) || explicitConfirmation.test(command)) return { explicit: true }
-    const matched = reviewedConfirmation.exec(command)
-    if (matched === null) return undefined
-    return matched[1] === undefined ? { explicit: false } : { explicit: false, recipient: matched[1] }
-  }
-
-  /** Compare an optional spoken addressee with the already-reviewed number or contact. @throws {never} */
-  export function sameSmsRecipient(spoken: string, number: string, names: readonly string[] = []): boolean {
-    const name = spoken.trim().toLowerCase()
-    return normalizePhoneNumber(spoken) === number || names.some((one) => one.trim().replace(/\.$/u, "").toLowerCase() === name)
-  }
-
   const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
 
   /** @throws {never} */
@@ -521,7 +499,7 @@ module pure {
       .replace(/\s+/g, " ")
   }
 }
-import { addressedSms, requestedDestination, sameSmsRecipient, smsConfirmation, speakableText, spokenForm, takeCompleteSentences } from pure
+import { addressedSms, requestedDestination, speakableText, spokenForm, takeCompleteSentences } from pure
 
 function placeForDestination(name: string): number | undefined {
   const lowered = name.toLowerCase()
@@ -637,12 +615,16 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   const observed = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context) : undefined
   const recipient = addressedSms(spoken)
   const existing = chat?.snapshot().media
-  if (existing?.some((card) => card.spokenSms !== undefined && card.decision !== "Deciding")) {
-    chat?.change({ media: existing.filter((card) => card.spokenSms === undefined || card.decision === "Deciding") })
+  const withdrawn = existing?.filter((card) => card.spokenSms !== undefined && card.decision !== "Deciding") ?? []
+  if (withdrawn.length > 0) {
+    chat?.change({ media: existing?.filter((card) => !withdrawn.includes(card)) ?? [] })
   }
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": the text review this turn follows is drawn again, for this turn, when the agent's reply names that same pending proposal unchanged.
+  const followed = withdrawn.length === 1 ? withdrawn[0] : undefined
+  const smsTo = recipient ?? followed?.spokenSms?.recipient
   const room = chatPage?.chosen === lease.conversation && chatPage.page.status === "Loaded" ? record : undefined
   const selection = observed?.sms?.selection
-  const smsReview = recipient === undefined || selection === undefined || room === undefined ? undefined
+  const smsReview = smsTo === undefined || selection === undefined || room === undefined ? undefined
     : Option.getOrUndefined(try Effect.serviceOption(MediaReview))
   const handset = smsReview === undefined ? undefined : Option.getOrUndefined(try Effect.serviceOption(Phone))
   const smsCurrent = effect {
@@ -661,9 +643,11 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
       && Voice.talking(speech) && clear(try handset.get())
   }
   const smsSession = smsReview !== undefined && (try smsCurrent) ? try smsReview.session() : undefined
-  const sms = smsSession !== undefined && smsSession.capabilities.has("sms.send.v1") && (try smsCurrent)
-    && recipient !== undefined && selection !== undefined && room !== undefined && chatPage !== undefined && screen !== undefined
-    ? { opened: smsSession, recipient, selection, room, conversation: chatPage.chosen, revision: screen.context.revision } : undefined
+  const smsText = smsSession !== undefined && smsSession.capabilities.has("sms.send.v1") && (try smsCurrent)
+    && smsTo !== undefined && selection !== undefined && room !== undefined && chatPage !== undefined && screen !== undefined
+    ? { opened: smsSession, recipient: smsTo, selection, room, conversation: chatPage.chosen, revision: screen.context.revision } : undefined
+  const sms = recipient !== undefined ? smsText : undefined
+  const again = sms === undefined && followed !== undefined ? smsText : undefined
   let streamed = false
   const transport: TurnTransport = {
     request(path, body, headers) {
@@ -781,12 +765,13 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let smsShown = false
-  if (sms !== undefined && smsReview !== undefined && chat !== undefined && streamed && result?.kind === "Replied"
+  const text = sms ?? again
+  if (text !== undefined && smsReview !== undefined && chat !== undefined && streamed && result?.kind === "Replied"
     && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && (try smsCurrent)) {
-    const card = try smsReview.spokenSms(sms.opened, result.reply.userMessageId, result.reply.actionResults, {
-      recipient: sms.recipient, selection: sms.selection, conversation: sms.conversation, revision: sms.revision,
-      room: sms.room, current: smsCurrent, session, turn,
-    })
+    const card = try smsReview.spokenSms(text.opened, result.reply.userMessageId, result.reply.actionResults, {
+      recipient: text.recipient, selection: text.selection, conversation: text.conversation, revision: text.revision,
+      room: text.room, current: smsCurrent, session, turn,
+    }, sms === undefined ? followed : undefined)
     if (card !== undefined && (try smsCurrent) && (try shell.get()).assistant === "Bar"
       && (try contained(shell.send({ type: "raise", detent: "Sheet" }, (state) => state.route === smsRoute
         && state.assistant === "Bar" && Effect.runSync(lease.current)), "showing the text review from Talk"))) smsRoute += 1
@@ -849,18 +834,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     }
   }
   memory.lastReply = finalText
-  if (!asks) output.finishSpeech(finalText)
-  return { type: "replyEnds", session, turn, asks }
-}
-
-function namesReviewedRecipient(card: MediaCard, spoken: string): boolean {
-  const op = card.operation
-  if (op.type === "sms_send") return op.recipients.length === 1 && sameSmsRecipient(spoken, op.recipients[0])
-  if (op.type !== "sms_compose") return false
-  const target = composeRecipient(op)
-  if (target.kind === "number") return sameSmsRecipient(spoken, target.number)
-  const selected = card.phone?.tag === "Exact" ? card.phone.selected : undefined
-  return selected !== undefined && sameSmsRecipient(spoken, selected.number, [selected.name, selected.query])
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a direct Files result is said even beside a page's card.
+  const says = !asks || filesReport !== undefined
+  if (says) output.finishSpeech(finalText)
+  return { type: "replyEnds", session, turn, asks: !says }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
@@ -868,53 +845,17 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
   const send = (queue: Queue.Queue<Voice.Event, Cause.Done>, shared: SpokenChat) => effect {
     const { memory } = try VoiceWords
     const voice = try Voice.Machine
-    const chat = Option.getOrUndefined(try Effect.serviceOption(Talk))?.board
     const heard = memory.heardText
     memory.heardText = undefined
     const spoken = heard?.session === session && heard.turn === turn ? heard.text.trim() : ""
-    const finishLocally = (words?: string) => {
-      if (words !== undefined) {
-        memory.enqueueSentence(turn, words)
-        Queue.offerUnsafe(queue, { type: "sentence", session, turn })
-      }
+    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": every spoken turn goes to the agent, and a review is decided only by the owner's touch on it.
+    const finishLocally = () => {
       Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
       Queue.endUnsafe(queue)
     }
     const state = try voice.get()
     if (spoken === "" || !Voice.canSentence(state, session, turn)) {
       finishLocally()
-      return
-    }
-    const confirmation = smsConfirmation(spoken)
-    const offered = confirmation === undefined ? [] : chat?.snapshot().media.filter((one) => {
-      const text = spokenText(one)
-      return text !== undefined && Voice.addressedTextConfirmation(state, text.session, text.turn, true)
-    }) ?? []
-    if (confirmation !== undefined && (confirmation.explicit || offered.length > 0)) {
-      const cards = offered.filter((one) => sendShowing(one.id))
-      const card = cards.length === 1 ? cards[0] : undefined
-      const request = card === undefined ? undefined : spokenText(card)
-      const review = Option.getOrUndefined(try Effect.serviceOption(MediaReview))
-      if (review === undefined || card === undefined || request === undefined || !(try request.current)) {
-        finishLocally(offered.length > 0 ? "Check the whole text review before sending." : "There’s no text open for review.")
-        return
-      }
-      if (confirmation.recipient !== undefined && !namesReviewedRecipient(card, confirmation.recipient)) {
-        finishLocally("That recipient doesn’t match the current text. Check the recipient shown before sending.")
-        return
-      }
-      const conversation = Option.getOrUndefined(try Effect.serviceOption(Conversation))
-      const chats = Option.getOrUndefined(try Effect.serviceOption(Chats))
-      const talk = Option.getOrUndefined(try Effect.serviceOption(Talk))
-      if (conversation === undefined || chats === undefined || talk === undefined) { finishLocally(); return }
-      const before = talk.board.snapshot().mediaNote
-      try (review.decide(card, true, "Speech")
-        |> Effect.provideService(%, Conversation, conversation)
-        |> Effect.provideService(%, Chats, chats)
-        |> Effect.provideService(%, Talk, talk))
-      const note = talk.board.snapshot().mediaNote
-      if (!Voice.canSentence(try voice.get(), session, turn)) { finishLocally(); return }
-      finishLocally(note !== before && note?.conversation === card.conversation ? note.text : "I couldn’t confirm the send. Check Messages before trying again.")
       return
     }
     const current = effect { return Voice.canSentence(try voice.get(), session, turn) }
