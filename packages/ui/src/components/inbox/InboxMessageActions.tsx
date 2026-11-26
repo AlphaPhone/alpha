@@ -1,6 +1,6 @@
 import { Archive, Ellipsis, Forward, Mail, Reply, Trash2 } from "lucide-react";
 import { Button } from "../Button.tsx";
-import { Mark } from "../Mark.tsx";
+import { LogoMark, Mark } from "../Mark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 
 export type InboxMessageActionsProps = {
@@ -42,7 +42,7 @@ export function InboxMessageActions({ compact = false, unread = false, onReply, 
             {compact && onReply ? <MenuItem onSelect={onReply}><Reply className="size-5.5" />Reply</MenuItem> : null}
             {onReplyAll ? <MenuItem onSelect={onReplyAll}><Reply className="size-5.5" />Reply all</MenuItem> : null}
             {onForward ? <MenuItem onSelect={onForward}><Forward className="size-5.5" />Forward</MenuItem> : null}
-            {compact && onAskAlpha ? <MenuItem onSelect={onAskAlpha}><Mark aria-hidden role="presentation" />Ask Alpha</MenuItem> : null}
+            {compact && onAskAlpha ? <MenuItem onSelect={onAskAlpha}><LogoMark className="size-5" />Ask Alpha</MenuItem> : null}
             {onToggleRead ? <MenuItem onSelect={onToggleRead}><Mail className="size-5.5" />{unread ? "Mark read" : "Mark unread"}</MenuItem> : null}
             {onArchive ? <MenuItem onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem> : null}
             {onTrash ? <MenuItem onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem> : null}

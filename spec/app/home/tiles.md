@@ -8,8 +8,8 @@ phone has) and which tiles are shown; this machine keeps the list, the read
 of what was saved and the save on its way.
 
 Old saved names, such as the Workflows tile saved under its earlier name,
-or Wallet saved as `alpha:inventory` by the Sunday demo build (Alpha
-45f6bed30, `alpha-product-registration.ts:308`, `:326`), are turned into today's tiles by the storage service as it parses the
+or Wallet saved as `alpha:inventory` by a development build of that time
+(Alpha 45f6bed30, `alpha-product-registration.ts:308`, `:326`), are turned into today's tiles by the storage service as it parses the
 record; a record it cannot parse is unreadable. An earlier Alpha's record
 (`alpha.launcher.favorites.v1`, its versions 1 and 2) is read only while
 Home has no record of its own, so it is taken up once: the first save
@@ -54,22 +54,25 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 ### Home's defaults use the product's Home order, and Home holds at most 4096 tiles
 
 The order is the one the owner approved on the Sunday demo build (Alpha
-45f6bed30, `apps/app/src/product/alpha-product-registration.ts:308`): its
-fourteen apps, Wallet between Files and Workflows
-(`alpha-product-registration.ts:302`, `:321`).
+45f6bed30, `apps/app/src/product/alpha-product-registration.ts:308`). That
+build's Home held only the apps its install admitted, and it admitted no
+Wallet ("Wallet is removed from MVP", `apps/app/src/prototype/mvp-features.ts:4`,
+`:17`; `prototype/model.js:4210`), so the demo's Home has thirteen apps with
+Workflows right after Files. Wallet, like Telegram and Slack, starts in Apps
+until the owner adds it to Home.
 
 ```quint
 pure val homeOrder: List[S::View] = List(
   S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
-  S::Maps, S::Notes, S::Contacts, S::Files, S::Wallet, S::Workflows, S::Settings)
+  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
 
-pure val homeCatalog: List[S::View] = homeOrder.append(S::Telegram).append(S::Slack)
+pure val homeCatalog: List[S::View] = homeOrder.append(S::Wallet).append(S::Telegram).append(S::Slack)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
   Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
-  Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Wallet }),
-  Own({ view: S::Workflows }), Own({ view: S::Settings }))
+  Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
+  Own({ view: S::Settings }))
 
 pure val maxTiles = 4096
 
@@ -86,9 +89,11 @@ pure def lawTheDefaultsAreHomeOrder(i: int): bool =
     and ((0 <= i and i < homeOrder.length()) implies shows(defaults.nthOr(i, noTile), homeOrder.nthOr(i, S::Phone)))
 
 pure def lawTheCatalogOffersEveryDefaultAndOptionalApp(i: int): bool =
-  homeCatalog.length() == homeOrder.length() + 2
-    and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Telegram
-    and homeCatalog.nthOr(homeOrder.length() + 1, S::Phone) == S::Slack
+  homeCatalog.length() == homeOrder.length() + 3
+    and not(homeOrder.includes(S::Wallet))
+    and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Wallet
+    and homeCatalog.nthOr(homeOrder.length() + 1, S::Phone) == S::Telegram
+    and homeCatalog.nthOr(homeOrder.length() + 2, S::Phone) == S::Slack
     and ((0 <= i and i < homeOrder.length()) implies homeCatalog.nthOr(i, S::Phone) == homeOrder.nthOr(i, S::Phone))
 ```
 

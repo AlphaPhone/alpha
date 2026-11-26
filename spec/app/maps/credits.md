@@ -100,7 +100,8 @@ pure def lawFollowingHidesTheCompass(bearing: int, pitch: int): bool = not(compa
 Every map Alpha draws, the world map and the Cloud rasters alike, covers the
 world, so the camera treats them alike. Guidance following the phone owns
 the camera. Otherwise a new route is fitted into view up to street zoom
-(17); a newly picked place is centred at zoom 14 above the sheets; and a new
+(17); a newly picked place is centred at zoom 14 between the sheets and a
+line 60 points under the search field, as v119 measured it; and a new
 set of result pins, with no place picked and no route, is fitted into view
 up to zoom 14. Leaving guidance turns the map north up again. Anything else
 keeps the camera where the owner left it.

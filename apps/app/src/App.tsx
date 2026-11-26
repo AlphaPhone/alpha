@@ -67,6 +67,8 @@ function touchScroll(target: Element, shell: HTMLElement) {
  * over them Ask Alpha, whatever covers the screen, and the notices. Each screen is its area's, drawn at its place.
  * One startup cover, the white page with the Alpha mark, stays over it until what shows under it is ready, kept at one
  * place so its fade never starts over: v119 drew one cover for the whole start (45f6bed30 apps/app/src/main.tsx:357).
+ * Home shows under an app's rise only when the app rose from Home; an app opened from another rises over it, and Back
+ * shows the app under it at once, as v119's one app layer did (45f6bed30 prototype/template.html:130).
  * @model spec/app/shell/index.md
  */
 export function App({ alpha }: AppProps) {
@@ -102,7 +104,7 @@ export function App({ alpha }: AppProps) {
     void alpha.runtime.runPromise(firstFrame(main), { signal: stop.signal }).then(() => setHomeShown(true), () => undefined);
     return () => stop.abort();
   }, [alpha, homeShown]);
-  const [risen, setRisen] = useState<{ view: View | undefined; done: boolean }>({ view: undefined, done: false });
+  const [risen, setRisen] = useState<{ view: View | undefined; depth: number; from: "Home" | "App" | "Back"; done: boolean }>({ view: undefined, depth: 0, from: "Home", done: false });
   const pageReady = state !== undefined && cause === undefined && page !== undefined && editorsMounted(page) && !updating;
   const signInWaits = signingIn && (!signedIn || signedIn.stage === "Checking" || !signInFlow);
   const cover = !updating && cause === undefined
@@ -116,7 +118,10 @@ export function App({ alpha }: AppProps) {
   }
   const shellFailed = cause !== undefined;
   const showing = state.trail.at(-1);
-  if (risen.view !== showing) setRisen({ view: showing, done: false });
+  if (risen.view !== showing) {
+    setRisen({ view: showing, depth: state.trail.length, from: risen.view === undefined ? "Home" : state.trail.length < risen.depth ? "Back" : "App", done: false });
+  }
+  const overHome = risen.view === showing && risen.from === "Home" && !risen.done;
   const owner = `${showing ?? "home"}:${state.assistant}:${launcher}:${state.textAskThrough}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
     if (shellFailed || signingIn || accessHolding || state.textAsk.tag === "TextAskVisit" || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
@@ -246,7 +251,7 @@ export function App({ alpha }: AppProps) {
                 inert={showing !== undefined || undefined}
                 className={cn(
                   showing === undefined ? "contents" : "absolute inset-0 isolate flex flex-col",
-                  showing !== undefined && (comms || (risen.view === showing && risen.done) ? "invisible" : "motion-reduce:invisible"),
+                  showing !== undefined && (comms || !overHome ? "invisible" : "motion-reduce:invisible"),
                 )}
               >
                 {alpha.slot("home")}
@@ -254,8 +259,8 @@ export function App({ alpha }: AppProps) {
               {showing !== undefined && (
                 <div
                   key={showing}
-                  onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen({ view: showing, done: true }); }}
-                  className={cn("relative flex min-h-0 flex-1 flex-col motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent", showing === "Camera" ? "bg-black" : "bg-background")}
+                  onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen((was) => (was.view === showing ? { ...was, done: true } : was)); }}
+                  className={cn("relative flex min-h-0 flex-1 flex-col has-[[data-alpha-camera-native]]:bg-transparent", risen.from !== "Back" && "motion-safe:animate-rise", showing === "Camera" ? "bg-black" : "bg-background")}
                 >
                   {!viewHasHeader(showing) && <AppHeader
                     title={views[showing].label}

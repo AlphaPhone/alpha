@@ -8,21 +8,46 @@ import { type Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { type DraftWords, NoteContent, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
+import { type Collection, type DraftWords, NoteContent, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
 export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind">
 
 const phone: Actor = "Phone"
 
+/** The title a new note starts with: New note, or the next number past every note and deleted note already titled New note or New note and a number, as v119's nextDefaultNoteTitle. */
+export function startingTitle(collection: Collection): string {
+  const base = "new note"
+  let highest = 0
+  for (const note of [...collection.noteByNumber.values(), ...collection.trash.map((entry) => entry.note)]) {
+    if (typeof note.title !== "string") continue
+    const title = note.title.trim().toLowerCase()
+    if (title === base) highest = Math.max(highest, 1)
+    if (title === base || !title.startsWith(base)) continue
+    const rest = title.slice(base.length)
+    const spaced = rest.trimStart()
+    const digits = spaced.startsWith("#") ? spaced.slice(1) : spaced
+    if (spaced === rest || digits === "" || [...digits].some((char) => char < "0" || char > "9")) continue
+    const number = Number(digits)
+    if (Number.isSafeInteger(number) && number > 0) highest = Math.max(highest, number)
+  }
+  return highest > 0 ? `New note ${highest + 1}` : "New note"
+}
+
+/** A new note holding only the title it started with, and no words or items: nothing of it is the owner's, so it is never saved or kept. */
+function startedOnly(draft: DraftWords, collection: Collection): boolean {
+  return draft.id === "" && draft.title === startingTitle(collection) && !hasContent({ ...draft, title: "" })
+}
+
 effect function freshEditor(kind: Fields["kind"], available: boolean, folder: number, covered: boolean) {
   const editor = try Editor.Machine
   const content = try NoteContent
-  const owner = (try content.collection()).owner
+  const collection = try content.collection()
+  const owner = collection.owner
   if (owner === "") return
   const active = ownerAt() catch () => ""
   if (active !== owner) return
   const opened = (editor.send({ type: "newNote", kind, available, folder, covered }, "Owner") catch () => undefined)?.state
-  if (opened !== undefined) try content.showDraft(newWords(owner, opened.made, folder, kind))
+  if (opened !== undefined) try content.showDraft({ ...newWords(owner, opened.made, folder, kind), title: startingTitle(collection) })
 }
 
 effect function oldEditor() {
@@ -47,7 +72,7 @@ effect function saveDraft(by: "Owner" | "Phone") {
   const content = try NoteContent
   const draft = try content.draft()
   const current = try editor.get()
-  if (draft === undefined || !Editor.canSave(current, by) || !hasContent(draft)) return
+  if (draft === undefined || !Editor.canSave(current, by) || !hasContent(draft) || startedOnly(draft, try content.collection())) return
   const ticket = current.ticket + 1
   try content.capture(ticket, draft)
   const sent = editor.send({ type: "save" }, by) catch () => undefined
@@ -58,7 +83,7 @@ export service NoteEditor {
   newNote(kind: Fields["kind"], available: boolean, folder: number, covered: boolean): void!!(Agent | Editor.Machine | NoteContent)
   typed(fields: Partial<Fields>): void!!
   save(): void!!(Editor.Machine | NoteContent)
-  close(): void!!(Editor.Machine | NoteContent)
+  close(): void!!(Agent | Editor.Machine | NoteContent)
   takeSaved(): void!!(Agent | Editor.Machine | NoteContent | List.Machine)
   keepMine(): void!!(Editor.Machine | NoteContent)
   keepAsNew(): void!!(Editor.Machine | NoteContent)
@@ -71,12 +96,23 @@ const typing = Layer.effect(NoteEditor, effect {
   const editor = try Editor.Machine
   const turn = try Semaphore.make(1)
 
+  effect function letGo(current: Editor.Editor) {
+    if (!Editor.canDiscardDraft(current, "Owner") && !Editor.canDropDraft(current, "Owner")) return
+    const identity = ownerAt() catch () => ""
+    if (identity === "" || numberOf("owner", identity) !== current.owner || !(try read.dropDraft(identity))) return
+    try ignore(editor.send({ type: current.unreadable ? "dropDraft" : "discardDraft" }, "Owner"))
+    try read.showDraft(undefined)
+  }
+
   effect function close() {
     const current = try editor.get()
     if (!Editor.canClose(current)) return
-    try saveDraft("Owner")
+    const draft = try read.draft()
+    const untouched = draft !== undefined && startedOnly(draft, try read.collection())
+    if (!untouched) try saveDraft("Owner")
     const moved = (editor.send({ type: "close" }, "Owner") catch () => undefined)?.state
-    if (moved !== undefined && !Editor.waiting(moved)) try read.showDraft(undefined)
+    if (moved !== undefined && untouched && Editor.waiting(moved)) try letGo(moved)
+    else if (moved !== undefined && !Editor.waiting(moved)) try read.showDraft(undefined)
   }
 
   return {
@@ -112,14 +148,7 @@ const typing = Layer.effect(NoteEditor, effect {
       try ignore(read.keepDraft(retained))
       try saveDraft("Owner")
     }),
-    discard: () => turn.withPermit(effect {
-      const current = try editor.get()
-      if (!Editor.canDiscardDraft(current, "Owner") && !Editor.canDropDraft(current, "Owner")) return
-      const identity = ownerAt() catch () => ""
-      if (identity === "" || numberOf("owner", identity) !== current.owner || !(try read.dropDraft(identity))) return
-      try ignore(editor.send({ type: current.unreadable ? "dropDraft" : "discardDraft" }, "Owner"))
-      try read.showDraft(undefined)
-    }),
+    discard: () => turn.withPermit(effect { try letGo(try editor.get()) }),
     settled: (initial: DraftWords, id: string, revision: number) => turn.withPermit(effect {
       const current = try read.draft()
       if (current === undefined || current.owner !== initial.owner || current.creation !== initial.creation) return

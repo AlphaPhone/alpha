@@ -24,6 +24,8 @@ import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
+import { CalendarReviews } from "../calendar/reviews.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
@@ -45,7 +47,7 @@ import { type Job, answer, applying, contained, following, reacting, run, starte
 import { Time } from "../runtime/time.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
-import { MediaReview, mediaReview } from "./media-review.vibe"
+import { MediaReview, mediaReview, ranDirect } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type ContactAttachmentScope, contactFileSendCurrent, contactFileTargetCurrent } from "./contact-attachments.vibe"
 import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, Talk, talk } from "./talk.vibe"
@@ -392,7 +394,7 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
     settle: effect (result, spoken) => {
       try Effect.provideService(Effect.provideService(
         settleSpoken(board, seat, chosen, record, result, spoken, current), Chats.Machine, chats), Agent, agent)
-      fork.detached Effect.provideContext(syncAlphaApps(result.reply.actionResults), apps)
+      fork.detached Effect.provideContext(syncAlphaApps(result.reply.actionResults, { conversation: chosen, message: result.reply.messageId }), apps)
     },
   }
 }
@@ -421,11 +423,16 @@ effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, re
     && now.chosen === selected && now.around === 0 && now.page.ticket === page))
 }
 
-effect function syncAlphaApps(actionResults: ReadonlyArray<{ readonly action: string }>): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+// spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+/** Bring the apps a reply's actions changed up to date: the clock, reminders, and Calendar's card for a request it filed in `reply`. */
+effect function syncAlphaApps(actionResults: ReadonlyArray<Ran>, reply: { readonly conversation: number; readonly message: string }): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
   const ranClock = actionResults.some((result) => result.action.startsWith("CLOCK_"))
   const ranReminders = actionResults.some((result) => result.action === "REMINDERS_MANAGE" || result.action === "OWNER_REMINDERS")
-  if (!ranClock && !ranReminders) return
+  const filed = calendarAsks.file(reply.conversation, reply.message, actionResults)
+  if (!ranClock && !ranReminders && !filed) return
   const ctx = try Effect.context<never>()
+  const reviews = Context.getOption(ctx, CalendarReviews)
+  if (filed && Option.isSome(reviews)) try reviews.value.relist()
   if (ranClock) {
     const alarms = Context.getOption(ctx, Alarms.Machine)
     const timers = Context.getOption(ctx, Timers.Machine)
@@ -699,6 +706,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
       const page = told ? pageIn(result.reply.actionResults, views.clientId) : undefined
       let continueFiles: Effect.Effect<void> | undefined
+      let openAsked: Effect.Effect<void> | undefined
       if (result.reply.userMessageId !== undefined) {
         board.messageNumber(result.reply.userMessageId)
         board.rename(pageTicket, mine, result.reply.userMessageId)
@@ -709,7 +717,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chats.chosen,
           conversationId: known.record.id, message: result.reply.messageId }, result.reply.text)
       if (board.draftSeat === seat) board.change({ recordingSummary })
-      fork.detached syncAlphaApps(result.reply.actionResults)
+      fork.detached syncAlphaApps(result.reply.actionResults, { conversation: chats.chosen, message: result.reply.messageId })
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
         const stillAuthored = effect {
@@ -739,6 +747,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
             actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
             ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
             ...(outsideFiles === undefined ? {} : { outsideFiles }) })
+        // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+        if (eligible && ranDirect(result.reply.actionResults)) openAsked = Effect.asVoid(review.openAsked(enrolled, result.reply.userMessageId, result.reply.actionResults, continued))
         if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
           && (try history.get()).chosen === chats.chosen) {
           const deciding = board.snapshot().media.filter((card) => card.decision === "Deciding")
@@ -747,6 +757,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       }
       if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
       else if (page !== undefined) try views.hold(ticket, { asked, page })
+      else if (openAsked !== undefined && (prepared === undefined || prepared.navigationBinding.viewId.toLowerCase() === "browser")) try views.hold(ticket, { asked, openAsked })
       else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)
@@ -1649,6 +1660,10 @@ const rested = started(effect {
     last = shown
     if (shown.assistant === "Bar" && (wasOpen || viewChanged)) {
       try ignore(dock.send({ type: "putAway", now: untimed }))
+    }
+    // spec/app/assistant/dock.md, "A bar or pill a drag left in place changes between them without an entrance until the sheet next opens"
+    if (!wasOpen && (shown.assistant === "Sheet" || shown.assistant === "Full")) {
+      try ignore(dock.send({ type: "opened" }))
     }
   })
 }, "resting the Ask Alpha dock")

@@ -558,10 +558,12 @@ pure def sometimesSearchFailed(m: Maps): bool = mode(m) == Search and m.search.s
 
 The [saved places](./places.md) keep one entry per place, at most 200. A
 place Google served is never saved or renamed; one already saved can be
-forgotten.
+forgotten. The pin dropped last is the owner's own coordinates, not
+Google's, so it is saved, renamed and shared on any map, as v119's live
+Maps treated a pin as a local place (prototype/maps-adapter.ts:378, 489).
 
 ```quint
-pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place))
+pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place)) and m.place != m.pin
 
 pure def canNamePlace(m: Maps, name: str): bool =
   m.place > 0 and name != "" and S::hasRoom(m.saved, m.place) and not(googleShown(m)) and m.keepable and onScreen(m)
@@ -581,7 +583,7 @@ pure def forgetPlace(m: Maps): Stepped =
 ### A saved place is renamed in a name field the owner opens on its card
 
 The pin dropped last offers the same field while it is the place on the
-card, as v119 did, while there is room and the map is not Google's; any
+card, as v119 did, while there is room, on Google's map as on any other; any
 other place not saved, such as a place found by search, offers none. Its
 name only names the pin, and the owner reads "Name updated. Tap Save to
 keep this place." on the pin's card only: choosing another place, Back,
@@ -1441,10 +1443,11 @@ Recenter or "Use my location", tapped while Android has not allowed
 location and the disclosure is unread, shows the disclosure and nothing
 else. A search needs no location, so the disclosure never holds one back,
 nor a query another app hands to Maps. Recenter stays on the map whenever
-Maps is not guiding; while Maps is locating or Android's prompt is open,
-tapping it does nothing. The disclosure belongs to the tap that showed it:
-it closes unread when the owner leaves Maps or presses Back, and once
-Android allows location, so Maps never opens on it.
+Maps is neither guiding nor showing directions, where v119 left "Use my
+location" on the directions card instead; while Maps is locating or
+Android's prompt is open, tapping it does nothing. The disclosure belongs
+to the tap that showed it: it closes unread when the owner leaves Maps or
+presses Back, and once Android allows location, so Maps never opens on it.
 
 ```quint
 pure def alwaysExplainingOnlyBeforeTheDisclosure(m: Maps): bool = m.explaining implies not(m.link.disclosed)
