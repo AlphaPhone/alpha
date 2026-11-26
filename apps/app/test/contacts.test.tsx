@@ -84,6 +84,9 @@ describe("Contacts on an Alpha image", () => {
     await press("Retry");
     await until(alpha, alpha.runtime, Messages, (state) => state.pane === "New" && state.newDraft.recipient > 0);
     expect(to()).toBe("+14155550100");
+    // spec/app/messages/index.md, "The current New address names the Messages stage beside Ask Alpha"
+    await enabled("Back to texting Maya Chen");
+    expect(document.querySelector('section[aria-label="Ask Alpha"] header')?.textContent).toContain("Maya Chen · Messages");
     const saved = world.secrets.get(slot);
     expect(saved).toBeDefined();
 
@@ -92,6 +95,7 @@ describe("Contacts on an Alpha image", () => {
     await press("Expand chat");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Full");
     expect(document.querySelector("[data-alpha-shell-page]")?.hasAttribute("inert")).toBe(true);
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Current view"]')?.textContent).toContain("Maya Chen · Messages"), { timeout: 12_000 });
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Messages" && state.assistant === "Sheet");
     await enabled("Return to Contacts");
