@@ -10,12 +10,15 @@ it('Keep a message and its list on a wide phone canvas (spec/app/shell/keyboard.
   await page.viewport(1280, 800);
   const world = { ...scene(), phone: true };
   await open(world, only("home", "view:Inbox", "assistant"));
-  await page.getByRole("button", { name: "Inbox", exact: true }).click();
-  const list = page.locator('[data-alpha-subview="inbox-list"]');
-  const reader = page.locator('[data-alpha-subview="inbox-detail"]');
-  const row = list.getByRole("button", { name: /Standup notes/ });
+  await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
+  const row = page.getByRole("button", { name: /Standup notes/ });
   await row.click();
-  await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
+  await expect.element(page.getByText(/Quick notes from standup/)).toBeVisible();
+  const listPane = document.querySelector('[data-alpha-subview="inbox-list"]');
+  const readerPane = document.querySelector('[data-alpha-subview="inbox-detail"]');
+  if (!listPane || !readerPane) throw new Error("Inbox did not draw its list and reader");
+  const list = page.elementLocator(listPane);
+  const reader = page.elementLocator(readerPane);
   await expect.element(row).toHaveAttribute("aria-current", "true");
   await expect.poll(() => {
     const columns = [list.element(), reader.element()].map((pane) => pane.getBoundingClientRect());

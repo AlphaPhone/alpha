@@ -459,7 +459,8 @@ describe("Files on a phone", () => {
     await fill("To", "+15550123456");
     await press("Text +15550123456");
     await until(alpha, alpha.runtime, MessageComposer, (s) => s.pictures === 1);
-    const pictures = alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()));
+    const { thread } = alpha.runtime.runSync(MessageComposer.use((composer) => composer.get()));
+    const pictures = alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures(thread)));
     expect(pictures).toEqual([{ name: "handed.png", wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(png, (byte) => byte.charCodeAt(0)) }]);
     expect(world.telephony.sent).toEqual([]);
   });
