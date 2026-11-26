@@ -32,7 +32,7 @@ afterEach(closeAll);
 type BrowserRuntime = ReturnType<typeof browser.runtime>;
 
 /** The tab the Browser shows. */
-const selectedTab = (runtime: BrowserRuntime) => runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+const selectedTab = (runtime: BrowserRuntime) => runtime.runSync(Effect.map(Effect.flatMap(Tabs, (m) => m.get()), (s) => s.selected));
 
 /** The page `tab` shows: by default the selected tab's. */
 const selectedPage = (runtime: BrowserRuntime, tab = selectedTab(runtime)) => runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
