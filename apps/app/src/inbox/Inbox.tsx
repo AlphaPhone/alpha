@@ -249,6 +249,9 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
+  const outcomeOf = (attempt: typeof state.file) => attempt.outcome === "Planned" ? undefined
+    : attempt.outcome === "Recorded" || attempt.outcome === "Sent" ? "working" : attempt.outcome === "Confirmed" ? "done" : attempt.outcome === "Refused" ? "refused" : "unknown";
+  const saveReviewed = { type: "saveReviewed", access } as const;
   const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
     ? runtime.runSync(AttachmentPreviews).read(state.file.id)
     : undefined;
@@ -316,7 +319,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         attachments={files.map((one, at) => ({
           id: `${one.partId}:${at}`, name: one.name, size: sizeOf(one.size),
           onOpen: state.revision > 0 && canPreviewAttachment(one) ? reviewing(at + 1, "Opening") : undefined,
-          onSave: state.revision > 0 && destination !== "unavailable" && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
+          onSave: state.revision > 0 && destination !== "unavailable" && !canPreviewAttachment(one) && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
           saveUnconfirmed: unsure(at + 1),
           browserDownload: destination === "download",
         }))}
@@ -340,10 +343,12 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         name={file?.name ?? ""}
         size={sizeOf(file?.size ?? 0)}
         handling={state.handling === "Saving" ? "save" : "open"}
-        outcome={outcome === "Planned" ? "review" : outcome === "Recorded" || outcome === "Sent" ? "working" : outcome === "Confirmed" ? "done" : outcome === "Refused" ? "refused" : "unknown"}
+        outcome={outcomeOf(state.file) ?? "review"}
         preview={preview}
         browserDownload={destination === "download"}
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
+        onSave={file && destination !== "unavailable" && canSaveAttachment(file) && can(saveReviewed) ? () => void send(saveReviewed) : undefined}
+        saveOutcome={state.handling === "Opening" ? outcomeOf(state.keep) : undefined}
         onClose={() => void send({ type: "closeAttachment" })}
       />
     </>
