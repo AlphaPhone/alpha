@@ -539,6 +539,12 @@ agent like any other, and the model reads what they mean. When the agent's
 reply to them names that same pending text again, unchanged, its review is
 shown again for that turn, with its Send and Decline; otherwise it leaves.
 
+Whether a spoken turn asks for a text is the model's to read: Talk matches
+nothing in the owner's words to route a turn, and a text review names the
+recipient the agent proposed, for the owner to check before Send. A review
+the reply proposed from a Messages chat that Talk cannot show ends the turn
+quietly: Talk says nothing of its own about it.
+
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool, says: bool): bool =
   (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)

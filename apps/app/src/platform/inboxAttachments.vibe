@@ -19,7 +19,7 @@ module android {
 }
 import { client } from android
 
-const SavedCopy = Schema.Struct({ status: Schema.Literals(["saved", "refused", "unknown"]) })
+const SavedCopy = Schema.Struct({ status: Schema.Literals(["saved", "cancelled", "refused", "unknown"]) })
 export type SaveResult = typeof SavedCopy.Type["status"]
 type Destination = "picker" | "library" | "download" | "unavailable"
 

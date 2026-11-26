@@ -84,6 +84,10 @@ public final class AlphaInboxAttachmentsPlugin extends Plugin {
       finish(review, "unknown");
       return;
     }
+    if (result.getResultCode() == Activity.RESULT_CANCELED) {
+      finish(review, "cancelled");
+      return;
+    }
     if (result.getResultCode() != Activity.RESULT_OK) {
       finish(review, "refused");
       return;
