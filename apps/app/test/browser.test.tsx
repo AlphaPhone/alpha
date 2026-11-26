@@ -400,10 +400,7 @@ describe("The Browser on a phone", () => {
     const { alpha } = await open(world, only("home", "view:Browser", "view:Settings"));
     await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
     await press("Browser");
-    // spec/app/browser/index.md, "The saved tabs replace an untouched launch tab, or join the open tabs when they all fit": the web host keeps its session in IndexedDB, which Node does not have, so there the read fails and the owner browses unsaved.
-    if (phone) await until(alpha, browser.runtime(alpha), Tabs, (s) => s.hydrated);
-    else await until(alpha, browser.runtime(alpha), Tabs, (s) => s.restore.status === "Failed");
-    await drawn(() => vi.waitFor(() => expect(button("Menu")).toBeDefined()));
+    await until(alpha, browser.runtime(alpha), Tabs, (s) => s.hydrated);
     await press("Menu");
     await press("Password manager");
     await until(alpha, alpha.runtime, Settings, (s) => s.page === "BrowserPasswordsPage");

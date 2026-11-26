@@ -495,13 +495,8 @@ const shown = started(effect {
   const shell = try Shell
   const machine = try Tabs.Machine
   const host = try TabHost
-  // A failed read is asked again when the Browser next comes to the front, not on each change of its tabs: a store that
-  // cannot be read (a web view without IndexedDB) would otherwise be asked in a loop.
-  let front = false
   try Stream.runForEach(Stream.zipLatest(Stream.map(shell.changes, (s) => showing(s, "Browser")), machine.changes), effect ([open, s]) => {
-    const arrived = open && !front
-    front = open
-    if (open && Tabs.canAskRestore(s) && (s.restore.status !== "Failed" || arrived)) try tellTabs({ type: "askRestore" })
+    if (open && Tabs.canAskRestore(s)) try tellTabs({ type: "askRestore" })
     const aimed = try (try Pages).aimed(s.selected)
     if (open && Tabs.steady(s) && !s.native.includes(s.selected) && Option.isSome(aimed)) {
       const p = try pageOf(s.selected)
