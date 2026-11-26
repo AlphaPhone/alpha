@@ -38,7 +38,8 @@ export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> &
   onReturnToOriginal?: () => void;
 };
 
-type TranscriptScroll = { page?: string; follows: boolean; paging?: { id: string; offset: number } };
+/** Where the conversation is read from: whether it follows the end, and the end it was last brought to, below which only the owner scrolls. */
+type TranscriptScroll = { page?: string; follows: boolean; end: number; paging?: { id: string; offset: number } };
 
 function messageRow(content: HTMLElement, id: string) {
   return Array.from(content.querySelectorAll<HTMLElement>("[data-alpha-message-id]"))
@@ -49,10 +50,11 @@ function topIn(viewport: HTMLElement, row: HTMLElement) {
   return row.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
 }
 
-function followEnd(viewport: HTMLElement) {
+function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
   if (selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode)) return;
   viewport.scrollTop = viewport.scrollHeight;
+  reading.end = viewport.scrollTop;
 }
 
 const MessageRows = memo(function MessageRows({ messages, hold }: { messages: readonly TranscriptMessage[]; hold?: MessageHold }) {
@@ -67,7 +69,7 @@ const MessageRows = memo(function MessageRows({ messages, hold }: { messages: re
  * @model spec/app/assistant/chats.md
  */
 export function AssistantTranscript({ messages, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
-  const scrollRef = useRef<TranscriptScroll>({ follows: true });
+  const scrollRef = useRef<TranscriptScroll>({ follows: true, end: 0 });
   const page = position?.page;
   const around = position?.around;
   const placed = useCallback((content: HTMLDivElement | null) => {
@@ -84,7 +86,7 @@ export function AssistantTranscript({ messages, holdMessage, briefing, liveMessa
       reading.follows = !row;
       reading.paging = undefined;
     }
-    const follow = () => { if (reading.follows) followEnd(viewport); };
+    const follow = () => { if (reading.follows) followEnd(viewport, reading); };
     follow();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(follow);
@@ -122,7 +124,8 @@ export function AssistantTranscript({ messages, holdMessage, briefing, liveMessa
       className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
       onScroll={(event) => {
         const viewport = event.currentTarget;
-        if (visible && status === "loaded") scrollRef.current.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+        const reading = scrollRef.current;
+        if (visible && status === "loaded") reading.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80 || (reading.follows && viewport.scrollTop >= reading.end);
         onScroll?.(event);
       }}
       {...props}

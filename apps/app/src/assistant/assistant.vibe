@@ -1392,7 +1392,7 @@ const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
 }, "asking what was typed on the communications dock")
 
-// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
+// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen"
 function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
   return match (fx) {
     when { tag: "Raise", let detent }: run("raise", effect {
@@ -1406,7 +1406,7 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
     when { tag: "Tap" }: run("tap", effect {
       const shell = try Shell
       const current = try shell.get()
-      for (const ask of Dock.focused(current.assistant)) {
+      for (const ask of Dock.tapped(current.assistant)) {
         if (ask.tag === "Raise") {
           fork.detached warmPlanner()
           try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
