@@ -276,9 +276,9 @@ export function ranDirect(actions: DeviceActionReply["actionResults"]): boolean 
   return [...repliedDeviceActions(actions).values()].some((action) => action === "Direct")
 }
 
-/** Whether the reply proposed a device action at all, for the owner's review or to run at once. */
-export function proposedDevice(actions: DeviceActionReply["actionResults"]): boolean {
-  return repliedDeviceActions(actions).size > 0
+/** Whether the reply proposed a device action for the owner's review. */
+export function proposedReview(actions: DeviceActionReply["actionResults"]): boolean {
+  return [...repliedDeviceActions(actions).values()].some((action) => action === "Review")
 }
 
 function fromThisEnrollment(proposal: Proposal, opened: Session): boolean {
@@ -573,6 +573,8 @@ export service MediaReview {
   spokenFilesFrom(session: Session, message: string, request: FilesContinuation, route: FilesRouteSteps, actions: DeviceActionReply["actionResults"]): boolean!!
   /** Opens at once, through the approvals path, the one page the reply to `message` offered as asked by the owner's whole message, while `current`. */
   openAsked(session: Session, message: string, actions: DeviceActionReply["actionResults"], current: Effect.Effect<boolean>): boolean!!
+  /** Whether the reply proposed a text to send (sms_send) for the owner's review on this enrollment, read from the proposals it names. */
+  proposedText(session: Session, actions: DeviceActionReply["actionResults"]): boolean!!
   messageTarget(): (MessageDraftTarget | undefined)!!
   voicemailTarget(): (VoicemailTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
@@ -1327,6 +1329,14 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       return turnHeaders(opened, filesOnly, opensAtOnce(try preferences.get()))
     },
     openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
+    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+    effect proposedText(opened, results) {
+      const actions = repliedDeviceActions(results)
+      if (![...actions.values()].some((action) => action === "Review")) return false
+      const answer = try proposals(opened)
+      return answer?.some((proposal) => actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
+        && operation(proposal.payload.operation)?.type === "sms_send") === true
+    },
     ...spokenReview,
     effect workflowDevice() {
       const opened = try session()

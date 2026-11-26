@@ -14,7 +14,7 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
 export { placeOf, viewOfPlace }
-import { MediaReview, proposedDevice, ranDirect, sameFiles } from "../assistant/media-review.vibe"
+import { MediaReview, proposedReview, ranDirect, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -860,9 +860,13 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   memory.lastReply = finalText
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a direct Files result is said even beside a page's card, whose notice Talk still shows.
-  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a reply that proposed a phone step Talk neither showed as a card nor ran describes what did not happen, so the turn ends quietly without setting reviewPending.
-  const proposed = result?.kind === "Replied" && proposedDevice(result.reply.actionResults)
-  const says = Voice.replySaid(proposed, asks, filesRan || pageOpened, filesReport !== undefined)
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a reply that proposed a text to send or a step to run at once, which Talk neither showed as a card nor ran, speaks of what did not happen, so the turn ends quietly without setting reviewPending; the chat keeps the reply.
+  const replied = result?.kind === "Replied" ? result.reply.actionResults : []
+  const texter = smsReview ?? review
+  const textSession = smsText?.opened ?? enrolled
+  const claimed = ranDirect(replied)
+    || (texter !== undefined && textSession !== undefined && proposedReview(replied) && (try texter.proposedText(textSession, replied)))
+  const says = Voice.replySaid(claimed, asks, filesRan || pageOpened, filesReport !== undefined)
   if (says) output.finishSpeech(finalText)
   return { type: "replyEnds", session, turn, asks, says }
 }
