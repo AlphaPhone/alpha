@@ -77,6 +77,39 @@ public final class ResidentWorkflowCrashInstrumentedTest {
    primary.addSuppressed(new AssertionError("Sanitized readiness snapshot unavailable"));
   }
  }
+ private static int marketedRamGb(long totalMemBytes) {
+  if(totalMemBytes<=0)return -1;
+  return (int)((totalMemBytes+(1L<<30)-1)/(1L<<30));
+ }
+ private static boolean allowsHybridAgent(long totalMemBytes) {
+  int marketed=marketedRamGb(totalMemBytes);
+  return marketed<0||marketed>=4;
+ }
+ private static final class WorkerIdentity {
+  final int pid,uid;
+  final String start,executable,sha256;
+  final long device,inode;
+  WorkerIdentity(int pid,int uid,String start,String executable,long device,long inode,String sha256) {
+   this.pid=pid;this.uid=uid;this.start=start;this.executable=executable;this.device=device;this.inode=inode;this.sha256=sha256;
+  }
+  String key() { return pid+":"+uid+":"+start+":"+device+":"+inode; }
+ }
+ private static WorkerIdentity processIdentity(int pid)throws Exception {
+  android.system.StructStat procStat=Os.stat("/proc/"+pid);
+  String start=processStart(pid);
+  String executable=Os.readlink("/proc/"+pid+"/exe");
+  android.system.StructStat exeStat=Os.stat(executable);
+  return new WorkerIdentity(pid,procStat.st_uid,start,executable,exeStat.st_dev,exeStat.st_ino,fileHash(new File(executable)));
+ }
+ private static void verifyWorkerIdentity(File journal,JSONObject record,WorkerIdentity worker,File filesRoot,String expectedRuntime,String expectedLoader,String expectedHash,long deadlineMs)throws Exception {
+  if(SystemClock.elapsedRealtime()>deadlineMs)throw new IOException("Worker verification deadline exceeded");
+  if(!journal.getCanonicalPath().equals(journal.getAbsolutePath())||!journal.getCanonicalPath().startsWith(filesRoot.getCanonicalPath()+File.separator))throw new IOException("Untrusted worker journal path");
+  if(worker.uid!=Process.myUid()||record.optInt("uid",-1)!=Process.myUid()||record.optInt("pid",-1)!=worker.pid)throw new IOException("Worker PID/UID mismatch");
+  JSONObject nativeIdentity=record.optJSONObject("nativeIdentity");
+  if(nativeIdentity!=null&&(nativeIdentity.optInt("pid",-1)!=worker.pid||nativeIdentity.optInt("uid",-1)!=worker.uid||!worker.start.equals(nativeIdentity.optString("startTicks"))))throw new IOException("Worker nativeIdentity mismatch");
+  if(!expectedRuntime.equals(record.optString("executable")))throw new IOException("Worker deployment differs");
+  if(!expectedLoader.equals(worker.executable)||expectedHash==null||!expectedHash.equals(worker.sha256))throw new IOException("Worker executable identity differs");
+ }
  private void reportRamAdmission() {
   // Read-only fixture evidence; unavailable diagnostics must not replace service admission.
   try {
@@ -87,8 +120,8 @@ public final class ResidentWorkflowCrashInstrumentedTest {
     android.app.ActivityManager.MemoryInfo memory=new android.app.ActivityManager.MemoryInfo();
     manager.getMemoryInfo(memory);
     diagnostic.put("totalMemBytes",memory.totalMem).put("availableMemBytes",memory.availMem).put("lowMemory",memory.lowMemory);
-    diagnostic.put("marketedRamGb",DeviceRamTierPolicy.marketedRamGb(memory.totalMem));
-    diagnostic.put("hybridAllowedByPolicy",DeviceRamTierPolicy.allowsHybridAgent(memory.totalMem));
+    diagnostic.put("marketedRamGb",marketedRamGb(memory.totalMem));
+    diagnostic.put("hybridAllowedByPolicy",allowsHybridAgent(memory.totalMem));
    }
    android.os.Bundle status=new android.os.Bundle();status.putString("stream","\nResident RAM admission: "+diagnostic+"\n");
    InstrumentationRegistry.getInstrumentation().sendStatus(2,status);
@@ -255,7 +288,7 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   if(Arrays.asList("/apex/com.android.runtime/bin/linker64","/system/bin/linker64","/system/bin/app_process64").contains(value))return value;
   return "<unrecognized executable path; chars="+value.length()+">";
  }
- private JSONObject workerDiagnostic(JSONObject record,WorkflowSurvivorInventory.Identity worker,File bun,File loader,String expectedHash)throws Exception {
+ private JSONObject workerDiagnostic(JSONObject record,WorkerIdentity worker,File bun,File loader,String expectedHash)throws Exception {
   JSONObject out=new JSONObject().put("schemaVersion",1).put("runId",fixture.getString("runId")).put("phase","worker-witness-binding").put("guardRelaxed",false);
   out.put("ownerExecutable",executableLabel(record==null?null:record.optString("executable",null)));
   out.put("expectedBun",executableLabel(bun.getCanonicalPath())).put("expectedLoader",executableLabel(loader.getCanonicalPath())).put("expectedLoaderSha256",expectedHash==null?JSONObject.NULL:expectedHash);
@@ -274,17 +307,17 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   }
   out.put("argv",argv).put("argvTruncated",truncated||start<limit||entries>=16).put("expectedTestArgv",new JSONArray().put("packaged loader wrapper").put("packaged Bun").put("trusted-worker.mjs").put("trusted-payload.json or trusted-replay-payload.json"));return out;
  }
- private WorkflowSurvivorInventory.Identity witness(File journal)throws Exception {
-  JSONObject record=null;WorkflowSurvivorInventory.Identity worker=null;String expectedHash=null;
+ private WorkerIdentity witness(File journal)throws Exception {
+  JSONObject record=null;WorkerIdentity worker=null;String expectedHash=null;
   File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so"),loader=new File(context.getApplicationInfo().nativeLibraryDir,Build.SUPPORTED_ABIS[0].equals("arm64-v8a")?"libeliza_ld_musl_aarch64_real.so":"libeliza_ld_musl_x86_64_real.so");
   try {
-   record=new JSONObject(readUtf8(journal));worker=WorkflowSurvivorInventory.processIdentity(record.getInt("pid"));expectedHash=fileHash(loader);
-   WorkflowSurvivorInventory.verify(journal,record,worker,context.getFilesDir().getCanonicalFile(),bun.getCanonicalPath(),loader.getCanonicalPath(),expectedHash,SystemClock.elapsedRealtime()+5000);return worker;
+   record=new JSONObject(readUtf8(journal));worker=processIdentity(record.getInt("pid"));expectedHash=fileHash(loader);
+   verifyWorkerIdentity(journal,record,worker,context.getFilesDir().getCanonicalFile(),bun.getCanonicalPath(),loader.getCanonicalPath(),expectedHash,SystemClock.elapsedRealtime()+5000);return worker;
   }catch(Exception failure){
    try{writePrivate(new File(context.getFilesDir(),"resident-recovery-identity.json"),workerDiagnostic(record,worker,bun,loader,expectedHash).toString());}catch(Exception diagnosticFailure){failure.addSuppressed(diagnosticFailure);}throw failure;
   }
  }
- private void exactAlive(WorkflowSurvivorInventory.Identity worker)throws Exception {assertEquals(worker.key(),WorkflowSurvivorInventory.processIdentity(worker.pid).key());}
+ private void exactAlive(WorkerIdentity worker)throws Exception {assertEquals(worker.key(),processIdentity(worker.pid).key());}
  private void crash(JSONObject resident)throws Exception {
   int pid=resident.getInt("pid");assertTrue(pid!=Process.myPid());assertEquals(Process.myUid(),Os.stat("/proc/"+pid).st_uid);assertEquals(resident.getString("start"),processStart(pid));assertEquals(fixture.getString("processExecutableSha256"),fileHash(new File("/proc/"+pid+"/exe")));
   String bundle=new File(context.getFilesDir(),"agent/agent-bundle.js").getCanonicalPath();assertTrue(Arrays.asList(new String(Files.readAllBytes(new File("/proc/"+pid+"/cmdline").toPath()),StandardCharsets.UTF_8).split(String.valueOf((char)0))).contains(bundle));
@@ -305,7 +338,7 @@ public final class ResidentWorkflowCrashInstrumentedTest {
  @Test public void lostParentModelRpcRemainsUnknownWithoutReplay()throws Throwable {
   String run=admit("Explicit resident crash fixture");
   control=null;
-  JSONObject proof=new JSONObject().put("passed",false).put("runId",run).put("case","lost-rpc");Throwable failure=null;JSONObject resident=null;WorkflowSurvivorInventory.Identity worker=null;boolean submitted=false;
+  JSONObject proof=new JSONObject().put("passed",false).put("runId",run).put("case","lost-rpc");Throwable failure=null;JSONObject resident=null;WorkerIdentity worker=null;boolean submitted=false;
   java.lang.reflect.Field hook=AlphaLocalAgentPlugin.class.getDeclaredField("instrumentationLaunchEnvironment");hook.setAccessible(true);assertNull(hook.get(null));
   try(HeldModel model=new HeldModel(false)) {
    hook.set(null,recoveryEndpoint(model.server));
@@ -335,7 +368,7 @@ public final class ResidentWorkflowCrashInstrumentedTest {
     proof.put("firstProcess",oldResident).put("secondProcess",resident).put("oldIpcPreserved",retained).put("workflowId",workflowId).put("workflowVersionId",version).put("executionId",executionId).put("sourceSha256",digest).put("workerPid",worker.pid).put("workerStartTicks",worker.start).put("effectCount",JSONObject.NULL).put("modelRequests",model.calls.get()).put("passed",true);
    } catch(Throwable error){failure=error;}
    finally {
-    try {model.release.countDown();if(submitted&&worker==null)throw new IOException("Submitted worker identity unobserved; preserve for disposable-user teardown");boolean workerGone=worker==null;long end=SystemClock.elapsedRealtime()+20000;while(!workerGone&&SystemClock.elapsedRealtime()<end){try{workerGone=!worker.key().equals(WorkflowSurvivorInventory.processIdentity(worker.pid).key());}catch(Exception gone){workerGone=!new File("/proc/"+worker.pid).exists();}if(!workerGone)SystemClock.sleep(100);}if(!workerGone)throw new IOException("Owned worker remains alive; preserve for disposable-user teardown");ElizaAgentService.stop(context);stopped(context,resident);proof.put("cleanupComplete",true);}
+    try {model.release.countDown();if(submitted&&worker==null)throw new IOException("Submitted worker identity unobserved; preserve for disposable-user teardown");boolean workerGone=worker==null;long end=SystemClock.elapsedRealtime()+20000;while(!workerGone&&SystemClock.elapsedRealtime()<end){try{workerGone=!worker.key().equals(processIdentity(worker.pid).key());}catch(Exception gone){workerGone=!new File("/proc/"+worker.pid).exists();}if(!workerGone)SystemClock.sleep(100);}if(!workerGone)throw new IOException("Owned worker remains alive; preserve for disposable-user teardown");ElizaAgentService.stop(context);stopped(context,resident);proof.put("cleanupComplete",true);}
     catch(Throwable cleanup){if(failure==null)failure=cleanup;else failure.addSuppressed(cleanup);proof.put("cleanupFailed",true);}
     finally {hook.set(null,null);ownerBearer=null;ownerIdentityId=null;}
    }
@@ -354,7 +387,7 @@ public final class ResidentWorkflowCrashInstrumentedTest {
     String script;try(InputStream in=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("trusted-worker.mjs")){script=new String(bounded(in,524288),StandardCharsets.UTF_8);}assertEquals(fixture.getString("trustedWorkerSha256"),hash(script.getBytes(StandardCharsets.UTF_8)));
     File workerResources=new File(context.getFilesDir(),"agent/workflow-worker");assertEquals(fixture.getString("workerIndexSha256"),fileHash(new File(workerResources,"files.sha256")));assertEquals(fixture.getString("workerManifestSha256"),fileHash(new File(workerResources,"manifest.json")));assertEquals(fixture.getString("compilerManifestSha256"),fileHash(new File(workerResources,"compiler/compiler.json")));
     model.expectRequest=true;trusted=new TrustedPackagedWorker(context,new File(context.getFilesDir(),"agent/workflow-worker"),module,script,fixture.getString("trustedWorkerSha256"),model.server,workflow.getString("id"));
-    assertTrue(model.received.await(45,java.util.concurrent.TimeUnit.SECONDS));assertNull(model.failure);assertEquals(1,model.calls.get());assertEquals(trusted.runId,model.requestRunId);untilFile(trusted.journal,5000);WorkflowSurvivorInventory.Identity worker=witness(trusted.journal);assertNotEquals(resident.getInt("pid"),worker.pid);
+    assertTrue(model.received.await(45,java.util.concurrent.TimeUnit.SECONDS));assertNull(model.failure);assertEquals(1,model.calls.get());assertEquals(trusted.runId,model.requestRunId);untilFile(trusted.journal,5000);WorkerIdentity worker=witness(trusted.journal);assertNotEquals(resident.getInt("pid"),worker.pid);
     long oldIpc=Os.lstat(new File(context.getFilesDir(),"ipc").getPath()).st_ino;JSONObject original=resident;crash(resident);resident=null;exactAlive(worker);startAndEnroll();resident=ownedChild();replacement=resident;assertEquals(ownerId,owner().getJSONObject("identity").getString("id"));assertEquals(agentId,agent().getString("id"));assertNotEquals(original.getInt("pid"),resident.getInt("pid"));assertEquals(worker.key(),witness(trusted.journal).key());assertNotEquals(oldIpc,Os.lstat(new File(context.getFilesDir(),"ipc").getPath()).st_ino);
     boolean retained=false;File[] generations=context.getFilesDir().listFiles(f->f.getName().startsWith("ipc-recovery-"));assertNotNull(generations);for(File generation:generations)if(Os.lstat(generation.getPath()).st_ino==oldIpc)retained=true;assertTrue(retained);assertEquals(1,model.calls.get());
     // Explicit service stop must preserve the same live shared-runtime worker too.

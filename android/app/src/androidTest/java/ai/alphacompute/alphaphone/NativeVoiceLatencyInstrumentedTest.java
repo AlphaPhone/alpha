@@ -3,6 +3,7 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.voice.VoiceLatencyTrials;
 import ai.eliza.voice.VoiceLatencyProbe;
 import ai.eliza.voice.LocalSpeechEngine;
+import ai.eliza.voice.LiveCaptureController;
 import ai.eliza.voice.LiveVoiceCapture;
 import ai.eliza.voice.LiveVadGate;
 import ai.eliza.voice.NativeAsr;
@@ -118,7 +119,7 @@ public final class NativeVoiceLatencyInstrumentedTest {
   // Warm start: the first trial is still marked cold (first turn of the process).
   worker.submit(()->{try{asr=bundle.openAsr();assertTrue(asr.supportsStreaming());voice=bundle.openVoice();}catch(Exception error){throw new RuntimeException(error);}}).get(300,TimeUnit.SECONDS);
   LiveVoiceCapture.SourceFactory source=feed?feedSource(new File(app.getFilesDir(),"latency-feed"),gapSeconds):()->new LiveVoiceCapture.MicrophoneSource(app,false);
-  LiveVoiceCapture capture=new LiveVoiceCapture(app,UUID.randomUUID().toString(),new LiveVoiceCapture.Sink(){
+  LiveVoiceCapture capture=new LiveVoiceCapture(app,UUID.randomUUID().toString(),new LiveCaptureController.Sink(){
    public void frames(String captureId,org.json.JSONArray frames,org.json.JSONArray vad,float peak){
     batchesSeen.incrementAndGet();synchronized(maxPeak){if(peak>maxPeak[0])maxPeak[0]=peak;}
     boolean start=false,end=false;
@@ -231,7 +232,7 @@ public final class NativeVoiceLatencyInstrumentedTest {
  }
 
  /** Opens this trial's speech-output warm-up, closing any earlier one first. */
- private synchronized void openWarmup(){closeWarmup();warmup=new SpeechOutputWarmup(LocalSpeechEngine.STREAM_RATE);}
+ private synchronized void openWarmup(){closeWarmup();warmup=new SpeechOutputWarmup(LocalSpeechEngine.STREAM_RATE,SpeechOutputWarmup.LIMIT_NS,()->AudioTrackSpeechOutput.open(LocalSpeechEngine.STREAM_RATE),System::nanoTime);}
  /** Closes this trial's speech-output warm-up, if one is open. Idempotent; called from the turn
   * worker and from the streamed output's first samples. */
  private synchronized void closeWarmup(){if(warmup!=null){warmup.close();warmup=null;}}

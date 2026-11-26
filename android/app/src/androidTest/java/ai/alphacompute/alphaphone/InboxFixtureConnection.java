@@ -14,8 +14,21 @@ public final class InboxFixtureConnection extends Plugin {
  @Override public void load(){store.setBridge(getBridge());}
  @Override protected void handleOnDestroy(){store.handleOnDestroy();super.handleOnDestroy();}
  @PluginMethod public void secureRead(PluginCall call){store.secureRead(call);}
- @PluginMethod public void secureWrite(PluginCall call){store.secureWrite(call);}
- @PluginMethod public void secureRemove(PluginCall call){store.secureRemove(call);}
+ @PluginMethod public void secureWrite(PluginCall call){
+  try{
+   String slot=RendererCredentialSlots.requireAllowed(call.getString("slot"));
+   String value=call.getString("value");
+   if(value==null)throw new IllegalArgumentException();
+   store.writeCredentialSlot(slot,value);
+   call.resolve(new JSObject().put("ok",true));
+  }catch(Exception error){call.reject("Secure storage write failed");}
+ }
+ @PluginMethod public void secureRemove(PluginCall call){
+  try{
+   store.removeCredentialSlot(RendererCredentialSlots.requireAllowed(call.getString("slot")));
+   call.resolve(new JSObject().put("ok",true));
+  }catch(Exception error){call.reject("Secure storage removal failed");}
+ }
  @PluginMethod public void secureCompareExchange(PluginCall call){store.secureCompareExchange(call);}
  @PluginMethod public void cancel(PluginCall call){call.resolve();}
  static String token(){return "synthetic-inbox-only-"+InboxFixtureScope.runId;}

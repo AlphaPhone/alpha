@@ -19,21 +19,21 @@ describe("Clock (spec/clock/alarms.md, \"Story: Set an alarm in the browser buil
     provide clock, build("browser") {
       const actions = try ClockActions
       const alarms = try AlarmsMachine
-      fork.detached keepTime()
       const set = try actions.addAlarm(7, 0, "Work", [])
       const refused = try actions.addAlarm(25, 0, "", [])
       const added = (try alarms.get()).alarms[0]!
-      try TestClock.setTime(added.nextAt)
-      try TestClock.adjust("1 second")
+      try TestClock.adjust(Duration.millis(added.nextAt - 5_000))
+      const keeping = fork keepTime()
+      try TestClock.adjust("6 seconds")
       const rang = (try alarms.get()).alarms[0]!
       const snoozed = try actions.snoozeAlarm(rang.id, rang.revision)
       const stale = try actions.dismissAlarm(rang.id, rang.revision)
       const after = (try alarms.get()).alarms[0]!
-      try TestClock.setTime(after.nextAt)
-      try TestClock.adjust("1 second")
+      try TestClock.adjust("11 minutes")
       const again = (try alarms.get()).alarms[0]!
       const dismissed = try actions.dismissAlarm(again.id, again.revision)
       const off = (try alarms.get()).alarms[0]!
+      try Fiber.interrupt(keeping)
       try Effect.try(() => assert.deepStrictEqual(
         { set, refused, added: added.phase, rang: rang.phase, snoozed, stale, after: after.phase, again: again.phase, dismissed, off: off.phase },
         { set: true, refused: false, added: "AlarmSet", rang: "AlarmRinging", snoozed: true, stale: false, after: "AlarmSet", again: "AlarmRinging", dismissed: true, off: "AlarmOff" },
@@ -46,7 +46,7 @@ describe("Clock (spec/clock/alarms.md, \"Story: Set an alarm in the browser buil
     provide clock, build("launcher") {
       const actions = try ClockActions
       const timers = try TimersMachine
-      fork.detached keepTime()
+      const keeping = fork keepTime()
       try actions.startTimer("Tea", 60_000)
       const id = (try timers.get()).timers[0]!.id
       try TestClock.adjust("20 seconds")
@@ -59,6 +59,7 @@ describe("Clock (spec/clock/alarms.md, \"Story: Set an alarm in the browser buil
       const rung = (try timers.get()).timers[0]!
       const stopped = try actions.dismissTimer(rung.id, rung.revision)
       const ready = (try timers.get()).timers[0]!
+      try Fiber.interrupt(keeping)
       try Effect.try(() => assert.deepStrictEqual(
         { paused, left, stillPaused, rung: rung.phase, stopped, ready: [ready.phase, ready.leftMs] },
         { paused: true, left: 40_000, stillPaused: "TimerPaused", rung: "TimerRinging", stopped: true, ready: ["TimerPaused", 60_000] },

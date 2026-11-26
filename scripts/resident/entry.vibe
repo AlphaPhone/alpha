@@ -1,8 +1,6 @@
 // spec/agent/plugins/bundle.md, "A consumer entry ships only as a named package's code inside the source root, and passes the same load smoke as the generated entry"; spec/agent/plugins/bundle.md, "A host module is named only for a bundled package that is not an agent module, and runs with its entry's services over the resident's platform layer"; spec/agent/plugins/profile.md, "A host service never takes an agent service's name"; spec/agent/host/process.md
 import { runAgentCli, type AgentPlugin, type ModuleFactory } from "@elizaos/agent-host"
 import { localInferenceModule, localInferencePluginName } from "@elizaos/plugin-local-inference"
-import * as localInference from "@elizaos/plugin-local-inference"
-import { AndroidInferenceEngine, androidInferenceLayer } from "@elizaos/os"
 import * as assistant from "@elizaos/plugin-personal-assistant"
 import * as calendar from "@elizaos/plugin-calendar"
 import * as inbox from "@elizaos/plugin-inbox"
@@ -12,6 +10,7 @@ import * as workflow from "@elizaos/plugin-workflow"
 import * as maps from "@elizaos/plugin-maps"
 import * as browser from "@elizaos/plugin-browser"
 import { inferenceSocket, residentServices, residentStateDirectory, savedPlaceFiles } from "./bridges.ts"
+import { androidInferenceEngine } from "./inference.ts"
 
 type PluginModule = { readonly default?: unknown; readonly plugin?: unknown }
 
@@ -28,11 +27,9 @@ const mapsWithHost: AgentPlugin = {
   },
 }
 
-/** Local inference over the device engine the host services provide on the app process's inference socket. */
-const localInferenceHosted: ModuleFactory<AndroidInferenceEngine> = effect (context) => {
-  const engine = try AndroidInferenceEngine
-  return try localInferenceModule(engine)(context)
-}
+/** Local inference over the device engine on the app process's inference socket. */
+const localInferenceHosted: ModuleFactory<never> = (context) =>
+  localInferenceModule(androidInferenceEngine(inferenceSocket()))(context)
 
 /** Alpha's resident agent: the bundled plugins, the workflow device and native digest bridges, and local inference hosted over the device's own engine. */
 runAgentCli({
@@ -48,9 +45,8 @@ runAgentCli({
     { packageName: localInferencePluginName, plugin: undefined },
   ],
   runtimeServices: residentServices,
-  hostModules: new Map<string, ModuleFactory<AndroidInferenceEngine>>([
+  hostModules: new Map<string, ModuleFactory<never>>([
     [notesModuleName, notesModule],
     [localInferencePluginName, localInferenceHosted],
   ]),
-  hostServices: () => androidInferenceLayer(inferenceSocket()),
 })

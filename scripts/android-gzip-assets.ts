@@ -17,6 +17,7 @@ import {fileURLToPath} from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ANDROID_PUBLIC = 'android/app/src/main/assets/public';
+export const ANDROID_AGENT = 'android/app/src/main/assets/agent';
 const GZIP_MAGIC = Buffer.from([0x1f, 0x8b]);
 export const isGzip = (bytes: Buffer) => bytes.length > 2 && bytes.subarray(0, 2).equals(GZIP_MAGIC);
 
@@ -64,6 +65,9 @@ export function packagedGzipProblems(apkPublic: string, webDist = path.join(ROOT
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv[2] !== 'protect') { console.error('Usage: node scripts/android-gzip-assets.ts protect'); process.exit(2); }
-  const wrapped = protectGzipAssets();
-  console.log(wrapped.length ? `Wrapped gzip assets for the Android asset merger: ${wrapped.join(', ')}` : 'Android web payload has no gzip assets to wrap.');
+  const wrapped = [
+    ...protectGzipAssets(),
+    ...protectGzipAssets(path.join(ROOT, ANDROID_AGENT)).map((file) => `agent/${file}`),
+  ];
+  console.log(wrapped.length ? `Wrapped gzip assets for the Android asset merger: ${wrapped.join(', ')}` : 'Android assets have no gzip files to wrap.');
 }

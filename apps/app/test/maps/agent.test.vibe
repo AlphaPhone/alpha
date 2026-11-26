@@ -135,16 +135,22 @@ it.live("The agent's reviewed Maps read runs once for the place its card named, 
     const machine = try ScreenMachine
     const ports = try operationPorts
     const call = undefined as unknown as ExecutorCall
+    const waitContext = (want: (c: unknown) => boolean) => effect {
+      for (let i = 0; i < 40; i++) {
+        const current = try agent.context()
+        if (want(current)) return current
+        try sleep("25 millis")
+      }
+      return try agent.context()
+    }
     try shownPier()
-    try sleep("20 millis")
-    const shown = try agent.context()
+    const shown = try waitContext((c) => c !== undefined)
     const op = { type: "maps_read_selected", target: shown }
     const valid = ports.validate(op) !== undefined
     const done = (try promise(() => ports.execute(op, call))) as { kind: string; result?: { fields?: { kind?: string; label?: string; providerRevision?: string } } }
     try screen.pickResult(1)
     try until(machine.changes, (s) => s.details === "Ready")
-    try sleep("20 millis")
-    const moved = try agent.context()
+    const moved = try waitContext((c) => c !== undefined && JSON.stringify(c) !== JSON.stringify(shown))
     const stale = (try promise(() => ports.execute(op, call))) as { kind: string; code?: string }
     try Effect.try(() => assert.deepStrictEqual(
       {

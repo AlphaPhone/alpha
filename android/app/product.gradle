@@ -39,7 +39,15 @@ def inferenceModule = file('../../vendor/eliza/packages/os/android/local-inferen
 if (!new File(inferenceModule, 'engine.lock.json').isFile()) throw new GradleException('The pinned upstream has no os local-inference module (vendor/eliza/packages/os/android/local-inference)')
 def inferenceEngineLock = new groovy.json.JsonSlurper().parse(new File(inferenceModule, 'engine.lock.json'))
 rootProject.ext.elizaSpeechBridgeCapacitor = 'true'
-rootProject.ext.elizaInferenceEngineDir = rootProject.findProperty('elizaInferenceEngineDir') ?: file('../../.eliza/inference-engine/' + inferenceEngineLock.engine.commit).absolutePath
+def defaultEngineDir = file('../../.eliza/inference-engine/' + inferenceEngineLock.engine.commit)
+def nativeReceiptFile = file('../../.eliza/native-inputs/receipt.json')
+if (!defaultEngineDir.isDirectory() && nativeReceiptFile.isFile()) {
+ def nativeReceipt = new groovy.json.JsonSlurper().parse(nativeReceiptFile)
+ def cacheRoot = System.getenv('ALPHA_NATIVE_CACHE_DIR') ?: (System.getProperty('user.home') + '/.cache/alpha/native-inputs')
+ def cachedEngine = new File(cacheRoot, "${nativeReceipt.recipeSha256}/${nativeReceipt.producer.platform}-${nativeReceipt.producer.arch}/engine")
+ if (cachedEngine.isDirectory()) defaultEngineDir = cachedEngine
+}
+rootProject.ext.elizaInferenceEngineDir = rootProject.findProperty('elizaInferenceEngineDir') ?: defaultEngineDir.absolutePath
 rootProject.ext.elizaParadeeNativeDir = rootProject.findProperty('elizaParadeeNativeDir') ?: file('../../.eliza/paradee-voice/native').absolutePath
 rootProject.ext.elizaParadeeAbis = rootProject.findProperty('elizaParadeeAbis') ?: runtimeAbis.join(',')
 apply from: file('cloud-deployment.generated.gradle')

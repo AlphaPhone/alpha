@@ -128,7 +128,9 @@
   <receiver android:name=".ReminderReceiver" android:exported="false">
    <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/><action android:name="android.intent.action.TIME_SET"/><action android:name="android.intent.action.TIMEZONE_CHANGED"/></intent-filter>
   </receiver>
-  <!-- Digests and agent schedules run in the resident runtime: bring back the owner-enabled agent (#394). Nothing is replayed. -->
+  <!-- Digests and agent schedules run in the resident runtime: bring back the owner-enabled agent (#394). Nothing is replayed.
+       Alpha declares its own ResidentScheduleReceiver, so remove the shared agent-service boot receiver. -->
+  <receiver android:name="ai.eliza.os.agent.AgentStartReceiver" tools:node="remove" />
   <receiver android:name=".ResidentScheduleReceiver" android:exported="false">
    <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/><action android:name="android.intent.action.TIME_SET"/><action android:name="android.intent.action.TIMEZONE_CHANGED"/></intent-filter>
   </receiver>
