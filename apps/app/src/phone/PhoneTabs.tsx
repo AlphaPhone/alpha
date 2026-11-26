@@ -9,6 +9,7 @@ export interface PhoneTabsProps {
   voicemail: boolean;
   unheard: boolean;
   onBack?: () => void;
+  header?: ReactNode;
   /** Contacts' actions, which get the title row while the tabs sit below. */
   children?: ReactNode;
 }
@@ -21,8 +22,8 @@ const tabs = [
 ] as const;
 
 /** Recents, keypad and the phone's admitted voicemail and address book, in the Phone header. */
-export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, children }: PhoneTabsProps) {
-  const separate = children !== undefined;
+export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, header, children }: PhoneTabsProps) {
+  const separate = header !== undefined || children !== undefined;
   const selector = (
     <TabsList aria-label="Phone" className="gap-0.5 p-[3px]">
       {tabs.map(({ name, Icon }) => {
@@ -41,10 +42,10 @@ export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, childre
   );
   return (
     <>
-      <AppHeader title={title} data-alpha-phone-header="" className="mt-[max(0.125rem,env(safe-area-inset-top))] shrink-0 flex-wrap in-[main:has([data-alpha-call-strip=over])]:mt-0"
+      {header ?? <AppHeader title={title} data-alpha-phone-header="" className="mt-[max(0.125rem,env(safe-area-inset-top))] shrink-0 flex-wrap in-[main:has([data-alpha-call-strip=over])]:mt-0"
         leading={onBack && <Button variant="ghost" size="icon" aria-label={separate ? "Back" : "Back to apps"} className="rounded-lg" onClick={onBack}><ChevronLeft /></Button>}>
         {separate ? children : selector}
-      </AppHeader>
+      </AppHeader>}
       {separate && <div className="flex shrink-0 justify-center px-4 pb-2">{selector}</div>}
     </>
   );

@@ -8,6 +8,7 @@ import { Machine as Phone, type Phone as PhoneState } from "../gen/app__phone.ef
 import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
 import { Machine as Comms } from "../gen/app__phone__comms.effect.vibe";
 import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
+import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { at } from "../src/areas.ts";
 import { propose } from "../src/contacts/requests.vibe";
@@ -178,8 +179,24 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Recents" && state.recents.status === "Loaded");
     expect(button("Call Maya Chen")).toBeDefined();
 
+    // spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts"
     await tab("Contacts");
     await contactsFront();
+    const contactsListed = () => until(alpha, alpha.runtime, Contacts, (state) =>
+      state.front && !state.searching && !state.sought && state.list.status === "Loaded" && state.rows === 2);
+    await contactsListed();
+    await press("Search contacts");
+    await fill("Search contacts", "Maya");
+    await until(alpha, alpha.runtime, Contacts, (state) =>
+      state.searching && state.sought && state.list.status === "Loaded" && state.rows === 1);
+    expect(button("Maya Chen")).toBeDefined();
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await tab("Contacts");
+    await contactsFront();
+    await contactsListed();
+    expect(button("Ben Ortiz")).toBeDefined();
     await press("Open Alpha");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     await fill("Ask Alpha", "Keep the Contacts draft");
