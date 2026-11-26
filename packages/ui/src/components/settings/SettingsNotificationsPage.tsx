@@ -45,7 +45,7 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
  * second in that one card, after Other apps, as the Sunday v119 demo build drew it (Alpha 45f6bed30,
  * prototype/settings-adapter.ts:1150-1155).
  */
-export const NotificationAccessRow = createContext<ReactNode>(null);
+export const NotificationAccessRowContext = createContext<ReactNode>(null);
 
 /**
  * Notifications: whether Alpha's notifications are on, Do Not Disturb, Android's page for them, each channel on its own
@@ -78,8 +78,8 @@ export function SettingsNotificationsPage({ browserAlerts, alerts, doNotDisturb,
         </ListGroup>
       ))}
       {collectionPolicy ? (
-        <NotificationAccessRow.Provider value={<SettingsAndroidRow target="notification-access" title="Android access"
-          aria-label="Manage notification access in Android" icon={<SlidersHorizontal />} {...android} />}>{collectionPolicy}</NotificationAccessRow.Provider>
+        <NotificationAccessRowContext value={<SettingsAndroidRow target="notification-access" title="Android access"
+          aria-label="Manage notification access in Android" icon={<SlidersHorizontal />} {...android} />}>{collectionPolicy}</NotificationAccessRowContext>
       ) : (
         <ListGroup>
           {collection ? <SettingsFactRow title="Other apps' notifications" icon={<Radio />} reading={collection} />
