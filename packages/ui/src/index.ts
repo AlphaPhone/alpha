@@ -60,6 +60,7 @@ export * from "./components/assistant/AssistantFileRow.tsx";
 export * from "./components/assistant/AssistantGenericCard.tsx";
 export * from "./components/assistant/AssistantGrabber.tsx";
 export * from "./components/assistant/AssistantMessage.tsx";
+export { watchMessageMenu } from "./components/assistant/messagePress.ts";
 export * from "./components/assistant/AssistantNoteCard.tsx";
 export * from "./components/assistant/AssistantNoticeCard.tsx";
 export * from "./components/assistant/AssistantPendingAttachments.tsx";
