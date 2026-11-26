@@ -45,6 +45,8 @@ export interface InboxScene {
   offline: boolean;
   /** Google refuses every Gmail request: the owner withdrew access. */
   revoked: boolean;
+  /** A reply the journey holds at the Gmail search boundary. */
+  pageReply?: Promise<void>;
   /** A reply the journey holds at the Gmail thread boundary. */
   threadReply?: Promise<void>;
   threadPageSize?: number;
@@ -256,7 +258,8 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         messages: found.slice(from, from + size).map((stored) => ({ ...stored.card, hasAttachments: stored.files.length > 0 })), nextPageToken: from + size < found.length ? `p${from + size}` : null,
         syncedAt: "2026-11-01T00:00:00Z", mailboxHistoryId: String(scene.history), supportsSpamTrash: true,
       };
-      return Response.json(page);
+      const answer = Response.json(page);
+      return scene.pageReply?.then(() => answer) ?? answer;
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${google}/gmail/read`) return;

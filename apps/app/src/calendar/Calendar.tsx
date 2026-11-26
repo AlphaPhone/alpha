@@ -336,7 +336,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
       <CalendarHeader inert={pageCovered} title={title} titleRef={dateButtonRef} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
         className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
         {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
-        {!month && (searching || view.can({ type: "openSearch" })) ? (
+        {/* v119 45f6bed30 prototype/template.html:1136-1149: the phone header holds the month, Today and New event; Search only on a wide screen. */}
+        {!month && s.wide && (searching || view.can({ type: "openSearch" })) ? (
           <CalendarHeaderAction aria-label="Search events" onClick={() => { setQuery(""); setSearchRound(searchRound + 1); if (!searching) void view.send({ type: "openSearch" }); }}><Search aria-hidden /></CalendarHeaderAction>
         ) : null}
         {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
@@ -518,13 +519,16 @@ function Month({ runtime, reminders, restoreFocus }: CalendarProps & { reminders
         today: day === s.today, selected: day === s.anchor, busy: visible.some((row) => onDay(row, day)),
         onPick: view.can({ type: "pickDay", day }) ? () => void view.send({ type: "pickDay", day }) : day === s.anchor ? close : undefined,
       }))}>
-      <div role="group" aria-label="Calendar view" className="mt-3 flex flex-wrap gap-2">
-        {views.map(({ layout, label }) => (
-          <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
-            onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
-        ))}
-        {s.owner > 0 || allows(s.access) ? <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill> : null}
-      </div>
+      {/* v119 45f6bed30 prototype/template.html:1261-1271: on a phone the month dialog holds only its days; the layouts and Calendars only on a wide screen. */}
+      {s.wide ? (
+        <div role="group" aria-label="Calendar view" className="mt-3 flex flex-wrap gap-2">
+          {views.map(({ layout, label }) => (
+            <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
+              onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
+          ))}
+          {s.owner > 0 || allows(s.access) ? <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill> : null}
+        </div>
+      ) : null}
     </CalendarMonthPanel>
   );
 }

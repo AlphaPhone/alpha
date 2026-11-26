@@ -1,0 +1,697 @@
+// spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"
+import { deviceConversation } from "@elizaos/agent-host";
+import { checkout } from "@repo/eliza-harness";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { ModuleContext } from "@elizaos/agent-host";
+import { Effect } from "effect";
+import { alphaAppsModuleWith, createAlphaAppsPlugin } from "../src/plugins/index.ts";
+import {
+  type EarlierSqlClient,
+  importLegacyStore,
+  isSecretOrAuthCacheKey,
+  LEGACY_IMPORT_MARKER_KEY,
+  sanitizeJsonValue,
+  sanitizeKeepableString,
+} from "../src/plugins/legacy-import.ts";
+
+interface PGliteStatic {
+  create(options?: { readonly dataDir?: string; readonly extensions?: Record<string, unknown> }): Promise<EarlierSqlClient & { exec(sql: string): Promise<unknown> }>;
+}
+
+interface OpenedDeviceStore {
+  readonly agentId: string;
+  readonly adapter: {
+    getConnection(): Promise<{ query<Row = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<{ readonly rows: readonly Row[] }> }>;
+    transaction<A>(callback: (tx: OpenedDeviceStore["adapter"]) => Promise<A>): Promise<A>;
+    getAllWorlds(): Promise<Array<{ id: string; agentId: string; name?: string }>>;
+    getRoomsByIds(ids: string[]): Promise<Array<{ id: string; agentId?: string; worldId?: string; name?: string; metadata?: Record<string, unknown> }>>;
+    createRooms(rooms: Array<Record<string, unknown>>): Promise<string[]>;
+    getEntitiesByIds(ids: string[]): Promise<Array<{ id: string; agentId: string; names: string[] }>>;
+    getParticipantsForRooms(rooms: string[]): Promise<Array<{ roomId: string; entityIds: string[] }>>;
+    getMemories(input: { roomId?: string; tableName: string; includeEmbedding?: boolean }): Promise<Array<{
+      id?: string;
+      agentId?: string;
+      entityId: string;
+      roomId: string;
+      worldId?: string;
+      content: { text?: string };
+      embedding?: number[];
+      createdAt?: number;
+    }>>;
+    createMemories(inputs: Array<{ memory: Record<string, unknown>; tableName: string }>): Promise<string[]>;
+    getTasks(input: Record<string, unknown>): Promise<Array<{ id?: string; name: string; agentId?: string; tags?: string[] }>>;
+    getRelationships(input: { entityIds: string[] }): Promise<Array<{ id: string; sourceEntityId: string; targetEntityId: string; agentId: string; tags: string[] }>>;
+    getCaches<A>(keys: string[]): Promise<Map<string, A>>;
+    close(): Promise<void>;
+  };
+}
+
+interface StorageModule {
+  openDeviceStorage(options: {
+    stateDirectory: string;
+    persistMemory: boolean;
+    account: { userId: string; organizationId: string } | null;
+    embeddingDimensions: number;
+  }): Promise<OpenedDeviceStore>;
+}
+
+interface MigrateModule {
+  migrate(db: EarlierSqlClient, owner: { agentId: string; account: { userId: string; organizationId: string } | null; embeddingDimensions: number }, list: readonly unknown[], seeded: boolean): Promise<void>;
+}
+
+const OLD_AGENT_ID = "11111111-1111-4111-8111-111111111111";
+const SECOND_AGENT_ID = "22222222-2222-4222-8222-222222222222";
+const OWNER_ENTITY_ID = "33333333-3333-4333-8333-333333333333";
+const WORLD_ID = "44444444-4444-4444-8444-444444444444";
+const CONVERSATION_WORLD_ID = "55555555-5555-4555-8555-555555555555";
+const CHAT_ROOM_ID = "66666666-6666-4666-8666-666666666666";
+const OTHER_ROOM_ID = "77777777-7777-4777-8777-777777777777";
+const USER_MSG_ID = "88888888-8888-4888-8888-888888888881";
+const AGENT_MSG_ID = "88888888-8888-4888-8888-888888888882";
+const FACT_MSG_ID = "88888888-8888-4888-8888-888888888883";
+const TASK_ID = "99999999-9999-4999-8999-999999999991";
+const REL_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+const COMP_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
+
+const tempDirs: string[] = [];
+
+function makeTempDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir !== undefined) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+async function loadElizaStorageTools() {
+  const root = checkout().root;
+  const req = createRequire(path.join(root, "packages/agent-host/package.json"));
+  const { PGlite } = req("@electric-sql/pglite") as { readonly PGlite: PGliteStatic };
+  const { vector } = req("@electric-sql/pglite/vector") as { readonly vector: unknown };
+  const storage = (await import(pathToFileURL(path.join(root, "packages/agent-host/dist/src/storage/index.js")).href)) as StorageModule;
+  const migrator = (await import(pathToFileURL(path.join(root, "packages/agent-host/dist/src/storage/migrate.js")).href)) as MigrateModule;
+  const openEarlier = (dataDir: string): Promise<EarlierSqlClient> =>
+    PGlite.create({ dataDir, extensions: { vector } });
+  return { PGlite, vector, storage, migrator, openEarlier };
+}
+
+function snapshotDirectory(root: string): Record<string, string> {
+  const hashes: Record<string, string> = {};
+  const walk = (current: string) => {
+    for (const name of fs.readdirSync(current).sort()) {
+      const full = path.join(current, name);
+      const rel = path.relative(root, full);
+      const stat = fs.lstatSync(full);
+      if (stat.isDirectory()) {
+        hashes[rel] = "dir";
+        walk(full);
+      } else if (stat.isFile()) {
+        const bytes = fs.readFileSync(full);
+        hashes[rel] = `file:${bytes.byteLength}:${createHash("sha256").update(bytes).digest("hex")}`;
+      }
+    }
+  };
+  walk(root);
+  return hashes;
+}
+
+async function createSyntheticV121Fixture(
+  PGlite: PGliteStatic,
+  vector: unknown,
+  fixtureDir: string,
+  options: { readonly multiAgent?: boolean } = {},
+): Promise<void> {
+  const db = await PGlite.create({ dataDir: fixtureDir, extensions: { vector } });
+  try {
+    await db.exec(`
+      CREATE EXTENSION IF NOT EXISTS vector;
+      CREATE TABLE agents (
+        id uuid PRIMARY KEY,
+        name text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE TABLE worlds (
+        id uuid PRIMARY KEY,
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        name text NOT NULL,
+        metadata jsonb,
+        message_server_id uuid,
+        created_at timestamp NOT NULL DEFAULT now()
+      );
+      CREATE TABLE rooms (
+        id uuid PRIMARY KEY,
+        agent_id uuid REFERENCES agents(id),
+        source text NOT NULL,
+        type text NOT NULL,
+        message_server_id uuid,
+        connector_server_id text,
+        world_id uuid,
+        name text,
+        metadata jsonb,
+        channel_id text,
+        created_at timestamp NOT NULL DEFAULT now()
+      );
+      CREATE TABLE entities (
+        id uuid PRIMARY KEY,
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        names text[] NOT NULL DEFAULT '{}'::text[],
+        metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+      );
+      CREATE TABLE participants (
+        id uuid PRIMARY KEY,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        entity_id uuid REFERENCES entities(id),
+        room_id uuid REFERENCES rooms(id),
+        agent_id uuid REFERENCES agents(id),
+        room_state text
+      );
+      CREATE TABLE memories (
+        id uuid PRIMARY KEY,
+        type text NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now(),
+        content json NOT NULL,
+        entity_id uuid REFERENCES entities(id),
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        room_id uuid REFERENCES rooms(id),
+        world_id uuid,
+        "unique" boolean NOT NULL DEFAULT true,
+        metadata json NOT NULL DEFAULT '{}'::json
+      );
+      CREATE TABLE embeddings (
+        id uuid PRIMARY KEY,
+        memory_id uuid REFERENCES memories(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        dim_384 vector(384),
+        dim_1536 vector(1536)
+      );
+      CREATE TABLE tasks (
+        id uuid PRIMARY KEY,
+        name text NOT NULL,
+        description text,
+        room_id uuid,
+        world_id uuid,
+        entity_id uuid,
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        tags text[] DEFAULT '{}'::text[],
+        metadata jsonb DEFAULT '{}'::jsonb,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE relationships (
+        id uuid PRIMARY KEY,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        source_entity_id uuid NOT NULL REFERENCES entities(id),
+        target_entity_id uuid NOT NULL REFERENCES entities(id),
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        tags text[],
+        metadata jsonb
+      );
+      CREATE TABLE components (
+        id uuid PRIMARY KEY,
+        entity_id uuid NOT NULL REFERENCES entities(id),
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        room_id uuid NOT NULL REFERENCES rooms(id),
+        world_id uuid REFERENCES worlds(id),
+        source_entity_id uuid REFERENCES entities(id),
+        type text NOT NULL,
+        data jsonb DEFAULT '{}'::jsonb,
+        created_at timestamp NOT NULL DEFAULT now()
+      );
+      CREATE TABLE cache (
+        key text NOT NULL,
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        value jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        expires_at timestamptz,
+        PRIMARY KEY (key, agent_id)
+      );
+      CREATE TABLE logs (
+        id uuid PRIMARY KEY,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        entity_id uuid NOT NULL,
+        body jsonb NOT NULL,
+        type text NOT NULL,
+        room_id uuid NOT NULL
+      );
+    `);
+
+    await db.query("INSERT INTO agents (id, name) VALUES ($1, $2)", [OLD_AGENT_ID, "Alpha"]);
+    if (options.multiAgent) {
+      await db.query("INSERT INTO agents (id, name) VALUES ($1, $2)", [SECOND_AGENT_ID, "Other"]);
+    }
+    await db.query(
+      "INSERT INTO worlds (id, agent_id, name, metadata, created_at) VALUES ($1, $2, $3, $4::jsonb, $5)",
+      [WORLD_ID, OLD_AGENT_ID, "Phone World", JSON.stringify({ origin: "v121" }), "2026-10-01T10:00:00.000Z"],
+    );
+    if (options.multiAgent) {
+      await db.query(
+        "INSERT INTO worlds (id, agent_id, name) VALUES ($1, $2, $3)",
+        ["44444444-4444-4444-8444-444444444445", SECOND_AGENT_ID, "Second World"],
+      );
+    }
+    await db.query(
+      "INSERT INTO rooms (id, agent_id, source, type, world_id, name, channel_id, metadata, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)",
+      [
+        CHAT_ROOM_ID,
+        OLD_AGENT_ID,
+        "client_chat",
+        "DM",
+        WORLD_ID,
+        "Ask Alpha",
+        "web-conv-conv-121",
+        JSON.stringify({ webConversation: { conversationId: "conv-121" } }),
+        "2026-10-01T10:01:00.000Z",
+      ],
+    );
+    await db.query(
+      "INSERT INTO rooms (id, agent_id, source, type, world_id, name, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+      [OTHER_ROOM_ID, OLD_AGENT_ID, "telegram", "GROUP", WORLD_ID, "Family", "2026-10-01T10:02:00.000Z"],
+    );
+    await db.query(
+      "INSERT INTO entities (id, agent_id, names, metadata) VALUES ($1, $2, $3, $4::jsonb), ($5, $6, $7, $8::jsonb)",
+      [OWNER_ENTITY_ID, OLD_AGENT_ID, ["Owner"], JSON.stringify({ role: "owner" }), OLD_AGENT_ID, OLD_AGENT_ID, ["Alpha"], JSON.stringify({ self: true })],
+    );
+    await db.query(
+      "INSERT INTO participants (id, entity_id, room_id, agent_id, room_state) VALUES ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)",
+      [
+        "cccccccc-cccc-4ccc-8ccc-ccccccccccc1", OWNER_ENTITY_ID, CHAT_ROOM_ID, OLD_AGENT_ID, "FOLLOWED",
+        "cccccccc-cccc-4ccc-8ccc-ccccccccccc2", OLD_AGENT_ID, CHAT_ROOM_ID, OLD_AGENT_ID, null,
+      ],
+    );
+
+    const dirtyUserContent = '{"text":"Remember heron\\u0000 and lone \\ud800 x \\udfff keep \\ud83d\\ude80"}';
+    const agentReplyContent = JSON.stringify({ text: "I will remember heron." });
+    const factContent = JSON.stringify({ text: "Owner prefers quiet mornings." });
+    await db.query(
+      `INSERT INTO memories (id, type, created_at, content, entity_id, agent_id, room_id, world_id, "unique", metadata)
+       VALUES
+         ($1, 'messages', '2026-10-01T10:03:00.000Z', $2::json, $3, $4, $5, $6, true, '{"type":"message"}'::json),
+         ($7, 'messages', '2026-10-01T10:04:00.000Z', $8::json, $9, $4, $5, $6, true, '{"type":"message"}'::json),
+         ($10, 'facts', '2026-10-01T10:05:00.000Z', $11::json, $3, $4, $12, $6, true, '{"type":"fact"}'::json)`,
+      [
+        USER_MSG_ID, dirtyUserContent, OWNER_ENTITY_ID, OLD_AGENT_ID, CHAT_ROOM_ID, WORLD_ID,
+        AGENT_MSG_ID, agentReplyContent, OLD_AGENT_ID,
+        FACT_MSG_ID, factContent, OTHER_ROOM_ID,
+      ],
+    );
+
+    const vec384 = `[${Array.from({ length: 384 }, (_, idx) => (idx === 0 ? 0.5 : 0)).join(",")}]`;
+    const vec1536 = `[${Array.from({ length: 1536 }, (_, idx) => (idx === 0 ? 0.25 : 0)).join(",")}]`;
+    await db.query(
+      `INSERT INTO embeddings (id, memory_id, dim_384, dim_1536) VALUES
+         ('dddddddd-dddd-4ddd-8ddd-ddddddddddd1', $1, $2::vector(384), NULL),
+         ('dddddddd-dddd-4ddd-8ddd-ddddddddddd2', $3, NULL, $4::vector(1536))`,
+      [USER_MSG_ID, vec384, AGENT_MSG_ID, vec1536],
+    );
+
+    await db.query(
+      "INSERT INTO tasks (id, name, description, room_id, world_id, entity_id, agent_id, tags, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)",
+      [TASK_ID, "morning-brief", "Daily summary", CHAT_ROOM_ID, WORLD_ID, OWNER_ENTITY_ID, OLD_AGENT_ID, ["repeat", "queue"], JSON.stringify({ hour: 8 })],
+    );
+    await db.query(
+      "INSERT INTO relationships (id, source_entity_id, target_entity_id, agent_id, tags, metadata) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
+      [REL_ID, OWNER_ENTITY_ID, OLD_AGENT_ID, OLD_AGENT_ID, ["owner"], JSON.stringify({ trust: "high" })],
+    );
+    await db.query(
+      "INSERT INTO components (id, entity_id, agent_id, room_id, world_id, source_entity_id, type, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)",
+      [COMP_ID, OWNER_ENTITY_ID, OLD_AGENT_ID, CHAT_ROOM_ID, WORLD_ID, OLD_AGENT_ID, "profile", JSON.stringify({ city: "Portland" })],
+    );
+    await db.query(
+      `INSERT INTO cache (key, agent_id, value, expires_at) VALUES
+         ('pref:theme', $1, '{"mode":"dark"}'::jsonb, NULL),
+         ('auth:session:v1', $1, '{"jwt":"should-never-migrate"}'::jsonb, NULL),
+         ('google_oauth_token', $1, '{"access":"secret"}'::jsonb, NULL),
+         ('user_api_key', $1, '{"key":"sk-secret"}'::jsonb, NULL),
+         ('pref:expired', $1, '{"stale":true}'::jsonb, '2020-01-01T00:00:00.000Z')`,
+      [OLD_AGENT_ID],
+    );
+    await db.query(
+      "INSERT INTO logs (id, entity_id, body, type, room_id) VALUES ($1, $2, $3::jsonb, $4, $5)",
+      ["eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1", OWNER_ENTITY_ID, JSON.stringify({ event: "ephemeral" }), "model_call", CHAT_ROOM_ID],
+    );
+  } finally {
+    await db.close();
+  }
+  fs.writeFileSync(path.join(fixtureDir, "postmaster.pid"), "999999\nstale-lock\n", "utf8");
+}
+
+describe("Earlier v121 PGlite one-shot importer", () => {
+  let sharedFixtureDir = "";
+  let sharedFixtureBefore: Record<string, string> = {};
+
+  beforeAll(async () => {
+    const { PGlite, vector } = await loadElizaStorageTools();
+    sharedFixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "v121-shared-fixture-"));
+    await createSyntheticV121Fixture(PGlite, vector, sharedFixtureDir);
+    sharedFixtureBefore = snapshotDirectory(sharedFixtureDir);
+  }, 120_000);
+
+  afterAll(() => {
+    if (sharedFixtureDir !== "") fs.rmSync(sharedFixtureDir, { recursive: true, force: true });
+  });
+
+  it("sanitizes NUL and lone UTF-16 surrogates while preserving valid surrogate pairs and filters secret keys", () => {
+    expect(sanitizeKeepableString("a\u0000b\ud800c\udfffd\ud83d\ude80")).toBe("abcd\ud83d\ude80");
+    expect(sanitizeJsonValue({ "k\u0000": ["v\ud800", 42, Number.NaN, { ok: "\ud83d\ude80" }] })).toEqual({
+      k: ["v", 42, null, { ok: "\ud83d\ude80" }],
+    });
+    expect(isSecretOrAuthCacheKey("pref:theme")).toBe(false);
+    expect(isSecretOrAuthCacheKey("auth:session:1")).toBe(true);
+    expect(isSecretOrAuthCacheKey("google_oauth_token")).toBe(true);
+    expect(isSecretOrAuthCacheKey("user_api_key")).toBe(true);
+    expect(isSecretOrAuthCacheKey(LEGACY_IMPORT_MARKER_KEY)).toBe(true);
+  });
+
+  it("proves all 6 migration safety invariants against a real synthetic v121 PGlite store", async () => {
+    const { PGlite, vector, storage, migrator, openEarlier } = await loadElizaStorageTools();
+    const fixtureDir = sharedFixtureDir;
+    const fixtureBefore = sharedFixtureBefore;
+
+    const directCopy = makeTempDir("v121-direct-migrate-");
+    fs.cpSync(fixtureDir, directCopy, { recursive: true });
+    fs.rmSync(path.join(directCopy, "postmaster.pid"), { force: true });
+    const directDb = await PGlite.create({ dataDir: directCopy, extensions: { vector } });
+    try {
+      await expect(
+        migrator.migrate(
+          directDb,
+          { agentId: OLD_AGENT_ID, account: { userId: "owner-1", organizationId: "org-1" }, embeddingDimensions: 0 },
+          [],
+          false,
+        ),
+      ).rejects.toMatchObject({ fault: "Corrupt" });
+      const ownerTable = await directDb.query<{ readonly exists: boolean }>("SELECT to_regclass('public.device_owner') IS NOT NULL AS exists");
+      expect(ownerTable.rows[0]?.exists).toBe(false);
+    } finally {
+      await directDb.close();
+    }
+
+    const stateDir = makeTempDir("v4-state-");
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: stateDir,
+      persistMemory: true,
+      account: { userId: "owner-1", organizationId: "org-1" },
+      embeddingDimensions: 0,
+    });
+    try {
+      const warnings: Array<{ readonly ctx: Record<string, unknown>; readonly msg: string }> = [];
+      let openCount = 0;
+      const countingOpener = (dir: string) => {
+        openCount += 1;
+        return openEarlier(dir);
+      };
+
+      const { plugin } = createAlphaAppsPlugin({
+        stateDirectory: stateDir,
+        earlierImport: {
+          legacyStoreDir: fixtureDir,
+          conversationWorldId: CONVERSATION_WORLD_ID,
+          embeddingDimensions: 0,
+          openLegacyStore: countingOpener,
+        },
+      });
+      await plugin.init?.({}, {
+        agentId: opened.agentId,
+        adapter: opened.adapter,
+        logger: { warn: (ctx: Record<string, unknown>, msg: string) => warnings.push({ ctx, msg }) },
+      } as never);
+
+      expect(openCount).toBe(1);
+      expect(warnings).toEqual([]);
+      expect(snapshotDirectory(fixtureDir)).toEqual(fixtureBefore);
+      expect(fs.readdirSync(stateDir).filter((name) => name.startsWith(".earlier-import-"))).toEqual([]);
+
+      const worlds = await opened.adapter.getAllWorlds();
+      expect(worlds).toHaveLength(1);
+      expect(worlds[0]).toMatchObject({ id: WORLD_ID, agentId: opened.agentId, name: "Phone World" });
+
+      const rooms = await opened.adapter.getRoomsByIds([CHAT_ROOM_ID, OTHER_ROOM_ID]);
+      const chatRoom = rooms.find((room) => room.id === CHAT_ROOM_ID);
+      const otherRoom = rooms.find((room) => room.id === OTHER_ROOM_ID);
+      expect(chatRoom).toMatchObject({ id: CHAT_ROOM_ID, agentId: opened.agentId, worldId: CONVERSATION_WORLD_ID, name: "Ask Alpha" });
+      expect(deviceConversation(chatRoom as never)).toMatchObject({ id: "conv-121", roomId: CHAT_ROOM_ID, title: "Ask Alpha", publication: "Published" });
+      expect(otherRoom).toMatchObject({ id: OTHER_ROOM_ID, agentId: opened.agentId, worldId: WORLD_ID, name: "Family" });
+
+      const entities = await opened.adapter.getEntitiesByIds([OWNER_ENTITY_ID, opened.agentId]);
+      expect(entities.map((entity) => entity.id).sort()).toEqual([OWNER_ENTITY_ID, opened.agentId].sort());
+      expect(entities.every((entity) => entity.agentId === opened.agentId)).toBe(true);
+
+      const participants = await opened.adapter.getParticipantsForRooms([CHAT_ROOM_ID]);
+      expect(participants[0]?.entityIds.sort()).toEqual([OWNER_ENTITY_ID, opened.agentId].sort());
+
+      const messages = await opened.adapter.getMemories({ roomId: CHAT_ROOM_ID, tableName: "messages" });
+      const userMsg = messages.find((m) => m.id === USER_MSG_ID);
+      const agentMsg = messages.find((m) => m.id === AGENT_MSG_ID);
+      expect(userMsg).toMatchObject({
+        id: USER_MSG_ID,
+        agentId: opened.agentId,
+        entityId: OWNER_ENTITY_ID,
+        worldId: CONVERSATION_WORLD_ID,
+        content: { text: "Remember heron and lone  x  keep \ud83d\ude80" },
+      });
+      expect(userMsg?.embedding).toBeUndefined();
+      expect(agentMsg).toMatchObject({
+        id: AGENT_MSG_ID,
+        agentId: opened.agentId,
+        entityId: opened.agentId,
+        content: { text: "I will remember heron." },
+      });
+      expect(agentMsg?.embedding).toBeUndefined();
+
+      const facts = await opened.adapter.getMemories({ roomId: OTHER_ROOM_ID, tableName: "facts" });
+      expect(facts).toHaveLength(1);
+      expect(facts[0]?.content.text).toBe("Owner prefers quiet mornings.");
+
+      const tasks = await opened.adapter.getTasks({});
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({ id: TASK_ID, name: "morning-brief", agentId: opened.agentId, tags: ["repeat", "queue"] });
+
+      const relationships = await opened.adapter.getRelationships({ entityIds: [OWNER_ENTITY_ID] });
+      expect(relationships).toHaveLength(1);
+      expect(relationships[0]).toMatchObject({ id: REL_ID, sourceEntityId: OWNER_ENTITY_ID, targetEntityId: opened.agentId, agentId: opened.agentId });
+
+      const conn = await opened.adapter.getConnection();
+      const components = await conn.query<{ readonly key: string; readonly data: Record<string, unknown> }>(
+        "SELECT key, data FROM device_records WHERE collection = 'components'",
+      );
+      expect(components.rows).toHaveLength(1);
+      expect(components.rows[0]?.data).toMatchObject({ id: COMP_ID, entityId: OWNER_ENTITY_ID, agentId: opened.agentId, type: "profile" });
+
+      const logs = await conn.query("SELECT key FROM device_records WHERE collection = 'logs'");
+      expect(logs.rows).toHaveLength(0);
+
+      const caches = await opened.adapter.getCaches<unknown>([
+        "pref:theme",
+        "auth:session:v1",
+        "google_oauth_token",
+        "user_api_key",
+        "pref:expired",
+        LEGACY_IMPORT_MARKER_KEY,
+      ]);
+      expect(caches.get("pref:theme")).toEqual({ mode: "dark" });
+      expect(caches.has("auth:session:v1")).toBe(false);
+      expect(caches.has("google_oauth_token")).toBe(false);
+      expect(caches.has("user_api_key")).toBe(false);
+      expect(caches.has("pref:expired")).toBe(false);
+      expect(caches.get(LEGACY_IMPORT_MARKER_KEY)).toMatchObject({
+        version: 1,
+        sourceAgentId: OLD_AGENT_ID,
+        targetAgentId: opened.agentId,
+      });
+
+      const secondRun = await importLegacyStore({
+        legacyStoreDir: fixtureDir,
+        stateDirectory: stateDir,
+        agentId: opened.agentId,
+        conversationWorldId: CONVERSATION_WORLD_ID,
+        adapter: opened.adapter,
+        openLegacyStore: countingOpener,
+      });
+      expect(secondRun).toEqual({ status: "skipped", reason: "already_imported" });
+      expect(openCount).toBe(1);
+      expect(snapshotDirectory(fixtureDir)).toEqual(fixtureBefore);
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+
+  it("keeps matching-dimension embeddings and nulls mismatched embeddings when v4 enables vectors", async () => {
+    const { storage, openEarlier } = await loadElizaStorageTools();
+    const stateDir = makeTempDir("v4-vec-state-");
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: stateDir,
+      persistMemory: true,
+      account: { userId: "owner-vec", organizationId: "org-vec" },
+      embeddingDimensions: 384,
+    });
+    try {
+      const result = await importLegacyStore({
+        legacyStoreDir: sharedFixtureDir,
+        stateDirectory: stateDir,
+        agentId: opened.agentId,
+        conversationWorldId: CONVERSATION_WORLD_ID,
+        embeddingDimensions: 384,
+        adapter: opened.adapter,
+        openLegacyStore: openEarlier,
+      });
+      expect(result.status).toBe("imported");
+      expect(snapshotDirectory(sharedFixtureDir)).toEqual(sharedFixtureBefore);
+      const messages = await opened.adapter.getMemories({ roomId: CHAT_ROOM_ID, tableName: "messages", includeEmbedding: true });
+      const with384 = messages.find((m) => m.id === USER_MSG_ID);
+      const with1536 = messages.find((m) => m.id === AGENT_MSG_ID);
+      expect(with384?.embedding).toHaveLength(384);
+      expect(with384?.embedding?.[0]).toBeCloseTo(0.5);
+      expect(with1536?.embedding).toBeUndefined();
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+
+  it("never overwrites a non-empty v4 store and never opens the earlier store", async () => {
+    const { storage, openEarlier } = await loadElizaStorageTools();
+    const stateDir = makeTempDir("v4-nonempty-state-");
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: stateDir,
+      persistMemory: true,
+      account: { userId: "owner-2", organizationId: "org-2" },
+      embeddingDimensions: 0,
+    });
+    try {
+      const freshRoomId = "ffffffff-ffff-4fff-8fff-fffffffffff1";
+      await opened.adapter.createRooms([{ id: freshRoomId, agentId: opened.agentId, source: "device", type: "DM", name: "Existing" }]);
+      let openedCount = 0;
+      const result = await importLegacyStore({
+        legacyStoreDir: sharedFixtureDir,
+        stateDirectory: stateDir,
+        agentId: opened.agentId,
+        adapter: opened.adapter,
+        openLegacyStore: (dir) => {
+          openedCount += 1;
+          return openEarlier(dir);
+        },
+      });
+      expect(result).toEqual({ status: "skipped", reason: "target_not_empty" });
+      expect(openedCount).toBe(0);
+      expect(await opened.adapter.getRoomsByIds([CHAT_ROOM_ID])).toEqual([]);
+      expect((await opened.adapter.getCaches([LEGACY_IMPORT_MARKER_KEY])).size).toBe(0);
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+
+  it("is off: the hosted module ignores ALPHA_LEGACY_STORE_DIR and leaves an empty store empty (alpha#1697 review, B1)", async () => {
+    const { storage, openEarlier } = await loadElizaStorageTools();
+    const stateDir = makeTempDir("v4-import-off-state-");
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: stateDir,
+      persistMemory: true,
+      account: { userId: "someone-else", organizationId: "org-other" },
+      embeddingDimensions: 0,
+    });
+    try {
+      let openedCount = 0;
+      const factory = alphaAppsModuleWith({
+        openLegacyStore: (dir) => {
+          openedCount += 1;
+          return openEarlier(dir);
+        },
+      });
+      const context = {
+        runtime: {},
+        launch: { environment: { ALPHA_LEGACY_STORE_DIR: sharedFixtureDir }, embeddingDimensions: 0 },
+        stateDirectory: stateDir,
+        timeZone: "UTC",
+        conversationOwner: { world: CONVERSATION_WORLD_ID },
+      } as unknown as ModuleContext;
+      const hosted = Effect.runSync(factory(context));
+      await hosted.plugin.init?.({}, { agentId: opened.agentId, adapter: opened.adapter } as never);
+      expect(openedCount).toBe(0);
+      expect(await opened.adapter.getRoomsByIds([CHAT_ROOM_ID])).toEqual([]);
+      expect(await opened.adapter.getAllWorlds()).toEqual([]);
+      expect((await opened.adapter.getCaches([LEGACY_IMPORT_MARKER_KEY])).size).toBe(0);
+      expect(fs.readdirSync(stateDir).filter((name) => name.startsWith(".earlier-import-"))).toEqual([]);
+      expect(snapshotDirectory(sharedFixtureDir)).toEqual(sharedFixtureBefore);
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+
+  it("logs a warning and lets fresh store-v4 boot cleanly when the earlier fixture is corrupt", async () => {
+    const { storage, openEarlier } = await loadElizaStorageTools();
+    const corruptDir = makeTempDir("v121-corrupt-fixture-");
+    fs.mkdirSync(path.join(corruptDir, "global"), { recursive: true });
+    fs.writeFileSync(path.join(corruptDir, "PG_VERSION"), "not-a-pg-version\n", "utf8");
+    fs.writeFileSync(path.join(corruptDir, "global/pg_control"), Buffer.from([0xde, 0xad, 0xbe, 0xef]));
+    fs.writeFileSync(path.join(corruptDir, "postmaster.pid"), "12345\n", "utf8");
+    const before = snapshotDirectory(corruptDir);
+
+    const stateDir = makeTempDir("v4-corrupt-state-");
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: stateDir,
+      persistMemory: true,
+      account: { userId: "owner-3", organizationId: "org-3" },
+      embeddingDimensions: 0,
+    });
+    try {
+      const warnings: string[] = [];
+      const result = await importLegacyStore({
+        legacyStoreDir: corruptDir,
+        stateDirectory: stateDir,
+        agentId: opened.agentId,
+        adapter: opened.adapter,
+        openLegacyStore: openEarlier,
+        logger: { warn: (_ctx, msg) => warnings.push(msg) },
+      });
+      expect(result.status).toBe("failed");
+      expect(warnings).toHaveLength(1);
+      expect(snapshotDirectory(corruptDir)).toEqual(before);
+      expect(fs.readdirSync(stateDir).filter((name) => name.startsWith(".earlier-import-"))).toEqual([]);
+      expect((await opened.adapter.getCaches([LEGACY_IMPORT_MARKER_KEY])).size).toBe(0);
+      await opened.adapter.createRooms([{ id: "ffffffff-ffff-4fff-8fff-fffffffffff2", agentId: opened.agentId, source: "device", type: "DM", name: "Still Healthy" }]);
+      expect(await opened.adapter.getRoomsByIds(["ffffffff-ffff-4fff-8fff-fffffffffff2"])).toHaveLength(1);
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+
+  it("skips cleanly with a warning when an earlier store contains multiple agents with data", async () => {
+    const { PGlite, vector, storage, openEarlier } = await loadElizaStorageTools();
+    const fixtureDir = makeTempDir("v121-multi-fixture-");
+    await createSyntheticV121Fixture(PGlite, vector, fixtureDir, { multiAgent: true });
+    const stateDir = makeTempDir("v4-multi-state-");
+    const opened = await storage.openDeviceStorage({
+      stateDirectory: stateDir,
+      persistMemory: true,
+      account: { userId: "owner-4", organizationId: "org-4" },
+      embeddingDimensions: 0,
+    });
+    try {
+      const warnings: string[] = [];
+      const result = await importLegacyStore({
+        legacyStoreDir: fixtureDir,
+        stateDirectory: stateDir,
+        agentId: opened.agentId,
+        adapter: opened.adapter,
+        openLegacyStore: openEarlier,
+        logger: { warn: (_ctx, msg) => warnings.push(msg) },
+      });
+      expect(result).toEqual({ status: "skipped", reason: "multi_agent_ambiguous" });
+      expect(warnings).toHaveLength(1);
+      expect(await opened.adapter.getAllWorlds()).toEqual([]);
+    } finally {
+      await opened.adapter.close();
+    }
+  }, 120_000);
+});
