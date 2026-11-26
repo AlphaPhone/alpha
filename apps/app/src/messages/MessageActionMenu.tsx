@@ -1,22 +1,24 @@
 import { Check, Copy, Trash2 } from "lucide-react";
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type Ref } from "react";
 import type { CopyReport } from "./messages.vibe";
 
 export interface MessageActions {
   copy?: ((report: CopyReport) => void) | undefined;
   remove?: (() => void) | undefined;
+  covered?: boolean;
 }
 
 interface MessageActionMenuProps {
   actions: MessageActions;
   focusOnOpen: boolean;
   close: () => void;
+  ref?: Ref<HTMLDivElement>;
 }
 
 const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm leading-[normal] font-semibold whitespace-nowrap transition-colors duration-fast pointer-fine:hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 
 // spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
-export function MessageActionMenu({ actions, focusOnOpen, close }: MessageActionMenuProps) {
+export function MessageActionMenu({ actions, focusOnOpen, close, ref }: MessageActionMenuProps) {
   const [copy, setCopy] = useState<Parameters<CopyReport>[0] | "pending">();
   const copyAttemptRef = useRef(0);
   const handleKey = (event: KeyboardEvent) => {
@@ -39,7 +41,7 @@ export function MessageActionMenu({ actions, focusOnOpen, close }: MessageAction
   };
 
   return (
-    <div data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1 leading-[normal]${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={handleKey}>
+    <div ref={ref} data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1 leading-[normal]${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={handleKey}>
       {actions.copy && <button type="button" role="menuitem" autoFocus={focusOnOpen} className={`${actionItem} min-w-25`} disabled={copy === "pending"} onClick={() => {
         const attempt = ++copyAttemptRef.current;
         setCopy("pending");
