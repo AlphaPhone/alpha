@@ -725,7 +725,7 @@ describe("Messages on an Alpha image", () => {
 
     await ask(review.proposal.id, "Use SIM 1 to send +14155550100 the text Meet at the front door");
     await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
-    expect(document.body.textContent).toContain(`To ${displayNumber(sms.recipients[0])}`);
+    expect(document.body.textContent).toContain(`To: ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
     await press("Send this text");
@@ -934,7 +934,7 @@ describe("Messages on an Alpha image", () => {
     const review = textReview(world.notes.owner, draft ? "draft-to-number" : "text-to-number", compose);
     await proposeText(world, review, draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?", "The proposal is read");
     await vi.waitFor(() => expect(button(draft ? "Open draft" : "Send this text")).toBeDefined());
-    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To ${displayNumber("+12025550142")}`);
+    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To: ${displayNumber("+12025550142")}`);
     expect(document.body.textContent).not.toContain(draft ? "Review this text on your phone" : "Open an editable text draft");
     expect(button(draft ? "Send this text" : "Open draft")).toBeUndefined();
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);

@@ -17,12 +17,12 @@ export interface PhoneTabsProps {
 /**
  * The top of Phone and Contacts as the Pixel drew it on Sunday's v119 (Alpha 45f6bed30): `--alpha-telephony-header-top`,
  * `max(44px, top inset + 8px)` (`prototype/phone.css:27,305-308`), a 56px `.alpha-stage-header` row with 4px gaps
- * (`phone.css:304`), and the top during a call (`phone.css:310`).
+ * (`phone.css:304`), 2px under the inset off the launcher (`phone.css:309`) and the top during a call (`phone.css:310`).
+ * Its `.ib` actions are 44px; `.app-header-back` stays 52px (`prototype.css:12`, `phone.css:342`).
  */
 export const telephonyHeader = cn(
-  "mt-[max(0.125rem,env(safe-area-inset-top))] shrink-0",
+  "mt-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(0.5))] shrink-0",
   "in-data-[alpha-launcher]:mt-[max(--spacing(11),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(2)))] in-data-[alpha-launcher]:min-h-14 in-data-[alpha-launcher]:gap-1",
-  // `.ib` actions are 44px on the phone; `.app-header-back` stays 52px (45f6bed30 `prototype.css:12`, `phone.css:342`).
   "in-data-[alpha-launcher]:[&>button[aria-label]:not([aria-label^=Back])]:size-11 in-data-[alpha-launcher]:[&>button[aria-label]:not([aria-label^=Back])]:min-w-11",
   "in-[main:has([data-alpha-call-strip=over])]:mt-0 in-data-[alpha-launcher]:in-[main:has([data-alpha-call-strip=over])]:mt-0",
 );
@@ -46,7 +46,7 @@ const tabs = [
 export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, header, children }: PhoneTabsProps) {
   const separate = header !== undefined || children !== undefined;
   const selector = (
-    <TabsList aria-label="Phone" className="gap-0.5 p-[3px]">
+    <TabsList aria-label="Phone" className="gap-0.5 rounded-panel p-[3px]">
       {tabs.map(({ name, Icon }) => {
         if ((name === "Voicemail" && !voicemail) || (name === "Contacts" && !contacts)) return null;
         return (
@@ -63,7 +63,7 @@ export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, header,
   );
   return (
     <>
-      {header ?? <AppHeader title={title} data-alpha-phone-header="" className={cn(telephonyHeader, "flex-wrap")}
+      {header ?? <AppHeader title={title} data-alpha-phone-header="" className={telephonyHeader}
         leading={onBack && <Button variant="ghost" size="icon" aria-label={separate ? "Back" : "Back to apps"} className="rounded-lg" onClick={onBack}><ChevronLeft /></Button>}>
         {separate ? children : selector}
       </AppHeader>}

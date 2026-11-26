@@ -36,16 +36,13 @@ export type SmsReviewCardProps = {
  * @model spec/app/contacts/agent.md
  */
 export function SmsReviewCard({ to, number, body, note, hint, review, onSend, onDecline, sendDisabled = false, declineDisabled = false, className }: SmsReviewCardProps) {
-  // `.alpha-action-review button` (min-height 56px, `phone.css:930`) with the row style at `template.html:4579`.
   const row = "flex min-h-14 w-full items-center gap-3 border-b border-border px-4 py-3 text-left disabled:cursor-default disabled:opacity-50";
-  // `.alpha-row-label` (`phone.css:926-928`).
   const label = "inline-flex min-h-9 shrink-0 items-center rounded-action px-4 text-sm font-semibold";
-  // `<small>` is the browser's smaller size, about 13px (`template.html:4581-4584`).
   const details = (
     <div className="min-w-0 grow">
       <div className="text-sm font-semibold">Review SMS</div>
       <small className="mt-1 block text-meta text-muted-foreground wrap-anywhere">To: {to}{number ? (number.startsWith("(") ? ` ${number}` : ` (${number})`) : ""}</small>
-      <span data-alpha-telephony-review-body="" className="my-1.5 block rounded-[0.75rem] bg-background px-3 py-2.5 text-lg leading-[1.45] font-medium whitespace-pre-wrap text-foreground wrap-anywhere shadow-[inset_0_0_0_1px_var(--color-border)]">{body}</span>
+      <span data-alpha-telephony-review-body="" className="my-1.5 block rounded-sm bg-background px-3 py-2.5 text-lg leading-details font-medium whitespace-pre-wrap text-foreground wrap-anywhere ring-1 ring-border ring-inset">{body}</span>
       {note ? <small className="block text-meta text-muted-foreground wrap-anywhere">{note}</small> : null}
       {hint ? <small className="block text-meta">{hint}</small> : null}
     </div>
@@ -61,7 +58,7 @@ export function SmsReviewCard({ to, number, body, note, hint, review, onSend, on
       ) : <div className={row}>{details}</div>}
       {onDecline ? (
         <button type="button" aria-label="Decline Keep things as they are." disabled={declineDisabled} className={row} onClick={onDecline}>
-          <div className="min-w-0 grow text-meta leading-[1.45] text-muted-foreground">Keep things as they are.</div>
+          <div className="min-w-0 grow text-meta leading-details text-muted-foreground">Keep things as they are.</div>
           <strong className={cn(label, "bg-accent text-foreground")}>Decline</strong>
         </button>
       ) : null}
