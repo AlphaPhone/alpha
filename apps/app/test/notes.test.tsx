@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { Machine as CalendarForm } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -63,6 +63,23 @@ async function openSavedVoiceNote(world: Scene) {
   await press("Open Design sync");
   await until(alpha, runtime, Voice, (state) => state.showing);
   return { alpha, runtime };
+}
+
+/** Notes opened from Home on `world`, once its list is read, choosing notes to delete. */
+async function selectingNotes(world: Scene) {
+  world.notes.deleteRequests = [];
+  const { alpha, runtime } = await openNotesFromHome(world);
+  await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+  await chooseNotesOption("Notes options", "Select", true);
+  return { alpha, runtime };
+}
+
+/** Copy the shared note's text after the notes changed under the share: it is refused, and `copy` was not called again. */
+async function copyAfterChange(world: Scene, copy: MockInstance) {
+  world.notes.revision++;
+  await pressOnTop("Copy text");
+  await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
+  expect(copy).toHaveBeenCalledTimes(1);
 }
 
 async function openNotesFromHome(world: Scene) {
@@ -299,10 +316,7 @@ describe("Notes", () => {
       expect(copy.mock.calls[0]?.[0]).toContain("Notifications stay as icons until unlock");
       expect(copy.mock.calls[0]?.[0]).not.toContain("Enclave launch");
       await reopenShare();
-      world.notes.revision++;
-      await pressOnTop("Copy text");
-      await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
-      expect(copy).toHaveBeenCalledTimes(1);
+      await copyAfterChange(world, copy);
     } finally { copy.mockRestore(); }
   });
 
@@ -341,20 +355,14 @@ describe("Notes", () => {
       await press("Open Groceries");
       await until(alpha, runtime, Editor, (state) => state.showing && state.kind === "Checklist" && state.draft.sync === "Kept");
       await share(false);
-      world.notes.revision++;
-      await pressOnTop("Copy text");
-      await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
-      expect(copy).toHaveBeenCalledTimes(1);
+      await copyAfterChange(world, copy);
     } finally { copy.mockRestore(); }
   });
 
   it("Selects notes and only moves the reviewed notes after confirmation (spec/app/notes/index.md, \"Story: Select and delete notes\")", async () => {
     const world = scene();
     world.now = Date.now();
-    world.notes.deleteRequests = [];
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    await chooseNotesOption("Notes options", "Select", true);
+    const { alpha, runtime } = await selectingNotes(world);
     expect(button("Delete selected notes")?.disabled).toBe(true);
     await press("Select Enclave launch");
     await press("Select Groceries");
@@ -394,10 +402,7 @@ describe("Notes", () => {
 
   it("Stops the reviewed selection on refusal and keeps the remaining notes selected (spec/app/notes/index.md, \"Confirmation moves only the reviewed notes to Recently deleted and stops if a deletion is refused or unknown\")", async () => {
     const world = scene();
-    world.notes.deleteRequests = [];
-    const { alpha, runtime } = await openNotesFromHome(world);
-    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
-    await chooseNotesOption("Notes options", "Select", true);
+    const { alpha, runtime } = await selectingNotes(world);
     await press("Select Enclave launch");
     await press("Select Groceries");
     await press("Select Design sync");
