@@ -238,7 +238,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       const grow = element.animate([{ height: `${from}px`, minHeight: "0px", maxHeight: "none" }, { height: `${target}px`, minHeight: "0px", maxHeight: "none" }], { ...resize, fill: "forwards" });
       motions.push(grow);
       grow.finished.then(finish, finish);
-      if (header) motions.push(header.animate(revealFrames(from, target, fit), resize));
+      if (header) motions.push(header.animate(revealFrames(from, target, fit), { duration: resize.duration, easing: "linear" }));
       return;
     }
     if (!handing) return;
@@ -249,7 +249,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     ghostRef.current = ghost;
     const ghostHeader = ghost.querySelector<HTMLElement>("[data-alpha-chat-header]");
     ghost.animate([{ height: `${from}px`, minHeight: "0px", maxHeight: "none" }, { height: `${to}px`, minHeight: "0px", maxHeight: "none" }], { ...resize, fill: "forwards" });
-    ghostHeader?.animate(revealFrames(from, to, fit), { ...resize, fill: "forwards" });
+    ghostHeader?.animate(revealFrames(from, to, fit), { duration: resize.duration, easing: "linear", fill: "forwards" });
     const fade = handing.tap
       ? ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: CLOSE_FADE_MS, delay: CLOSE_MS - CLOSE_FADE_MS, easing: "linear", fill: "forwards" })
       : ghost.animate([{ opacity: handing.opacity ?? 1 }, { opacity: 0 }], { duration: 200, easing: "ease", fill: "forwards" });
