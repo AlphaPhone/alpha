@@ -98,7 +98,8 @@ Prewarm speech output and status without opening the microphone, hold or
 release the native speech engine across an active conversation, ask for the
 microphone, open app settings, listen or record, close the microphone, send
 a turn, play a sentence of the reply, set the speaker output, hush the reply,
-shut the conversation down, open a screen, transcribe a clip, abandon a
+shut the conversation down, ask again after a while whether a stop that
+could not be confirmed has gone quiet, open a screen, transcribe a clip, abandon a
 recording, or fill a field with dictated text.
 
 ```quint
@@ -115,6 +116,7 @@ type Effect =
   | SetSpeakerOutput({ session: int, speakerTicket: int, muted: bool })
   | Hush({ turn: int })
   | Shut({ session: int, keyboard: bool })
+  | Release({ afterMs: int })
   | Navigate({ session: int, turn: int, place: int, sourceRoute: int })
   | CheckDictation({ ticket: int })
   | Record({ ticket: int })
@@ -209,10 +211,11 @@ pure def canPrewarm(v: Voice, now: int): bool = not(v.warmed) and not(v.latched)
 pure def prewarm(v: Voice, now: int): Change =
   { state: { ...v, warmed: true }, out: List(Prewarm({ network: onNetwork(v.route, now) })) }
 
-pure def canReturned(v: Voice): bool = (quiet(v) and v.warmed) or v.callNotice != NoCallNotice
+pure def canReturned(v: Voice): bool = (quiet(v) and (v.warmed or v.latched)) or v.callNotice != NoCallNotice
 
-pure def returned(v: Voice): Voice =
-  { ...v, warmed: if (quiet(v)) false else v.warmed, callNotice: NoCallNotice }
+pure def returned(v: Voice): Change =
+  { state: { ...v, warmed: if (quiet(v)) false else v.warmed, callNotice: NoCallNotice },
+    out: if (v.latched) List(Release({ afterMs: 0 })) else List() }
 
 pure def stepPrewarmNeverOpensTheMicrophone(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   via == "prewarm" implies (after.mic == before.mic and after.prompting == before.prompting and after.phase == before.phase)
@@ -918,8 +921,12 @@ pure def interrupt(v: Voice): Change =
 
 ### Stop shuts the conversation down, and a stop asked for the keyboard then hands it over
 
-A stop is settled once the microphone and speech are confirmed off. Talk's
-controls offer Stop and no keyboard switch, as in Alpha's Sunday demo build.
+A stop is settled once the microphone and speech are confirmed off. Only
+what could go on listening or making sound counts: the agent acknowledging
+that it closed its side of the speech session, a Cloud speech session that
+never opened, and the speaker's volume being set back do not. Talk's
+controls offer Stop and no keyboard switch. Both are as in Alpha's Sunday
+demo build.
 
 ```quint
 pure def shutDown(failure: D::Failure, keyboard: bool, v: Voice): Change =
@@ -933,8 +940,9 @@ pure def stop(v: Voice, keyboard: bool): Change = shutDown(D::NoFailure, keyboar
 
 pure def canStopped(v: Voice, confirmed: bool): bool = v.phase == Stopping
 
-pure def stopped(v: Voice, confirmed: bool): Voice =
-  { ...v, phase: if (v.failure == D::NoFailure) Idle else Failed, mic: Off, network: false, latched: v.latched or not(confirmed) }
+pure def stopped(v: Voice, confirmed: bool): Change =
+  { state: { ...v, phase: if (v.failure == D::NoFailure) Idle else Failed, mic: Off, network: false, latched: v.latched or not(confirmed) },
+    out: if (confirmed) List() else List(Release({ afterMs: releaseAgainMs })) }
 
 pure val fair_stopped = "weak"
 
@@ -945,15 +953,26 @@ pure def canDismiss(v: Voice): bool = v.phase == Failed
 pure def dismiss(v: Voice): Voice = { ...v, phase: Idle, failure: D::NoFailure }
 ```
 
-### A stop that could not be confirmed keeps voice closed until Alpha restarts
+### A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off
 
 The microphone or speech may still be running, so neither a conversation
-nor dictation starts; the owner is told "Speech could not be stopped.
-Restart Alpha."
+nor dictation starts, and no words are shown. Alpha asks again whether they
+are off two seconds after the stop and each time it returns to the
+foreground; once they are, voice opens again and Talk is offered, with no
+restart.
 
 ```quint
+pure val releaseAgainMs = 2000
+
 pure def alwaysAnUnconfirmedStopKeepsVoiceClosed(v: Voice): bool =
   v.latched implies (quiet(v) and v.recorder.stage == D::Closed)
+
+pure def canReleased(v: Voice, confirmed: bool): bool = v.latched
+
+pure def released(v: Voice, confirmed: bool): Voice = { ...v, latched: not(confirmed) }
+
+pure def stepAnUnconfirmedStopIsAskedAgain(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  (after.latched and not(before.latched)) implies out.includes(Release({ afterMs: releaseAgainMs }))
 
 pure def sometimesStopUnconfirmed(v: Voice): bool = v.latched
 ```

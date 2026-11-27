@@ -19,7 +19,7 @@ import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { SystemSettings, classifyVoiceFault, interruptedByCall, refusedForFunds, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/index.vibe"
 import { fresh } from "../runtime/index.vibe"
-import { type Job, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/index.vibe"
+import { type Job, Time, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/index.vibe"
 import { createShelf } from "../runtime/index.vibe"
 import { signedIn } from "./account.vibe"
 import { replyBlocks } from "../assistant/words.ts"
@@ -987,7 +987,7 @@ effect function dictationVisible(): boolean!!(Device | Layers.Machine | VoiceBri
   return try (try VoiceBridge).dictationForeground()
 }
 
-function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.Machine | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine, []> {
+function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.Machine | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine | Time, []> {
   return match (fx) {
     when { tag: "Prewarm", let network }: run("prewarm", effect { try (try VoiceBridge).prewarm(network) });
     when { tag: "HoldEngine" }: run("holdEngine", effect { try (try VoiceBridge).holdEngine() });
@@ -1086,6 +1086,11 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const confirmed = try (try VoiceBridge).shut(session)
       return { type: "stopped", confirmed }
     }, { type: "stopped", confirmed: false });
+    when { tag: "Release", let afterMs }: answer("release", effect {
+      const time = try Time
+      if (afterMs > 0) try time.until((try time.now()) + afterMs)
+      return { type: "released", confirmed: try (try VoiceBridge).release() }
+    }, { type: "released", confirmed: false });
     when { tag: "Navigate", let session, let turn, let place, let sourceRoute }: run("spoken navigation", navigateLeased(session, turn, place, sourceRoute));
     when { tag: "CheckDictation", let ticket }: answer("check dictation recognition", effect {
       const voice = try Voice.Machine
