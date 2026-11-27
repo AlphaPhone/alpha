@@ -113,6 +113,16 @@ export interface AccessibilityInspection {
   readonly boundInDumpsys: boolean;
 }
 
+/** Parsed result of structured zero-PII control telemetry from `AlphaAccessibilityService` and `AlphaControlPolicy`. */
+export interface ControlTelemetryInspection {
+  readonly passed: boolean;
+  readonly serviceConnected: boolean;
+  readonly observedPackage: string | null;
+  readonly observedNodes: number;
+  readonly refusedSettings: boolean;
+  readonly telemetryLines: number;
+}
+
 /** Structured report produced by `pnpm cli alpha-next emulator-e2e`. */
 export interface EmulatorE2eReport {
   readonly subcommand: "emulator-e2e";
@@ -178,6 +188,7 @@ function isCoreApkPath(apkPath: string): boolean {
     || base.includes("alpha-core")
     || base.includes("alpha-launcher")
     || base.includes("alpha-phone")
+    || base.startsWith("launcher-")
     || base.startsWith("app-");
 }
 
@@ -330,6 +341,41 @@ export function inspectAccessibilityDump(dump: string, enabledSetting: string): 
     passed: enabledInSettings && boundInDumpsys,
     enabledInSettings,
     boundInDumpsys,
+  };
+}
+
+/** Inspect structured zero-PII logcat telemetry from `AlphaAccessibilityService` and `AlphaControlPolicy`. */
+export function inspectControlTelemetry(
+  logcat: string,
+  expectedBrowserPkg?: string,
+): ControlTelemetryInspection {
+  const serviceConnected = /\bAlphaAccessibilityService\b[^\n]*\bevent=connected\b/.test(logcat);
+  const refusedSettings = /\bAlphaControlPolicy\b[^\n]*\bevent=refuse\s+pkg=com\.android\.settings\b/.test(logcat);
+
+  let observedPackage: string | null = null;
+  let observedNodes = 0;
+  const observeRegex = /\bAlphaAccessibilityService\b[^\n]*\bevent=observe\s+pkg=([^\s]+)\s+targetKind=AllowedApp\b[^\n]*\bnodes=(\d+)/g;
+  let match: RegExpExecArray | null = observeRegex.exec(logcat);
+  while (match !== null) {
+    const pkg = match[1] ?? "";
+    const nodes = Number.parseInt(match[2] ?? "0", 10);
+    const matchesTarget = expectedBrowserPkg
+      ? pkg === expectedBrowserPkg
+      : !pkg.startsWith("ai.alphacompute.");
+    if (matchesTarget && Number.isFinite(nodes) && nodes > observedNodes) {
+      observedPackage = pkg;
+      observedNodes = nodes;
+    }
+    match = observeRegex.exec(logcat);
+  }
+
+  return {
+    passed: serviceConnected && observedNodes > 0 && refusedSettings,
+    serviceConnected,
+    observedPackage,
+    observedNodes,
+    refusedSettings,
+    telemetryLines: countLogcatEntries(logcat),
   };
 }
 
@@ -531,6 +577,9 @@ async function verifyDeviceSuite(
     });
   }
 
+  adbShell(adbPath, serial, ["settings", "put", "secure", "accessibility_enabled", "0"]);
+  adbShell(adbPath, serial, ["settings", "delete", "secure", "enabled_accessibility_services"]);
+  await timersPromises.scheduler.wait(500);
   adbShell(adbPath, serial, ["logcat", "-c"]);
   adbShell(adbPath, serial, ["settings", "put", "secure", "enabled_accessibility_services", ACCESSIBILITY_COMPONENT]);
   adbShell(adbPath, serial, ["settings", "put", "secure", "accessibility_enabled", "1"]);
@@ -569,12 +618,12 @@ async function verifyDeviceSuite(
     "AlphaControlPolicy",
     "AlphaControlBridge",
   ]);
-  const telemetryLines = countLogcatEntries(controlLogcat);
-  const a11yOk = a11yCheck.passed && browserObserved && blockedPresent && settingsObserved;
+  const telemetryCheck = inspectControlTelemetry(controlLogcat, browserPkg);
+  const a11yOk = a11yCheck.passed && browserObserved && blockedPresent && settingsObserved && telemetryCheck.passed;
   results.push({
     stage: "verify-accessibility-and-browser-control",
     status: a11yOk ? "passed" : "failed",
-    detail: `service=${ACCESSIBILITY_COMPONENT} enabled=${String(a11yCheck.enabledInSettings)} bound=${String(a11yCheck.boundInDumpsys)} browser=${browserPkg ?? "ACTION_VIEW"} observed=${String(browserObserved)} settingsObserved=${String(settingsObserved)} blockedGuards=${BLOCKED_PACKAGES.join(",")} telemetryLines=${String(telemetryLines)}`,
+    detail: `service=${ACCESSIBILITY_COMPONENT} enabled=${String(a11yCheck.enabledInSettings)} bound=${String(a11yCheck.boundInDumpsys)} connected=${String(telemetryCheck.serviceConnected)} browser=${browserPkg ?? "ACTION_VIEW"} observed=${String(browserObserved)} observedNodes=${String(telemetryCheck.observedNodes)} settingsObserved=${String(settingsObserved)} refusedSettings=${String(telemetryCheck.refusedSettings)} blockedGuards=${BLOCKED_PACKAGES.join(",")} telemetryLines=${String(telemetryCheck.telemetryLines)}`,
   });
 
   return results;

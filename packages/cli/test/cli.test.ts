@@ -10,6 +10,7 @@ import {
   defineCommand,
   extractPackageUid,
   inspectAccessibilityDump,
+  inspectControlTelemetry,
   inspectCorePackageDump,
   inspectCrossAppIpcLog,
   inspectLauncherActivities,
@@ -521,14 +522,18 @@ describe("project CLI", () => {
   test("verifies emulator dumps, APK install order, cross-APK IPC logs, and accessibility binding strictly", () => {
     expect(sortApksCoreFirst([
       "apps/app/android/suite/out/notes-debug.apk",
+      "apps/app/artifacts/launcher-debug.apk",
       "apps/app/artifacts/alpha-launcher-debug.apk",
       "apps/app/artifacts/ai.alphacompute.alphaphone-debug.apk",
       "apps/app/android/suite/out/browser-debug.apk",
+      "apps/app/android/suite/out/settings-debug.apk",
     ])).toEqual([
       "apps/app/artifacts/ai.alphacompute.alphaphone-debug.apk",
       "apps/app/artifacts/alpha-launcher-debug.apk",
+      "apps/app/artifacts/launcher-debug.apk",
       "apps/app/android/suite/out/browser-debug.apk",
       "apps/app/android/suite/out/notes-debug.apk",
+      "apps/app/android/suite/out/settings-debug.apk",
     ]);
 
     const launcher = inspectLauncherActivities([
@@ -590,6 +595,20 @@ describe("project CLI", () => {
     ].join("\n");
     expect(inspectAccessibilityDump(boundDump, enabledSetting).passed).toBe(true);
     expect(inspectAccessibilityDump(`Enabled services:{${enabledSetting}}\nservices:{}`, enabledSetting).passed).toBe(false);
+
+    const controlLogs = [
+      "11-27 01:10:00.100 1000 1000 I AlphaAccessibilityService: event=connected tier=TierAccessibility",
+      "11-27 01:10:02.200 1000 1000 I AlphaAccessibilityService: event=observe pkg=com.android.chrome targetKind=AllowedApp protection=ScreenClear nodes=19 snapId=1",
+      "11-27 01:10:04.300 1000 1000 I AlphaControlPolicy: event=refuse pkg=com.android.settings targetKind=BlockedApp protection=ScreenClear",
+      "11-27 01:10:04.301 1000 1000 I AlphaAccessibilityService: event=observe pkg=com.android.settings targetKind=BlockedApp protection=ScreenClear nodes=0 snapId=2",
+    ].join("\n");
+    const telemetryOk = inspectControlTelemetry(controlLogs, "com.android.chrome");
+    expect(telemetryOk.passed).toBe(true);
+    expect(telemetryOk.observedPackage).toBe("com.android.chrome");
+    expect(telemetryOk.observedNodes).toBe(19);
+    expect(telemetryOk.refusedSettings).toBe(true);
+    expect(inspectControlTelemetry(controlLogs.replace("nodes=19", "nodes=0"), "com.android.chrome").passed).toBe(false);
+    expect(inspectControlTelemetry(controlLogs.replace("event=refuse pkg=com.android.settings", "event=allow"), "com.android.chrome").passed).toBe(false);
   });
 
   test("alpha-next validate --check --aapt2 passes against the live repository artifacts", async () => {
