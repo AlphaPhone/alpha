@@ -11,6 +11,12 @@
 -keep class ai.eliza.voice.** { *; }
 -keep class ai.eliza.os.agent.inference.** { *; }
 -keep class ai.elizaos.** { *; }
+-keep,allowoptimization class ai.eliza.plugins.media.PermittedMediaCatalog
+-keep,allowoptimization class ai.eliza.plugins.media.OwnedPhotoEdits
+-keep,allowoptimization class ai.eliza.plugins.media.OwnedVideoPlayback
+-keep,allowoptimization class ai.eliza.plugins.media.OwnedCaptures
+-keep,allowoptimization class ai.eliza.plugins.media.SelectedDocuments
+-keep,allowoptimization class ai.eliza.plugins.media.DocumentDestinations
 -keep class * extends androidx.work.ListenableWorker {
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }
