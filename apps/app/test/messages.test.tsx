@@ -23,7 +23,7 @@ import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
 import { displayNumber } from "../src/phone/words.ts";
-import { button, closeAll, drawn, fill, hardware, input, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, input, later, only, open, press, shownWords, underAct, until } from "./alpha.tsx";
 import { alphaImage as image } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -113,14 +113,6 @@ async function dictateToMaya(alpha: Awaited<ReturnType<typeof openImage>>["alpha
   await ready(messageView, Voice, "Messages recording", (state) => state.recorder.field === "MessagesBar" && state.recorder.stage === "Recording");
   await press("Stop recording");
   await ready(messageView, Voice, "Messages transcript returned", (state) => state.recorder.stage === "Closed");
-}
-
-/** The words `element` shows on screen, leaving out what only a screen reader hears. */
-function shownWords(element: Element | null) {
-  const copy = element?.cloneNode(true);
-  if (!(copy instanceof Element)) return undefined;
-  for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
-  return copy.textContent?.trim();
 }
 
 /** Wait until Maya's message field reads `text`. */
@@ -306,15 +298,21 @@ describe("Messages on an Alpha image", () => {
     expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value, world.telephony.sent, world.ask.opened, world.ask.said, world.voice.startLiveCaptureCalls])
       .toEqual([dictated, [], openedChats, [], 0]);
 
-    // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends": a transcript that would make the text too long is left out, with no words
+    // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends": a transcript past the longest text goes into the draft whole, as v119 did, with no words
     const full = "x".repeat(MMS_MAX_BODY - 4);
     await fill("Text Maya", full);
     await ready(alpha.runtime, Composer, "A draft at the length limit is saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
     const beforeLong = await toastsIssued(alpha);
+    const savedAtLimit = (await alpha.runtime.runPromise(Effect.flatMap(Composer, (machine) => machine.get()))).slot.draft.edits;
     await dictateToMaya(alpha);
-    await later(alpha, 1_000);
-    expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value === full, await toastsIssued(alpha) - beforeLong, world.telephony.sent])
-      .toEqual([true, 0, []]);
+    const long = `${full} Dictated note`;
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe(long);
+    }, { timeout: 12_000 });
+    await ready(alpha.runtime, Composer, "The long dictated draft is saved", (state) => state.slot.draft.edits > savedAtLimit && state.slot.draft.sync === "Kept");
+    // spec/app/messages/composer.md, "Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call": Send waits until the owner shortens it
+    expect([await toastsIssued(alpha) - beforeLong, button("Send")?.disabled ?? true, world.telephony.sent]).toEqual([0, true, []]);
     await fill("Text Maya", dictated);
     await ready(alpha.runtime, Composer, "The dictated draft is saved again", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
 

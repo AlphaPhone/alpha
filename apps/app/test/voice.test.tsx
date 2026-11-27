@@ -29,7 +29,7 @@ import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, later, only, open, press, seen, shownWords, underAct, until as drawnUntil } from "./alpha.tsx";
 import { untoldStep } from "./fakes/ask.ts";
 import { publish } from "./fakes/platform.ts";
 import { rejection } from "./fakes/phone.ts";
@@ -2286,6 +2286,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       const { recorder } = await getVoice(area);
       await expect(sendVoice(area, { type: "recognitionChecked", ticket: recorder.ticket - 1, ready: true })).rejects.toBeDefined();
       expect(button("Preparing on-device speech")?.disabled).toBe(true);
+      // spec/app/voice/dictation.md, "Ask Alpha names recognition preparation and can start only after its recognition check succeeds": the button shows no words while preparing
+      expect(shownWords(button("Preparing on-device speech"))).toBe("");
       await press("Preparing on-device speech");
       expect(recordings).toBe(0);
     } finally {
@@ -2295,7 +2297,13 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     if (ready) {
       expect(button("Start recording")?.disabled).toBe(false);
       expect(recordings).toBe(0);
+      const opening = Promise.withResolvers<void>();
+      world.voice.recordingStartGate = () => { recordings += 1; return opening.promise; };
       await press("Start recording");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Starting");
+      // spec/app/voice/dictation.md, "Ask Alpha names recognition preparation and can start only after its recognition check succeeds": nor while the microphone starts
+      expect([button("Starting microphone")?.disabled, shownWords(button("Starting microphone"))]).toEqual([true, ""]);
+      opening.resolve();
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
       expect(recordings).toBe(1);
       await press("Discard transcription");
