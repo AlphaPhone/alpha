@@ -1,4 +1,4 @@
-// spec/app/phone/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"; spec/app/voice/index.md, "Story: Hold a spoken conversation"
+// spec/app/phone/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"; spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
@@ -6,7 +6,6 @@ import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { say } from "../notices/index.vibe"
 import { CommsPrompts } from "../comms/index.vibe"
 import { Device } from "../platform/index.vibe"
 import { VoiceBridge } from "../platform/index.vibe"
@@ -48,10 +47,7 @@ export const talkFromComms = started(effect {
   try Stream.runForEach(requests, effect ({ about, view }) => {
     const before = try shell.get()
     if (!Shell.showing(before, view) || !Shell.canRaise(before, "Sheet") || (try comms.get()).key !== about || !(try device.showing())) return
-    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) {
-      try say("Talk is unavailable right now", true)
-      return
-    }
+    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) return
     if (!(try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Talk from the communications bar"))) return
     const current = try shell.get()
     if (Shell.showing(current, view) && current.assistant === "Sheet" && (try comms.get()).key === about
