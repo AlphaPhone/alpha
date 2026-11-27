@@ -79,6 +79,32 @@ pure def handsOn(kind: Kind): bool = kind == Proposal or kind == Review
 pure def live(c: Card): bool = c.shown and not(c.settled)
 ```
 
+### A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it
+
+As v119 drew a phone step's proposal, its first row has no picture: the
+title and what it does, with a compact Approve at the row's end. Once the
+owner's decision has ended and the card has gone, its result chip shows
+under the reply that offered the card, before any answer that followed,
+and stays there for the rest of the conversation. A reply that did nothing
+but offer that one review gives way to the chip, as v119 hid its review
+instruction once an outcome showed; while the card is still shown, or when
+the reply carried more than that one review, the reply stays. A reviewed
+read that answered says on its chip what the phone read, in v119's words:
+the last four digits of the latest text's sender, or the number where the
+agent asked for it, that there was no text or no readable number, or that
+the open conversation or voicemail was shared.
+
+```quint
+pure def offerShown(onlyOffered: bool, cardShown: bool, ended: bool): bool =
+  not(onlyOffered and ended and not(cardShown))
+
+pure def lawAShownReviewKeepsTheReplyThatOfferedIt(onlyOffered: bool, ended: bool): bool = offerShown(onlyOffered, true, ended)
+
+pure def lawAReplyThatSaidMoreStays(cardShown: bool, ended: bool): bool = offerShown(false, cardShown, ended)
+
+pure def lawAPendingReviewKeepsItsReply(onlyOffered: bool, cardShown: bool): bool = offerShown(onlyOffered, cardShown, false)
+```
+
 ### What the simulator tries
 
 ```quint
