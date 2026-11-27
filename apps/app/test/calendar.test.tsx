@@ -1400,25 +1400,44 @@ describe("on a phone", () => {
     expect(named).toEqual([true, false, false]);
   });
 
-  it("A read of the agent's list begun before the owner signed out proposes nothing of that owner's request, and the next card shows whole (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\")", async () => {
-    const { named, writes } = await namesAfterOwnerChange("approval-after", async (world, alpha, agent, request) => {
+  /**
+   * Owner A's request "lens check" waits in a read of the agent's list held at its read of `held` while A signs out and the agent
+   * lists nothing for the next owner. Once the read answers, no card shows; then a card filed from Home tells what `namesAfterOwnerChange` does.
+   */
+  async function heldAcrossSignOut(held: "calendars" | "approvals") {
+    return namesAfterOwnerChange("approval-after", async (world, alpha, agent, request) => {
+      const hold = (on: boolean) => {
+        if (held === "calendars") world.calendar.holdCalendars = on;
+        else world.calendar.holdApprovals = on;
+      };
+      const releases = held === "calendars" ? world.calendar.heldCalendars : world.calendar.heldApprovals;
+      const answered = () => (held === "calendars" ? world.calendar.calendarsAnswered : world.calendar.approvalsAnswered) ?? 0;
       world.calendar.approvals.push(request("approval-before", "lens check", 11));
-      world.calendar.holdCalendars = true;
+      hold(true);
       await openCalendar(alpha);
-      await vi.waitFor(() => expect(world.calendar.heldCalendars.length).toBeGreaterThan(0));
+      await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
       await hardware("home");
       world.calendar.approvals.splice(0);
       world.calendar.summary = undefined;
-      world.calendar.holdCalendars = false;
+      hold(false);
       await reopenSignedOut(world, alpha, agent);
-      const answered = (world.calendar.calendarsAnswered ?? 0) + world.calendar.heldCalendars.length;
-      await drawn(() => world.calendar.heldCalendars.splice(0).forEach((release) => release()));
-      await vi.waitFor(() => expect(world.calendar.calendarsAnswered).toBe(answered));
+      const expected = answered() + releases.length;
+      await drawn(() => releases.splice(0).forEach((release) => release()));
+      await vi.waitFor(() => expect(answered()).toBe(expected));
       await drawn(() => {});
       // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": a changed owner drops the requests Calendar read, so the read begun before it shows no card, blank or with Approve
       const after = await agent.runPromise(Effect.flatMap(Changes, (machine) => machine.get()));
       expect([after.stage, Boolean(button("Approve")), askedCard()]).toEqual(["Idle", false, ""]);
     });
+  }
+
+  it("A read of the agent's list begun before the owner signed out proposes nothing of that owner's request, and the next card shows whole (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\")", async () => {
+    const { named, writes } = await heldAcrossSignOut("calendars");
+    expect([...named, askedCard().includes("lens check"), writes]).toEqual([true, false, false, false, []]);
+  });
+
+  it("An answer of the agent's approvals list read for the owner before a sign-out is refused, so that owner's request never shows signed out (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\")", async () => {
+    const { named, writes } = await heldAcrossSignOut("approvals");
     expect([...named, askedCard().includes("lens check"), writes]).toEqual([true, false, false, false, []]);
   });
 

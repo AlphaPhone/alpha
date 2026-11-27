@@ -58,11 +58,13 @@ effect function read(ticket: number): Event!!(Agent | Time) {
 const resolveOf = (request: Request, decision: "approve" | "reject") =>
   HttpClientRequest.post(`/api/approvals/${encodeURIComponent(request.id)}/resolve`) |> HttpClientRequest.bodyJsonUnsafe(%, { decision, revision: request.revision })
 
-/** The agent's pending requests, read from its approvals list; none where the list could not be read. */
+/** The agent's pending requests, read from its approvals list for the owner the read began under; none where the list could not be read, or another owner signed in while it was read. */
 effect function pendingRequests(floor: number): (ReadonlyArray<Request> | undefined)!!(Agent | Requests | Time) {
   const now = try (try Time).now()
   const reqStore = try Requests
+  const owner = reqStore.owner()
   const listed = ask(Agent, HttpClientRequest.get("/api/approvals", { urlParams: { state: "pending", limit: "50" } }), Approvals) catch () => undefined
+  if (reqStore.owner() !== owner) return undefined
   return listed?.approvals.map((row) => reqStore.fromWire(row, floor, now)).filter((request): request is Request => request !== undefined)
 }
 

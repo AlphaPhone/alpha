@@ -175,8 +175,10 @@ export interface RequestsStore {
   readonly recordResult: (filing: number, result: Result) => void;
   /** The last reported outcome for `filing`, if any. @throws {never} */
   readonly lastResult: (filing: number) => Result | undefined;
-  /** Drop all pending requests when the signed-in owner changes. @throws {never} */
-  readonly clear: () => void;
+  /** The owner Calendar read the requests held for, so a read of the list begun for another is refused. @throws {never} */
+  readonly owner: () => number;
+  /** Drop all pending requests when the signed-in owner changes to `owner`. @throws {never} */
+  readonly clear: (owner: number) => void;
   /** Reset all state when the runtime scope closes. @throws {never} */
   readonly reset: () => void;
 }
@@ -189,6 +191,7 @@ export function createRequestsStore(): RequestsStore {
   const reported = new Map<number, Result>();
   const version = createShelf(0);
   let next = 0;
+  let current = 0;
 
   /** @throws {never} */
   function told(): void {
@@ -246,7 +249,9 @@ export function createRequestsStore(): RequestsStore {
       told();
     },
     lastResult: (filing) => reported.get(filing),
-    clear() {
+    owner: () => current,
+    clear(owner) {
+      current = owner;
       numbers.clear();
       held.clear();
       expired.clear();
@@ -260,6 +265,7 @@ export function createRequestsStore(): RequestsStore {
       expired.clear();
       reported.clear();
       next = 0;
+      current = 0;
       version.reset();
     },
   };

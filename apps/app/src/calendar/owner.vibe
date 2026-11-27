@@ -77,7 +77,7 @@ effect function tellOwner() {
     (try Shown).drop("Google")
     // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it"
     ;(try Shown).listed([])
-    ;(try Requests).clear()
+    ;(try Requests).clear(owner)
     ;(try LinkCache).invalidate()
   }
   try contained(view.send({ type: "ownerChanged", owner, hidden: [...hidden] }), "telling Calendar who is signed in")

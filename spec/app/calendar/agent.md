@@ -116,7 +116,9 @@ Calendar, Back, a hidden page or a locked screen leave it waiting, in
 Calendar and under the reply that filed it. A card shows only with the
 request Calendar read for it: a changed owner drops the requests Calendar
 read, so a card still waiting for them ends unsent, the list is read again
-at once, and a read begun before the change shows nothing. A change the
+at once, and a read begun before the change shows nothing: each read of the
+list is for the owner it began under, and its answer is refused once
+another owner, or none, is signed in. A change the
 owner declined, the agent withdrew or Google refused reads the list again at once, so the next
 pending request's card shows without waiting for Calendar's next read; the
 request just declined is not proposed again while its decline is on its
