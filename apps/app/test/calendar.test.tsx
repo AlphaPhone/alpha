@@ -1146,6 +1146,33 @@ describe("on a phone", () => {
     expect([...named(), Boolean(button("Approve")), world.calendar.writes]).toEqual([true, false, true, []]);
   });
 
+  it("A card filed from Ask Alpha on Home before the owner signed in shows whole in Calendar, and is approved only so (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": the demo gate's D17 on develop 680960bfb, a resident calendar whose feed is unavailable, as on a fresh agent with no Google
+    const world = { ...morning(true), signedIn: false };
+    world.calendar.events = [];
+    world.calendar.feedState = "unavailable";
+    const { alpha, agent, file } = await askingCalendar(world, "view:Calendar");
+    await file("approval-home", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": v119 45f6bed30 prototype/model.js:5822-5830 kept a request's card open until it was answered or replaced; Back and leaving Calendar leave it waiting
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front);
+    await hardware("back");
+    await until(alpha, agent, View, (s) => !s.front);
+    await drawn(() => {});
+    expect((await agent.runPromise(Effect.flatMap(Changes, (machine) => machine.get()))).card.showing).toBe(true);
+    world.signedIn = true;
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front && s.owner > 0);
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": v119 45f6bed30 prototype/calendar-approval-fields.ts:46-48 always printed the card's heading, calendar and fields, and calendar-approval-review.ts:19-24 offered Approve only on a complete card
+    await vi.waitFor(() => expect(["Add event", "Waiting for you", "camera setup", "Eliza Calendar", "Unavailable"].map((text) => askedCard().includes(text))).toEqual([true, true, true, true, false]));
+    expect([Boolean(button("Approve")), world.calendar.writes]).toEqual([true, []]);
+    await press("Approve");
+    await until(alpha, agent, Changes, (a) => a.stage === "Idle" && a.write.outcome === "Confirmed");
+    expect(world.calendar.writes).toEqual(["approve approval-home", "create ev-camera-setup"]);
+  });
+
   it("Signing out forgets the name the agent listed for the owner before, so the next card reads the list again (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\"; spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
     const world = morning(true);
     world.calendar.summary = "Family";

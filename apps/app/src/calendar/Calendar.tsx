@@ -1315,7 +1315,7 @@ export function Proposal({ runtime, className = "mx-4 mb-2", request: bound }: C
           <dt className="sr-only">When</dt><dd>{Number.isFinite(start) && Number.isFinite(end)
             ? `${shortDate.format(start)} · ${f.isAllDay ? "All day" : hourMinute.formatRange(start, end)}${f.timeZone ? ` (${f.timeZone})` : ""}` : "No valid time"}</dd>
           {f.location ? <><dt className="sr-only">Place</dt><dd>{f.location}</dd></> : null}
-          <dt className="sr-only">People</dt><dd>{f.attendees.length > 0 ? f.attendees.join(", ") : "Attendees: none"}</dd>
+          <div><dt className="inline">Guests: </dt><dd className="inline">{f.attendees.length > 0 ? f.attendees.join(", ") : "No guests"}</dd></div>
           {f.description.trim() ? <><dt className="sr-only">Notes</dt><dd className="whitespace-pre-line">{f.description.trim()}</dd></> : null}
         </dl>
       ) : null}
@@ -1324,12 +1324,12 @@ export function Proposal({ runtime, className = "mx-4 mb-2", request: bound }: C
         ? calendarName(shown.listedName(""))
         : shown.listedSummary(request.calendarId) || `Calendar ${request.calendarId}`}</p> : null}
       {request && occurrences[request.occurrences] ? <p className="text-meta">{occurrences[request.occurrences]}</p> : null}
-      {request ? <p className="text-meta text-muted-foreground">{request.notify ? "Guests are told of this change." : "No invitations are sent."}</p> : null}
+      {request ? <p className="text-meta text-muted-foreground">{`Notify guests: ${request.notify ? "Yes" : "No"}`}</p> : null}
       {a.complete ? null : <p className="text-meta text-muted-foreground">Alpha can't check this whole change, so it can't be approved.</p>}
       {a.stage === "Sending" || a.stage === "ReadingBack" ? <Spinner size="sm" /> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {agent.can(decline, "Owner") ? <Button variant="outline" onClick={() => void agent.send(decline, "Owner")}>Decline</Button> : null}
-        {!expired && agent.can(approve, "Owner") ? <Button onClick={() => void agent.send(approve, "Owner")}>Approve</Button> : null}
+        {agent.can(decline, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-background px-4 py-2 font-semibold")} onClick={() => void agent.send(decline, "Owner")}>Decline</button> : null}
+        {!expired && agent.can(approve, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-alpha px-4 py-2 font-semibold text-alpha-foreground")} onClick={() => void agent.send(approve, "Owner")}>Approve</button> : null}
       </div>
     </section>
   );

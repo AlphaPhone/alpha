@@ -110,8 +110,14 @@ A request gone from the list is withdrawn; a new revision of the same
 request is a change of its event. What a read of the list finds counts
 only for the card it was read for: an answer that comes back after that
 card ended, or after another card took its place, neither revises nor
-completes the card shown then. A change the owner declined, the agent
-withdrew or Google refused reads the list again at once, so the next
+completes the card shown then. A card waits until the owner answers it, as
+Sunday's v119 kept each request's card until it was answered: leaving
+Calendar, Back, a hidden page or a locked screen leave it waiting, in
+Calendar and under the reply that filed it. A card shows only with the
+request Calendar read for it: a changed owner drops the requests Calendar
+read, so a card still waiting for them ends unsent, the list is read again
+at once, and a read begun before the change shows nothing. A change the
+owner declined, the agent withdrew or Google refused reads the list again at once, so the next
 pending request's card shows without waiting for Calendar's next read; the
 request just declined is not proposed again while its decline is on its
 way to the agent.
@@ -250,20 +256,6 @@ pure def canWithdraw(s: AgentCalendar, by: Actor): bool = by == Agent and s.stag
 
 pure def withdraw(s: AgentCalendar, by: Actor): Acted =
   { state: { ...s, stage: Idle, card: V::dismiss(s.card), result: Withdrawn }, out: List(Report({ result: Withdrawn })) }
-```
-
-### Back, a hidden page or leaving Calendar retires a card still waiting; the request stays the agent's
-
-Nothing is sent and the agent is told nothing: its request is still
-pending in its list, and the next read of the day proposes it again. A
-decision already sent stays until the agent answers.
-
-```quint
-pure def canRetire(s: AgentCalendar, by: Actor): bool = by == Owner and s.stage == Awaiting
-
-pure def retire(s: AgentCalendar, by: Actor): AgentCalendar = { ...s, stage: Idle, card: V::dismiss(s.card) }
-
-pure def sometimesACardRetired(s: AgentCalendar): bool = s.stage == Idle and s.result == NoResult and s.card.revision > 0 and not(s.card.showing)
 ```
 
 ### What is sent is exactly the change approved, for the revision the agent selected
