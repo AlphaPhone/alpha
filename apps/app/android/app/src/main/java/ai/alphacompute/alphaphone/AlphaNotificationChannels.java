@@ -22,6 +22,7 @@ final class AlphaNotificationChannels {
  };
  static final Row[] ROWS = {
   new Row("eliza-agent", 0, 0, ASSISTANT),
+  new Row(InboxNoticeDelivery.CHANNEL, R.string.alpha_gmail_channel_name, R.string.alpha_gmail_channel_description, MAIL_AND_BRIEFS),
  };
 
  static void describe(Context context) {
@@ -31,10 +32,12 @@ final class AlphaNotificationChannels {
    for (Row row : ROWS) {
     NotificationChannel existing = manager.getNotificationChannel(row.id());
     if (existing == null) continue;
-    String name = row.name() == 0 ? String.valueOf(existing.getName()) : context.getString(row.name());
+    CharSequence existingName = existing.getName();
+    String currentName = existingName == null ? "" : existingName.toString();
+    String name = row.name() == 0 ? currentName : context.getString(row.name());
     String description = row.description() == 0 ? existing.getDescription() : context.getString(row.description());
     String group = existing.getGroup() != null ? existing.getGroup() : row.group();
-    if (name.contentEquals(existing.getName()) && Objects.equals(description, existing.getDescription()) && Objects.equals(group, existing.getGroup())) continue;
+    if (Objects.equals(name, currentName) && Objects.equals(description, existing.getDescription()) && Objects.equals(group, existing.getGroup())) continue;
     if (group != null && group.equals(row.group())) manager.createNotificationChannelGroup(new NotificationChannelGroup(group, context.getString(groupName(group))));
     NotificationChannel next = new NotificationChannel(row.id(), name, existing.getImportance());
     next.setDescription(description);

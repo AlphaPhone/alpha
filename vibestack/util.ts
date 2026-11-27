@@ -243,7 +243,7 @@ export function testInputs(root: string, mode: TestProfile = "normal", read: Inp
 export const testReceipt = (root: string, mode: TestProfile = "normal") => path.join(root, ".cache", `test-result-${mode}.json`);
 
 /** Where code cites a story or rule (AGENTS.md, "Tests"). */
-const CITATION = /(?<![\w/.-])(spec\/(?:[A-Za-z0-9]+\/)*[A-Za-z0-9]+\.md), "([^"]+)"/g;
+const CITATION = /(?<![\w/.-])(spec\/(?:[A-Za-z0-9]+\/)*[A-Za-z0-9]+\.md), "((?:[^"\\]|\\["\\])+)"/g;
 export const HAS_CITATION = new RegExp(CITATION.source);
 /** A citation of `heading` in `spec`; `at` is `file:line`, a path from the checking root. */
 export interface Citation { at: string; spec: string; heading: string }
@@ -253,7 +253,7 @@ export function fileCitations(file: string, text: string): Citation[] {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].includes("spec/")) continue;
-    for (const [, spec, heading] of lines[i].matchAll(CITATION)) out.push({ at: `${file}:${i + 1}`, spec, heading });
+    for (const [, spec, heading] of lines[i].matchAll(CITATION)) out.push({ at: `${file}:${i + 1}`, spec, heading: heading.replace(/\\(["\\])/g, "$1") });
   }
   return out;
 }
@@ -303,8 +303,44 @@ export const SIMULATIONS = "gen/traces";
 
 /** A token of a script, and how many brackets it sits in. */
 interface Token { text: string; pos: number; start: number; depth: number; fresh: boolean }
-/** A script's tokens, or nothing if its brackets do not balance; TypeScript's scanner reads VibeLang's too. */
-export function tokenize(text: string): Token[] | undefined {
+const JSX_FILE = /\.[cm]?[jt]sx$|\.vibex$/i;
+
+function tokenizeJsx(text: string): Token[] | undefined {
+  const ts = tsApi();
+  const K = ts.SyntaxKind;
+  const source = ts.createSourceFile("file.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const out: Token[] = [];
+  const open: boolean[] = [];
+  let balanced = true;
+  const walk = (node: TS.Node) => {
+    if (!balanced) return;
+    const children = node.getChildren(source);
+    if (children.length) {
+      for (const child of children) walk(child);
+      return;
+    }
+    const kind = node.kind;
+    if (kind === K.EndOfFileToken || kind === K.JsxTextAllWhiteSpaces) return;
+    const tokenText = node.getText(source);
+    if (!tokenText) return;
+    if (kind === K.CloseParenToken || kind === K.CloseBracketToken || kind === K.CloseBraceToken || kind === K.TemplateTail) {
+      if (!open.length) { balanced = false; return; }
+      open.pop();
+    }
+    const pos = node.getFullStart();
+    const start = node.getStart(source);
+    const trivia = text.slice(pos, start);
+    out.push({ text: tokenText, pos, start, depth: open.length, fresh: trivia.includes("\n") || trivia.includes("\r") });
+    if (kind === K.OpenParenToken || kind === K.OpenBracketToken || kind === K.OpenBraceToken || kind === K.TemplateHead) open.push(kind === K.TemplateHead);
+  };
+  walk(source);
+  return balanced && !open.length ? out : undefined;
+}
+
+/** A script's tokens, or nothing if its brackets do not balance; TypeScript's scanner reads VibeLang's too, and TSX/JSX uses TypeScript's parser. */
+export function tokenize(text: string, file?: string | boolean): Token[] | undefined {
+  const isJsx = typeof file === "boolean" ? file : file !== undefined && JSX_FILE.test(file);
+  if (isJsx) return tokenizeJsx(text);
   const K = tsApi().SyntaxKind;
   const scanner = tsApi().createScanner(tsApi().ScriptTarget.Latest, true, tsApi().LanguageVariant.Standard, text);
   const out: Token[] = [];

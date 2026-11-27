@@ -83,7 +83,7 @@ describe("the eliza harness", () => {
     expect(await Effect.runPromise(pinnedCheckout())).toEqual({ commit: lock.commit, dir: checkout().root });
   });
 
-  it("starts eliza's cloud on a free loopback port, which answers its owner with the scripted model, repeating them, until it is stopped", async () => {
+  it("starts eliza's cloud on a free loopback port, which answers its owner with the scripted model, repeating their own words without the agent host's notes as a tagged answer, until it is stopped", async () => {
     const state = scratch();
     try {
       const cloud = await startCloud(state, [owner], 1_000_000);
@@ -91,7 +91,9 @@ describe("the eliza harness", () => {
       expect(new URL(cloud.local).hostname).toBe("127.0.0.1");
       await expect(said(health)).resolves.toBeDefined();
       const answer = await chat(cloud, [strictTool, looseTool], false);
-      expect([answer.status, JSON.parse(answer.text)]).toMatchObject([200, { model: "alpha-chat", choices: [{ message: { role: "assistant", content: "You said: what's 17 times 24" }, finish_reason: "stop" }] }]);
+      expect([answer.status, JSON.parse(answer.text)]).toMatchObject([200, { model: "alpha-chat", choices: [{ message: { role: "assistant", content: "[answer] You said: what's 17 times 24" }, finish_reason: "stop" }] }]);
+      const noted = await chat(cloud, [strictTool, looseTool], false, "what's 17 times 24\n\nNote from the agent host, not the person:\nServer time: Wednesday, November 25, 2026 at 11:22 AM PST");
+      expect(JSON.parse(noted.text)).toMatchObject({ choices: [{ message: { content: "[answer] You said: what's 17 times 24" } }] });
       await cloud.stop();
       await expect(said(health)).rejects.toThrow();
     } finally {

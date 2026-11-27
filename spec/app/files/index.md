@@ -18,6 +18,11 @@ as an archive, and the browser build keeps no file library of its own.
 - [Scan](./scan.md): pages made into a PDF
 - [Shared](./shared.md): the file vocabulary and the free-name rule
 
+A place opened from the start of Files, and a file's preview, rise over
+what they were opened from as Alpha's earlier build drew them, and Back
+shows it again at once. Before Files has its
+first answer, it shows its header, never a blank screen.
+
 ## Story: Browse my storage
 
 > As the owner, I want to see my volumes, how full they are and my
@@ -84,10 +89,10 @@ type Effect =
   | Search({ ticket: int, where: S::Where, filter: S::Filter })
   | LookInto({ ticket: int, trail: List[int] })
   | AgentLook({ ticket: int, folder: int, filter: S::Filter })
-  | Tell({ request: int, ok: bool, items: List[F::Item] })
+  | Tell({ request: int, ok: bool, items: List[F::Item], complete: bool })
   | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool, downloads: bool })
   | ToTrash({ items: List[int], approval: int })
-  | Show({ item: F::Item, siblings: List[str] })
+  | Show({ item: F::Item, siblings: List[str], owner: bool })
   | Share({ ticket: int, channel: C::Dest, items: List[F::Item], approval: int })
   | Taken({ items: List[int] })
   | Receipt({ ticket: int, ran: bool, outcome: A::Outcome, done: int })
@@ -110,11 +115,11 @@ pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
 pure val volumesValues = Set(List({ id: 1, used: 3, total: 8 }, { id: 9, used: 0, total: 0 }))
 pure val tallyValues = Set({ counts: List({ kind: F::Image, items: 2, bytes: 9 }), trashed: 1 })
-pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 })
-pure val firstValues = Set({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 5 })
-pure val secondValues = Set({ id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 9 }, { id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 })
+pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 })
+pure val firstValues = Set({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0, children: 0 }, { id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 5, children: 0 })
+pure val secondValues = Set({ id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 9, children: 0 }, { id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0, children: 0 })
 pure val trailValues = Set(List(), List(1, 4))
-pure val hitsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
+pure val hitsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0, children: 0 }))
 pure val positionsValues = Set(List(), List(1), List(2, 1), List(3))
 pure val weight_showDownloads = 3
 pure val weight_showDetails = 5
@@ -154,8 +159,8 @@ pure val weight_approve = 2
 pure val weight_approveBatch = 1
 pure val weight_approveNewFolder = 1
 pure val parentPlaceValues = Set({ folder: 1, path: List(), names: List("b") }, { folder: 4, path: List(1), names: List() })
-pure val approvedItemsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }),
-  List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
+pure val approvedItemsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 }),
+  List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0, children: 0 }))
 pure val reviewedFromValues = Set(S::top, { trail: List(1, 4), inCategory: false, category: F::Other })
 pure val weight_renameShown = 1
 pure val weight_openPreviewParent = 1
@@ -174,8 +179,8 @@ pure val weight_closeMoveTo = 8
 pure val weight_closeShare = 8
 pure val entriesValues =
   Set(List())
-    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 })))
-    .union(Set(List({ id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 })))
+    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0, children: 0 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 })))
+    .union(Set(List({ id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 0, children: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0, children: 0 })))
 ```
 
 ### Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place
@@ -228,8 +233,8 @@ with a failure and nothing else.
 
 ```quint
 pure def unanswered(s: S::Search): List[Effect] =
-  (if (s.asker != 0 and s.query.status == R::Loading) List(Tell({ request: s.asker, ok: false, items: List() })) else List())
-    .concat(if (s.peeker != 0 and s.peek.status == R::Loading) List(Tell({ request: s.peeker, ok: false, items: List() })) else List())
+  (if (s.asker != 0 and s.query.status == R::Loading) List(Tell({ request: s.asker, ok: false, items: List(), complete: false })) else List())
+    .concat(if (s.peeker != 0 and s.peek.status == R::Loading) List(Tell({ request: s.peeker, ok: false, items: List(), complete: false })) else List())
 
 pure def told(out: List[Effect], request: int): bool = out.some(e => match e { | Tell(x) => x.request == request | _ => false })
 
@@ -239,7 +244,7 @@ pure def stepTheAgentIsAnswered(before: Files, after: Files, out: List[Effect]):
     and (before.search.peeker != 0 and before.search.peek.status == R::Loading implies
       ((after.search.peeker == before.search.peeker and after.search.peek.ticket == before.search.peek.ticket
           and after.search.peek.status == R::Loading) or told(out, before.search.peeker)))
-    and out.every(e => match e { | Tell(x) => x.ok or x.items.length() == 0 | _ => true })
+    and out.every(e => match e { | Tell(x) => (x.ok or x.items.length() == 0) and (not(x.complete) or x.ok) | _ => true })
 ```
 
 ### Arriving at a place reads it afresh with nothing selected, and the filter on is asked again there, only while Files is open and allowed
@@ -274,7 +279,7 @@ pure def enter(s: Files, by: Actor): Moved = arrived(entered(s.trail, s.inCatego
 
 pure def shut(open: bool, s: Files): Moved =
   { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), tally: untallied, listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
-      details: 0, handed: false,
+      trash: false, details: 0, handed: false,
       search: S::stop(s.search), deleting: V::dismiss(s.deleting), change: C::retire(s.change), sheet: M::close(s.sheet) },
     out: unanswered(s.search) }
 
@@ -284,8 +289,8 @@ pure def leave(s: Files, by: Actor): Moved = shut(false, s)
 
 pure def alwaysNothingIsReadOrHeldWhileClosed(s: Files): bool =
   not(s.open) implies (s.listing.status != R::Loading and s.storage.status != R::Loading and s.search.query.status != R::Loading
-    and s.picked.length() == 0 and s.search.hits.length() == 0 and not(s.deleting.showing) and s.change.panel == 0 and not(s.sheet.open)
-    and s.details == 0)
+    and s.picked.length() == 0 and s.search.hits.length() == 0 and not(s.deleting.showing) and s.change.panel == 0 and not(s.change.clash.showing) and not(s.sheet.open)
+    and not(s.trash) and s.details == 0)
 ```
 
 ### When the phone says Alpha may read the storage the place is read, and when it takes access away, or says the storage cannot be reached at all, everything read is dropped
@@ -613,7 +618,7 @@ const nameBefore: (str, str) => bool
 pure def lawNoNameComesBeforeItself(label: str): bool = not(nameBefore(label, label))
 
 pure def precedes(order: Order, first: F::Item, second: F::Item): bool =
-  if (order == ByName) nameBefore(first.name, second.name)
+  if (order == ByName) first.name != second.name and nameBefore(first.name, second.name)
   else if (order == ByDate) first.revision > second.revision
   else first.bytes > second.bytes
 
@@ -663,7 +668,7 @@ pure def canSearched(s: Files, ticket: int, by: Actor): bool = by == Phone and S
 
 pure def searched(s: Files, ticket: int, ok: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
   val search = S::searched(s.search, ticket, ok, complete, entries.select(i => containsText(i.name, s.search.filter.text)))
-  { state: { ...s, search: search }, out: if (s.search.asker != 0) List(Tell({ request: s.search.asker, ok: ok, items: search.hits })) else List() }
+  { state: { ...s, search: search }, out: if (s.search.asker != 0) List(Tell({ request: s.search.asker, ok: ok, items: search.hits, complete: ok and complete })) else List() }
 
 pure def canClearFilter(s: Files, by: Actor): bool = by == Owner and S::canClearFilter(s.search)
 
@@ -678,12 +683,16 @@ pure def alwaysResultsBelongToThePlaceShowing(s: Files): bool = s.search.hits.le
 
 ### The owner opens a file that is listed or found, with the names beside it, and Recent remembers it
 
+A format the phone can preview opens in Files. For a format without a
+preview, tapping the row opens Android's read-only chooser and holds no
+Recent grant. If the chooser cannot open, Files reports the refusal.
+
 ```quint
 pure def canView(s: Files, file: F::Item, by: Actor): bool =
   by == Owner and allowed(s) and s.open and file.kind != F::Folder and (s.items.includes(file) or s.search.hits.includes(file))
 
 pure def view(s: Files, file: F::Item, by: Actor): Moved =
-  { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() })) }
+  { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: true })) }
 ```
 
 ### A filter can find nothing and find files, and follow the owner to another place
@@ -702,6 +711,58 @@ pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search)
 > see and open a file I am shown, never on a protected screen, without
 > moving what I am working on, and always answered.
 
+### An explicit request to open or filter Files may act directly on the same idle Files view
+
+The phone remembers the place and the list and search tickets when the
+owner sends a typed or spoken request from Files. Each authorized turn
+from Files asks for direct Files execution on that turn, for Files alone
+(`direct-files-v1`); the agent decides from the owner's words whether they
+asked for a filter or an open, and the phone never matches those words.
+When the resident returns that message's one direct filter or open, the
+phone may carry it out once if the owner allows direct action, the same
+place and tickets still show and the open viewer is empty. A turn whose
+reply proposes nothing leaves Files as it is; any other Files proposal, an
+unreadable preference, or a work item in progress keeps the usual review. A
+spoken request uses its own current voice turn and conversation,
+declares only the Files capabilities, with opening at once a page the
+owner's whole message asked for (`browser.open-direct.v1`, see
+[Browser](../browser/index.md)) while the owner lets Alpha open it with no
+card, and, since voice shows no Files review card,
+asks for a filter or an open only (`direct-files-only-v1`): the agent
+refuses a change by voice and has the owner ask for it in the chat, where
+its card shows. A page open the agent keeps for review on that turn still
+shows its card, as Browser has it, and the turn still says its Files
+result beside that card, as v119 never hushed a direct turn, while Talk's
+notice follows that card ([Voice](../voice/index.md)). An attached document does not authorize a direct action. The agent gets a result receipt without the
+opened file's contents. An open counts only when that folder loaded or
+that file could be shown.
+
+```quint
+pure def freeForDirectRead(s: Files): bool =
+  s.open and allowed(s) and not(s.trash) and s.picked.length() == 0 and s.details == 0
+    and not(s.deleting.showing) and not(C::busy(s.change)) and not(C::asking(s.change))
+    and s.change.panel == 0 and not(s.sheet.open)
+    and s.listing.status != R::Loading and s.search.query.status != R::Loading
+```
+
+### An exact Files request from another screen may open Files once after the typed reply finishes
+
+With direct Files actions allowed, each authorized turn from a screen that
+may bring Files forward asks for direct Files execution, as a turn from
+Files does, and the agent's one direct filter, or open by path, can open
+Files after the same turn finishes. Positions only name results that
+already show in Files, so an open by position never starts from another
+screen. Every other proposal of the turn keeps its card.
+Closing Ask Alpha, leaving the source or Files, or asking another
+question cancels the continuation. Files first loads its storage and
+settles its listing. The exact item then has to open or the filter finish
+before its result is reported. No file contents go with that report.
+
+```quint
+pure def readyForFilesContinuation(s: Files): bool =
+  s.open and allowed(s) and s.storage.status == R::Loaded and s.listing.status != R::Loading
+```
+
 ### The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen
 
 Whether the screen is protected is the approvals area's fact. The agent
@@ -712,7 +773,7 @@ pure def canAgentLook(s: Files, request: int, target: int, wanted: S::Filter, gu
 
 pure def agentLook(s: Files, request: int, target: int, wanted: S::Filter, guarded: bool, by: Actor): Moved =
   val search = S::agentLook(s.search, request)
-  if (not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+  if (not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
   else { state: { ...s, search: search },
     out: unanswered({ ...s.search, asker: 0 }).append(AgentLook({ ticket: search.peek.ticket, folder: target, filter: wanted })) }
 
@@ -720,25 +781,29 @@ pure def canAgentLooked(s: Files, ticket: int, by: Actor): bool = by == Phone an
 
 pure def agentLooked(s: Files, ticket: int, ok: bool, entries: List[F::Item], by: Actor): Moved =
   { state: { ...s, search: S::agentLooked(s.search, ticket, ok) },
-    out: List(Tell({ request: s.search.peeker, ok: ok, items: if (ok) entries else List() })) }
+    out: List(Tell({ request: s.search.peeker, ok: ok, items: if (ok) entries else List(), complete: false })) }
 ```
 
 ### The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed
+
+The result counts only what came back from the current search and says
+when the phone could not finish reading. The count does not travel as an
+attachment or a list of file identities in the device receipt.
 
 ```quint
 pure def canAgentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, by: Actor): bool = by == Agent and request > 0
 
 pure def agentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, by: Actor): Moved =
-  if (not(s.open) or not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+  if (not(s.open) or not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
   else asking(wanted, request, s)
 ```
 
 ### An approved filter for a named folder goes to that folder before it searches
 
-The primary folder path is resolved on the phone. Its filter can replace
-a previous read, but cannot move an open preview, a selection, or a
-change in progress. The owner sees the named folder and the requested
-filter, with one answer for the agent.
+The primary folder path is resolved on the phone. A request with no folder
+starts at Browse and searches Internal storage. A filter can replace a
+previous read when the preview, selection and change sheets are closed.
+The owner sees the requested place and filter, with one answer for the agent.
 
 ```quint
 pure def canAgentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: List[int], guarded: bool, by: Actor): bool =
@@ -752,7 +817,7 @@ pure def agentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: L
   val filtered = asking(wanted, request, there.state)
   if (safe and known)
     { state: filtered.state, out: unanswered({ ...s.search, peeker: 0 }).concat(there.out).concat(filtered.out) }
-  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
 ```
 
 ### The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed
@@ -765,8 +830,8 @@ pure def canAgentOpen(s: Files, request: int, file: F::Item, previewing: bool, g
 pure def agentOpen(s: Files, request: int, file: F::Item, previewing: bool, guarded: bool, by: Actor): Moved =
   val visible = if (s.search.searching) s.search.hits else s.items
   if (allowed(s) and s.open and not(s.trash) and not(guarded) and not(previewing) and file.kind != F::Folder and visible.includes(file))
-    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() }), Tell({ request: request, ok: true, items: List(file) })) }
-  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: false }), Tell({ request: request, ok: true, items: List(file), complete: false })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
 ```
 
 ### A reviewed exact path opens its file or folder; a shown position is bound to the same path at review
@@ -791,10 +856,10 @@ pure def openReviewed(s: Files, request: int, file: F::Item, openedTrail: List[i
     and openedTrail.nthOr(0, 0) == file.volume and openedTrail.nthOr(openedTrail.length() - 1, 0) == file.id
     and s.volumes.some(v => v.id == file.volume)
   val opened = if (folder) entered(openedTrail, false, F::Other, { ...s, handed: false }) else
-    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() })) }
+    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: false })) }
   if (safe and file.id > 0 and (not(folder) or (resting and path)))
-    { state: opened.state, out: opened.out.append(Tell({ request: request, ok: true, items: List(file) })) }
-  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+    { state: opened.state, out: opened.out.append(Tell({ request: request, ok: true, items: List(file), complete: false })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
 
 pure def stepReviewedOpenKeepsAFileInItsPreview(before: Files, via: str, after: Files, out: List[Effect]): bool =
   via == "openReviewed" implies out.every(e => match e {
@@ -829,7 +894,7 @@ when the card is built; a refresh of Files after that changes nothing on it.
 ```quint
 pure def atPositions(hits: List[F::Item], positions: List[int]): List[F::Item] =
   if (positions.length() > 0 and positions.every(p => p >= 1 and p <= hits.length()))
-    positions.listMap(p => hits.nthOr(p - 1, { id: 0, name: "", revision: 0, kind: F::Other, volume: 0, bytes: 0 }))
+    positions.listMap(p => hits.nthOr(p - 1, { id: 0, name: "", revision: 0, kind: F::Other, volume: 0, bytes: 0, children: 0 }))
   else List()
 
 pure def lawAPositionNamesOnlyAResultShown(hits: List[F::Item], positions: List[int]): bool =
@@ -861,7 +926,40 @@ pure def sometimesTheAgentFiltered(s: Files): bool = S::finding(s.search) == S::
 > copy, share or delete them, one change at a time, a deletion only after I
 > confirmed what goes, and the agent's request only as I approved it.
 
+### A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows
+
+A share, move, deletion or new folder the agent proposes while Files is not
+on screen cannot be reviewed there, since the approvals area builds a Files
+card only from what Files shows. The request instead shows the notice
+"Open Files to review this action." with Decline only, as the earlier Alpha
+did, and nothing runs. When the owner opens Files, the area reads the request
+again. If it is still open, unexpired, from this enrollment and an answer to
+the latest message sent, the area builds its card afresh for Files as it now
+shows, and approving it holds to that screen as every card does. A request
+that is no longer open, or that Files cannot review, leaves no card. Alpha
+never opens Files for the request itself.
+
+```quint
+type ChangeCard = ChangeHidden | ChangeNotice | ChangeReviewed
+pure def changeCard(filesShown: bool, reviewable: bool, stillOpen: bool, latest: bool): ChangeCard =
+  if (not(stillOpen) or not(latest)) ChangeHidden
+  else if (not(filesShown)) ChangeNotice
+  else if (reviewable) ChangeReviewed
+  else ChangeHidden
+pure def lawOnlyFilesOnScreenBuildsTheCard(reviewable: bool, stillOpen: bool, latest: bool): bool =
+  changeCard(false, reviewable, stillOpen, latest) != ChangeReviewed
+pure def lawAStaleRequestLeavesNoCard(filesShown: bool, reviewable: bool): bool =
+  changeCard(filesShown, reviewable, false, true) == ChangeHidden and changeCard(filesShown, reviewable, true, false) == ChangeHidden
+pure def lawAnOpenLatestRequestAwayFromFilesShowsTheNotice(reviewable: bool): bool =
+  changeCard(false, reviewable, true, true) == ChangeNotice
+```
+
 ### The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation
+
+Holding a listed row still for half a second selects it. Dragging, leaving
+its row or releasing early cancels the hold, and a hold that selects never
+also opens the item or toggles it off when the owner lifts their finger.
+Each row also has a keyboard-accessible way to select it.
 
 ```quint
 pure def selected(picked: List[int], s: Files): Files =
@@ -1006,11 +1104,11 @@ pure def stepADestinationIsAFolderAsRead(before: Files, via: str, after: Files):
   (via == "begin" and moving(after.change.work) and after.change.attempt.id != before.change.attempt.id) implies
     (M::ready(before.sheet) and after.change.dest == M::place(before.sheet))
 
-pure def canKeepBoth(s: Files, by: Actor): bool = by == Owner and C::canKeepBoth(s.change)
+pure def canKeepBoth(s: Files, by: Actor): bool = by == Owner and s.open and allowed(s) and C::canKeepBoth(s.change)
 
 pure def keepBoth(s: Files, by: Actor): Moved = { state: { ...s, change: C::keepBoth(s.change) }, out: performing(C::keepBoth(s.change), s) }
 
-pure def canReplaceThem(s: Files, by: Actor): bool = by == Owner and C::canReplaceThem(s.change)
+pure def canReplaceThem(s: Files, by: Actor): bool = by == Owner and s.open and allowed(s) and C::canReplaceThem(s.change)
 
 pure def replaceThem(s: Files, by: Actor): Moved = { state: { ...s, change: C::replaceThem(s.change) }, out: performing(C::replaceThem(s.change), s) }
 

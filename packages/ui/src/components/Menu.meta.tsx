@@ -50,6 +50,18 @@ export const meta: ComponentMeta<MenuProps> = {
     Default: async () => {
       onShare.mockClear();
       const trigger = screen.getByRole("button", { name: "More" });
+      const pointer = (target: Element, type: "pointerdown" | "pointerup" | "click", pointerType = "touch") => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType, isPrimary: true }));
+      pointer(trigger, "pointerdown");
+      const share = await screen.findByRole("menuitem", { name: "Share" });
+      pointer(share, "pointerup", "mouse");
+      pointer(share, "pointerup");
+      pointer(share, "click");
+      await expect([onShare.mock.calls.length, screen.queryByRole("menu") === null]).toEqual([0, false]);
+      pointer(share, "pointerdown");
+      pointer(share, "pointerup");
+      pointer(share, "click");
+      await waitFor(() => expect([onShare.mock.calls.length, screen.queryByRole("menu")]).toEqual([1, null]));
+      onShare.mockClear();
       trigger.focus();
       await userEvent.keyboard("{Enter}");
       await expect(await screen.findByRole("menu")).toBeTruthy();

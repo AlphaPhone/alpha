@@ -2,10 +2,10 @@
 import { Time } from "../runtime/index.vibe"
 
 module pure {
-  /** Converts a timestamp in milliseconds or seconds into whole Unix seconds. @throws {never} */
-  export function toSeconds(timestamp: number): number {
+  /** Converts a timestamp in milliseconds or seconds into whole Unix milliseconds. @throws {never} */
+  export function toMillis(timestamp: number): number {
     if (!Number.isFinite(timestamp) || timestamp <= 0) return 0
-    return timestamp >= 1e11 ? Math.floor(timestamp / 1000) : Math.floor(timestamp)
+    return timestamp >= 1e11 ? Math.floor(timestamp) : Math.floor(timestamp * 1000)
   }
 
   /** Deterministic positive integer identifier for mapping string Cloud account and grant IDs into spec machine IDs. @throws {never} */
@@ -18,20 +18,10 @@ module pure {
     return ((hash >>> 1) % 1_000_000_000) + 1
   }
 }
-import { accountIdNumber, toSeconds } from pure
-export { accountIdNumber, toSeconds }
+import { accountIdNumber, toMillis } from pure
+export { accountIdNumber, toMillis }
 
-/** Adapts Alpha's millisecond Time service to whole seconds for the account specs. */
-export const secondsTime = Layer.effect(Time, effect {
-  const ms = try Time
-  return {
-    now: () => Effect.map(ms.now(), (value) => Math.floor(value / 1000)),
-    latest: () => Effect.map(ms.latest(), (value) => Math.floor(value / 1000)),
-    until: (seconds: number) => ms.until(seconds * 1000),
-  }
-})
-
-/** Current time in whole seconds from the root millisecond Time service. */
-export effect function nowSeconds(): number!!Time {
-  return Math.floor((try (try Time).now()) / 1000)
+/** Current time in whole milliseconds from the root Time service. */
+export effect function nowMillis(): number!!Time {
+  return try (try Time).now()
 }

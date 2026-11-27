@@ -24,6 +24,10 @@ Reminders belong to the notices area: Calendar shows them among the events,
 as many as it is told of. Which app is showing, and Back between apps, belong
 to the [shell](../shell/).
 
+An event and the form rise over the days as Alpha's earlier build drew them,
+and the days stay under them as they were. Before Calendar has its first
+answer, it shows its header, never a blank screen or a spinner.
+
 ## Story: See my days
 
 > As the owner, I want one calendar of the events on my phone and in my
@@ -56,7 +60,7 @@ type Calendar = {
   layout: Layout, wide: bool, today: int, anchor: int,
   access: P::Permission, phone: R::Read, phoneDay: int, phoneRows: int, phoneLimited: bool,
   owner: int, connected: bool, google: R::Read, googleDay: int, googleRows: int, hidden: Set[int],
-  reminders: int, remindersDay: int, overlay: Overlay,
+  reminders: int, remindersDay: int, reminder: int, overlay: Overlay,
   open: int, local: bool, web: bool, place: bool, video: bool, detail: Detail, event: R::Read,
   front: bool, readAt: int, writing: bool, again: bool,
 }
@@ -75,7 +79,7 @@ pure val initial: Calendar = {
   layout: Timeline, wide: false, today: 0, anchor: 0,
   access: P::unasked, phone: R::unread, phoneDay: 0, phoneRows: 0, phoneLimited: false,
   owner: 0, connected: false, google: R::unread, googleDay: 0, googleRows: 0, hidden: Set(),
-  reminders: 0, remindersDay: 0, overlay: NoOverlay,
+  reminders: 0, remindersDay: 0, reminder: 0, overlay: NoOverlay,
   open: 0, local: false, web: false, place: false, video: false, detail: Showing, event: R::unread,
   front: false, readAt: 0, writing: false, again: false,
 }
@@ -228,11 +232,11 @@ pure def alwaysColumnsOnlyOnAWideScreen(s: Calendar): bool = s.layout == Columns
 ### The layout menu and the month dialog open over the days, never over an open event
 
 ```quint
-pure def canOpenLayoutMenu(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
+pure def canOpenLayoutMenu(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
 
 pure def openLayoutMenu(s: Calendar): Calendar = { ...s, overlay: LayoutMenu }
 
-pure def canOpenMonth(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
+pure def canOpenMonth(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
 
 pure def openMonth(s: Calendar): Calendar = { ...s, overlay: MonthDialog }
 
@@ -261,7 +265,7 @@ pure def chooseLayout(s: Calendar, layout: Layout): Viewed =
 The month dialog closes; from the agenda, the timeline shows the day picked.
 
 ```quint
-pure def canPickDay(s: Calendar, day: int): bool = s.open == 0 and s.overlay != LayoutMenu and day != s.anchor
+pure def canPickDay(s: Calendar, day: int): bool = s.open == 0 and s.reminder == 0 and s.overlay != LayoutMenu and day != s.anchor
 
 pure def pickDay(s: Calendar, day: int): Viewed =
   readFor(day, { ...s, overlay: NoOverlay, layout: if (s.layout == Agenda) Timeline else s.layout })
@@ -270,7 +274,7 @@ pure def pickDay(s: Calendar, day: int): Viewed =
 ### Today comes back to today
 
 ```quint
-pure def canGoToday(s: Calendar): bool = s.open == 0 and s.overlay == NoOverlay and s.anchor != s.today
+pure def canGoToday(s: Calendar): bool = s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and s.anchor != s.today
 
 pure def goToday(s: Calendar): Viewed = readFor(s.today, s)
 ```
@@ -323,19 +327,55 @@ pure def sometimesTheAgendaFollowedTheDate(s: Calendar): bool = s.layout == Agen
 > after that to send me to Android's Calendar settings, so that I am never
 > asked again and again.
 
+### A reviewed workflow reads only the selected phone calendars in its approved range
+
+The phone checks the existing read grant and foreground before and after
+reading. It queries only the approved calendar IDs, interval, time zone
+and event limit. A stale Workflows review or a reply outside that scope
+settles without calendar data. The reply carries only the event identity,
+title, time, all-day flag and the revision of those fields.
+
 ### Calendar asks for the phone's calendar only while it lacks it, and only once
+
+As live v119 did, Calendar shows no notice asking for it: opening New event
+on a phone with calendars of its own asks Android while the agent's
+calendar is not connected, so the event would go to the phone's, and Save
+to the phone's calendar asks too, waits for the answer, and goes out only
+with access. Either asks only while Calendar may still ask; after that,
+Calendar's settings notice, on the days and on a form going to the phone's
+calendar, is the way to grant it, and Save to the phone's calendar waits
+for it. v119's default Agent Calendar never asked at New event; only its
+opt-in Android calendars mode did, where the phone's own calendars are the
+calendar, which here is a phone with no agent's calendar connected. Once
+Android said no, the form going to the phone's calendar says No access, as
+v119 did.
 
 ```quint
 pure def canAskAccess(s: Calendar): bool = P::canAsk(s.access)
+
+pure def asksAtNewEvent(s: Calendar): bool = canAskAccess(s) and not(s.connected)
+
+pure def phoneTakesASave(s: Calendar): bool = P::allows(s.access) or canAskAccess(s)
+
+pure def lawADeniedPhoneTakesNoSave(grant: P::Grant): bool =
+  not(phoneTakesASave({ ...initial, access: { grant: grant, asked: true } })) or grant == P::Granted or grant == P::Limited
+
+pure def lawAConnectedAgentIsNeverAskedForAtNewEvent(grant: P::Grant): bool =
+  not(asksAtNewEvent({ ...initial, connected: true, access: { grant: grant, asked: false } }))
 
 pure def askAccess(s: Calendar): Viewed = { state: { ...s, access: P::ask(s.access) }, out: List(AskAccess) }
 ```
 
 ### What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go
 
+Calendar reads the current grant when it comes into view or the phone
+returns to it. That read asks for no permission. Losing the grant closes
+an open phone event.
+
 ```quint
 pure def accessAnswered(s: Calendar, grant: P::Grant): Viewed =
-  val told = { ...s, access: P::observe(s.access, grant) }
+  val seen = { ...s, access: P::observe(s.access, grant) }
+  val told = if (not(P::allows(seen.access)) and s.local) closeEvent(seen) else seen
   if (P::allows(told.access) and not(P::allows(s.access))) readFor(s.anchor, told)
   else { state: { ...told, phoneRows: if (P::allows(told.access)) s.phoneRows else 0, phoneLimited: P::allows(told.access) and s.phoneLimited }, out: List() }
 ```
@@ -385,7 +425,7 @@ pure def sometimesNotConnected(s: Calendar): bool = not(s.connected) and s.phone
 
 ### Calendar shows the reminders it is told of for the day it shows, among that day's events
 
-The notices area keeps the reminders and tells Calendar how many fall on
+The Reminders area keeps the reminders and tells Calendar how many fall on
 the day it is anchored to; moving to another day sets them aside until it
 is told of that day's. The screen places each at its time among the events.
 
@@ -431,6 +471,27 @@ pure def sometimesEmptyWithoutThePhone(s: Calendar): bool = empty(s) and not(P::
 pure def sometimesRemindersAmongEvents(s: Calendar): bool = s.reminders > 0 and s.phoneRows > 0
 ```
 
+### Opening a reminder shows that reminder by itself until I go back
+
+The screen offers the Reminders area's actual dated rows. Selecting one
+shows its own detail without opening a calendar event or giving that day's
+events to Ask Alpha. Back and leaving Calendar retire the selection.
+
+```quint
+pure def canOpenReminder(s: Calendar, id: int): bool =
+  id > 0 and s.front and s.open == 0 and s.reminder == 0 and (s.overlay == NoOverlay or s.overlay == Search)
+
+pure def openReminder(s: Calendar, id: int): Calendar = { ...s, reminder: id, overlay: NoOverlay }
+
+pure def canCloseReminder(s: Calendar): bool = s.reminder > 0
+
+pure def closeReminder(s: Calendar): Calendar = { ...s, reminder: 0 }
+
+pure def alwaysAnOpenReminderShowsAlone(s: Calendar): bool = s.reminder > 0 implies (s.front and s.open == 0 and s.overlay == NoOverlay)
+
+pure def sometimesAnOpenReminder(s: Calendar): bool = s.reminder == 1
+```
+
 ## Story: Look at an event
 
 > As the owner, I want to open an event to see where it is, who comes and
@@ -447,7 +508,7 @@ words.
 
 ```quint
 pure def canOpenEvent(s: Calendar, id: int, local: bool, web: bool): bool =
-  s.open == 0 and s.overlay == NoOverlay and id > 0 and s.phoneRows + s.googleRows > 0
+  s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and id > 0 and s.phoneRows + s.googleRows > 0
     and not(local and web) and (if (local) s.phoneRows > 0 else s.googleRows > 0)
 
 pure def openEvent(s: Calendar, id: int, place: bool, video: bool, local: bool, web: bool): Calendar =
@@ -551,15 +612,20 @@ pure def sometimesGoneOnReturn(s: Calendar): bool = s.open == 0 and s.event.stat
 
 Search reads nothing new: it lists the rows the reads around the anchored
 day found whose title, place or notes hold every word typed, case-folded,
-and says which dates it covers. The Calendars sheet lists the agent's
-calendar and the phone's, each with its switch.
+and names the window from the first of last month through the end of next
+month. Empty standalone Search without a connected calendar says Not connected
+with or without a query. The Calendars sheet lists the agent's calendar and the
+phone's, each with its switch. Only a wide screen offers Search, the layouts and
+the Calendars sheet: on a phone, Calendar's header holds the month, Today and New
+event, and the month dialog only its days, as Alpha's build of 22 November drew
+them.
 
 ```quint
-pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
+pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
 
 pure def openSearch(s: Calendar): Calendar = { ...s, overlay: Search }
 
-pure def canOpenCalendars(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
+pure def canOpenCalendars(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
 
 pure def openCalendars(s: Calendar): Calendar = { ...s, overlay: CalendarsSheet }
 ```
@@ -607,7 +673,7 @@ pure def canOwnerChanged(s: Calendar, owner: int, hidden: Set[int]): bool = owne
 
 pure def ownerChanged(s: Calendar, owner: int, hidden: Set[int]): Calendar =
   { ...s, owner: owner, hidden: hidden, connected: false, googleRows: 0,
-    open: 0, local: false, web: false, place: false, video: false, detail: Showing,
+    open: 0, reminder: 0, local: false, web: false, place: false, video: false, detail: Showing,
     overlay: if (s.overlay == CalendarsSheet) NoOverlay else s.overlay }
 ```
 
@@ -647,7 +713,7 @@ pure def readOrWait(day: int, s: Calendar): Viewed =
 pure def canFrontChanged(s: Calendar, front: bool, now: int): bool = front != s.front
 
 pure def frontChanged(s: Calendar, front: bool, now: int): Viewed =
-  if (front) readOrWait(s.anchor, { ...s, front: true, readAt: now }) else { state: { ...s, front: false, overlay: NoOverlay }, out: List() }
+  if (front) readOrWait(s.anchor, { ...s, front: true, readAt: now }) else { state: { ...s, front: false, reminder: 0, overlay: NoOverlay }, out: List() }
 ```
 
 ### Leaving Calendar closes its search, its sheets and its dialogs
@@ -721,7 +787,7 @@ pure def sometimesReadAfterAMinute(s: Calendar): bool = s.front and s.readAt == 
 pure def canOpenOn(s: Calendar, day: int): bool = day >= 0 and s.detail == Showing
 
 pure def openOn(s: Calendar, day: int): Viewed =
-  val cleared = { ...s, overlay: NoOverlay, open: 0, local: false, web: false, place: false, video: false,
+  val cleared = { ...s, overlay: NoOverlay, open: 0, reminder: 0, local: false, web: false, place: false, video: false,
     layout: if (s.layout == Agenda and day != s.today) Timeline else s.layout }
   readFor(day, cleared)
 ```
@@ -742,7 +808,7 @@ signed in.
 ```quint
 pure def selectedEvent(s: Calendar): int = if (s.open != 0 and s.detail == Showing) s.open else 0
 
-pure def dayGiven(s: Calendar): bool = s.open == 0 and s.overlay == NoOverlay and not(s.writing) and s.owner > 0
+pure def dayGiven(s: Calendar): bool = s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and not(s.writing) and s.owner > 0
 
 pure def alwaysTheSelectionIsWhatShows(s: Calendar): bool =
   (selectedEvent(s) != 0 implies (s.open == selectedEvent(s) and s.detail == Showing)) and not(dayGiven(s) and selectedEvent(s) != 0)

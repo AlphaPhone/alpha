@@ -107,13 +107,14 @@ pure def stepALinkOpensOnlyFromTheReview(before: Text, via: str, after: Text): b
 ### A poster's text is asked for an event, and the answer opens the Calendar form for the owner to review, finds none, or says the Calendar is unavailable
 
 The scan writes nothing to the calendar; only the newest asking counts.
+Discovered by the proof: a suggestion answer counts only while its asking holds a page with read text.
 
 ```quint
 pure def canSuggest(t: Text, page: K::Page): bool = worded(page)
 
 pure def suggest(t: Text, page: K::Page): Text = { ...t, event: R::ask(t.event), eventOf: page, found: false }
 
-pure def canSuggested(t: Text, ticket: int): bool = R::canAnswer(t.event, ticket)
+pure def canSuggested(t: Text, ticket: int): bool = R::canAnswer(t.event, ticket) and worded(t.eventOf)
 
 pure def suggested(t: Text, ticket: int, ok: bool, found: bool): Text = { ...t, event: R::answer(t.event, ok), found: ok and found }
 

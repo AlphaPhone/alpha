@@ -269,7 +269,7 @@ export function BillingView({ runtime }: { readonly runtime: AccountRuntime }) {
         <ListGroup heading="Plans">
           {shelf.offers.map((offer) => {
             const tier = offer.key === "pro_monthly" ? "Pro" : "Plus";
-            const chooseEvent = { type: "choosePlan", tier, signIn, standing: planState.standing, origin: "ByOwner", elsewhere: changeBusy || codesBusy, now: untimed } as const;
+            const chooseEvent = { type: "choosePlan", tier, reviewed: billState.reviewNumber, signIn, standing: planState.standing, origin: "ByOwner", elsewhere: changeBusy || codesBusy, now: untimed } as const;
             return (
               <ListRow
                 key={offer.key}

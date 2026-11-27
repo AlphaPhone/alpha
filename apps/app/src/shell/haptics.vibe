@@ -17,15 +17,16 @@ module page {
   const removing = /^(delete|discard|erase|remove|replace|clear|reset|sign out)\b/i
   /** @throws {never} */
   export function clicked(event: Event): Clicked {
-    const target = event.target instanceof Element ? event.target.closest("button, [role=switch], input[type=checkbox]") : null
+    const target = event.target instanceof Element ? event.target.closest("button, [role=switch], [role=checkbox], input[type=checkbox]") : null
     if (target === null) return { role: "NotAControl", disabled: false, inert: false, checked: false, inDialog: false, destructive: false }
-    const checkbox = target instanceof HTMLInputElement
-    const role = checkbox ? "CheckboxSwitch" : target.getAttribute("role") === "switch" ? "ButtonSwitch" : "PlainButton"
+    const inputBox = target instanceof HTMLInputElement
+    const roleAttr = target.getAttribute("role")
+    const role = inputBox || roleAttr === "checkbox" ? "CheckboxSwitch" : roleAttr === "switch" ? "ButtonSwitch" : "PlainButton"
     return {
       role,
       disabled: target.hasAttribute("disabled") || target.getAttribute("aria-disabled") === "true",
       inert: target.closest("[inert]") !== null,
-      checked: checkbox ? target.checked : target.getAttribute("aria-checked") === "true",
+      checked: inputBox ? target.checked : target.getAttribute("aria-checked") === "true",
       inDialog: target.closest("[role=dialog], [role=alertdialog]") !== null,
       destructive: target.hasAttribute("data-destructive") || removing.test((target.textContent ?? "").trim()),
     }

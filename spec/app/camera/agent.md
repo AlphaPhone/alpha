@@ -162,6 +162,11 @@ pure def stepShootsTheViewApproved(before: Capture, via: str, after: Capture): b
 
 ### A capture is taken only when the phone saved a photo it names; any other answer, or the camera released first, is uncertain
 
+The receipt and any retry carry the optional photo-library identifier only
+when the current agent connection negotiated it. The phone retains the full
+saved-photo evidence in its own journal, and the receipt still names the
+same saved photo when the optional identifier is omitted.
+
 ```quint
 pure def canCaptured(s: Capture, request: int, by: Actor): bool = by == Phone and s.stage == Shooting and A::canConclude(s.shot, request)
 
@@ -171,6 +176,19 @@ pure def captured(s: Capture, request: int, photo: int, by: Actor): Capture =
 pure def canLost(s: Capture, by: Actor): bool = by == Phone and s.stage == Shooting
 
 pure def lost(s: Capture, by: Actor): Capture = { ...s, stage: Over, shot: A::conclude(s.shot, true, false), result: Uncertain, photo: 0 }
+```
+
+### A confirmed capture can be offered in the same draft for the owner to send
+
+With the same Camera visit still visible and unlocked, the saved photo may
+fill the empty photo slot of the draft that requested it. It stays local
+until the owner sends the draft. If the visit, draft, or saved photo has
+changed, the capture still has its own result. Reporting a saved receipt
+again makes no draft offer.
+
+```quint
+pure def offeringPhoto(s: Capture, request: int, photo: int): bool =
+  s.stage == Over and s.result == Taken and s.approvedBy == Owner and s.request == request and s.photo == photo and photo > 0
 ```
 
 ### A request ended without a shutter fired none; an uncertain one fired exactly one and is never shot again; a taken one names its photo

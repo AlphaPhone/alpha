@@ -1,29 +1,11 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"
-import { managedGmailClient, type ManagedGmailClient, type ManagedGmailTransport, AttachmentRefused, MailProtocolFailed, MailUnreachable, reviewOpaqueAttachment, type MailAttachmentReviewer } from "@elizaos/plugin-inbox-client"
-import { type Account, Garbled, Refused } from "../platform/index.vibe"
+import { managedGmailClient, type ManagedGmailClient, type ManagedGmailTransport, AttachmentRefused, MailProtocolFailed, MailUnreachable, type MailAttachmentReviewer } from "@elizaos/plugin-inbox-client"
+import { reviewMailAttachment } from "@elizaos/plugin-files-client"
+import type { Account } from "../platform/index.vibe"
+import { Garbled, Refused } from "../platform/index.vibe"
 
-const previewLimit = 512 * 1024
-
-module web {
-  /** Decode a reviewed UTF-8 attachment, refusing bytes that only claim to be text. @throws {never} */
-  export function textOf(data: string): string | undefined {
-    try {
-      const bytes = Uint8Array.from(atob(data), (character) => character.charCodeAt(0))
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
-    } catch {
-      return undefined
-    }
-  }
-}
-import { textOf } from web
-
-const preview: MailAttachmentReviewer = effect (file) => {
-  const checked = try reviewOpaqueAttachment(file)
-  const text = checked.mimeType === "text/plain" && checked.size <= previewLimit ? textOf(checked.dataBase64) : undefined
-  if (text === undefined) throw new AttachmentRefused({ detail: "No text preview is available" })
-  const { name, mimeType, size, sha256 } = checked
-  return { name, mimeType, size, sha256, text }
-}
+const preview: MailAttachmentReviewer = (file) =>
+  mapError(reviewMailAttachment({ ...file, mimeType: file.mimeType.toLowerCase() }), (failure) => new AttachmentRefused({ detail: failure.message }))
 
 /** The pinned Inbox client over the same device-key relay as the rest of Alpha's Cloud. */
 export function provider(cloud: Account): ManagedGmailClient {
@@ -35,7 +17,7 @@ export function provider(cloud: Account): ManagedGmailClient {
         ? HttpClientRequest.get(route, { urlParams: params })
         : HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(route, { urlParams: params }), options.body)
       return cloud.call(request) catch effect (cause) => match (cause) {
-        when Refused: throw new MailProtocolFailed({ code: "http", status: cause.status, reason: "" });
+        when Refused: throw new MailProtocolFailed({ code: "http", status: cause.status, reason: cause.reason ?? "" });
         when Garbled: throw new MailProtocolFailed({ code: "invalid-response", status: 0, reason: "" });
         default: throw new MailUnreachable({ cause });
       }

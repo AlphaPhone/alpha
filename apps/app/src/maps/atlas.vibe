@@ -1,17 +1,11 @@
 // spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places, the Calendar event it came from, the agent's question and the agent's last read"
 import type { CloudClient } from "../platform/index.vibe"
+import { fresh } from "../runtime/index.vibe"
+import { createShelf } from "../runtime/index.vibe"
 import type { Point } from "./geometry.ts"
 
 /** What Cloud answered about the account's Maps: its provider, coverage, tiles and credits. */
 export type Coverage = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>
-
-module web {
-  /** A random id for a handle that names a place on this phone only. @throws {never} */
-  export function fresh(): string {
-    return globalThis.crypto.randomUUID()
-  }
-}
-import { fresh } from web
 
 /** A place of the map beyond its number, which the spec never holds: what the provider said of it, or a dropped pin. */
 export interface Spot {
@@ -33,7 +27,7 @@ export interface Turn {
   readonly instruction: string
   readonly at: Point
   readonly meters: number
-  /** The provider's kind of turn, such as "left" or "arrive", for its arrow; none when the provider names none. */
+  /** The manoeuvre the provider names for the turn, drawn as its icon; none goes straight on. */
   readonly maneuver?: string
 }
 
@@ -43,6 +37,8 @@ export interface Way {
   readonly seconds: number
   readonly line: readonly Point[]
   readonly turns: readonly Turn[]
+  /** Whether the provider timed the route with live traffic. */
+  readonly live?: boolean
 }
 
 /** Where the phone was last seen, and whether the fix was only approximate. */
@@ -78,101 +74,189 @@ export interface Seen {
   readonly showings: number
 }
 
-const empty: Seen = { spots: new Map(), results: [], origins: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined, showings: 0 }
-const accounts = new Map<string, number>()
-let current: Seen = empty
-const listeners = new Set<() => void>()
-const byProvider = new Map<string, number>()
-const handles = new Map<number, string>()
-let next = 1
+const maxCached = 12
 
-function change(patch: Partial<Seen>): void {
-  current = { ...current, ...patch }
-  for (const listener of [...listeners]) listener()
+const empty = (): Seen => ({
+  spots: new Map(), results: [], origins: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined, showings: 0,
+})
+
+// spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"
+/** Strip provider-supplied place details, retaining only the place identity, name, category and coordinates. */
+export function withoutDetails(spot: Spot): Spot {
+  const { address: _address, phone: _phone, website: _website, hours: _hours, ...kept } = spot
+  return kept
+}
+
+function keyOf(spot: Spot): string {
+  return spot.providerId !== "" ? `${spot.providerId}/${spot.id}` : `@${spot.at.lat},${spot.at.lng}`
+}
+
+function mergeSpot(prior: Spot | undefined, next: Spot): Spot {
+  if (prior === undefined) return next
+  return {
+    ...prior,
+    ...next,
+    ...(next.address !== undefined ? { address: next.address } : prior.address !== undefined ? { address: prior.address } : {}),
+    ...(next.phone !== undefined ? { phone: next.phone } : prior.phone !== undefined ? { phone: prior.phone } : {}),
+    ...(next.website !== undefined ? { website: next.website } : prior.website !== undefined ? { website: prior.website } : {}),
+    ...(next.hours !== undefined ? { hours: next.hours } : prior.hours !== undefined ? { hours: prior.hours } : {}),
+  }
+}
+
+function boundedMap<K, V>(prior: ReadonlyMap<K, V>, key: K, value: V, limit: number): Map<K, V> {
+  const next = new Map(prior)
+  next.delete(key)
+  next.set(key, value)
+  while (next.size > limit) {
+    const oldest = next.keys().next()
+    if (oldest.done) break
+    next.delete(oldest.value)
+  }
+  return next
+}
+
+/** Scoped Maps atlas service, reset cleanly whenever its runtime scope closes. */
+export service Atlas {
+  readonly snapshot: () => Seen
+  readonly subscribe: (listener: () => void) => () => void
+  readonly numberOf: (spot: Spot) => number
+  readonly numberAll: (spots: ReadonlyArray<Spot>) => number[]
+  readonly spot: (place: number) => Spot | undefined
+  readonly found: (places: ReadonlyArray<number>) => void
+  readonly originsFound: (places: ReadonlyArray<number>) => void
+  readonly routed: (ticket: number, ways: ReadonlyArray<Way>) => void
+  readonly way: (ticket: number, chosen: number) => Way | undefined
+  readonly located: (here: Here) => void
+  readonly showMe: () => void
+  readonly covered: (ticket: number, coverage: Coverage) => void
+  readonly coverage: (ticket: number) => Coverage | undefined
+  readonly viewed: (view: View) => void
+  readonly creditedFor: (credited: View) => void
+  readonly accountOf: (id: string) => number
+  readonly handleOf: (place: number) => string
+  readonly forgetDetails: () => void
+  readonly forget: () => void
 }
 
 /**
- * The world around the Maps machine: the places, routes, position and tiles its numbers stand for. The shell writes
- * it before it tells the machine, and the screen reads it with `useSyncExternalStore`. It holds no rule.
+ * The world around the Maps machine, scoped to one runtime: the places, routes, position and tiles its numbers stand
+ * for. The shell writes it before telling the machine, and the screen reads it with `useSyncExternalStore`.
  */
-export const atlas = {
-  snapshot: (): Seen => current,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
-  // spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"
-  /** The number of `spot`: the one the same place already has (its provider's id, or for a pin its coordinates), or a new one never given before. */
-  numberOf(spot: Spot): number {
-    const key = spot.id === "" ? `@${spot.at.lat},${spot.at.lng}` : `${spot.providerId}/${spot.id}`
-    const number = byProvider.get(key) ?? next++
-    byProvider.set(key, number)
-    change({ spots: new Map(current.spots).set(number, { ...current.spots.get(number), ...spot }) })
-    return number
-  },
-  spot: (place: number): Spot | undefined => current.spots.get(place),
-  /** The places a search found, in the provider's order. */
-  found(places: ReadonlyArray<number>): void {
-    change({ results: places })
-  },
-  /** The places a search for a starting point found. */
-  originsFound(places: ReadonlyArray<number>): void {
-    change({ origins: places })
-  },
-  /** The routes a plan's `ticket` brought, in the provider's order. */
-  routed(ticket: number, ways: ReadonlyArray<Way>): void {
-    change({ ways: new Map(current.ways).set(ticket, ways) })
-  },
-  /** The route `chosen` of those `ticket` brought. */
-  way: (ticket: number, chosen: number): Way | undefined => current.ways.get(ticket)?.[chosen],
-  located(here: Here): void {
-    change({ here })
-  },
-  /** "Use my location" found the phone: the map centres on it. */
-  showMe(): void {
-    change({ showings: current.showings + 1 })
-  },
-  /** The answer of the coverage read `ticket`. */
-  covered(ticket: number, coverage: Coverage): void {
-    change({ coverages: new Map(current.coverages).set(ticket, coverage) })
-  },
-  coverage: (ticket: number): Coverage | undefined => current.coverages.get(ticket),
-  viewed(view: View): void {
-    change({ view })
-  },
-  /** The area the copyright now asked for covers. */
-  creditedFor(credited: View): void {
-    change({ credited })
-  },
-  /** The number the machine knows the account `id` by: the one it already has, or the next. */
-  accountOf(id: string): number {
-    const known = accounts.get(id) ?? accounts.size + 1
-    accounts.set(id, known)
-    return known
-  },
-  /** The handle that names `place` to the agent on this phone: `maps_` and a random id, never a provider's id. */
-  handleOf(place: number): string {
-    const known = handles.get(place)
-    if (known !== undefined) return known
-    const made = `maps_${fresh()}`
-    handles.set(place, made)
-    return made
-  },
-  // spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
-  /** Maps left the screen: what providers said of places beyond their names, positions and identities is forgotten. */
-  forgetDetails(): void {
-    change({ spots: new Map([...current.spots].map(([place, { address: _address, phone: _phone, website: _website, hours: _hours, ...kept }]) => [place, kept])) })
-  },
-  /** Everything of the last account, which another account never sees. */
-  forget(): void {
-    byProvider.clear()
-    handles.clear()
-    const kept = new Map([...current.spots].filter(([, spot]) => !spot.google))
-    for (const [place, spot] of kept) {
-      const key = spot.id === "" ? `@${spot.at.lat},${spot.at.lng}` : `${spot.providerId}/${spot.id}`
-      byProvider.set(key, place)
-    }
-    current = { ...empty, spots: kept, here: current.here, view: current.view, showings: current.showings }
-    for (const listener of [...listeners]) listener()
-  },
+export type AtlasStore = Effect.Success<typeof Atlas>
+
+/** Creates an isolated `AtlasStore` backed by a `Shelf<Seen>`. */
+function createAtlas(): AtlasStore & { readonly reset: () => void } {
+  const shelf = createShelf<Seen>(empty(), { reset: empty })
+  const accounts = new Map<string, number>()
+  const byProvider = new Map<string, number>()
+  const handles = new Map<number, string>()
+  let next = 1
+
+  const change = (patch: Partial<Seen>): void => {
+    shelf.update((current) => ({ ...current, ...patch }))
+  }
+
+  return {
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
+    // spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"
+    numberOf(spot: Spot): number {
+      const key = keyOf(spot)
+      const number = byProvider.get(key) ?? next++
+      byProvider.set(key, number)
+      shelf.update((current) => ({ ...current, spots: new Map(current.spots).set(number, mergeSpot(current.spots.get(number), spot)) }))
+      return number
+    },
+    numberAll(spots: ReadonlyArray<Spot>): number[] {
+      if (spots.length === 0) return []
+      const numbers: number[] = []
+      shelf.update((current) => {
+        const nextSpots = new Map(current.spots)
+        for (const spot of spots) {
+          const key = keyOf(spot)
+          const number = byProvider.get(key) ?? next++
+          byProvider.set(key, number)
+          nextSpots.set(number, mergeSpot(nextSpots.get(number), spot))
+          numbers.push(number)
+        }
+        return { ...current, spots: nextSpots }
+      })
+      return numbers
+    },
+    spot: (place: number): Spot | undefined => shelf.get().spots.get(place),
+    found(places: ReadonlyArray<number>): void {
+      change({ results: places })
+    },
+    originsFound(places: ReadonlyArray<number>): void {
+      change({ origins: places })
+    },
+    routed(ticket: number, ways: ReadonlyArray<Way>): void {
+      shelf.update((current) => ({ ...current, ways: boundedMap(current.ways, ticket, ways, maxCached) }))
+    },
+    way: (ticket: number, chosen: number): Way | undefined => shelf.get().ways.get(ticket)?.[chosen],
+    located(here: Here): void {
+      change({ here })
+    },
+    showMe(): void {
+      shelf.update((current) => ({ ...current, showings: current.showings + 1 }))
+    },
+    covered(ticket: number, coverage: Coverage): void {
+      shelf.update((current) => ({ ...current, coverages: boundedMap(current.coverages, ticket, coverage, maxCached) }))
+    },
+    coverage: (ticket: number): Coverage | undefined => shelf.get().coverages.get(ticket),
+    viewed(view: View): void {
+      change({ view })
+    },
+    creditedFor(credited: View): void {
+      change({ credited })
+    },
+    accountOf(id: string): number {
+      const known = accounts.get(id) ?? accounts.size + 1
+      accounts.set(id, known)
+      return known
+    },
+    handleOf(place: number): string {
+      const known = handles.get(place)
+      if (known !== undefined) return known
+      const made = `maps_${fresh()}`
+      handles.set(place, made)
+      return made
+    },
+    // spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
+    forgetDetails(): void {
+      shelf.update((current) => ({
+        ...current,
+        spots: new Map([...current.spots].map(([place, spot]) => [place, withoutDetails(spot)])),
+      }))
+    },
+    // spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"
+    forget(): void {
+      byProvider.clear()
+      handles.clear()
+      shelf.update((current) => {
+        const kept = new Map<number, Spot>()
+        for (const [place, spot] of current.spots) {
+          if (spot.google) continue
+          const stripped = withoutDetails(spot)
+          kept.set(place, stripped)
+          byProvider.set(keyOf(stripped), place)
+        }
+        return { ...empty(), spots: kept, here: current.here, view: current.view, showings: current.showings }
+      })
+    },
+    reset(): void {
+      accounts.clear()
+      byProvider.clear()
+      handles.clear()
+      next = 1
+      shelf.reset()
+    },
+  }
 }
+
+/** Provides a fresh scoped `Atlas` per runtime and clears it when the runtime scope closes. */
+export const atlasLayer = Layer.effect(Atlas, effect {
+  const store = createAtlas()
+  try Effect.addFinalizer(() => sync(() => { store.reset() }))
+  return store
+})

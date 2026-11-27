@@ -12,7 +12,7 @@ The profiles, the seed and the commands that check them are `apps/cloud`.
 
 - [Local cloud](./local.md): eliza's own server on this computer, and the gates Alpha's contract passes on it
 - [Provisioning](./provisioning.md): the operator's commands, in order, each read back before the next
-- [Rollout](./rollout.md): Alpha's own cloud on Cloudflare, the candidate's serve step
+- [Rollout](./rollout.md): Alpha's own cloud on Cloudflare, the serve step
 
 ## Story: Know which cloud the app talks to
 
@@ -23,8 +23,8 @@ The profiles, the seed and the commands that check them are `apps/cloud`.
 ### A hosted environment's profile answers at its deployment's cloud and keeps its returns on its deployment's App Link host
 
 `@repo/deployment` names the cloud and the App Link host of each
-environment; the profile that environment's deployment names says the same
-API origin and has its web origin on that host. The local environment runs
+hosted environment. Alpha's hosted profile uses the same API origin and web
+host, where Alpha's registration sends its sign-in and billing returns. The local environment runs
 the staging profile on this computer, where the cloud's origin is known only
 once it listens.
 
@@ -36,15 +36,17 @@ pure def profileFits(deployment: Hosts, profile: ProfileHosts): bool =
   profile.api == deployment.cloud and profile.webHost == deployment.appLinkHost
 ```
 
-### A cut-over candidate names neither the cloud nor the App Link host it would replace
+### Hosted production and staging share no API or App Link hostname
 
-The candidate is the product's own cloud, recorded and not used until the
-decision on where Alpha's cloud runs is taken.
+Production and staging each use their own API and App Link hostnames.
+An API hostname in either environment also differs from the other
+environment's App Link hostname.
 
 ```quint
-pure def candidateApart(serving: Hosts, candidate: Hosts): bool =
-  candidate.cloud != serving.cloud and candidate.appLinkHost != serving.appLinkHost
-    and candidate.cloud != serving.appLinkHost and candidate.appLinkHost != serving.cloud
+type HostNames = { apiHost: str, appLinkHost: str }
+
+pure def hostedSeparate(production: HostNames, staging: HostNames): bool =
+  Set(production.apiHost).union(Set(production.appLinkHost)).intersect(Set(staging.apiHost).union(Set(staging.appLinkHost))).size() == 0
 ```
 
 ## Story: Register Alpha's app with the cloud
@@ -139,33 +141,14 @@ pure def assetLinksNameAlpha(statements: List[Statement], environment: Environme
   statements.select(s => s.packageName == alphaPackage) == List({ packageName: alphaPackage, fingerprints: signersOf(environment) })
 ```
 
-## Story: Keep Alpha's own cloud ready for the cutover
+## Story: Operate Alpha's own cloud
 
-> As the owner, I want Alpha's own cloud to stand at the hosts the
-> candidate names, serving eliza's cloud under Alpha's name, model and
-> services, so that taking the cutover changes only which cloud my phone
-> signs in to.
+> As the owner, I want my phone to use Alpha Cloud at the hosts Alpha
+> names, with Alpha's model, sign-in and services.
 
-The candidate is Alpha's own deployment of eliza's cloud on Cloudflare
-([Rollout](./rollout.md)), under the profile the operator completes from
-`apps/cloud/profile/candidate.example.json`. Phones keep the cloud
-`@repo/deployment` names until the owner takes the cutover.
-
-### The candidates of production and staging share no host
-
-A staging change can then never reach a production phone, nor a production
-credential a staging Worker.
-
-```quint
-pure def candidatesSeparate(production: Hosts, staging: Hosts): bool =
-  Set(production.cloud).union(Set(production.appLinkHost)).intersect(Set(staging.cloud).union(Set(staging.appLinkHost))).size() == 0
-```
-
-### The candidate's profile answers at the candidate's cloud and keeps its returns on the candidate's App Link host
-
-```quint
-pure def candidateProfileFits(candidate: Hosts, profile: ProfileHosts): bool = profileFits(candidate, profile)
-```
+Alpha deploys eliza's cloud on Cloudflare ([Rollout](./rollout.md)) at the
+hosted origins in `@repo/deployment`. The operator completes the profile
+from `apps/cloud/profile/candidate.example.json` for those environments.
 
 ### Alpha's own cloud offers inference, speech, maps, managed Google and billing, under Alpha's name, its entitlements for Alpha's package
 
@@ -177,15 +160,18 @@ pure def offersAlphasServices(name: str, audience: str, capabilities: List[str])
   name == ownCloudName and audience == alphaPackage and capabilities == ownCapabilities
 ```
 
-### Alpha's own cloud mails each sign-in code from its own address on Alpha's zone
+### Alpha's own cloud uses Cloudflare to mail sign-in codes from its own address
 
-The sender is `noreply@alphacompute.cc` in both environments, the address the
-mail provider verified for Alpha's zone.
+The reviewed profile names `SIGN_IN_EMAIL` in both environments. The API
+Worker binds Cloudflare Email Sending to that name and allows it to send
+from `noreply@auth.alphaphone.dev` only.
 
 ```quint
-pure val ownMailSender = "noreply@alphacompute.cc"
+pure val ownMailSender = "noreply@auth.alphaphone.dev"
+pure val ownMailBinding = "SIGN_IN_EMAIL"
 
-pure def mailsAsAlpha(sender: str): bool = sender == ownMailSender
+pure def mailsAsAlpha(sender: str, binding: str): bool =
+  sender == ownMailSender and binding == ownMailBinding
 ```
 
 ### Chat on Alpha's own cloud is Alpha's model, and a request that names no cap is quoted and sent at the longest reply its provider generates
@@ -217,24 +203,30 @@ only when every route is a device route the page may use"). The service
 document and a device's own sign-out belong to sign-in and go through
 eliza's sign-in plugin.
 
-### Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no account session
+### Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no fresh or stepped-up session
 
-The app holds no fresh or stepped-up account session, so a route that needs
-one (`FreshSession`, `StepUp` or `SessionFamily`) could never be sent;
-`ElizaCloud` attaches the device key (`KeyOrSession`), the mail lease (`Mail`),
-or the reauthenticated session (`Session`) natively (`spec/os/signIn/cloudRequests.md`).
-Sign-in owns the routes under `/api/v1/auth/`, `/api/v1/app-auth/`,
-`/api/v1/api-keys/`, `/api/public/` and `/api/v1/voice/speech/`.
+The phone attaches what each route's class asks for, and the page never
+holds it (`spec/os/signIn/cloudRequests.md`): the device key; for Google
+status and accounts and the Gmail and calendar reads (`Mail`), the device
+lease, never the key; and for connecting or disconnecting Google and the
+managed Gmail client's operations (`Session`), the account session the
+phone holds after the owner signs in again. A request the phone holds back
+for want of the lease or that session reads as a sign-in
+(`spec/app/platform/index.md`). Alpha never asks for a fresh or stepped-up
+session, so a route that needs one, or the sign-in's own session family,
+could never be sent. Sign-in owns the routes under `/api/v1/auth/`,
+`/api/v1/app-auth/`, `/api/v1/api-keys/`, `/api/public/` and
+`/api/v1/voice/speech/`.
 
 ```quint
 type Verb = Get | Post | Patch | Delete
-type Auth = Public | KeyOrSession | Mail | Session | SessionOnly
+type Auth = Public | KeyOrSession | Mail | Session | FreshOnly
 type Listing = { matches: int, buffered: bool, auth: Auth }
 
 pure val signInPrefixes: List[str] = List("/api/v1/auth/", "/api/v1/app-auth/", "/api/v1/api-keys/", "/api/public/", "/api/v1/voice/speech/")
 
 pure def pageRoute(listing: Listing, underSignIn: bool): bool =
-  listing.matches == 1 and listing.buffered and not(underSignIn) and listing.auth != SessionOnly
+  listing.matches == 1 and listing.buffered and not(underSignIn) and listing.auth != FreshOnly
 ```
 
 ### The table lists every route Alpha's screens and eliza's managed mail client send, each with the query keys they send
@@ -260,6 +252,7 @@ pure val cloudTable: List[TableRoute] = List(
   { verb: Get, path: "/api/v1/billing/invoices", query: List() },
   { verb: Get, path: "/api/v1/billing/invoices/{invoiceId}", query: List() },
   { verb: Get, path: "/api/v1/maps/capabilities", query: List() },
+  { verb: Post, path: "/api/v1/maps/geocode", query: List() },
   { verb: Post, path: "/api/v1/maps/places/search", query: List() },
   { verb: Post, path: "/api/v1/maps/places/details", query: List() },
   { verb: Post, path: "/api/v1/maps/routes", query: List() },

@@ -1,0 +1,376 @@
+// spec/app/workflows/approvals.md, "A running run may ask for one approval at a time, each asking with a higher number and a deadline, and a notice is wanted for it"; spec/app/workflows/approvals.md, "An approval stops waiting when its run ends or its deadline passes, and its notice goes with it"
+import { type DeviceOperation, type ExecutorCall, NOT_DISPATCHED } from "@elizaos/agent"
+import type { ReviewAuthority } from "../assistant/media-review.vibe"
+import { noticeOwnerOf, resolveNoticeTap, type NoticeOwnerIdentity, type SuspendedApprovalNotice } from "@elizaos/os-bridges"
+import { type WorkflowApproval, type WorkflowApprovalOffer, type WorkflowRun, type WorkflowNoticeRoute, openWorkflowNotice, revalidateWorkflowApprovalNotice, revalidateWorkflowResultNotice, workflowApprovalNoticeIdentity, workflowApprovalProposalId, workflowNoticeOffers, workflowNoticeReads, workflowResultNoticeIdentity, workflowSha } from "@elizaos/plugin-workflow-client"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import * as Listing from "../../gen/app__workflows__list.effect.vibe"
+import { say } from "../notices/index.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device, registered } from "../platform/index.vibe"
+import { noticeHostOf, noticesOf } from "../platform/index.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
+import { WorkflowsApi } from "./api.vibe"
+
+
+export const approvalNoticesAvailable = (): boolean => registered("ElizaNotifications")
+
+const Scope = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("signedOut") }),
+  Schema.Struct({ kind: Schema.Literal("owned"), userId: Schema.NonEmptyString, organizationId: Schema.NonEmptyString,
+    agentId: Schema.NonEmptyString, epoch: Schema.Int.check(Schema.isGreaterThan(0)) }),
+])
+
+interface Session { readonly epoch: number; readonly owner: NoticeOwnerIdentity; readonly scope: string }
+interface Presented { readonly session: Session; readonly id: string }
+
+effect function sessionForWorkflowNotices(): (Session | null | undefined)!! {
+  if (!approvalNoticesAvailable()) return undefined
+  return effect {
+    const raw = try tryPromise(() => noticeHostOf().workflowApprovalScope())
+    const scope = try Schema.decodeUnknownEffect(Scope)(raw)
+    if (scope.kind === "signedOut") return null
+    const owner = noticeOwnerOf(scope, scope.agentId)
+    if (owner === null) return undefined
+    const digest = try workflowSha(["alpha-phone/workflow-notices", owner.origin, owner.ownerId, owner.agentId])
+    return { epoch: scope.epoch, owner, scope: digest }
+  } catch () => undefined
+}
+
+function sameOwner(first: NoticeOwnerIdentity, current: Partial<NoticeOwnerIdentity>): boolean {
+  return first.origin === current.origin && first.ownerId === current.ownerId && first.agentId === current.agentId
+}
+
+function sameSession(first: Session, current: Session | null | undefined): boolean {
+  return current != null && current.epoch === first.epoch && sameOwner(first.owner, current.owner)
+}
+
+export service ApprovalPresentation {
+  record(digest: number, posted: Presented): void!!
+  remove(digest: number): (Presented | undefined)!!
+}
+
+export const approvalPresentation = Layer.sync(ApprovalPresentation, () => {
+  const seen = new Map<number, Presented>()
+  return {
+    record: (digest: number, posted: Presented) => sync(() => { seen.set(digest, posted) }),
+    remove: (digest: number) => sync(() => { const found = seen.get(digest); seen.delete(digest); return found }),
+  }
+})
+
+export effect function offerApprovalNotice<R>(digest: number, run: WorkflowRun, approval: WorkflowApproval, current: boolean!!R): void!!(ApprovalPresentation | R) {
+  if (approval.status !== "pending" || approval.expiresAt === undefined || !(try current)) return
+  const session = try sessionForWorkflowNotices()
+  if (session == null) return
+  const route: WorkflowNoticeRoute = { ...session.owner, scope: session.scope, workflowId: run.workflowId, runId: run.id, versionId: run.versionId }
+  const proposalId = workflowApprovalProposalId(approval)
+  const { id } = try workflowApprovalNoticeIdentity(route, proposalId)
+  const bridge = noticesOf()
+  const supported = tryPromise(() => bridge.presentsWorkflow()) catch () => false
+  if (!supported || !sameSession(session, try sessionForWorkflowNotices()) || !(try current)) return
+  const owner = tryPromise(() => bridge.publishOwner(session.owner)) catch () => undefined
+  if (owner === undefined || !sameSession(session, try sessionForWorkflowNotices()) || !(try current)) return
+  const expiresAt = approval.expiresAt
+  try (try ApprovalPresentation).record(digest, { session, id })
+  try ignore(tryPromise(() => bridge.postApproval({ route, proposalId, phase: "Pending", expiresAt })))
+}
+
+export effect function withdrawApprovalNotice(digest: number): void!!ApprovalPresentation {
+  const prior = try (try ApprovalPresentation).remove(digest)
+  if (prior === undefined || !sameSession(prior.session, try sessionForWorkflowNotices())) return
+  const bridge = noticesOf()
+  try ignore(tryPromise(() => bridge.withdrawApproval(prior.id)))
+}
+
+/** Publish the approved text under the exact workflow run and this phone's current notice owner. */
+export effect function postWorkflowStepNotice(
+  operation: Extract<DeviceOperation, { type: "post_notification" }>,
+  call: ExecutorCall,
+  scope: NonNullable<ReviewAuthority["workflow"]>,
+  approved: () => Promise<boolean>,
+): unknown!! {
+  const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+  const session = try sessionForWorkflowNotices()
+  if (session == null) return refused
+  const bridge = noticesOf()
+  const supported = tryPromise(() => bridge.presentsWorkflow()) catch () => false
+  if (!supported) return refused
+  const { workflowId, runId, versionId, stepId } = scope.binding
+  const route: WorkflowNoticeRoute = { ...session.owner, scope: session.scope, workflowId, runId, versionId }
+  const operationId = `step-${try workflowSha([route.scope, workflowId, runId, versionId, stepId, call.operationId])}`
+  const bindingHash = try workflowSha([operationId, scope.digest, operation.title, operation.body])
+  effect function current(expected: Session): boolean!! {
+    const allowed = tryPromise(approved) catch () => false
+    return allowed && sameSession(expected, try sessionForWorkflowNotices())
+  }
+  if (!(try current(session))) return refused
+  const published = tryPromise(() => bridge.publishOwner(session.owner)) catch () => undefined
+  if (published === undefined || !(try current(session))) return refused
+  const input = { operationId, bindingHash, route, title: operation.title, body: operation.body }
+  const sent = tryPromise(() => bridge.postWorkflow(input)) catch () => undefined
+  if (!(try current(session))) return undefined
+  if (sent === "succeeded" || sent === "posted") return { kind: "applied" }
+  if (sent === "failed" || sent === "owner-changed") return refused
+  const checked = tryPromise(() => bridge.workflowReceipt(input)) catch () => undefined
+  if (!(try current(session))) return undefined
+  return checked === "succeeded" || checked === "posted" ? { kind: "applied" } : undefined
+}
+
+interface ApprovalTap {
+  readonly token: string
+  readonly operationId: string
+  readonly bindingHash: string
+  readonly session: Session
+  readonly route: WorkflowNoticeRoute
+  readonly run: WorkflowRun
+  readonly approval: WorkflowApproval
+}
+
+interface ResultTap {
+  readonly token: string
+  readonly operationId: string
+  readonly bindingHash: string
+  readonly session: Session
+  readonly route: WorkflowNoticeRoute
+  readonly run: WorkflowRun
+  readonly noticeRevision?: string
+  readonly duringRun?: true
+}
+
+type WorkflowTap = ApprovalTap | ResultTap
+
+export service WorkflowTaps {
+  get(): (WorkflowTap | undefined)!!
+  set(tap: WorkflowTap | undefined): void!!
+  readonly changes: Stream.Stream<WorkflowTap | undefined>
+}
+
+const taps = Layer.effect(WorkflowTaps, effect {
+  const state = try SubscriptionRef.make<WorkflowTap | undefined>(undefined)
+  return { get: () => SubscriptionRef.get(state), set: (tap: WorkflowTap | undefined) => SubscriptionRef.set(state, tap), changes: SubscriptionRef.changes(state) }
+})
+
+export function sameApprovalTap(tap: WorkflowTap, approval: WorkflowApproval): boolean {
+  return "approval" in tap && tap.approval.requestDigest === approval.requestDigest && tap.approval.expiresAt === approval.expiresAt
+    && tap.approval.nodeId === approval.nodeId && tap.approval.iteration === approval.iteration
+    && tap.route.runId === approval.runId && tap.route.workflowId === approval.workflowId && tap.route.versionId === approval.workflowVersionId
+}
+
+export effect function currentTap(tap: WorkflowTap): boolean!! {
+  if (!sameSession(tap.session, try sessionForWorkflowNotices())) return false
+  const bridge = noticesOf()
+  const current = tryPromise(() => bridge.pendingTap()) catch () => undefined
+  return current?.token === tap.token && current.operationId === tap.operationId && current.bindingHash === tap.bindingHash
+    && sameOwner(tap.session.owner, current) && current.scope === tap.session.scope && current.runId === tap.route.runId
+    && current.versionId === tap.route.versionId && current.workflowId === tap.route.workflowId
+    && ("approval" in tap || tap.noticeRevision === current.notice?.revision)
+}
+
+export effect function settleWorkflowTap(tap: WorkflowTap): boolean!!WorkflowTaps {
+  const pending = try WorkflowTaps
+  if ((try pending.get())?.token !== tap.token || !(try currentTap(tap))) return false
+  const bridge = noticesOf()
+  const noticeRevision = "approval" in tap ? undefined : tap.noticeRevision
+  const input = { token: tap.token, ...(noticeRevision === undefined ? {} : { noticeRevision }) }
+  const done = tryPromise(() => bridge.consumeTap(input).then(() => true)) catch () => false
+  if (done && (try pending.get())?.token === tap.token) try pending.set(undefined)
+  return done
+}
+
+// spec/app/workflows/approvals.md, "A tap reads the approval it names again from the agent, whatever the phone believed"
+const opening = started(effect {
+  if (!approvalNoticesAvailable()) return
+  const bridge = noticesOf()
+  const device = try Device
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  const listing = try Listing.Machine
+  const shelf = try WorkflowTaps
+  const { workflow } = try WorkflowsApi
+  const { life } = try Agent
+  const time = try Time
+  const taps = Stream.callback<void>((queue) => effect {
+    const listener = tryPromise(() => bridge.onPendingTap(() => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined
+    if (listener !== undefined) try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+  })
+  const shown = Stream.filter(Stream.concat(Stream.fromEffect(device.showing()), device.visible), (visible) => visible)
+  const ready = Stream.catch(Stream.filter(life.changes, (status) => status.available && status.state === "running"), () => Stream.empty)
+  const exposed = Stream.filter(Stream.changes(Stream.map(layers.changes, (state) => !Layers.pageInert(state))), (open) => open)
+  const signals = Stream.merge(taps, Stream.merge(Stream.as(shown, undefined), Stream.as(Stream.merge(Stream.as(ready, undefined), Stream.as(exposed, undefined)), undefined)))
+  const clearView = effect {
+    const place = try listing.get()
+    return (try device.showing()) && (try shell.get()).assistant === "Bar" && !Layers.pageInert(try layers.get()) && place.place.tag === "ListingRows" && !place.sheet
+  }
+  try Stream.runForEach(signals, () => effect {
+    if (!(try clearView)) return
+    const session = try sessionForWorkflowNotices()
+    if (session == null) return
+    const offered = tryPromise(() => bridge.pendingTap()) catch () => undefined
+    if (typeof offered?.operationId !== "string" || typeof offered.token !== "string" || typeof offered.bindingHash !== "string") return
+    const approvalNotice = offered.operationId.startsWith("approval-")
+    const resultNotice = offered.operationId.startsWith("result-")
+    const stepNotice = /^step-[0-9a-f]{64}$/.test(offered.operationId)
+    if (!(approvalNotice || resultNotice || stepNotice)) return
+    const offeredToken = offered.token
+    const { scope } = session
+    const at = try time.now()
+    const resolved = tryPromise((signal) => resolveNoticeTap({
+      pending: () => bridge.pendingTap(), binding: { ...session.owner, scope, current: () => !signal.aborted },
+      identifiers: ["workflowId", "runId", "versionId"], signal,
+      load: (tap, signal, checkpoint) => runPromise(effect {
+        if (tap.token !== offeredToken || typeof tap.workflowId !== "string" ||
+          typeof tap.runId !== "string" || typeof tap.versionId !== "string") return null
+        const route: WorkflowNoticeRoute = { ...session.owner, scope, workflowId: tap.workflowId, runId: tap.runId, versionId: tap.versionId }
+        const target = try openWorkflowNotice(workflow, route)
+        if (target.kind === "unavailable" && target.reason === "unreadable") return try Effect.fail(new Error("The run could not be read"))
+        if (target.kind !== "run" || signal.aborted) return null
+        if (stepNotice) {
+          return tap.question === true ? null : { route, run: target.run, duringRun: true as const }
+        }
+        if (resultNotice) {
+          const identity = try workflowResultNoticeIdentity(route)
+          const noticeRevision = tap.question === true ? tap.notice?.revision : undefined
+          if (tap.question === true && noticeRevision === undefined) return null
+          return target.run.finished && identity.id === tap.operationId && identity.bindingHash === tap.bindingHash
+            ? { route, run: target.run, ...(noticeRevision === undefined ? {} : { noticeRevision }) } : null
+        }
+        if (target.run.finished || tap.question === true) return null
+        for (const approval of target.pending) {
+          if (approval.expiresAt === undefined || approval.expiresAt <= at) continue
+          const identity = try workflowApprovalNoticeIdentity(route, workflowApprovalProposalId(approval))
+          if (identity.id === tap.operationId && identity.bindingHash === tap.bindingHash) return { route, run: target.run, approval }
+        }
+        return null
+      }, { signal }).then((target) => { checkpoint(); return target }),
+    })) catch () => undefined
+    if (resolved === undefined || !sameSession(session, try sessionForWorkflowNotices()) || !(try clearView)) return
+    if (resolved.kind === "unavailable") {
+      const retry = tryPromise(() => bridge.pendingTap()) catch () => undefined
+      if (retry?.token === offeredToken && retry.operationId === offered.operationId) {
+        const ended = tryPromise(() => bridge.consumeTap({ token: offeredToken, unavailable: true }).then(() => true)) catch () => false
+        if (ended) try say(approvalNotice ? "This workflow approval is no longer available." : "This workflow run is no longer available.", true)
+      }
+      return
+    }
+    if (resolved.kind !== "ready" || resolved.token !== offeredToken) return
+    if (resolved.target.approval !== undefined && (resolved.target.approval.expiresAt ?? 0) <= (try time.now())) return
+    if (!Shell.showing(try shell.get(), "Workflows") &&
+      !(try contained(shell.send({ type: "openView", view: "Workflows" }), "opening a workflow notification"))) return
+    if (Shell.showing(try shell.get(), "Workflows")) {
+      try shelf.set({ token: resolved.token, operationId: offered.operationId, bindingHash: offered.bindingHash, session, ...resolved.target })
+    }
+  })
+}, "opening a reviewed workflow run from its notice")
+
+// spec/app/workflows/approvals.md, "When another owner signs in, the previous owner's approval and its notice are gone"
+interface OfferedNotice { readonly proof: SuspendedApprovalNotice; readonly proposalId: string }
+
+effect function offeredNotice(session: Session, source: WorkflowApprovalOffer): OfferedNotice!! {
+  const { workflowId, runId, versionId, proposalId, expiresAt } = source
+  const route: WorkflowNoticeRoute = { ...session.owner, scope: session.scope, workflowId, runId, versionId }
+  const identity = try workflowApprovalNoticeIdentity(route, proposalId)
+  return { proof: { ...identity, route, expiresAt }, proposalId }
+}
+
+const ownerFence = started(effect {
+  if (!approvalNoticesAvailable()) return
+  const device = try Device
+  const { life } = try Agent
+  const { workflow, request } = try WorkflowsApi
+  const reads = workflowNoticeReads(workflow)
+  const bridge = noticesOf()
+  const visible = Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible))
+  const foreground = Stream.switchMap(visible, (visible) => visible
+    ? Stream.concat(Stream.succeed(undefined), Stream.fromEffectRepeat(sleep("60 seconds")))
+    : Stream.empty)
+  const agent = Stream.catch(life.changes, () => Stream.empty)
+  const pulse = Stream.merge(foreground, Stream.as(agent, undefined))
+  const shown = new Map<string, SuspendedApprovalNotice>()
+  const resultIds = new Set<string>()
+  const time = try Time
+  let published: Session | null | undefined = undefined
+
+  effect function current(session: Session): boolean!! {
+    return (try device.showing()) && sameSession(session, try sessionForWorkflowNotices())
+  }
+
+  try Stream.runForEach(pulse, () => effect {
+    if (!(try device.showing())) return
+    const session = try sessionForWorkflowNotices()
+    if (session === undefined) return
+    if (session === null ? published !== null : !sameSession(session, published)) {
+      const answer = tryPromise(() => bridge.publishOwner(session?.owner ?? null)) catch () => undefined
+      if (answer === undefined) return
+      shown.clear()
+      resultIds.clear()
+      if (session === null) {
+        if ((try sessionForWorkflowNotices()) === null) published = null
+        return
+      }
+      for (const notice of answer.suspended) {
+        if (!sameOwner(session.owner, notice.route)) continue
+        const decision = revalidateWorkflowApprovalNotice(notice, reads, () => true) catch () => undefined
+        if (!(try current(session))) return
+        if (decision === undefined) return
+        if (decision === "resume") {
+          const restored = tryPromise(() => bridge.resumeApproval(notice)) catch () => undefined
+          if (restored === undefined || restored === "suspended" || restored === "owner-changed") return
+          if (restored === "succeeded" || restored === "posted" || restored === "unknown") shown.set(notice.id, notice)
+        } else if (decision === "withdraw") {
+          const withdrawn = tryPromise(() => bridge.withdrawApproval(notice.id).then(() => true)) catch () => false
+          if (!withdrawn) return
+        }
+      }
+      if (!(try current(session))) return
+      published = session
+    }
+    if (session === null) return
+    const offered = workflowNoticeOffers(request) catch () => undefined
+    if (offered === undefined) return
+    const now = try time.now()
+    const offers = new Map<string, OfferedNotice>()
+    for (const source of offered.approvals) {
+      if (source.expiresAt <= now) continue
+      const notice = try offeredNotice(session, source)
+      offers.set(notice.proof.id, notice)
+    }
+    const visibleResults = new Set<string>()
+    for (const result of offered.results) {
+      const { workflowId, runId, versionId, title, body } = result
+      const route: WorkflowNoticeRoute = { ...session.owner, scope: session.scope, workflowId, runId, versionId }
+      const { id, bindingHash } = try workflowResultNoticeIdentity(route)
+      visibleResults.add(id)
+      if (resultIds.has(id)) continue
+      const eligible = revalidateWorkflowResultNotice(route, reads, () => true) catch () => undefined
+      if (!(try current(session))) return
+      if (eligible !== "offer") continue
+      const sent = tryPromise(() => bridge.postWorkflow({ operationId: id, bindingHash, route, title, body })) catch () => undefined
+      if (sent === "succeeded" || sent === "posted" || sent === "unknown") resultIds.add(id)
+    }
+    for (const id of resultIds) if (!visibleResults.has(id)) resultIds.delete(id)
+    for (const [id, notice] of shown) if (notice.expiresAt <= now) shown.delete(id)
+    const eligible = new Map(shown)
+    for (const [id, notice] of offers) if (!eligible.has(id)) eligible.set(id, notice.proof)
+    const checked = try Effect.forEach(eligible.values(), effect (proof) => {
+      const decision = revalidateWorkflowApprovalNotice(proof, reads, () => true) catch () => undefined
+      return { proof, decision }
+    }, { concurrency: 4 })
+    if (!(try current(session))) return
+    for (const { proof, decision } of checked) {
+      const offer = offers.get(proof.id)
+      if (decision === "resume" && offer !== undefined && !shown.has(proof.id)) {
+        const received = tryPromise(() => bridge.postApproval({ route: proof.route, proposalId: offer.proposalId,
+          phase: "Pending", expiresAt: proof.expiresAt })) catch () => undefined
+        if (received === "succeeded" || received === "posted" || received === "unknown") shown.set(proof.id, proof)
+      } else if (decision === "withdraw" && shown.has(proof.id)) {
+        if (!(try current(session))) return
+        const removed = tryPromise(() => bridge.withdrawApproval(proof.id).then(() => true)) catch () => false
+        if (removed) shown.delete(proof.id)
+      }
+    }
+  })
+}, "keeping notices current with the resident's pending workflow approvals")
+
+export const nativeApprovalOwner = together(taps, opening, ownerFence)

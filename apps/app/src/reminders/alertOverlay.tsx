@@ -4,15 +4,16 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { area, type Resident, type Shown } from "../runtime/ui.tsx";
 import { AlertBanner } from "./AlertBanner.tsx";
 import { beginEditReminder } from "./editor.vibe";
-import { remindersStore } from "./store.ts";
+import { RemindersShelf } from "./shelf.vibe";
 
 function RemindersAlertOverlay({ runtime }: Shown<Resident>) {
   return (
     <AlertBanner
       runtime={runtime}
       onOpenItem={(itemId) => {
-        const target = remindersStore.snapshot().snapshot.items.find((item) => item.id === itemId);
         void runtime.runPromise(Effect.gen(function* () {
+          const { store } = yield* RemindersShelf;
+          const target = store.findItem(itemId);
           const shell = yield* Shell;
           yield* Effect.ignore(shell.send({ type: "openView", view: "Reminders" }));
           if (target) yield* beginEditReminder(target);

@@ -137,6 +137,19 @@ pure def keyboardReported(c: Canvas, shown: bool, voice: bool): Canvas =
     field: if (release) NoField else c.field, released: if (release) c.released + 1 else c.released }
 ```
 
+### Voice keeps ownership of the composer even before the Android keyboard reports
+
+The voice area may claim or release the composer before Android has
+reported its keyboard. That changes voice ownership without inventing a
+keyboard observation or releasing a field.
+
+```quint
+pure def canVoiceBeforeKeyboard(c: Canvas, voice: bool): bool =
+  c.mounted and c.keyboard == NotReported and c.voice != voice
+
+pure def voiceBeforeKeyboard(c: Canvas, voice: bool): Canvas = { ...c, voice: voice }
+```
+
 ### Alpha going to the background puts the composer away
 
 ```quint
@@ -206,6 +219,8 @@ pure def sometimesTheAgendaAtLargeText(c: Canvas): bool = c.agenda and c.mounted
 
 At 150% the title still fits beside them, as it did on Alpha's earlier
 build; above it a one-word title would be split.
+Browser's address bar is a layout of its own that already fits, so it
+keeps its row, as it did on that build.
 
 ```quint
 pure def titleRow(c: Canvas): bool = c.textScale > 150

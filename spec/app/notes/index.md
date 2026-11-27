@@ -16,6 +16,12 @@ agent's store, and every write in Notes names the revision it builds on, so
 the store refuses one that another writer overtook. The list then reads the
 store again, so what it shows is always what the store holds.
 
+A note, a voice note, a link note, the notes from before and Recently deleted
+each rise over the list as Alpha's earlier build drew them, and the list stays
+under them as it was, scrolled where the owner left it; Back takes the page
+away at once. Before the list has first been read, Notes shows its header
+over an empty list, never a blank screen.
+
 ## Story: See my notes
 
 > As the owner, I want my notes listed with the pinned ones first, narrowed
@@ -41,12 +47,15 @@ type Row = { id: int, revision: int, kind: Kind, origin: Origin, source: Source,
 type Folder = { id: int, name: str }
 type Op = Pin | Unpin | Move | AddFolder | RenameFolder | RemoveFolder | Create | Rewrite
 type Change = { op: Op, note: int, base: int, folder: int, name: str, kind: Kind, origin: Origin, source: Source }
+type Selection = NoSelection | Picking | Reviewing | Deleting
+type SelectionResult = NotReported | MovedToTrash | RefusedSelection | UnknownSelection
 
 type Notes = {
   owner: int, asked: int, read: R::Read, version: int, rows: List[Row], folders: List[Folder], shelf: int,
   filter: int, retired: List[int], again: bool, storage: bool,
   writing: A::Attempt, change: Change, wrote: int, fromProposal: bool,
   proposal: Change, proposed: bool, declined: bool, review: V::Review, agentTurn: int,
+  selection: Selection, selected: List[int], selectionTurn: int, selectionResult: SelectionResult, removed: int,
 }
 
 pure val nothing: Change =
@@ -57,6 +66,7 @@ pure val initial: Notes = {
   filter: 0, retired: List(), again: false, storage: true,
   writing: A::plan(0), change: nothing, wrote: 0, fromProposal: false,
   proposal: nothing, proposed: false, declined: false, review: V::unreviewed, agentTurn: 0,
+  selection: NoSelection, selected: List(), selectionTurn: 0, selectionResult: NotReported, removed: 0,
 }
 
 pure def hasNote(rows: List[Row], id: int): bool = rows.some(r => r.id == id)
@@ -79,6 +89,7 @@ type Effect =
   | Shows({ row: Row, by: Actor, req: Request })
   | OpensAccount
   | NotOpened({ turn: int })
+  | DeletesSelection({ turn: int, owner: int, revision: int, ids: List[int] })
 type Moved = { state: Notes, out: List[Effect] }
 ```
 
@@ -168,11 +179,15 @@ pure def listed(s: Notes, ticket: int, ok: bool, version: int, rows: List[Row], 
   val stale = ok and version < s.version
   val good = ok and not(stale) and wellFormed(tidy, folders) and unretired(folders, s.retired)
   val keptFolders = if (good) folders else List()
+  val narrowed = if (hasFolder(keptFolders, s.filter)) s.filter else 0
   val gone = if (good) s.folders.select(f => not(hasFolder(folders, f.id))).listMap(f => f.id) else List()
   val read = R::answer(s.read, good)
-  val shown = { ...s, read: read, rows: if (good) tidy else List(), folders: keptFolders, shelf: shelf,
+  val shown = { ...s, read: read, rows: if (good) tidy else List(), folders: keptFolders, shelf: if (good) shelf else s.shelf,
     version: if (good) version else s.version, retired: s.retired.concat(gone),
-    filter: if (hasFolder(keptFolders, s.filter)) s.filter else 0, review: V::revise(s.review), again: false }
+    filter: narrowed, review: V::revise(s.review), again: false,
+    selection: if (s.selection == Reviewing and (not(good) or version != s.version or s.filter != narrowed)) Picking else s.selection,
+    selected: if (s.selection == Deleting) s.selected else s.selected.select(id =>
+      good and tidy.some(row => row.id == id and (narrowed == 0 or narrowed == row.folder))) }
   if (stale) { state: { ...s, read: R::ask(s.read) }, out: List(Lists({ ticket: s.read.ticket + 1, owner: s.owner })) }
   else if (s.again) { state: { ...shown, read: R::ask(read) }, out: List(Lists({ ticket: read.ticket + 1, owner: s.owner })) }
   else { state: shown, out: List() }
@@ -278,11 +293,12 @@ pure def lawAWaitingDraftLeads(s: Notes, draft: int, fresh: bool): bool =
 ### The owner narrows the list to a folder, and clears the filter
 
 ```quint
-pure def canFilterBy(s: Notes, folder: int): bool = folder != s.filter and folder != 0 and hasFolder(s.folders, folder)
+pure def canFilterBy(s: Notes, folder: int): bool =
+  s.selection == NoSelection and folder != s.filter and folder != 0 and hasFolder(s.folders, folder)
 
 pure def filterBy(s: Notes, folder: int): Notes = { ...s, filter: folder }
 
-pure def canClearFilter(s: Notes): bool = s.filter != 0
+pure def canClearFilter(s: Notes): bool = s.selection == NoSelection and s.filter != 0
 
 pure def clearFilter(s: Notes): Notes = { ...s, filter: 0 }
 ```
@@ -356,7 +372,7 @@ when the owner comes back to it.
 
 ```quint
 pure def canOpenRow(s: Notes, id: int, covered: bool, by: Actor): bool =
-  mayOpen(covered, by) and id > 0 and shown(s).some(r => r.id == id)
+  s.selection == NoSelection and mayOpen(covered, by) and id > 0 and shown(s).some(r => r.id == id)
 
 pure def shownRow(s: Notes, id: int): Row = shown(s).select(r => r.id == id).nthOr(0, blankRow)
 
@@ -393,7 +409,7 @@ pure def canAgentOpen(s: Notes, id: int, covered: bool, req: Request, by: Actor)
   by == Agent and isOwner(s.owner) and req.turn > 0 and req.opened == s.agentTurn
 
 pure def agentOpens(s: Notes, id: int, covered: bool, req: Request, by: Actor): bool =
-  mayOpenNote(covered, by, req) and id > 0 and hasNote(s.rows, id) and viewFor(rowOf(s, id).kind) != Visiting
+  s.selection == NoSelection and mayOpenNote(covered, by, req) and id > 0 and hasNote(s.rows, id) and viewFor(rowOf(s, id).kind) != Visiting
 
 pure def agentOpen(s: Notes, id: int, covered: bool, req: Request, by: Actor): Moved =
   if (agentOpens(s, id, covered, req, by))
@@ -502,7 +518,7 @@ written notes come from the editor, and imported text files from
 
 ```quint
 pure def canChange(s: Notes, c: Change, covered: bool, by: Actor): bool =
-  by == Owner and mayWrite(s, covered) and valid(s, c) and (c.op == Create implies derived(c.origin))
+  by == Owner and s.selection == NoSelection and mayWrite(s, covered) and valid(s, c) and (c.op == Create implies derived(c.origin))
 
 pure def change(s: Notes, c: Change, covered: bool, by: Actor): Moved = written(c, false, s)
 ```
@@ -538,7 +554,7 @@ they start. A draft or a recording that a restart left unfinished is offered
 first, by the editor and the recorder, before anything new is begun.
 
 ```quint
-pure def readyForNew(s: Notes): bool = s.read.status == R::Loaded and s.storage and isOwner(s.owner)
+pure def readyForNew(s: Notes): bool = s.selection == NoSelection and s.read.status == R::Loaded and s.storage and isOwner(s.owner)
 ```
 
 ### One change is written at a time, under a number never used before, for the owner it was made for, and only as it makes sense
@@ -607,7 +623,8 @@ pure def propose(s: Notes, c: Change, by: Actor): Notes =
 ### The owner is shown the proposal over the notes as they are now, when nothing else of Notes is open
 
 ```quint
-pure def canShowProposal(s: Notes, covered: bool, by: Actor): bool = mayOpen(covered, by) and s.proposed and not(s.review.showing)
+pure def canShowProposal(s: Notes, covered: bool, by: Actor): bool =
+  s.selection == NoSelection and mayOpen(covered, by) and s.proposed and not(s.review.showing)
 
 pure def showProposal(s: Notes, covered: bool, by: Actor): Notes = { ...s, review: V::present(s.review) }
 ```
@@ -666,6 +683,76 @@ pure def sometimesAProposalApproved(s: Notes): bool = s.fromProposal and s.chang
 pure def sometimesAProposalDeclined(s: Notes): bool = s.declined and s.read.status == R::Loaded
 ```
 
+## Story: Select and delete notes
+
+> As the owner, I want to select several notes from the list and move
+> them to Recently deleted together after reviewing my selection.
+
+### The owner selects from the visible list and reviews the selection before deleting
+
+Back or Cancel dismisses the review. Done leaves selection. If the list
+changes before confirmation, the question closes and the owner can
+review the notes still shown.
+
+```quint
+pure def canBeginSelection(s: Notes, covered: bool, by: Actor): bool =
+  by == Owner and mayWrite(s, covered) and not(s.review.showing) and s.selection == NoSelection and shown(s) != List()
+
+pure def beginSelection(s: Notes, covered: bool, by: Actor): Notes =
+  { ...s, selection: Picking, selected: List(), selectionResult: NotReported, removed: 0 }
+
+pure def canToggleSelection(s: Notes, id: int, by: Actor): bool =
+  by == Owner and s.selection == Picking and s.read.status == R::Loaded and shown(s).some(r => r.id == id)
+
+pure def toggleSelection(s: Notes, id: int, by: Actor): Notes =
+  { ...s, selected: if (s.selected.includes(id)) s.selected.select(other => other != id) else s.selected.append(id) }
+
+pure def canReviewSelection(s: Notes, available: bool, by: Actor): bool =
+  by == Owner and available and s.selection == Picking and mayWrite(s, false) and s.selected != List()
+    and s.selected.every(id => shown(s).some(row => row.id == id))
+
+pure def reviewSelection(s: Notes, available: bool, by: Actor): Notes = { ...s, selection: Reviewing }
+```
+
+### Confirmation moves only the reviewed notes to Recently deleted and stops if a deletion is refused or unknown
+
+Each note is handed to Recently deleted in turn. A partial result reports
+how many were confirmed and keeps the remaining selection available for
+a fresh review. The owner cannot change the selection during the move.
+When the phone can bind the confirmed moves to exact Trash entries, one
+Undo is offered through the shared [toast](../notices/toasts.md).
+
+```quint
+pure def canDeleteSelection(s: Notes, available: bool, by: Actor): bool =
+  by == Owner and available and s.selection == Reviewing and mayWrite(s, false) and s.selected != List()
+    and s.selected.every(id => shown(s).some(row => row.id == id))
+
+pure def deleteSelection(s: Notes, available: bool, by: Actor): Moved =
+  val turn = s.selectionTurn + 1
+  { state: { ...s, selection: Deleting, selectionTurn: turn, selectionResult: NotReported, removed: 0 },
+    out: List(DeletesSelection({ turn: turn, owner: s.owner, revision: s.version, ids: s.selected })) }
+
+pure def canSelectionDeleted(s: Notes, turn: int, removedIds: List[int], by: Actor): bool =
+  by == Phone and s.selection == Deleting and turn == s.selectionTurn and
+    removedIds.every(id => s.selected.includes(id))
+
+pure def selectionDeleted(s: Notes, turn: int, removedIds: List[int], known: bool, by: Actor): Moved =
+  val left = s.selected.select(id => not(removedIds.includes(id)) and shown(s).some(row => row.id == id))
+  val updated = { ...s, selection: if (left == List()) NoSelection else Picking, selected: left,
+    removed: s.selected.select(id => removedIds.includes(id)).length(),
+    selectionResult: if (s.selected.every(id => removedIds.includes(id))) MovedToTrash
+      else if (known) RefusedSelection else UnknownSelection }
+  if (updated.selectionResult == MovedToTrash) { state: updated, out: List() } else refresh(updated)
+
+pure def stepOnlyReviewedNotesAreDeleted(before: Notes, via: str, after: Notes, out: List[Effect]): bool =
+  out.every(e => match e {
+    | DeletesSelection(x) => via == "deleteSelection" and before.selection == Reviewing and
+        x.ids == before.selected and x.owner == before.owner and x.revision == before.version and
+        x.turn == after.selectionTurn and after.selection == Deleting
+    | _ => true
+  })
+```
+
 ## Story: Leave Notes and come back
 
 > As the owner, I want Back to close the proposal on show, and leaving
@@ -673,16 +760,25 @@ pure def sometimesAProposalDeclined(s: Notes): bool = s.declined and s.read.stat
 
 ### Back in the list closes the proposal on show
 
-```quint
-pure def canBack(s: Notes): bool = s.review.showing
+Back also closes a selection review before it leaves selection. It waits
+for a deletion already in progress.
 
-pure def back(s: Notes): Notes = { ...s, review: V::dismiss(s.review) }
+```quint
+pure def canBack(s: Notes): bool = s.review.showing or s.selection != NoSelection
+
+pure def back(s: Notes): Notes =
+  { ...s, review: V::dismiss(s.review),
+    selection: if (s.selection == Reviewing) Picking else if (s.selection == Deleting) Deleting else NoSelection,
+    selected: if (s.selection == Picking) List() else s.selected,
+    selectionResult: if (s.selection == Picking) NotReported else s.selectionResult,
+    removed: if (s.selection == Picking) 0 else s.removed }
 ```
 
 ### Leaving Notes closes the proposal and keeps it to decide later
 
 ```quint
-pure def left(s: Notes): Notes = { ...s, review: V::dismiss(s.review) }
+pure def left(s: Notes): Notes = { ...s, review: V::dismiss(s.review), selection: NoSelection, selected: List(),
+    selectionResult: NotReported, removed: 0 }
 
 pure def stepLeavingKeepsTheProposal(before: Notes, via: str, after: Notes): bool =
   (via == "left" or via == "back")
@@ -706,7 +802,8 @@ pure def canOwnerChanged(s: Notes, owner: int, by: Actor): bool = by == Phone an
 pure def ownerChanged(s: Notes, owner: int, by: Actor): Notes =
   { ...s, owner: owner, read: dropped(s.read), version: 0, rows: List(), folders: List(), shelf: 0, filter: 0,
     retired: List(), again: false, writing: cutOff(s.writing), change: nothing, fromProposal: false,
-    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), agentTurn: 0 }
+    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), agentTurn: 0,
+    selection: NoSelection, selected: List(), selectionResult: NotReported, removed: 0 }
 ```
 
 ### Everything shown, read or written belongs to the owner the phone has now
@@ -753,7 +850,7 @@ pure def canRestart(s: Notes, by: Actor): bool = by == Phone
 pure def restart(s: Notes, by: Actor): Notes =
   { ...s, rows: List(), folders: List(), filter: 0, read: dropped(s.read), again: false,
     proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), writing: cutOff(s.writing),
-    agentTurn: 0 }
+    agentTurn: 0, selection: NoSelection, selected: List(), selectionResult: NotReported, removed: 0 }
 
 pure def stepNoLateAnswerAfterRestart(before: Notes, via: str, after: Notes): bool =
   via == "restart" implies and {

@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { AudioLines } from "lucide-react";
+import { AudioLines, Check } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 
 export type NoteRowProps = Omit<ComponentProps<"button">, "title"> & {
@@ -11,24 +11,31 @@ export type NoteRowProps = Omit<ComponentProps<"button">, "title"> & {
   preview: string;
   /** Marks a voice note with its waveform. */
   voice?: boolean;
+  /** A short note at the row's end, such as the days a deleted note has left; an empty one keeps its place. */
+  aside?: string;
 };
 
 /** One note in the Notes list: its title, then its date and the first two lines of what it holds. */
-export function NoteRow({ title, date, preview, voice = false, className, ...props }: NoteRowProps) {
+export function NoteRow({ title, date, preview, voice = false, aside, className, ...props }: NoteRowProps) {
+  const chosen = props["aria-pressed"];
   return (
     <button
       type="button"
       className={cn(focusRing, "flex w-full items-start gap-3 border-b border-border px-2 py-3 text-left text-foreground focus-visible:-outline-offset-focus active:bg-accent", className)}
       {...props}
     >
+      {typeof chosen === "boolean" && <span aria-hidden className={cn("mt-0.5 grid size-6 shrink-0 place-items-center rounded-check", chosen ? "bg-alpha text-alpha-foreground" : "inset-ring-[1.5px] inset-ring-muted-foreground")}>
+        {chosen && <Check className="size-3.75" />}
+      </span>}
       {voice && <AudioLines aria-hidden className="mt-0.5 size-4.5 shrink-0 text-primary" />}
       <span className="block min-w-0 flex-auto">
         <span className="block truncate text-body leading-row font-semibold">{title}</span>
-        <span className="mt-0.5 line-clamp-2 text-sm whitespace-pre-line text-muted-foreground">
+        <span className="mt-0.5 line-clamp-2 text-sm leading-normal whitespace-pre-line text-muted-foreground">
           <span className="text-foreground">{date}</span>
           {`  ${preview}`}
         </span>
       </span>
+      {aside !== undefined && <span aria-hidden className="shrink-0 pt-0.5 text-meta text-muted-foreground tabular-nums">{aside}</span>}
     </button>
   );
 }

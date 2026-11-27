@@ -1,11 +1,11 @@
 // spec/app/platform/index.md, "Story: Reach the phone's native capabilities"; spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 package ai.alphacompute.alphaphone;
 
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.role.RoleManager;
 import android.content.Intent;
 import android.os.Bundle;
-import android.os.SystemClock;
 import android.util.Log;
 import android.view.ViewGroup;
 import android.webkit.WebSettings;
@@ -29,15 +29,89 @@ public class MainActivity extends BridgeActivity {
  private static final String FRONT_START = "alpha.frontStart";
  private static final String FRONT_TOKEN = UUID.randomUUID().toString();
  private static final int MAX_UNANSWERED_FRONT_STARTS = 3;
+ private static final String TEXT_ASK = "ai.alphacompute.alphaphone.TEXT_ASK";
+ private static final String TEXT_ASK_NONCE = "alpha.textAsk";
+ private static int nextTextAsk;
+ private static OfferedAsk offeringAsk;
  private static WeakReference<MainActivity> livePage = new WeakReference<>(null);
- private static final NavigationOpenRequest navigationOpen = new NavigationOpenRequest();
  private static boolean handoffUnavailable;
  private static int unansweredFrontStarts;
  private boolean homeTask;
  private boolean handingOff;
  private boolean telephonyAdmitted;
+ private volatile boolean resumed;
+ private volatile boolean windowFocused;
+ private volatile boolean tornDown;
  private final AtomicLong composerVisit = new AtomicLong();
  private InsetsState insets;
+ private volatile TextAsk textAsk;
+ private int closedTextAsk;
+
+ private record TextAsk(int ticket, boolean returnExternally) {}
+ private record OfferedAsk(String nonce, TextAsk visit) {}
+
+ static void openTextAsk(Activity source) {
+  MainActivity live = livePage.get();
+  boolean alreadyVisible = live != null && !live.isFinishing() && !live.isDestroyed()
+    && live.getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED);
+  int ticket = ++nextTextAsk;
+  if (ticket <= 0) return;
+  OfferedAsk offer = new OfferedAsk(UUID.randomUUID().toString(), new TextAsk(ticket, !alreadyVisible));
+  offeringAsk = offer;
+  Intent target = new Intent(source, MainActivity.class).setAction(TEXT_ASK)
+    .putExtra(TEXT_ASK_NONCE, offer.nonce()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+  try { source.startActivity(target); }
+  catch (RuntimeException unavailable) { if (offeringAsk == offer) offeringAsk = null; }
+ }
+
+ private boolean receiveTextAsk(Intent intent) {
+  if (intent == null || !TEXT_ASK.equals(intent.getAction())) return false;
+  OfferedAsk offered = offeringAsk;
+  if (offered == null) return true;
+  try {
+   if (!offered.nonce().equals(intent.getStringExtra(TEXT_ASK_NONCE))) return true;
+   offeringAsk = null;
+   if (AlphaAssistActivity.unlocked(this) && textAsk == null) {
+    composerVisit.incrementAndGet();
+    textAsk = offered.visit();
+   }
+   if (textAsk != null && getBridge() != null) getBridge().triggerWindowJSEvent("alpha-text-ask");
+  } catch (RuntimeException foreignExtras) { return true; }
+  return true;
+ }
+
+ int textAskTicket() {
+  return AlphaAssistActivity.unlocked(this) && hasWindowFocus() && !isFinishing() && !isDestroyed()
+    ? assistantVisit() : 0;
+ }
+
+ boolean closeTextAsk(int ticket) {
+  if (ticket <= 0) return false;
+  if (textAsk == null) return ticket == closedTextAsk;
+  if (ticket != textAskTicket()) return false;
+  composerVisit.incrementAndGet();
+  if (textAsk.returnExternally() && !moveTaskToBack(true)) return false;
+  closedTextAsk = ticket;
+  textAsk = null;
+  wakeSmsDraft();
+  return true;
+ }
+
+ private boolean receiveSmsDraft(Intent intent) {
+  if (intent == null || !SmsDraftOpenRequest.ACTION.equals(intent.getAction())) return false;
+  if (AlphaImageCapability.verified(this) && AlphaAssistActivity.unlocked(this)) {
+   try {
+    if (SmsDraftOpenRequest.bind(this, intent.getStringExtra(SmsDraftOpenRequest.TOKEN))) wakeSmsDraft();
+   } catch (RuntimeException foreignExtras) { return true; }
+  }
+  return true;
+ }
+
+ private void wakeSmsDraft() {
+  if (getBridge() == null || !AlphaDevicePlugin.shareForeground(this) || isAssistantSurface()) return;
+  var handle = getBridge().getPlugin("ElizaTelephony");
+  if (handle != null && handle.getInstance() instanceof AlphaTelephonyPlugin telephony) telephony.wakeSmsDraft();
+ }
 
  private record InsetsState(int top, int bottom, boolean keyboard) {
   void publish(WebView page) {
@@ -52,6 +126,10 @@ public class MainActivity extends BridgeActivity {
 
  @Override public void onCreate(Bundle state) {
   SplashScreen.installSplashScreen(this);
+  Intent incoming = getIntent();
+  BillingReturn.capture(incoming);
+  if (incoming == null || !TEXT_ASK.equals(incoming.getAction())) HostedDigestDelivery.get().capture(incoming);
+  InboxNoticeDelivery.get(this).capture(incoming);
   MainActivity live = livePage.get();
   boolean frontStart = isFrontStart(getIntent());
   if (live != null && live != this && !live.isFinishing() && !live.isDestroyed()
@@ -62,9 +140,9 @@ public class MainActivity extends BridgeActivity {
    handoffTo(live, frontStart);
    return;
   }
+  if (receiveTextAsk(incoming) || receiveSmsDraft(incoming)) setIntent(new Intent(this, MainActivity.class));
   homeTask = state == null ? isHomeTaskStart(getIntent()) : state.getBoolean(HOME_TASK, isHomeTaskStart(getIntent()));
   if (isHome(getIntent())) SmsNoticeOpenRequest.clear();
-  captureNavigationOpen(getIntent());
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaSignInPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
@@ -72,7 +150,10 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
+  registerPlugin(AlphaInboxAttachmentsPlugin.class);
+  registerPlugin(AlphaInboxNoticesPlugin.class);
   registerPlugin(AlphaNotesPlugin.class);
+  registerPlugin(AlphaAssistantDraftPlugin.class);
   registerPlugin(AlphaNoteDocumentsPlugin.class);
   AlphaNoteRecordingService.offerFromIntent(this, getIntent());
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
@@ -81,15 +162,14 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaMediaEnrollmentPlugin.class);
   registerPlugin(AlphaScanPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
-  registerPlugin(AlphaMapsTransportPlugin.class);
   registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
   registerPlugin(AlphaCalendarPlugin.class);
   registerPlugin(AlphaNotificationsPlugin.class);
+  registerPlugin(AlphaHostedDigestDeliveryPlugin.class);
   registerPlugin(AlphaPhotosPermissionsPlugin.class);
   registerPlugin(AlphaResetPlugin.class);
-  registerPlugin(AlphaConnectionPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
   registerPlugin(AlphaCarrierSetupPlugin.class);
@@ -101,21 +181,29 @@ public class MainActivity extends BridgeActivity {
   if (image) {
    registerPlugin(AlphaTelephonyPlugin.class);
    registerPlugin(AlphaContactsPlugin.class);
+   if (AlphaSenseAdmission.available(this)) registerPlugin(ai.eliza.plugins.system.SensePlugin.class);
   }
   AlphaLauncher.register(this, image);
   super.onCreate(state);
   if (getBridge() == null) return;
+  WebView page = getBridge().getWebView();
+  if (page == null) return;
   livePage = new WeakReference<>(this);
   WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
-  getBridge().getWebView().getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-  android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(getBridge().getWebView(), false);
+  page.setFilterTouchesWhenObscured(true);
+  page.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+  android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(page, false);
+  AlphaDevicePlugin.applyTextScale(this);
   followWindowInsets();
   getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
    @Override public void handleOnBackPressed() {
+    var bridge = getBridge();
+    WebView view = bridge == null ? null : bridge.getWebView();
+    if (view == null) return;
     boolean staysHome = holdsHomeRole();
     String script = "(() => { if (document.documentElement?.dataset.alphaCanGoBack === 'true') { "
       + BACK + "; return true; } " + (staysHome ? HOME + "; return true;" : "return false;") + " })()";
-    getBridge().getWebView().evaluateJavascript(script, handled -> {
+    view.evaluateJavascript(script, handled -> {
      if (!staysHome && !"true".equals(handled) && !isFinishing() && !isDestroyed()) moveTaskToBack(true);
     });
    }
@@ -123,12 +211,13 @@ public class MainActivity extends BridgeActivity {
  }
 
  private void followWindowInsets() {
-  getBridge().addWebViewListener(new WebViewListener() {
+  var bridge = getBridge();
+  if (bridge == null) return;
+  bridge.addWebViewListener(new WebViewListener() {
    @Override public void onPageStarted(WebView page) { composerVisit.incrementAndGet(); }
 
    @Override public void onPageLoaded(WebView page) {
     if (insets != null) insets.publish(page);
-    signalNavigationOpen();
    }
   });
   var decor = getWindow().getDecorView();
@@ -139,7 +228,9 @@ public class MainActivity extends BridgeActivity {
      incoming.isVisible(WindowInsetsCompat.Type.ime()));
    if (!measured.equals(insets)) {
     insets = measured;
-    measured.publish(getBridge().getWebView());
+    var currentBridge = getBridge();
+    WebView webView = currentBridge == null ? null : currentBridge.getWebView();
+    if (webView != null) measured.publish(webView);
    }
    return ViewCompat.onApplyWindowInsets(view, incoming);
   });
@@ -148,11 +239,11 @@ public class MainActivity extends BridgeActivity {
 
  @Override protected void load() {
   if (handingOff) return;
-  if (telephonyAdmitted && !isAssistantSurface()) {
+  WebView page = findViewById(com.getcapacitor.android.R.id.webview);
+  if (page != null) page.setFilterTouchesWhenObscured(true);
+  if (telephonyAdmitted) {
    if (config == null) config = CapConfig.loadDefault(this);
-   WebView page = findViewById(com.getcapacitor.android.R.id.webview);
    if (page != null && config.getServerUrl() == null) {
-    page.setFilterTouchesWhenObscured(true);
     AlphaMessagesComposerPort.install(this, page);
    }
   }
@@ -167,51 +258,88 @@ public class MainActivity extends BridgeActivity {
  @Override public void onResume() {
   composerVisit.incrementAndGet();
   super.onResume();
+  resumed = true;
+  windowFocused = hasWindowFocus();
+  HostedDigestDelivery.get().refreshNotices();
+  InboxNoticeDelivery.get(this).changed();
   if (livePage.get() == this) unansweredFrontStarts = 0;
  }
 
  @Override public void onPause() {
+  resumed = false;
   composerVisit.incrementAndGet();
   super.onPause();
  }
 
  @Override public void onDestroy() {
+  resumed = false;
+  windowFocused = false;
+  tornDown = true;
   composerVisit.incrementAndGet();
+  SmsDraftOpenRequest.retire(this);
   if (livePage.get() == this) livePage.clear();
   super.onDestroy();
  }
 
  @Override public void onWindowFocusChanged(boolean focused) {
+  windowFocused = focused;
   composerVisit.incrementAndGet();
   super.onWindowFocusChanged(focused);
-  if (focused && getBridge() != null) {
-   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
+  var bridge = getBridge();
+  WebView view = bridge == null ? null : bridge.getWebView();
+  if (focused && bridge != null) {
+   InboxNoticeDelivery.get(this).changed();
+   wakeSmsDraft();
+   if (view != null) view.evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
   }
+ }
+
+ boolean isForegroundFocused() {
+  return resumed && windowFocused && !tornDown && !isFinishing() && !isDestroyed();
+ }
+
+ boolean isResumedActive() {
+  return resumed && !tornDown && !isFinishing() && !isDestroyed();
  }
 
  private boolean volumeShutter;
 
- boolean isAssistantSurface() { return false; }
+ int assistantVisit() {
+  TextAsk current = textAsk;
+  return current == null ? 0 : current.ticket();
+ }
+
+ boolean isAssistantSurface() { return assistantVisit() != 0; }
  long composerVisit() { return composerVisit.get(); }
 
  void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
 
  @Override public void onStop() {
   volumeShutter = false;
+  SmsDraftOpenRequest.retire(this);
   super.onStop();
  }
 
  @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
   int key = event.getKeyCode();
-  if (volumeShutter && (key == android.view.KeyEvent.KEYCODE_VOLUME_UP || key == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) && getBridge() != null) {
+  var bridge = getBridge();
+  WebView view = bridge == null ? null : bridge.getWebView();
+  if (volumeShutter && (key == android.view.KeyEvent.KEYCODE_VOLUME_UP || key == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) && view != null) {
    if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0)
-    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
+    view.evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
    return true;
   }
   return super.dispatchKeyEvent(event);
  }
 
  @Override protected void onNewIntent(Intent intent) {
+  if (receiveTextAsk(intent) || receiveSmsDraft(intent)) return;
+  if (BillingReturn.capture(intent) && getBridge() != null) {
+   WebView billingView = getBridge().getWebView();
+   if (billingView != null) billingView.evaluateJavascript("window.dispatchEvent(new Event('alpha-billing-return'))", null);
+  }
+  HostedDigestDelivery.get().capture(intent);
+  InboxNoticeDelivery.get(this).capture(intent);
   if (isFrontStart(intent)) {
    if (!handingOff) unansweredFrontStarts = 0;
    return;
@@ -219,32 +347,14 @@ public class MainActivity extends BridgeActivity {
   boolean home = isHome(intent);
   if (home) {
    composerVisit.incrementAndGet();
+   textAsk = null;
+   SmsDraftOpenRequest.retire(this);
    SmsNoticeOpenRequest.clear();
   }
-  boolean openMaps = captureNavigationOpen(intent);
   super.onNewIntent(intent);
-  if (getBridge() != null && home) getBridge().getWebView().evaluateJavascript(HOME, null);
-  if (openMaps) signalNavigationOpen();
- }
-
- private boolean captureNavigationOpen(Intent intent) {
-  if (isAssistantSurface() || intent == null || isFrontStart(intent)) return false;
-  if (AlphaNavigationService.ACTION_SHOW_MAPS.equals(intent.getAction())) {
-   navigationOpen.offer(SystemClock.elapsedRealtime());
-   intent.setAction(Intent.ACTION_MAIN);
-   return true;
-  }
-  if (isHome(intent)) navigationOpen.clear();
-  return false;
- }
-
- boolean consumeNavigationOpen() { return !isAssistantSurface() && navigationOpen.consume(SystemClock.elapsedRealtime()); }
- void clearNavigationOpen() { if (!isAssistantSurface()) navigationOpen.clear(); }
-
- private void signalNavigationOpen() {
-  if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface()) {
-   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
-  }
+  var bridge = getBridge();
+  WebView view = bridge == null ? null : bridge.getWebView();
+  if (view != null && home) view.evaluateJavascript(HOME, null);
  }
 
  private static boolean isHome(Intent intent) {

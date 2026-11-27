@@ -1,12 +1,13 @@
 // spec/app/settings/activity.md, "Story: Help the agent recover"; spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"; spec/app/assistant/chats.md, "Story: Find my conversations"
-import { ListGroup, SettingsNavRow } from "@repo/ui";
+import { ListGroup, ListRow, SettingsNavRow } from "@repo/ui";
 import { Effect } from "effect";
 import { Clock, Plus, RotateCw, Undo2 } from "lucide-react";
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
+import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
-import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { Machine as ShellMachine, canRaise } from "../../gen/app__shell.effect.vibe";
 import type { Area } from "../runtime/ui.tsx";
 import { type AssistantProps } from "./Assistant.tsx";
 import { freedom } from "./assistant.vibe";
@@ -14,52 +15,61 @@ import assistant from "./index.tsx";
 import { Talk } from "./talk.vibe";
 
 /**
- * New chat and Chat history where Alpha kept them before VibeStack (v121 `settings-adapter.ts`, Agent activity):
- * New conversation, History to read the agent's list, and one row per conversation to open it in Ask Alpha.
+ * Where Alpha's earlier build kept the conversations: on Agent activity, New starts one and History lists the saved
+ * ones, each restored into Ask Alpha with one press. As there, they are not offered while Alpha is answering.
  */
 function ConversationActions({ runtime }: AssistantProps) {
   const conversation = useConversation(runtime).state;
   const chats = useChats(runtime);
   const composer = useComposer(runtime).state;
-  const shell = useShell(runtime);
   const board = useMemo(() => runtime.runSync(Effect.map(Talk, (talk) => talk.board)), [runtime]);
-  const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
+  const store = useMemo(() => ({ subscribe: (listener: () => void) => board.subscribe(listener), snapshot: () => board.snapshot() }), [board]);
+  const seen = useSyncExternalStore(store.subscribe, store.snapshot);
+  const [listing, setListing] = useState(false);
   if (!conversation || !chats.state || !composer) return null;
-  const free = freedom(conversation, composer, chats.state.chosen);
+  const shown = chats.state;
+  const free = freedom(conversation, composer, shown.chosen);
   const start = { type: "start", ...free } as const;
-  const browse = { type: "browse" } as const;
-  const openAskAlpha = () => {
-    const open = { type: "raise", detent: "Full" } as const;
-    if (shell.can(open)) void shell.send(open);
+  const busy = making(shown);
+  const raise = () => {
+    void runtime.runPromiseExit(Effect.gen(function* () {
+      const shell = yield* ShellMachine;
+      if (canRaise(yield* shell.get(), "Full")) yield* shell.send({ type: "raise", detent: "Full" });
+    }));
   };
-  const list = chats.state.list.status;
-  const chosen = chats.state.chosen;
-  const listed = list === "Loaded" ? chats.state.ids : [];
-  if (!chats.can(start) && !chats.can(browse) && listed.length === 0) return null;
+  const listed = listing && shown.list.status !== "Idle";
+  if (free.replying && !(listed && shown.list.status === "Failed")) return null;
   return (
-    <>
-      <ListGroup>
-        {chats.can(start) ? <SettingsNavRow title="New" aria-label="New" value="New conversation" icon={<Plus />} onOpen={() => {
-          void chats.send(start).then((result) => { if (result._tag === "Success") openAskAlpha(); });
-        }} /> : null}
-        {chats.can(browse) ? <SettingsNavRow title={list === "Failed" ? "Retry" : "History"} aria-label={list === "Failed" ? "Retry" : "History"} value={list === "Idle" ? "Load conversations" : undefined} icon={list === "Failed" ? <RotateCw /> : <Clock />} onOpen={() => void chats.send(browse)} /> : null}
-      </ListGroup>
-      {listed.length > 0 ? (
-        <ListGroup aria-label="Chat history">
-          {listed.map((id) => {
-            const choose = { type: "choose", conversation: id, ...free } as const;
-            const title = seen.titles.get(id) ?? "Ask Alpha";
-            return <SettingsNavRow key={id} title={title} aria-label={`Restore conversation: ${title}`} selected={id === chosen} icon={<Undo2 />} onOpen={id === chosen ? openAskAlpha : chats.can(choose) ? () => {
-              void chats.send(choose).then((result) => { if (result._tag === "Success") openAskAlpha(); });
-            } : undefined} />;
-          })}
-        </ListGroup>
+    <ListGroup aria-label="Chat history">
+      {free.replying ? null : <>
+      <ListRow title="New" aria-label="New conversation" leading={<Plus />} disabled={!chats.can(start)} onClick={() => {
+        void chats.send(start).then((result) => { if (result._tag === "Success") raise(); });
+      }} />
+      <SettingsNavRow title="History" aria-label={shown.list.status === "Loading" ? "Loading conversations" : "Load conversations"} icon={<Clock />} disabled={busy} onOpen={() => {
+        setListing(true);
+        void chats.send({ type: "browse" });
+      }} />
+      {listed ? shown.ids.map((id) => {
+        const title = seen.titles.get(id) ?? "Ask Alpha";
+        const choose = { type: "choose", conversation: id, ...free } as const;
+        return (
+          <ListRow key={id} title={title} aria-label={`Restore conversation: ${title}`} selected={id === shown.chosen} leading={<Undo2 />} disabled={id !== shown.chosen && !chats.can(choose)} onClick={id === shown.chosen ? raise : () => {
+            void chats.send(choose).then((result) => { if (result._tag === "Success") raise(); });
+          }} />
+        );
+      }) : null}
+      </>}
+      {listed && shown.list.status === "Failed" ? (
+        <>
+          <ListRow title="History" detail="Chats did not load" />
+          {free.replying ? null : <ListRow title="Retry" aria-label="Retry saved conversation" leading={<RotateCw />} onClick={() => void chats.send({ type: "browse" })} />}
+        </>
       ) : null}
-    </>
+    </ListGroup>
   );
 }
 
-/** The owner can start or reopen an Ask Alpha conversation from the Agent activity page. */
+/** The owner starts a conversation, or restores a saved one, from the Agent activity page. */
 export default {
   open(alpha) {
     const runtime = assistant.runtime(alpha);

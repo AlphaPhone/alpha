@@ -30,6 +30,7 @@ import { type Agent, native, testMocks } from "../platform/index.vibe";
 import { useTimed } from "../runtime/ui.tsx";
 import { untimed, Time } from "../runtime/index.vibe";
 import { StartupDesk, retryAgentConnection } from "./boot.vibe";
+import { AccessDesk } from "./settingsAccess.vibe";
 
 const ordered: readonly Key[] = ["Notifications", "Microphone", "Camera", "Location", "Calendar", "Photos", "Files"];
 
@@ -40,7 +41,7 @@ const connectionMessages: Partial<Record<Outcome, string>> = {
 };
 
 type StartupRuntime = ManagedRuntime.ManagedRuntime<
-  StartupMachine | StartupDesk | AccessMachine | RecoveryMachine | JournalMachine | Agent | Time,
+  StartupMachine | StartupDesk | AccessDesk | AccessMachine | RecoveryMachine | JournalMachine | Agent | Time,
   unknown
 >;
 
@@ -124,6 +125,7 @@ export function StartupOverlay({
   const access = useTimed(runtime, useAccess);
   const recovery = useTimed(runtime, useRecovery);
   const desk = useMemo(() => runtime.runSync(Effect.flatMap(StartupDesk, (found) => Effect.succeed(found))), [runtime]);
+  const accessDesk = useMemo(() => runtime.runSync(Effect.flatMap(AccessDesk, (found) => Effect.succeed(found))), [runtime]);
   const host = useSyncExternalStore((listener) => desk.subscribe(listener), () => desk.snapshot(), () => desk.snapshot());
 
   const bootState = boot.state;
@@ -191,7 +193,7 @@ export function StartupOverlay({
   }
 
   const showMark = bootState !== undefined && shows(bootState, "Mark");
-  const accessPanel = accessState ? panel(accessState) : "Hidden";
+  const accessPanel = accessState && accessDesk.hasHooks() ? panel(accessState) : "Hidden";
   const connectionMessage = bootState && bootState.known && bootState.connection !== "Pending" && bootState.connection !== "Connected" && !host.agentHealthy
     ? connectionMessages[bootState.connection]
     : undefined;

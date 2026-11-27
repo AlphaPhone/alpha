@@ -1,23 +1,25 @@
-// spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/recent.md, "Story: Pick a file with the system picker"
+// spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/recent.md, "Story: Pick a file with the system picker"
 import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import { Capacitor, registerPlugin } from "@capacitor/core"
+  import { Capacitor } from "@capacitor/core"
   import type { SelectedDocumentsClient, SelectedDocumentsPlugin } from "@elizaos/os-bridges"
   import { selectedDocumentsClient } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export interface SelectedDocumentHost extends SelectedDocumentsPlugin {
     pickSelected(): Promise<unknown>
     attachmentSelected(input: { selectionId: string }): Promise<unknown>
+    reviewStorageAttachment(input: { readonly path: string; readonly volume?: string; readonly name: string; readonly mimeType: string; readonly size: number; readonly modified: number }): Promise<unknown>
+    readStorageAttachment(input: { readonly path: string; readonly volume?: string; readonly reviewed: string }): Promise<unknown>
   }
 
-  let plugin: SelectedDocumentHost | undefined
   let made: SelectedDocumentsClient | undefined
 
   /** @throws {never} */
   export function host(name: string): SelectedDocumentHost {
-    return (plugin ??= registerPlugin<SelectedDocumentHost>(name))
+    return capacitorPlugin<SelectedDocumentHost>(name)
   }
 
   /** @throws {never} */
@@ -35,6 +37,27 @@ export { previewUrl }
 
 const Choice = Schema.Struct({ selectionId: Schema.String })
 const Selection = Schema.NonEmptyString.pipe(Schema.brand("SelectionId"))
+const StorageReceipt = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/)).pipe(Schema.brand("StorageAttachmentReceipt"))
+const ReviewedStorageAttachment = Schema.Struct({ reviewed: StorageReceipt })
+
+export type StorageAttachmentReceipt = typeof StorageReceipt.Type
+
+export const parseStorageAttachmentReceipt = Schema.decodeUnknownOption(StorageReceipt)
+
+export interface StorageAttachmentTarget {
+  readonly path: string
+  readonly volume?: string
+}
+
+export interface StorageAttachmentRow extends StorageAttachmentTarget {
+  readonly name: string
+  readonly mimeType: string
+  readonly size: number
+  readonly modified: number
+}
+
+type StorageAttachmentRead = StorageAttachmentRow & { readonly reviewed: StorageAttachmentReceipt }
+
 const Attachment = Schema.Struct({
   name: Schema.NonEmptyString,
   mimeType: Schema.NonEmptyString,
@@ -51,28 +74,55 @@ export service Documents {
   readonly client: Option.Option<SelectedDocumentsClient>
   pick(): Option.Option<SelectionId>!!
   attachment(selectionId: SelectionId): Option.Option<DocumentAttachment>!!
+  reviewStorageAttachment(input: StorageAttachmentRow): (StorageAttachmentReceipt | undefined)!!
+  readStorageAttachment(input: StorageAttachmentRead): (DocumentAttachment | undefined)!!
 }
 
 const name = "SelectedDocuments"
+
+effect function reviewPhoneAttachment(input: StorageAttachmentRow): (StorageAttachmentReceipt | undefined)!! {
+  if (!registered(name)) return undefined
+  return effect {
+    const answer = try Schema.decodeUnknownEffect(ReviewedStorageAttachment)(try tryPromise(() => host(name).reviewStorageAttachment(input)))
+    return answer.reviewed
+  } catch () => undefined
+}
+
+effect function readPhoneAttachment({ path, volume, reviewed }: StorageAttachmentRead): (DocumentAttachment | undefined)!! {
+  if (!registered(name)) return undefined
+  const target = { path, reviewed, ...(volume === undefined ? {} : { volume }) }
+  return effect {
+    return try Schema.decodeUnknownEffect(Attachment)(try tryPromise(() => host(name).readStorageAttachment(target)))
+  } catch () => undefined
+}
 
 export const browserDocuments = Layer.succeed(Documents, {
   client: Option.none(),
   pick: () => succeed(Option.none()),
   attachment: () => succeed(Option.none()),
+  reviewStorageAttachment: () => succeed(undefined),
+  readStorageAttachment: () => succeed(undefined),
 })
 
-export const phoneDocuments = Layer.sync(Documents, () => ({
-  client: registered(name) ? Option.some(client(name)) : Option.none(),
-  effect pick(): Option.Option<SelectionId>!! {
-    return effect {
-      const choice = try Schema.decodeUnknownEffect(Choice)(try tryPromise(() => host(name).pickSelected()))
-      return Option.some(try Schema.decodeUnknownEffect(Selection)(choice.selectionId))
-    } catch () => Option.none()
-  },
-  effect attachment(selectionId: SelectionId): Option.Option<DocumentAttachment>!! {
-    return effect {
-      const data = try Schema.decodeUnknownEffect(Attachment)(try tryPromise(() => host(name).attachmentSelected({ selectionId })))
-      return Option.some(data)
-    } catch () => Option.none()
-  },
-}))
+export const phoneDocuments = Layer.sync(Documents, () => {
+  const present = registered(name)
+  return {
+    client: present ? Option.some(client(name)) : Option.none(),
+    reviewStorageAttachment: reviewPhoneAttachment,
+    readStorageAttachment: readPhoneAttachment,
+    effect pick(): Option.Option<SelectionId>!! {
+      if (!present) return Option.none()
+      return effect {
+        const choice = try Schema.decodeUnknownEffect(Choice)(try tryPromise(() => host(name).pickSelected()))
+        return Option.some(try Schema.decodeUnknownEffect(Selection)(choice.selectionId))
+      } catch () => Option.none()
+    },
+    effect attachment(selectionId: SelectionId): Option.Option<DocumentAttachment>!! {
+      if (!present) return Option.none()
+      return effect {
+        const data = try Schema.decodeUnknownEffect(Attachment)(try tryPromise(() => host(name).attachmentSelected({ selectionId })))
+        return Option.some(data)
+      } catch () => Option.none()
+    },
+  }
+})

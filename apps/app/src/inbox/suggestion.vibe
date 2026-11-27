@@ -5,7 +5,7 @@ import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { Machine as Shell, showing as showingView } from "../../gen/app__shell.effect.vibe"
 import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/index.vibe"
-import { Letters, policy } from "./composer.vibe"
+import { Letters, acceptable, policy } from "./composer.vibe"
 import { Mail } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
@@ -48,8 +48,9 @@ effect function inserted(draft: number, revision: number, text: number, appends:
   const open = state.open && state.letter.id === draft
   const event: Drafts.Event = open ? { type: "inserted", now: untimed, draft, revision } : { type: "insertedAside", draft, revision }
   const before = words.words(draft)
+  words.set(draft, { ...before, text: appends && before.text !== "" ? `${before.text}\n\n${said}` : said })
   const sent = try exit(composer.send(event, "Owner"))
-  if (Exit.isSuccess(sent)) words.set(draft, { ...before, text: appends && before.text !== "" ? `${before.text}\n\n${said}` : said })
+  if (!Exit.isSuccess(sent)) words.set(draft, before)
 }
 
 // spec/app/inbox/drafts.md, "Text the owner reviewed goes into the draft it was shown against, as that draft still is, open or set aside; text for a new message or reply starts one with it; a file handed over with no draft open starts a new message with it"
@@ -61,14 +62,23 @@ effect function startedWith(target: Target, account: number, message: number, te
   const card = message === 0 ? undefined : ledger.card(message)
   const sender = card === undefined ? "" : /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from.trim()
   const replying = target === "NewReply"
-  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || sender !== "", policy }
-  const sent = try exit(composer.send(event, "Owner"))
-  if (!Exit.isSuccess(sent) || !sent.value.state.open) return
+  const nextId = (try composer.get()).made + 1
   const subject = card === undefined ? "" : card.subject.toLowerCase().startsWith("re:") ? card.subject : `Re: ${card.subject}`
-  words.set(sent.value.state.letter.id, {
+  const prepared = {
     to: replying ? [sender] : [], cc: [], bcc: [], subject, text: (try Offers).text(text), files: [],
-    answers: card?.id, mode: replying ? "reply" : "compose",
-  })
+    answers: card?.id, mode: replying ? "reply" as const : "compose" as const,
+  }
+  words.set(nextId, prepared)
+  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || acceptable(sender), policy }
+  const sent = try exit(composer.send(event, "Owner"))
+  if (!Exit.isSuccess(sent) || !sent.value.state.open) {
+    try words.forget([nextId])
+    return
+  }
+  if (sent.value.state.letter.id !== nextId) {
+    try words.forget([nextId])
+    words.set(sent.value.state.letter.id, prepared)
+  }
   try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
 }
 

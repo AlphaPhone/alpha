@@ -21,9 +21,9 @@ import * as Pages from "../gen/app__settings.effect.vibe";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import { AccountShelf } from "../src/account/bridge.vibe";
-import accountOverlay, { AccountStatus, accountResident, accountRuntime } from "../src/account/index.tsx";
+import { AccountStatus, accountPanelOverlay, accountRuntime } from "../src/account/index.tsx";
 import { normalizePhoneNumber } from "../src/account/phone.ts";
-import { accountLayer, openAccount } from "../src/account/profile.vibe";
+import { accountLayer, accountProfile, openAccount } from "../src/account/profile.vibe";
 import type { Alpha, Resident as RootResident } from "../src/runtime/area.tsx";
 import { rooted, together, untimed, whole } from "../src/runtime/index.vibe";
 import { closeAll, drawn, press, seen, underAct } from "./alpha.tsx";
@@ -50,19 +50,21 @@ async function bootAccount(overrides: Partial<AccountScene> = {}) {
   const scene = accountScene(overrides);
   const platform = accountPlatform(scene);
   const minimalRoot = Layer.provideMerge(
-    whole(together(Shell.machine(), Layers.machine(), Pages.machine(), accountResident)),
+    whole(together(Shell.machine(), Layers.machine(), Pages.machine(), accountProfile)),
     platform,
   );
   const root = rooted(minimalRoot);
+  await root.runtime.runPromise(Effect.void);
   const alpha: Alpha = {
     runtime: root.runtime as unknown as ManagedRuntime.ManagedRuntime<RootResident, unknown>,
     over: (layer) => root.over(layer as never),
     slot: () => null,
     back: () => Promise.resolve(undefined),
     taking: () => undefined,
+    requiresSignIn: false,
     dispose: root.dispose,
   };
-  const OverlayScreen = accountOverlay.open(alpha, "overlay");
+  const OverlayScreen = accountPanelOverlay.open(alpha, "overlay");
   const container = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(container);
   await drawn(async () => {
@@ -119,7 +121,7 @@ describe("Account", () => {
     expect(scene.sentPhones).toEqual(["+14155550100"]);
 
     const codeState = await runtime.runPromise(SignIn.Machine.use((m) => m.get()));
-    expect(SignIn.canResend(codeState, Math.floor(scene.now / 1000), true)).toBe(false);
+    expect(SignIn.canResend(codeState, scene.now, true)).toBe(false);
     await advance(61_000);
     await runtime.runPromise(SignIn.Machine.use((m) => m.send({ type: "resend", now: untimed, online: true })));
     await waitFor(runtime, SignIn.Machine, (s) => s.step === "Code" && s.attempt === 2 && s.work === "Resting");
@@ -247,7 +249,7 @@ describe("Account", () => {
     await runtime.runPromise(Plan.Machine.use((m) => m.send({ type: "restart", signIn, now: untimed })));
     await waitFor(runtime, Plan.Machine, (p) => p.standing === "Grace" && Plan.aiOn(p));
 
-    await advance((Plan.graceWindow + 10) * 1000);
+    await advance(Plan.graceWindow + 10_000);
     await waitFor(runtime, Plan.Machine, (p) => p.standing === "Unavailable" && !Plan.aiOn(p));
 
     scene.online = true;
@@ -270,8 +272,11 @@ describe("Account", () => {
 
     await runtime.runPromise(Billing.Machine.use((m) => m.send({ type: "askOffers", signIn })));
     await waitFor(runtime, Billing.Machine, (b) => b.offers.status === "Loaded");
+    const offersTicket = (await runtime.runPromise(Billing.Machine.use((m) => m.get()))).offers.ticket;
+    await runtime.runPromise(Billing.Machine.use((m) => m.send({ type: "reviewPlan", tier: "Pro", ticket: offersTicket })));
+    const reviewed = (await runtime.runPromise(Billing.Machine.use((m) => m.get()))).reviewNumber;
 
-    await runtime.runPromise(Billing.Machine.use((m) => m.send({ type: "choosePlan", tier: "Pro", signIn, standing: "Unfunded", origin: "ByOwner", elsewhere: false, now: untimed })));
+    await runtime.runPromise(Billing.Machine.use((m) => m.send({ type: "choosePlan", tier: "Pro", reviewed, signIn, standing: "Unfunded", origin: "ByOwner", elsewhere: false, now: untimed })));
     await waitFor(runtime, Billing.Machine, (b) => b.visit.open && b.goal === "Subscribe");
     await vi.waitFor(() => expect(scene.openedExternalUrls.some((u) => u.includes("checkout.stripe.test"))).toBe(true));
 

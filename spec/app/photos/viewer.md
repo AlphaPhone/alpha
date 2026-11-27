@@ -74,7 +74,7 @@ type Effect =
   | Render({ revision: int, edit: Edit, cropSource: bool })
   | WriteCopy({ attempt: int, photo: int, revision: int, edit: Edit, replace: bool })
   | FindCopy({ attempt: int, ticket: int })
-  | AskAbout({ photo: int, revision: int })
+  | AskAbout({ photo: int, revision: int, ticket: int })
   | Compose({ photo: int, revision: int, ticket: int })
   | TextPicture({ photo: int, revision: int, ticket: int })
   | Request({ change: C::Change, photo: int, revision: int })
@@ -153,6 +153,13 @@ pure val weight_saved = 20
 > could not, zoom and pan in a photo, show or hide the controls, play or mute
 > a video from where I choose, swipe to the next one, and see its details.
 
+As Sunday's v119 drew it, the item is centred in a 3:4 frame as wide as the
+screen, above Ask Alpha, and shown whole inside it; the header and the
+controls float over it, and on the launcher the header sits below the
+phone's status bar. The editor keeps its own layout. Its controls carry
+v119's names: Back from photo, Edit photo or Edit video, and a viewer that
+says how to zoom, pan and browse.
+
 ### An item opens from what Photos lists, and is read from the phone; from the lock screen only one of that session's captures opens
 
 The owner opens an item Photos lists. The agent opens only an item listed
@@ -197,6 +204,19 @@ pure def alwaysCameraOriginBelongsToTheOwner(s: Viewer): bool =
 pure def canClose(s: Viewer, by: Actor): bool = by == Owner and s.open != 0 and not(s.editing)
 
 pure def close(s: Viewer, by: Actor): Viewer = { ...s, open: 0, origin: LibraryItem, playing: false, info: false, gone: false }
+```
+
+### Removing its draft attachment closes only the exact photo still showing
+
+Removing the viewed photo's attachment from Ask Alpha closes that photo if
+its opening is still showing. A different or reopened photo, a later
+revision, or a viewer being edited stays as it was.
+
+```quint
+pure def canCloseRemovedPhoto(s: Viewer, photo: int, revision: int, ticket: int, by: Actor): bool =
+  canClose(s, by) and shown(s) and not(s.secure) and s.open == photo and s.revision == revision and s.read.ticket == ticket
+
+pure def closeRemovedPhoto(s: Viewer, photo: int, revision: int, ticket: int, by: Actor): Viewer = close(s, by)
 ```
 
 ### Only the newest read's answer is shown, while the viewer is showing; one that failed can be read again
@@ -312,8 +332,14 @@ pure def played(s: Viewer, position: int, by: Actor): Viewer =
 
 ### The info sheet opens over the item showing
 
+The sheet shows the loaded item's date, filename, file size and dimensions.
+For a video with a known duration it also shows the length. The phone's
+folder and the names of personal albums that contain that exact item
+appear when those facts are available. The locked viewer does not offer
+Info. Recently deleted keeps recovery and deletion in its viewer.
+
 ```quint
-pure def canToggleInfo(s: Viewer, by: Actor): bool = by == Owner and shown(s) and not(s.editing)
+pure def canToggleInfo(s: Viewer, by: Actor): bool = by == Owner and shown(s) and not(s.editing or s.secure)
 
 pure def toggleInfo(s: Viewer, by: Actor): Viewer = { ...s, info: not(s.info) }
 ```
@@ -385,7 +411,8 @@ pure def sometimesSecureShown(s: Viewer): bool = s.secure and shown(s)
 
 ### Only the owner sends the revision showing to Alpha, to an email or to Android's share sheet, favourites it, or deletes it, and never from the lock screen
 
-Asking Alpha raises Ask Alpha with this item, which the shell shows; Inbox
+Asking Alpha reads the exact item again for the open chat draft and raises
+Ask Alpha with this item. It needs a separate Send to reach Alpha. Inbox
 offers the permitted JPEG, PNG or WebP original for email, up to 5 MiB,
 under the same open view and revision. Inbox keeps its own account and draft
 review. A later read of another revision or a closed viewer cannot offer a file. A share, a favourite or a delete is carried out by
@@ -396,7 +423,7 @@ there is none.
 ```quint
 pure def canAskAlpha(s: Viewer, by: Actor): bool = by == Owner and shown(s) and not(s.editing) and not(s.secure)
 
-pure def askAlpha(s: Viewer, by: Actor): Done = emit(List(AskAbout({ photo: s.open, revision: s.revision })), { ...s, playing: false })
+pure def askAlpha(s: Viewer, by: Actor): Done = emit(List(AskAbout({ photo: s.open, revision: s.revision, ticket: s.read.ticket })), { ...s, playing: false })
 
 pure def canEmail(s: Viewer, by: Actor): bool = canAskAlpha(s, by) and s.kind == Still
 
@@ -421,7 +448,7 @@ pure def trashOpen(s: Viewer, neighbour: int, by: Actor): Done =
 
 pure def stepItemLeavesOnlyByTheOwner(before: Viewer, via: str, after: Viewer, out: List[Effect]): bool =
   out.every(e => match e {
-    | AskAbout(a) => via == "askAlpha" and a.photo == before.open and a.revision == before.revision and shown(before) and not(before.secure)
+    | AskAbout(a) => via == "askAlpha" and a.photo == before.open and a.revision == before.revision and a.ticket == before.read.ticket and shown(before) and not(before.secure)
     | Compose(c) => via == "email" and c.photo == before.open and c.revision == before.revision
         and c.ticket == before.read.ticket and canEmail(before, Owner)
     | TextPicture(p) => via == "useInMessages" and p.photo == before.open and p.revision == before.revision
@@ -495,7 +522,7 @@ pure def startEdit(s: Viewer, by: Actor): Done =
   emit(List(Render({ revision: revised.revision, edit: fresh, cropSource: false })),
     { ...s, editing: true, cropping: false, playing: false, info: false, zoom: 1, pan: centered, chrome: true, edit: fresh, preview: revised, replace: false, unavailable: false, refusal: NoRefusal })
 
-pure def canCancelEdit(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(s.cropping)
+pure def canCancelEdit(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(s.cropping) and not(busy(s.save))
 
 pure def cancelEdit(s: Viewer, by: Actor): Viewer = { ...s, editing: false, cropping: false, playing: false, preview: V::dismiss(s.preview) }
 ```

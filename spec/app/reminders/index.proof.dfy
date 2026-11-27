@@ -199,6 +199,8 @@ lemma setToday_ensures(s: Reminders, day: int)
   ensures (inv(s) ==> canSetToday(s, day) ==> alwaysHiddenExactlyWhileDeleteHeld(setToday(s, day)))
   ensures (inv(s) ==> canSetToday(s, day) ==> alwaysActiveCustomListExists(setToday(s, day)))
   ensures (inv(s) ==> canSetToday(s, day) ==> alwaysSmartCountsConsistent(setToday(s, day)))
+  ensures (inv(s) ==> canSetToday(s, day) ==> stepBackShowsLists(s, "setToday", setToday(s, day)))
+  ensures (inv(s) ==> canSetToday(s, day) ==> stepLeavesOverview(s, "setToday", setToday(s, day)))
   ensures (inv(s) ==> canSetToday(s, day) ==> stepDeleteOnlyOnExpire(s, "setToday", setToday(s, day), []))
   ensures (inv(s) ==> canSetToday(s, day) ==> stepUndoRestoresExactState(s, "setToday", setToday(s, day)))
   ensures (inv(s) ==> canSetToday(s, day) ==> stepDeleteListKeepsItemsValid(s, "setToday", setToday(s, day)))
@@ -217,6 +219,8 @@ lemma createList_ensures(s: Reminders)
   ensures (inv(s) ==> canCreateList(s) ==> alwaysHiddenExactlyWhileDeleteHeld(createList(s).state))
   ensures (inv(s) ==> canCreateList(s) ==> alwaysActiveCustomListExists(createList(s).state))
   ensures (inv(s) ==> canCreateList(s) ==> alwaysSmartCountsConsistent(createList(s).state))
+  ensures (inv(s) ==> canCreateList(s) ==> stepBackShowsLists(s, "createList", createList(s).state))
+  ensures (inv(s) ==> canCreateList(s) ==> stepLeavesOverview(s, "createList", createList(s).state))
   ensures (inv(s) ==> canCreateList(s) ==> stepDeleteOnlyOnExpire(s, "createList", createList(s).state, createList(s).out))
   ensures (inv(s) ==> canCreateList(s) ==> stepUndoRestoresExactState(s, "createList", createList(s).state))
   ensures (inv(s) ==> canCreateList(s) ==> stepDeleteListKeepsItemsValid(s, "createList", createList(s).state))
@@ -248,6 +252,8 @@ lemma renameList_ensures(s: Reminders, listId: int)
   ensures (inv(s) ==> canRenameList(s, listId) ==> alwaysHiddenExactlyWhileDeleteHeld(renameList(s, listId).state))
   ensures (inv(s) ==> canRenameList(s, listId) ==> alwaysActiveCustomListExists(renameList(s, listId).state))
   ensures (inv(s) ==> canRenameList(s, listId) ==> alwaysSmartCountsConsistent(renameList(s, listId).state))
+  ensures (inv(s) ==> canRenameList(s, listId) ==> stepBackShowsLists(s, "renameList", renameList(s, listId).state))
+  ensures (inv(s) ==> canRenameList(s, listId) ==> stepLeavesOverview(s, "renameList", renameList(s, listId).state))
   ensures (inv(s) ==> canRenameList(s, listId) ==> stepDeleteOnlyOnExpire(s, "renameList", renameList(s, listId).state, renameList(s, listId).out))
   ensures (inv(s) ==> canRenameList(s, listId) ==> stepUndoRestoresExactState(s, "renameList", renameList(s, listId).state))
   ensures (inv(s) ==> canRenameList(s, listId) ==> stepDeleteListKeepsItemsValid(s, "renameList", renameList(s, listId).state))
@@ -287,6 +293,8 @@ lemma deleteList_ensures(s: Reminders, listId: int, mode: DeleteMode)
   ensures (inv(s) ==> canDeleteList(s, listId) ==> alwaysHiddenExactlyWhileDeleteHeld(deleteList(s, listId, mode).state))
   ensures (inv(s) ==> canDeleteList(s, listId) ==> alwaysActiveCustomListExists(deleteList(s, listId, mode).state))
   ensures (inv(s) ==> canDeleteList(s, listId) ==> alwaysSmartCountsConsistent(deleteList(s, listId, mode).state))
+  ensures (inv(s) ==> canDeleteList(s, listId) ==> stepBackShowsLists(s, "deleteList", deleteList(s, listId, mode).state))
+  ensures (inv(s) ==> canDeleteList(s, listId) ==> stepLeavesOverview(s, "deleteList", deleteList(s, listId, mode).state))
   ensures (inv(s) ==> canDeleteList(s, listId) ==> stepDeleteOnlyOnExpire(s, "deleteList", deleteList(s, listId, mode).state, deleteList(s, listId, mode).out))
   ensures (inv(s) ==> canDeleteList(s, listId) ==> stepUndoRestoresExactState(s, "deleteList", deleteList(s, listId, mode).state))
   ensures (inv(s) ==> canDeleteList(s, listId) ==> stepDeleteListKeepsItemsValid(s, "deleteList", deleteList(s, listId, mode).state))
@@ -337,6 +345,8 @@ lemma createItem_ensures(s: Reminders, spec: ItemSpec)
   ensures (inv(s) ==> canCreateItem(s, spec) ==> alwaysHiddenExactlyWhileDeleteHeld(createItem(s, spec).state))
   ensures (inv(s) ==> canCreateItem(s, spec) ==> alwaysActiveCustomListExists(createItem(s, spec).state))
   ensures (inv(s) ==> canCreateItem(s, spec) ==> alwaysSmartCountsConsistent(createItem(s, spec).state))
+  ensures (inv(s) ==> canCreateItem(s, spec) ==> stepBackShowsLists(s, "createItem", createItem(s, spec).state))
+  ensures (inv(s) ==> canCreateItem(s, spec) ==> stepLeavesOverview(s, "createItem", createItem(s, spec).state))
   ensures (inv(s) ==> canCreateItem(s, spec) ==> stepDeleteOnlyOnExpire(s, "createItem", createItem(s, spec).state, createItem(s, spec).out))
   ensures (inv(s) ==> canCreateItem(s, spec) ==> stepUndoRestoresExactState(s, "createItem", createItem(s, spec).state))
   ensures (inv(s) ==> canCreateItem(s, spec) ==> stepDeleteListKeepsItemsValid(s, "createItem", createItem(s, spec).state))
@@ -361,6 +371,8 @@ lemma updateItem_ensures(s: Reminders, itemId: int, spec: ItemSpec)
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> alwaysHiddenExactlyWhileDeleteHeld(updateItem(s, itemId, spec).state))
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> alwaysActiveCustomListExists(updateItem(s, itemId, spec).state))
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> alwaysSmartCountsConsistent(updateItem(s, itemId, spec).state))
+  ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepBackShowsLists(s, "updateItem", updateItem(s, itemId, spec).state))
+  ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepLeavesOverview(s, "updateItem", updateItem(s, itemId, spec).state))
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepDeleteOnlyOnExpire(s, "updateItem", updateItem(s, itemId, spec).state, updateItem(s, itemId, spec).out))
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepUndoRestoresExactState(s, "updateItem", updateItem(s, itemId, spec).state))
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepDeleteListKeepsItemsValid(s, "updateItem", updateItem(s, itemId, spec).state))
@@ -386,6 +398,8 @@ lemma toggleFlag_ensures(s: Reminders, itemId: int)
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> alwaysHiddenExactlyWhileDeleteHeld(toggleFlag(s, itemId).state))
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> alwaysActiveCustomListExists(toggleFlag(s, itemId).state))
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> alwaysSmartCountsConsistent(toggleFlag(s, itemId).state))
+  ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepBackShowsLists(s, "toggleFlag", toggleFlag(s, itemId).state))
+  ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepLeavesOverview(s, "toggleFlag", toggleFlag(s, itemId).state))
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepDeleteOnlyOnExpire(s, "toggleFlag", toggleFlag(s, itemId).state, toggleFlag(s, itemId).out))
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepUndoRestoresExactState(s, "toggleFlag", toggleFlag(s, itemId).state))
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepDeleteListKeepsItemsValid(s, "toggleFlag", toggleFlag(s, itemId).state))
@@ -411,6 +425,8 @@ lemma moveItem_ensures(s: Reminders, itemId: int, targetListId: int)
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> alwaysHiddenExactlyWhileDeleteHeld(moveItem(s, itemId, targetListId).state))
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> alwaysActiveCustomListExists(moveItem(s, itemId, targetListId).state))
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> alwaysSmartCountsConsistent(moveItem(s, itemId, targetListId).state))
+  ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepBackShowsLists(s, "moveItem", moveItem(s, itemId, targetListId).state))
+  ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepLeavesOverview(s, "moveItem", moveItem(s, itemId, targetListId).state))
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepDeleteOnlyOnExpire(s, "moveItem", moveItem(s, itemId, targetListId).state, moveItem(s, itemId, targetListId).out))
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepUndoRestoresExactState(s, "moveItem", moveItem(s, itemId, targetListId).state))
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepDeleteListKeepsItemsValid(s, "moveItem", moveItem(s, itemId, targetListId).state))
@@ -436,6 +452,8 @@ lemma toggleComplete_ensures(s: Reminders, itemId: int, nextDueDay: int, at: int
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> alwaysHiddenExactlyWhileDeleteHeld(toggleComplete(s, itemId, nextDueDay, at).state))
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> alwaysActiveCustomListExists(toggleComplete(s, itemId, nextDueDay, at).state))
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> alwaysSmartCountsConsistent(toggleComplete(s, itemId, nextDueDay, at).state))
+  ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepBackShowsLists(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state))
+  ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepLeavesOverview(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state))
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepDeleteOnlyOnExpire(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state, toggleComplete(s, itemId, nextDueDay, at).out))
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepUndoRestoresExactState(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state))
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepDeleteListKeepsItemsValid(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state))
@@ -463,6 +481,8 @@ lemma deleteItem_ensures(s: Reminders, itemId: int, at: int)
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> alwaysHiddenExactlyWhileDeleteHeld(deleteItem(s, itemId, at).state))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> alwaysActiveCustomListExists(deleteItem(s, itemId, at).state))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> alwaysSmartCountsConsistent(deleteItem(s, itemId, at).state))
+  ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepBackShowsLists(s, "deleteItem", deleteItem(s, itemId, at).state))
+  ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepLeavesOverview(s, "deleteItem", deleteItem(s, itemId, at).state))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepDeleteOnlyOnExpire(s, "deleteItem", deleteItem(s, itemId, at).state, deleteItem(s, itemId, at).out))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepUndoRestoresExactState(s, "deleteItem", deleteItem(s, itemId, at).state))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepDeleteListKeepsItemsValid(s, "deleteItem", deleteItem(s, itemId, at).state))
@@ -481,6 +501,8 @@ lemma undoAction_ensures(s: Reminders, now: int)
   ensures (inv(s) ==> canUndoAction(s, now) ==> alwaysHiddenExactlyWhileDeleteHeld(undoAction(s, now).state))
   ensures (inv(s) ==> canUndoAction(s, now) ==> alwaysActiveCustomListExists(undoAction(s, now).state))
   ensures (inv(s) ==> canUndoAction(s, now) ==> alwaysSmartCountsConsistent(undoAction(s, now).state))
+  ensures (inv(s) ==> canUndoAction(s, now) ==> stepBackShowsLists(s, "undoAction", undoAction(s, now).state))
+  ensures (inv(s) ==> canUndoAction(s, now) ==> stepLeavesOverview(s, "undoAction", undoAction(s, now).state))
   ensures (inv(s) ==> canUndoAction(s, now) ==> stepDeleteOnlyOnExpire(s, "undoAction", undoAction(s, now).state, undoAction(s, now).out))
   ensures (inv(s) ==> canUndoAction(s, now) ==> stepUndoRestoresExactState(s, "undoAction", undoAction(s, now).state))
   ensures (inv(s) ==> canUndoAction(s, now) ==> stepDeleteListKeepsItemsValid(s, "undoAction", undoAction(s, now).state))
@@ -509,6 +531,8 @@ lemma expireUndo_ensures(s: Reminders, now: int)
   ensures (inv(s) ==> canExpireUndo(s, now) ==> alwaysHiddenExactlyWhileDeleteHeld(expireUndo(s, now).state))
   ensures (inv(s) ==> canExpireUndo(s, now) ==> alwaysActiveCustomListExists(expireUndo(s, now).state))
   ensures (inv(s) ==> canExpireUndo(s, now) ==> alwaysSmartCountsConsistent(expireUndo(s, now).state))
+  ensures (inv(s) ==> canExpireUndo(s, now) ==> stepBackShowsLists(s, "expireUndo", expireUndo(s, now).state))
+  ensures (inv(s) ==> canExpireUndo(s, now) ==> stepLeavesOverview(s, "expireUndo", expireUndo(s, now).state))
   ensures (inv(s) ==> canExpireUndo(s, now) ==> stepDeleteOnlyOnExpire(s, "expireUndo", expireUndo(s, now).state, expireUndo(s, now).out))
   ensures (inv(s) ==> canExpireUndo(s, now) ==> stepUndoRestoresExactState(s, "expireUndo", expireUndo(s, now).state))
   ensures (inv(s) ==> canExpireUndo(s, now) ==> stepDeleteListKeepsItemsValid(s, "expireUndo", expireUndo(s, now).state))
@@ -532,6 +556,38 @@ lemma expireUndo_ensures(s: Reminders, now: int)
   }
 }
 
+lemma settleUndo_ensures(s: Reminders)
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysDefaultListExists(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysEveryItemWellFormed(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysSelectedItemExists(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysHiddenExactlyWhileDeleteHeld(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysActiveCustomListExists(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> alwaysSmartCountsConsistent(settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepBackShowsLists(s, "settleUndo", settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepLeavesOverview(s, "settleUndo", settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepDeleteOnlyOnExpire(s, "settleUndo", settleUndo(s).state, settleUndo(s).out))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepUndoRestoresExactState(s, "settleUndo", settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepDeleteListKeepsItemsValid(s, "settleUndo", settleUndo(s).state))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepNoSentWriteAfterRestart(s, "settleUndo", settleUndo(s).state, settleUndo(s).out))
+  ensures (inv(s) ==> canSettleUndo(s) ==> stepRecurringCompleteAdvancesDue(s, "settleUndo", settleUndo(s).state))
+{
+  if inv(s) && canSettleUndo(s) {
+    var after := settleUndo(s).state;
+    if s.undoData.kind.UndoDelete? {
+      ItemsUniqueFromCounts(s.items);
+      var p := (it: ItemEntry) => (it.id != s.hiddenId);
+      ProofLib.FilterKeepsDistinctBy(p, s.items, (it: ItemEntry) => it.id);
+      ProofLib.FilterSubset(p, s.items);
+      ItemsCountsFromUnique(after.items);
+      if s.selectedId != 0 {
+        var sel :| sel in s.items && sel.id == s.selectedId;
+        ProofLib.FilterMember(p, s.items, sel);
+      }
+    }
+    SmartCountsHold(after);
+  }
+}
+
 lemma ownerChanged_ensures(s: Reminders, owner: int)
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> alwaysDefaultListExists(ownerChanged(s, owner)))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> alwaysEveryItemWellFormed(ownerChanged(s, owner)))
@@ -539,6 +595,8 @@ lemma ownerChanged_ensures(s: Reminders, owner: int)
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> alwaysHiddenExactlyWhileDeleteHeld(ownerChanged(s, owner)))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> alwaysActiveCustomListExists(ownerChanged(s, owner)))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> alwaysSmartCountsConsistent(ownerChanged(s, owner)))
+  ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepBackShowsLists(s, "ownerChanged", ownerChanged(s, owner)))
+  ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepLeavesOverview(s, "ownerChanged", ownerChanged(s, owner)))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepDeleteOnlyOnExpire(s, "ownerChanged", ownerChanged(s, owner), []))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepUndoRestoresExactState(s, "ownerChanged", ownerChanged(s, owner)))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepDeleteListKeepsItemsValid(s, "ownerChanged", ownerChanged(s, owner)))
@@ -553,6 +611,30 @@ lemma ownerChanged_ensures(s: Reminders, owner: int)
   }
 }
 
+lemma clearCompleted_ensures(s: Reminders)
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysDefaultListExists(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysEveryItemWellFormed(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysSelectedItemExists(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysHiddenExactlyWhileDeleteHeld(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysActiveCustomListExists(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysSmartCountsConsistent(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepDeleteOnlyOnExpire(s, "clearCompleted", clearCompleted(s).state, clearCompleted(s).out))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepUndoRestoresExactState(s, "clearCompleted", clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepDeleteListKeepsItemsValid(s, "clearCompleted", clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepNoSentWriteAfterRestart(s, "clearCompleted", clearCompleted(s).state, clearCompleted(s).out))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepRecurringCompleteAdvancesDue(s, "clearCompleted", clearCompleted(s).state))
+{
+  if inv(s) && canClearCompleted(s) {
+    ItemsUniqueFromCounts(s.items);
+    var p := (it: ItemEntry) => !it.completed;
+    var after := clearCompleted(s).state;
+    ProofLib.FilterKeepsDistinctBy(p, s.items, (it: ItemEntry) => it.id);
+    ProofLib.FilterSubset(p, s.items);
+    ItemsCountsFromUnique(after.items);
+    SmartCountsHold(after);
+  }
+}
+
 lemma reopen_ensures(s: Reminders)
   ensures (inv(s) ==> alwaysDefaultListExists(reopen(s).state))
   ensures (inv(s) ==> alwaysEveryItemWellFormed(reopen(s).state))
@@ -560,6 +642,8 @@ lemma reopen_ensures(s: Reminders)
   ensures (inv(s) ==> alwaysHiddenExactlyWhileDeleteHeld(reopen(s).state))
   ensures (inv(s) ==> alwaysActiveCustomListExists(reopen(s).state))
   ensures (inv(s) ==> alwaysSmartCountsConsistent(reopen(s).state))
+  ensures (inv(s) ==> stepBackShowsLists(s, "reopen", reopen(s).state))
+  ensures (inv(s) ==> stepLeavesOverview(s, "reopen", reopen(s).state))
   ensures (inv(s) ==> stepDeleteOnlyOnExpire(s, "reopen", reopen(s).state, reopen(s).out))
   ensures (inv(s) ==> stepUndoRestoresExactState(s, "reopen", reopen(s).state))
   ensures (inv(s) ==> stepDeleteListKeepsItemsValid(s, "reopen", reopen(s).state))
@@ -576,5 +660,128 @@ lemma reopen_ensures(s: Reminders)
       assert moved.out[idx] in moved.out && moved.out[idx] == WakeUndo(s.undo.until);
     }
     SmartCountsHold(moved.state);
+  }
+}
+
+lemma takeList_ensures(s: Reminders, listId: int)
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysDefaultListExists(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysEveryItemWellFormed(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysSelectedItemExists(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysHiddenExactlyWhileDeleteHeld(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysActiveCustomListExists(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysSmartCountsConsistent(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepBackShowsLists(s, "takeList", takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepLeavesOverview(s, "takeList", takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepDeleteOnlyOnExpire(s, "takeList", takeList(s, listId), []))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepUndoRestoresExactState(s, "takeList", takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepDeleteListKeepsItemsValid(s, "takeList", takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepNoSentWriteAfterRestart(s, "takeList", takeList(s, listId), []))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepRecurringCompleteAdvancesDue(s, "takeList", takeList(s, listId)))
+{
+  if inv(s) && canTakeList(s, listId) {
+    ListsUniqueFromCounts(s.lists);
+    ListOfMember(s.lists, defaultListId);
+    var defL := listOf(s.lists, defaultListId);
+    var created := ListEntry(listId, false, 1);
+    var after := takeList(s, listId);
+    assert after.lists == s.lists + [created];
+    ProofLib.DistinctByConcat(s.lists, [created], (l: ListEntry) => l.id);
+    ListsCountsFromUnique(after.lists);
+    assert defL in after.lists;
+    ListOfUnique(after.lists, defL);
+    forall it | it in after.items ensures itemWellFormed(it, after.lists, after.nextItemId) {
+      var l :| l in s.lists && l.id == it.listId;
+      assert l in after.lists;
+    }
+    SmartCountsHold(after);
+  }
+}
+
+lemma takeItem_ensures(s: Reminders, itemId: int, spec: ItemSpec, completed: bool)
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysDefaultListExists(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysEveryItemWellFormed(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysSelectedItemExists(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysHiddenExactlyWhileDeleteHeld(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysActiveCustomListExists(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysSmartCountsConsistent(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepBackShowsLists(s, "takeItem", takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepLeavesOverview(s, "takeItem", takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepDeleteOnlyOnExpire(s, "takeItem", takeItem(s, itemId, spec, completed), []))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepUndoRestoresExactState(s, "takeItem", takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepDeleteListKeepsItemsValid(s, "takeItem", takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepNoSentWriteAfterRestart(s, "takeItem", takeItem(s, itemId, spec, completed), []))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepRecurringCompleteAdvancesDue(s, "takeItem", takeItem(s, itemId, spec, completed)))
+{
+  if inv(s) && canTakeItem(s, itemId, spec, completed) {
+    ItemsUniqueFromCounts(s.items);
+    var prior := itemOf(s.items, itemId);
+    var taken := ItemEntry(itemId, spec.listId, spec.hasDue, (if spec.hasDue then spec.dueDay else 0), spec.hasDueTime, (if spec.hasDueTime then spec.dueMinute else 0), spec.repeat, spec.priority, spec.flagged, completed, prior.snoozedUntil, prior.revision + 1);
+    var after := takeItem(s, itemId, spec, completed);
+    if hasItem(s.items, itemId) {
+      ItemOfMember(s.items, itemId);
+      PutItemPreserves(s.items, s.lists, s.nextItemId, taken);
+    } else {
+      assert after.items == s.items + [taken];
+      ProofLib.DistinctByConcat(s.items, [taken], (it: ItemEntry) => it.id);
+      forall it | it in after.items ensures itemWellFormed(it, after.lists, after.nextItemId) {
+        if it != taken { assert it in s.items; }
+      }
+      forall id | hasItem(s.items, id) ensures hasItem(after.items, id) {
+        var it :| it in s.items && it.id == id;
+        assert it in after.items;
+      }
+    }
+    ItemsCountsFromUnique(after.items);
+    SmartCountsHold(after);
+  }
+}
+
+lemma forgetItem_ensures(s: Reminders, itemId: int)
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysDefaultListExists(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysEveryItemWellFormed(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysSelectedItemExists(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysHiddenExactlyWhileDeleteHeld(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysActiveCustomListExists(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysSmartCountsConsistent(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepBackShowsLists(s, "forgetItem", forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepLeavesOverview(s, "forgetItem", forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepDeleteOnlyOnExpire(s, "forgetItem", forgetItem(s, itemId), []))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepUndoRestoresExactState(s, "forgetItem", forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepDeleteListKeepsItemsValid(s, "forgetItem", forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepNoSentWriteAfterRestart(s, "forgetItem", forgetItem(s, itemId), []))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepRecurringCompleteAdvancesDue(s, "forgetItem", forgetItem(s, itemId)))
+{
+  if inv(s) && canForgetItem(s, itemId) {
+    ItemsUniqueFromCounts(s.items);
+    var after := forgetItem(s, itemId);
+    var p := (it: ItemEntry) => (it.id != itemId);
+    ProofLib.FilterKeepsDistinctBy(p, s.items, (it: ItemEntry) => it.id);
+    ProofLib.FilterSubset(p, s.items);
+    ItemsCountsFromUnique(after.items);
+    forall id | id != itemId && hasItem(s.items, id) ensures hasItem(after.items, id) {
+      var it :| it in s.items && it.id == id;
+      ProofLib.FilterMember(p, s.items, it);
+    }
+    SmartCountsHold(after);
+  }
+}
+
+lemma applySync_ensures(s: Reminders, syncedLists: seq<ListEntry>, nextListId: int, syncedItems: seq<ItemEntry>, nextItemId: int)
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysDefaultListExists(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysEveryItemWellFormed(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysSelectedItemExists(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysHiddenExactlyWhileDeleteHeld(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysActiveCustomListExists(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysSmartCountsConsistent(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepBackShowsLists(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepLeavesOverview(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepDeleteOnlyOnExpire(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId), []))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepUndoRestoresExactState(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepDeleteListKeepsItemsValid(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepNoSentWriteAfterRestart(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId), []))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepRecurringCompleteAdvancesDue(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+{
+  if inv(s) && canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) {
+    SmartCountsHold(applySync(s, syncedLists, nextListId, syncedItems, nextItemId));
   }
 }

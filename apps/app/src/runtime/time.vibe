@@ -15,34 +15,38 @@ export service Time {
   until(at: number): void!!
 }
 
-/** Where the latest time is kept, and how far it runs ahead of what is kept before it is written again. */
+/** Where the latest time is kept so restarts never move backwards. */
 const key = "alpha.time"
-const kept = 5000
 
 /**
  * Time over Effect's `Clock` and the store. `resumed` says each time the page may have slept, which stops its timers:
- * every wait looks at the clock again then.
+ * every wait looks at the clock again then. If `resumed` completes cleanly, waits still rest on the clock without spinning.
  */
 export function timeOver(resumed: Stream.Stream<unknown>) {
   return Layer.effect(Time, effect {
     const store = try KeyValueStore.KeyValueStore
     const clock = try Clock.clockWith((clock) => succeed(clock))
     const before = Number((store.get(key) catch () => undefined) ?? 0)
+    const persisted = Number.isSafeInteger(before) && before > 0 ? before : 0
     let wall = try clock.currentTimeMillis
-    let latest = Number.isSafeInteger(before) && before > wall ? before : wall
-    let saved = latest
+    let latest = persisted > wall ? persisted : wall
+    let saved = persisted
+    effect function persist(value: number): void!! {
+      if (value <= saved) return
+      const wrote = effect { try store.set(key, String(value)); return true } catch () => false
+      if (wrote) saved = value
+    }
+    try persist(latest)
+    const wake = flatMap(Stream.runHead(resumed), (seen) => Option.isSome(seen) ? Effect.void : Effect.never)
     effect function now(): number!! {
       const read = try clock.currentTimeMillis
       latest = read >= latest ? read : latest + Math.max(0, Math.ceil((read - wall) / 2))
       wall = read
-      if (latest - saved >= kept) {
-        saved = latest
-        try ignore(store.set(key, String(latest)))
-      }
+      try persist(latest)
       return latest
     }
     effect function until(at: number): void!! {
-      for (let left = at - (try now()); left > 0; left = at - (try now())) try race(sleep(left), Stream.runHead(resumed))
+      for (let left = at - (try now()); left > 0; left = at - (try now())) try race(sleep(left), wake)
     }
     return { now, latest: () => sync(() => latest), until }
   })

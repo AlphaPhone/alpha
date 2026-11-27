@@ -1,4 +1,5 @@
 dependencies {
  implementation 'androidx.browser:browser:1.8.0'
  testImplementation 'org.json:json:20250517'
+ testImplementation 'org.robolectric:robolectric:4.16.1'
 }

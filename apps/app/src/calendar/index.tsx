@@ -2,6 +2,7 @@
 import { Effect, Layer } from "effect";
 import * as View from "../../gen/app__calendar.effect.vibe";
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe";
+import * as Reopen from "../../gen/app__calendar__reminderReopen.effect.vibe";
 import { area } from "../runtime/ui.tsx";
 import { together } from "../runtime/index.vibe";
 import { changes } from "./agent.vibe";
@@ -11,19 +12,29 @@ import { deletions } from "./deletions.vibe";
 import { editor } from "./editor.vibe";
 import { linking } from "./link.vibe";
 import { owners } from "./owner.vibe";
+import { reopening } from "./reopen.vibe";
+import { stores } from "./stores.vibe";
 
 /** Back inside Calendar: the form, then the overlay, then the open event, while one is open. */
 const back = Effect.gen(function* () {
   const form = yield* Editor.Machine;
   const view = yield* View.Machine;
+  const dismiss = yield* Reopen.Machine;
+  const review = yield* dismiss.get();
+  if (review.showing) {
+    if (Reopen.canCancel(review)) yield* Effect.ignore(dismiss.send({ type: "cancel" }));
+    return true;
+  }
   const tried: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+    form.send({ type: "callOff" }),
     form.send({ type: "close" }),
     view.send({ type: "closeOverlay" }),
+    view.send({ type: "closeReminder" }),
     view.send({ type: "closeEvent" }),
   ];
   for (const step of tried) if (yield* Effect.match(step, { onFailure: () => false, onSuccess: () => true })) return true;
   return false;
 });
 
-/** Calendar, at its view (areas.ts): its view, its form, the Google link, who it reads for and the agent's changes live from its first opening until Alpha closes. */
-export default area(Layer.mergeAll(together(calendar, editor, linking, deletions, owners), changes), Calendar, { back });
+/** Calendar, at its view (areas.ts): its scoped stores, view, form, Google link, owner coordination, reminder reopen review and agent changes live from its first opening until Alpha closes. */
+export default area(Layer.mergeAll(together(stores, calendar, editor, linking, deletions, owners, reopening), changes), Calendar, { back });

@@ -1,0 +1,38 @@
+// spec/app/voice/listener.md, "Story: See and control the listener"
+import { Sense, parseListenerStatus, parseListenerStopReceipt, type ListenerStatus, type ListenerStopReceipt } from "@elizaos/os-bridges"
+import { Device, registered } from "./device.vibe"
+
+type Stop = "pause" | "turnOff"
+
+export service ImageListener {
+  readonly present: boolean
+  status(): ListenerStatus!!
+  stop(action: Stop): ListenerStopReceipt!!
+  openSettings(): boolean!!
+}
+
+const wait = "5 seconds"
+
+/** The image listener's controls, where the native host admitted the companion. */
+export const imageListener = Layer.effect(ImageListener, effect {
+  const { image } = try (try Device).capabilities()
+  const present = image && registered("ElizaSense")
+  return {
+    present,
+    status: () => effect {
+      if (!present) return parseListenerStatus(undefined)
+      const raw = timeout(tryPromise(() => Sense.status()), wait) catch () => undefined
+      return parseListenerStatus(raw)
+    },
+    stop: (action: Stop) => effect {
+      if (!present) return parseListenerStopReceipt(undefined, action)
+      const raw = timeout(tryPromise(() => Sense[action]()), wait) catch () => undefined
+      return parseListenerStopReceipt(raw, action)
+    },
+    openSettings: () => effect {
+      if (!present) return false
+      const result = timeout(tryPromise(() => Sense.openSettings()), wait) catch () => undefined
+      return result?.opened === true
+    },
+  }
+})

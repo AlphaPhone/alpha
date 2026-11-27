@@ -5,8 +5,10 @@ import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as ContactsMachine, canBookChanged } from "../../gen/app__contacts.effect.vibe"
 import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event, Request } from "../../gen/app__contacts__agent.effect.vibe"
-import { type Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/index.vibe"
-import { Attempts, type Job, answer, contained, reacting, run, together, Time } from "../runtime/index.vibe"
+import { type Telephony, TelephonyRefused, namesOf, readAddressBook, telephony, textingDefault } from "../platform/index.vibe"
+import { Attempts } from "../runtime/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import { classifyDialNumber } from "../comms/index.vibe"
 import { draftFrom, removeContact } from "./contacts.vibe"
 
@@ -66,16 +68,6 @@ function askOf(operation: Asking): { readonly ask: Ask; readonly number: string;
   }
 }
 
-/** Whether the phone answers `operation` as a request: a draft is Alpha's suggestion in the composer, and a text to several numbers is not one request. */
-export function isAsking(operation: DeviceOperation): operation is Asking {
-  switch (operation.type) {
-    case "phone_call": case "phone_dial": case "contact_create": case "contact_update": case "contact_delete": return true
-    case "sms_send": case "mms_send": return operation.recipients.length === 1
-    case "sms_compose": return !("draft" in operation && operation.draft === true)
-    default: return false
-  }
-}
-
 // spec/app/contacts/agent.md, "Only the agent asks, and only when no other request is open"; spec/app/contacts/agent.md, "A call or a text to a number reaches only a number the owner wrote"
 /** Hand the agent's operation to the phone as a request; `written` says the owner wrote the number it names. Answers whether the request was taken. */
 export effect function propose(operation: Asking, written: boolean): boolean!!(Requested | Agent.Machine | Telephony) {
@@ -116,29 +108,6 @@ export effect function withdrawn(): boolean!!Agent.Machine {
   return try contained(machine.send({ type: "withdraw" }, "Device"), "withdrawing the agent's request")
 }
 
-module page {
-  /** Whether the review is whole on screen and its enabled Send is what a finger there would hit, nothing covering it. @throws {never} */
-  export function sendShowing(): boolean {
-    if (typeof document === "undefined") return false
-    const review = document.querySelector<HTMLElement>("[data-alpha-review]")
-    const send = review?.querySelector<HTMLButtonElement>("button[data-alpha-review-send]")
-    if (!review || !send || send.disabled) return false
-    const whole = review.getBoundingClientRect()
-    if (whole.width <= 0 || whole.height <= 0 || whole.top < 0 || whole.left < 0 || whole.bottom > window.innerHeight || whole.right > window.innerWidth) return false
-    const at = send.getBoundingClientRect()
-    return send.contains(document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2))
-  }
-}
-import { sendShowing } from page
-
-// spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
-/** The owner said "Send this text" as the next thing said in Talk: the shown text is approved only while its whole review and its enabled Send are on screen. Answers whether it was approved. */
-export effect function spokenSend(): boolean!!(Agent.Machine | PhoneMachine) {
-  if (!sendShowing()) return false
-  const approve: Event = { type: "approve", clear: clear(try (try PhoneMachine).get()), spoken: true }
-  return try contained((try Agent.Machine).send(approve, "Owner"), "the spoken Send")
-}
-
 /** The contact as the request would leave it: a new contact, or `before` with the change applied. */
 export function afterOf(operation: Asking | undefined, before: Lines): Lines {
   if (operation?.type === "contact_create") return { name: operation.contact.displayName, phones: operation.contact.phoneNumbers, emails: operation.contact.emailAddresses }
@@ -159,7 +128,11 @@ export const linesOf = (contact: AddressBookContact): Lines => ({ name: contact.
 export function unchangedBy(operation: Asking | undefined, contact: AddressBookContact): boolean {
   const before = linesOf(contact)
   const after = afterOf(operation, before)
-  const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.length === b.length && a.every((value) => b.includes(value))
+  const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => {
+    const left = [...a].sort()
+    const right = [...b].sort()
+    return left.length === right.length && left.every((value, at) => value === right[at])
+  }
   return after.name === before.name && same(after.phones, before.phones) && same(after.emails, before.emails)
 }
 
@@ -191,19 +164,20 @@ effect function searched(ticket: number): Event!!(Telephony | Requested | Agent.
   const documents = state.ask === "ChangeContact" || state.ask === "DeleteContact"
     ? try Effect.forEach(candidates, (one) => Effect.orElseSucceed(readAddressBook("read reviewed contact", (c) => c.get(one.id, "ExplicitRead")), () => undefined))
     : []
-  if (documents.some((document) => document === undefined)) return failed
   const reviewed = new Map(documents.flatMap((document) => document === undefined ? [] : [[document.id, document] as const]))
-  const found = candidates.map((one) => {
+  if ((state.ask === "ChangeContact" || state.ask === "DeleteContact") && candidates.length > 0 && reviewed.size === 0) return failed
+  const found = (state.ask === "ChangeContact" || state.ask === "DeleteContact" ? candidates.filter((one) => reviewed.has(one.id)) : candidates).map((one) => {
     const document = reviewed.get(one.id)
     return document === undefined ? one : { ...one, name: document.displayName, phones: document.phoneNumbers.map(({ number }) => number), emails: document.emailAddresses.map(({ address }) => address) }
   })
   const more = all.length > Agent.maxMatches || pages.some((page) => page.next !== null && page.next !== undefined)
   const added = operation.type === "contact_create" ? operation.contact.phoneNumbers : operation.type === "contact_update" ? [...(operation.set?.phoneNumbers ?? []), ...(operation.add?.phoneNumbers ?? [])] : []
   const saved = try namesOf("call", added)
-  if (!Agent.canFound(try (try Agent.Machine).get(), ticket, found.length, found[0]?.id ?? "", "Device")) return failed
-  try store.set({ matches: found, reviewed, saved })
-  const matches = Agent.reachesANumber(state.ask) ? choicesOf(found).length : found.length
+  const fresh = try (try Agent.Machine).get()
+  const matches = Agent.reachesANumber(fresh.ask) ? choicesOf(found).length : found.length
   const only = found.length === 1 ? found[0] : undefined
+  if (!Agent.canFound(fresh, ticket, matches, only?.id ?? "", "Device")) return failed
+  try store.set({ matches: found, reviewed, saved })
   return { type: "found", ticket, ok: true, matches, more, unchanged: only !== undefined && unchangedBy(operation, only), contact: only?.id ?? "" }
 }
 
@@ -221,10 +195,9 @@ function settled(record: SmsSendResult): { readonly done: boolean; readonly know
 
 /** The SIM a text goes out on: the one the agent named, the phone's default for texts, or its only SIM; with several and no default, none. */
 effect function simFor(operation: Asking | undefined): (number | undefined)!!Telephony {
-  if (operation?.type === "sms_send") return operation.subscriptionId
+  if (operation?.type === "sms_send" && operation.subscriptionId !== undefined) return operation.subscriptionId
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
-  const sims = status?.subscriptions ?? []
-  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+  return textingDefault(status?.subscriptions ?? [])
 }
 
 // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"
@@ -314,5 +287,29 @@ function carry(fx: Out): Job<Event, Telephony | Requested | Attempts | Time | Ag
   }
 }
 
+// spec/app/contacts/agent.md, "A change on the phone stops the review until the owner sees what is on the phone now"
+const watchedBook = started(effect {
+  const agent = try Agent.Machine
+  const contacts = try ContactsMachine
+  const store = try Requested
+  const signals = Stream.changesWith(
+    Stream.map(contacts.changes, (state) => `${state.write.id}:${state.write.outcome}:${state.card.ticket}:${state.list.ticket}`),
+    (a, b) => a === b,
+  )
+  try Stream.runForEach(signals, effect () => {
+    const current = try agent.get()
+    if (current.stage !== "Shown" || current.contact === "" || !Agent.canChanged(current, "Device")) return
+    const held = try store.get()
+    const base = held.reviewed.get(current.contact)
+    if (base === undefined) return
+    const latest = readAddressBook("recheck reviewed contact", (c) => c.get(base.id, "ExplicitRead")) catch () => undefined
+    if (latest !== undefined && latest.version === base.version) return
+    const now = try agent.get()
+    if (now.stage === "Shown" && now.contact === current.contact && Agent.canChanged(now, "Device")) {
+      try contained(agent.send({ type: "changed" }, "Device"), "marking the shown contact changed")
+    }
+  })
+}, "watching reviewed contacts for changes")
+
 /** What the agent asked of the phone, held until it ends: resident, since the approvals desk hands it requests whatever is showing. */
-export const requests = together(reacting(Agent, { carry }), requested)
+export const requests = together(reacting(Agent, { carry }), requested, watchedBook)

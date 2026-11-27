@@ -14,6 +14,8 @@ export interface PlatformScene {
   readonly dripping: Set<object>;
   /** The requests the agent is still holding open for `/api/platform/hang` until aborted. */
   readonly hanging: Set<object>;
+  /** When true, `ElizaAgent.abort` rejects, simulating a bridge failure during stream teardown. */
+  abortFails?: boolean;
 }
 
 export function platformScene(): PlatformScene {

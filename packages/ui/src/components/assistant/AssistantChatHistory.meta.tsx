@@ -4,7 +4,7 @@ import type { AssistantChatHistoryProps } from "./AssistantChatHistory.tsx";
 import { refuses } from "./plays.ts";
 
 const onChoose = fn();
-const onBack = fn();
+const onStart = fn();
 
 export const meta: ComponentMeta<AssistantChatHistoryProps> = {
   args: {
@@ -14,7 +14,7 @@ export const meta: ComponentMeta<AssistantChatHistoryProps> = {
       { id: "2", title: "Gift ideas for Mum", detail: "Tuesday" },
     ],
     onChoose,
-    onBack,
+    onStart,
     onRetry: fn(),
   },
   examples: {
@@ -26,12 +26,13 @@ export const meta: ComponentMeta<AssistantChatHistoryProps> = {
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onChoose.mockClear();
-      onBack.mockClear();
+      onStart.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: /Dentist and invoices/ }));
-      await userEvent.click(canvas.getByRole("button", { name: "Back to chat" }));
-      await expect([onChoose.mock.calls, onBack.mock.calls.length]).toEqual([[["3"]], 1]);
+      await userEvent.click(canvas.getByRole("button", { name: "New chat" }));
+      await expect([onChoose.mock.calls, onStart.mock.calls.length]).toEqual([[["3"]], 1]);
     },
     Blocked: refuses(/Dentist and invoices/, onChoose),
+    Making: refuses("New chat", onStart),
   },
 };

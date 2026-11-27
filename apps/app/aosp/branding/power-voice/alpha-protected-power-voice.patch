@@ -54,9 +54,47 @@
          }
      }
  
+--- a/packages/SystemUI/src/com/android/systemui/LauncherProxyService.java
++++ b/packages/SystemUI/src/com/android/systemui/LauncherProxyService.java
+@@ -441,8 +441,9 @@
+ 
+         @Override
+         public void startAssistant(Bundle bundle) {
++            final Bundle sanitized = stripAlphaPowerInvocation(bundle);
+             verifyCallerAndClearCallingIdentityPostMain("startAssistant", () ->
+-                    notifyStartAssistant(bundle));
++                    notifyStartAssistant(sanitized));
+         }
+ 
+         @Override
+@@ -1200,6 +1201,24 @@
+         }
+     }
+ 
++    private static Bundle stripAlphaPowerInvocation(Bundle bundle) {
++        if (bundle == null) {
++            return null;
++        }
++        try {
++            final Bundle sanitized = new Bundle(bundle);
++            if (sanitized.getInt(AssistUtils.INVOCATION_TYPE_KEY,
++                    AssistUtils.INVOCATION_TYPE_UNKNOWN)
++                    == AssistUtils.INVOCATION_TYPE_POWER_BUTTON_LONG_PRESS) {
++                sanitized.remove(AssistUtils.INVOCATION_TYPE_KEY);
++            }
++            return sanitized;
++        } catch (RuntimeException malformed) {
++            // Malformed parcel data has no authenticated Power origin.
++            return null;
++        }
++    }
++
+     private void notifyStartAssistant(Bundle bundle) {
+         for (int i = mConnectionCallbacks.size() - 1; i >= 0; --i) {
+             mConnectionCallbacks.get(i).startAssistant(bundle);
 --- a/packages/SystemUI/src/com/android/systemui/assist/AssistManager.java
 +++ b/packages/SystemUI/src/com/android/systemui/assist/AssistManager.java
-@@ -7,12 +7,15 @@
+@@ -7,12 +7,17 @@
  import android.annotation.Nullable;
  import android.app.ActivityManager;
  import android.app.ActivityOptions;
@@ -68,11 +106,13 @@
  import android.content.Context;
  import android.content.Intent;
 +import android.content.pm.ActivityInfo;
++import android.content.pm.ApplicationInfo;
++import android.content.pm.PackageInfo;
 +import android.content.pm.PackageManager;
  import android.metrics.LogMaker;
  import android.os.AsyncTask;
  import android.os.Bundle;
-@@ -20,6 +23,7 @@
+@@ -20,6 +25,7 @@
  import android.os.RemoteException;
  import android.os.SystemClock;
  import android.os.UserHandle;
@@ -80,11 +120,28 @@
  import android.provider.Settings;
  import android.service.voice.VisualQueryAttentionResult;
  import android.service.voice.VoiceInteractionSession;
-@@ -354,7 +358,95 @@
+@@ -159,6 +165,7 @@
+     private final SelectedUserInteractor mSelectedUserInteractor;
+     private final ActivityManager mActivityManager;
+     private final AssistInteractor mInteractor;
++    private final Handler mUiHandler;
+     private final Handler mBgHandler;
+     private final Optional<InvocationEffectEnabler> mOptionalInvocationEffectEnabler;
+ 
+@@ -223,6 +230,7 @@
+         mSelectedUserInteractor = selectedUserInteractor;
+         mActivityManager = activityManager;
+         mInteractor = interactor;
++        mUiHandler = uiHandler;
+         mBgHandler = bgHandler;
+         mOptionalInvocationEffectEnabler = optionalInvocationEffectEnabler;
+ 
+@@ -354,7 +362,134 @@
                  legacyDeviceState);
          logStartAssistLegacy(legacyInvocationType, legacyDeviceState);
          mInteractor.onAssistantStarted(legacyInvocationType);
-+        if (!isService && tryStartAlphaPowerVoice(context, args, assistComponent)) {
++        if (!isService && isAlphaPowerVoiceCandidate(args, assistComponent)) {
++            startAlphaPowerVoiceAsync(context, new Bundle(args), assistComponent);
 +            return;
 +        }
          startAssistInternal(context, args, assistComponent, isService);
@@ -97,18 +154,44 @@
 +            new ComponentName(ALPHA_PACKAGE, ALPHA_PACKAGE + ".AlphaPowerVoiceActivity");
 +    private static final String ALPHA_POWER_PERMISSION = "android.permission.STATUS_BAR_SERVICE";
 +    private static final String ALPHA_SENSE_FEATURE = ALPHA_PACKAGE + ".feature.SENSE";
++    private static final byte[] ALPHA_SIGNER_SHA256 = new byte[] {
++        (byte) 0xed, (byte) 0xbf, (byte) 0xca, (byte) 0xcb,
++        (byte) 0x1d, (byte) 0xa6, (byte) 0x89, (byte) 0x00,
++        (byte) 0x8b, (byte) 0xf4, (byte) 0xe7, (byte) 0xd6,
++        (byte) 0x75, (byte) 0x17, (byte) 0x6c, (byte) 0x30,
++        (byte) 0x2d, (byte) 0xec, (byte) 0xf8, (byte) 0x31,
++        (byte) 0x61, (byte) 0xa8, (byte) 0x77, (byte) 0xeb,
++        (byte) 0x8b, (byte) 0x1d, (byte) 0xe4, (byte) 0xff,
++        (byte) 0xae, (byte) 0x04, (byte) 0x45, (byte) 0xed,
++    };
++
++    private boolean isAlphaPowerVoiceCandidate(Bundle args, ComponentName assistComponent) {
++        return args != null
++                && args.getInt(INVOCATION_TYPE_KEY, INVOCATION_TYPE_UNKNOWN)
++                        == INVOCATION_TYPE_POWER_BUTTON_LONG_PRESS
++                && ALPHA_ASSIST.equals(assistComponent)
++                && mDeviceProvisionedController.isDeviceProvisioned()
++                && mDeviceProvisionedController.isCurrentUserSetup()
++                && mSelectedUserInteractor.getSelectedUserId() == mUserTracker.getUserId();
++    }
++
++    /** Offload Binder verification and protected Power voice launch off SystemUI's main thread. */
++    private void startAlphaPowerVoiceAsync(
++            Context context, Bundle fallbackArgs, ComponentName assistComponent) {
++        mBgHandler.post(() -> {
++            if (!tryStartAlphaPowerVoice(context, fallbackArgs, assistComponent)) {
++                mUiHandler.post(() -> startAssistInternal(
++                        context, fallbackArgs, assistComponent, false /* isService */));
++            }
++        });
++    }
 +
 +    /** Only the authenticated native Power route can enter the protected one-shot voice child. */
 +    private boolean tryStartAlphaPowerVoice(
 +            Context context, Bundle args, ComponentName assistComponent) {
 +        try {
-+            if (args == null || args.getInt(INVOCATION_TYPE_KEY, INVOCATION_TYPE_UNKNOWN)
-+                    != INVOCATION_TYPE_POWER_BUTTON_LONG_PRESS
-+                    || !ALPHA_ASSIST.equals(assistComponent)
++            if (!isAlphaPowerVoiceCandidate(args, assistComponent)
 +                    || !context.getPackageManager().hasSystemFeature(ALPHA_SENSE_FEATURE)
-+                    || !mDeviceProvisionedController.isDeviceProvisioned()
-+                    || !mDeviceProvisionedController.isCurrentUserSetup()
-+                    || mSelectedUserInteractor.getSelectedUserId() != mUserTracker.getUserId()
 +                    || context.checkSelfPermission(ALPHA_POWER_PERMISSION)
 +                            != PackageManager.PERMISSION_GRANTED) {
 +                return false;
@@ -122,14 +205,21 @@
 +                return false;
 +            }
 +            final PackageManager pm = userContext.getPackageManager();
-+            final ActivityInfo selected = pm.getActivityInfo(ALPHA_ASSIST, 0);
-+            final ActivityInfo child = pm.getActivityInfo(ALPHA_POWER_VOICE, 0);
++            final ActivityInfo selected = pm.getActivityInfo(
++                    ALPHA_ASSIST, PackageManager.MATCH_SYSTEM_ONLY);
++            final ActivityInfo child = pm.getActivityInfo(
++                    ALPHA_POWER_VOICE, PackageManager.MATCH_SYSTEM_ONLY);
++            final PackageInfo pkgInfo = pm.getPackageInfo(
++                    ALPHA_PACKAGE,
++                    PackageManager.MATCH_SYSTEM_ONLY | PackageManager.GET_SIGNING_CERTIFICATES);
 +            if (!alphaPowerComponentEnabled(pm, selected, ALPHA_ASSIST)
 +                    || !alphaPowerComponentEnabled(pm, child, ALPHA_POWER_VOICE)
 +                    || !ALPHA_POWER_PERMISSION.equals(child.permission)
 +                    || selected.applicationInfo.uid != child.applicationInfo.uid
-+                    || pm.checkSignatures(selected.packageName, child.packageName)
-+                            != PackageManager.SIGNATURE_MATCH) {
++                    || pkgInfo == null || pkgInfo.signingInfo == null
++                    || pkgInfo.signingInfo.hasMultipleSigners()
++                    || !pm.hasSigningCertificate(
++                            ALPHA_PACKAGE, ALPHA_SIGNER_SHA256, PackageManager.CERT_INPUT_SHA256)) {
 +                return false;
 +            }
 +            // Drop all caller extras, URI, assist-context and origin hints. The explicit
@@ -148,9 +238,9 @@
 +                    || !users.isUserUnlocked()) {
 +                return false;
 +            }
-+            mCommandQueue.animateCollapsePanels(
++            mUiHandler.post(() -> mCommandQueue.animateCollapsePanels(
 +                    CommandQueue.FLAG_EXCLUDE_SEARCH_PANEL | CommandQueue.FLAG_EXCLUDE_RECENTS_PANEL,
-+                    false /* force */);
++                    false /* force */));
 +            userContext.startActivityAsUser(intent, options.toBundle(), user);
 +            return true;
 +        } catch (PackageManager.NameNotFoundException | RuntimeException unavailable) {
@@ -165,6 +255,11 @@
 +                || !expected.getClassName().equals(activity.name)
 +                || activity.targetActivity != null || !activity.exported || !activity.enabled
 +                || activity.applicationInfo == null || !activity.applicationInfo.enabled) {
++            return false;
++        }
++        final int flags = activity.applicationInfo.flags;
++        if ((flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) == 0
++                || (flags & ApplicationInfo.FLAG_SUSPENDED) != 0) {
 +            return false;
 +        }
 +        final int componentState = pm.getComponentEnabledSetting(expected);

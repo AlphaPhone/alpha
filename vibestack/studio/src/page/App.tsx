@@ -19,13 +19,13 @@ export function App() {
   const openPublish = () => { if (!S.publishing && can({ type: "publish", changes: 0 })) setPublishing(true); };
 
   useEffect(() => {
-    connect();
+    const disconnect = connect();
     const keys = (e: KeyboardEvent) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "");
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); openPublish(); }
       else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdOpen(!S.cmdOpen); }
       else if ((e.metaKey || e.ctrlKey) && e.key === "\\") { e.preventDefault(); toggleRail(); }
-      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !typing && S.history.length) { e.preventDefault(); undo(); }
+      else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !typing && S.history.length) { e.preventDefault(); undo(); }
       else if (e.key === "Escape" && !document.querySelector("[role=dialog]")) {
         if (typing && S.editing.size) {
           const id = document.activeElement?.closest<HTMLElement>("[data-uid]")?.dataset.uid;
@@ -39,7 +39,7 @@ export function App() {
     const leaving = (e: BeforeUnloadEvent) => { if (dirtySpecs().length) e.preventDefault(); };
     document.addEventListener("keydown", keys);
     window.addEventListener("beforeunload", leaving);
-    return () => { document.removeEventListener("keydown", keys); window.removeEventListener("beforeunload", leaving); };
+    return () => { disconnect(); document.removeEventListener("keydown", keys); window.removeEventListener("beforeunload", leaving); };
   }, []);
 
   const spec = current();

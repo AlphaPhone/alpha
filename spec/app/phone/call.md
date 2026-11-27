@@ -51,8 +51,8 @@ pure val atValues = Set(0, 1000, 2500, 4000, 64000)
 
 ### The bar is about the call that needs the owner first: a ringing call, then the connected one
 
-The comms stage and End beside the comms bar read this call while a call
-rings; the top bar itself draws nothing then.
+The open comms stage reads this call while it rings. The top bar itself
+draws nothing then and Android presents the closed-stage incoming alert.
 
 ```quint
 pure def inPhase(calls: List[LiveCall], phase: CallPhase): List[LiveCall] = calls.select(c => c.phase == phase)
@@ -78,12 +78,14 @@ pure def barPhase(b: CallBar): BarPhase =
 
 pure def ringingIn(calls: List[LiveCall]): bool = calls.some(c => c.phase == Ringing)
 
-pure def withCalls(calls: List[LiveCall], wellFormed: bool, b: CallBar): CallBar =
+pure def withCalls(calls: List[LiveCall], wellFormed: bool, at: int, b: CallBar): CallBar =
+  val now = if (at > b.now) at else b.now
   val kept = if (wellFormed) calls else List()
   val live = b.eligible and wellFormed and kept.length() > 0
   val endedNow = b.eligible and wellFormed and b.shown and not(ringingIn(b.calls)) and not(live) and not(ringingIn(kept))
-  { ...b, calls: kept, trusted: wellFormed, ending: if (kept.some(c => c.id == b.ending)) b.ending else "", shown: live,
-    endedUntil: if (live or ringingIn(kept)) 0 else if (endedNow) b.now + endedHold else if (b.eligible and wellFormed) b.endedUntil else 0 }
+  val priorEnded = if (b.endedUntil > now) b.endedUntil else 0
+  { ...b, now: now, calls: kept, trusted: wellFormed, ending: if (kept.some(c => c.id == b.ending)) b.ending else "", shown: live,
+    endedUntil: if (live or ringingIn(kept)) 0 else if (endedNow) now + endedHold else if (b.eligible and wellFormed) priorEnded else 0 }
 
 pure def refresh(b: CallBar): Moved =
   { state: { ...b, generation: b.generation + 1 }, out: List(ReadCalls({ ticket: b.generation + 1 })) }
@@ -105,8 +107,8 @@ pure def sometimesTheBarShowsALiveCall(b: CallBar): bool = barPhase(b) == LiveBa
 
 The top bar draws nothing while any listed call rings, a call waiting behind
 a held or connected call included; a second call bar would cover or repeat
-Android's alert. The ringing call stays listed, so the comms stage and End
-beside the comms bar still see it. Once the ring is answered or gone the bar
+Android's alert. The ringing call stays listed so the open comms stage
+still sees it. Once the ring is answered or gone the bar
 draws the call that is left. A ring holds no "Call ended" moment, and a ring
 that arrives during that moment clears it.
 
@@ -128,9 +130,9 @@ reads Telecom when it opens and when the page shows again.
 
 pure def canRefreshAnswered(b: CallBar, ticket: int): bool = ticket == b.generation
 
-pure def refreshAnswered(b: CallBar, ticket: int, calls: List[LiveCall], wellFormed: bool): CallBar = withCalls(calls, wellFormed, b)
+pure def refreshAnswered(b: CallBar, ticket: int, calls: List[LiveCall], wellFormed: bool, at: int): CallBar = withCalls(calls, wellFormed, at, b)
 
-pure def callsReported(b: CallBar, calls: List[LiveCall], wellFormed: bool): CallBar = withCalls(calls, wellFormed, { ...b, generation: b.generation + 1 })
+pure def callsReported(b: CallBar, calls: List[LiveCall], wellFormed: bool, at: int): CallBar = withCalls(calls, wellFormed, at, { ...b, generation: b.generation + 1 })
 
 pure def stepTheTicketNeverGoesBack(before: CallBar, after: CallBar): bool = after.generation >= before.generation
 ```
@@ -182,7 +184,7 @@ pure def sometimesAnEndedCallHoldsItsPlace(b: CallBar): bool = barPhase(b) == En
 
 ### Return and End act only on the call the bar shows, and End is asked once
 
-End on a ringing call, from End beside the comms bar, is Decline. While an
+End on a ringing call is Decline. While an
 End is waiting for Telecom a second tap does nothing; a refused End releases
 it, and either way the bar reads Telecom again.
 

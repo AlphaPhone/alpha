@@ -1,7 +1,11 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
-import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
+import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordEditorInput, PasswordEntrySummary, PasswordsStatus, LaunchTarget, LauncherAppsChange, MirrorChoice, MirrorHistoryRow, MirrorPolicyChange, MirrorStatus, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
+import type { PasswordProvider, PasswordProviderAction } from "../../src/platform/systemSettings.vibe";
+import type { PermissionState } from "@capacitor/core";
 import type { LauncherScene } from "./launcher.ts";
-import { type Faked, plugin, rejection } from "./phone.ts";
+import { answered, type Faked, plugin, rejection } from "./phone.ts";
+
+type AppPermission = "camera" | "notifications";
 
 /** A field as Alpha's `AlphaCarrierSetup` plugin reports one. */
 export interface CarrierField { status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"; value?: string }
@@ -13,32 +17,59 @@ export interface RecoveryScene {
   readonly tokens: string[];
 }
 
+export interface ListenerScene {
+  status: ListenerStatus;
+  readonly pauseReply: Promise<unknown>;
+  openSettings: boolean;
+}
+
 /** What the fake phone holds for Settings, and how it behaves; a journey changes it between steps. */
 export interface SettingsScene {
   facts: SystemFacts;
   recovery?: RecoveryScene;
+  listener?: ListenerScene;
+  textAsk?: { ticket: number; canReturn: boolean; returned: number[] };
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
-  hostFacts: { androidRelease: string; permissions: { Camera?: boolean; Microphone?: boolean; Calendar?: boolean } };
+  hostFacts: { androidRelease: string; startupPermissionDefaults?: boolean; permissions: { Camera?: boolean; Microphone?: boolean; Calendar?: boolean } };
   /** Reads of the phone's facts wait for this before they answer. */
   gate: Promise<unknown>;
   /** Android takes the Home role for Alpha when its dialog closes. */
   grantsHome: boolean;
   readonly opened: string[];
   readonly copied: string[];
+  readonly shared: Array<{ title: string; text: string }>;
+  readonly haptics: string[];
+  readonly systemBars: boolean[];
+  timeoutScalePercent: number;
+  refusesCopy: boolean;
+  passwordsUnlocked: boolean;
+  readonly passwords: PasswordEntrySummary[];
+  readonly passwordEdits: Array<PasswordEditorInput | undefined>;
+  readonly passwordRowActions: Array<{ choice: "copy" | "reveal" | "remove"; id: string; revision: number }>;
+  mirror: MirrorStatus;
+  readonly mirrorChoices: MirrorChoice[];
+  readonly mirrorHistory: MirrorHistoryRow[];
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
+  passwordProvider?: PasswordProvider;
+  readonly permissionRequests: AppPermission[];
+  readonly permissionStates: Partial<Record<AppPermission, PermissionState>>;
+  readonly permissionReplies: Partial<Record<AppPermission, PermissionState>>;
   crashes: NativeCrashEntry[];
   reset: { status: string; message: string };
   readonly reviews: number[];
   networks: WiFiNetwork[];
+  wifiScanGate?: Promise<unknown>;
   joinAnswer: ApprovedJoinResult["status"];
   readonly joins: ConnectOptions[];
   connectivity: ConnectivityResult;
   carrier: { slots: Array<{ slotIndex: number; imei: CarrierField; simState: CarrierField }>; iccid: CarrierField; eid: CarrierField };
   /** Each Google consent Alpha's host kept to launch the agent with, oldest first: one told again unchanged is kept once, as `AlphaAgentService.keep` does. */
   readonly consents: Array<{ gmailChanges: boolean; calendarEdits: boolean }>;
+  /** How many times Alpha told the host a consent at all, kept or not. */
+  told: number;
   /** Whether the host refuses each consent it is told, keeping what it had, as when Android cannot save it. */
   refusesConsent: boolean;
   /** What the host waits for before it answers a consent, as when a restart of the agent is slow. */
@@ -54,10 +85,15 @@ export function settingsScene(): SettingsScene {
     ],
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
+    passwordsUnlocked: false, passwords: [], passwordEdits: [], passwordRowActions: [],
+    mirror: { revision: "policy-1", enabled: false, paused: false, accessGranted: true, connected: true, history: false, historyUnavailable: false, apps: [] },
+    mirrorChoices: [{ packageName: "example.reader", label: "News reader" }], mirrorHistory: [],
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
-    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
+    permissionRequests: [], permissionStates: {}, permissionReplies: {},
+    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], refusesCopy: false, shared: [], haptics: [], systemBars: [], timeoutScalePercent: 100,
+    crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
-    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false, consentGate: Promise.resolve(),
+    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], told: 0, refusesConsent: false, consentGate: Promise.resolve(),
     carrier: {
       slots: [{ slotIndex: 0, imei: { status: "available", value: "356938035643809" }, simState: { status: "available", value: "Ready" } }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: { status: "available", value: "Absent" } }],
       iccid: { status: "permission-denied" }, eid: { status: "available", value: "89049032000000000000000000000001" },
@@ -153,9 +189,15 @@ export function elizaWiFi(scene: SettingsScene): Faked {
     requestPermissions: () => Promise.resolve({ location: "granted" }),
     getCapabilities: () => Promise.resolve({ sdk: 35, approvedJoin: true, internetPanel: true }),
     openInternetPanel: () => page(scene, "internet"),
-    getWifiState: () => Promise.resolve({ enabled: true, connected: true, rssi: -50 }),
-    getConnectedNetwork: () => Promise.resolve({ network: null }),
-    listAvailableNetworks: () => Promise.resolve({ networks: scene.networks.map((network) => ({ ...network })) }),
+    getWifiState: () => Promise.resolve({ enabled: true, connected: scene.connectivity.ssid !== undefined, rssi: -50 }),
+    getConnectedNetwork: () => {
+      const current = scene.connectivity.ssid === undefined ? undefined : scene.networks.find((n) => n.ssid === scene.connectivity.ssid);
+      return Promise.resolve({ network: current ? { ...current } : null });
+    },
+    listAvailableNetworks: async () => {
+      await scene.wifiScanGate;
+      return { networks: scene.networks.map((network) => ({ ...network })) };
+    },
     connectToNetwork: () => Promise.resolve({ success: false }),
     disconnectFromNetwork: () => Promise.resolve({ success: true }),
     getConnectivity: () => Promise.resolve({ ...scene.connectivity }),
@@ -170,10 +212,11 @@ export function elizaWiFi(scene: SettingsScene): Faked {
 export function alphaAgentConsent(scene: SettingsScene) {
   return {
     setAgentGoogleConsent: async (consent: { gmailChanges: boolean; calendarEdits: boolean }) => {
+      scene.told += 1;
       await scene.consentGate;
       if (scene.refusesConsent) throw new Error("Agent consent could not be saved");
       const kept = scene.consents.at(-1);
-      if (kept?.gmailChanges !== consent.gmailChanges || kept.calendarEdits !== consent.calendarEdits) scene.consents.push({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits });
+      if (kept?.gmailChanges !== consent.gmailChanges || kept?.calendarEdits !== consent.calendarEdits) scene.consents.push({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits });
     },
   };
 }
@@ -196,10 +239,73 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
 }
 
 
+/** The qualified image listener's status, stop receipts and explicit native settings handoff. */
+export function elizaSense(scene: SettingsScene, listener: ListenerScene): Faked {
+  return () => ({
+    status: () => Promise.resolve(listener.status),
+    pause: () => listener.pauseReply,
+    turnOff: () => {
+      listener.status = { available: true, state: "OFF", label: "Off", consented: false, listening: false, microphoneOpen: false };
+      return Promise.resolve({ ...listener.status, saved: true });
+    },
+    openSettings: async () => {
+      if (listener.openSettings) await page(scene, "sense-settings");
+      return { opened: listener.openSettings };
+    },
+  });
+}
+
 /** Android's autofill status and provider picker through the native Passwords bridge. */
 export function elizaPasswords(scene: SettingsScene): Faked {
+  const check = (choice: "copy" | "reveal" | "remove", id: string, revision: number | undefined) => {
+    if (!scene.passwordsUnlocked) throw rejection("locked");
+    const index = scene.passwords.findIndex((entry) => entry.id === id && entry.revision === revision);
+    if (revision === undefined || index < 0) throw rejection("conflict");
+    scene.passwordRowActions.push({ choice, id, revision });
+    return index;
+  };
   return () => ({
-    status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: true, unlockRemainingMs: 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
+    status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: !scene.passwordsUnlocked, unlockRemainingMs: scene.passwordsUnlocked ? 60000 : 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
+    unlock: (): ReturnType<ElizaPasswordsPlugin["unlock"]> => {
+      scene.passwordsUnlocked = true;
+      return Promise.resolve({ unlocked: true, unlockRemainingMs: 60000 });
+    },
+    lock: (): ReturnType<ElizaPasswordsPlugin["lock"]> => {
+      scene.passwordsUnlocked = false;
+      return Promise.resolve({ locked: true });
+    },
+    list: (): ReturnType<ElizaPasswordsPlugin["list"]> => answered(() => {
+      if (!scene.passwordsUnlocked) throw rejection("locked");
+      return { entries: structuredClone(scene.passwords) };
+    }),
+    reveal: ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["reveal"]>[0]): ReturnType<ElizaPasswordsPlugin["reveal"]> => answered(() => {
+      check("reveal", id, expectedRevision);
+      return { shown: true, hidesAfterMs: 30_000 };
+    }),
+    copy: ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["copy"]>[0]): ReturnType<ElizaPasswordsPlugin["copy"]> => answered(() => {
+      check("copy", id, expectedRevision);
+      return { copied: true, clearsAfterMs: 30_000 };
+    }),
+    remove: ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["remove"]>[0]): ReturnType<ElizaPasswordsPlugin["remove"]> => answered(() => {
+      scene.passwords.splice(check("remove", id, expectedRevision), 1);
+      return { removed: true };
+    }),
+    openEditor: ({ entryId, expectedRevision }: Partial<PasswordEditorInput>): ReturnType<ElizaPasswordsPlugin["openEditor"]> => answered(() => {
+      if (!scene.passwordsUnlocked) throw rejection("locked");
+      if (entryId === undefined && expectedRevision === undefined) {
+        scene.passwordEdits.push(undefined);
+        scene.passwords.push({ id: "entry-new", label: "New account", username: "owner", updatedAt: 1000, revision: 1,
+          bindings: [{ kind: "web", facet: "https://other.test", display: "other.test" }] });
+        return { status: "saved", id: "entry-new", revision: 1 };
+      }
+      if (entryId === undefined || expectedRevision === undefined) throw rejection("invalid");
+      scene.passwordEdits.push({ entryId, expectedRevision });
+      const found = scene.passwords.find(({ id }) => id === entryId);
+      if (!found || found.revision !== expectedRevision) throw rejection("conflict");
+      found.label = "Updated account";
+      found.revision += 1;
+      return { status: "saved", id: found.id, revision: found.revision };
+    }),
     openAutofillSettings: async (): ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]> => {
       await page(scene, scene.autofillDestination);
       return { status: "opened", destination: scene.autofillDestination };
@@ -207,13 +313,54 @@ export function elizaPasswords(scene: SettingsScene): Faked {
   });
 }
 
-/** The Android-only Settings methods exposed by AlphaDevice. */
+/** The Android-only Settings and device methods exposed by AlphaDevice. */
 export function settingsHost(scene: SettingsScene) {
+  const permissionState = (permission: AppPermission) => scene.permissionStates[permission] ??
+    (permission === "camera" && scene.hostFacts.permissions.Camera ? "granted" : "denied");
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
+    diagnosticsFacts: () => Promise.resolve({ androidRelease: scene.hostFacts.androidRelease, version: scene.version, launcher: scene.launcher }),
+    haptic: ({ kind }: { kind: string }) => {
+      scene.haptics.push(kind);
+      return Promise.resolve();
+    },
+    recommendedTimeout: ({ baseMs }: { baseMs: number }) => Promise.resolve({ timeoutMs: Math.round((baseMs * scene.timeoutScalePercent) / 100) }),
+    setSystemBarAppearance: ({ dark }: { dark: boolean }) => {
+      scene.systemBars.push(dark);
+      return Promise.resolve();
+    },
+    accessPermissionStatus: ({ permission }: { permission: AppPermission }) => Promise.resolve({ state: permissionState(permission) }),
+    requestAccessPermission: ({ permission }: { permission: AppPermission }) => {
+      const state = permissionState(permission);
+      if (state === "prompt" || state === "prompt-with-rationale") {
+        scene.permissionRequests.push(permission);
+        scene.permissionStates[permission] = scene.permissionReplies[permission] ?? state;
+      }
+      return Promise.resolve({ state: permissionState(permission) });
+    },
+    passwordProviderStatus: () => Promise.resolve(scene.passwordProvider),
+    openPasswordProvider: async ({ action }: { action: PasswordProviderAction }) => {
+      await page(scene, `password-provider ${action}`);
+      return { status: "opened", destination: action === "settings" ? "provider-picker" : "external" };
+    },
+    textAsk: () => Promise.resolve({ ticket: scene.textAsk?.ticket ?? 0 }),
+    closeTextAsk: ({ ticket }: { ticket: number }) => {
+      const visit = scene.textAsk;
+      const closed = visit?.ticket === ticket && visit.canReturn;
+      if (closed) {
+        visit.returned.push(ticket);
+        visit.ticket = 0;
+      }
+      return Promise.resolve({ closed });
+    },
     copyText: ({ text }: { text: string }) => {
+      if (scene.refusesCopy) return Promise.reject(new Error("Clipboard unavailable"));
       scene.copied.push(text);
       return Promise.resolve();
+    },
+    shareText: ({ title, text }: { title: string; text: string }) => {
+      scene.shared.push({ title, text });
+      return Promise.resolve({ status: "opened" });
     },
     openSettings: async ({ page: target }: { page: string }) => {
       await page(scene, target);
@@ -229,11 +376,39 @@ export function elizaNotices(scene: SettingsScene): Faked {
       appEnabled: true, permissionGranted: true, interruption: "all", scope: "alpha-phone",
       channels: [{ id: "opaque-reminders", name: "Reminders", importance: 0, blocked: true, groupBlocked: false }],
     }),
+    mirrorStatus: () => Promise.resolve({ ...scene.mirror }),
     openChannelSettings: async ({ id }: { id: string }) => {
       if (id !== "opaque-reminders") throw rejection("This notification channel is no longer available");
       await page(scene, `channel ${id}`);
       return { status: "opened" };
     },
+    crossAppStatus: () => Promise.resolve(structuredClone(scene.mirror)),
+    notificationApps: () => Promise.resolve({ apps: structuredClone(scene.mirrorChoices) }),
+    setNotificationPolicy: (requested: MirrorPolicyChange) => answered(() => {
+      if (requested.expectedRevision !== scene.mirror.revision) throw rejection("changed");
+      const { enabled, history, apps } = requested;
+      const pinned = apps?.map(({ packageName, preview }) => {
+        const verified = scene.mirrorChoices.find((choice) => choice.packageName === packageName);
+        if (!verified) throw rejection("unavailable");
+        return { ...verified, preview, available: true };
+      });
+      scene.mirror = {
+        ...scene.mirror, revision: scene.mirror.revision + "-next",
+        enabled: enabled ?? scene.mirror.enabled, history: history ?? scene.mirror.history, apps: pinned ?? scene.mirror.apps,
+      };
+      scene.mirrorHistory.splice(0);
+      return structuredClone(scene.mirror);
+    }),
+    resumeCrossApp: ({ expectedRevision }: { expectedRevision: string }) => answered(() => {
+      if (expectedRevision !== scene.mirror.revision) throw rejection("changed");
+      scene.mirror.paused = false;
+      return structuredClone(scene.mirror);
+    }),
+    notificationHistory: () => Promise.resolve({ items: structuredClone(scene.mirrorHistory) }),
+    clearNotificationHistory: ({ expectedRevision }: { expectedRevision: string }) => answered(() => {
+      if (expectedRevision !== scene.mirror.revision) throw rejection("changed");
+      scene.mirrorHistory.splice(0);
+    }),
     openNotificationAccess: async () => {
       await page(scene, "notification-access");
       return { status: "opened" };
@@ -241,9 +416,9 @@ export function elizaNotices(scene: SettingsScene): Faked {
   });
 }
 
-/** The licence notices the page ships beside it, as the fake origin serves them. */
+/** Licence notices as a test answers the shipped notices file with them. */
 export const notices = [
   { name: "effect", version: "4.1.1", license: "MIT", text: "MIT License", flags: [] },
   { name: "react", version: "19.2.0", license: "MIT", text: "MIT License", flags: [] },
-  { name: "mediabunny", version: "1.0.0", license: "MPL-2.0", text: "Mozilla Public License", flags: ["weak-copyleft"] },
+  { name: "mediabunny", version: "1.0.0", license: "MPL-2.0", text: "Mozilla Public License", flags: ["copyleft-weak"], obligations: [{ flag: "copyleft-weak", note: "Check this component’s attribution." }] },
 ];

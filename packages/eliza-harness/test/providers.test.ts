@@ -111,10 +111,17 @@ describe("Slack user-account HTTP+SSE provider", () => {
 
     const badPkce = await postJson<{ ok: boolean; error?: string }>(`${slack.origin}/api/oauth.v2.access`, {
       code,
+      client_id: "alpha",
       redirect_uri: "http://127.0.0.1/cb",
       code_verifier: "wrong-verifier",
     });
     expect(badPkce.json).toEqual({ ok: false, error: "invalid_code_verifier" });
+
+    // spec/app/messages/index.md, "Story: Give Alpha my messages and contacts"
+    expect((await postJson<{ ok: boolean; error?: string }>(`${slack.origin}/api/oauth.v2.access`, { code, client_id: "alpha", code_verifier: verifier })).json).toEqual({
+      ok: false,
+      error: "bad_redirect_uri",
+    });
 
     const formBody = new URLSearchParams({
       code,
@@ -163,7 +170,7 @@ describe("Slack user-account HTTP+SSE provider", () => {
     const { code: designCode } = (await designAuthz.json()) as { code: string };
     const designAccess = await postJson<{ ok: boolean; authed_user: { access_token: string } }>(
       `${slack.origin}/api/oauth.v2.access`,
-      { code: designCode },
+      { code: designCode, client_id: "alpha" },
     );
     const designToken = designAccess.json.authed_user.access_token;
 
@@ -375,6 +382,73 @@ describe("Slack user-account HTTP+SSE provider", () => {
     );
     expect(afterRevoke.json).toEqual({ ok: false, error: "token_revoked" });
   });
+
+  it("blocks prototype-key auth bypass, OAuth open redirects and redirect_uri/client_id omissions, and disconnects revoked SSE streams", async () => {
+    for (const protoKey of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      const res = await postJson<{ ok: boolean; error?: string }>(
+        `${slack.origin}/api/auth.test`,
+        {},
+        { authorization: `Bearer ${protoKey}` },
+      );
+      expect(res.json).toEqual({ ok: false, error: "invalid_auth" });
+    }
+
+    for (const badRedirect of ["javascript:alert(1)", "http://evil.example/cb", "not-a-valid-url"]) {
+      const badAuthz = await fetch(
+        `${slack.origin}/oauth/v2/authorize?client_id=alpha&user_scope=channels:read&redirect_uri=${encodeURIComponent(badRedirect)}&auto_approve=1`,
+        { redirect: "manual" },
+      );
+      expect(badAuthz.status).toBe(400);
+      expect(await badAuthz.json()).toEqual({ ok: false, error: "bad_redirect_uri" });
+    }
+
+    const plainPkce = await fetch(
+      `${slack.origin}/oauth/v2/authorize?client_id=alpha&user_scope=channels:read&redirect_uri=http://127.0.0.1/cb&code_challenge=abc&code_challenge_method=plain&auto_approve=1`,
+      { redirect: "manual" },
+    );
+    expect(plainPkce.status).toBe(400);
+    expect(await plainPkce.json()).toEqual({ ok: false, error: "invalid_code_challenge_method" });
+
+    const verifier = "pkce-verifier-regression-check-9876543210";
+    const challenge = createHash("sha256").update(verifier, "ascii").digest("base64url");
+    const redirectRes = await fetch(
+      `${slack.origin}/oauth/v2/authorize?client_id=alpha&user_scope=channels:read&redirect_uri=http://127.0.0.1/cb&code_challenge=${challenge}&code_challenge_method=S256&team=T01ALPHA&auto_approve=1`,
+      { redirect: "manual" },
+    );
+    const code = new URL(redirectRes.headers.get("location")!).searchParams.get("code")!;
+
+    const missingRedirect = await postJson<{ ok: boolean; error?: string }>(`${slack.origin}/api/oauth.v2.access`, {
+      code,
+      client_id: "alpha",
+      code_verifier: verifier,
+    });
+    expect(missingRedirect.json).toEqual({ ok: false, error: "bad_redirect_uri" });
+
+    const wrongClient = await postJson<{ ok: boolean; error?: string }>(`${slack.origin}/api/oauth.v2.access`, {
+      code,
+      client_id: "other-client",
+      redirect_uri: "http://127.0.0.1/cb",
+      code_verifier: verifier,
+    });
+    expect(wrongClient.json).toEqual({ ok: false, error: "invalid_client_id" });
+
+    const authHeader = { authorization: "Bearer xoxp-alpha-team-owner-initial" };
+    const sse = await openSse(`${slack.origin}/api/events.stream`, authHeader);
+    try {
+      await postJson(`${slack.origin}/api/auth.revoke`, {}, authHeader);
+      const revokedEvent = await sse.nextEvent();
+      expect(revokedEvent.data).toMatchObject({ event: { type: "tokens_revoked" } });
+      await expect(sse.nextEvent()).rejects.toThrow("SSE stream closed before event arrived");
+    } finally {
+      sse.close();
+    }
+
+    await postJson(`${slack.origin}/__control/reset`);
+    await postJson(`${slack.origin}/__control/fault`, { path: "/api/auth.test", status: 503, remaining: 0 });
+    const unaffected = await postJson<{ ok: boolean }>(`${slack.origin}/api/auth.test`, {}, authHeader);
+    expect(unaffected.status).toBe(200);
+    expect(unaffected.json.ok).toBe(true);
+  });
 });
 
 describe("Telegram user-account RPC+SSE provider", () => {
@@ -540,6 +614,15 @@ describe("Telegram user-account RPC+SSE provider", () => {
     );
     expect(archived.json.dialogs.map((d) => d.peer_key)).toEqual(["user:2002"]);
 
+    // spec/app/messages/index.md, "Story: See my conversations"
+    const allChats = await postJson<{ ok: boolean; dialogs: { peer_key: string; archived: boolean }[] }>(
+      `${telegram.origin}/rpc/messages.getDialogs`,
+      { folder_id: 0 },
+      authHeader,
+    );
+    expect(allChats.json.dialogs.some((d) => d.archived)).toBe(false);
+    expect(allChats.json.dialogs.map((d) => d.peer_key)).not.toContain("user:2002");
+
     const broadcastWrite = await postJson<{ ok: boolean; error_message: string }>(
       `${telegram.origin}/rpc/messages.sendMessage`,
       { peer: "channel:4002", message: "Cannot post here" },
@@ -655,6 +738,65 @@ describe("Telegram user-account RPC+SSE provider", () => {
     expect(flood.status).toBe(429);
     expect(flood.headers.get("retry-after")).toBe("12");
     expect(flood.json).toEqual({ ok: false, error_code: 429, error_message: "FLOOD_WAIT_12" });
+  });
+
+  it("blocks prototype-key auth bypass, QR replay and double approval, broadcast/peer delete, and disconnects SSE on logout/revoke", async () => {
+    for (const protoKey of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      const me = await postJson<{ ok: boolean; error_message: string }>(
+        `${telegram.origin}/rpc/users.getMe`,
+        {},
+        { authorization: `Bearer ${protoKey}` },
+      );
+      expect(me.status).toBe(401);
+      expect(me.json.error_message).toBe("AUTH_KEY_UNREGISTERED");
+      const logout = await postJson<{ ok: boolean; error_message: string }>(
+        `${telegram.origin}/rpc/auth.logOut`,
+        {},
+        { authorization: `Bearer ${protoKey}` },
+      );
+      expect(logout.status).toBe(401);
+      expect((Object.prototype.toString as unknown as { revoked?: boolean }).revoked).toBeUndefined();
+    }
+
+    const qr = await postJson<{ ok: boolean; token: string }>(`${telegram.origin}/rpc/auth.exportLoginToken`, {});
+    const approved1 = await postJson<{ ok: boolean }>(`${telegram.origin}/__control/approve-qr`, { token: qr.json.token });
+    expect(approved1.status).toBe(200);
+    const approved2 = await postJson<{ ok: boolean; error?: string }>(`${telegram.origin}/__control/approve-qr`, { token: qr.json.token });
+    expect(approved2.status).toBe(409);
+
+    const claim1 = await postJson<{ ok: boolean; _type: string }>(`${telegram.origin}/rpc/auth.exportLoginToken`, { token: qr.json.token });
+    expect(claim1.status).toBe(200);
+    expect(claim1.json._type).toBe("auth.loginTokenSuccess");
+
+    const claim2 = await postJson<{ ok: boolean; error_message: string }>(`${telegram.origin}/rpc/auth.exportLoginToken`, { token: qr.json.token });
+    expect(claim2.status).toBe(400);
+    expect(claim2.json.error_message).toBe("AUTH_TOKEN_EXPIRED");
+
+    const authHeader = { authorization: "Bearer tg-sess-initial-owner" };
+    const broadcastDelete = await postJson<{ ok: boolean; error_message: string }>(
+      `${telegram.origin}/rpc/messages.deleteMessages`,
+      { peer: "channel:4002", id: [107] },
+      authHeader,
+    );
+    expect(broadcastDelete.status).toBe(403);
+    expect(broadcastDelete.json.error_message).toBe("CHAT_WRITE_FORBIDDEN");
+
+    const peerDelete = await postJson<{ ok: boolean; error_message: string }>(
+      `${telegram.origin}/rpc/messages.deleteMessages`,
+      { peer: "user:2001", id: [102] },
+      authHeader,
+    );
+    expect(peerDelete.status).toBe(403);
+    expect(peerDelete.json.error_message).toBe("MESSAGE_DELETE_FORBIDDEN");
+
+    const sse = await openSse(`${telegram.origin}/rpc/updates.stream`, authHeader);
+    try {
+      const out = await postJson<{ ok: boolean }>(`${telegram.origin}/rpc/auth.logOut`, {}, authHeader);
+      expect(out.json.ok).toBe(true);
+      await expect(sse.nextEvent()).rejects.toThrow("SSE stream closed before event arrived");
+    } finally {
+      sse.close();
+    }
   });
 });
 

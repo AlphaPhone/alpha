@@ -8,6 +8,7 @@
  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+ <uses-permission android:name="ai.alphacompute.alphaphone.sense.permission.LISTENER_CONTROL" />
  <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
@@ -31,6 +32,9 @@
  <uses-feature android:name="android.hardware.location" android:required="false" />
  <uses-feature android:name="android.hardware.wifi" android:required="false" />
  <queries>
+  <package android:name="com.android.systemui" />
+  <package android:name="ai.alphacompute.alphaphone.sense" />
+  <package android:name="proton.android.pass" />
   <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="https" /></intent>
   <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="geo" /></intent>
   <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>
@@ -44,7 +48,14 @@
   <intent><action android:name="android.intent.action.SNOOZE_ALARM" /></intent>
   <intent><action android:name="android.support.customtabs.action.CustomTabsService" /></intent>
  </queries>
- <application android:name=".AlphaApplication" android:label="@string/app_name" android:icon="@drawable/app_icon" android:roundIcon="@drawable/app_icon" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="false" android:enableOnBackInvokedCallback="true" android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:requestLegacyExternalStorage="true" android:theme="@style/AppTheme">
+ <application android:name=".AlphaApplication" android:label="@string/app_name" android:icon="@drawable/app_icon" android:roundIcon="@drawable/app_icon" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="false" android:enableOnBackInvokedCallback="true" android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:theme="@style/AppTheme">
+  <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.browser.fileprovider" android:exported="false" android:grantUriPermissions="true">
+   <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/alpha_browser_file_paths" />
+  </provider>
+  <service android:name="ai.eliza.plugins.passwords.ElizaPasswordAutofillService" android:label="@string/eliza_passwords_service_label" android:exported="true" android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+   <intent-filter><action android:name="android.service.autofill.AutofillService" /></intent-filter>
+   <meta-data android:name="android.autofill" android:resource="@xml/eliza_passwords_autofill_service" />
+  </service>
   <service android:name=".AlphaNoteRecordingService" android:exported="false" android:foregroundServiceType="microphone" />
   <service android:name=".AlphaNavigationService" android:exported="false" android:foregroundServiceType="location" />
   <service android:name=".IsolatedPdfService" android:exported="false" android:isolatedProcess="true" android:process=":isolated_pdf" android:stopWithTask="true" />
@@ -53,9 +64,21 @@
    <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
   </service>
   <activity android:name=".AlphaResetRecoveryActivity" android:exported="false" android:process=":reset_recovery" android:taskAffinity="${applicationId}.reset" android:excludeFromRecents="true" android:launchMode="singleTask" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_reset_recovery_label" />
+  <activity android:name=".HostedDigestQuestionActivity" android:exported="false" android:noHistory="true"
+   android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+  <activity android:name=".AlphaAssistActivity" android:enabled="false" android:exported="true" android:permission="android.permission.STATUS_BAR_SERVICE" android:taskAffinity="${applicationId}.assistant" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+   <intent-filter><action android:name="android.intent.action.ASSIST" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+   <meta-data android:name="ai.eliza.os.POWER_VOICE_ACTIVITY" android:value="ai.alphacompute.alphaphone.AlphaPowerVoiceActivity" />
+  </activity>
+  <activity android:name=".AlphaPowerVoiceActivity" android:enabled="false" android:exported="true" android:permission="android.permission.STATUS_BAR_SERVICE" android:taskAffinity="${applicationId}.assistant" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
   <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="${appOrientation}" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density|navigation" android:theme="@style/AppTheme.Launch">
    <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+  </activity>
+  <activity android:name="ai.eliza.plugins.signin.SignInCallbackActivity" android:exported="true" android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="https" android:host="${appLinkHost}" android:path="${signInCallbackPath}" /></intent-filter>
   </activity>
+  <activity-alias android:name=".AlphaCloudBillingReturn" android:targetActivity=".MainActivity" android:exported="true">
+   <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/billing/return" /></intent-filter>
+  </activity-alias>
  </application>
 </manifest>

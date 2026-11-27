@@ -28,7 +28,7 @@ const noNodeInBrowser = [
   { regex: "^@repo/eliza-harness(?:/|$)", message: "Browser application code must not import @repo/eliza-harness." },
 ]
 const intraAppBarrels = [
-  { regex: String.raw`^\.\./runtime/(?!index\.vibe$|ui\.tsx$)`, message: "Import app runtime through ../runtime/index.vibe or ../runtime/ui.tsx." },
+  { regex: String.raw`^\.\./runtime/(?!index\.vibe$|ui\.tsx$|store\.ts$)`, message: "Import app runtime through ../runtime/index.vibe, ../runtime/ui.tsx, or ../runtime/store.ts." },
   { regex: String.raw`^\.\./platform/(?!index\.vibe$)`, message: "Import app platform services through ../platform/index.vibe." },
   { regex: String.raw`^\.\./shell/(?!index\.vibe$|ui\.tsx$|views\.tsx$)`, message: "Import app shell through ../shell/index.vibe or ../shell/ui.tsx." },
   { regex: String.raw`^\.\./notices/(?!index\.vibe$)`, message: "Import app notices through ../notices/index.vibe." },
@@ -50,23 +50,26 @@ const timersOf = ["window", "globalThis", "self"].flatMap((object) => timers.map
 const clocks = [
   { selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']", message: 'A screen reads no clock: write `now: untimed`, and show a time the machine holds: AGENTS.md, "This project".' },
   { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: 'A screen reads no clock: write `now: untimed`, and show a time the machine holds: AGENTS.md, "This project".' },
+  { selector: "CallExpression[callee.object.name='performance'][callee.property.name='now']", message: 'A screen reads no clock: write `now: untimed`, and show a time the machine holds: AGENTS.md, "This project".' },
   { selector: "CallExpression[callee.property.name='format'][arguments.length=0]", message: 'A formatter with no date formats the clock, and a screen reads no clock: format a time the machine holds: AGENTS.md, "This project".' },
 ]
 const noReact = { patterns: [...imports.patterns, { regex: "^react(?:-dom)?(?:/|$)", message: `Tool and domain code does not import React: ${monorepo}.` }] }
 // What no tsconfig.json includes, so the type-aware rules cannot see it.
-const untyped = ["*.{js,ts}", "vibestack/studio/scripts/**", "**/.storybook/**", "packages/design-system/**", "vibestack/design/test/**", "vibestack/stories/test/**"]
+const untyped = ["*.{js,ts}", "apps/app/public/**/*.js", "vibestack/studio/scripts/**", "**/.storybook/**", "packages/design-system/**", "vibestack/design/test/**", "vibestack/stories/test/**"]
 // Every React interface: Studio's page is built on the same theme (vibestack/studio/vite.config.ts).
 const tsx = ["packages/ui/**/*.{ts,tsx}", "apps/**/*.{ts,tsx}", "vibestack/studio/src/page/**/*.{ts,tsx}"]
 const design = "packages/design-system"
 const writing = 'AGENTS.md, "Writing code"'
-const citation = String.raw`spec\/\S+\.md, "[^"]+"`
+const citation = String.raw`spec\/\S+\.md, "(?:[^"\\]|\\["\\])+"`
 const suppressible = String.raw`(?!code\/|barrel\/|no-console\b)[\w@/-]+`
 // AGENTS.md, "Writing code": a citation's line may end with `: ` and what the step shows, and a declaration keeps its doc comment.
 const cited = new RegExp(String.raw`^\s*${citation}(?:; ${citation})*(?:: \S.*)?\s*$`)
 const suppression = new RegExp(String.raw`^ eslint-disable(?:-next-line|-line)? ${suppressible}(?:, ${suppressible})* -- \S`)
 const configs = [suppression, /^ eslint-enable\b/]
 const throwsType = String.raw`[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`
-const throwsDirective = new RegExp(String.raw`^\*(?:[\s*]*@throws \{[ \t]*${throwsType}(?:[ \t]*\|[ \t]*${throwsType})*[ \t]*\})+[\s*]*$`)
+const throwsShape = String.raw`\{[ \t]*${throwsType}(?:[ \t]*\|[ \t]*${throwsType})*[ \t]*\}`
+const throwsDirective = new RegExp(String.raw`^\*(?:[\s*]*@throws ${throwsShape})+[\s*]*$`)
+const malformedThrows = new RegExp(String.raw`@throws\b(?![ \t]+${throwsShape})`)
 const directives = {
   Line: [cited, suppression, /^@ (?:backend|requires|ensures|invariant|decreases|assert|pure|type|ghost)(?: |$)/, /^\/ <reference /, /^ @vitest-environment [\w-]+$/],
   Block: [cited, ...configs, /^\*(?:[\s*]*@(?:model|design) \S+)+[\s*]*$/, throwsDirective],
@@ -82,16 +85,29 @@ const guarded = (parser) => ({
     return parsed
   },
 })
-const within = (node) => Boolean(node) && (/Function/.test(node.type) || within(node.parent))
-const documented = (context, comment) => context.options[0]?.jsdoc && comment.type === "Block" && comment.value.startsWith("*") && !within(context.sourceCode.getNodeByRangeIndex(comment.range[0]))
+const declaration = /(?:Declaration|Signature|PropertyDefinition|MethodDefinition|^Property|^TSEnumMember)$/
+const documented = (context, comment) => {
+  if (!context.options[0]?.jsdoc || comment.type !== "Block" || !comment.value.startsWith("*") || malformedThrows.test(comment.value)) return false
+  const start = context.sourceCode.getTokenAfter(comment)?.range[0]
+  if (start === undefined) return false
+  for (let node = context.sourceCode.getNodeByRangeIndex(start); node && node.range[0] === start; node = node.parent) {
+    if (declaration.test(node.type)) return true
+  }
+  return false
+}
 const left = { type: "object", additionalProperties: { type: "integer", minimum: 1 } }
-const excess = (context, found) => found.length > (context.options[0]?.left?.[relative(context.cwd, context.filename).split(sep).join("/")] ?? 0) && found.forEach((problem) => context.report(problem))
+const excess = (context, node, found, kind) => {
+  const rel = relative(context.cwd, context.filename).split(sep).join("/")
+  const allowed = context.options[0]?.left?.[rel] ?? 0
+  if (found.length > allowed) found.forEach((problem) => context.report(problem))
+  else if (allowed > 0 && found.length < allowed) context.report({ node, message: found.length ? `Stale ${kind} ratchet (${allowed}) for "${rel}": ${found.length} remain; lower it to ${found.length}.` : `Stale ${kind} ratchet (${allowed}) for "${rel}": 0 remain; remove it.` })
+}
 const comments = {
   meta: { type: "problem", schema: [{ type: "object", properties: { jsdoc: { type: "boolean" }, left }, additionalProperties: false }] },
   create: (context) => ({
-    Program: () => excess(context, context.sourceCode.getAllComments()
+    Program: (node) => excess(context, node, context.sourceCode.getAllComments()
       .filter((comment) => !directives[comment.type].some((directive) => directive.test(comment.value)) && !documented(context, comment))
-      .map((comment) => ({ loc: comment.loc, message: `No code comments: only spec citations and tool directives (${writing}).` }))),
+      .map((comment) => ({ loc: comment.loc, message: `No code comments: only spec citations and tool directives (${writing}).` })), "commented"),
   }),
 }
 const uses = (names) => `:matches(Identifier[name=${names}]:not(ImportSpecifier[imported.name=${names}] > Identifier.local):not(ObjectExpression > Property[computed=false][shorthand=false] > Identifier.key), MemberExpression[computed=true] > Literal.property[value=${names}])`
@@ -103,20 +119,20 @@ const effects = {
   meta: { type: "problem", schema: [{ type: "object", properties: { left }, additionalProperties: false }] },
   create: (context) => {
     const found = []
-    return { ...Object.fromEntries(Object.entries(scheduling).map(([selector, message]) => [selector, (node) => found.push({ node, message })])), "Program:exit": () => excess(context, found) }
+    return { ...Object.fromEntries(Object.entries(scheduling).map(([selector, message]) => [selector, (node) => found.push({ node, message })])), "Program:exit": (node) => excess(context, node, found, "scheduled") }
   },
 }
 const code = { rules: { comments, effects } }
 const own = ["apps/**", "packages/**"]
-const commented = { "apps/app/src/App.tsx": 5, "apps/app/src/greeter.vibe": 5, "apps/app/src/greeting.ts": 1, "apps/app/src/link.contract.ts": 2, "apps/app/src/link.ts": 3, "apps/app/test/app.browser.test.tsx": 5, "apps/app/test/app.test.vibe": 4, "apps/app/test/bombadil.ts": 4, "apps/app/test/drivers/app.ts": 5, "packages/ui/.storybook/preview.ts": 1, "packages/ui/src/components/Button.meta.tsx": 4, "packages/ui/src/components/Button.tsx": 1, "packages/ui/src/components/Card.meta.tsx": 1, "packages/ui/src/components/Dialog.meta.tsx": 2, "packages/ui/src/components/Progress.tsx": 1, "packages/ui/src/lib/cn.ts": 2, "packages/ui/vite.config.ts": 1, "packages/ui/vitest.config.ts": 1 }
-const scheduled = { "apps/app/src/App.tsx": 2 }
+const commented = { "apps/app/test/app.browser.test.tsx": 1, "packages/ui/vite.config.ts": 1 }
+const scheduled = {}
 
 // The tool reads Quint's JSON and the TypeScript compiler API as `any` at its boundaries; packages and apps stay strict.
 const loose = Object.fromEntries(["no-explicit-any", "no-unsafe-argument", "no-unsafe-assignment", "no-unsafe-call", "no-unsafe-member-access", "no-unsafe-return"].map((rule) => [`@typescript-eslint/${rule}`, "off"]))
 
 export default withWorkspaceBarrels(defineConfig(
   // Generated or disposable, and .claude/worktrees holds other checkouts of this repository.
-  globalIgnores(["**/gen/", "!vibestack/gen/", "**/.vibe/", "**/dist/", "**/.cache/", "**/.spec-cache/", "**/generated/", "**/storybook-static/", "**/test/fixtures/", "vibestack/examples/", "vibestack/fixtures/", ".claude/", ".lemmascript/", ".studio/", ".turbo/", "_apalache-out/"]),
+  globalIgnores([".eliza/", "apps/app/android/", "apps/app/aosp/", "**/gen/", "!vibestack/gen/", "**/.vibe/", "**/dist/", "**/.cache/", "**/.spec-cache/", "**/generated/", "**/storybook-static/", "**/test/fixtures/", "vibestack/examples/", "vibestack/fixtures/", ".claude/", ".lemmascript/", ".studio/", ".turbo/", "_apalache-out/"]),
   { linterOptions: { reportUnusedDisableDirectives: "error", reportUnusedInlineConfigs: "error" } },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
@@ -155,6 +171,7 @@ export default withWorkspaceBarrels(defineConfig(
     },
   },
   { files: untyped, extends: [tseslint.configs.disableTypeChecked] },
+  { files: ["apps/app/public/voice/**/*.js"], languageOptions: { globals: { AudioWorkletProcessor: "readonly", registerProcessor: "readonly", sampleRate: "readonly" } } },
   // A ratchet at today's longest (Studio's server); a test's describe block holds its cases.
   { ignores: ["**/test/**", "vibestack/selftest.ts"], rules: { "max-lines-per-function": ["error", { max: 250, skipBlankLines: true, skipComments: true }] } },
   {

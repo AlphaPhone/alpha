@@ -1,18 +1,24 @@
+import type { Machine as SignInMachine } from "../../gen/app__account__signIn.effect.vibe";
+import type { StartupSignIn } from "../startup/signIn.vibe";
 import type { Effect, Layer, ManagedRuntime } from "effect";
 import type { ComponentType, ReactNode } from "react";
 import type { Place } from "../areas.ts";
 import type { MediaHandoff } from "../assistant/attachments.vibe";
+import type { CalendarReviews } from "../calendar/reviews.vibe";
 import type { ScanExports } from "../files/scanEntry.vibe";
-import type { BrowserDownloadsHandoff, Platform } from "../platform/index.vibe";
+import type { InboxCardEntry } from "../home/cards.vibe";
+import type { AgentPages, BrowserDownloadsHandoff, InboxBrowserLinks } from "../platform/index.vibe";
+import type { Platform } from "../platform/index.vibe";
 import type { resident } from "../resident.vibe";
 import type { Whole } from "./reactor.vibe";
 
 /** What the root runtime gives every area: the platform and the resident machines. */
-export type Resident = Platform | MediaHandoff | BrowserDownloadsHandoff | ScanExports | Layer.Success<typeof resident>;
+export type Resident = Platform | MediaHandoff | AgentPages | BrowserDownloadsHandoff | InboxBrowserLinks | InboxCardEntry | ScanExports | CalendarReviews | SignInMachine | StartupSignIn | Layer.Success<typeof resident>;
 
 /** Alpha as boot.tsx opened it. */
 export interface Alpha {
   /** The root runtime: the platform and every resident machine, from launch to exit. */
+  readonly requiresSignIn: boolean;
   readonly runtime: ManagedRuntime.ManagedRuntime<Resident, unknown>;
   /** A runtime of an area's own machines over the root's, made once and kept until Alpha is disposed. */
   over<I, E>(layer: Layer.Layer<I, E, Resident | NoInfer<I> | Whole>): ManagedRuntime.ManagedRuntime<I | Resident, unknown>;
@@ -20,8 +26,8 @@ export interface Alpha {
   slot(place: Place): ReactNode;
   /** Back, from the header as from the phone: the shell's layers first, then the screen showing, then the app on top. */
   back(): Promise<unknown>;
-  /** While the screen at `place` shows, ask `took` for each Back: whether the screen went back a step of its own. */
-  taking(place: Place, took: () => Promise<boolean>): void;
+  /** While the screen at `place` (or an active `"ui-layer"`) shows, ask `took` for each Back: whether it went back a step of its own. */
+  taking(place: Place | "ui-layer", took: () => Promise<boolean>): void;
   dispose(): Promise<void>;
 }
 

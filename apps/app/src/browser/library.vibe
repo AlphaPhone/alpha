@@ -4,30 +4,47 @@ import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Library from "../../gen/app__browser__library.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { TabHost, hosted } from "../platform/index.vibe"
-import { answer, contained, reacting } from "../runtime/index.vibe"
-import { Pages, idOf } from "./browser.vibe"
+import { readWebBookmarks, writeWebBookmark, type FrameRequest } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
+import { Pages, idOf, pageOf, persistHistory } from "./browser.vibe"
 
 export type Bookmark = { readonly url: string; readonly title?: string }
-type BookmarkWrite = { readonly ticket: number; readonly entry: Bookmark; readonly saved: boolean }
+type WriteIntent =
+  | { readonly kind: "bookmark"; readonly ticket: number; readonly entry: Bookmark; readonly saved: boolean }
+  | { readonly kind: "history"; readonly ticket: number; readonly stamps: ReadonlySet<number> }
+/** One visit by its stamp, every visit, or the visits since a moment (a time range's start, in epoch milliseconds). */
+type HistoryChoice = "all" | number | { readonly since: number }
+export type BookmarkPage = BrowserPageBinding | FrameRequest
 
-/** The native rows and the address bound to a library write. */
+/** The saved rows and the address bound to a library write. */
 export service LibraryRows {
   readonly turn: Semaphore.Semaphore
+  readonly subscribe: (listener: () => void) => () => void
+  readonly snapshot: () => readonly Bookmark[]
   bookmarks(): readonly Bookmark[]!!
   keep(bookmarks: readonly Bookmark[]): void!!
-  prepare(intent: BookmarkWrite): void!!
-  take(ticket: number): (BookmarkWrite | undefined)!!
+  prepare(intent: WriteIntent): void!!
+  take(ticket: number): (WriteIntent | undefined)!!
 }
 
 const rows = Layer.effect(LibraryRows, effect {
   let stored: readonly Bookmark[] = []
-  let offered: BookmarkWrite | undefined
+  let offered: WriteIntent | undefined
+  const listeners = new Set<() => void>()
   const turn = try Semaphore.make(1)
   return {
     turn,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    snapshot: () => stored,
     bookmarks: () => sync(() => stored),
-    keep: (bookmarks: readonly Bookmark[]) => sync(() => { stored = bookmarks }),
-    prepare: (intent: BookmarkWrite) => sync(() => { offered = intent }),
+    keep: (bookmarks: readonly Bookmark[]) => sync(() => {
+      stored = bookmarks
+      for (const listener of [...listeners]) listener()
+    }),
+    prepare: (intent: WriteIntent) => sync(() => { offered = intent }),
     take: (ticket: number) => sync(() => {
       if (offered?.ticket !== ticket) return undefined
       const intent = offered
@@ -47,51 +64,78 @@ function entries(saved: BrowserBookmarkList): Bookmark[] {
 
 effect function load(ticket: number): Library.Event!!(TabHost | Pages | LibraryRows | Library.Machine) {
   return effect {
-    const saved = try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session }))
+    const host = try TabHost
+    const saved = host.web === undefined ? try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session })) : try readWebBookmarks()
     const bookmarks = entries(saved)
-    const visits = try (try Pages).visits()
+    const visits = try (try Pages).history()
     const current = try (try Library.Machine).get()
     if (Library.canLoaded(current, ticket, bookmarks.length, visits.length)) try (try LibraryRows).keep(bookmarks)
     return { type: "loaded", ticket, ok: true, damaged: false, count: bookmarks.length, entries: visits.length }
-  } catch () => ({ type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 })
+  } catch (cause) => ({
+    type: "loaded",
+    ticket,
+    ok: false,
+    damaged: /recovery|damaged/i.test(String(cause)),
+    count: 0,
+    entries: 0,
+  })
+}
+
+effect function setMarkInside(entry: Bookmark, saved: boolean): boolean!!(LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  const machine = try Library.Machine
+  const s = try machine.get()
+  const known = (try rows.bookmarks()).some((bookmark) => bookmark.url === entry.url)
+  if (known === saved) return false
+  const secure = bookmarkBrowserUrl(entry.url)
+  if (saved ? !Library.canMark(s, secure, false) : !Library.canUnmark(s)) return false
+  const ticket = s.write + 1
+  const changes = !saved || (secure && s.marks < Library.maxMarks)
+  if (changes) try rows.prepare({ kind: "bookmark", ticket, entry, saved })
+  const sent = try contained(machine.send(saved ? { type: "mark", secure, userInfo: false } : { type: "unmark" }), "choosing a bookmark")
+  if (!sent) try rows.take(ticket)
+  return changes && sent
 }
 
 /** Save or remove the exact entry the owner chose, after the library has read the saved list. */
 export effect function setMark(entry: Bookmark, saved: boolean): boolean!!(LibraryRows | Library.Machine) {
   const rows = try LibraryRows
-  return try Semaphore.withPermit(rows.turn, effect {
-    const machine = try Library.Machine
-    const s = try machine.get()
-    const known = (try rows.bookmarks()).some((bookmark) => bookmark.url === entry.url)
-    if (known === saved) return false
-    const secure = bookmarkBrowserUrl(entry.url)
-    if (saved ? !Library.canMark(s, secure, false) : !Library.canUnmark(s)) return false
-    const ticket = s.write + 1
-    const changes = !saved || (secure && s.marks < Library.maxMarks)
-    if (changes) try rows.prepare({ ticket, entry, saved })
-    const sent = try contained(machine.send(saved ? { type: "mark", secure, userInfo: false } : { type: "unmark" }), "choosing a bookmark")
-    if (!sent) try rows.take(ticket)
-    return changes && sent
-  })
+  return try Semaphore.withPermit(rows.turn, setMarkInside(entry, saved))
 }
 
-/** Bind a menu bookmark to the page the owner saw, before asking the saved list to change. */
-export effect function markPage(binding: BrowserPageBinding, saved: boolean): boolean!!(TabHost | Tabs | Shell | LibraryRows | Library.Machine) {
-  const tabs = try (try Tabs).get()
-  const host = (try TabHost).session
-  if (tabs.layer !== "Menu" || !showing(try (try Shell).get(), "Browser") || !host.current(binding, idOf(tabs.selected))) return false
-  const title = host.info(binding.id)?.title
-  return try setMark(title && title !== binding.url ? { url: binding.url, title } : { url: binding.url }, saved)
+/** Bind a menu bookmark to the current shown native page or opaque frame before accepting the write. */
+export effect function markPage(binding: BookmarkPage, saved: boolean): boolean!!(TabHost | Tabs | Shell | Pages | LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  return try Semaphore.withPermit(rows.turn, effect {
+    const tabs = try (try Tabs).get()
+    const host = try TabHost
+    const id = idOf(tabs.selected)
+    if (tabs.layer !== "Menu" || binding.id !== id || !showing(try (try Shell).get(), "Browser")) return false
+    let title: string | undefined
+    if ("load" in binding) {
+      const page = try pageOf(tabs.selected)
+      if (page.phase !== "Shown" || page.load !== binding.load || (try sync(() => host.web?.current(id, page.load))) !== binding) return false
+      title = (try sync(() => host.web?.info(id)))?.title
+    } else {
+      if (!host.session.current(binding, id)) return false
+      title = host.session.info(id)?.title
+    }
+    return try setMarkInside(title && title !== binding.url ? { url: binding.url, title } : { url: binding.url }, saved)
+  })
 }
 
 effect function bookmarkWritten(ticket: number): Library.Event!!(TabHost | LibraryRows | Library.Machine) {
   const rows = try LibraryRows
   const intent = try rows.take(ticket)
   const failed: Library.Event = { type: "written", ticket, ok: false }
-  if (intent === undefined) return failed
+  if (intent?.kind !== "bookmark") return failed
   return effect {
     const { entry, saved } = intent
-    const result = try hosted("setBookmark", (plugin, session) => plugin.setBookmark({ session, ...entry, saved }))
+    const host = try TabHost
+    const before = (try rows.bookmarks()).map((bookmark) => bookmark.url)
+    const result = host.web === undefined
+      ? try hosted("setBookmark", (plugin, session) => plugin.setBookmark({ session, ...entry, saved }))
+      : try writeWebBookmark({ ...entry, saved, before, limit: Library.maxMarks })
     const list = entries(result)
     if (list.some((one) => one.url === entry.url) !== saved) return failed
     const current = try (try Library.Machine).get()
@@ -100,10 +144,77 @@ effect function bookmarkWritten(ticket: number): Library.Event!!(TabHost | Libra
   } catch () => failed
 }
 
-/** The Browser's library reads the phone's saved bookmarks and its current visit list. */
-export const library = Layer.provideMerge(reacting(Library, {
-  carry: (fx: Library.Effect) => match (fx) {
+effect function repairedBookmarks(ticket: number): Library.Event!!(LibraryRows | Library.Machine) {
+  const current = try (try Library.Machine).get()
+  if (Library.canWritten(current, ticket)) try (try LibraryRows).keep([])
+  return { type: "written", ticket, ok: true }
+}
+
+// spec/app/browser/library.md, "Removing a history row forgets only the visit the owner selected"; spec/app/browser/library.md, "Clearing history asks first, and can be cancelled"
+/** Bind a history edit to the visits shown at the moment the owner chooses. */
+export effect function editHistory(choice: HistoryChoice): boolean!!(Pages | LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  return try Semaphore.withPermit(rows.turn, effect {
+    const machine = try Library.Machine
+    const state = try machine.get()
+    const clearing = typeof choice !== "number"
+    if (clearing ? !Library.canConfirmClear(state, 1) : !Library.canRemoveVisit(state)) return false
+    const current = try (try Pages).history()
+    const chosen = current.filter((row) => choice === "all" || (typeof choice === "number" ? row.stamp === choice : row.at !== undefined && row.at >= choice.since))
+    if (chosen.length === 0) return false
+    const event: Library.Event = { type: "visited", count: current.length, remaining: state.kept }
+    if (Library.canVisited(state, current.length, state.kept)) try contained(machine.send(event), "counting the current Browser visits")
+    const ticket = state.write + 1
+    try rows.prepare({ kind: "history", ticket, stamps: new Set(chosen.map((row) => row.stamp)) })
+    const sent = try contained(machine.send(clearing ? { type: "confirmClear", count: chosen.length } : { type: "removeVisit" }), "choosing exact Browser history")
+    if (!sent) try rows.take(ticket)
+    return sent
+  })
+}
+
+/** Back dismisses a history confirmation before leaving the Library. */
+export effect function cancelHistory(): boolean!!Library.Machine {
+  const machine = try Library.Machine
+  if (!Library.canCancelClear(try machine.get())) return false
+  return try contained(machine.send({ type: "cancelClear" }), "cancelling Browser history clear")
+}
+
+effect function historyRequested(ticket: number): void!!(Pages | Tabs | LibraryRows | Library.Machine) {
+  const intent = try (try LibraryRows).take(ticket)
+  if (intent?.kind === "history" && (try persistHistory(ticket, intent.stamps))) return
+  try contained((try Library.Machine).send({ type: "written", ticket, ok: false }), "retiring a refused history write")
+}
+
+const historyChanges = started(effect {
+  const machine = try Library.Machine
+  const rows = try LibraryRows
+  try Stream.runForEach((try Pages).historyChanges, (change) => Semaphore.withPermit(rows.turn, effect {
+    const state = try machine.get()
+    if (change.kind === "wiped") {
+      try contained(machine.send({ type: "wiped" }), "clearing the Library after Browser data")
+      return
+    }
+    if (change.kind === "edited" && !Library.canWritten(state, change.ticket)) return
+    const remaining = change.kind === "visited" ? state.kept : change.remaining
+    if (Library.canVisited(state, change.count, remaining)) {
+      try contained(machine.send({ type: "visited", count: change.count, remaining }), "counting Browser history")
+    }
+    if (change.kind === "edited") {
+      try contained(machine.send({ type: "written", ticket: change.ticket, ok: change.ok }), "settling the exact Browser history write")
+    }
+  }))
+}, "Browser history changes")
+
+/** The Browser's library reads the saved bookmarks and the current visit list. */
+function carry(fx: Library.Effect): Job<Library.Event, TabHost | Tabs | Pages | LibraryRows | Library.Machine, []> {
+  return match (fx) {
     when { tag: "Load", let ticket }: answer("read library", load(ticket), { type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 } as Library.Event);
-    when { tag: "Write", let write }: answer("write library", bookmarkWritten(write), { type: "written", ticket: write, ok: false } as Library.Event);
-  },
-}), rows)
+    when { tag: "Write", let write, let job }: job === "Clearing" ? run("write history", historyRequested(write))
+      : job === "Repairing" ? answer("repair bookmarks", repairedBookmarks(write), { type: "written", ticket: write, ok: false } as Library.Event)
+      : answer("write library", bookmarkWritten(write), { type: "written", ticket: write, ok: false } as Library.Event);
+  }
+}
+
+const libraryMachine = reacting(Library, { carry })
+
+export const library = Layer.provideMerge(together(libraryMachine, historyChanges), rows)

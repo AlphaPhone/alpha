@@ -28,7 +28,7 @@ import undo as U from "../../kit/undo"
 import recurrence.* from "./recurrence"
 
 type SmartView = TodayView | ScheduledView | AllView | FlaggedView | OverdueView | CompletedView
-type ActiveView = Smart({ view: SmartView }) | CustomList({ listId: int })
+type ActiveView = Overview | Smart({ view: SmartView }) | CustomList({ listId: int })
 type SortKey = SortDue | SortPriority | SortTitle | SortCreated
 type Priority = NoPriority | LowPriority | MediumPriority | HighPriority
 type DeleteMode = ReassignToDefault | CascadeItems
@@ -123,7 +123,7 @@ pure val initial: Reminders = {
   items: List(),
   nextItemId: 1,
   hiddenId: 0,
-  view: Smart({ view: TodayView }),
+  view: Overview,
   sort: SortDue,
   filter: defaultFilter,
   searchOpen: false,
@@ -180,12 +180,24 @@ pure val specValues: Set[ItemSpec] = Set(
   { listId: 2, hasDue: true, dueDay: 11, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: HighPriority, flagged: true },
 )
 pure val criteriaValues = Set(defaultFilter, { showCompleted: true, flaggedOnly: false, priority: NoPriority }, { showCompleted: false, flaggedOnly: true, priority: HighPriority })
+pure val syncedListsValues: Set[List[ListEntry]] = Set(
+  List(defaultList),
+  List(defaultList, { id: 2, isDefault: false, revision: 1 }),
+)
+pure val nextListIdValues = Set(2, 3)
+pure val syncedItemsValues: Set[List[ItemEntry]] = Set(
+  List(),
+  List({ id: 1, listId: 1, hasDue: true, dueDay: 10, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: HighPriority, flagged: true, completed: false, snoozedUntil: 0, revision: 1 }),
+  List({ id: 1, listId: 2, hasDue: false, dueDay: 0, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: NoPriority, flagged: false, completed: true, snoozedUntil: 0, revision: 2 }),
+)
+pure val nextItemIdValues = Set(1, 2)
 ```
 
 ### Switching smart views, custom lists, sort, filter, search and item selection keeps every reference valid
 
 ```quint
-pure def canSelectSmartView(s: Reminders, view: SmartView): bool = s.view != Smart({ view: view })
+pure def canSelectSmartView(s: Reminders, view: SmartView): bool =
+  s.view != Smart({ view: view })
 
 pure def selectSmartView(s: Reminders, view: SmartView): Reminders =
   { ...s, view: Smart({ view: view }), selectedId: 0 }
@@ -195,6 +207,10 @@ pure def canSelectCustomList(s: Reminders, listId: int): bool =
 
 pure def selectCustomList(s: Reminders, listId: int): Reminders =
   { ...s, view: CustomList({ listId: listId }), selectedId: 0 }
+
+pure def canShowLists(s: Reminders): bool = s.view != Overview
+
+pure def showLists(s: Reminders): Reminders = { ...s, view: Overview, selectedId: 0 }
 
 pure def canSetSort(s: Reminders, sort: SortKey): bool = sort != s.sort
 
@@ -223,7 +239,18 @@ pure def setToday(s: Reminders, day: int): Reminders = { ...s, today: day }
 
 pure def canFrontChanged(s: Reminders, front: bool): bool = front != s.front
 
-pure def frontChanged(s: Reminders, front: bool): Reminders = { ...s, front: front }
+pure def frontChanged(s: Reminders, front: bool): Reminders =
+  if (front) { ...s, front: true } else { ...s, front: false, view: Overview, searchOpen: false, selectedId: 0 }
+```
+
+### Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview
+
+```quint
+pure def stepBackShowsLists(before: Reminders, via: str, after: Reminders): bool =
+  via == "showLists" implies (before.view != Overview and after.view == Overview and after.selectedId == 0)
+
+pure def stepLeavesOverview(before: Reminders, via: str, after: Reminders): bool =
+  (via == "frontChanged" and not(after.front)) implies (after.view == Overview and not(after.searchOpen) and after.selectedId == 0)
 ```
 
 ### Creating, renaming and deleting custom lists protects the default Reminders list and keeps every item in a valid list
@@ -264,7 +291,7 @@ pure def deleteList(s: Reminders, listId: int, mode: DeleteMode): Moved =
   }
   val curView = s.view
   val nextView = match curView {
-    | CustomList(c) => if (c.listId == listId) Smart({ view: AllView }) else curView
+    | CustomList(c) => if (c.listId == listId) Overview else curView
     | _ => curView
   }
   val nextSelected = if (s.selectedId != 0 and hasItem(nextItems, s.selectedId)) s.selectedId else 0
@@ -336,13 +363,32 @@ pure def moveItem(s: Reminders, itemId: int, targetListId: int): Moved =
   val updated: ItemEntry = { ...cur, listId: targetListId, revision: cur.revision + 1 }
   { state: { ...s, items: putItem(s.items, updated), write: A::dispatch(A::record(A::plan(attemptId))) },
     out: List(WriteItem({ attemptId: attemptId, itemId: itemId })) }
+
+pure def canClearCompleted(s: Reminders): bool =
+  not(writing(s)) and not(undoHeld(s)) and s.items.some(it => it.completed)
+
+pure def clearCompleted(s: Reminders): Moved =
+  val attemptId = s.write.id + 1
+  val remaining = s.items.select(it => not(it.completed))
+  val nextSelected = if (s.selectedId != 0 and hasItem(remaining, s.selectedId)) s.selectedId else 0
+  { state: { ...s, items: remaining, selectedId: nextSelected, write: A::dispatch(A::record(A::plan(attemptId))) },
+    out: List(WriteItem({ attemptId: attemptId, itemId: 0 })) }
 ```
 
 ### Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day
 
+An occurrence with a due time keeps the instant it was due and the instant it
+was completed, even when the reminder repeats or reopens. Calendar shows the
+last 32 actual completions for the selected reminder, oldest first. Undo
+restores the preceding reminder and its history together. Older reminders
+only show the completion information still present in their saved record.
+
 Completing an uncompleted repeating reminder keeps it active on the next due day
-while recording the prior due day in the Undo snapshot; completing a one-off
-reminder marks it completed; toggling a completed reminder reopens it.
+whose alert is after completion. A repeating reminder with no alert advances
+to its next future due time. Calendar shows how many elapsed repeat dates
+were skipped with the occurrence that was completed. Undo keeps the prior
+due day. Completing a one-off reminder marks it completed. Toggling a
+completed reminder reopens it.
 
 ```quint
 pure def canToggleComplete(s: Reminders, itemId: int, nextDueDay: int): bool =
@@ -369,6 +415,24 @@ pure def toggleComplete(s: Reminders, itemId: int, nextDueDay: int, at: int): Mo
   else
     { state: { ...s, items: putItem(s.items, updated), write: A::dispatch(A::record(A::plan(attemptId))) },
       out: List(WriteItem({ attemptId: attemptId, itemId: itemId })) }
+```
+
+### The reviewed reopen from Calendar restores the same reminder without an alert
+
+Calendar already wrote the selected resident revision. This updates the
+list's projection where it knows that item, without sending a second write.
+
+```quint
+pure val dueMinuteValues = Set(0, 540, 1439)
+
+pure def canAdoptReopened(s: Reminders, itemId: int, dueDay: int, dueMinute: int): bool =
+  itemId != s.hiddenId and hasItem(s.items, itemId) and itemOf(s.items, itemId).completed
+    and itemOf(s.items, itemId).repeat == NoRepeat and dueMinute >= 0 and dueMinute < 1440
+
+pure def adoptReopened(s: Reminders, itemId: int, dueDay: int, dueMinute: int): Reminders =
+  { ...s, items: s.items.listMap(row => if (row.id == itemId)
+    { ...row, completed: false, hasDue: true, hasDueTime: true, dueDay: dueDay, dueMinute: dueMinute,
+      snoozedUntil: 0, revision: row.revision + 1 } else row) }
 ```
 
 ### Deleting a reminder hides it immediately and holds it for five seconds before committing the deletion
@@ -419,16 +483,30 @@ pure def undoAction(s: Reminders, now: int): Moved =
 pure def canExpireUndo(s: Reminders, now: int): bool =
   U::canRelease(s.undo, now) and not(writing(s))
 
-pure def expireUndo(s: Reminders, now: int): Moved =
+pure def holdEnding(kind: UndoKind, s: Reminders): Moved =
   val target = s.hiddenId
   val attemptId = s.write.id + 1
-  if (s.undoData.kind == UndoDelete)
+  if (kind == UndoDelete)
     { state: { ...s, items: s.items.select(it => it.id != target), hiddenId: 0,
                undo: U::release(s.undo), undoData: noUndoData,
                write: A::dispatch(A::record(A::plan(attemptId))) },
       out: List(CommitDelete({ attemptId: attemptId, itemId: target })) }
   else
     { state: { ...s, undo: U::release(s.undo), undoData: noUndoData }, out: List() }
+
+pure def expireUndo(s: Reminders, now: int): Moved = holdEnding(s.undoData.kind, s)
+```
+
+### A change the owner starts while an Undo is held ends the hold at once: a held deletion is committed and a held completion settles
+
+The owner who checks off or deletes one reminder after another does not wait
+five seconds between them: the next change ends the hold of the one before,
+as its expiry would.
+
+```quint
+pure def canSettleUndo(s: Reminders): bool = undoHeld(s) and not(writing(s))
+
+pure def settleUndo(s: Reminders): Moved = holdEnding(s.undoData.kind, s)
 ```
 
 ## Story: Sync with the resident agent and recover across restarts
@@ -473,6 +551,78 @@ pure def agentChanged(s: Reminders): Moved =
     { state: { ...s, again: true }, out: List() }
   else
     refresh(s)
+
+pure def canApplySync(s: Reminders, syncedLists: List[ListEntry], nextListId: int, syncedItems: List[ItemEntry], nextItemId: int): bool =
+  not(writing(s)) and not(undoHeld(s))
+    and syncedLists.length() <= 32
+    and hasList(syncedLists, defaultListId) and listOf(syncedLists, defaultListId).isDefault
+    and nextListId > defaultListId
+    and syncedLists.every(l => l.id >= 1 and l.id < nextListId and syncedLists.select(m => m.id == l.id).length() == 1)
+    and syncedItems.length() <= 200
+    and nextItemId >= 1
+    and syncedItems.every(it => itemWellFormed(it, syncedLists, nextItemId) and syncedItems.select(o => o.id == it.id).length() == 1)
+
+pure def applySync(s: Reminders, syncedLists: List[ListEntry], nextListId: int, syncedItems: List[ItemEntry], nextItemId: int): Reminders =
+  val curView = s.view
+  val keepCustom = match curView {
+    | CustomList(c) => hasList(syncedLists, c.listId)
+    | _ => true
+  }
+  val nextView = if (keepCustom) curView else Overview
+  val nextSelected = if (s.selectedId != 0 and hasItem(syncedItems, s.selectedId)) s.selectedId else 0
+  {
+    ...s,
+    lists: syncedLists,
+    nextListId: nextListId,
+    items: syncedItems,
+    nextItemId: nextItemId,
+    view: nextView,
+    selectedId: nextSelected,
+  }
+```
+
+### A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made
+
+A reminder made in chat, or before Alpha last opened, is held like one made
+here: what the agent holds is taken under its number, with its list, and a
+reminder the agent no longer holds is forgotten, however many it holds: the
+cap on reminders made here does not drop one the agent already has. The
+reminder an Undo holds is left as it is until the hold ends. A reminder
+keeps its number when Alpha opens again, so a hold resumed after a restart
+commits the reminder it held. A change made while an Undo is held ends that hold first, and one made while
+a write is still answering waits for it, so two quick deletes both happen,
+each with its own Undo.
+
+```quint
+pure def canTakeList(s: Reminders, listId: int): bool =
+  listId > defaultListId and not(hasList(s.lists, listId)) and s.lists.length() < 32
+
+pure def takeList(s: Reminders, listId: int): Reminders =
+  { ...s, lists: s.lists.append({ id: listId, isDefault: false, revision: 1 }),
+          nextListId: if (listId >= s.nextListId) listId + 1 else s.nextListId }
+
+pure def heldBack(s: Reminders, itemId: int): bool =
+  itemId == s.hiddenId or (undoHeld(s) and s.undoData.itemId == itemId)
+
+pure def canTakeItem(s: Reminders, itemId: int, spec: ItemSpec, completed: bool): bool =
+  itemId >= 1 and not(heldBack(s, itemId))
+    and hasList(s.lists, spec.listId) and validTiming(spec.hasDue, spec.hasDueTime, spec.dueMinute, spec.repeat)
+
+pure def takeItem(s: Reminders, itemId: int, spec: ItemSpec, completed: bool): Reminders =
+  val prior = itemOf(s.items, itemId)
+  val taken: ItemEntry = {
+    id: itemId, listId: spec.listId, hasDue: spec.hasDue, dueDay: if (spec.hasDue) spec.dueDay else 0,
+    hasDueTime: spec.hasDueTime, dueMinute: if (spec.hasDueTime) spec.dueMinute else 0,
+    repeat: spec.repeat, priority: spec.priority, flagged: spec.flagged, completed: completed,
+    snoozedUntil: prior.snoozedUntil, revision: prior.revision + 1,
+  }
+  if (hasItem(s.items, itemId)) { ...s, items: putItem(s.items, taken) }
+  else { ...s, items: s.items.append(taken), nextItemId: if (itemId >= s.nextItemId) itemId + 1 else s.nextItemId }
+
+pure def canForgetItem(s: Reminders, itemId: int): bool = hasItem(s.items, itemId) and not(heldBack(s, itemId))
+
+pure def forgetItem(s: Reminders, itemId: int): Reminders =
+  { ...s, items: s.items.select(it => it.id != itemId), selectedId: if (s.selectedId == itemId) 0 else s.selectedId }
 ```
 
 ### Switching owners resets custom lists, items, selection and holds; reopening resumes pending reads and holds while settling any sent write as unknown
@@ -492,7 +642,7 @@ pure def reopen(s: Reminders): Moved =
   val settledWrite = if (writing(s)) A::conclude(s.write, false, false) else s.write
   val fetchOut = if (s.sync.status == R::Loading) List(SyncFetch({ ticket: s.sync.ticket })) else List()
   val wakeOut = if (undoHeld(s)) List(WakeUndo({ at: s.undo.until })) else List()
-  { state: { ...s, front: false, write: settledWrite }, out: fetchOut.concat(wakeOut) }
+  { state: { ...s, front: false, view: Overview, searchOpen: false, selectedId: 0, write: settledWrite }, out: fetchOut.concat(wakeOut) }
 ```
 
 ### The default list always exists, every item belongs to a valid list, timing rules hold, and ids remain unique and below the next id
@@ -539,12 +689,12 @@ pure def alwaysSmartCountsConsistent(s: Reminders): bool =
     and smartCount(s, AllView) + smartCount(s, CompletedView) == visibleItems(s).length()
 ```
 
-### Deletions commit only on Undo expiry, Undo restores exact state, deleting a list keeps all remaining items valid, repeating completions advance their due day, and reopening leaves no write in flight
+### Deletions commit only when their Undo ends, on expiry or when the owner starts another change, Undo restores exact state, deleting a list keeps all remaining items valid, repeating completions advance their due day, and reopening leaves no write in flight
 
 ```quint
 pure def stepDeleteOnlyOnExpire(before: Reminders, via: str, after: Reminders, out: List[Effect]): bool =
   out.some(e => match e { | CommitDelete(d) => true | _ => false }) implies
-    (via == "expireUndo" and before.undoData.kind == UndoDelete and after.write.outcome == A::Sent)
+    ((via == "expireUndo" or via == "settleUndo") and before.undoData.kind == UndoDelete and after.write.outcome == A::Sent)
 
 pure def stepUndoRestoresExactState(before: Reminders, via: str, after: Reminders): bool =
   via == "undoAction" implies (

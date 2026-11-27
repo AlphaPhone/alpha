@@ -1,0 +1,133 @@
+// spec/app/wallet/index.md, "Story: Make my wallet"; spec/app/wallet/index.md, "Story: See what I hold"; spec/app/wallet/index.md, "Story: Receive"; spec/app/wallet/index.md, "Story: Decide what my agent asked"; spec/app/wallet/index.md, "Story: See what happened"; spec/app/wallet/index.md, "Story: Switch the wallet off and on"
+import * as Wallet from "../../gen/app__wallet.effect.vibe"
+import type { Account, Custody, Effect as Out, Event, Family, Fate } from "../../gen/app__wallet.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { ask, attemptedWith } from "../platform/index.vibe"
+import type { Attempts } from "../runtime/index.vibe"
+import { type Job, answer, following, reacting, started, together } from "../runtime/index.vibe"
+import { type WalletFamilyName, WalletActivity, WalletHoldings, WalletRequests, WalletStatus, type WalletSwitch, walletPaths } from "@elizaos/plugin-wallet-client"
+
+const custodies = { none: "NoWallet", ready: "Ready", off: "Off", unavailable: "Unavailable" } as const satisfies Record<WalletStatus["custody"], Custody>
+const families = { evm: "Evm", solana: "Solana" } as const satisfies Record<WalletFamilyName, Family>
+const fates = { notSent: "NotSent", pending: "Pending", confirmed: "Arrived", failed: "Reverted" } as const satisfies Record<WalletActivity["operations"][number]["status"], Fate>
+
+/** The family the agent names `family` by. */
+export const familyNames = { Evm: "evm", Solana: "solana" } as const satisfies Record<Family, WalletFamilyName>
+
+/** The family the agent's `name` means. */
+export const familyOf = (name: WalletFamilyName): Family => families[name]
+
+/** Whether every one of `numbers` is a whole number the rules can count with: an answer with another is not what was asked for. */
+export const whole = (...numbers: readonly number[]) => numbers.every((one) => Number.isSafeInteger(one) && one >= 0)
+
+interface Standing {
+  readonly custody: Custody
+  readonly canHold: boolean
+  readonly accounts: Account[]
+}
+
+const nothing: Standing = { custody: "NoWallet", canHold: false, accounts: [] }
+
+function standingOf(said: WalletStatus): Standing | undefined {
+  if (!whole(...said.accounts.map((account) => account.nativeDecimals))) return undefined
+  return {
+    custody: custodies[said.custody], canHold: said.canHold,
+    accounts: said.accounts.map((account) => ({
+      family: families[account.family], address: account.address, network: account.network, symbol: account.nativeSymbol,
+      decimals: account.nativeDecimals, connected: account.connected, canSend: account.canSend,
+    })),
+  }
+}
+
+const posted = (path: string, body: object) => HttpClientRequest.post(path) |> HttpClientRequest.bodyJsonUnsafe(%, body)
+
+// spec/app/wallet/index.md, "Only the newest asking's answer is taken; a failure keeps what was last read"
+effect function stood(ticket: number): Event!!Agent {
+  const said = ask(Agent, HttpClientRequest.get(walletPaths.wallet), WalletStatus) catch () => undefined
+  const standing = said === undefined ? undefined : standingOf(said)
+  return { type: "stood", ticket, ok: standing !== undefined, ...(standing ?? nothing) }
+}
+
+// spec/app/wallet/index.md, "A change the agent confirms is taken as the wallet's new standing; any other answer reads the wallet again"
+/** The making or the switch `id`, sent once: the wallet as the agent then says it stands, and unknown where its answer is no standing. */
+effect function changed(id: number, request: HttpClientRequest.HttpClientRequest): Event!!(Agent | Attempts) {
+  const sent = try attemptedWith(Agent, () => request, id)
+  const said = sent.confirmed ? Option.getOrUndefined(Schema.decodeUnknownOption(WalletStatus)(sent.body)) : undefined
+  const standing = said === undefined ? undefined : standingOf(said)
+  if (standing === undefined) return { type: "changed", id, confirmed: false, known: sent.known && !sent.confirmed, ...nothing }
+  return { type: "changed", id, confirmed: true, known: true, ...standing }
+}
+
+// spec/app/wallet/index.md, "The holdings are read for a wallet that serves, and only the newest asking's answer is taken"; spec/app/wallet/index.md, "A network that could not be read is shown as unread, never as empty, and nothing is shown as held on it"
+effect function holdingsRead(ticket: number): Event!!Agent {
+  const said = ask(Agent, HttpClientRequest.get(walletPaths.holdings), WalletHoldings) catch () => undefined
+  if (said === undefined || !whole(...said.holdings.map((holding) => holding.decimals))) return { type: "holdingsRead", ticket, ok: false, found: [], missed: [] }
+  return {
+    type: "holdingsRead", ticket, ok: true, missed: said.unread.map(familyOf),
+    found: said.holdings.map((holding) => ({ family: families[holding.family], asset: holding.asset, symbol: holding.symbol, decimals: holding.decimals, units: holding.atomicUnits })),
+  }
+}
+
+// spec/app/wallet/index.md, "The waiting requests are read for a wallet that serves, and only the newest asking's answer is taken"
+effect function deskRead(ticket: number): Event!!Agent {
+  const said = ask(Agent, HttpClientRequest.get(walletPaths.requests), WalletRequests) catch () => undefined
+  if (said === undefined || !whole(...said.requests.map((request) => request.id))) return { type: "deskRead", ticket, ok: false, asked: [] }
+  return {
+    type: "deskRead", ticket, ok: true,
+    asked: said.requests.map((request) => ({
+      id: request.id, family: families[request.family], asset: request.asset, symbol: request.symbol, recipient: request.recipient,
+      amount: request.amount, asker: request.asker === "agent" ? "AgentAsks" : "OwnerAsks",
+    })),
+  }
+}
+
+// spec/app/wallet/index.md, "The past transfers are read for a wallet that serves, and only the newest asking's answer is taken"
+effect function activityRead(ticket: number): Event!!Agent {
+  const said = ask(Agent, HttpClientRequest.get(walletPaths.activity), WalletActivity) catch () => undefined
+  if (said === undefined || !whole(...said.operations.flatMap((operation) => [operation.decimals, operation.reservedAt]))) return { type: "activityRead", ticket, ok: false, did: [] }
+  return {
+    type: "activityRead", ticket, ok: true,
+    did: said.operations.map((operation) => ({
+      intent: operation.intentId, family: families[operation.family], symbol: operation.symbol, decimals: operation.decimals,
+      units: operation.atomicUnits, recipient: operation.recipient, at: operation.reservedAt, fate: fates[operation.status],
+    })),
+  }
+}
+
+// spec/app/wallet/index.md, "Copy puts one of the wallet's own addresses on the clipboard, one copy at a time, and says whether it was copied"
+effect function copied(ticket: number, address: string): Event!!Device {
+  return { type: "copied", ticket, ok: try (try Device).copyText(address) }
+}
+
+function carry(fx: Out): Job<Event, Agent | Device, []> {
+  return match (fx) {
+    when { tag: "ReadWallet", let ticket }: answer("wallet", stood(ticket), { type: "stood", ticket, ok: false, ...nothing });
+    when { tag: "Make", let attempt }: answer("change", changed(attempt, posted(walletPaths.wallet, {})), { type: "changed", id: attempt, confirmed: false, known: false, ...nothing });
+    when { tag: "Switch", let attempt, let wanted }: answer("change", changed(attempt, posted(walletPaths.switch, { on: wanted } satisfies WalletSwitch)), { type: "changed", id: attempt, confirmed: false, known: false, ...nothing });
+    when { tag: "ReadHoldings", let ticket }: answer("holdings", holdingsRead(ticket), { type: "holdingsRead", ticket, ok: false, found: [], missed: [] });
+    when { tag: "ReadDesk", let ticket }: answer("desk", deskRead(ticket), { type: "deskRead", ticket, ok: false, asked: [] });
+    when { tag: "ReadActivity", let ticket }: answer("activity", activityRead(ticket), { type: "activityRead", ticket, ok: false, did: [] });
+    when { tag: "Copy", let ticket, let address }: answer("copy", copied(ticket, address), { type: "copied", ticket, ok: false });
+  }
+}
+
+// spec/app/wallet/index.md, "When Alpha opens again, every read under way is dropped, an open address is put away, and a change that was sent is unknown"
+const kept = reacting(Wallet, { keep: 1, open: [{ type: "reopen" }], carry })
+
+// spec/app/wallet/index.md, "Shown, the wallet is read under the next ticket; hidden, an open address is put away"
+/** Wallet is shown while it is the app on top and Ask Alpha rests as its bar: coming back from a conversation reads what the agent asked there. */
+const told = following(Shell, (shell) => showing(shell, "Wallet") && shell.assistant === "Bar", Wallet.Machine, (shown): Event => ({ type: "show", showing: shown }))
+
+/** Coming back to Alpha with Wallet showing reads the wallet again: a transfer that was pending may have ended meanwhile. */
+const returned = started(effect {
+  const device = try Device
+  const wallet = try Wallet.Machine
+  try Stream.runForEach(device.visible, effect (visible) => {
+    if (visible && (try wallet.get()).showing) try ignore(wallet.send({ type: "refresh" }))
+  })
+}, "reading the wallet again on return")
+
+/** The wallet as the resident agent holds it: kept across restarts, read while it shows, and changed only by the owner's own actions. */
+export const wallet = together(kept, told, returned)

@@ -25,6 +25,7 @@ type AlertEntry = {
   phase: AlertPhase,
   firedAt: int,
   snoozedUntil: int,
+  requestedSnooze: int,
   completed: bool,
   attempt: A::Attempt,
 }
@@ -33,13 +34,15 @@ type AlertEffect =
   | ClearBanner({ id: int })
   | SyncComplete({ id: int, attemptId: int })
   | SyncSnooze({ id: int, until: int, attemptId: int })
+  | StoreCalendarSnooze({ id: int, itemRevision: int, until: int, attemptId: int })
   | SyncDismiss({ id: int, attemptId: int })
   | Arm({ id: int, at: int })
+  | ArmCalendarSnooze({ id: int, at: int, itemRevision: int, attemptId: int })
 type Alerts = { entries: List[AlertEntry], bannerId: int, nextAttempt: int }
 type AlertMoved = { state: Alerts, out: List[AlertEffect] }
 
 pure val blankEntry: AlertEntry = {
-  id: 0, dueAt: 0, revision: 0, phase: Dismissed, firedAt: 0, snoozedUntil: 0, completed: false, attempt: A::plan(0),
+  id: 0, dueAt: 0, revision: 0, phase: Dismissed, firedAt: 0, snoozedUntil: 0, requestedSnooze: 0, completed: false, attempt: A::plan(0),
 }
 
 pure val initial: Alerts = { entries: List(), bannerId: 0, nextAttempt: 1 }
@@ -64,21 +67,22 @@ pure val dueAtValues = Set(100, 200)
 pure val nowValues = Set(50, 100, 200)
 pure val untilValues = Set(200, 300)
 pure val revisionValues = Set(1, 2)
+pure val itemRevisionValues = Set(1, 2)
 pure val expectedRevisionValues = Set(1, 2, 3, 4)
 pure val attemptIdValues = Set(1, 2, 3, 4, 5)
 ```
 
-### Scheduling arms a reminder for a future due time and replaces any earlier schedule for that reminder
+### Scheduling arms a reminder for its due time (including already-due overdue reminders) and replaces any earlier schedule for that reminder
 
 ```quint
 pure def canSchedule(s: Alerts, id: int, dueAt: int, revision: int, now: int): bool =
-  id > 0 and dueAt > now and revision >= 1
+  id > 0 and dueAt > 0 and revision >= 1
     and (not(hasEntry(s.entries, id)) or (entryOf(s.entries, id).attempt.outcome != A::Sent and revision > entryOf(s.entries, id).revision))
 
 pure def schedule(s: Alerts, id: int, dueAt: int, revision: int, now: int): AlertMoved =
   val entry: AlertEntry = {
     id: id, dueAt: dueAt, revision: revision, phase: Scheduled,
-    firedAt: 0, snoozedUntil: 0, completed: false, attempt: A::plan(0),
+    firedAt: 0, snoozedUntil: 0, requestedSnooze: 0, completed: false, attempt: A::plan(0),
   }
   val updated = putEntry(s.entries, entry)
   val cleared = s.bannerId == id
@@ -107,6 +111,7 @@ pure def cancelAlert(s: Alerts, id: int): AlertMoved =
 pure def canFire(s: Alerts, id: int, now: int): bool =
   hasEntry(s.entries, id)
     and isWaiting(entryOf(s.entries, id))
+    and entryOf(s.entries, id).requestedSnooze == 0
     and now >= entryOf(s.entries, id).dueAt
 
 pure def fire(s: Alerts, id: int, now: int): AlertMoved =
@@ -161,6 +166,48 @@ pure def snoozeFromBanner(s: Alerts, id: int, expectedRevision: int, until: int,
     out: List(ClearBanner({ id: id }), Arm({ id: id, at: until }), SyncSnooze({ id: id, until: until, attemptId: attemptId })) }
 ```
 
+### Snoozing the selected reminder in Calendar reserves one attempt and re-arms only after that exact item revision was saved
+
+The Calendar can snooze a scheduled alert before it rings, and can retry an alert
+that has no active timer. The carrier rechecks the selected item revision before
+changing the reminder, and keeps its original due instant. An older answer
+does not change the banner or arm another reminder.
+
+```quint
+pure def canSnoozeFromCalendar(s: Alerts, id: int, itemRevision: int, until: int, now: int): bool =
+  id > 0 and itemRevision >= 1 and until > now
+    and until > entryOf(s.entries, id).firedAt
+    and entryOf(s.entries, id).attempt.outcome != A::Sent
+
+pure def snoozeFromCalendar(s: Alerts, id: int, itemRevision: int, until: int, now: int): AlertMoved =
+  val cur = entryOf(s.entries, id)
+  val attemptId = s.nextAttempt
+  val pending: AlertEntry = {
+    ...cur, id: id, revision: if (cur.revision > 0) cur.revision else 1, requestedSnooze: until,
+    attempt: A::dispatch(A::record(A::plan(attemptId))),
+  }
+  { state: { ...s, entries: putEntry(s.entries, pending), nextAttempt: attemptId + 1 },
+    out: List(StoreCalendarSnooze({ id: id, itemRevision: itemRevision, until: until, attemptId: attemptId })) }
+
+pure def canCalendarSnoozeSaved(s: Alerts, id: int, attemptId: int): bool =
+  hasEntry(s.entries, id) and entryOf(s.entries, id).requestedSnooze > 0
+    and A::canConclude(entryOf(s.entries, id).attempt, attemptId)
+
+pure def calendarSnoozeSaved(s: Alerts, id: int, attemptId: int, itemRevision: int, stored: bool, confirmed: bool, known: bool): AlertMoved =
+  val cur = entryOf(s.entries, id)
+  val afterReceipt: AlertEntry = { ...cur, requestedSnooze: 0, attempt: A::conclude(cur.attempt, confirmed, known) }
+  val snoozed: AlertEntry = {
+    ...afterReceipt, phase: Snoozed, dueAt: cur.requestedSnooze, snoozedUntil: cur.requestedSnooze,
+    revision: cur.revision + 1, completed: false,
+  }
+  val updated = putEntry(s.entries, if (stored) snoozed else afterReceipt)
+  val cleared = stored and s.bannerId == id
+  val nextBanner = if (cleared) firstRingingId(updated) else s.bannerId
+  val clear = if (cleared) List(ClearBanner({ id: id })) else List()
+  { state: { ...s, entries: updated, bannerId: nextBanner },
+    out: if (stored) clear.append(ArmCalendarSnooze({ id: id, at: cur.requestedSnooze, itemRevision: itemRevision, attemptId: attemptId })) else clear }
+```
+
 ### Dismissing from the banner silences the exact ringing revision, clears the banner and syncs once
 
 ```quint
@@ -187,7 +234,8 @@ pure def dismissFromBanner(s: Alerts, id: int, expectedRevision: int): AlertMove
 
 ```quint
 pure def canSyncAnswered(s: Alerts, id: int, attemptId: int): bool =
-  hasEntry(s.entries, id) and A::canConclude(entryOf(s.entries, id).attempt, attemptId)
+  hasEntry(s.entries, id) and entryOf(s.entries, id).requestedSnooze == 0
+    and A::canConclude(entryOf(s.entries, id).attempt, attemptId)
 
 pure def syncAnswered(s: Alerts, id: int, attemptId: int, confirmed: bool, known: bool): Alerts =
   val cur = entryOf(s.entries, id)
@@ -199,7 +247,7 @@ pure def syncAnswered(s: Alerts, id: int, attemptId: int, confirmed: bool, known
 ```quint
 pure def reopen(s: Alerts): AlertMoved =
   val kept = s.entries.listMap(e =>
-    if (e.attempt.outcome == A::Sent) { ...e, attempt: A::conclude(e.attempt, false, false) } else e)
+    if (e.attempt.outcome == A::Sent) { ...e, requestedSnooze: 0, attempt: A::conclude(e.attempt, false, false) } else e)
   val arms = kept.select(e => isWaiting(e)).listMap(e => Arm({ id: e.id, at: e.dueAt }))
   { state: { ...s, entries: kept }, out: arms }
 ```
@@ -244,6 +292,7 @@ pure def leadsToBannerSettles(s: Alerts, later: Alerts): bool =
 pure val fair_dismissFromBanner = "weak"
 pure val fair_completeFromBanner = "weak"
 pure val fair_syncAnswered = "weak"
+pure val fair_calendarSnoozeSaved = "weak"
 ```
 
 ### An alert can ring, be completed, snoozed and ring again, or dismissed

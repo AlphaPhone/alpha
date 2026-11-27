@@ -1,9 +1,8 @@
 // spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
+import type { ReminderRecurrence } from "@repo/launcher-records";
 import { type CivilDate, type Repeat, nextOccurrence, validDate } from "../../gen/app__reminders__recurrence.ts";
 
 /** Wire recurrence rule shared between Reminders UI and the resident agent. */
-export type ReminderRecurrence = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
-
 const wireToSpec: Readonly<Record<ReminderRecurrence, Repeat>> = {
   none: "NoRepeat",
   daily: "Daily",
@@ -48,11 +47,19 @@ export function civilDayFromString(text: string | null | undefined): number | un
   return Math.floor(Date.UTC(parsed.year, parsed.month - 1, parsed.day) / 86_400_000);
 }
 
-/** Convert a civil date and optional minute-of-day into a local epoch millisecond instant. @throws {never} */
+/** Convert a civil date and optional minute-of-day into a local epoch millisecond instant (defaults date-only to 9:00 AM for alert timing). @throws {never} */
 export function dueInstantMs(dueDate: string | null, dueMinute: number | null): number | null {
   const parsed = parseCivilDate(dueDate);
   if (!parsed) return null;
   const minute = dueMinute ?? 9 * 60;
+  return new Date(parsed.year, parsed.month - 1, parsed.day, Math.floor(minute / 60), minute % 60, 0, 0).getTime();
+}
+
+/** Convert a civil date and optional minute-of-day into a sort key instant (date-only reminders sort at start of day 00:00 before timed reminders). @throws {never} */
+export function dueSortInstantMs(dueDate: string | null, dueMinute: number | null): number | null {
+  const parsed = parseCivilDate(dueDate);
+  if (!parsed) return null;
+  const minute = dueMinute ?? 0;
   return new Date(parsed.year, parsed.month - 1, parsed.day, Math.floor(minute / 60), minute % 60, 0, 0).getTime();
 }
 
@@ -71,6 +78,22 @@ export function advanceDueDate(dueDate: string, recurrence: ReminderRecurrence):
   if (!parsed || recurrence === "none") return dueDate;
   const dow = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day)).getUTCDay();
   return formatCivilDate(nextOccurrence(parsed, dow, wireToSpec[recurrence]));
+}
+
+/** The next repeat whose alert or unalerted due time has not elapsed. @throws {never} */
+export function nextFutureOccurrence(dueDate: string, recurrence: ReminderRecurrence, dueMinute: number | null, alertMinutes: number | null, now: number): { readonly dueDate: string; readonly skippedDates: number } | undefined {
+  const elapsedAt = now + (alertMinutes ?? 0) * 60_000;
+  const elapsedDay = formatCivilDate(civilDateAt(elapsedAt));
+  let date = dueDate;
+  for (let skippedDates = 0; skippedDates < 40_000; skippedDates++) {
+    const next = advanceDueDate(date, recurrence);
+    if (next <= date) return undefined;
+    if (next > elapsedDay || (next === elapsedDay && (dueInstantMs(next, dueMinute) ?? 0) > elapsedAt)) {
+      return { dueDate: next, skippedDates };
+    }
+    date = next;
+  }
+  return undefined;
 }
 
 /** Shift a `CivilDate` forward by `offsetDays` days (non-negative). */
@@ -93,7 +116,7 @@ export function quickDatePresets(nowMs: number): { readonly today: string; reado
   };
 }
 
-/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. */
+/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. @throws {never} */
 export function snoozeTargetMs(nowMs: number, preset: "10m" | "1h" | "tomorrow"): number {
   if (preset === "10m") return nowMs + 10 * 60_000;
   if (preset === "1h") return nowMs + 60 * 60_000;
@@ -101,14 +124,14 @@ export function snoozeTargetMs(nowMs: number, preset: "10m" | "1h" | "tomorrow")
   return new Date(tomorrow.year, tomorrow.month - 1, tomorrow.day, 9, 0, 0, 0).getTime();
 }
 
-/** Format a minute-of-day (`0..1439`) as a 12-hour clock string (e.g. `9:00 AM`). */
+const localeTimeFormatter = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** Format a minute-of-day (`0..1439`) using the owner's locale clock preference. @throws {never} */
 export function formatMinuteOfDay(minute: number): string {
   const clamped = Math.max(0, Math.min(1439, Math.floor(minute)));
   const hour24 = Math.floor(clamped / 60);
   const mins = clamped % 60;
-  const period = hour24 >= 12 ? "PM" : "AM";
-  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
-  return `${hour12}:${pad2(mins)} ${period}`;
+  return localeTimeFormatter.format(new Date(2000, 0, 1, hour24, mins, 0, 0));
 }
 
 /** Format a minute-of-day as `HH:MM` for time inputs. */

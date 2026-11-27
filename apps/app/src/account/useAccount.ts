@@ -9,14 +9,14 @@ import { type AccountDetailsSnapshot, AccountShelf } from "./bridge.vibe";
 /** Runtime type available to every Account UI component. */
 export type AccountRuntime = ManagedRuntime.ManagedRuntime<Layer.Success<typeof accountMachines> | Resident, unknown>;
 
-/** Reads the current time in whole Unix seconds from Alpha's Time service without touching Date.now(). */
-export function currentSeconds(runtime: AccountRuntime): number {
-  return Math.floor(runtime.runSync(Time.use((time) => time.latest())) / 1000);
+/** Reads the current time in whole Unix milliseconds from Alpha's Time service without touching Date.now(). */
+export function currentMillis(runtime: AccountRuntime): number {
+  return runtime.runSync(Time.use((time) => time.latest()));
 }
 
 /**
  * Wraps a generated `useMachine` hook so `can` checks evaluate at the account machines'
- * seconds clock instead of raw milliseconds.
+ * millisecond clock.
  */
 export function useAccountTimed<M extends { readonly state: unknown; readonly can: (event: never, ...by: never[]) => boolean }>(
   runtime: AccountRuntime,
@@ -24,12 +24,12 @@ export function useAccountTimed<M extends { readonly state: unknown; readonly ca
 ): M {
   const hook = use(runtime);
   if (hook.state === undefined) return hook;
-  const seconds = currentSeconds(runtime);
+  const nowMs = currentMillis(runtime);
   const check = hook.can as (event: unknown, ...args: unknown[]) => boolean;
   return {
     ...hook,
     can(event: unknown, ...args: unknown[]) {
-      return check(stamped(event, seconds), ...args);
+      return check(stamped(event, nowMs), ...args);
     },
   };
 }

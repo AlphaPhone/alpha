@@ -10,10 +10,11 @@ Everything is built on [the stack](AGENTS.md#the-stack): Node 26, pnpm, VibeLang
 |---|---|
 | `apps/` | deployable applications; `apps/app` is Alpha's page: Home, the built-in apps and Ask Alpha, over eliza's agent and cloud (`pnpm eliza` builds the pinned commit once) |
 | `apps/site` | `@repo/site`: Alpha's public page (`spec/site/`): `build` writes the static page its deploy uploads to Cloudflare Pages; operating it is in [README.md](README.md#operating-alpha) |
-| `apps/cloud` | `@repo/cloud`: Alpha's side of eliza's cloud (`spec/cloud/`): the profiles, the seed, the cloud route table the app hands eliza's `ElizaCloud` plugin (`elizaCloudRoutes` from `@repo/cloud`), and Alpha's own cloud on Cloudflare, the cut-over candidate: its API and web host Workers and `pnpm cloud`, the operator command that checks, renders, provisions, deploys and smoke-tests an environment from a private secrets file and the operator's completed `profile/candidate.example.json` (`apps/cloud/alpha-cloud.env.example`, `.github/workflows/cloud-deploy.yml`) |
-| `packages/` | what applications share: `@repo/ui` (components), `@repo/design-system` (tokens) |
+| `apps/cloud` | `@repo/cloud` owns the Alpha Cloud profiles, local seed, and `elizaCloudRoutes` for the phone's `ElizaCloud` plugin. `pnpm cloud` checks, renders, provisions, deploys, and smoke-tests the Cloudflare API and App Link Workers from the private secrets file and the operator's completed `profile/candidate.example.json`. See `spec/cloud/`, `apps/cloud/alpha-cloud.env.example`, and `.github/workflows/cloud-deploy.yml`. |
+| `packages/` | what applications share: `@repo/cli` (project CLI levers), `@repo/ui` (components), `@repo/design-system` (tokens) |
 | `packages/eliza-harness` | `@repo/eliza-harness`: the pinned eliza checkout (`pnpm eliza`, `pinnedCheckout()`), its cloud and agent started for journeys and `pnpm dev`, the run's owners, and `pnpm no-bun`; an app imports it from `test/` and its configs, and `pinned` from `src/` |
 | `packages/deployment` | `@repo/deployment`: `deployments.json`, the cloud origin, App Link host and profile of each environment (`local`, `staging`, `production`), read by `deployment(name)` |
+| `packages/launcher-records` | `@repo/launcher-records`: the Clock and Reminders records exchanged between the launcher and its resident agent |
 | `vibestack/` | the tools: the `spec` command, Studio, and what any project uses but does not own (`vibestack/testing`, `vibestack/design`, `vibestack/stories`) |
 | `vibestack/examples/` | standalone projects, each with its own install; never part of the workspace |
 
@@ -45,14 +46,16 @@ application again each time.
 A package joins by having a script named `gen`, `build`, `typecheck`, `test`, `test:browser` or `check`. Its other
 tasks wait for its `gen` and the root's, and its `check` for all of them, since `check` rewrites `gen/`. A package that
 can never own a root spec waits for no root `gen`, so a spec edit leaves its tasks cached: Studio, which has a `spec/`
-of its own, and `@repo/design-system` and `@repo/ui`, which have no `spec/<name>/`; `@repo/ui`'s tests still wait for
+of its own, and `@repo/cli`, `@repo/design-system` and `@repo/ui`, which have no `spec/<name>/`; `@repo/ui`'s tests still wait for
 its stories, whose `@model` tags read the root's `gen/`. Studio's tests wait for its page build and are keyed by its
 files and the `vibestack/fixtures/` they read, besides the tools every task is keyed by. The root's
 `check` rewrites its owners' `gen/` too, so it waits for their tasks: name each owner's in `//#check` of `turbo.json`,
 as `@repo/app`'s are. `pnpm lint:js` on its own needs what `gen` and `typecheck` write (`gen/`, `.vibe/declarations`);
 `pnpm lint` runs them first.
 `pnpm all //#analyze` also runs or restores the application and Studio generators,
-the UI stories and the design theme before analysis reads their outputs.
+the UI stories, the design theme and the Eliza harness before analysis reads their outputs.
+The app's Knip configuration accounts for the Android Gradle module selected by
+`apps/app/android/host.json` and the OCR package files read by `apps/app/scripts/ocr-assets.ts`.
 
 The hosted VibeStack app build keys its `//#gen` dependency on `apps/app/gen/`.
 Its other inputs come from `apps/app/` and the declared workspace builds. Add any
@@ -81,8 +84,8 @@ See [CI](#ci) for the checks each branch runs on pull requests and pushes.
 | `vibestack/std/` | specs that ship with the tools, which any spec may import, each with its proof file |
 | `vibestack/conform.ts` | the `traces` stage and `spec conformance`: drivers, each in a Node of its own, `driver:` programs and recorded traces; saved counterexamples; the driver stub |
 | `vibestack/explore.ts` | the `explore` stage and `spec explore`: serves a package's page with its app script, runs Bombadil on it, and replays and removes a saved run |
-| `vibestack/conformance.ts` | the comparing: journeys, malformed-input probes, walks, shrinking and replay; copied into `gen/` for a driver's types |
-| `vibestack/testing/` | what packages import via `vibestack/testing*`: `project()` (the Vitest configuration), the property-test generator, `effectDriver` |
+| `vibestack/conformance.ts` | the comparing: journeys, deterministic model-based path planning (`planModel`), malformed-input probes, walks, shrinking and replay; copied into `gen/` for a driver's types |
+| `vibestack/testing/` | what packages import via `vibestack/testing*`: `project()` (the Vitest configuration), the property-test generator, `effectDriver`, `planModel`, `runModel` |
 | `vibestack/stories/`, `vibestack/design/` | generated stories and their tests; design tokens and their lint rules. The design project module in [`vibestack/design/project.ts`](vibestack/design/project.ts) builds or checks several token directories in one process |
 | `vibestack/eslint.ts` | `withWorkspaceBarrels` and `vibestackConfig`: ESLint rules enforcing barrel-only workspace `exports` and imports plus a reusable downstream preset |
 | `vibestack/formal.ts` | `vibestack/formal`: `check`, `conformance`, `explore`, `precomputeSimulations`, `prepareSimulationReceipts`, `readSpecs`, `withFormalCache`, `show` |
@@ -382,7 +385,7 @@ failing exploration found is saved and replayed instead
 | Kind | Checks | Source or example |
 |---|---|---|
 | Formal | Rules and laws for every state and input | `spec/app/`; `.proof.dfy` where Dafny needs help, such as `spec/app/echo.proof.dfy` and `src/greeting.proof.dfy` |
-| Model-based | Real shell against the spec: journeys, malformed input, walks and saved counterexamples | `test/drivers/app.ts` and the recorded `test/traces/app.jsonl`, run by `traces` |
+| Model-based | Real shell or UI against the spec: journeys, deterministic transition-covering paths (accepted and refused), malformed input, walks and saved counterexamples | `test/drivers/app.ts` and the recorded `test/traces/app.jsonl`, run by `traces`; `planModel` and `runModel` from `vibestack/testing` in Vitest Node and browser tests (`test/app.browser.test.tsx`) |
 | Journey/integration | A story through real services, including what a driver cannot see | `@effect/vitest` in `test/app.test.vibe`: reload from storage |
 | Component/browser | Story interactions and accessibility; browser-only behavior such as focus and storage | Component metadata `play`; `test/app.browser.test.tsx` in Chromium |
 | Exploratory/browser | The served page under random clicks, typing, scrolling and reloads: no uncaught error, console error or failed request, and the properties each rule gives the page, in every state reached | `test/bombadil.ts`, or nothing for Bombadil's defaults; `apps/app/test/bombadil.ts`, run by `explore` |
@@ -436,7 +439,9 @@ configured scopes are in `knip.config.js`, `.madgerc`, `.jscpd.json` and
 | Push to `main` / dispatch (`release.yml`) | Builds an unsigned Alpha launcher candidate on `main`; manual dispatch in the protected `release` environment signs, delivers, qualifies and publishes it ([Releasing](#releasing)) |
 
 This repository runs its root specs in the ordinary check. Consumer
-workflows using the four simulation jobs assign modules by file hash. Each
+workflows using the four simulation jobs balance modules across shards with
+longest-processing-time bin-packing (using structural complexity by default, or
+an optional `--weights <json>` map, with `--list` to inspect the assignment). Each
 shard can fill gaps in its restored spec cache from a previous run of the same
 shard layout and lockfile. When a pull request starts native simulations, it
 can also read that shard’s published receipts from the push to its exact base

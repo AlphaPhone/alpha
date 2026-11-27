@@ -1,0 +1,60 @@
+// spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/calendar/link.md, "The account area's read says what Google allows now; a grant that no longer writes stops a setup under way"
+import { protocolFailure } from "@elizaos/plugin-inbox-client"
+import { grantOf, type Grant } from "../../gen/app__calendar__link.effect.vibe"
+import * as Settings from "../../gen/app__settings.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { connections } from "../inbox/gmail.vibe"
+import type { Cloud } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { started } from "../runtime/index.vibe"
+
+export type CalendarConnection = Grant | "Checking" | "Unchecked"
+
+export service CalendarAccount {
+  readonly snapshot: () => CalendarConnection
+  readonly subscribe: (listener: () => void) => () => void
+  publish(connection: CalendarConnection): void!!
+}
+
+const held = Layer.sync(CalendarAccount, () => {
+  let current: CalendarConnection = "Checking"
+  const listeners = new Set<() => void>()
+  return {
+    snapshot: () => current,
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    publish: (connection: CalendarConnection) => sync(() => {
+      if (connection === current) return
+      current = connection
+      for (const listener of listeners) listener()
+    }),
+  }
+})
+
+effect function checked(): CalendarConnection!!Cloud {
+  return effect {
+    const accounts = try timeout(connections(), "10 seconds")
+    const readable = accounts.filter((account) => account.connected && Boolean(account.connectionId) && account.grantedCapabilities.includes("google.calendar.read"))
+    return grantOf(readable.length > 0, readable.some((account) => account.grantedCapabilities.includes("google.calendar.write")))
+  } catch (error) => protocolFailure(error)?.status === 401 ? "NoGrant" : "Unchecked"
+}
+
+const visibleCalendar = started(effect {
+  const shelf = try CalendarAccount
+  const device = try Device
+  const pages = try Settings.Machine
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  const opened = Stream.changes(Stream.map(Stream.zipLatest(Stream.zipLatest(shell.changes, pages.changes), layers.changes), ([[view, settings], covers]) =>
+    Shell.showing(view, "Settings") && view.assistant !== "Full" && settings.page === "CalendarApp" && !Layers.pageInert(covers)))
+  const visible = Stream.switchMap(opened, (shown) => shown
+    ? Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)) : Stream.succeed(false))
+  const status = Stream.switchMap(visible, (shown) => shown
+    ? Stream.concat(Stream.succeed<CalendarConnection>("Checking"), Stream.fromEffect(checked())) : Stream.succeed<CalendarConnection>("Checking"))
+  try Stream.runForEach(status, (connection) => shelf.publish(connection))
+}, "reading Calendar settings connection")
+
+export const calendarAccount = Layer.provideMerge(visibleCalendar, held)

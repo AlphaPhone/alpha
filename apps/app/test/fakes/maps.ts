@@ -2,7 +2,7 @@
 import type { LocationErrorEvent, LocationPlugin, LocationResult } from "@elizaos/os-bridges";
 import type { CloudClient } from "../../src/platform/cloud.vibe";
 import { type Faked, plugin, rejection } from "./phone.ts";
-import type { Route } from "./routes.ts";
+import { type Route, readJsonBody } from "./routes.ts";
 
 type Capabilities = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>;
 type CloudPlace = Awaited<ReturnType<CloudClient["mapsPlacesSearch"]>>["places"][number];
@@ -11,8 +11,8 @@ type CloudRoute = Awaited<ReturnType<CloudClient["mapsRoutes"]>>["routes"][numbe
 const attribution = "Map data from the test provider";
 
 /** A place as the fake Cloud Maps answers it, typed by eliza's own schema. */
-export function cloudPlace(id: string, name: string, latitude: number, longitude: number, phone?: string): CloudPlace {
-  return { providerId: "test-open", id, name, coordinate: { latitude, longitude }, attribution, fetchedAt: 1, ...(phone === undefined ? {} : { phone }) };
+export function cloudPlace(id: string, name: string, latitude: number, longitude: number, phone?: string, more: Pick<CloudPlace, "address" | "openingHours" | "website"> = {}): CloudPlace {
+  return { providerId: "test-open", id, name, coordinate: { latitude, longitude }, attribution, fetchedAt: 1, ...(phone === undefined ? {} : { phone }), ...more };
 }
 
 /** A route of `steps` steps along a straight line from `from` to `to`, `meters` long. */
@@ -20,7 +20,10 @@ export function cloudRoute(id: string, from: CloudPlace["coordinate"], to: Cloud
   const at = (share: number) => ({ latitude: from.latitude + (to.latitude - from.latitude) * share, longitude: from.longitude + (to.longitude - from.longitude) * share });
   return {
     providerId: "test-open", id, from, to, mode: "drive", geometry: [from, to], distanceMeters: meters, durationSeconds: meters / 10,
-    steps: Array.from({ length: steps }, (_, index) => ({ instruction: index === 0 ? "Head north" : index === steps - 1 ? "Arrive" : "Turn left", coordinate: at(index / Math.max(1, steps - 1)), distanceMeters: meters / steps })),
+    steps: Array.from({ length: steps }, (_, index) => ({
+      instruction: index === 0 ? "Head north" : index === steps - 1 ? "Arrive" : "Turn left", coordinate: at(index / Math.max(1, steps - 1)), distanceMeters: meters / steps,
+      maneuver: index === 0 ? "depart" : index === steps - 1 ? "arrive" : "left",
+    })),
     attribution, fetchedAt: 1, traffic: "none",
   };
 }
@@ -41,6 +44,8 @@ export interface MapsScene {
   here: { latitude: number; longitude: number; accuracy: number } | undefined;
   /** Whether Android currently grants Alpha location permission. */
   allowed: "granted" | "denied" | "prompt";
+  /** When set, Android's location prompt stays open until it settles. */
+  answer?: Promise<void>;
   /** How precisely Android lets Alpha locate the phone, once location is allowed. */
   precision: "precise" | "approximate";
   /** The page's listeners of the fake location plugin. */
@@ -49,14 +54,11 @@ export interface MapsScene {
   readonly watches: Set<string>;
   /** Alpha's screen-off guidance service: the session running with its notification, the arrival notices shown, and whether the owner opened Alpha from the notification. */
   readonly guidance: { session: string | undefined; title: string; text: string; arrivals: string[]; opened: boolean; stop?: (reason: string) => void };
-  /** Tiles answer 429 with this wait in seconds, once each, while it is set. */
-  tilesLimited: number | undefined;
-  /** The tiles the page fetched, as `z/x/y`. */
-  readonly tiles: string[];
 }
 
-export const harbour = cloudPlace("test:harbour", "Harbour Cafe", 43.7312, 7.4211, "+377 93 15 00 00");
-export const gallery = cloudPlace("test:gallery", "Harbour Gallery", 43.7333, 7.4167);
+export const harbour = cloudPlace("test:harbour", "Harbour Cafe", 43.7312, 7.4211, "+377 93 15 00 00",
+  { address: "6 Quai Antoine 1er, Monaco", openingHours: "Closed · opens 7:30 AM", website: "https://harbour-cafe.example/" });
+export const gallery = cloudPlace("test:gallery", "Harbour Gallery", 43.7333, 7.4167, undefined, { address: "11 Rue Grimaldi, Monaco" });
 
 export function mapsScene(): MapsScene {
   return {
@@ -80,20 +82,7 @@ export function mapsScene(): MapsScene {
     listeners: new Set(),
     watches: new Set(),
     guidance: { session: undefined, title: "", text: "", arrivals: [], opened: false },
-    tilesLimited: undefined,
-    tiles: [],
   };
-}
-
-/** The page's speech synthesis as a recorder: what it was asked to read aloud, in order, and how often it was cut off. */
-export function speech(): { readonly spoken: string[]; cancels: number } {
-  const heard = { spoken: [] as string[], cancels: 0 };
-  class Utterance { constructor(readonly text: string) {} }
-  Object.assign(globalThis, {
-    SpeechSynthesisUtterance: Utterance,
-    speechSynthesis: { speak: (said: Utterance) => { heard.spoken.push(said.text); }, cancel: () => { heard.cancels += 1; } },
-  });
-  return heard;
 }
 
 /** The fake phone moves to `latitude, longitude`, and its open watches report it. */
@@ -103,7 +92,7 @@ export function move(scene: MapsScene, latitude: number, longitude: number, accu
 }
 
 async function asked(scene: MapsScene, request: Request, url: URL): Promise<unknown> {
-  const body: unknown = request.method === "POST" ? await request.json() : undefined;
+  const body: unknown = request.method === "POST" ? await readJsonBody(request) : undefined;
   scene.asked.push({ path: url.pathname, key: request.headers.get("idempotency-key"), body });
   return body;
 }
@@ -142,17 +131,6 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
           : Response.json({ providerId: "test-open", attribution, routes: scene.routes }));
     },
     (request, url) => {
-      const tile = /^\/api\/v1\/maps\/tiles\/(\d+)\/(\d+)\/(\d+)$/.exec(url.pathname);
-      if (request.method !== "GET" || tile === null) return;
-      scene.tiles.push(`${tile[1]}/${tile[2]}/${tile[3]}`);
-      if (scene.tilesLimited !== undefined) {
-        const wait = scene.tilesLimited;
-        scene.tilesLimited = undefined;
-        return Response.json({ error: { code: "RateLimited", message: "slow down" } }, { status: 429, headers: { "retry-after": new Date(now() + wait * 1000).toUTCString() } });
-      }
-      return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
-    },
-    (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/v1/maps/tiles/viewport") return;
       return asked(scene, request, url).then(() => Response.json({ providerId: "test-open", copyright: "Map data ©2026 Test" }));
     },
@@ -161,19 +139,28 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
 
 /** `ElizaLocation` of eliza's Android package: its permission, which Maps and Settings read, one watch per call, and the positions the scene moves to. */
 export function elizaLocation(scene: MapsScene, now: () => number): Faked {
-  return plugin<LocationPlugin, { locationChange: LocationResult; error: LocationErrorEvent }>((emit) => {
+  return plugin<LocationPlugin, { locationChange: LocationResult; error: LocationErrorEvent }>((emit, onUnplug) => {
     const told = (result: LocationResult) => emit("locationChange", result);
     let next = 0;
+    onUnplug?.(() => {
+      scene.watches.clear();
+      scene.listeners.delete(told);
+    });
     return {
       checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: scene.precision }),
-      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: scene.precision }),
+      requestPermissions: async () => {
+        await scene.answer;
+        if (scene.allowed === "prompt") scene.allowed = "granted";
+        return { location: scene.allowed, accuracy: scene.precision };
+      },
       getCurrentPosition: () => (scene.here && scene.allowed === "granted" ? Promise.resolve({ coords: { ...scene.here, timestamp: now() }, cached: false }) : Promise.reject(rejection("TIMEOUT"))),
       watchPosition: () => {
+        if (scene.allowed !== "granted") return Promise.reject(rejection("PERMISSION_DENIED"));
         const watchId = `w${++next}`;
         scene.watches.add(watchId);
         scene.listeners.add(told);
         const here = scene.here;
-        if (here) void Promise.resolve().then(() => told({ coords: { ...here, timestamp: now() }, cached: false }));
+        if (here) void Promise.resolve().then(() => { if (scene.watches.has(watchId)) told({ coords: { ...here, timestamp: now() }, cached: false }); });
         return Promise.resolve({ watchId });
       },
       clearWatch: ({ watchId }) => {
@@ -181,7 +168,11 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
         if (scene.watches.size === 0) scene.listeners.delete(told);
         return Promise.resolve();
       },
-      removeAllListeners: () => Promise.resolve(),
+      removeAllListeners: () => {
+        scene.watches.clear();
+        scene.listeners.delete(told);
+        return Promise.resolve();
+      },
     };
   });
 }

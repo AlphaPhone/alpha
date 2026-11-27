@@ -1,16 +1,18 @@
-// spec/app/calendar/index.md, "Story: See only my own account's calendar"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/editor.md, "Another owner signing in closes the editor; the old owner's slot keeps its edits"; spec/app/calendar/link.md, "A result shows only for the owner it ran for; another owner signing in ends setup and refuses its late answers"; spec/app/calendar/deletions.md, "Another owner signing in drops a waiting deletion unsent"
+// spec/app/calendar/index.md, "Story: See only my own account's calendar"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/editor.md, "Another owner signing in closes the editor; the old owner's slot keeps its edits"; spec/app/calendar/link.md, "A result shows only for the owner it ran for; another owner signing in ends setup and refuses its late answers"; spec/app/calendar/link.md, "Cloud overload is unavailable and retryable, never a changed account"; spec/app/calendar/deletions.md, "Another owner signing in drops a waiting deletion unsent, and says the event was not deleted"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { CloudError } from "@elizaos/cloud"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
+import { inFlight } from "../../gen/app__calendar__editor.ts"
 import * as Link from "../../gen/app__calendar__link.effect.vibe"
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
+import { Agent } from "../platform/index.vibe"
 import { Cloud } from "../platform/index.vibe"
-import { contained, started, together, Time } from "../runtime/index.vibe"
-import { readFeed } from "./calendar.vibe"
-import { type Read, shown } from "./shown.ts"
-import { civilDay } from "./time.ts"
+import { Refused, ask } from "../platform/index.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
+import { LinkCache } from "./link.vibe"
+import { Requests, Shown } from "./stores.vibe"
 
 const ownersKey = "alpha.calendar.owners"
 
@@ -21,6 +23,9 @@ function hiddenKey(owner: number): string {
 
 const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)))
 const decodeHidden = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.Number)))
+
+/** Lightweight calendar list response used to determine whether the agent's calendar is connected. */
+schema Calendars { readonly calendars: ReadonlyArray<{ readonly calendarId: string }> }
 
 /** The number `account` keeps on this phone across restarts, which names its draft and hidden-calendar slots: 0 for no account. */
 effect function numberOf(account: string): number!!KeyValueStore.KeyValueStore {
@@ -49,7 +54,15 @@ effect function account(): (string | undefined)!!Cloud {
   } catch (failed) => (failed instanceof CloudError && failed.failure.tag === "CloudCredentialInvalid" ? "" : undefined)
 }
 
-// spec/app/calendar/index.md, "Google's rows are only ever an owner's who is signed in and connected"; spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
+/** Whether the agent has a connected calendar: `undefined` on transient overload/network errors so `connected` is preserved. */
+effect function probeConnected(): (boolean | undefined)!!Agent {
+  return effect {
+    const listed = try ask(Agent, HttpClientRequest.get("/api/lifeops/calendar/calendars"), Calendars)
+    return listed.calendars.length > 0
+  } catch (failure) => (failure instanceof Refused && !Link.cloudRetryable(failure.status) ? false : undefined)
+}
+
+// spec/app/calendar/index.md, "Google's rows are only ever an owner's who is signed in and connected"; spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"; spec/app/calendar/link.md, "Cloud overload is unavailable and retryable, never a changed account"
 /** Tell Calendar's machines who is signed in: the view, the form, the deletions and the Google link change owner together, and whether the agent has Google. */
 effect function tellOwner() {
   const who = try account()
@@ -57,14 +70,21 @@ effect function tellOwner() {
   const owner = try numberOf(who)
   const hidden = try hiddenOf(owner)
   const view = try View.Machine
-  if ((try view.get()).owner !== owner) shown.drop("Google")
+  const before = try view.get()
+  const changed = before.owner !== owner
+  if (changed) {
+    (try Shown).drop("Google")
+    ;(try Requests).clear()
+    ;(try LinkCache).invalidate()
+  }
   try contained(view.send({ type: "ownerChanged", owner, hidden: [...hidden] }), "telling Calendar who is signed in")
   try contained((try Held.Machine).send({ type: "ownerChanged", owner }), "telling the deletions who is signed in")
   try contained((try Editor.Machine).send({ type: "ownerChanged", owner }), "telling the form who is signed in")
   try contained((try Link.Machine).send({ type: "ownerChanged", owner }), "telling the Google link who is signed in")
   if (owner === 0) return
-  const connected = Option.isSome(readFeed(civilDay(try (try Time).now())) catch () => Option.none<ReadonlyArray<Read>>())
-  try contained(view.send({ type: "googleChanged", connected }), "telling Calendar of the agent's account")
+  if (!changed && before.connected) return
+  const connected = try probeConnected()
+  if (connected !== undefined) try contained(view.send({ type: "googleChanged", connected }), "telling Calendar of the agent's account")
 }
 
 // spec/app/calendar/index.md, "Story: See only my own account's calendar"
@@ -74,6 +94,20 @@ const session = started(effect {
   const forward = Stream.filter(Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar"))), (front) => front)
   try Stream.runForEach(forward, () => contained(tellOwner(), "reading who is signed in"))
 }, "reading who is signed in")
+
+// spec/app/calendar/editor.md, "Another owner signing in closes the editor; the old owner's slot keeps its edits"
+/** If `Editor.Machine` had a write in flight when the owner changed, retry `ownerChanged` as soon as the write settles. */
+const editorOwner = started(effect {
+  const view = try View.Machine
+  const editor = try Editor.Machine
+  const watched = Stream.map(Stream.zipLatest(view.changes, editor.changes), ([v, e]) => ({ target: v.owner, current: e.owner, busy: inFlight(e) }))
+  try Stream.runForEach(
+    Stream.changesWith(watched, (a, b) => a.target === b.target && a.current === b.current && a.busy === b.busy),
+    effect ({ target, current, busy }) => {
+      if (!busy && current !== target) try contained(editor.send({ type: "ownerChanged", owner: target }), "retrying Editor owner switch after write settled")
+    },
+  )
+}, "synchronizing Editor owner after in-flight writes")
 
 // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"
 /** Keep the calendars the owner hid in that owner's own slot, each time they change. */
@@ -86,4 +120,4 @@ const remembered = started(effect {
 }, "keeping the hidden calendars")
 
 /** Who Calendar reads for: told to every machine of the area, and the hidden calendars kept per owner. */
-export const owners = together(session, remembered)
+export const owners = together(session, editorOwner, remembered)

@@ -1,5 +1,7 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
 import type { TurnReply } from "@elizaos/agent";
+import type { DraftAddress } from "../../src/assistant/draft-device.vibe";
+import type { Faked } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 export interface AskScene {
@@ -8,6 +10,7 @@ export interface AskScene {
   down: boolean;
   stalled: boolean;
   readonly turns: Map<string, () => void>;
+  afterStop?: Kept["messages"];
   readonly kept: Map<string, Kept>;
   searchDown: boolean;
   /** The agent fails every read of a conversation's messages with a 503, as while it is starting. */
@@ -20,25 +23,94 @@ export interface AskScene {
   /** While set, the agent holds each answer to a read of the list until the test lets it go. */
   holdLists: boolean;
   readonly heldLists: (() => void)[];
+  /** While set, the agent holds each answer to a read of a conversation's messages, as it stood when asked, until the test lets it go. */
+  holdPages?: boolean;
+  readonly heldPages: (() => void)[];
   acknowledgment?: string;
+  /** Text the agent streams before its acknowledgment, which it starts again after it, as eliza's planner does with a cue it displayed. */
+  streamedBeforeAcknowledgment?: string;
+  /** The next reply holds after its acknowledgment and tool frames, before any text, until the test runs its entry in `turns`. */
+  holdAfterTools?: boolean;
   metadata?: unknown[];
+  spokenFiles?: { readonly channel: unknown; readonly images: readonly unknown[] | undefined }[];
   /** The failure fields of the resident's terminal reply. */
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
   nextReplyProvisional?: boolean;
-  /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
-  nextActions?: (metadata: unknown) => readonly unknown[];
-  cloudWarmCalls: number;
+  /** After the next reply's chunks, the agent writes their whole text once without the provisional mark, as eliza writes the reply it decided before storing it. */
+  nextReplySettled?: boolean;
+  /** The actions the next reply says it ran, made from the turn's metadata and the device capabilities the turn declared, as eliza's agent lists them on its done frame. */
+  nextActions?: (metadata: unknown, capabilities: readonly string[]) => readonly unknown[];
+  /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
+  holdDoneAfterReady?: Promise<void>;
+  /** The agent sends no status frame, as the resident host does not. */
+  noStatus?: boolean;
+  /** With `holdDoneAfterReady`, awaits this promise after the reply's text before emitting `reply_ready`. */
+  holdReady?: Promise<void>;
+  /** The next reply's tools ran while the stream was busy, so only the newest waiting tool frame is written, as eliza's reply stream writes progress. */
+  nextNewestProgressOnly?: boolean;
+  /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
+  knowsNoActionMode?: boolean;
+  /** The fake native store, which survives disposal of the WebView runtime. */
+  readonly drafts: Map<string, string>;
+  beforeDraftExchange?: () => Promise<void>;
+  refusedDraftExchanges: number;
+  /** When true, /api/status omits serverInstanceId so the peer does not declare optional turn-context fields. */
+  noOptionalFields?: boolean;
+  /** When true, /api/status fails with 503 (for testing transient support probe failures). */
+  failStatus?: boolean;
+  /** Optional hook awaited before answering /api/status (for simulating slow startup support probes). */
+  beforeStatus?: () => Promise<void>;
+  /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
+  canRespond: boolean;
+  warmUps: Record<string, string>[];
+  warmUpFails: boolean;
+  statusReads: number;
 }
 
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; abortCause?: string; cloudCode?: string }[];
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+}
+
+/** A storage address within the fake phone's already verified local account. */
+export function draftKey(owner: string, agent: string, conversation?: string, room?: string) {
+  return JSON.stringify([owner, agent, conversation ?? null, room ?? null]);
+}
+
+/** AlphaAssistantDraft derives the slot after admitting the supplied owner, agent and epoch as assertions. */
+export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<DraftAddress, "owner" | "agent" | "epoch">): Faked {
+  function admitted(assertion: DraftAddress) {
+    const current = authority();
+    if (assertion.owner !== current.owner || assertion.agent !== current.agent || assertion.epoch !== current.epoch ||
+      (assertion.conversation === undefined) !== (assertion.room === undefined)) return undefined;
+    return draftKey(current.owner, current.agent, assertion.conversation, assertion.room);
+  }
+  return () => ({
+    read(address: DraftAddress) {
+      const key = admitted(address);
+      if (key === undefined) return Promise.resolve({ status: "denied" });
+      const raw = scene.drafts.get(key);
+      return Promise.resolve(raw === undefined ? { status: "read" } : { status: "read", raw });
+    },
+    async exchange(address: DraftAddress & { expected?: string; next?: string }) {
+      const key = admitted(address);
+      if (key !== undefined) await scene.beforeDraftExchange?.();
+      if (key === undefined || admitted(address) !== key) {
+        scene.refusedDraftExchanges += 1;
+        return { status: "denied" };
+      }
+      if (scene.drafts.get(key) !== address.expected) return { status: "conflict" };
+      if (address.next === undefined) scene.drafts.delete(key);
+      else scene.drafts.set(key, address.next);
+      return { status: "landed" };
+    },
+  });
 }
 
 const encoder = new TextEncoder();
@@ -46,43 +118,90 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown, capabilities: readonly string[]): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
-  const actions = scene.nextActions?.(metadata) ?? [];
+  const settles = scene.nextReplySettled === true;
+  const actions = scene.nextActions?.(metadata, capabilities) ?? [];
+  const holdDone = scene.holdDoneAfterReady;
+  const holdReady = scene.holdReady;
+  let cancelled = false;
+  const newestOnly = scene.nextNewestProgressOnly === true;
+  scene.nextNewestProgressOnly = undefined;
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
+  scene.nextReplySettled = undefined;
   scene.nextActions = undefined;
+  scene.holdDoneAfterReady = undefined;
+  scene.holdReady = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(frame({ type: "status", activity: "thinking" }));
+      if (!scene.noStatus) controller.enqueue(frame({ type: "status", activity: "thinking" }));
       if (scene.refusal !== undefined) {
         controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length), ...scene.refusal }));
         controller.close();
         return;
       }
+      const streamedCue = scene.acknowledgment === undefined ? undefined : scene.streamedBeforeAcknowledgment;
+      if (streamedCue !== undefined) controller.enqueue(frame({ type: "token", text: streamedCue }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
+      if (streamedCue !== undefined) controller.enqueue(frame({ type: "token", fullText: "" }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
-        controller.enqueue(frame({ type: "token", text: "Thinking" }));
+        for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
+        if (settles) controller.enqueue(frame({ type: "token", fullText: (custom ?? ["Thinking"]).join("") }));
         scene.turns.set(room, () => controller.close());
         return;
       }
-      if (custom !== undefined && custom.length > 0) {
-        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
-        const full = custom.join("");
-        keep(full);
-        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+      const answer = () => {
+        const ran = actions as readonly { readonly action?: unknown }[];
+        for (const { action } of newestOnly ? ran.slice(-1) : ran) {
+          if (typeof action === "string") controller.enqueue(frame({ type: "tool", name: action, label: "Working" }));
+        }
+        if (custom !== undefined && custom.length > 0) {
+          for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
+          const full = custom.join("");
+          if (settles) controller.enqueue(frame({ type: "token", fullText: full }));
+          keep(full);
+          if (holdDone !== undefined) {
+            const announce = () => {
+              if (cancelled) return;
+              controller.enqueue(frame({ type: "reply_ready", fullText: full, actionResults: actions }));
+              void holdDone.then(() => {
+                if (cancelled) return;
+                controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+                controller.close();
+              });
+            };
+            if (holdReady === undefined) announce();
+            else void holdReady.then(announce);
+            return;
+          }
+          controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+          controller.close();
+          return;
+        }
+        controller.enqueue(frame({ type: "token", text: "You said: " }));
+        controller.enqueue(frame({ type: "token", text }));
+        keep(`You said: ${text}`);
+        controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
         controller.close();
+      };
+      if (scene.holdAfterTools) {
+        scene.holdAfterTools = false;
+        controller.enqueue(frame({ type: "status", activity: "Working" }));
+        scene.turns.set(room, () => {
+          scene.turns.delete(room);
+          answer();
+        });
         return;
       }
-      controller.enqueue(frame({ type: "token", text: "You said: " }));
-      controller.enqueue(frame({ type: "token", text }));
-      keep(`You said: ${text}`);
-      controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
-      controller.close();
+      answer();
     },
-    cancel: () => void scene.turns.delete(room),
+    cancel: () => {
+      cancelled = true;
+      scene.turns.delete(room);
+    },
   });
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
@@ -106,10 +225,27 @@ export function askRoutes(scene: AskScene): Route[] {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];
       if (request.method !== "GET" || id === undefined || id === "messages") return;
       scene.pageReads += 1;
-      if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
-      if (scene.pagesMissing) return Response.json({ error: "unknown_conversation" }, { status: 404 });
-      const one = scene.kept.get(id);
-      return one === undefined ? Response.json({ error: "unknown_conversation" }, { status: 404 }) : Response.json({ messages: one.messages.map((message) => ({ ...message, timestamp: 0 })) });
+      const answer = (): Response => {
+        if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
+        if (scene.pagesMissing) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+        const one = scene.kept.get(id);
+        if (one === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+        const messages = one.messages.map((message, at) => ({ ...message, timestamp: at + 1 }));
+        const around = url.searchParams.get("around");
+        if (around !== null) {
+          const pivot = messages.findIndex((message) => message.id === around);
+          return pivot < 0 ? Response.json({ error: "unknown_message" }, { status: 404 })
+            : Response.json({ messages: messages.slice(Math.max(0, pivot - 100), pivot + 101) });
+        }
+        const before = url.searchParams.get("before");
+        if (before === null) return Response.json({ messages: messages.slice(-200), hasMore: messages.length > 200 });
+        const beforeId = url.searchParams.get("beforeId");
+        const older = messages.filter(({ timestamp, id }) => timestamp < Number(before) || (timestamp === Number(before) && beforeId !== null && id < beforeId));
+        const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
+        return Response.json({ messages: older.slice(-limit), hasMore: older.length > limit });
+      };
+      const page = answer();
+      return scene.holdPages ? new Promise<Response>((resolve) => void scene.heldPages.push(() => resolve(page))) : page;
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations/messages/search") return;
@@ -135,18 +271,28 @@ export function askRoutes(scene: AskScene): Route[] {
       });
     },
     (request, url) => {
-      const found = /^\/api\/conversations\/c(\d+)\/messages(\/stream)?$/.exec(url.pathname);
+      const found = /^\/api\/conversations\/([^/]+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
-      const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
-      const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
-      return request.json().then((body: { text: string; metadata?: unknown }) => {
+      const conversationId = decodeURIComponent(found[1] ?? "");
+      const kept = scene.kept.get(conversationId);
+      if (kept === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+      const keep = (role: "user" | "assistant", text: string) => void kept.messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
+      return request.json().then((body: { text: string; metadata?: unknown; channelType?: unknown; images?: readonly unknown[]; clientMessageId?: string }) => {
         scene.metadata?.push(body.metadata);
+        scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
-        if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
+        if (scene.knowsNoActionMode === true && JSON.stringify(body.metadata ?? {}).includes('"agentActionMode"')) return Response.json({ error: "VOICE_UI_CONTEXT_INVALID" }, { status: 400 });
         scene.said.push(body.text);
         keep("user", body.text);
-        Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
-        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
+        Object.assign(kept.messages.at(-1) ?? {}, { clientMessageId: body.clientMessageId });
+        if (found[2] === undefined) {
+          const text = `You said: ${body.text}`;
+          keep("assistant", text);
+          return Response.json({ text, ...named(scene.said.length) });
+        }
+        if (scene.refusal !== undefined) kept.messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
+        const capabilities = request.headers.get("x-eliza-device-capabilities")?.split(",").filter((name) => name !== "") ?? [];
+        return reply(scene, kept.roomId, body.text, (said) => keep("assistant", said), body.metadata, capabilities);
       });
     },
     (request, url) => {
@@ -156,14 +302,24 @@ export function askRoutes(scene: AskScene): Route[] {
         const stop = scene.turns.get(room);
         scene.turns.delete(room);
         stop?.();
+        const after = scene.afterStop;
+        scene.afterStop = undefined;
+        if (after !== undefined) [...scene.kept.values()].find((one) => one.roomId === room)?.messages.push(...after);
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },
-    (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
     (request, url) => {
-      if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
-      scene.cloudWarmCalls += 1;
-      return Response.json({ warmed: true });
+      if (request.method !== "GET" || url.pathname !== "/api/status") return;
+      scene.statusReads += 1;
+      const answer = () => scene.failStatus
+        ? Response.json({ error: "status_unavailable" }, { status: 503 })
+        : Response.json({ ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }), canRespond: scene.canRespond });
+      return scene.beforeStatus ? scene.beforeStatus().then(answer) : answer();
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;
+      scene.warmUps.push(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza-"))));
+      return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
     },
   ];
 }

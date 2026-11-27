@@ -47,7 +47,7 @@ pure val initial: Provider = {
 
 pure val ticketValues = Set(1, 2, 3)
 pure val revisionValues = Set(1, 2)
-pure val nowValues = Set(0, 500)
+pure val nowValues = Set(0, 500000)
 pure val keyValues = Set("csk-test")
 pure val weight_reported = 5
 pure val weight_agentHeld = 10
@@ -436,7 +436,7 @@ pure def stepRemovingTheKeyNeverSwitchesToCloud(before: Provider, via: str, afte
 A clock that went back gives it up too.
 
 ```quint
-pure val holdLimit = 120
+pure val holdLimit = 120000
 
 pure def canGiveUp(s: Provider, now: int): bool =
   (s.work == Waiting or s.work == Using or s.work == Selecting or s.work == Removing) and (now < s.since or now - s.since >= holdLimit)

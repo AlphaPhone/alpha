@@ -58,11 +58,12 @@ pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
 pure val itemsValues =
   Set(List())
-    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 8, bytes: 0 })))
-    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 8, bytes: 0 }, { id: 2, name: "b", revision: 1, kind: F::Folder, volume: 8, bytes: 0 })))
+    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 8, bytes: 0, children: 0 })))
+    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 8, bytes: 0, children: 0 }, { id: 2, name: "b", revision: 1, kind: F::Folder, volume: 8, bytes: 0, children: 0 })))
 pure val destValues =
-  Set({ folder: 3, path: List(8), names: List("a") })
-    .union(Set({ folder: 4, path: List(8, 2), names: List() }))
+  Set({ folder: 2, path: List(8), names: List("a") })
+    .union(Set({ folder: 3, path: List(8, 2), names: List() }))
+    .union(Set({ folder: 4, path: List(8), names: List() }))
     .union(Set({ folder: 5, path: List(9), names: List("a") }))
     .union(Set({ folder: 6, path: List(9), names: List() }))
 ```
@@ -233,9 +234,9 @@ pure def shareEnded(c: Change, ticket: int, opened: bool, known: bool): Change =
 ```quint
 pure def canRetire(c: Change): bool = c.panel != 0
 
-pure def retire(c: Change): Change = { ...c, panel: 0, sharing: List() }
+pure def retire(c: Change): Change = { ...c, panel: 0, sharing: List(), clash: V::dismiss(c.clash) }
 
-pure def invalidate(c: Change): Change = { ...c, panel: 0, sharing: List(), stale: c.stale or c.panel != 0 }
+pure def invalidate(c: Change): Change = { ...c, panel: 0, sharing: List(), clash: V::dismiss(c.clash), stale: c.stale or c.panel != 0 }
 
 pure def stepSheetsAreNumberedAfresh(before: Change, after: Change): bool =
   after.panels >= before.panels and (after.panel == 0 or after.panel == before.panel or after.panel > before.panels)

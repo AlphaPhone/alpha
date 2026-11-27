@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { alone, checkout, repository, run } from "./checkout.ts";
+import { alone, checkout, hasCommit, headCommit, repository, run } from "./checkout.ts";
 
 /**
  * A private clone of the pinned eliza that the agent pack is built from, as Alpha's old phone build prepared its own
@@ -44,8 +44,11 @@ function stamped(root: string): Stamp {
 
 /** The clone holds `commit` with every one of `plugins` built. @throws {never} */
 export function packReady(plugins: readonly string[], commit = checkout().commit): boolean {
-  const stamp = stamped(packRoot(commit));
-  return stamp.commit === commit && plugins.every((name) => stamp.plugins?.includes(name) === true);
+  const root = packRoot(commit);
+  const stamp = stamped(root);
+  return stamp.commit === commit
+    && plugins.every((name) => stamp.plugins?.includes(name) === true)
+    && headCommit(root) === commit;
 }
 
 function workspace(root: string): Map<string, string> {
@@ -84,11 +87,19 @@ function prepare(root: string, commit: string, plugins: readonly string[]) {
   if (packReady(plugins, commit)) return;
   const shared = checkout().root;
   const source = process.env.ALPHA_ELIZA_SOURCE ?? (fs.existsSync(path.join(shared, ".git")) ? shared : undefined);
+  const lock = JSON.parse(fs.readFileSync(path.join(repository, "eliza.lock.json"), "utf8")) as { remote: string; branch: string };
   if (!fs.existsSync(path.join(root, ".git"))) {
     fs.rmSync(root, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(root), { recursive: true });
-    const lock = JSON.parse(fs.readFileSync(path.join(repository, "eliza.lock.json"), "utf8")) as { remote: string; branch: string };
     run(path.dirname(root), "git", "clone", "-q", "--no-checkout", ...(source === undefined ? ["--branch", lock.branch, lock.remote] : ["--shared", source]), root);
+  }
+  if (!hasCommit(root, commit)) {
+    const fetchSource = source ?? lock.remote;
+    try {
+      run(root, "git", "fetch", "-q", "--no-tags", fetchSource, commit);
+    } catch {
+      run(root, "git", "fetch", "-q", "--no-tags", fetchSource, lock.branch);
+    }
   }
   run(root, "git", "checkout", "-q", "--detach", commit);
   const before = stamped(root);
@@ -127,6 +138,19 @@ export interface ProductPackage {
   readonly dir: string;
 }
 
+function copyProductJs(fromDir: string, toDir: string): void {
+  fs.mkdirSync(toDir, { recursive: true });
+  for (const entry of fs.readdirSync(fromDir, { withFileTypes: true })) {
+    const src = path.join(fromDir, entry.name);
+    const dest = path.join(toDir, entry.name);
+    if (entry.isDirectory()) {
+      copyProductJs(src, dest);
+    } else if (entry.isFile() && entry.name.endsWith(".js")) {
+      fs.copyFileSync(src, dest);
+    }
+  }
+}
+
 /**
  * Write the pack's entry package inside the clone: its `package.json`, `entry.js` with `source`, and each `@elizaos`
  * package of the clone linked in its `node_modules`, so the entry's imports resolve to the clone's own packages.
@@ -138,6 +162,8 @@ export function stagePackEntry(pack: Pack, source: string, product?: ProductPack
   fs.mkdirSync(parent, { recursive: true });
   const target = path.join(parent, `pack-entry-${worktreeKey}`);
   const staging = fs.mkdtempSync(path.join(parent, ".pack-entry-"));
+  const backup = `${target}.prev-${randomBytes(4).toString("hex")}`;
+  let movedBackup = false;
   try {
     fs.writeFileSync(path.join(staging, "package.json"), `${JSON.stringify({ name: packEntryName, version: "0.0.0", private: true, type: "module" }, null, 2)}\n`);
     fs.writeFileSync(path.join(staging, "entry.js"), source);
@@ -148,18 +174,29 @@ export function stagePackEntry(pack: Pack, source: string, product?: ProductPack
     }
     if (product !== undefined) {
       const productTarget = path.join(staging, "node_modules", product.name);
-      fs.mkdirSync(productTarget, { recursive: true });
-      for (const entry of fs.readdirSync(product.dir)) {
-        if (entry.endsWith(".js")) fs.copyFileSync(path.join(product.dir, entry), path.join(productTarget, entry));
-      }
+      copyProductJs(product.dir, productTarget);
       fs.writeFileSync(
         path.join(productTarget, "package.json"),
         `${JSON.stringify({ name: product.name, version: "0.1.0", private: true, type: "module", main: "./index.js" }, null, 2)}\n`,
       );
+      const generated = path.join(product.dir, "..", "..", "gen");
+      if (fs.existsSync(generated)) {
+        fs.mkdirSync(path.join(staging, "gen"), { recursive: true });
+        for (const entry of fs.readdirSync(generated)) {
+          if (entry.endsWith(".js")) fs.copyFileSync(path.join(generated, entry), path.join(staging, "gen", entry));
+        }
+      }
     }
-    fs.rmSync(target, { recursive: true, force: true });
+    if (fs.existsSync(target)) {
+      fs.renameSync(target, backup);
+      movedBackup = true;
+    }
     fs.renameSync(staging, target);
+    if (movedBackup) fs.rmSync(backup, { recursive: true, force: true });
   } catch (cause) {
+    if (movedBackup && !fs.existsSync(target) && fs.existsSync(backup)) {
+      try { fs.renameSync(backup, target); } catch { void 0; }
+    }
     fs.rmSync(staging, { recursive: true, force: true });
     throw cause;
   }
@@ -170,9 +207,10 @@ export function stagePackEntry(pack: Pack, source: string, product?: ProductPack
 export const packDist = path.join(repository, "apps/agent/dist");
 
 /**
- * What a launch of the built pack names: the bundle, the phone's character, the policy's allowed actions and plugins (load list and product), and the workflow
- * worker the bundle pinned, where the pack's clone built it, as the phone stages it beside the bundle. A pack restored
- * from a build cache comes without its clone, so the clone is prepared here where it is not.
+ * What a launch of the built pack names: the bundle, the phone's character, the policy's allowed actions and plugins (load list and product), the workflow
+ * worker the bundle pinned, where the pack's clone built it, as the phone stages it beside the bundle, and the host context
+ * revision and the views the phone's launch carries (host.json). A pack restored from a build cache comes without its clone, so the
+ * clone is prepared here where it is not.
  * @throws {Error} where the pack is not built
  */
 export async function builtPack() {
@@ -184,16 +222,27 @@ export async function builtPack() {
     }
   };
   const manifest = read("bundle/manifest.json") as { workflowWorkerSha256?: string };
+  const host = read("host/host.json") as { hostContextRevision?: number; views?: unknown[] };
   const policy = read("host/policy.json") as { actions: { allowed: string[] }; plugins: { load: string[]; product?: string } };
   const clone = await packCheckout(policy.plugins.load.filter((name) => name.startsWith("@elizaos/plugin-")));
   const workflow = clone.packages.get("@elizaos/plugin-workflow");
-  if (workflow === undefined || manifest.workflowWorkerSha256 === undefined) throw new Error("the agent pack pins no workflow worker");
+  if (workflow === undefined || typeof manifest.workflowWorkerSha256 !== "string" || manifest.workflowWorkerSha256 === "") {
+    throw new Error("the agent pack pins no workflow worker");
+  }
   const runtimeDir = path.join(workflow, "dist");
-  const { executable } = JSON.parse(fs.readFileSync(path.join(runtimeDir, "workflow-worker.json"), "utf8")) as { executable: string };
+  const { executable } = JSON.parse(fs.readFileSync(path.join(runtimeDir, "workflow-worker.json"), "utf8")) as { executable?: string };
+  if (typeof executable !== "string" || executable === "") throw new Error("the workflow worker manifest names no executable");
+  const workerPath = path.join(runtimeDir, executable);
+  const actualSha256 = createHash("sha256").update(fs.readFileSync(workerPath)).digest("hex");
+  if (actualSha256 !== manifest.workflowWorkerSha256) {
+    throw new Error(`workflow worker digest mismatch: expected ${manifest.workflowWorkerSha256}, got ${actualSha256}`);
+  }
   return {
     bundle: path.join(packDist, "bundle/agent.mjs"),
     character: read("host/character.json") as { name: string; system: string },
     policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
     workflowWorker: { runtimeDir, executable, sha256: manifest.workflowWorkerSha256 },
+    ...(host.hostContextRevision === undefined ? {} : { hostContextRevision: host.hostContextRevision }),
+    ...(host.views === undefined ? {} : { views: host.views }),
   };
 }

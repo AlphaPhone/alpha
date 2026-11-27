@@ -19,7 +19,7 @@ import {
 import { type Listening, type Wired, remoteAt } from "./remote.vibe"
 
 /** Default OAuth2 user scopes requested for first-class Slack user-account access (`user_scope`, never bot `scope`). */
-const SLACK_DEFAULT_USER_SCOPES = [
+export const SLACK_DEFAULT_USER_SCOPES = [
   "channels:read",
   "channels:history",
   "groups:read",
@@ -448,17 +448,22 @@ const SLACK_AUTH_ERRORS = ["token_revoked", "invalid_auth", "not_authed", "accou
 const SLACK_FORBIDDEN_ERRORS = ["cant_update_message", "cant_delete_message", "missing_scope"]
 const SLACK_BOT_ERRORS = ["bot_token_not_allowed", "bot_tokens_not_supported"]
 
-/** Reject Slack bot (`xoxb-`) and app (`xapp-`) tokens at the client boundary. */
-effect function assertSlackUserToken(token: string): string!BotTokenRejected {
-  if (token.startsWith("xoxb-") || token.startsWith("xapp-")) {
-    throw new BotTokenRejected({ provider: "slack", reason: "Slack bot and app tokens are not allowed; use an xoxp- user token" })
+function isSlackUserToken(token: string): boolean {
+  return token.startsWith("xoxp-") || token.startsWith("xoxe.xoxp-")
+}
+
+/** Reject Slack bot (`xoxb-`, `xoxe.xoxb-`) and app (`xapp-`) tokens at the client boundary. */
+export effect function assertSlackUserToken(token: string): string!BotTokenRejected {
+  if (token.startsWith("xoxb-") || token.startsWith("xoxe.xoxb-") || token.startsWith("xapp-")) {
+    throw new BotTokenRejected({ provider: "slack", reason: "Slack bot and app tokens are not allowed; use an xoxp- or xoxe.xoxp- user token" })
   }
   return token
 }
 
 function slackErrorFromCode(code: string, status: number, retryAfter: string | undefined): MessagingFailure {
   if (code === "ratelimited" || status === 429) {
-    return new RateLimited({ provider: "slack", retryAfter: parseRetryAfter(retryAfter, 1), code })
+    const wait = parseRetryAfter(retryAfter)
+    return new RateLimited({ provider: "slack", ...(wait === undefined ? {} : { retryAfter: wait }), code })
   }
   if (SLACK_BOT_ERRORS.includes(code)) return new BotTokenRejected({ provider: "slack", reason: code })
   if (SLACK_AUTH_ERRORS.includes(code) || status === 401) return new AuthRevoked({ provider: "slack", code })
@@ -501,8 +506,8 @@ effect function callSlackAuthed<A>(
 
 effect function exchangeOAuth(wired: Wired, body: Readonly<Record<string, unknown>>): SlackOAuthResponse!MessagingFailure {
   const response = try callSlack(wired, jsonPost("/api/oauth.v2.access", body), SlackOAuthResponse)
-  if (!response.authed_user.access_token.startsWith("xoxp-") || response.authed_user.token_type !== "user") {
-    throw new BotTokenRejected({ provider: "slack", reason: "Slack OAuth exchange must return an xoxp- user token" })
+  if (!isSlackUserToken(response.authed_user.access_token) || response.authed_user.token_type !== "user") {
+    throw new BotTokenRejected({ provider: "slack", reason: "Slack OAuth exchange must return an xoxp- or xoxe.xoxp- user token" })
   }
   return response
 }

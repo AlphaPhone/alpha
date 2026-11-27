@@ -25,10 +25,11 @@ module page {
     const measure = () => {
       const frame = root.getBoundingClientRect()
       if (frame.height <= 0) return
+      const scale = root.dataset.alphaDesktopPreview !== undefined && root.offsetHeight > 0 ? frame.height / root.offsetHeight : 1
       let headerPx = 0
       for (const header of headers) {
         const box = header.getBoundingClientRect()
-        if (box.height > 0) headerPx = Math.max(headerPx, Math.round(box.bottom - frame.top))
+        if (box.height > 0) headerPx = Math.max(headerPx, Math.round((box.bottom - frame.top) / scale))
       }
       if (headerPx !== headerBottom) {
         headerBottom = headerPx
@@ -37,9 +38,9 @@ module page {
       }
       const dockBox = dock?.getBoundingClientRect()
       if (dockBox && dockBox.height > 0 && dock?.dataset.alphaDragging !== "true") {
-        const total = Math.max(0, Math.round(frame.bottom - dockBox.top))
+        const total = Math.max(0, Math.round((frame.bottom - dockBox.top) / scale))
         if (detent === "bar" && total > 0) rest = total
-        const floor = Math.min(total, rest || Math.round(dockBox.height))
+        const floor = Math.min(total, rest || Math.round(dockBox.height / scale))
         if (floor > 0 && (total !== clearance || floor !== bar)) {
           clearance = total
           bar = floor
@@ -49,10 +50,12 @@ module page {
       }
       const pageBox = page?.getBoundingClientRect()
       const beside = pageBox && dockBox && (dockBox.left >= pageBox.right || dockBox.right <= pageBox.left)
-      const nextOverlap = dockBox && dockBox.height > 0 && pageBox && !beside ? Math.max(0, Math.round(pageBox.bottom - dockBox.top)) : 0
-      if (nextOverlap !== overlap) {
-        overlap = nextOverlap
-        root.style.setProperty("--alpha-dock-overlap", `${nextOverlap}px`)
+      if (dock?.dataset.alphaDragging !== "true") {
+        const nextOverlap = dockBox && dockBox.height > 0 && pageBox && !beside ? Math.max(0, Math.round((pageBox.bottom - dockBox.top) / scale)) : 0
+        if (nextOverlap !== overlap) {
+          overlap = nextOverlap
+          root.style.setProperty("--alpha-dock-overlap", `${nextOverlap}px`)
+        }
       }
     }
     const sizes = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure)
@@ -83,7 +86,7 @@ module page {
         sizes?.observe(page)
         changes?.observe(page, { childList: true, subtree: true })
       }
-      if (assistant) changes?.observe(assistant, { childList: true, attributes: true, attributeFilter: ["hidden"] })
+      if (assistant) changes?.observe(assistant, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] })
       for (const header of headers) sizes?.observe(header)
       if (dock) {
         sizes?.observe(dock)

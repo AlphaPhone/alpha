@@ -2,14 +2,14 @@
 import { Button, Card } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { Pause, Play, Undo2 } from "lucide-react";
-import { useSyncExternalStore } from "react";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
 import { useMachine as useStopwatch } from "../../gen/app__clock__stopwatch.react.ts";
 import { bestLapIndex, elapsedAt, lastLapTotal, worstLapIndex } from "../../gen/app__clock__stopwatch.ts";
 import { useTimed } from "../runtime/ui.tsx";
-import { untimed, type Time } from "../runtime/index.vibe";
-import { stopwatchNow } from "./ticker.vibe";
+import { untimed } from "../runtime/index.vibe";
+import type { Time } from "../runtime/index.vibe";
 import { formatStopwatch } from "./time.ts";
+import { useStopwatchNow } from "./useClockStore.ts";
 
 export interface StopwatchTabProps {
   /** Stopwatch machine and Alpha Time service. */
@@ -19,7 +19,7 @@ export interface StopwatchTabProps {
 /** Precision stopwatch with centisecond display, lap splits, and fastest/slowest highlights. */
 export function StopwatchTab({ runtime }: StopwatchTabProps) {
   const sw = useTimed(runtime, useStopwatch);
-  const tickNow = useSyncExternalStore(stopwatchNow.subscribe, stopwatchNow.snapshot);
+  const tickNow = useStopwatchNow(runtime);
   const state = sw.state;
   if (!state) return null;
 
@@ -39,11 +39,11 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
   return (
     <section aria-label="Stopwatch" className="flex flex-col gap-5">
       <Card className="items-center gap-2 py-8 rounded-tile border-0 bg-secondary">
-        <span aria-label="Stopwatch elapsed time" className="font-display text-display font-light tabular-nums text-foreground">
+        <span aria-label="Stopwatch elapsed time" className="font-mono text-4xl font-light tracking-tight tabular-nums text-foreground">
           {formatStopwatch(totalElapsed)}
         </span>
         {state.laps.length > 0 && (
-          <span className="text-sm tabular-nums text-muted-foreground">
+          <span className="font-mono text-sm tabular-nums text-muted-foreground">
             {`Lap ${state.laps.length + 1} · ${formatStopwatch(currentSplit)}`}
           </span>
         )}
@@ -52,7 +52,7 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
       <div className="grid grid-cols-2 gap-3">
         {state.status === "Paused" ? (
           <Button variant="secondary" disabled={!sw.can(resetEvent)} onClick={() => void sw.send(resetEvent)}>
-            <Undo2 aria-hidden className="size-4" />
+            <Undo2 aria-hidden className="size-4.5" />
             Reset
           </Button>
         ) : (
@@ -63,19 +63,19 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
 
         {state.status === "Reset" && (
           <Button disabled={!sw.can(startEvent)} onClick={() => void sw.send(startEvent)}>
-            <Play aria-hidden className="size-4" />
+            <Play aria-hidden className="size-4.5" />
             Start
           </Button>
         )}
         {state.status === "Running" && (
           <Button variant="destructive" disabled={!sw.can(pauseEvent)} onClick={() => void sw.send(pauseEvent)}>
-            <Pause aria-hidden className="size-4" />
+            <Pause aria-hidden className="size-4.5" />
             Pause
           </Button>
         )}
         {state.status === "Paused" && (
           <Button disabled={!sw.can(resumeEvent)} onClick={() => void sw.send(resumeEvent)}>
-            <Play aria-hidden className="size-4" />
+            <Play aria-hidden className="size-4.5" />
             Resume
           </Button>
         )}
@@ -99,8 +99,8 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
                   <span className={toneClass}>
                     {`Lap ${entry.number}${isBest ? " · Fastest" : isWorst ? " · Slowest" : ""}`}
                   </span>
-                  <span className={`text-right tabular-nums ${toneClass}`}>{formatStopwatch(entry.splitMs)}</span>
-                  <span className="text-right tabular-nums text-muted-foreground">{formatStopwatch(entry.totalMs)}</span>
+                  <span className={`text-right font-mono tabular-nums ${toneClass}`}>{formatStopwatch(entry.splitMs)}</span>
+                  <span className="text-right font-mono tabular-nums text-muted-foreground">{formatStopwatch(entry.totalMs)}</span>
                 </li>
               );
             })}

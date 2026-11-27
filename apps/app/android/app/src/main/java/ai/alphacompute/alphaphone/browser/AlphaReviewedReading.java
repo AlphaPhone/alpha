@@ -31,6 +31,8 @@ public final class AlphaReviewedReading {
  private final android.app.Activity activity;
  private final Consumer<String> cancelSpeech;
  private final boolean allowLoopback;
+ private final android.os.Handler timeoutHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+ private Runnable pendingTimeout;
  private AlertDialog dialog;
  private PluginCall pending;
  private BooleanSupplier current;
@@ -90,7 +92,12 @@ public final class AlphaReviewedReading {
    if(expected!=generation)return;PluginCall rejected=pending;pending=null;cancel();if(rejected!=null)rejected.reject(ISOLATED_MESSAGE,BrowserPageReading.ISOLATED_WORLD_UNAVAILABLE);
   });
  }
- private void scheduleTimeout(long expected,long delay){new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(()->{if(expected==generation)cancel();},delay);}
+ private void scheduleTimeout(long expected,long delay){
+  if(pendingTimeout!=null){timeoutHandler.removeCallbacks(pendingTimeout);pendingTimeout=null;}
+  Runnable timeout=()->{pendingTimeout=null;if(expected==generation)cancel();};
+  pendingTimeout=timeout;
+  timeoutHandler.postDelayed(timeout,delay);
+ }
  private boolean valid(){return current!=null&&current.getAsBoolean()&&System.currentTimeMillis()<expires;}
  /** Releases the approved text once to the bound speech request; later calls fail. */
  public String consume(PluginCall call)throws Exception{
@@ -102,5 +109,12 @@ public final class AlphaReviewedReading {
  public void check(){if(current!=null&&!valid())cancel();}
  /** Cancels only a reading of the given tab: another tab's load, close or crash leaves it alone. */
  public void cancelFor(String tab){if(Objects.equals(tabId,tab))cancel();}
- public void cancel(){generation++;tabId=null;PluginCall rejected=pending;pending=null;AlertDialog old=dialog;dialog=null;String active=requestId;requestId=null;current=null;binding=null;token=null;text=null;approved=false;if(old!=null)old.dismiss();if(rejected!=null)rejected.reject("Reading cancelled or page unavailable");if(active!=null)cancelSpeech.accept(active);}
+ public void cancel(){
+  generation++;
+  if(pendingTimeout!=null){timeoutHandler.removeCallbacks(pendingTimeout);pendingTimeout=null;}
+  tabId=null;PluginCall rejected=pending;pending=null;AlertDialog old=dialog;dialog=null;String active=requestId;requestId=null;current=null;binding=null;token=null;text=null;approved=false;
+  if(old!=null)old.dismiss();
+  if(rejected!=null)rejected.reject("Reading cancelled or page unavailable");
+  if(active!=null)cancelSpeech.accept(active);
+ }
 }

@@ -1,4 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Device } from "../platform/index.vibe"
@@ -23,8 +24,37 @@ export effect function taking(place: string, took: () => Promise<boolean>): void
   try (try Backs).register(place, Effect.orElseSucceed(tryPromise(took), () => false))
 }
 
+module previous {
+  /** Older shell state with the navigation fields initialized, still untrusted. @throws {never} */
+  export function withTextAsk(raw: string, needsDrawer: boolean, needsRoute: boolean, needsSpokenRoute: boolean): unknown {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+        ? { ...parsed, ...(needsDrawer ? { drawer: false } : {}), ...(needsRoute ? { route: 0 } : {}), ...(needsSpokenRoute ? { spokenRoute: 0 } : {}), textAsk: { tag: "NoTextAsk" }, textAskThrough: 0 }
+        : undefined
+    } catch {
+      return undefined
+    }
+  }
+}
+import { withTextAsk } from previous
+
 // spec/app/shell/index.md, "When Alpha opens again the trail is kept, and Ask Alpha is closed"
-const kept = reacting(Shell, { keep: 1, open: [{ type: "reopen" }] })
+function stored(key: string, start?: Shell.Shell) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const current = store.get(key) catch () => undefined
+    if (current !== undefined) return Shell.stored(key, start)
+    const withSpokenRoute = store.get("alpha/app/shell/index@4") catch () => undefined
+    const withRoute = withSpokenRoute ?? (store.get("alpha/app/shell/index@3") catch () => undefined)
+    const withDrawer = withRoute ?? (store.get("alpha/app/shell/index@2") catch () => undefined)
+    const raw = withDrawer ?? (store.get("alpha/app/shell/index@1") catch () => undefined)
+    const recovered = raw === undefined ? undefined : (Shell.decodeState(withTextAsk(raw, withDrawer === undefined, withRoute === undefined, withSpokenRoute === undefined)) catch () => undefined)
+    return Shell.stored(key, recovered ?? start)
+  })
+}
+
+const kept = reacting({ ...Shell, stored }, { keep: 5, open: [{ type: "reopen" }] })
 
 // spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
 const layered = reacting(Layers, {})
@@ -35,31 +65,44 @@ const layered = reacting(Layers, {})
  * nothing while the phone is held; then the screen showing may take a step of its own, Home's Add to Home and
  * editing included, under Ask Alpha at rest; then Ask Alpha by a step and the app on top.
  */
-export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
+export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs | Device) {
   const shell = try Shell.Machine
   const layers = try Layers.Machine
   const screens = try Backs
   const over = try layers.get()
   const taker = Layers.backTaker(over)
   if (taker === "ByLayer") {
-    if (!(try screens.take(`layer:${Layers.top(over).id}`))) try contained(layers.send({ type: "back" }), "back")
+    const id = Layers.top(over).id
+    if (!(try screens.take(`layer:${id}`))) {
+      try contained(layers.send({ type: "back" }, (current) => Layers.top(current).id === id), "back")
+    }
     return
   }
-  if (taker === "ByHold") return
+  if (taker === "ByHold" || (try screens.take("startup/sign-in"))) return
+  if (try screens.take("ui-layer")) return
   const state = try shell.get()
   const view = state.trail.at(-1)
   if (try screens.take("assistant")) return
+  if (state.textAsk.tag === "TextAskVisit") {
+    const device = try Device
+    const ticket = state.textAsk.ticket
+    if (!(try device.showing()) || !Shell.canCloseTextAsk(state, ticket) || !(try contained(shell.send({ type: "closeTextAsk", ticket }), "close text Ask Alpha"))) return
+    const closed = try device.closeTextAsk(ticket)
+    try contained(shell.send({ type: "textAskClosed", ticket, closed }), "return from text Ask Alpha")
+    return
+  }
   if (state.assistant === "Bar" && (try screens.take(view === undefined ? "home" : `view:${view}`))) return
   try contained(shell.send({ type: "goBack" }), "back")
 }
 
 // spec/app/shell/index.md, "Home leaves every app and closes every layer at once"; spec/app/shell/layers.md, "Home closes every layer, unless the phone is held"
 /** Home, from the phone: nothing while the phone is held; otherwise every layer closes and the shell goes Home. */
-export effect function home(): void!!(Shell.Machine | Layers.Machine) {
+export effect function home(): void!!(Shell.Machine | Layers.Machine | Backs) {
   const layers = try Layers.Machine
   const over = try layers.get()
   if (Layers.homeTaker(over) === "ByHold") return
   if (Layers.canHome(over)) try contained(layers.send({ type: "home" }), "home")
+  try (try Backs).take("home/finished")
   try contained((try Shell.Machine).send({ type: "goHome" }), "home")
 }
 
@@ -79,6 +122,18 @@ const told = Layer.effectDiscard(effect {
     Effect.provideService(Effect.provideService(Effect.provideService(Effect.provideService(work, Shell.Machine, shell), Layers.Machine, layers), Backs, pressed), Device, device)
   try provided(admitted())
   try fork.scoped Stream.runForEach(Stream.filter(device.visible, (shown) => shown), () => provided(admitted()))
+  const uncovered = Stream.filter(Stream.changes(Stream.map(layers.changes, (state) => !Layers.assistantInert(state))), (open) => open)
+  const ready = Stream.filter(Stream.changes(Stream.map(shell.changes, (state) => state.image && state.textAsk.tag === "NoTextAsk")), (ready) => ready)
+  const fromAndroid = Stream.merge(device.textAskVisits, Stream.merge(uncovered, ready))
+  try fork.scoped Stream.runForEach(fromAndroid, () => provided(effect {
+    const before = try shell.get()
+    if (!before.image || before.textAsk.tag !== "NoTextAsk" || !(try device.showing()) || Layers.assistantInert(try layers.get())) return
+    const ticket = try device.textAsk()
+    const state = try shell.get()
+    if (Shell.canOpenTextAsk(state, ticket) && (try device.showing()) && !Layers.assistantInert(try layers.get())) {
+      try contained(shell.send({ type: "openTextAsk", ticket }), "open text Ask Alpha")
+    }
+  }))
   try fork.scoped Stream.runForEach(device.buttons, (button) => contained(provided(button === "back" ? back() : home()), `the ${button} button`))
 })
 
@@ -88,5 +143,44 @@ export function stepping<IA, A>(place: string, source: Context.Key<IA, { readonl
   return following(source, fact, Layers.Machine, (has) => ({ type: has ? "offerStep" : "withdrawStep", place } as const))
 }
 
+module page {
+  /** Publish whether the shell or its layers can take Back for the native Android bridge. @throws {never} */
+  export function markCanGoBack(value: string | undefined): void {
+    if (typeof document === "undefined") return
+    const root = document.documentElement
+    if (value === undefined) delete root.dataset.alphaCanGoBack
+    else if (root.dataset.alphaCanGoBack !== value) root.dataset.alphaCanGoBack = value
+  }
+}
+import { markCanGoBack } from page
+
+/** Open a layer in the shell's layer stack if not already listed. */
+export effect function openLayer(id: string, kind: Layers.Kind, covers: boolean): void!!Layers.Machine {
+  const layers = try Layers.Machine
+  const state = try layers.get()
+  if (Layers.listed(state, id)) return
+  try contained(layers.send({ type: "openLayer", id, kind, covers }), `opening ${id}`)
+}
+
+/** Close a layer in the shell's layer stack if currently listed. */
+export effect function closeLayer(id: string): void!!Layers.Machine {
+  const layers = try Layers.Machine
+  const state = try layers.get()
+  if (!Layers.listed(state, id)) return
+  try contained(layers.send({ type: "closeLayer", id }), `closing ${id}`)
+}
+
+/** Keep `data-alpha-can-go-back` synchronized with `Shell` and `Layers` without render-time DOM writes. */
+const backFlag = Layer.effectDiscard(effect {
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  try Effect.addFinalizer(() => sync(() => markCanGoBack(undefined)))
+  const flags = Stream.changes(Stream.map(
+    Stream.zipLatest(shell.changes, layers.changes),
+    ([state, over]) => String(Shell.enabled(state, { type: "goBack" }) || state.textAsk.tag === "TextAskVisit" || Layers.takesBack(over)),
+  ))
+  try fork.scoped Stream.runForEach(flags, (flag) => sync(() => markCanGoBack(flag)))
+})
+
 /** The shell, kept across restarts, with the layers over it, told what the phone admits and which buttons it hands over. */
-export const shell = Layer.provideMerge(told, Layer.mergeAll(kept, layered, backs))
+export const shell = Layer.provideMerge(Layer.mergeAll(told, backFlag), Layer.mergeAll(kept, layered, backs))

@@ -51,7 +51,7 @@ pure val wantedValues = Set({ ...everything, kind: F::Image, anyKind: false })
 pure val whereValues = Set({ trail: List(1), inCategory: false, category: F::Other }).union(Set({ trail: List(), inCategory: true, category: F::Image }))
 pure val entriesValues =
   Set(List())
-    .union(Set(List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Pdf, volume: 1, bytes: 0 })))
+    .union(Set(List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0, children: 0 }, { id: 3, name: "c", revision: 1, kind: F::Pdf, volume: 1, bytes: 0, children: 0 })))
 ```
 
 ### A filter is looking, found nothing, found files, found nothing in what the phone could search, or could not finish

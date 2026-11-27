@@ -34,11 +34,11 @@ import draft as D from "../../kit/draft"
 import attempt as A from "../../kit/attempt"
 import read as R from "../../kit/read"
 
-type Form = NoForm | NewEvent | EditEvent
+type Form = NoForm | NewEvent | EditEvent | EditReminder
 type Scope = Unchosen | ThisOne | ThisAndFollowing | WholeSeries
 type Banner = NoBanner | Available | Conflict | Failed
-type Write = Create | Update | Remove | Reply
-type Confirm = NoConfirm | ConfirmDiscard | ConfirmReplace
+type Write = Create | CreateReminder | Update | UpdateReminder | RescheduleReminder | Remove | Reply
+type Confirm = NoConfirm | ConfirmDiscard | ConfirmReplace | ConfirmReschedule
 
 type Editor = {
   owner: int, form: Form, shown: bool, target: int, day: int, revision: int, titled: bool,
@@ -109,6 +109,22 @@ pure def editEvent(s: Editor, id: int, revision: int, day: int, repeats: bool): 
     banner: NoBanner, separate: false }
 ```
 
+### Editing a dated reminder opens its own Calendar form at the selected reminder revision
+
+The reminder keeps its resident identity and fields that Calendar does not
+edit. There is no provider Calendar event to create, edit or resend. The
+carrier opens this form only for the reminder in front of the owner, then
+compares the same record and revision before making any write.
+
+```quint
+pure def canEditReminder(s: Editor, id: int, revision: int): bool =
+  canEditEvent(s, id, revision) and revision > 0
+
+pure def editReminder(s: Editor, id: int, revision: int, day: int): Editor =
+  { ...editEvent(s, id, revision, day, false), form: EditReminder, kept: true,
+    draft: { ...D::edit(D::blank), base: revision } }
+```
+
 ### A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept
 
 What the note or the scan said is the form's first edit: nothing is saved
@@ -131,7 +147,8 @@ two drafts.
 
 ```quint
 pure def typable(s: Editor): bool =
-  s.shown and s.draft.sync != D::Saving and not(D::canChoose(s.draft)) and (s.banner == NoBanner or s.banner == Failed)
+  s.shown and s.draft.sync != D::Saving and not(D::canChoose(s.draft))
+    and (s.banner == NoBanner or s.banner == Failed) and s.confirming == NoConfirm
 
 pure def typed(d: D::Draft, edited: Editor): Editor = { ...edited, draft: D::edit(d), kept: edited.banner != Failed }
 
@@ -186,12 +203,46 @@ pure def sent(kind: Write, id: int, s: Editor): Composed =
   { state: { ...s, write: w, kind: kind, writing: id, filed: false }, out: List(Send({ attempt: w.id, kind: kind, id: id, scope: s.scope, base: s.draft.base })) }
 
 pure def canSave(s: Editor): bool =
-  s.shown and D::canSave(s.draft) and s.titled and s.banner == NoBanner and not(inFlight(s)) and not(s.extras)
+  (s.form == NewEvent or s.form == EditEvent) and s.shown and D::canSave(s.draft)
+    and s.titled and s.banner == NoBanner and s.confirming == NoConfirm and not(inFlight(s)) and not(s.extras)
     and (if (s.form == NewEvent) s.receipts.status == R::Loaded and (not(s.unknownCreate) or s.separate)
          else not(s.latched.contains(s.target)) and (not(s.repeats) or s.scope != Unchosen))
 
 pure def save(s: Editor): Composed =
   sent(if (s.form == NewEvent) Create else Update, s.target, { ...s, draft: D::save(s.draft) })
+```
+
+### The Calendar's Reminders destination saves a dated reminder through its own on-device store
+
+The form carries its own title, note, date and time, and the reminder's repeat
+and lead time. Resolving a Calendar event's provider receipt cannot save or
+discard this reminder. A repeated attempt to save the same retained reminder
+form looks for its own creation identity before it can add anything.
+
+```quint
+pure def canSaveReminder(s: Editor): bool =
+  (s.form == NewEvent or s.form == EditReminder) and s.shown and D::canSave(s.draft) and s.titled
+    and s.banner == NoBanner and s.confirming == NoConfirm and not(inFlight(s))
+
+pure def saveReminder(s: Editor): Composed =
+  sent(if (s.form == EditReminder) UpdateReminder else CreateReminder, s.target, { ...s, draft: D::save(s.draft) })
+```
+
+### Moving a completed reminder keeps its edited draft on screen until the owner approves rescheduling
+
+Cancel leaves the draft and the completed reminder as they were. Approval
+saves the edited fields and reopens the same reminder in one write.
+
+```quint
+pure def canAskReschedule(s: Editor): bool = s.form == EditReminder and canSaveReminder(s)
+
+pure def askReschedule(s: Editor): Editor = { ...s, confirming: ConfirmReschedule }
+
+pure def canReschedule(s: Editor): bool =
+  s.confirming == ConfirmReschedule and s.form == EditReminder and canSaveReminder({ ...s, confirming: NoConfirm })
+
+pure def reschedule(s: Editor): Composed =
+  sent(RescheduleReminder, s.target, { ...s, draft: D::save(s.draft), confirming: NoConfirm })
 ```
 
 ### A write in flight for the form is the shown form's own save: a create for a new event, a change for an existing one
@@ -202,10 +253,11 @@ was in doubt, with neither holding the other.
 
 ```quint
 pure def alwaysASaveInFlightIsTheShownForm(s: Editor): bool =
-  ((inFlight(s) and (s.kind == Create or s.kind == Update))
+  ((inFlight(s) and (s.kind == Create or s.kind == CreateReminder or s.kind == Update or s.kind == UpdateReminder or s.kind == RescheduleReminder))
     implies (s.shown and s.draft.sync == D::Saving and s.writing == s.target and s.banner == NoBanner))
-    and ((inFlight(s) and s.kind == Create) implies s.form == NewEvent)
+    and ((inFlight(s) and (s.kind == Create or s.kind == CreateReminder)) implies s.form == NewEvent)
     and ((inFlight(s) and s.kind == Update) implies s.form == EditEvent)
+    and ((inFlight(s) and (s.kind == UpdateReminder or s.kind == RescheduleReminder)) implies s.form == EditReminder)
     and ((inFlight(s) and (s.kind == Remove or s.kind == Reply)) implies s.draft.sync != D::Saving)
 ```
 
@@ -241,7 +293,10 @@ pure def canWritten(s: Editor, attempt: int, filed: bool): bool = A::canConclude
 pure def written(s: Editor, attempt: int, confirmed: bool, known: bool, filed: bool): Editor =
   val w = A::conclude(s.write, confirmed, known)
   val told = { ...s, write: w, filed: filed and w.outcome == A::Confirmed }
-  if (told.filed) (if (s.kind == Create or s.kind == Update) withoutForm(w, told) else told)
+  if (s.kind == CreateReminder or s.kind == UpdateReminder or s.kind == RescheduleReminder) (
+    if (w.outcome == A::Confirmed) withoutForm(w, told)
+    else { ...told, draft: D::keepMine(s.draft) })
+  else if (told.filed) (if (s.kind == Create or s.kind == Update) withoutForm(w, told) else told)
   else if (w.outcome == A::Confirmed)
     (if (s.kind == Create or s.kind == Update) withoutForm(w, told) else if (s.kind == Reply) { ...told, latched: s.latched.union(Set(s.writing)) } else told)
   else if (w.outcome == A::Refused)
@@ -272,6 +327,13 @@ pure def sometimesSavedAfterEdits(s: Editor): bool = s.write.outcome == A::Confi
 
 > As the owner, I want an event with people, a video call or alerts handed
 > to Android Calendar to finish, rather than saved without them.
+
+As in Sunday's v119, a new event shows its video link, how it repeats and
+its alert whenever this phone's calendar is there to take it, whichever
+calendar is chosen. The form never moves an event to another calendar on
+its own: while the agent's calendar is chosen, these rows offer only what
+that calendar holds (once, no alert, no video link), so Save stays in
+reach. Choosing the agent's calendar sets them back to that.
 
 ### People, a video call or alerts make the form one for Android Calendar
 
@@ -417,7 +479,8 @@ reads its day again. Only that event is held: another event can still be
 changed, deleted or answered.
 
 ```quint
-pure def alwaysNothingIsSentOverAChangeInDoubt(s: Editor): bool = (inFlight(s) and s.kind != Create) implies not(s.latched.contains(s.writing))
+pure def alwaysNothingIsSentOverAChangeInDoubt(s: Editor): bool =
+  (inFlight(s) and s.kind != Create and s.kind != CreateReminder and s.kind != UpdateReminder and s.kind != RescheduleReminder) implies not(s.latched.contains(s.writing))
 
 pure def sometimesAnotherEventChangedBesideOneInDoubt(s: Editor): bool =
   inFlight(s) and s.kind != Create and s.latched.size() > 0
@@ -493,7 +556,8 @@ pure def sometimesTheOwnerChooses(s: Editor): bool = D::canChoose(s.draft) and s
 ### Closing a form with edits kept on the phone sets it aside, offered back by a banner; otherwise the form is gone
 
 ```quint
-pure def canClose(s: Editor): bool = s.shown and s.draft.sync != D::Saving and s.banner != Conflict
+pure def canClose(s: Editor): bool =
+  s.shown and s.draft.sync != D::Saving and s.banner != Conflict and s.confirming == NoConfirm
 
 pure def close(s: Editor): Editor =
   if (D::unsaved(s.draft) and s.kept) { ...s, shown: false, banner: Available } else withoutForm(s.write, s)
@@ -509,7 +573,7 @@ pure def restart(s: Editor): Editor =
     ...s, write: w, separate: false, confirming: NoConfirm,
     receipts: if (s.receipts.status == R::Loading) R::answer(s.receipts, false) else s.receipts,
     unknownCreate: s.unknownCreate or (flying and s.kind == Create),
-    latched: if (flying and s.kind != Create) s.latched.union(Set(s.writing)) else s.latched,
+    latched: if (flying and s.kind != Create and s.kind != CreateReminder and s.kind != UpdateReminder and s.kind != RescheduleReminder) s.latched.union(Set(s.writing)) else s.latched,
   }
   val draft = if (s.draft.sync == D::Saving) D::keepMine(s.draft) else s.draft
   if (s.form != NoForm and s.kept and D::unsaved(draft)) { ...doubted, draft: draft, shown: false, banner: Available }
@@ -526,7 +590,11 @@ pure def restore(s: Editor, revision: int): Editor =
   if (s.form == EditEvent and revision != s.revision) { ...shown, revision: revision, draft: D::collide(s.draft, revision) }
   else shown
 
-pure def canDiscard(s: Editor): bool = s.banner == Available and s.confirming == ConfirmDiscard
+pure def discardable(s: Editor): bool =
+  s.banner == Available or (s.shown and s.form == NewEvent and s.banner == NoBanner
+    and s.kept and D::unsaved(s.draft) and s.draft.sync != D::Saving and not(inFlight(s)))
+
+pure def canDiscard(s: Editor): bool = discardable(s) and s.confirming == ConfirmDiscard
 
 pure def discard(s: Editor): Editor = withoutForm(s.write, s)
 ```
@@ -540,7 +608,7 @@ crash.
 ```quint
 pure def canKeepFailed(s: Editor): bool = s.shown and s.banner == NoBanner and s.draft.sync != D::Saving
 
-pure def keepFailed(s: Editor): Editor = { ...s, banner: Failed, kept: false }
+pure def keepFailed(s: Editor): Editor = { ...s, banner: Failed, kept: false, confirming: NoConfirm }
 
 pure def canRetryKeeping(s: Editor): bool = s.banner == Failed
 
@@ -556,7 +624,7 @@ pure def draftKept(s: Editor): Editor = { ...s, banner: NoBanner, kept: true }
 ```quint
 pure def canReplacedElsewhere(s: Editor): bool = s.shown and s.kept and s.banner == NoBanner and s.draft.sync != D::Saving
 
-pure def replacedElsewhere(s: Editor): Editor = { ...s, banner: Conflict }
+pure def replacedElsewhere(s: Editor): Editor = { ...s, banner: Conflict, confirming: NoConfirm }
 
 pure def canKeepMyDraft(s: Editor): bool = s.banner == Conflict
 
@@ -570,7 +638,7 @@ pure def takeOtherDraft(s: Editor): Editor = { ...s, banner: NoBanner, confirmin
 ### Discarding a draft and replacing it with the other copy each wait for the owner to confirm, and can be called off
 
 ```quint
-pure def canAskDiscard(s: Editor): bool = s.banner == Available and s.confirming == NoConfirm
+pure def canAskDiscard(s: Editor): bool = discardable(s) and s.confirming == NoConfirm
 
 pure def askDiscard(s: Editor): Editor = { ...s, confirming: ConfirmDiscard }
 
@@ -583,7 +651,8 @@ pure def canCallOff(s: Editor): bool = s.confirming != NoConfirm
 pure def callOff(s: Editor): Editor = { ...s, confirming: NoConfirm }
 
 pure def alwaysAConfirmationBelongsToItsBanner(s: Editor): bool =
-  (s.confirming == ConfirmDiscard implies s.banner == Available) and (s.confirming == ConfirmReplace implies s.banner == Conflict)
+  (s.confirming == ConfirmDiscard implies discardable(s)) and (s.confirming == ConfirmReplace implies s.banner == Conflict)
+    and (s.confirming == ConfirmReschedule implies s.form == EditReminder and s.shown and s.banner == NoBanner)
 
 pure def sometimesAskedToConfirm(s: Editor): bool = s.confirming == ConfirmReplace and D::unsaved(s.draft)
 ```

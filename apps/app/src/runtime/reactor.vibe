@@ -5,21 +5,46 @@ import { Time } from "./time.vibe"
 import { setAside } from "../../gen/app__platform.effect.vibe"
 
 module pure {
+  const undefinedWritten = "__alpha_undefined__"
+  const unserializableWritten = "__alpha_unserializable__"
+  const correlationKeys = ["ticket", "id", "session", "hold"] as const
+  /** What a screen and a shell write for an event's `now` or `at`: the reactor replaces it with Alpha's time. */
+  export const untimed = 0
   /** `value` as text, to tell whether two facts are the same. @throws {never} */
   export function written(value: unknown): string {
-    try { return JSON.stringify(value) ?? "" } catch { return "" }
+    if (value === undefined) return undefinedWritten
+    try { return JSON.stringify(value) ?? undefinedWritten } catch { return unserializableWritten }
   }
-  /** The names an event's time has in a spec: the time of the event, and the time an asking it makes starts at. */
-  const times = ["now", "at"] as const
-  /** `event` with each of its times set to `now`: a spec reads the time only from an event. @throws {never} */
+  /**
+   * `event` with Alpha's `now` stamped in: `now` is always stamped when present, and `at` is stamped only when it
+   * holds `untimed` (`0`), preserving explicit non-zero domain timestamps or indices. @throws {never}
+   */
   export function stamped<A>(event: A, now: number): A {
     if (typeof event !== "object" || event === null) return event
-    const found = times.filter((name) => name in event)
-    return found.length === 0 ? event : { ...event, ...Object.fromEntries(found.map((name) => [name, now])) }
+    const record = event as Record<string, unknown>
+    const stampNow = "now" in record
+    const stampAt = "at" in record && record.at === untimed
+    if (!stampNow && !stampAt) return event
+    return {
+      ...event,
+      ...(stampNow ? { now } : {}),
+      ...(stampAt ? { at: now } : {}),
+    }
+  }
+  /** Whether a stored-layer failure is `NotAState` rather than a transient store read error. @throws {never} */
+  export function isNotAState(cause: unknown): boolean {
+    return typeof cause === "object" && cause !== null && "_tag" in cause && (cause as { readonly _tag?: unknown })._tag === "NotAState"
+  }
+  /** Whether `event` carried a correlation token while `lost` carries none, so a stale refusal must not send `lost`. @throws {never} */
+  export function isUnticketedLost(event: unknown, lost: unknown): boolean {
+    if (typeof event !== "object" || event === null || typeof lost !== "object" || lost === null) return false
+    const ev = event as Record<string, unknown>
+    const lo = lost as Record<string, unknown>
+    return correlationKeys.some((key) => key in ev) && !correlationKeys.some((key) => key in lo)
   }
 }
-import { stamped, written } from pure
-export { stamped }
+import { isNotAState, isUnticketedLost, stamped, untimed, written } from pure
+export { stamped, untimed }
 
 /** What a transition that returns effects gives: the state it led to and what it asks of the world. */
 export interface Moved<S, Fx> {
@@ -52,7 +77,7 @@ export interface Spec<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<
  * interrupts it, and then nothing more is sent.
  */
 export data Job<Ev, R, By> {
-  Run { key: string; answers: Stream.Stream<Ev, never, R>; lost: Option.Option<Ev>; by: By }
+  Run { key: string; answers: Stream.Stream<Ev, never, R>; lost: Option.Option<Ev>; by: By; allowEmpty: boolean }
   Stop { key: string }
 }
 
@@ -64,9 +89,6 @@ export interface Due<Ev, By> {
   readonly by: By
 }
 
-/** What a screen and a shell write for an event's `now` or `at`: the reactor replaces it with Alpha's time. */
-export const untimed = 0
-
 /** The one answer of `answered`, an effect that has already turned each failure into an event; `lost` where it never answers. */
 export function answer<Ev, R, By extends ReadonlyArray<unknown>>(key: string, answered: Ev!!R, lost: Ev, ...by: By): Job<Ev, Exclude<R, Attempts>, By> {
   return stream(key, Stream.fromEffect(answered), lost, ...by)
@@ -74,12 +96,12 @@ export function answer<Ev, R, By extends ReadonlyArray<unknown>>(key: string, an
 
 /** Every answer of `answers`, a stream that has already turned its failure into a last event; `lost` where it is cut short. */
 export function stream<Ev, R, By extends ReadonlyArray<unknown>>(key: string, answers: Stream.Stream<Ev, never, R>, lost: Ev, ...by: By): Job<Ev, Exclude<R, Attempts>, By> {
-  return Job.Run({ key, answers: answers as Stream.Stream<Ev, never, Exclude<R, Attempts>>, lost: Option.some(lost), by })
+  return Job.Run({ key, answers: answers as Stream.Stream<Ev, never, Exclude<R, Attempts>>, lost: Option.some(lost), by, allowEmpty: false })
 }
 
 /** `work`, which has nothing to tell the machine. */
 export function run<Ev, R, By extends ReadonlyArray<unknown>>(key: string, work: unknown!!R, ...by: By): Job<Ev, R, By> {
-  return Job.Run({ key, answers: Stream.fromEffectDrain(work), lost: Option.none(), by })
+  return Job.Run({ key, answers: Stream.fromEffectDrain(work), lost: Option.none(), by, allowEmpty: true })
 }
 
 /** Interrupt what runs under `key`. */
@@ -89,7 +111,7 @@ export function stop<Ev, By extends ReadonlyArray<unknown>>(key: string): Job<Ev
 
 /** `event` once the time is `at`, for a spec that asks for its own wakes in `out`; a deadline the state holds is a `due` in `timers`. */
 export function wake<Ev, By extends ReadonlyArray<unknown>>(key: string, at: number, event: Ev, ...by: By): Job<Ev, Time, By> {
-  return Job.Run({ key, answers: Stream.fromEffect(effect { try (try Time).until(at); return event }), lost: Option.none(), by })
+  return Job.Run({ key, answers: Stream.fromEffect(effect { try (try Time).until(at); return event }), lost: Option.none(), by, allowEmpty: true })
 }
 
 /** A deadline of `timers`: `event` once the time is `at`. */
@@ -115,7 +137,7 @@ export function tell<IB, Ev2, Refused2, By2 extends ReadonlyArray<unknown>, Ev, 
       return answers.taken === undefined ? Stream.empty : Stream.succeed(answers.taken)
     } catch () => Stream.succeed(answers.refused)
   }
-  return Job.Run({ key, answers: Stream.unwrap(told), lost: Option.some(answers.refused), by })
+  return Job.Run({ key, answers: Stream.unwrap(told), lost: Option.some(answers.refused), by, allowEmpty: answers.taken === undefined })
 }
 
 /**
@@ -157,46 +179,81 @@ export effect function contained<R = never>(work: unknown!unknown!R, what: strin
 }
 
 /** Where a machine's state is kept: under the spec's own path, so no two machines share a key, and a version the area raises when the state's shape changes. */
-function storeKey(machine: string, version: number): string {
+export function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
+}
+
+/**
+ * The store, reading what is kept under `key` through `migrate`: a state kept in an older shape is brought to the
+ * current one before its machine decodes it.
+ */
+export function migratedStore(key: string, migrate: (raw: string | undefined) => (string | undefined)!!) {
+  return Layer.effect(KeyValueStore.KeyValueStore, effect {
+    const store = try KeyValueStore.KeyValueStore
+    return KeyValueStore.make({ ...store, get: (name: string) => name === key ? Effect.flatMap(store.get(name), migrate) : store.get(name) })
+  })
+}
+
+/** Where the epoch of a durable machine's attempts is kept, beside its state under `key`. */
+const epochKey = (key: string): string => `${key}.epoch`
+
+/**
+ * Look up a durable attempt under the same scope the reactor gave its sender: the machine's store key and the epoch
+ * kept beside it, or this launch where none could be kept.
+ */
+export effect function keptAttempts(machine: { readonly key: string }, version: number): Attempts.Shape!!(Install | KeyValueStore.KeyValueStore) {
+  const install = try Install
+  const store = try KeyValueStore.KeyValueStore
+  const scope = storeKey(machine.key, version)
+  const epoch = store.get(epochKey(scope)) catch () => undefined
+  return attemptsOf(install, `${scope}@${epoch ?? install.launch}`)
 }
 
 /** The places a value kept under `key` that is no longer a state may be copied to, in order. */
 const asides = (key: string): ReadonlyArray<string> => [`${key}.unreadable`, ...Array.from({ length: 8 }, (_, index) => `${key}.unreadable.${index + 2}`)]
 
+/** Whether this machine is actually backed by durable storage at runtime (false when falling back to memory). */
+service Durability {
+  readonly durable: boolean
+}
+
 /**
  * The machine kept under `key`. What is stored there and is not a state, after a change of its shape or of an
  * `always` rule, is copied to the first of its `asides` that holds nothing and the machine starts afresh: one area's
  * state never keeps Alpha from opening, and no copy is written over. Where every place is taken, or the store cannot
- * be read at all, the value stays and the machine runs in memory.
+ * be read at all, the value stays and the machine runs in memory without reusing the persisted attempt epoch.
  */
 function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Layer.Layer<I, SE, SR>, memory: Layer.Layer<I>) {
+  const asMemory = Layer.merge(memory, Layer.succeed(Durability, { durable: false }))
+  const asStored = (layer: Layer.Layer<I, SE, SR>) => Layer.merge(layer, Layer.succeed(Durability, { durable: true }))
   const aside = Layer.unwrap(effect {
     const store = try KeyValueStore.KeyValueStore
     const found = store.get(key) catch () => undefined
-    if (found === undefined) return memory
+    if (found === undefined) return asMemory
     let place: string | undefined
     for (const one of asides(key)) {
       const held = (store.get(one) catch () => "") !== undefined
-      if (place === undefined && setAside("KeptUnreadable", held)) place = one
+      if (setAside("KeptUnreadable", held)) {
+        place = one
+        break
+      }
     }
-    if (place === undefined) return memory
+    if (place === undefined) return asMemory
     const at = place
     try logError(`what is kept under ${key} is not a state: set aside under ${at}`)
     const copied = effect { try store.set(at, found); return true } catch () => false
-    if (!copied) return memory
-    try ignore(store.remove(key))
-    try ignore(store.remove(`${key}.epoch`))
-    return Layer.catch(Layer.fresh(stored(key)), () => memory)
+    if (!copied) return asMemory
+    const removed = effect { try store.remove(key); return true } catch () => false
+    if (!removed) return asMemory
+    try ignore(store.remove(epochKey(key)))
+    return Layer.catch(asStored(Layer.fresh(stored(key))), () => asMemory)
   })
-  return Layer.catch(stored(key), () => aside)
+  return Layer.catch(asStored(stored(key)), (cause) => (isNotAState(cause) ? aside : asMemory))
 }
 
 interface Parts<S, Ev, M, Fx, R, By extends ReadonlyArray<unknown>> {
   /** What names this machine: its key in the store, or, in memory, its spec. */
   readonly scope: string
-  /** Whether the state is kept: the attempts of a machine in memory start again at each launch, so their keys name the launch too. */
-  readonly durable: boolean
   readonly stateOf: (moved: M) => S
   readonly outOf: (moved: M) => ReadonlyArray<Fx>
   readonly carry: (fx: Fx) => Job<Ev, R, By>
@@ -206,25 +263,27 @@ interface Parts<S, Ev, M, Fx, R, By extends ReadonlyArray<unknown>> {
 
 function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<unknown>, R>(
   tag: Context.Key<I, Steps<S, Ev, M, Refused, Undecoded, By>>,
-  { scope, durable, stateOf, outOf, carry, timers, open }: Parts<S, Ev, M, Fx, R, By>,
+  { scope, stateOf, outOf, carry, timers, open }: Parts<S, Ev, M, Fx, R, By>,
 ) {
   return Layer.effect(tag, effect {
     const inner = try tag
+    const { durable } = try Durability
     const whole = try Whole
     const time = try Time
     const install = try Install
     const store = try KeyValueStore.KeyValueStore
     effect function epoch(): string!! {
       if (!durable) return install.launch
-      const found = store.get(`${scope}.epoch`) catch () => undefined
+      const found = store.get(epochKey(scope)) catch () => undefined
       if (found !== undefined) return found
       const made = fresh()
-      return effect { try store.set(`${scope}.epoch`, made); return made } catch () => install.launch
+      return effect { try store.set(epochKey(scope), made); return made } catch () => install.launch
     }
     const attempts = attemptsOf(install, `${scope}@${try epoch()}`)
     const running = try FiberMap.make<string>()
     const turn = try Semaphore.make(1)
-    const armed = new Map<string, number>()
+    const armed = new Map<string, { readonly at: number; readonly signature: string; readonly token: number }>()
+    let timerToken = 0
 
     function halt(key: string): void {
       const found = FiberMap.getUnsafe(running, key)
@@ -237,22 +296,32 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
     effect function taken(event: Ev, by: By): boolean!! {
       return effect { try send(event, ...by); return true } catch () => false
     }
-    effect function job(key: string, answers: Stream.Stream<Ev, never, R>, lost: Option.Option<Ev>, by: By): void!!R {
+    effect function job(key: string, answers: Stream.Stream<Ev, never, R>, lost: Option.Option<Ev>, by: By, allowEmpty: boolean): void!!R {
       let refused = false
+      let refusedEvent: unknown
+      let delivered = 0
       const ended = try exit(Stream.runForEachWhile(answers, effect (event: Ev) => {
-        refused = !(try taken(event, by))
-        return !refused
+        if (try taken(event, by)) {
+          delivered += 1
+          return true
+        }
+        refused = true
+        refusedEvent = event
+        return false
       }))
       if (Exit.isFailure(ended)) {
         if (Cause.hasInterruptsOnly(ended.cause)) return
         try logError(`job ${key} died`, ended.cause)
       }
-      if ((refused || Exit.isFailure(ended)) && Option.isSome(lost)) try contained(send(lost.value, ...by), `job ${key}, telling that it was lost,`)
+      if (Option.isNone(lost)) return
+      const empty = Exit.isSuccess(ended) && !refused && delivered === 0 && !allowEmpty
+      const notifyRefused = refused && !isUnticketedLost(refusedEvent, lost.value)
+      if (notifyRefused || Exit.isFailure(ended) || empty) try contained(send(lost.value, ...by), `job ${key}, telling that it was lost,`)
     }
     effect function start(moved: M): void!! {
       for (const fx of outOf(moved)) {
         match (carry(fx)) {
-          when { _tag: "Run", let key, let answers, let lost, let by }: try launch(key, job(key, answers, lost, by));
+          when { _tag: "Run", let key, let answers, let lost, let by, let allowEmpty }: try launch(key, job(key, answers, lost, by, allowEmpty));
           when { _tag: "Stop", let key }: halt(key);
         }
       }
@@ -267,33 +336,40 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
       }
       for (const { key, at, event, by } of waiting) {
         const name = `timer ${key}`
-        if (armed.get(name) === at) continue
-        armed.set(name, at)
-        try launch(name, effect {
-          try time.until(at)
-          try contained(send(event, ...by), name)
+        const signature = written([event, by])
+        const current = armed.get(name)
+        if (current !== undefined && current.at === at && current.signature === signature && Option.isSome(FiberMap.getUnsafe(running, name))) continue
+        const token = ++timerToken
+        armed.set(name, { at, signature, token })
+        const clear = sync(() => {
+          if (armed.get(name)?.token === token) armed.delete(name)
         })
+        try launch(name, Effect.ensuring(effect {
+          try time.until(at)
+          try clear
+          try contained(send(event, ...by), name)
+        }, clear))
       }
     }
     effect function send(event: Ev, ...by: By): M!Refused {
-      uninterruptible {
-        return try Semaphore.withPermit(turn, effect {
+      return try Semaphore.withPermit(turn, effect {
+        uninterruptible {
           const moved = try inner.send(stamped(event, try time.now()), ...by)
           try start(moved)
           try arm(stateOf(moved))
           return moved
-        })
-      }
+        }
+      })
     }
     effect function receive(input: unknown, ...by: By): M!Undecoded {
-      uninterruptible {
-        return try Semaphore.withPermit(turn, effect {
+      return try Semaphore.withPermit(turn, effect {
+        uninterruptible {
           const moved = try inner.receive(stamped(input, try time.now()), ...by)
           try start(moved)
           try arm(stateOf(moved))
           return moved
-        })
-      }
+        }
+      })
     }
     if (open !== undefined) {
       if (Effect.isEffect(open)) try launch("open", effect {
@@ -355,14 +431,15 @@ export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArr
   const key = options.keep === undefined ? undefined : storeKey(spec.Machine.key, options.keep)
   const parts: Parts<S, Ev, M, unknown, R | RO, By> = {
     scope: key ?? (options.attemptScope === undefined ? spec.Machine.key : `${spec.Machine.key}/${options.attemptScope}`),
-    durable: key !== undefined,
     stateOf: (moved) => (carry === undefined ? moved as unknown as S : (moved as unknown as Moved<S, unknown>).state),
     outOf: (moved) => (carry === undefined ? [] : (moved as unknown as Moved<S, unknown>).out),
     carry: carry ?? ((fx: unknown) => Job.Stop({ key: written(fx) })),
     timers: options.timers ?? (() => []),
     open: options.open,
   }
-  const inner = key === undefined ? spec.machine() : kept(key, spec.stored, spec.machine())
+  const inner = key === undefined
+    ? Layer.merge(spec.machine(), Layer.succeed(Durability, { durable: false }))
+    : kept(key, spec.stored, spec.machine())
   return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, R | RO>>
 }
 

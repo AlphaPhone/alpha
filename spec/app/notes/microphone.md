@@ -2,7 +2,8 @@
 
 Allowing the microphone for a voice note: Android's prompt, asked once, a
 recording queued behind it, and Android's Settings once the answer was no.
-The permission itself is [the kit's](../../kit/permission.md);
+A web browser shows that the microphone is unavailable while its permission
+is denied. The permission itself is [the kit's](../../kit/permission.md);
 [recording](./recording.md) starts only while it allows the microphone.
 
 ## Story: Allow the microphone for a voice note
@@ -17,9 +18,9 @@ The permission itself is [the kit's](../../kit/permission.md);
 import permission as P from "../../kit/permission"
 import note.* from "./note"
 
-type Microphone = { owner: int, mic: P::Permission, asking: bool, queued: bool, folder: int, started: bool }
+type Microphone = { owner: int, mic: P::Permission, asking: bool, queued: bool, folder: int, started: bool, browserDenied: bool }
 
-pure val initial: Microphone = { owner: 0, mic: P::unasked, asking: false, queued: false, folder: 0, started: false }
+pure val initial: Microphone = { owner: 0, mic: P::unasked, asking: false, queued: false, folder: 0, started: false, browserDenied: false }
 ```
 
 ### What allowing the microphone asks of the phone
@@ -29,7 +30,7 @@ open Android's Settings for Alpha.
 
 ```quint
 type Effect =
-  | AsksMicrophone
+  | AsksMicrophone({ browser: bool })
   | Records({ folder: int })
   | OpensSettings
 type Moved = { state: Microphone, out: List[Effect] }
@@ -38,7 +39,8 @@ type Moved = { state: Microphone, out: List[Effect] }
 ### What the simulator tries
 
 ```quint
-pure val grantValues = Set(P::Granted, P::Denied)
+pure val grantValues = Set(P::Unasked, P::Granted, P::Denied)
+pure val browserValues = Set(false, true)
 pure val folderValues = Set(0, 2)
 pure val ownerValues = Set(0, 1, 2)
 ```
@@ -51,10 +53,15 @@ changed it in Settings.
 ```quint
 pure def canReported(m: Microphone, grant: P::Grant, by: Actor): bool = by == Phone and not(m.asking)
 
-pure def reported(m: Microphone, grant: P::Grant, by: Actor): Microphone = { ...m, mic: P::observe(m.mic, grant) }
+pure def reported(m: Microphone, grant: P::Grant, by: Actor): Microphone =
+  { ...m, mic: P::observe(m.mic, grant), browserDenied: m.browserDenied and grant == P::Denied }
 ```
 
-### Record voice note asks for the microphone when Alpha lacks it and has never asked, and the recording waits behind Android's prompt
+### Record voice note asks Android once and the browser whenever it reports that it can prompt
+
+The browser lets the owner reset permission to Ask between attempts. An
+explicit Record in that state can ask again. While the browser still
+reports Denied, Record shows the unavailable view.
 
 Recording needs the owner's notes available (Notes, "Nothing new can be
 made while the notes are unavailable or storage has failed"), and nothing
@@ -64,11 +71,13 @@ starts only when no recording is unfinished, and is made in the folder the
 list is narrowed to").
 
 ```quint
-pure def canAsk(m: Microphone, available: bool, folder: int, covered: bool, by: Actor): bool =
-  mayOpen(covered, by) and isOwner(m.owner) and available and not(m.asking) and P::canAsk(m.mic) and folder >= 0
+pure def canAsk(m: Microphone, available: bool, folder: int, covered: bool, browser: bool, by: Actor): bool =
+  mayOpen(covered, by) and isOwner(m.owner) and available and not(m.asking) and folder >= 0
+    and (if (browser) m.mic.grant == P::Unasked else P::canAsk(m.mic))
 
-pure def ask(m: Microphone, available: bool, folder: int, covered: bool, by: Actor): Moved =
-  { state: { ...m, mic: P::ask(m.mic), asking: true, queued: true, folder: folder, started: false }, out: List(AsksMicrophone) }
+pure def ask(m: Microphone, available: bool, folder: int, covered: bool, browser: bool, by: Actor): Moved =
+  { state: { ...m, mic: P::ask(m.mic), asking: true, queued: true, folder: folder, started: false, browserDenied: false },
+    out: List(AsksMicrophone({ browser: browser })) }
 ```
 
 ### Android answers, and the recording waiting starts only if the microphone is now allowed, Notes is still in front, no call is on, nothing plays and the recorder is free
@@ -78,12 +87,13 @@ for starting. A recording that cannot start then is dropped, not kept for
 later.
 
 ```quint
-pure def canAnswered(m: Microphone, grant: P::Grant, ready: bool, by: Actor): bool = by == Phone and m.asking
+pure def canAnswered(m: Microphone, grant: P::Grant, ready: bool, browser: bool, by: Actor): bool = by == Phone and m.asking
 
-pure def answered(m: Microphone, grant: P::Grant, ready: bool, by: Actor): Moved =
+pure def answered(m: Microphone, grant: P::Grant, ready: bool, browser: bool, by: Actor): Moved =
   val mic = P::observe(m.mic, grant)
   val starts = m.queued and P::allows(mic) and ready
-  { state: { ...m, mic: mic, asking: false, queued: false, started: starts },
+  { state: { ...m, mic: mic, asking: false, queued: false, started: starts,
+      browserDenied: browser and m.queued and grant == P::Denied },
     out: if (starts) List(Records({ folder: m.folder })) else List() }
 ```
 
@@ -95,6 +105,29 @@ pure def canOpenSettings(m: Microphone, by: Actor): bool = by == Owner and P::ne
 pure def openSettings(m: Microphone, by: Actor): Moved = { state: m, out: List(OpensSettings) }
 ```
 
+### The owner sees Mic unavailable after asking to record while the browser denies the microphone
+
+The recorder page has no audio, an elapsed time of zero, and Record and
+Discard. Record checks the current permission again. Discard and Back
+return to Notes.
+
+```quint
+pure def canShowBrowserDenial(m: Microphone, available: bool, covered: bool, by: Actor): bool =
+  mayOpen(covered, by) and isOwner(m.owner) and available and not(m.asking) and m.mic.grant == P::Denied
+
+pure def showBrowserDenial(m: Microphone, available: bool, covered: bool, by: Actor): Microphone =
+  { ...m, browserDenied: true }
+
+pure def canCloseBrowserDenial(m: Microphone, by: Actor): bool = by == Owner and m.browserDenied
+
+pure def closeBrowserDenial(m: Microphone, by: Actor): Microphone = { ...m, browserDenied: false }
+
+pure def alwaysBrowserDenialBelongsToTheOwner(m: Microphone): bool =
+  m.browserDenied implies (isOwner(m.owner) and not(m.asking) and m.mic.grant == P::Denied)
+
+pure def sometimesTheBrowserDenialShows(m: Microphone): bool = m.browserDenied
+```
+
 ### Android's prompt is shown at most once, and a recording waits only behind it
 
 ```quint
@@ -103,7 +136,8 @@ pure def alwaysOnePrompt(m: Microphone): bool =
 
 pure def stepAskedOnce(before: Microphone, via: str, after: Microphone, out: List[Effect]): bool =
   out.every(e => match e {
-    | AsksMicrophone => not(before.mic.asked) and not(P::allows(before.mic)) and after.asking
+    | AsksMicrophone(a) => after.asking and
+        (if (a.browser) before.mic.grant == P::Unasked else not(before.mic.asked) and not(P::allows(before.mic)))
     | Records(r) => via == "answered" and before.queued and P::allows(after.mic) and r.folder == before.folder
     | OpensSettings => P::needsSettings(before.mic)
   })
@@ -130,15 +164,16 @@ Android's own prompt stays until it is answered; its answer then starts
 nothing.
 
 ```quint
-pure def left(m: Microphone): Microphone = { ...m, queued: false }
+pure def left(m: Microphone): Microphone = { ...m, queued: false, browserDenied: false }
 
 pure def canRestart(m: Microphone, by: Actor): bool = by == Phone
 
-pure def restart(m: Microphone, by: Actor): Microphone = { ...m, asking: false, queued: false }
+pure def restart(m: Microphone, by: Actor): Microphone = { ...m, asking: false, queued: false, browserDenied: false }
 
 pure def canOwnerChanged(m: Microphone, owner: int, by: Actor): bool = by == Phone and owner != m.owner and owner >= 0
 
-pure def ownerChanged(m: Microphone, owner: int, by: Actor): Microphone = { ...m, owner: owner, asking: false, queued: false, started: false }
+pure def ownerChanged(m: Microphone, owner: int, by: Actor): Microphone =
+  { ...m, owner: owner, asking: false, queued: false, started: false, browserDenied: false }
 
 pure def stepNothingStartsBehindTheOwner(before: Microphone, via: str, after: Microphone): bool =
   (via == "left" or via == "restart" or via == "ownerChanged") implies not(after.queued)

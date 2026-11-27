@@ -1,7 +1,7 @@
 // spec/app/phone/call.md, "Story: See my live call over every view"
 
 module capacitor {
-  import { registerPlugin } from "@capacitor/core"
+  import { plugin } from "./capacitor.ts"
 
   interface Listening { remove(): Promise<void> }
   interface OngoingCallPlugin {
@@ -18,7 +18,7 @@ module capacitor {
   let made: { ongoing: OngoingCallPlugin; state: CallStatePlugin } | undefined
   /** The image's own call plugins, registered once for the life of the page. @throws {never} */
   export function plugins() {
-    return (made ??= { ongoing: registerPlugin<OngoingCallPlugin>("AlphaOngoingCall"), state: registerPlugin<CallStatePlugin>("AlphaCallState") })
+    return (made ??= { ongoing: plugin<OngoingCallPlugin>("AlphaOngoingCall"), state: plugin<CallStatePlugin>("AlphaCallState") })
   }
   /** Each report `plugin` pushes under `event`, until the listener is removed. @throws {never} */
   export function pushed(plugin: { addListener(event: string, heard: (data: unknown) => void): Promise<Listening> }, event: string, heard: (data: unknown) => void): Promise<Listening> {

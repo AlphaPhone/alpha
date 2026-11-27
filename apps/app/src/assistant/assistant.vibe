@@ -1,8 +1,9 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
+import { ConversationRecord, TurnController, encodeTurnContext, findStoppedUserTurn, learnPeer, notLearned, sendsOptionalFields, statusRead, type ChatHeight, type LocationObservation, type ReviewedEmail, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
+import { picker } from "./attachment-picker.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
@@ -14,27 +15,48 @@ import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
 import * as World from "../../gen/app__clock__world.effect.vibe"
+import * as Contacts from "../../gen/app__contacts.effect.vibe"
+import * as Messages from "../../gen/app__messages.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { Machine as Shell, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
+import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowInside, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
+import { CalendarReviews } from "../calendar/reviews.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
-import { type NoteStore, type Telephony, Agent, isCloudFundsRefusal, Device, Location, type VoiceBridge, Refused, ask, outcomeOf } from "../platform/index.vibe"
+import type { NoteStore } from "../platform/index.vibe"
 import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
+import { Conversations } from "../messages/messages.vibe"
+import type { Telephony } from "../platform/index.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { Attempts, fresh, type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed, Time } from "../runtime/index.vibe"
-import { CommsPrompts, type CommsPrompt, commsViewOf } from "../comms/index.vibe"
-import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
-import { VoiceWords } from "../voice/voice.vibe"
-import { MediaReview, mediaReview } from "./media-review.vibe"
-import { type Board, type Line, Talk, talk } from "./talk.vibe"
-import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
+import { Agent, isCloudFundsRefusal } from "../platform/index.vibe"
+import { Device, native } from "../platform/index.vibe"
+import { Location } from "../platform/index.vibe"
+import { type PageInFront, type TabHost, pageInFront } from "../platform/index.vibe"
+import type { VoiceBridge } from "../platform/index.vibe"
+import { Refused, ask, outcomeOf } from "../platform/index.vibe"
+import { Attempts, fresh } from "../runtime/index.vibe"
+import { CommsPrompts, commsViewOf } from "../comms/index.vibe"
+import { MailQuestions, reviewedMail, type MailQuestion } from "../inbox/mail-context.vibe"
+import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
+import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
+import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
+import { FileContext, documentObservation } from "./file-context.vibe"
+import { MediaReview, mediaReview, ranDirect } from "./media-review.vibe"
+import { agentWarmUp } from "./warm-up.vibe"
+import { type ContactAttachmentScope, contactFileSendCurrent, contactFileTargetCurrent } from "./contact-attachments.vibe"
+import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, Talk, talk } from "./talk.vibe"
+import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
+import { withoutTurnTags } from "./words.ts"
+import { type DraftAddress, exchangePhoneDraft, readPhoneDraft } from "./draft-device.vibe"
+import { offerRecordingSummary } from "./recording-summary.vibe"
 
 service Turns {
   readonly controller: TurnController
@@ -65,15 +87,49 @@ const turns = Layer.effect(Turns, effect {
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String) })) })
-const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
+const page = () => Schema.Struct({
+  messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, role: Schema.Literals(["user", "assistant"]), text: Schema.String,
+    timestamp: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))), clientMessageId: Schema.optionalKey(Schema.String),
+    failureKind: Schema.optionalKey(Schema.String), abortCause: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
+  hasMore: Schema.optionalKey(Schema.Boolean), hasEarlier: Schema.optionalKey(Schema.Boolean), hasLater: Schema.optionalKey(Schema.Boolean),
+})
+const pageEdge = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) })
+const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
 
-const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))
+/** Eliza's pinned history contract projects a redacted body to this exact text. */
+const privateHistoryNotice = "[Private information removed]"
+
+const slotted = Schema.fromJsonString(Schema.Struct({
+  revision: Schema.Int,
+  text: Schema.String,
+  sending: Schema.Boolean,
+  lastSentId: Schema.optionalKey(Schema.String),
+  lastSentWire: Schema.optionalKey(Schema.String),
+}))
 
 const pageSize = 20
 
-function slotKey(binding: Composer.Binding): string {
-  return `alpha/assistant/slot/${binding.owner}/${binding.conversation}@1`
+type DraftSlot = { key: string; seat: NonNullable<Board["draftSeat"]>; phone?: DraftAddress }
+
+function draftSlot(board: Board, binding: Composer.Binding): DraftSlot | undefined {
+  const seat = board.draftSeat
+  if (seat === undefined || seat.number !== binding.owner) return undefined
+  const conversation = board.known(binding.conversation)?.record
+  if (binding.conversation > 0 && conversation === undefined) return undefined
+  const key = [seat.authority.owner, seat.authority.agent, conversation?.id ?? null, conversation?.roomId ?? null]
+  const slot = { key: `alpha/assistant/slot-v2/${encodeURIComponent(JSON.stringify(key))}`, seat }
+  if (!native()) return slot
+  const phone = conversation === undefined
+    ? seat.authority
+    : { ...seat.authority, conversation: conversation.id, room: conversation.roomId }
+  return { ...slot, phone }
+}
+
+/** The proof for a current request, pinned to the seat captured before any asynchronous read. */
+effect function ownsSeat(board: Board, seat: Board["draftSeat"]): boolean!!Agent {
+  if (seat === undefined || seat !== board.draftSeat) return false
+  const observed = try attachmentAuthority()
+  return observed !== undefined && seat === board.draftSeat && Attachments.sameArchiveAuthority(seat.authority, observed)
 }
 
 export function freedom(conversation: Conversation.Conversation, composer: Composer.Composer, chosen: number) {
@@ -83,12 +139,17 @@ export function freedom(conversation: Conversation.Conversation, composer: Compo
   }
 }
 
-// spec/app/assistant/index.md, "The screen is told only to an agent that said, on this connection, that it takes it"
-effect function supported(ticket: number): Conversation.Event!!Agent {
+effect function readOptionalSupport(): { readonly ok: boolean; readonly takes: boolean }!!Agent {
   return effect {
     const read = statusRead(try ask(Agent, HttpClientRequest.get("/api/status"), Schema.Unknown))
-    return { type: "supported", ticket, ok: true, takes: sendsOptionalFields(learnPeer(notLearned, read), read) }
-  } catch () => ({ type: "supported", ticket, ok: false, takes: false })
+    return { ok: true, takes: sendsOptionalFields(learnPeer(notLearned, read), read) }
+  } catch () => ({ ok: false, takes: false })
+}
+
+// spec/app/assistant/index.md, "The screen is told only to an agent that said, on this connection, that it takes it"
+effect function supported(ticket: number): Conversation.Event!!Agent {
+  const probed = try readOptionalSupport()
+  return { type: "supported", ticket, ok: probed.ok, takes: probed.takes }
 }
 
 function ended(ticket: number, heard: boolean, result: TurnResult | undefined): Conversation.Event {
@@ -105,7 +166,7 @@ function ended(ticket: number, heard: boolean, result: TurnResult | undefined): 
 const failures: Readonly<Record<string, Reply.Failure>> = {
   credential_invalid: "CredentialInvalid", insufficient_credits: "InsufficientCredits", limit_reached: "LimitReached",
   rate_limited: "LimitReached", provider_issue: "ProviderIssue", timeout: "TimedOut", missing_capability: "MissingCapability",
-  no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
+  no_provider: "NoProvider",
 }
 
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
@@ -143,18 +204,79 @@ function viewOf(showing: Conversation.Showing): string {
   }
 }
 
-// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selected?: RendererNote | SmsSelection["observation"]) {
+function messagingPlatformOf(view: View | undefined): MessagingPlatform | undefined {
+  return view === "Telegram" ? "Telegram" : view === "Slack" ? "Slack" : undefined
+}
+
+function showingPlatform(shown: Conversation.Showing): MessagingPlatform | undefined {
+  return match (shown) {
+    when { tag: "App", let view }: messagingPlatformOf(view);
+    default: undefined;
+  }
+}
+
+function messagingAppOf(platform: MessagingPlatform | undefined): Locator.MessagingApp {
+  return platform === "Telegram" ? "OnTelegram" : platform === "Slack" ? "OnSlack" : "NoMessaging"
+}
+
+function shareOf(platform: MessagingPlatform): Prefs.Share {
+  return platform === "Telegram" ? "TelegramContext" : "SlackContext"
+}
+
+const wireChatHeight: Record<Locator.ChatHeight, ChatHeight> = {
+  ChatHidden: "hidden",
+  ChatBar: "bar",
+  ChatTyping: "typing",
+  ChatSheet: "sheet",
+  ChatFull: "full",
+}
+
+const overlayDetent: Record<"Bar" | "Typing" | "Sheet" | "Full", Locator.OverlayDetent> = {
+  Bar: "DetentBar",
+  Typing: "DetentTyping",
+  Sheet: "DetentSheet",
+  Full: "DetentFull",
+}
+
+// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"; spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"; spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
+function observed(
+  told: boolean,
+  context: Conversation.Context,
+  location: LocationObservation | undefined,
+  bridge: MessagingBridgeApi,
+  prefs: Prefs.Preferences,
+  selected?: RendererNote | SmsSelection["observation"] | ReturnType<typeof documentObservation>,
+  front?: PageInFront,
+  email?: ReviewedEmail,
+  useTranscript = false,
+  chatHeight?: ChatHeight,
+) {
   if (!told) return undefined
+  const platform = showingPlatform(context.showing)
+  const shareAllowed = platform === undefined ? true : Prefs.allows(prefs, shareOf(platform))
+  const raw = platform === undefined ? undefined : bridge.contextOf(platform)
+  const bounded = boundedMessagingContext(raw)
+  const peer = { takes: told, declaresLocation: location !== undefined, declaresPage: front !== undefined }
+  const sendMessaging = platform !== undefined
+    && Locator.sendsMessagingContext(!context.sensitive, messagingAppOf(platform), raw?.authenticated === true, shareAllowed, bounded !== undefined, peer)
   const section = Pages.selectionOf(context.section)
-  const selectedObject = context.sensitive ? undefined : section === "" ? selected : { kind: "settings", id: section }
-  return encodeTurnContext({
+  const sensitive = context.sensitive || !shareAllowed
+  const selectedObject = sensitive ? undefined : front?.selection ?? (section === "" ? selected : { kind: "settings", id: section })
+  const carriesEmail = Locator.sendsReviewedEmail(email !== undefined, email !== undefined, told)
+  const carriesTranscript = Locator.sendsVoiceNoteTranscript(useTranscript, selectedObject?.kind === "canonical-note", sensitive, told)
+  const carriesChatHeight = chatHeight !== undefined && Locator.sendsChatHeight(!sensitive, told)
+  const encoded = encodeTurnContext({
     observation: {
-      view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
+      view: viewOf(context.showing), revision: context.revision, sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
       ...(selectedObject === undefined ? {} : { selectedObject }),
       ...(location === undefined ? {} : { location }),
+      ...(carriesChatHeight ? { chatHeight } : {}),
     },
-  }, { optionalFields: true })
+    ...(front === undefined || sensitive ? {} : { browserPage: front.page }),
+    ...(carriesEmail && email !== undefined ? { reviewedEmail: email } : {}),
+    ...(carriesTranscript ? { useSelectedVoiceNoteTranscript: true } : {}),
+  }, { optionalFields: told })
+  return sendMessaging && bounded !== undefined ? { ...encoded, messagingContext: bounded } : encoded
 }
 
 // spec/app/assistant/context.md, "A turn carries the location only while the owner allows it, from a screen that is not sensitive, to a peer that declares it, and only a GPS fix at most thirty minutes old or a network answer that still stands"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/settings/preferences.md, "Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
@@ -176,26 +298,40 @@ effect function whereabouts(sensitive: boolean, told: boolean): (LocationObserva
   return { latitude: position.lat / 1e6, longitude: position.lng / 1e6, ...accuracy, capturedAt: Math.trunc(position.taken) }
 }
 
-// spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony
+// spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"; spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"
+type ScreenContext = Locator.Machine | Prefs.Machine | MessagingBridge | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony | TabHost | Shell | Dock.Machine
 
 interface ScreenTold {
   readonly metadata: TurnContext | undefined
   readonly sms: MessageSmsRequest | undefined
+  readonly attachment: Attached | undefined
 }
 
-/** A review from Messages must use the same selected SIM that its outgoing observation names. */
-effect function screenTold(told: boolean, context: Conversation.Context, transcript?: NoteTranscript): ScreenTold!!ScreenContext {
+// spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"; spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"; spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"; spec/app/settings/preferences.md, "Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
+/** What a turn sent now tells the agent of the screen, read as it is sent: a review from Messages uses the same selected SIM its observation names, the open Files document goes as the turn's attachment, the Browser page in front beside the observation, and the live assistant overlay height. */
+effect function screenTold(told: boolean, context: Conversation.Context, transcript?: NoteTranscript, email?: ReviewedEmail): ScreenTold!!ScreenContext {
   const location = try whereabouts(context.sensitive, told)
+  const bridge = try MessagingBridge
+  const prefState = try (try Prefs.Machine).get()
+  const shellState = try (try Shell).get()
+  const dockState = try (try Dock.Machine).get()
+  const chatHeight = wireChatHeight[Locator.chatHeightOf(
+    overlayDetent[shellState.assistant],
+    askAlphaDrawn(shellState),
+    Dock.pill(shellState, dockState.tucked),
+  )]
   const view = viewOf(context.showing)
   const seeSelection = told && !context.sensitive
   const seen = seeSelection && view === "notes" ?
     (transcript === undefined ? try notesSelection() : (try transcriptCurrent(transcript)) ? transcript.record : undefined) : undefined
   const note = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
   const selection = seeSelection && view === "messages" ? try captureSmsSelection() : undefined
-  const metadata = observed(told, context, location, note ?? selection?.observation)
+  const file = seeSelection && view === "files" ? try (try FileContext).selected() : undefined
+  const attachment = file === undefined ? undefined : try (try FileContext).read(file)
+  const front = seeSelection && view === "browser" ? try pageInFront(true, Prefs.allows(prefState, "BrowserPage"), try (try Time).now()) : undefined
+  const metadata = observed(told, context, location, bridge, prefState, note ?? selection?.observation ?? (file === undefined ? undefined : documentObservation(file)), front, email, transcript !== undefined, chatHeight)
   const sms = view === "messages" ? { selection: metadata?.observation?.selectedObject?.kind === "sms-subscription" ? selection : undefined } : undefined
-  return { metadata, sms }
+  return { metadata, sms, attachment }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
@@ -203,24 +339,123 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
 export const spokenScreen = started(effect {
   const { memory } = try VoiceWords
   const context = try Effect.context<ScreenContext>()
-  memory.screen = (shown) => Effect.map(Effect.provideContext(screenTold(true, shown), context), (observed) => observed.metadata)
+  const chatContext = try Effect.context<SpokenChatContext | Composer.Machine | KeyValueStore.KeyValueStore | Time>()
+  const { writer } = try Talk
+  memory.chat = { context: chatContext, writer, begin: (session, turn, current) => Effect.provideContext(spokenChat(session, turn, current), chatContext) }
+  memory.screen = (shown) => Effect.provideContext(Effect.map(screenTold(true, shown), ({ metadata, sms, attachment }) => ({ metadata, sms, attachment })), context)
 }, "telling voice the screen")
 
-effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
-  const ctx = try Effect.context<never>()
-  const alarms = Context.getOption(ctx, Alarms.Machine)
-  const timers = Context.getOption(ctx, Timers.Machine)
-  const world = Context.getOption(ctx, World.Machine)
-  if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
-    try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
-      Layer.succeed(Alarms.Machine, alarms.value),
-      Layer.succeed(Timers.Machine, timers.value),
-      Layer.succeed(World.Machine, world.value),
-    )))
+// spec/app/voice/index.md, "Talk keeps what it sends in the selected Ask Alpha conversation"
+effect function spokenChat(session: number, turn: number, current: boolean!!): (SpokenChatLease | undefined)!!(Agent | Chats.Machine | Composer.Machine | Conversation.Machine | Talk | KeyValueStore.KeyValueStore | Time) {
+  const { board } = try Talk
+  const agent = try Agent
+  const apps = try Effect.context<Agent | KeyValueStore.KeyValueStore | Time>()
+  const chats = try Chats.Machine
+  const composer = try Composer.Machine
+  const conversation = try Conversation.Machine
+  const seat = board.draftSeat
+  if (seat === undefined || !(try current) || !(try ownsSeat(board, seat))) return undefined
+  const boardChanges = Stream.callback<void>((queue) => acquireRelease(
+    sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, undefined) })),
+    (off) => sync(off),
+  ))
+  const retiredSeat = Stream.filter(Stream.concat(Stream.succeed(undefined), boardChanges), () => board.draftSeat !== seat)
+  const started = try chats.get()
+  if (Chats.making(started) || Conversation.inFlight((try conversation.get()).turn)) return undefined
+  let chosen = started.chosen
+  if (chosen === 0) {
+    const empty = (writing: Composer.Composer) =>
+      writing.binding.owner === seat.number && writing.binding.conversation === 0 && writing.slot === "Open"
+      && writing.away === "Free" && !writing.unsettled && writing.draft.sync === "Kept" && !Composer.content(writing.editor)
+      && !Composer.attached(writing.editor) && board.snapshot().typed === "" && board.sendWhenMade === 0
+      && board.waitingRequest === undefined && board.postingRequest === undefined
+    if (!empty(try composer.get())) return undefined
+    const begin = { type: "start", replying: false, holding: false } as const
+    if (seat !== board.draftSeat || !(try current) || !(try contained(chats.send(begin, (live) =>
+      live.chosen === 0 && live.make.id === started.make.id && seat === board.draftSeat && empty(Effect.runSync(composer.get()))), "starting a chat for Talk"))) return undefined
+    const ticket = started.make.id + 1
+    const made = Stream.runHead(Stream.filter(chats.changes, (live) =>
+      live.make.id > ticket || (live.make.id === ticket && !Chats.making(live))))
+    const answer = try Effect.raceFirst(made, Effect.as(Stream.runHead(retiredSeat), Option.none<Chats.Chats>()))
+    if (Option.isNone(answer) || answer.value.make.id !== ticket || answer.value.make.outcome !== "Confirmed") return undefined
+    chosen = answer.value.chosen
   }
-  const reminders = Context.getOption(ctx, Reminders.Machine)
-  if (Option.isSome(reminders)) {
-    try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+  const record = board.known(chosen)?.record
+  if (record === undefined || !(try current) || !(try ownsSeat(board, seat))) return undefined
+  const selected = effect {
+    const live = try chats.get()
+    const now = board.known(live.chosen)?.record
+    return board.draftSeat === seat && live.chosen === chosen && now?.id === record.id && now?.roomId === record.roomId
+  }
+  if (!(try selected)) return undefined
+  const retired = Stream.filterEffect(
+    Stream.merge(Stream.succeed(undefined), Stream.merge(boardChanges, Stream.as(chats.changes, undefined))),
+    () => Effect.map(selected, (matches) => !matches),
+  )
+  const verified = Effect.provideService(effect {
+    return (try selected) && (try ownsSeat(board, seat)) && (try selected)
+  }, Agent, agent)
+  return {
+    session, turn, record, authority: seat.authority, conversation: chosen, current: selected, verified, retired,
+    settle: effect (result, spoken) => {
+      try Effect.provideService(Effect.provideService(
+        settleSpoken(board, seat, chosen, record, result, spoken, current), Chats.Machine, chats), Agent, agent)
+      fork.detached Effect.provideContext(syncAlphaApps(result.reply.actionResults, { conversation: chosen, message: result.reply.messageId }), apps)
+    },
+  }
+}
+
+effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, record: ConversationRecord, result: Extract<TurnResult, { kind: "Replied" }>, spoken: string, current: boolean!!): void!!(Agent | Chats.Machine) {
+  if (!(try ownsSeat(board, seat)) || !(try current)) return
+  const chats = try Chats.Machine
+  const live = try chats.get()
+  const bound = board.known(live.chosen)?.record
+  if (live.chosen !== selected || live.around !== 0 || board.draftSeat !== seat
+    || bound?.id !== record.id || bound?.roomId !== record.roomId) return
+  const page = live.page.ticket
+  const { userMessageId, messageId, text, failureKind, cloudCode } = result.reply
+  const lines: Line[] = []
+  if (userMessageId !== undefined && userMessageId !== "") lines.push({ id: userMessageId, mine: true, text: spoken })
+  if (messageId !== "" && messageId !== userMessageId) {
+    const failure = failureKind === undefined ? undefined : Reply.readAgain(failures[failureKind] ?? "OtherFailure", cloudCode !== undefined)
+    lines.push({ id: messageId, mine: false, text, ...(failure === undefined ? {} : { failure }) })
+  }
+  const prior = board.page(page)
+  const added = lines.filter((line) => !prior.some((other) => other.id === line.id))
+  if (added.length === 0) return
+  for (const line of added) board.messageNumber(line.id)
+  board.putPage(page, selected, [...prior, ...added])
+  try ignore(chats.send({ type: "kept", messages: added.length }, (now) => board.draftSeat === seat
+    && now.chosen === selected && now.around === 0 && now.page.ticket === page))
+}
+
+// spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+/** Bring the apps a reply's actions changed up to date: the clock, reminders, and Calendar's card for a request it filed in `reply`. */
+effect function syncAlphaApps(actionResults: ReadonlyArray<Ran>, reply: { readonly conversation: number; readonly message: string }): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+  const ranClock = actionResults.some((result) => result.action.startsWith("CLOCK_") || /clock|alarm|timer|world/i.test(result.action))
+  const ranReminders = actionResults.some((result) => result.action === "REMINDERS_MANAGE" || result.action === "OWNER_REMINDERS" || /reminder/i.test(result.action))
+  const filed = calendarAsks.file(reply.conversation, reply.message, actionResults)
+  if (!ranClock && !ranReminders && !filed) return
+  const ctx = try Effect.context<never>()
+  const reviews = Context.getOption(ctx, CalendarReviews)
+  if (filed && Option.isSome(reviews)) try reviews.value.relist()
+  if (ranClock) {
+    const alarms = Context.getOption(ctx, Alarms.Machine)
+    const timers = Context.getOption(ctx, Timers.Machine)
+    const world = Context.getOption(ctx, World.Machine)
+    if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
+      try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
+        Layer.succeed(Alarms.Machine, alarms.value),
+        Layer.succeed(Timers.Machine, timers.value),
+        Layer.succeed(World.Machine, world.value),
+      )))
+    }
+  }
+  if (ranReminders) {
+    const reminders = Context.getOption(ctx, Reminders.Machine)
+    if (Option.isSome(reminders)) {
+      try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+    }
   }
 }
 
@@ -233,9 +468,163 @@ effect function bindArchiveAuthority(board: Board, authority: Attachments.Archiv
   if (Attachments.canClosePreview(try picker.get())) try ignore(picker.send({ type: "closePreview" }))
 }
 
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore> {
-  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore>((queue) => effect {
-    const { controller, streamed } = try Turns
+/** Record a settled typed reply, offer any recording summary or device reviews, and hold post-reply view handoffs. */
+effect function settleReplied(input: {
+  readonly ticket: number
+  readonly told: boolean
+  readonly context: Conversation.Context
+  readonly seat: DraftSeat
+  readonly chosen: number
+  readonly conversationId: string
+  readonly pageTicket: number
+  readonly mine: Line
+  readonly asked: number
+  readonly directFiles: boolean
+  readonly requestedFiles: Effect.Success<ReturnType<MediaReview.Shape["filesContext"]>>
+  readonly outsideOrigin: Effect.Success<ReturnType<MediaReview.Shape["filesOrigin"]>>
+  readonly enrolled: Effect.Success<ReturnType<MediaReview.Shape["session"]>>
+  readonly messageTarget: Effect.Success<ReturnType<MediaReview.Shape["messageTarget"]>>
+  readonly voicemail: Effect.Success<ReturnType<MediaReview.Shape["voicemailTarget"]>>
+  readonly sms: Effect.Success<ReturnType<typeof screenTold>>["sms"]
+  readonly transcript: ReturnType<Board["snapshot"]>["transcript"]
+  readonly result: Extract<TurnResult, { kind: "Replied" }>
+}): void!!(Views | Agent | Device | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Talk | MediaReview | NoteStore | Time) {
+  const { board } = try Talk
+  const { streamed } = try Turns
+  const history = try Chats.Machine
+  const conversation = try Conversation.Machine
+  const views = try Views
+  const review = try MediaReview
+  const { ticket, told, context, seat, chosen, conversationId, pageTicket, mine, asked, directFiles, requestedFiles, outsideOrigin, enrolled, messageTarget, voicemail, sms, transcript, result } = input
+  const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+  const page = told ? pageIn(result.reply.actionResults, views.clientId) : undefined
+  let continueFiles: Effect.Effect<void> | undefined
+  let openAsked: Effect.Effect<void> | undefined
+  if (result.reply.userMessageId !== undefined) {
+    board.messageNumber(result.reply.userMessageId)
+    board.rename(pageTicket, mine, result.reply.userMessageId)
+  }
+  board.messageNumber(result.reply.messageId)
+  board.append(pageTicket, chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
+  const recordingSummary = transcript === undefined || result.reply.failureKind !== undefined
+    ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chosen,
+      conversationId, message: result.reply.messageId }, result.reply.text)
+  if (board.draftSeat === seat) board.change({ recordingSummary })
+  fork.detached syncAlphaApps(result.reply.actionResults, { conversation: chosen, message: result.reply.messageId })
+  if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
+    const replied = streamed(result.clientMessageId)
+    const stillAuthored = effect {
+      return board.draftSeat === seat && board.lastSentId === result.clientMessageId
+        && (try views.current()) === asked && (try history.get()).chosen === chosen
+    }
+    const currentFiles = effect {
+      const now = try conversation.get()
+      return (try stillAuthored) && Conversation.canFinish(now, ticket) && !now.turn.stopping
+        && !now.context.sensitive && now.context.revision === context.revision
+    }
+    const report = (note: string) => {
+      if (board.draftSeat === seat) board.change({ mediaNote: { conversation: chosen, text: note } })
+    }
+    const eligible = replied && result.reply.failureKind === undefined
+    const inFiles = !directFiles || requestedFiles === undefined || !eligible
+      ? undefined : { files: requestedFiles, current: currentFiles, report }
+    const continued = effect {
+      const now = try conversation.get()
+      return (try stillAuthored) && now.turn.send.id === ticket && !now.turn.stopping && !now.context.sensitive
+    }
+    const outsideFiles = !directFiles || outsideOrigin === undefined || !eligible || !(try currentFiles)
+      ? undefined : { origin: outsideOrigin, ticket, current: continued, report,
+        hold: (work: Effect.Effect<void>) => { continueFiles = work } }
+    const media = try review.pending(enrolled, result.reply.userMessageId, chosen, context.revision, messageTarget,
+      { clientMessageId: result.clientMessageId, conversationId, pageTicket,
+        actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
+        ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
+        ...(outsideFiles === undefined ? {} : { outsideFiles }) })
+    // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+    if (eligible && ranDirect(result.reply.actionResults)) openAsked = Effect.asVoid(review.openAsked(enrolled, result.reply.userMessageId, result.reply.actionResults, continued))
+    if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
+      && (try history.get()).chosen === chosen) {
+      const deciding = board.snapshot().media.filter((card) => card.decision === "Deciding")
+      board.change({ media: [...deciding, ...media.filter((card) => !deciding.some((held) => held.id === card.id && held.digest === card.digest))] })
+    }
+  }
+  if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
+  else if (page !== undefined) try views.hold(ticket, { asked, page })
+  else if (openAsked !== undefined && (prepared === undefined || prepared.navigationBinding.viewId.toLowerCase() === "browser")) try views.hold(ticket, { asked, openAsked })
+  else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
+}
+
+// spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+effect function ensureOptionalFieldsSupport(told: boolean, needsStructured: boolean): boolean!!(Agent | Conversation.Machine) {
+  if (told || !needsStructured) return told
+  const conversation = try Conversation.Machine
+  const current = try conversation.get()
+  if (current.observing) return true
+  if (current.support.status === "Loaded") return false
+  const probed = try readOptionalSupport()
+  const after = try conversation.get()
+  if (probed.ok && Conversation.canSupported(after, after.support.ticket)) {
+    try ignore(conversation.send({ type: "supported", ticket: after.support.ticket, ok: true, takes: probed.takes }))
+  }
+  return (probed.ok && probed.takes) || (try conversation.get()).observing
+}
+
+// spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+effect function reviewedEmailForSend(heldMail: boolean, attachment: MailQuestion | undefined, told: boolean): { readonly ok: boolean; readonly email?: ReviewedEmail }!!MailQuestions {
+  const mail = try MailQuestions
+  const email = heldMail
+    ? (attachment !== undefined && attachment === mail.attached() ? (reviewedMail(attachment) catch () => undefined) : undefined)
+    : undefined
+  if (heldMail && !Locator.sendsReviewedEmail(true, email !== undefined, told)) {
+    if (email === undefined) mail.show({ failure: "changed" })
+    return { ok: false }
+  }
+  return { ok: true, email }
+}
+
+// spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+function structuredAttachmentsReady(
+  held: Composer.Message,
+  exactNote: boolean,
+  screen: TurnContext | undefined,
+  sensitive: boolean,
+  told: boolean,
+): { readonly exact: boolean; readonly carried: boolean } {
+  const exact = !held.transcript || (
+    Locator.sendsVoiceNoteTranscript(true, exactNote, sensitive, told)
+    && screen?.useSelectedVoiceNoteTranscript === true
+  )
+  const carried = Locator.turnContextCarriesAttachment(
+    held.mail, screen?.reviewedEmail !== undefined, held.transcript, exactNote, sensitive, told,
+  )
+  return { exact, carried }
+}
+
+function sameStagedTranscript(
+  transcript: NonNullable<Board["staged"]>["transcript"],
+  staged: Board["staged"],
+  board: Board,
+  composer: Composer.Composer,
+  currentComposer: Composer.Composer,
+  current: Conversation.Conversation,
+  selected: NonNullable<TurnContext["observation"]>["selectedObject"],
+): boolean {
+  return transcript !== undefined && transcript === board.snapshot().transcript &&
+    staged === board.staged && currentComposer.away === "Asked" && currentComposer.held.transcript &&
+    currentComposer.hold === composer.hold && sameBinding(currentComposer.binding, composer.binding) &&
+    !current.context.sensitive && current.context.selected && selected?.kind === "canonical-note" &&
+    selected.id === transcript.offered.record.id && selected.revision === transcript.offered.record.revision
+}
+
+effect function endRefused(queue: Queue.Queue<Conversation.Event, Cause.Done>, ticket: number, declineReply: boolean, offer = true): void!!Reply.Machine {
+  if (declineReply) try ignore((try Reply.Machine).send({ type: "decline", turn: ticket }))
+  if (offer) Queue.offerUnsafe(queue, { type: "refuse", ticket })
+  Queue.endUnsafe(queue)
+}
+
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | Device | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore | Time> {
+  const post = (queue: Queue.Queue<Conversation.Event, Cause.Done>, request: CommsRequest | undefined) => effect {
+    const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
     let shown: Promise<unknown> | undefined
@@ -245,66 +634,67 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     const history = try Chats.Machine
     const conversation = try Conversation.Machine
+    const seat = board.draftSeat
+    if (seat === undefined || !(try ownsSeat(board, seat))) return try endRefused(queue, ticket, false)
     const chats = try history.get()
     const known = board.known(chats.chosen)
-    const request = board.postingRequest
-    board.postingRequest = undefined
     const text = (request?.text ?? board.outgoing).trim()
     const composer = try (try Composer.Machine).get()
     const held = request === undefined ? composer.held : Composer.blankMessage
     const stage = board.staged
-    const staged = request === undefined && stage?.ticket === ticket && stage.hold === composer.hold && sameBinding(stage.binding, composer.binding) ? stage : undefined
+    const contact = request?.contact
+    const contactDraft = contact?.draft
+    const staged = stage?.ticket === ticket && (contactDraft !== undefined
+      ? stage.contactDraft === contactDraft && stage.binding.owner === seat.number && stage.binding.conversation === chats.chosen
+      : request === undefined && stage.contactDraft === undefined && stage.hold === composer.hold && sameBinding(stage.binding, composer.binding)) ? stage : undefined
     const files = staged?.files ?? []
     const quoted = board.line(chats.chosen, held.quote)
-    if (known === undefined || (text.trim() === "" && files.length === 0 && !held.mail && !held.transcript) || (held.quote > 0 && quoted === undefined) || held.files !== files.length) {
-      Queue.offerUnsafe(queue, { type: "refuse", ticket })
-      Queue.endUnsafe(queue)
-      return
+    const expectedFiles = contactDraft?.files.length ?? held.files
+    if (known === undefined || (text.trim() === "" && files.length === 0 && !held.mail && !held.transcript) || (held.quote > 0 && quoted === undefined) || expectedFiles !== files.length) {
+      return try endRefused(queue, ticket, false)
     }
-    const mail = try MailQuestions
     if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
     const review = try MediaReview
     const enrolled = context.sensitive ? undefined : try review.session()
     const messageTarget = enrolled === undefined ? undefined : try review.messageTarget()
+    // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
+    const mayAskFiles = enrolled !== undefined && request === undefined && told && !held.mail && !held.transcript
+      && files.length === 0 && quoted === undefined
+    const lookingAtFiles = viewOf(context.showing) === "files"
+    const requestedFiles = mayAskFiles && lookingAtFiles ? try review.filesContext() : undefined
+    const outsideOrigin = mayAskFiles && !lookingAtFiles ? try review.filesOrigin() : undefined
+    const voicemail = enrolled === undefined ? undefined : try review.voicemailTarget()
     try ignore(reply.send({ type: "begin", turn: ticket }))
-    const attachment = staged?.mail
     const transcript = staged?.transcript
-    const words = held.mail ? (attachment !== undefined && attachment === mail.attached() ? (withMail(text, attachment) catch () => undefined) : undefined) : text
-    if (words === undefined) {
-      mail.show({ failure: "changed" })
-      try ignore(reply.send({ type: "decline", turn: ticket }))
-      Queue.offerUnsafe(queue, { type: "refuse", ticket })
-      Queue.endUnsafe(queue)
-      return
-    }
-    const authority = files.length === 0 ? undefined : try attachmentAuthority()
-    if (files.length > 0 && authority === undefined) {
+    const effectiveTold = try ensureOptionalFieldsSupport(told, held.mail || held.transcript)
+    const mailReview = try reviewedEmailForSend(held.mail, staged?.mail, effectiveTold)
+    if (!mailReview.ok) return try endRefused(queue, ticket, true)
+    const authority = staged?.authority
+    const observed = files.length === 0 ? undefined : try attachmentAuthority()
+    if (files.length > 0 && (authority === undefined || observed === undefined || !Attachments.sameArchiveAuthority(authority, observed))) {
       board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." })
-      try ignore(reply.send({ type: "decline", turn: ticket }))
-      Queue.offerUnsafe(queue, { type: "refuse", ticket })
-      Queue.endUnsafe(queue)
-      return
+      return try endRefused(queue, ticket, true)
     }
-    const outgoing = transcript === undefined ? words : `Use the transcript of the selected voice note to answer this question.\n\n${words}`
-    const { metadata: screen, sms } = try screenTold(told, context, transcript?.offered)
+    // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text"
+    const { metadata: screen, sms, attachment: openFile } = try screenTold(effectiveTold, context, transcript?.offered, mailReview.email)
     const selected = screen?.observation?.selectedObject
+    const owns = try ownsSeat(board, seat)
+    const checkedOwner = owns ? seat?.authority : undefined
     const current = try conversation.get()
     const currentComposer = try (try Composer.Machine).get()
-    const exact = !held.transcript || (transcript !== undefined && transcript === board.snapshot().transcript &&
-      staged === board.staged && currentComposer.away === "Asked" && currentComposer.held.transcript &&
-      currentComposer.hold === composer.hold && sameBinding(currentComposer.binding, composer.binding) &&
-      !current.context.sensitive && current.context.selected && selected?.kind === "canonical-note" &&
-      selected.id === transcript.offered.record.id && selected.revision === transcript.offered.record.revision)
-    if (!exact || !Conversation.canFinish(current, ticket) || current.turn.stopping ||
-      current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
+    const exactNote = sameStagedTranscript(transcript, staged, board, composer, currentComposer, current, selected)
+    const { exact, carried } = structuredAttachmentsReady(held, exactNote, screen, current.context.sensitive, effectiveTold)
+    const onContact = contact === undefined || (staged === board.staged
+      && board.snapshot().contactDraft === contactDraft && (try contactFileSendCurrent(contact)))
+    if (!owns || !exact || !carried || !onContact || (authority !== undefined && (checkedOwner === undefined || !Attachments.sameArchiveAuthority(authority, checkedOwner))) ||
+      !Conversation.canFinish(current, ticket) || current.turn.stopping || current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
       if (!exact && transcript !== undefined) try retireTranscript(transcript)
-      try ignore(reply.send({ type: "decline", turn: ticket }))
-      if (Conversation.canRefuse(current, ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
-      Queue.endUnsafe(queue)
-      return
+      return try endRefused(queue, ticket, true, Conversation.canRefuse(current, ticket))
     }
     if (authority !== undefined) try bindArchiveAuthority(board, authority)
     const pageTicket = (try history.get()).page.ticket
+    const releasePage = board.holdTurnPage(pageTicket)
+    try addFinalizer(() => sync(releasePage))
     const mine: Line = {
       id: `sent ${ticket}`, mine: true, text,
       ...(quoted === undefined ? {} : { quote: quoted.text }),
@@ -312,35 +702,75 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     board.append(pageTicket, chats.chosen, mine)
     board.lastSent = text
-    board.lastSentWire = outgoing
-    board.lastSentId = ""
+    const previousStop = controller.stopped
+    if (previousStop !== null) controller.releaseStopped(previousStop.clientMessageId)
+    const post: PostedMessage = { turn: ticket, seat, record: known.record }
+    board.lastPost = post
     let heard = false
     board.change({ reply: "", label: "", failure: undefined })
     const preview = (written: string, provisional: boolean) => {
+      if (board.draftSeat !== seat) return
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
       heard = true
-      board.change({ reply: written, label: "" })
+      // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": text that may still be taken back keeps the working label.
+      if (!provisional) board.change({ reply: written, label: "" })
       show({ type: "token", turn: ticket, units: written.length, provisional })
     }
+    // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": once the acknowledgment is taken it stays the label until text or the reply arrives.
+    let acknowledged = false
+    let toolRan = false
+    const labelled = () => !acknowledged && board.snapshot().reply === ""
     const hooks = {
       onPreview: preview,
       onAcknowledgment: (said: string) => {
-        board.change({ label: said })
+        if (board.draftSeat !== seat) return
         show({ type: "acknowledge", turn: ticket, units: said.length })
+        if (acknowledged || toolRan || board.snapshot().reply !== "") return
+        acknowledged = true
+        board.change({ label: said })
       },
-      onStatus: (activity: string) => { if (board.snapshot().reply === "") board.change({ label: activity }) },
+      onStatus: (activity: string) => { if (board.draftSeat === seat && labelled()) board.change({ label: activity }) },
       onTool: (name: string, label: string | undefined) => {
+        if (board.draftSeat !== seat) return
         show({ type: "toolStarts", turn: ticket })
-        if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
+        toolRan = true
+        if (labelled()) board.change({ label: label ?? `Using ${name}` })
       },
+      // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": the reply the agent stored is settled text, shown at once, so Stop keeps it.
+      onReady: (fullText: string) => { if (fullText !== "") preview(fullText, false) },
     }
-    board.change({ media: [], mediaNote: undefined })
+    board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNote: undefined })
     const views = try Views
     const asked = try views.begin()
-    const metadata = { ...screen, ...(told ? delivery(views.clientId) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
-    const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
-    const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
+    // spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"
+    const openDocument = openFile !== undefined && !files.some((one) => one.id === openFile.id) && Locator.sendsOpenDocument("Typed", {
+      filesShowing: context.showing.tag === "App" && context.showing.view === "Files", readable: openFile.mimeType === "text/plain",
+      sensitive: context.sensitive, currentTurn: Conversation.canFinish(try conversation.get(), ticket),
+    }) ? [openFile] : []
+    const asksDirect = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
+    const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
+    const sent = effect (direct: boolean) => {
+      const metadata = { ...screen, ...(effectiveTold ? delivery(views.clientId, try views.shown(), direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+      const headers = enrolled === undefined ? undefined : try review.turnHeaders(enrolled, false)
+      return tryPromise(() => controller.send({ text, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(headers === undefined ? {} : { headers }) })) catch () => undefined
+    }
+    if (contact !== undefined && (!(try contactFileSendCurrent(contact)) || board.snapshot().contactDraft !== contactDraft)) {
+      board.drop(pageTicket, mine)
+      return try endRefused(queue, ticket, true, Conversation.canRefuse(try conversation.get(), ticket))
+    }
+    const first = try sent(asksDirect)
+    const directFiles = asksDirect && !resendWithoutMode(first, asksDirect)
+    const result = directFiles || !asksDirect ? first : try sent(false)
+    if (!(try ownsSeat(board, seat))) {
+      Queue.offerUnsafe(queue, { type: "lose", ticket })
+      Queue.endUnsafe(queue)
+      return
+    }
     const event = ended(ticket, heard, result)
+    const messageId = result?.kind === "AgentFailed" || result?.kind === "Replied" ? result.reply?.messageId : undefined
+    if (result !== undefined && "clientMessageId" in result) {
+      post.receipt = { clientMessageId: result.clientMessageId, ...(messageId ? { replyId: messageId } : {}) }
+    }
     if (authority !== undefined && event.type !== "refuse" && result !== undefined && "clientMessageId" in result) {
       const currentOwner = try attachmentAuthority()
       if (currentOwner !== undefined && Attachments.sameArchiveAuthority(authority, currentOwner)) {
@@ -348,39 +778,48 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (!(try rememberFiles(archive, result.clientMessageId, files))) board.change({ attachmentNotice: "Could not keep the sent attachments on this phone." })
       } else try bindArchiveAuthority(board, currentOwner)
     }
-    board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
-    board.change({ ...(keepStreamed ? {} : { reply: "" }), label: "", ...(ending.type === "failed" ? { failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } } : {}) })
+    board.change({
+      ...(keepStreamed ? {} : { reply: "" }), label: "",
+      ...(ending.type === "failed" ? { failure: {
+        kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result), ...(messageId === undefined ? {} : { messageId }),
+      } } : {}),
+    })
     show(ending)
     const pendingShow = shown
     if (pendingShow !== undefined) try promise(() => pendingShow)
     if (request !== undefined && (heard || event.type === "finish")) {
       const comms = try Comms.Machine
       const current = (try comms.get()).requests.find((one) => one.about === request.about)
-      if (current?.request === request.text) try contained(comms.send({ type: "requestSent", about: request.about }, "Owner"), "clearing the accepted request")
+      const sameDraft = contactDraft === undefined || board.snapshot().contactDraft === contactDraft
+      if (sameDraft && current?.request === request.text) try contained(comms.send({ type: "requestSent", about: request.about }, "Owner"), "clearing the accepted request")
+      if (contactDraft !== undefined && board.snapshot().contactDraft === contactDraft) board.change({ contactDraft: undefined })
     }
     const finishing = Conversation.canFinish(try conversation.get(), ticket)
     if (result?.kind === "Replied" && finishing) {
-      const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
-      if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
-      if (result.reply.userMessageId !== undefined) {
-        board.messageNumber(result.reply.userMessageId)
-        board.rename(pageTicket, mine, result.reply.userMessageId)
-      }
-      board.messageNumber(result.reply.messageId)
-      board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
-      try syncAlphaApps()
-      if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
-        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget,
-          { clientMessageId: result.clientMessageId, actionResults: streamed(result.clientMessageId) ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }) })
-        if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
-          && (try history.get()).chosen === chats.chosen) board.change({ media })
-      }
+      try settleReplied({
+        ticket, told, context, seat, chosen: chats.chosen, conversationId: known.record.id, pageTicket, mine, asked,
+        directFiles, requestedFiles, outsideOrigin, enrolled, messageTarget, voicemail, sms, transcript, result,
+      })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)
     Queue.offerUnsafe(queue, event)
     Queue.endUnsafe(queue)
+  }
+  return Stream.callback<Conversation.Event, never, Views | Agent | Device | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore | Time>((queue) => effect {
+    const { board, writer } = try Talk
+    const pending = board.postingRequest
+    const request = pending?.ticket === ticket ? pending.request : undefined
+    if (pending?.ticket === ticket) board.postingRequest = undefined
+    const { controller } = try Turns
+    const posted = try writer.withPermitsIfAvailable(1)(Effect.ensuring(post(queue, request), effect {
+      if (controller.pending) try ignore(tryPromise(() => controller.interrupt()))
+    }))
+    if (Option.isNone(posted)) {
+      Queue.offerUnsafe(queue, { type: "refuse", ticket })
+      Queue.endUnsafe(queue)
+    }
   })
 }
 
@@ -392,27 +831,77 @@ effect function aborted(turn: number): Conversation.Event!!Turns {
 }
 
 // spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
-/** The message is found by the id its turn was posted under, or by its text where the post never said which. */
-effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Chats.Machine) {
+effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Turns | Chats.Machine | Conversation.Machine) {
+  const unread = { type: "reconcile", ticket: recheck, found: "Unread" } as const
   return effect {
     const { board } = try Talk
-    const chats = try (try Chats.Machine).get()
-    const known = board.known(chats.chosen)
-    if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
-    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
-    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSentWire : one.clientMessageId === board.lastSentId))
-    const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
+    const post = board.lastPost
+    if (post === undefined || !(try ownsSeat(board, post.seat))) return unread
+    const conversation = try Conversation.Machine
+    const chats = try Chats.Machine
+    const current = effect {
+      const state = try conversation.get()
+      const shown = board.known((try chats.get()).chosen)?.record
+      return board.lastPost === post && board.draftSeat === post.seat && Conversation.canReconcile(state, recheck)
+        && state.turn.send.id === post.turn && shown?.id === post.record.id && shown.roomId === post.record.roomId
+    }
+    if (!(try current)) return unread
+    const { controller } = try Turns
+    const stopped = controller.stopped
+    const stoppingThisPost = stopped?.conversation.id === post.record.id && stopped.conversation.roomId === post.record.roomId
+    const id = post.receipt?.clientMessageId ?? (stoppingThisPost ? stopped.clientMessageId : undefined)
+    if (id === undefined) return unread
+    const { messages, hasMore } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(post.record.id)}/messages`), page())
+    if (!(try ownsSeat(board, post.seat)) || !(try current)) return unread
+    const receipt = post.receipt
+    if (receipt !== undefined && receipt.clientMessageId !== id) return unread
+    const asked = findStoppedUserTurn(messages, id)
+    const exact = receipt?.replyId === undefined ? undefined : messages.find((one) => one.id === receipt.replyId && one.role === "assistant")
+    const following = asked === undefined ? undefined : messages[messages.lastIndexOf(asked) + 1]
+    const history: Conversation.HistoryEvidence = asked === undefined
+      ? { tag: "MissingMessage", complete: hasMore === false && receipt?.replyId === undefined }
+      : { tag: "RecordedMessage", answer: exact !== undefined ? (exact.failureKind === "aborted" ? "MatchedAbort" : "MatchedReply")
+        : receipt?.replyId !== undefined || following?.role === "assistant" ? "UnknownReply" : "MissingReply" }
+    const found = Conversation.observedHistory(history)
+    if (found !== "Unread" && stoppingThisPost && stopped.clientMessageId === id) controller.releaseStopped(id)
     return { type: "reconcile", ticket: recheck, found }
-  } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
+  } catch () => unread
 }
 
 // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
-effect function staged(ticket: number, attachments: number): Conversation.Event!!(Conversation.Machine | Composer.Machine | Talk | MailQuestions) {
+effect function stagedContactFiles(ticket: number, count: number, request: CommsRequest, contact: NonNullable<CommsRequest["contact"]>): Conversation.Event!!(ContactAttachmentScope | Chats.Machine | Agent) {
+  const conversation = try Conversation.Machine
+  const history = try Chats.Machine
+  const { board } = try Talk
+  const rejected: Conversation.Event = { type: "uploaded", ticket, ok: false }
+  const seat = board.draftSeat
+  const chosen = (try history.get()).chosen
+  const draft = contact.draft
+  const authority = try attachmentAuthority()
+  if (seat === undefined || chosen === 0 || draft.files.length !== count || authority === undefined || !Attachments.sameArchiveAuthority(draft.target.authority, authority)
+    || !(try contactFileSendCurrent(contact)) || !Conversation.canUploaded(try conversation.get(), ticket)
+    || board.snapshot().contactDraft !== draft || board.postingRequest?.request !== request) return rejected
+  const key = fresh()
+  if (!(try stageFiles(key, draft.files))) return rejected
+  const pending = try conversation.get()
+  if (!Conversation.canUploaded(pending, ticket) || pending.turn.stopping || board.postingRequest?.request !== request
+    || board.snapshot().contactDraft !== draft || !(try contactFileSendCurrent(contact))
+    || board.draftSeat !== seat || (try history.get()).chosen !== chosen) {
+    try dropFiles(key)
+    return rejected
+  }
+  board.staged = { ticket, hold: 0, binding: { owner: seat.number, conversation: chosen }, key, files: draft.files, authority, contactDraft: draft }
+  return { type: "uploaded", ticket, ok: true }
+}
+
+effect function staged(ticket: number, attachments: number): Conversation.Event!!(ContactAttachmentScope | Chats.Machine | Composer.Machine | MailQuestions | Agent) {
   const conversation = try Conversation.Machine
   const composer = try Composer.Machine
   const before = try composer.get()
   const turn = (try conversation.get()).turn
   const { board } = try Talk
+  const request = board.postingRequest?.ticket === ticket ? board.postingRequest.request : undefined
+  if (request?.contact !== undefined) return try stagedContactFiles(ticket, attachments, request, request.contact)
   const snapshot = board.snapshot()
   const files = sameBinding(snapshot.filesBinding, before.binding) ? snapshot.files : []
   const mail = try MailQuestions
@@ -426,6 +915,14 @@ effect function staged(ticket: number, attachments: number): Conversation.Event!
     return rejected
   }
   if (files.length + Number(item !== undefined) + Number(transcript !== undefined) !== attachments || files.length !== before.held.files) return rejected
+  const authority = files.length === 0 ? undefined : snapshot.filesAuthority
+  if (files.length > 0) {
+    const observed = try attachmentAuthority()
+    if (authority === undefined || observed === undefined || !Attachments.sameArchiveAuthority(authority, observed)) {
+      board.change({ attachmentNotice: "These attachments belong to an earlier Ask Alpha session. Remove them and choose again." })
+      return rejected
+    }
+  }
   const key = files.length === 0 ? undefined : fresh()
   if (key !== undefined && !(try stageFiles(key, files))) {
     board.change({ attachmentNotice: "Could not save the attachments. Try again." })
@@ -440,6 +937,7 @@ effect function staged(ticket: number, attachments: number): Conversation.Event!
   }
   board.staged = {
     ticket, hold: before.hold, binding: before.binding, files,
+    ...(authority === undefined ? {} : { authority }),
     ...(key === undefined ? {} : { key }), ...(item === undefined ? {} : { mail: item }), ...(transcript === undefined ? {} : { transcript }),
   }
   return { type: "uploaded", ticket, ok: true }
@@ -451,9 +949,16 @@ effect function settled(hold: number, sent: boolean): void!!(Talk | Composer.Mac
   const event: Composer.Event = sent ? { type: "commit", hold } : { type: "release", hold }
   if (!Composer.enabled(try composer.get(), event)) return
   const staged = board.staged
-  if (sent) board.change({ files: [], filesBinding: undefined, transcript: undefined, attachmentNotice: "" })
+  if (sent) board.change({ files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "" })
   else giveBack(board)
   try contained(composer.send(event), "settling the composer")
+  if (!sent) {
+    const restored = board.snapshot().typed
+    if (restored.length > Composer.textLimit) {
+      const tooLong: Composer.Event = { type: "edit", blank: restored.trim() === "", long: true }
+      if (Composer.enabled(try composer.get(), tooLong)) try contained(composer.send(tooLong), "marking restored draft length")
+    }
+  }
   if (!sent && board.snapshot().transcript === undefined && (try composer.get()).editor.transcript) try retireTranscript()
   if (staged?.hold === hold) {
     if (board.staged === staged) board.staged = undefined
@@ -465,13 +970,28 @@ effect function settled(hold: number, sent: boolean): void!!(Talk | Composer.Mac
   }
 }
 
+effect function arrived(recorded: boolean): void!!(Composer.Machine | Talk) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  const before = try composer.get()
+  if (!Composer.canArrived(before, recorded)) return
+  const { typed, saved } = board.snapshot()
+  if (!recorded) board.change({ typed: saved === "" ? typed : typed === "" ? saved : `${saved}\n${typed}`, saved: "" })
+  const accepted = try contained(composer.send({ type: "arrived", recorded }), "telling the composer")
+  if (!accepted) {
+    if (!recorded) board.change({ typed, saved })
+    return
+  }
+  if (recorded) board.change({ saved: "" })
+}
+
 function giveBack(board: Board) {
   const { typed } = board.snapshot()
   board.change({ typed: typed === "" ? board.outgoing : `${board.outgoing}\n${typed}` })
   board.outgoing = ""
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", staged(ticket, attachments), { type: "uploaded", ticket, ok: false });
@@ -486,11 +1006,31 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
     when { tag: "Prompted" }: run("prompted", Effect.void);
     when { tag: "Kept", let messages }: run("kept", effect { try contained((try Chats.Machine).send({ type: "kept", messages }), "counting kept messages") });
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
-    when { tag: "Arrived", let recorded }: run("arrived", effect { try contained((try Composer.Machine).send({ type: "arrived", recorded }), "telling the composer") });
-    when { tag: "Navigate", let turn, let view }: answer("navigate", effect {
+    when { tag: "Arrived", let recorded }: run("arrived", arrived(recorded));
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
+    when { tag: "Navigate", let turn, let view, let inside }: answer("navigate", effect {
       const shell = try Shell
-      const shown = showing(try shell.get(), view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view the agent named"))
+      const before = try shell.get()
+      const shown = inside
+        ? (showing(before, view) && !canAgentShowInside(before, view)) || (try contained(shell.send({ type: "agentShowInside", view }), "opening the page the agent named"))
+        : (showing(before, view) && !canAgentShowView(before, view)) || (try contained(shell.send({ type: "agentShowView", view }), "opening the view the agent named"))
       return { type: "navigated", ticket: turn, opened: shown } as Conversation.Event
+    }, { type: "navigated", ticket: turn, opened: false });
+    when { tag: "NavigateHome", let turn }: answer("navigate", effect {
+      const shell = try Shell
+      const home = !canAgentGoHome(try shell.get()) || (try contained(shell.send({ type: "agentGoHome" }), "going Home as the agent named"))
+      return { type: "navigated", ticket: turn, opened: home } as Conversation.Event
+    }, { type: "navigated", ticket: turn, opened: false });
+    when { tag: "NavigateFiles", let turn, let source, let panel, let route }: answer("navigate", effect {
+      const conversation = try Conversation.Machine
+      const shell = try Shell
+      const opened = try contained(shell.send({ type: "agentOpenFilesFrom", source, panel, route, spoken: false }, () => {
+        const state = Effect.runSync(conversation.get())
+        return state.opening.id === turn && state.opening.outcome === "Sent" && state.turn.send.id === turn
+          && state.turn.reply === "Complete" && !state.turn.stopping && !state.context.sensitive
+          && state.turn.revision === state.context.revision
+      }), "opening Files for the completed reply")
+      return { type: "navigated", ticket: turn, opened } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });
     when { tag: "Navigated" }: run("navigated", Effect.void);
   }
@@ -554,7 +1094,10 @@ const forgetting = started(effect {
 effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   return effect {
     const { board } = try Talk
+    const seat = board.draftSeat
+    if (!(try ownsSeat(board, seat))) return { type: "listed", ticket, ok: false, ids: [] }
     const { conversations } = try ask(Agent, HttpClientRequest.get("/api/conversations"), listing())
+    if (!(try ownsSeat(board, seat))) return { type: "listed", ticket, ok: false, ids: [] }
     return { type: "listed", ticket, ok: true, ids: conversations.map((one) => board.numberOf({ id: one.id, roomId: one.roomId } as ConversationRecord, one.title)) }
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
@@ -566,37 +1109,101 @@ effect function newest(page: number, conversation: number): Chats.Event!!(Agent 
   return read.type === "listed" ? { type: "latest", page, ok: read.ok, ids: read.ids, conversation, ...free } : read
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there"
+const historyRadius = 100
+
+/** Prove the edges of a centered window, where a full side alone cannot say anything about the row past it. */
+effect function historyBounds(path: string, pivot: string | undefined, answer: ReturnType<typeof page>["Type"], current: boolean!!(Agent | Chats.Machine)): HistoryBounds!!(Agent | Chats.Machine) {
+  const { messages, hasMore, hasEarlier, hasLater } = answer
+  const first = messages[0]
+  const last = messages.at(-1)
+  if (first === undefined || last === undefined) return {}
+  if (pivot === undefined) return (hasEarlier ?? hasMore) === true ? { earlier: first.id } : {}
+  const center = messages.findIndex((one) => one.id === pivot)
+  if (center < 0) return {}
+  const older = effect {
+    if (hasEarlier !== undefined) return hasEarlier
+    if (center < historyRadius || first.timestamp === undefined || !(try current)) return false
+    const before = String(first.timestamp)
+    const edge = ask(Agent, HttpClientRequest.get(path, { urlParams: { before, beforeId: first.id, limit: "1" } }), pageEdge()) catch () => undefined
+    return edge?.messages.length === 1
+  }
+  const newer = effect {
+    if (hasLater !== undefined) return hasLater
+    if (messages.length - center - 1 < historyRadius || !(try current)) return false
+    const edge = ask(Agent, HttpClientRequest.get(path, { urlParams: { around: last.id } }), pageEdge()) catch () => undefined
+    const at = edge?.messages.findIndex((one) => one.id === last.id) ?? -1
+    return edge !== undefined && at >= 0 && at < edge.messages.length - 1
+  }
+  const [earlier, later] = try Effect.all([older, newer], { concurrency: "unbounded" })
+  return { ...(earlier ? { earlier: first.id } : {}), ...(later ? { later: last.id } : {}) }
+}
+
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
 /** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. A 404 to a read of the latest messages is told as such, for the agent's list to decide. */
-effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine) {
+effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine | Speaker) {
   return effect {
     const { board } = try Talk
+    const seat = board.draftSeat
     const known = board.known(conversation)
-    if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
+    if (known === undefined || !(try ownsSeat(board, seat))) return { type: "paged", ticket, ok: false, messages: 0 }
     const composer = try Composer.Machine
     const owner = (try composer.get()).binding.owner
-    const authority = try attachmentAuthority()
+    const authority = seat?.authority
     const pivot = around > 0 ? board.messageId(around) : undefined
-    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    const keys = messages.flatMap((one) => (one.role === "user" && one.clientMessageId ? [one.clientMessageId] : []))
+    if (around > 0 && pivot === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
+    const path = `/api/conversations/${encodeURIComponent(known.record.id)}/messages`
+    const answer = try ask(Agent, HttpClientRequest.get(path, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
+    const { messages } = answer
+    if (pivot !== undefined && !messages.some((one) => one.id === pivot)) return { type: "paged", ticket, ok: false, messages: 0 }
+    const edgeCurrent = effect {
+      const live = try (try Chats.Machine).get()
+      return live.chosen === conversation && live.page.ticket === ticket && (try ownsSeat(board, seat))
+    }
+    const bounds = try historyBounds(path, pivot, answer, edgeCurrent)
+    const redacted = new Set(messages.filter((one) => one.text === privateHistoryNotice).map((one) => one.id))
+    const keys = messages.flatMap((one) => {
+      const key = one.clientMessageId
+      return key !== undefined && Attachments.archiveRowNamesFile(one.role === "user", redacted.has(one.id), key) ? [key] : []
+    })
     const saved = authority === undefined ? undefined : try readFiles({ authority, conversation: known.record.id, room: known.record.roomId }, keys)
-    const currentOwner = (saved?.size ?? 0) === 0 ? authority : try attachmentAuthority()
+    const currentOwner = try attachmentAuthority()
     const current = try (try Chats.Machine).get()
-    if (current.chosen !== conversation || current.page.ticket !== ticket || owner !== (try composer.get()).binding.owner) return { type: "paged", ticket, ok: false, messages: 0 }
+    if (seat !== board.draftSeat || currentOwner === undefined || seat === undefined ||
+      !Attachments.sameArchiveAuthority(seat.authority, currentOwner) || current.chosen !== conversation ||
+      current.page.ticket !== ticket || owner !== (try composer.get()).binding.owner) return { type: "paged", ticket, ok: false, messages: 0 }
     try bindArchiveAuthority(board, currentOwner)
+    const reading = try (try Chats.Machine).get()
+    const draft = try composer.get()
+    const speaker = try (try Speaker).get()
+    if (seat !== board.draftSeat || reading.chosen !== conversation || reading.page.ticket !== ticket ||
+      draft.binding.owner !== owner) return { type: "paged", ticket, ok: false, messages: 0 }
+    const readers = [
+      { conversation: draft.binding.conversation, message: draft.editor.quote },
+      { conversation: draft.binding.conversation, message: draft.held.quote },
+      { conversation, message: Chats.making(reading) ? reading.forkAt : 0 },
+      { conversation, message: speaker.text === "Message" && (speaker.stage === "Waiting" || speaker.stage === "Preparing") ? speaker.item : 0 },
+    ].filter(({ conversation, message }) => conversation > 0 && message > 0)
     const recorded = messages.map((one): Line => {
+      // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": eliza stores a reply stopped before any of its text settled as aborted, with the provisional text it had, which is never shown; one whose stream Alpha closed first (client_left) keeps only its notice.
+      const aborted = one.role === "assistant" && one.failureKind === "aborted"
+      if (aborted && one.abortCause === "stop") return { id: one.id, mine: false, text: "" }
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
-        Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", key) ? saved?.get(key) : undefined
+        Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", redacted.has(one.id), key) ? saved?.get(key) : undefined
+      const failure = one.role !== "assistant" || one.failureKind === undefined ? undefined
+        : Reply.readAgain(failures[one.failureKind] ?? "OtherFailure", one.cloudCode !== undefined)
       return {
-        id: one.id, mine: one.role === "user", text: one.text,
-        ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
+        id: one.id, mine: one.role === "user", text: aborted && one.abortCause === "client_left" ? "" : one.text,
+        ...(failure === undefined ? {} : { failure }),
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
-    const ids = new Set(recorded.map((one) => one.id))
-    board.putPage(ticket, conversation, [...recorded, ...board.page(ticket).filter((one) => !ids.has(one.id))])
     const numbers = messages.map((one) => board.messageNumber(one.id))
+    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds, readers)
+    if (preview !== undefined) {
+      const picker = try Attachments.Machine
+      try ignore(picker.send({ type: "closePreview" }, (state) => state.preview === preview && board.snapshot().preview === undefined))
+    }
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch (failure) => (around === 0 && failure instanceof Refused && failure.status === 404 ? { type: "notFound", ticket } : { type: "paged", ticket, ok: false, messages: 0 })
 }
@@ -606,7 +1213,10 @@ effect function making(ticket: number, request: HttpClientRequest.HttpClientRequ
   const chats = try (try Chats.Machine).get()
   return effect {
     const { board } = try Talk
+    const seat = board.draftSeat
+    if (!(try ownsSeat(board, seat))) return { type: "made", ticket, confirmed: false, known: true, conversation: chats.chosen + 1 }
     const { conversation } = try ask(Agent, request, made())
+    if (!(try ownsSeat(board, seat))) return { type: "made", ticket, confirmed: false, known: false, conversation: chats.chosen + 1 }
     return { type: "made", ticket, confirmed: true, known: true, conversation: board.numberOf({ id: conversation.id, roomId: conversation.roomId } as ConversationRecord, conversation.title) }
   } catch (failure) => {
     const { confirmed, known } = outcomeOf(failure)
@@ -635,103 +1245,205 @@ function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Mac
   }
 }
 
-effect function slotOf(binding: Composer.Binding): { found: Composer.Found; revision: number; text: string }!!KeyValueStore.KeyValueStore {
-  const store = try KeyValueStore.KeyValueStore
+type SlotReading = { found: Composer.Found; revision: number; text: string; raw?: string; lastSentId?: string; lastSentWire?: string }
+
+function emptySlot(found: Composer.Found): SlotReading {
+  return { found, revision: 0, text: "" }
+}
+
+effect function slotOf(board: Board, slot: DraftSlot | undefined): SlotReading!!(Agent | KeyValueStore.KeyValueStore) {
+  if (slot === undefined) return emptySlot("Nothing")
   return effect {
-    const raw = try store.get(slotKey(binding))
-    if (raw === undefined) return { found: "Nothing" as const, revision: 0, text: "" }
-    return effect {
-      const slot = try Schema.decodeUnknownEffect(slotted)(raw)
-      return { found: slot.sending ? "Sending" as const : "Saved" as const, revision: slot.revision, text: slot.text }
-    } catch () => ({ found: "Corrupt" as const, revision: 0, text: "" })
-  } catch () => ({ found: "Failure" as const, revision: 0, text: "" })
+    let raw: string | undefined
+    if (slot.phone === undefined) raw = try (try KeyValueStore.KeyValueStore).get(slot.key)
+    else {
+      if (slot.seat !== board.draftSeat) return emptySlot("Failure")
+      if (board.phoneDrafts?.kind !== "temporary") {
+        const answer = try readPhoneDraft(slot.phone)
+        if (slot.seat !== board.draftSeat) return emptySlot("Failure")
+        if (answer.status === "failure") return emptySlot("Failure")
+        if (answer.status === "read") {
+          board.phoneDrafts ??= { kind: "encrypted" }
+          raw = answer.raw
+        } else {
+          if (!(try ownsSeat(board, slot.seat))) return emptySlot("Failure")
+          board.phoneDrafts ??= { kind: "temporary", values: new Map<string, string>() }
+          if (board.phoneDrafts.kind === "encrypted") return emptySlot("Failure")
+        }
+      }
+      if (board.phoneDrafts?.kind === "temporary") {
+        if (!(try ownsSeat(board, slot.seat))) return emptySlot("Failure")
+        raw = board.phoneDrafts.values.get(slot.key)
+      }
+    }
+    if (raw === undefined) return emptySlot("Nothing")
+    const decoded = Schema.decodeUnknownOption(slotted)(raw)
+    if (Option.isNone(decoded)) return { ...emptySlot("Corrupt"), raw }
+    const saved = decoded.value
+    return {
+      found: saved.sending ? "Sending" as const : "Saved" as const,
+      revision: saved.revision,
+      text: saved.text,
+      raw,
+      ...(saved.lastSentId === undefined ? {} : { lastSentId: saved.lastSentId }),
+      ...(saved.lastSentWire === undefined ? {} : { lastSentWire: saved.lastSentWire }),
+    }
+  } catch () => emptySlot("Failure")
+}
+
+effect function putSlot(board: Board, slot: DraftSlot, expected: string | undefined, next: string | undefined): boolean!!(Agent | KeyValueStore.KeyValueStore) {
+  if (slot.phone === undefined) return effect {
+    const store = try KeyValueStore.KeyValueStore
+    if (next === undefined) try store.remove(slot.key)
+    else try store.set(slot.key, next)
+    return true
+  } catch () => false
+  if (slot.seat !== board.draftSeat) return false
+  const backend = board.phoneDrafts
+  if (backend?.kind === "temporary") {
+    if (!(try ownsSeat(board, slot.seat)) || backend.values.get(slot.key) !== expected) return false
+    if (next === undefined) backend.values.delete(slot.key)
+    else backend.values.set(slot.key, next)
+    return true
+  }
+  const landed = try exchangePhoneDraft(slot.phone, expected, next)
+  return landed && slot.seat === board.draftSeat
 }
 
 // spec/app/assistant/composer.md, "The slot's answer fills the empty editor with the saved draft, or reports it damaged or unreadable"; spec/app/assistant/composer.md, "A damaged slot is recovered on the owner's word"
-effect function slotRead(ticket: number, binding: Composer.Binding, recover: boolean): Composer.Event!!(KeyValueStore.KeyValueStore | Talk) {
+effect function slotRead(ticket: number, binding: Composer.Binding, recover: boolean): Composer.Event!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
   const { board } = try Talk
-  if (recover) try ignore((try KeyValueStore.KeyValueStore).remove(slotKey(binding)))
-  const { found, revision, text } = try slotOf(binding)
+  const machine = try Composer.Machine
+  const slot = draftSlot(board, binding)
+  let held = try slotOf(board, slot)
+  const live = try machine.get()
+  if (!sameBinding(live.binding, binding) || !Composer.canSlotRead(live, ticket, held.revision) || slot?.key !== draftSlot(board, binding)?.key) {
+    return { type: "slotRead", ticket, found: "Failure", revision: 0 }
+  }
+  if (recover && slot !== undefined && held.found !== "Failure") {
+    const removed = try putSlot(board, slot, held.raw, undefined)
+    held = removed ? emptySlot("Nothing") : emptySlot("Failure")
+  }
+  const { found, revision, text } = held
+  const now = try machine.get()
+  if (!sameBinding(now.binding, binding) || !Composer.canSlotRead(now, ticket, revision) || slot?.key !== draftSlot(board, binding)?.key) {
+    return { type: "slotRead", ticket, found: "Failure", revision: 0 }
+  }
+  if (found === "Sending") {
+    board.lastSentId = held.lastSentId ?? ""
+    board.lastSentWire = held.lastSentWire ?? text
+  }
   board.change(found === "Saved" ? { typed: text, saved: "" } : found === "Sending" ? { typed: "", saved: text } : { typed: "", saved: "" })
   return { type: "slotRead", ticket, found, revision }
 }
 
 // spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops for the owner to choose"
-effect function wrote(ticket: number, binding: Composer.Binding, sending: boolean): Composer.Event!!(KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
+effect function wrote(ticket: number, binding: Composer.Binding, sending: boolean): Composer.Event!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
   const { board } = try Talk
-  const composer = try (try Composer.Machine).get()
+  const machine = try Composer.Machine
+  const composer = try machine.get()
   const base = composer.draft.base
-  const held = try slotOf(binding)
+  const slot = draftSlot(board, binding)
+  const held = try slotOf(board, slot)
+  const live = try machine.get()
+  if (!sameBinding(live.binding, binding) || live.writing !== ticket || slot?.key !== draftSlot(board, binding)?.key) {
+    return { type: "wrote", ticket, result: "Lost", revision: 0 }
+  }
   const lost = (): Composer.Event => {
     if (sending) giveBack(board)
     return { type: "wrote", ticket, result: "Lost", revision: 0 }
   }
-  if (held.found === "Failure") return lost()
+  if (slot === undefined) {
+    return binding.owner === 0 && !sending
+      ? { type: "wrote", ticket, result: "Landed", revision: base + 1 }
+      : lost()
+  }
+  if (held.found === "Failure" || (slot.phone !== undefined && held.found === "Corrupt")) return lost()
   if (held.revision > base) {
     board.change({ saved: held.text })
     if (sending) giveBack(board)
     return { type: "wrote", ticket, result: "Collided", revision: held.revision }
   }
   const text = sending ? board.outgoing : board.snapshot().typed
-  return effect {
-    try (try KeyValueStore.KeyValueStore).set(slotKey(binding), JSON.stringify({ revision: base + 1, text, sending }))
-    return { type: "wrote", ticket, result: "Landed", revision: base + 1 }
-  } catch () => lost()
+  const payload = sending
+    ? { revision: base + 1, text, sending, ...(board.lastSentId === "" ? {} : { lastSentId: board.lastSentId }), lastSentWire: board.lastSentWire || text }
+    : { revision: base + 1, text, sending }
+  const landed = try putSlot(board, slot, held.raw, JSON.stringify(payload))
+  const then = try machine.get()
+  if (!sameBinding(then.binding, binding) || then.writing !== ticket || slot.key !== draftSlot(board, binding)?.key) {
+    return { type: "wrote", ticket, result: "Lost", revision: 0 }
+  }
+  return landed ? { type: "wrote", ticket, result: "Landed", revision: base + 1 } : lost()
 }
 
 // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
-effect function cleared(attempt: number, binding: Composer.Binding, revision: number): Composer.Event!!KeyValueStore.KeyValueStore {
-  const held = try slotOf(binding)
+effect function cleared(attempt: number, binding: Composer.Binding, revision: number): Composer.Event!!(Agent | KeyValueStore.KeyValueStore | Talk) {
+  const { board } = try Talk
+  const slot = draftSlot(board, binding)
+  if (slot === undefined) return { type: "cleared", attempt, ok: false, known: true }
+  const held = try slotOf(board, slot)
   if (held.found === "Failure") return { type: "cleared", attempt, ok: false, known: false }
   if (held.found === "Nothing" || held.revision !== revision) return { type: "cleared", attempt, ok: false, known: true }
-  return effect {
-    try (try KeyValueStore.KeyValueStore).remove(slotKey(binding))
-    return { type: "cleared", attempt, ok: true, known: true }
-  } catch () => ({ type: "cleared", attempt, ok: false, known: false })
+  if (slot.key !== draftSlot(board, binding)?.key) return { type: "cleared", attempt, ok: false, known: false }
+  const removed = try putSlot(board, slot, held.raw, undefined)
+  return { type: "cleared", attempt, ok: removed, known: removed }
 }
 
 // spec/app/assistant/index.md, "A message is asked when the agent can be reached, the screen may be sent and no turn is in flight"; spec/app/assistant/index.md, "A message that cannot be asked is given back at once: a typed one to the composer, a card's prompt to its card"
-function asked(hold: number, attachments: number): Stream.Stream<Composer.Event, never, Conversation.Machine | Talk> {
-  return Stream.unwrap(effect {
-    const conversation = try Conversation.Machine
-    if (try contained(conversation.send({ type: "ask", hold, prompt: 0, attachments }), "asking")) return Stream.empty
-    if (try contained(conversation.send({ type: "decline", hold, prompt: 0 }), "declining")) return Stream.empty
-    giveBack((try Talk).board)
-    return Stream.succeed<Composer.Event>({ type: "release", hold })
-  })
+effect function asked(hold: number, attachments: number): void!!(Conversation.Machine | Composer.Machine | Talk) {
+  const conversation = try Conversation.Machine
+  if (try contained(conversation.send({ type: "ask", hold, prompt: 0, attachments }), "asking")) return
+  if (try contained(conversation.send({ type: "decline", hold, prompt: 0 }), "declining")) return
+  giveBack((try Talk).board)
+  try contained((try Composer.Machine).send({ type: "release", hold }), "releasing unasked composer")
 }
 
-function carryComposer(fx: Composer.Effect): Job<Composer.Event, KeyValueStore.KeyValueStore | Talk | Composer.Machine | Conversation.Machine, []> {
+function carryComposer(fx: Composer.Effect): Job<Composer.Event, Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine | Conversation.Machine, []> {
   return match (fx) {
     when { tag: "ReadSlot", let ticket, let binding, let recover }: answer("slot", slotRead(ticket, binding, recover), { type: "slotRead", ticket, found: "Failure", revision: 0 });
     when { tag: "Write", let ticket, let binding, let sending }: answer(`write ${ticket}`, wrote(ticket, binding, sending), { type: "wrote", ticket, result: "Lost", revision: 0 });
     when { tag: "Clear", let attempt, let binding, let revision }: answer("clear", cleared(attempt, binding, revision), { type: "cleared", attempt, ok: false, known: false });
-    when { tag: "Ask", let hold, let attachments }: stream(`ask ${hold}`, asked(hold, attachments), { type: "release", hold });
+    when { tag: "Ask", let hold, let attachments }: run(`ask ${hold}`, asked(hold, attachments));
   }
 }
 
-// spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"
-effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk) {
+// spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
+effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk | Search.Machine | Shell | Contacts.Machine) {
   return effect {
     const { board } = try Talk
+    const seat = board.draftSeat
+    if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
     const { results } = try ask(Agent, HttpClientRequest.get("/api/conversations/messages/search", { urlParams: { q: words, offset: String(from), limit: String(pageSize) } }), hits())
-    const shown = results.map((one) => ({ conversation: board.numberOf({ id: one.conversationId, roomId: one.roomId } as ConversationRecord), message: board.messageNumber(one.messageId), text: one.text }))
+    if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
+    const searching = try (try Search.Machine).get()
+    if (!Search.canFound(searching, ticket, results.length) || searching.origin.tag === "ContactDock" && !(try contactSearchCurrent(searching.origin))) {
+      return { type: "found", ticket, ok: false, count: 0, further: false }
+    }
+    const shown = results.map((one) => ({ conversation: board.numberOf({ id: one.conversationId, roomId: one.roomId } as ConversationRecord), message: board.messageNumber(one.messageId), text: one.role === "assistant" ? withoutTurnTags(one.text) : one.text }))
     board.change({ hits: [...(from === 0 ? [] : board.snapshot().hits.slice(0, from)), ...shown] })
     return { type: "found", ticket, ok: true, count: results.length, further: results.length === pageSize }
   } catch () => ({ type: "found", ticket, ok: false, count: 0, further: false })
 }
 
 // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
-effect function opened(conversation: number, message: number): void!!(Chats.Machine | Conversation.Machine | Composer.Machine) {
+effect function opened(conversation: number, message: number, origin: Search.Origin): void!!(Chats.Machine | Conversation.Machine | Composer.Machine | Shell | Contacts.Machine) {
   const chats = try Chats.Machine
   const free = freedom(try (try Conversation.Machine).get(), try (try Composer.Machine).get(), (try chats.get()).chosen)
-  try contained(chats.send({ type: "openHit", conversation, message, ...free }), "opening a hit")
+  const hit = { type: "openHit", conversation, message, ...free } as const
+  if (!Chats.enabled(try chats.get(), hit)) return
+  if (origin.tag === "ContactDock") {
+    if (!(try contactSearchCurrent(origin))) return
+    const shell = try Shell
+    const raised = shell.send({ type: "raise", detent: "Full" }, (where) => where.route === origin.route && where.assistant === "Bar") catch () => undefined
+    if (raised === undefined || (try shell.get()).route !== raised.route) return
+  }
+  try contained(chats.send(hit), "opening a hit")
 }
 
-function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Chats.Machine | Conversation.Machine | Composer.Machine, []> {
+function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Search.Machine | Chats.Machine | Conversation.Machine | Composer.Machine | Shell | Contacts.Machine, []> {
   return match (fx) {
     when { tag: "Find", let words, let from, let ticket }: answer("find", found(words, from, ticket), { type: "found", ticket, ok: false, count: 0, further: false });
-    when { tag: "Open", let conversation, let message }: run("open", opened(conversation, message));
+    when { tag: "Open", let conversation, let message, let origin }: run("open", opened(conversation, message, origin));
   }
 }
 
@@ -741,69 +1453,111 @@ const reached = started(effect {
   const device = try Device
   const conversation = try Conversation.Machine
   const refresh = Stream.concat(Stream.succeed(true), Stream.filter(device.visible, (visible) => visible))
-  const { board } = try Talk
+  const talk = try Talk
+  const { board } = talk
+  const composer = try Composer.Machine
+  const chats = try Chats.Machine
+  const attachments = try Attachments.Machine
+  const search = try Search.Machine
+  const mail = try MailQuestions
+  let ownerNumber = (try composer.get()).binding.owner
   const reported = Stream.catch(life.changes, () => Stream.empty)
   const seen = Stream.merge(Stream.as(refresh, undefined), reported)
   const status = Stream.switchMap(seen, (said) => Stream.fromEffect(said === undefined ? effect {
     return life.status() catch () => undefined
   } : succeed(said)))
-  let epoch: number | undefined
+  const reach = (ready: boolean) => contained(conversation.send({ type: "reach", ready }, (state) => Conversation.enabled(state, { type: "reach", ready })), "telling Ask Alpha whether the agent is ready")
   try Stream.runForEach(status, effect (current) => {
-    const next = current?.available === true && current.state === "running" ? current.epoch : undefined
-    if (epoch !== undefined && next !== epoch) try bindArchiveAuthority(board, undefined)
-    epoch = next
-    const event: Conversation.Event = { type: "reach", ready: next !== undefined }
-    if (Conversation.enabled(try conversation.get(), event)) try contained(conversation.send(event), "telling Ask Alpha whether the agent is ready")
+    const running = current?.available === true && current.state === "running"
+    const next = running ? try attachmentAuthority() : undefined
+    const before = board.draftSeat?.authority
+    const same = before !== undefined && next !== undefined && Attachments.sameArchiveAuthority(before, next)
+    if (!same && (before !== undefined || next !== undefined || (try composer.get()).binding.owner !== 0)) {
+      const staged = board.staged
+      board.staged = undefined
+      try talk.seat(undefined)
+      try ignore(reach(false))
+      if (staged?.key !== undefined) try dropFiles(staged.key)
+      try bindArchiveAuthority(board, undefined)
+      mail.clear()
+      const picker = try attachments.get()
+      if (Attachments.canCancel(picker)) try ignore(attachments.send({ type: "cancel" }))
+      if (Attachments.canClosePreview(try attachments.get())) try ignore(attachments.send({ type: "closePreview" }))
+      try ignore(search.send({ type: "switchSession" }))
+      if ((try composer.get()).binding.owner !== 0) try ignore(composer.send({ type: "switchOwner", owner: 0 }))
+      if (next !== undefined) {
+        ownerNumber += 1
+        const known = try talk.seat({ number: ownerNumber, authority: next })
+        if (!known) {
+          if (!(try talk.markSeat(false)) || !(try contained(chats.send({ type: "switchSession" }), "retiring the old chat session"))) {
+            try talk.seat(undefined)
+            return
+          }
+          try talk.markSeat(true)
+          try ignore(chats.send({ type: "browse" }))
+        } else try ignore(chats.send({ type: "restart" }))
+        try ignore(composer.send({ type: "switchOwner", owner: ownerNumber }))
+      }
+    }
+    try ignore(reach(next !== undefined))
   })
 }, "following Ask Alpha's agent")
 
-// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"; spec/app/assistant/composer.md, "What a view offered is dropped when another view shows before Send"
 const looked = started(effect {
   const shell = try Shell
   const settings = try Pages.Machine
+  const bridge = try MessagingBridge
+  const prefs = try Prefs.Machine
   const conversation = try Conversation.Machine
+  const composer = try Composer.Machine
+  const mail = try MailQuestions
   const { board } = try Talk
   let taken: string | undefined
+  let previousView: string | undefined
   const page = Stream.zipLatest(shell.changes, settings.changes)
-  const selection = Stream.zipLatest(noteSubjects, conversation.changes)
-  try Stream.runForEach(Stream.zipLatest(page, selection), effect ([[shown, pages], [subject]]) => {
+  const messaging = Stream.zipLatest(bridge.changes, prefs.changes)
+  const contacts = try Contacts.Machine
+  const selection = Stream.zipLatest(Stream.zipLatest(noteSubjects, conversation.changes), contacts.changes)
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(page, messaging), selection), effect ([[[shown, pages], [msgSnap, prefState]], [[subject], contact]]) => {
     const view = shown.trail.at(-1)
+    const viewKey = view ?? ""
     const offer = board.snapshot().transcript
     const transcript = offer?.offered
     if (transcript !== undefined && (view !== "Notes" || transcript.owner !== subject.owner ||
       transcript.number !== subject.note || transcript.opened !== subject.opened || transcript.record.revision !== String(subject.revision - 1))) try retireTranscript(offer)
     const section: Pages.Page = view === "Settings" ? pages.page : "Top"
-    const sensitive = view === "Settings" && Pages.sensitive(pages)
+    const platform = messagingPlatformOf(view)
+    const msgCtx = platform === undefined ? undefined : msgSnap.contexts[platform]
+    const shareAllowed = platform !== undefined && Prefs.allows(prefState, shareOf(platform))
+    const msgSensitive = platform !== undefined && (msgCtx?.sensitive === true || msgCtx?.pane === "auth")
+    const sensitive = (view === "Settings" && Pages.sensitive(pages)) || msgSensitive
     const { note } = subject
-    const selected = view === "Notes" && !sensitive && note > 0
-    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? note : ""}`
-    if (seen === taken) return
-    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive, section }
-    if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
+    const currentZone = zone()
+    const msgSelected = !sensitive && platform !== undefined && shareAllowed && msgCtx !== undefined && msgCtx.authenticated && msgCtx.conversation !== undefined
+    const contactSelected = view === "Contacts" && contact.front && Contacts.shown(contact) && contact.form === "Shut" && !contact.confirming
+    const selected = (view === "Notes" && !sensitive && note > 0) || msgSelected || contactSelected
+    const selectionKey = contactSelected ? `${contact.contact} ${contact.card.ticket}` : view === "Notes" ? note : msgCtx?.conversation?.id ?? "msg"
+    const seen = `${viewKey} ${section} ${sensitive} ${currentZone} ${selected ? selectionKey : ""}`
+    if (seen !== taken) {
+      const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: currentZone, day: 0, selected, sensitive, section }
+      if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
+    }
+    if (previousView !== undefined && viewKey !== previousView) {
+      const comp = try composer.get()
+      if (comp.editor.mail || comp.editor.transcript) {
+        const nextRev = Math.max(comp.offeredAt + 1, (try conversation.get()).context.revision + 1)
+        if (Composer.canMoveOn(comp, nextRev)) {
+          if (try contained(composer.send({ type: "moveOn", revision: nextRev }), "dropping view offers on view change")) {
+            if (comp.editor.mail) mail.clear()
+            if (comp.editor.transcript) board.change({ transcript: undefined })
+          }
+        }
+      }
+    }
+    previousView = viewKey
   })
 }, "telling the screen")
-
-// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
-const left = started(effect {
-  const chats = try Chats.Machine
-  const conversation = try Conversation.Machine
-  const { board } = try Talk
-  let seen = false
-  let previous = 0
-  try Stream.runForEach(chats.changes, effect (shown) => {
-    if (!seen) {
-      seen = true
-      previous = shown.chosen
-    } else if (shown.chosen !== previous) {
-      previous = shown.chosen
-      try contained(conversation.send({ type: "leave" }), "leaving the conversation")
-    }
-    const request = board.waitingRequest
-    if (request === undefined || Chats.making(shown)) return
-    board.waitingRequest = undefined
-    if (shown.chosen !== 0) try postRequest(request)
-  })
-}, "leaving conversation and sending waiting request")
 
 // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
 const opening = following(Composer.Machine, (composer) => (composer.slot === "Closed" && composer.read.status !== "Loading" ? composer.binding : undefined), Composer.Machine, (binding): Composer.Event | undefined => (binding === undefined ? undefined : { type: "open" }))
@@ -811,13 +1565,35 @@ const opening = following(Composer.Machine, (composer) => (composer.slot === "Cl
 // spec/app/assistant/composer.md, "Edits are saved while no send is in hand and storage has not failed"
 const saving = following(Composer.Machine, (composer) => (Composer.canSave(composer) ? composer.draft.edits : undefined), Composer.Machine, (edits): Composer.Event | undefined => (edits === undefined ? undefined : { type: "save" }))
 
-// spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
+// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"; spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"; spec/app/assistant/composer.md, "A typed draft in a conversation that vanished moves into the new chat"
 const bound = started(effect {
   const chats = try Chats.Machine
   const composer = try Composer.Machine
   const conversation = try Conversation.Machine
   const { board } = try Talk
+  let leftAt: number | undefined
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(chats.changes, composer.changes), conversation.changes), effect ([[shown, writing], talking]) => {
+    if (shown.chosen !== leftAt) {
+      if (!(try contained(conversation.send({ type: "leave" }), "leaving the previous conversation"))) return
+      leftAt = shown.chosen
+    }
+    const live = try chats.get()
+    const turn = (try conversation.get()).turn
+    const stagedContact = board.staged
+    if (stagedContact?.contactDraft !== undefined && (stagedContact.ticket !== turn.send.id || !Conversation.inFlight(turn))) {
+      board.staged = undefined
+      if (stagedContact.key !== undefined) try dropFiles(stagedContact.key)
+    }
+    const posting = board.postingRequest
+    if (posting?.request.contact !== undefined && (turn.send.id > posting.ticket
+      || (turn.send.id === posting.ticket && !Conversation.inFlight(turn)))) board.postingRequest = undefined
+    if (board.sendWhenMade > 0 && !Chats.making(live) && live.chosen === 0 && live.make.id >= board.sendWhenMade) board.sendWhenMade = 0
+    const request = board.waitingRequest
+    if (request !== undefined && !Chats.making(live) && ((live.chosen === 0 && live.make.id >= request.ticket) || (live.chosen !== 0 && live.chosen === leftAt))) {
+      board.waitingRequest = undefined
+      if (live.chosen !== 0) try postRequest(request)
+    }
+    if (board.draftSeat === undefined || writing.binding.owner !== board.draftSeat.number) return
     const offered = board.snapshot().transcript
     if (offered !== undefined && offered.binding.owner !== writing.binding.owner) board.change({ transcript: undefined })
     const staged = board.staged
@@ -829,9 +1605,13 @@ const bound = started(effect {
     if (shown.chosen !== here) {
       board.change({ reply: "", label: "", failure: undefined })
       const moving = here === 0 && shown.chosen > 0 && (Composer.content(writing.editor) || Composer.attached(writing.editor) || writing.draft.sync !== "Kept")
-      const bound = try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
+      const carrying = here > 0 && shown.chosen === 0 && !shown.ids.includes(here) && Composer.canCarry(writing)
+      const event: Composer.Event = moving ? { type: "adopt", conversation: shown.chosen }
+        : carrying ? { type: "carry" }
+        : { type: "bind", conversation: shown.chosen }
+      const bound = try contained(composer.send(event), "binding the composer")
       if (bound && sameBinding(board.snapshot().filesBinding, writing.binding)) {
-        board.change(moving ? { filesBinding: { owner: writing.binding.owner, conversation: shown.chosen } } : { files: [], filesBinding: undefined, attachmentNotice: "" })
+        board.change(moving ? { filesBinding: { owner: writing.binding.owner, conversation: shown.chosen } } : { files: [], filesBinding: undefined, filesAuthority: undefined, attachmentNotice: "" })
       }
       const transcript = board.snapshot().transcript
       if (bound && transcript !== undefined && sameBinding(transcript.binding, writing.binding)) {
@@ -839,9 +1619,9 @@ const bound = started(effect {
       }
       return
     }
-    if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
+    if (board.sendWhenMade > 0 && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
       if (writing.slot !== "Open" || writing.draft.sync === "Saving") return
-      board.sendWhenMade = false
+      board.sendWhenMade = 0
       const event: Composer.Event = { type: "hold", askable: Conversation.askable(talking) }
       if (Composer.enabled(writing, event)) board.outgoing = board.snapshot().typed
       if (try contained(composer.send(event), "sending what waited for its conversation")) board.change({ typed: "" })
@@ -851,49 +1631,104 @@ const bound = started(effect {
 }, "binding the composer")
 
 // spec/app/phone/comms.md, "Each subject keeps one request to Alpha, separate from its draft"
-effect function postRequest(request: CommsPrompt): void!!(Comms.Machine | Conversation.Machine | Talk) {
+effect function postRequest(request: CommsRequest): void!!ContactAttachmentScope {
   const comms = try (try Comms.Machine).get()
-  if (comms.key !== request.about || !comms.requests.some((one) => one.about === request.about && one.request === request.text)) return
+  const text = comms.requests.find((one) => one.about === request.about)?.request ?? ""
+  if (comms.key !== request.about || text !== request.text) return
   const conversation = try Conversation.Machine
   const where = try conversation.get()
-  const event: Conversation.Event = { type: "ask", hold: 0, prompt: where.turn.send.id + 1, attachments: 0 }
-  if (!Conversation.enabled(where, event)) return
+  const ticket = where.turn.send.id + 1
+  const contact = request.contact
   const { board } = try Talk
-  board.postingRequest = request
-  if (!(try contained(conversation.send(event), "asking about the subject"))) board.postingRequest = undefined
+  if (contact !== undefined && (board.snapshot().contactDraft !== contact.draft || !(try contactFileSendCurrent(contact)))) return
+  const event: Conversation.Event = contact === undefined
+    ? { type: "ask", hold: 0, prompt: ticket, attachments: 0 }
+    : { type: "askContactFiles", prompt: ticket, attachments: contact.draft.files.length }
+  if (!Conversation.enabled(where, event)) return
+  const offered = { ticket, request }
+  board.postingRequest = offered
+  if (!(try contained(conversation.send(event), "asking about the subject")) && board.postingRequest === offered) board.postingRequest = undefined
 }
 
 // spec/app/assistant/index.md, "A message is asked when the agent can be reached, the screen may be sent and no turn is in flight"
-export effect function askComms(request: CommsPrompt): void!!(Chats.Machine | Composer.Machine | Comms.Machine | Conversation.Machine | Talk) {
+export effect function askComms(request: CommsRequest): void!!(Chats.Machine | Composer.Machine | ContactAttachmentScope) {
   const { board } = try Talk
   const conversation = try (try Conversation.Machine).get()
-  if (request.text.trim() === "" || request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade) return
+  if (request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade > 0) return
+  const contact = request.contact
+  if (contact === undefined && request.text.trim() === "") return
+  if (contact !== undefined && (board.snapshot().contactDraft !== contact.draft || contact.draft.target.about !== request.about
+    || !(try contactFileSendCurrent(contact)))) return
   const chats = try Chats.Machine
   if ((try chats.get()).chosen !== 0) {
     try postRequest(request)
     return
   }
-  board.waitingRequest = request
+  const ticket = (try chats.get()).make.id + 1
   const free = freedom(conversation, try (try Composer.Machine).get(), 0)
-  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request"))) board.waitingRequest = undefined
+  board.waitingRequest = { ...request, ticket }
+  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request")) && board.waitingRequest?.ticket === ticket) {
+    board.waitingRequest = undefined
+  }
 }
 
+export effect function startAndSend(start: Chats.Event): void!!(Chats.Machine | Talk) {
+  const chats = try Chats.Machine
+  const { board } = try Talk
+  const ticket = (try chats.get()).make.id + 1
+  board.queueSend(ticket)
+  if (!(try contained(chats.send(start), "starting a conversation to send")) && board.sendWhenMade === ticket) {
+    board.sendWhenMade = 0
+  }
+}
+
+export effect function holdAndSend(hold: Composer.Event): void!!(Composer.Machine | Talk) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  const text = board.snapshot().typed
+  board.hold(text)
+  board.type("")
+  if (!(try contained(composer.send(hold), "holding a message to send")) && board.outgoing === text) {
+    const current = board.snapshot().typed
+    board.type(current === "" ? text : `${text}\n${current}`)
+    board.outgoing = ""
+  }
+}
+
+// spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows"
+const reviewedInFiles = started(effect {
+  const conversation = try Conversation.Machine
+  const review = try MediaReview
+  let lookedAt = -1
+  try Stream.runForEach(conversation.changes, effect (talking) => {
+    const { context } = talking
+    if (context.revision === lookedAt || context.showing.tag !== "App" || context.showing.view !== "Files") return
+    lookedAt = context.revision
+    try review.reviewInFiles()
+  })
+}, "building the Files cards that waited for Files to be opened")
 const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
 }, "asking what was typed on the communications dock")
 
-// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a closed keyboard, a field left for elsewhere, and a downward drag release lower Ask Alpha one at a time, so a second step never leaves the app behind the bar
+const resting = Semaphore.makeUnsafe(1)
+
+// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen"
 function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   return match (fx) {
     when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
-    when { tag: "Lower", let steps }: run("lower", effect {
+    when { tag: "Lower", let steps }: run("lower", resting.withPermits(1)(effect {
       const shell = try Shell
-      for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
-    });
+      for (const _ of Array.from({ length: steps })) {
+        if ((try shell.get()).assistant === "Bar") break
+        try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
+      }
+    }));
     when { tag: "Tap" }: run("tap", effect {
       const shell = try Shell
       const current = try shell.get()
-      for (const ask of Dock.opened(current.assistant)) {
+      for (const ask of Dock.tapped(current.assistant)) {
         if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
       }
     });
@@ -901,14 +1736,34 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
 }
 
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
-const rested = following(Shell, (shown) => shown.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
+const rested = started(effect {
+  const shell = try Shell
+  const dock = try Dock.Machine
+  let last = try shell.get()
+  try Stream.runForEach(shell.changes, effect (shown) => {
+    const wasOpen = last.assistant === "Sheet" || last.assistant === "Full"
+    const viewChanged = last.trail.join("/") !== shown.trail.join("/")
+    last = shown
+    if (shown.assistant === "Bar" && (wasOpen || viewChanged)) {
+      try ignore(dock.send({ type: "putAway", now: untimed }))
+    }
+    // spec/app/assistant/dock.md, "A bar or pill a drag left in place changes between them without an entrance until the sheet next opens"
+    if (!wasOpen && (shown.assistant === "Sheet" || shown.assistant === "Full")) {
+      try ignore(dock.send({ type: "opened" }))
+    }
+  })
+}, "resting the Ask Alpha dock")
+
+export const restTyping = resting.withPermits(1)(effect {
+  const shell = try Shell
+  const current = try shell.get()
+  if (Dock.keyboardClosed(current.assistant).length > 0) try contained(shell.send({ type: "goBack" }), "resting Ask Alpha after typing")
+})
 
 // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
 const keyboardRest = applying(Canvas, (canvas) => canvas.released, effect (releases) => {
   if (releases === 0) return
-  const shell = try Shell
-  const current = try shell.get()
-  if (Dock.keyboardClosed(current.assistant).length > 0) try contained(shell.send({ type: "goBack" }), "resting Ask Alpha after typing")
+  try restTyping
 })
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
@@ -917,19 +1772,124 @@ const steppingBack = started(effect {
   const composer = try Composer.Machine
   const voice = try Voice.Machine
   const attachments = try Attachments.Machine
+  const mail = try MailQuestions
+  const comms = try Comms.Machine
+  const shell = try Shell
   const layers = try Layers
   let offered = false
+  const mailChanges = Stream.callback<boolean>((queue) => effect {
+    Queue.offerUnsafe(queue, Boolean(mail.snapshot().question))
+    const stop = mail.subscribe(() => { Queue.offerUnsafe(queue, Boolean(mail.snapshot().question)) })
+    try addFinalizer(() => sync(stop))
+  })
   const composing = Stream.zipLatest(search.changes, composer.changes)
   const media = Stream.zipLatest(voice.changes, attachments.changes)
-  try Stream.runForEach(Stream.zipLatest(composing, media), effect ([[finding, writing], [speech, picker]]) => {
-    const has = finding.open || writing.editor.quote > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker) || Attachments.canCancel(picker)
+  const overlays = Stream.zipLatest(mailChanges, Stream.zipLatest(comms.changes, shell.changes))
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(composing, media), overlays), effect ([[[finding, writing], [speech, picker]], [hasMail, [stage, shown]]]) => {
+    const previous = stage.stage.at(-1)
+    const hasStage = previous !== undefined && canReturnCommsView(shown, commsViewOf(previous.app))
+    const has = finding.open || writing.editor.quote > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker) || Attachments.canCancel(picker) || hasMail || hasStage
     if (has === offered) return
     if (try contained(layers.send({ type: has ? "offerStep" : "withdrawStep", place: "assistant" }), "offering Back")) offered = has
   })
 }, "offering Back")
 
+// spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"
+export effect function openChatSearch(route: number): void!!(Shell | Search.Machine | Chats.Machine) {
+  const shell = try Shell
+  const search = try Search.Machine
+  const current = try shell.get()
+  if (current.route !== route || !Search.canOpenSearch(try search.get())) return
+  const raised = current.assistant === "Full" ? current
+    : (shell.send({ type: "raise", detent: "Full" }, (showing) => showing.route === route) catch () => undefined)
+  if (raised === undefined || (try shell.get()).route !== raised.route) return
+  if (try contained(search.send({ type: "openSearch" }), "opening chat search")) {
+    try ignore((try Chats.Machine).send({ type: "browse" }))
+  }
+}
+
+type ContactSearch = Extract<Search.Origin, { tag: "ContactDock" }>
+
+effect function contactSearchCurrent(origin: ContactSearch): boolean!!(Shell | Contacts.Machine) {
+  const where = try (try Shell).get()
+  const card = try (try Contacts.Machine).get()
+  return where.route === origin.route && where.assistant === "Bar" && showing(where, "Contacts")
+    && card.front && Contacts.shown(card) && card.contact === origin.person && card.form === "Shut"
+}
+
+// spec/app/assistant/search.md, "Search from a closed Contact remembers the card that opened it"
+export effect function openContactChatSearch(route: number, person: string): void!!(Shell | Contacts.Machine | Search.Machine | Chats.Machine) {
+  const origin = { tag: "ContactDock", route, person } as const
+  if (!(try contactSearchCurrent(origin))) return
+  const search = try Search.Machine
+  if (try contained(search.send({ type: "openContactSearch", route, person }), "opening chat search over the contact")) {
+    if (!(try contactSearchCurrent(origin))) {
+      try contained(search.send({ type: "closeSearch" }, (finding) => finding.open && finding.origin.tag === "ContactDock" && finding.origin.route === route && finding.origin.person === person), "leaving the contact's search")
+      return
+    }
+    try ignore((try Chats.Machine).send({ type: "browse" }))
+  }
+}
+
+const retireContactAttachments = started(effect {
+  const shell = try Shell
+  const contacts = try Contacts.Machine
+  const conversation = try Conversation.Machine
+  const comms = try Comms.Machine
+  const { board } = try Talk
+  const changes = Stream.mergeAll([Stream.as(shell.changes, undefined), Stream.as(contacts.changes, undefined),
+    Stream.as(conversation.changes, undefined), Stream.as(comms.changes, undefined)], { concurrency: "unbounded" })
+  try Stream.runForEach(changes, effect () => {
+    const draft = board.snapshot().contactDraft
+    if (draft !== undefined && !(try contactFileTargetCurrent(draft.target)) && board.snapshot().contactDraft === draft) {
+      board.change({ contactDraft: undefined })
+    }
+  })
+}, "leaving the Contact attachment draft")
+
+const retireContactSearch = started(effect {
+  const shell = try Shell
+  const contacts = try Contacts.Machine
+  const search = try Search.Machine
+  try Stream.runForEach(Stream.zipLatest(shell.changes, contacts.changes), effect () => {
+    const finding = try search.get()
+    if (finding.open && finding.origin.tag === "ContactDock" && !(try contactSearchCurrent(finding.origin))) {
+      try contained(search.send({ type: "closeSearch" }), "leaving the contact's search")
+    }
+  })
+}, "retiring search after leaving its contact")
+
+// spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"; spec/app/messages/index.md, "Returning from Phone restores the conversation the Ask Alpha stage held"
+effect function stageRestoration(previous: Comms.StageEntry): (((current: () => boolean) => void!!) | undefined)!!(Contacts.Machine | Messages.Machine | Conversations) {
+  if (previous.app === "ContactsApp" && previous.subject === "ContactSubject") {
+    const contacts = try Contacts.Machine
+    const before = try contacts.get()
+    const event = { type: "restoreStageContact", contact: before.contact, ticket: before.list.ticket } as const
+    if (previous.key !== `contacts:contact:${event.contact}` || !Contacts.canRestoreStageContact(before, event.contact, event.ticket)) return undefined
+    return effect (current: () => boolean) => {
+      try contained(contacts.send(event, current), "reading the earlier Contacts card")
+    }
+  }
+  if (previous.app === "MessagesApp" && previous.subject === "ThreadSubject") {
+    const thread = Number(/^messages:thread:([1-9]\d*)$/.exec(previous.key)?.[1])
+    if (!Number.isSafeInteger(thread) || Option.isNone(try (try Conversations).get(thread))) return undefined
+    const messages = try Messages.Machine
+    const before = try messages.get()
+    const event = { type: "restoreStageThread", thread, ticket: before.list.ticket } as const
+    if (!Messages.canRestoreStageThread(before, event.thread, event.ticket)) return undefined
+    return effect (current: () => boolean) => {
+      try contained(messages.send(event, current), "reading the earlier Messages conversation")
+    }
+  }
+  return undefined
+}
+
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
+  const summary = (try Talk).board.snapshot().recordingSummary
+  if (summary !== undefined && (try summary.machine.get()).reviewing) {
+    return try contained(summary.machine.send({ type: "dismissSummary" }), "closing the recording summary review")
+  }
   const attachments = try Attachments.Machine
   if (Attachments.canCancel(try attachments.get())) return try contained(attachments.send({ type: "cancel" }), "closing attachments")
   if (Attachments.canClosePreview(try attachments.get())) return try contained(attachments.send({ type: "closePreview" }), "closing the attachment preview")
@@ -951,8 +1911,25 @@ export const assistantBack = effect {
   if (previous !== undefined) {
     const shell = try Shell
     const view = commsViewOf(previous.app)
-    if (canReturnCommsView(try shell.get(), view) && (try contained(comms.send({ type: "stageReturned" }, "Owner"), "returning to the earlier communications stage"))) {
-      return try contained(shell.send({ type: "returnCommsView", previous: view }), "returning to the earlier communications app")
+    const where = try shell.get()
+    if (where.assistant === "Sheet" && canReturnCommsView(where, view)) {
+      const fromSameRoute = () => Effect.runSync(shell.get()).route === where.route
+      const returned = try contained(comms.send({ type: "stageReturned" }, "Owner", (state) => {
+        const entry = state.stage.at(-1)
+        return fromSameRoute() && entry?.app === previous.app && entry.subject === previous.subject && entry.key === previous.key
+      }), "returning to the earlier communications stage")
+      if (!returned) return true
+      const restoration = try stageRestoration(previous)
+      const opened = try contained(shell.send({ type: "returnCommsView", previous: view }, (state) => state.route === where.route), "returning to the earlier communications app")
+      if (opened && restoration !== undefined) {
+        const device = try Device
+        const exactVisit = () => {
+          const current = Effect.runSync(shell.get())
+          return current.route === where.route + 1 && showing(current, view) && current.assistant === "Sheet" && Effect.runSync(device.showing())
+        }
+        if (exactVisit()) try restoration(exactVisit)
+      }
+      return true
     }
   }
   return false
@@ -967,9 +1944,9 @@ export const assisting = Layer.provideMerge(
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
-    Attachments.machine(),
+    picker,
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, left, opening, saving, bound, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud,
+    reached, looked, opening, saving, bound, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, retireContactAttachments, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

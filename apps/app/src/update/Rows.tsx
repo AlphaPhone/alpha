@@ -1,7 +1,7 @@
 // spec/app/update/index.md, "Story: Settings rows"; spec/app/update/index.md, "Story: Allow automatic updates"; spec/app/update/index.md, "A version name is shown only when it has 1 to 64 characters, and notes only when they have at most 500"
-import { ListGroup, ListRow, Spinner } from "@repo/ui";
+import { ListGroup, ListRow, SettingsFactRow, Spinner } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ChevronRight, Download, RefreshCw, Shield } from "lucide-react";
+import { ChevronRight, Download, RotateCw, Shield } from "lucide-react";
 import type { Machine as UpdatesMachine } from "../../gen/app__update.effect.vibe";
 import {
   automaticStatus, checkLabel, checking, downloading, installLabel, installRowShown, noteText, offerName, offerNotes,
@@ -35,7 +35,7 @@ export function UpdateRows({ runtime }: UpdateRowsProps) {
   const version = state.offer.release.version;
   return (
     <ListGroup aria-label="Updates">
-      {status !== "" && <ListRow title="Automatic updates" trailing={status} />}
+      {status !== "" && <SettingsFactRow title="Automatic updates" reading={{ word: "reported", value: status }} />}
       {can(allow) && <ListRow title="Allow automatic updates" leading={<Shield aria-hidden />} trailing={<ChevronRight aria-hidden className="size-4" />} onClick={() => void send(allow)} />}
       {installRowShown(state) && (
         <ListRow
@@ -48,12 +48,13 @@ export function UpdateRows({ runtime }: UpdateRowsProps) {
       )}
       {installRowShown(state) && notes !== "" && <p className="px-4 pb-2 text-sm whitespace-pre-line text-muted-foreground">{notes}</p>}
       <ListRow
-        title={checkLabel(state)}
-        leading={<RefreshCw aria-hidden />}
+        title="Check"
+        aria-label={checkLabel(state)}
+        leading={<RotateCw aria-hidden />}
         {...(can(check) ? { onClick: () => void send(check) } : {})}
-        trailing={checking(state) ? <Spinner size="sm" label="Checking" /> : <ChevronRight aria-hidden className="size-4" />}
+        trailing={checking(state) ? <Spinner size="sm" label="Checking" /> : undefined}
       />
-      {note !== "" && <ListRow title="Update check" trailing={<span role="status" className="max-w-44 text-right">{note}</span>} />}
+      {note !== "" && <div role="status"><SettingsFactRow title="Update check" reading={{ word: "reported", value: note }} /></div>}
     </ListGroup>
   );
 }

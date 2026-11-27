@@ -18,10 +18,12 @@ export type AssistantCardFrameProps = Omit<ComponentProps<"div">, "title"> & {
   onOpen?: () => void;
   /** Done with, or answered by a newer reply: the card is quiet and offers nothing. */
   settled?: boolean;
+  /** What ends a live card's head in place of its chevron. */
+  trailing?: ReactNode;
 };
 
 /** The surface every card of a reply shares: its head with the kind's mark on Alpha blue, what it holds and its controls, quiet once settled. */
-export function AssistantCardFrame({ icon, title, detail, children, actions, onOpen, settled = false, className, ...props }: AssistantCardFrameProps) {
+export function AssistantCardFrame({ icon, title, detail, children, actions, onOpen, settled = false, trailing, className, ...props }: AssistantCardFrameProps) {
   const head = (
     <>
       <span aria-hidden className={cn("flex size-11.5 shrink-0 items-center justify-center rounded-lg [&_svg:not([class*='size-'])]:size-5.5", settled ? "bg-accent text-muted-foreground" : "bg-alpha text-alpha-foreground")}>{icon}</span>
@@ -29,7 +31,7 @@ export function AssistantCardFrame({ icon, title, detail, children, actions, onO
         <span className={cn("line-clamp-3 text-md font-semibold break-words", settled && "text-muted-foreground")}>{title}</span>
         {detail ? <span className="text-meta break-words text-muted-foreground">{detail}</span> : null}
       </span>
-      {onOpen && !settled ? <ChevronRight aria-hidden className="size-4.5 shrink-0 text-muted-foreground" /> : null}
+      {onOpen && !settled ? trailing ?? <ChevronRight aria-hidden className="size-4.5 shrink-0 text-muted-foreground" /> : null}
     </>
   );
   const row = "flex w-full items-center gap-3.5 p-3.5 text-left";
@@ -43,5 +45,21 @@ export function AssistantCardFrame({ icon, title, detail, children, actions, onO
       {children ? <div className="flex flex-col gap-2 px-3.5 pb-3.5 text-base">{children}</div> : null}
       {actions && !settled ? <div className="flex flex-wrap gap-2 px-3.5 pb-3.5">{actions}</div> : null}
     </Card>
+  );
+}
+
+/** A reply's list of rows, openable as a whole while the card is live. */
+export function AssistantCardRows({ title, children, onOpen, settled }: Pick<AssistantCardFrameProps, "title" | "children" | "onOpen" | "settled">) {
+  const list = (
+    <span className="flex w-full flex-col">
+      <span className="sr-only">{title}</span>
+      {children}
+    </span>
+  );
+  const surface = "w-full overflow-hidden rounded-tile bg-secondary text-left text-secondary-foreground";
+  return onOpen && !settled ? (
+    <button type="button" onClick={onOpen} className={cn(focusRing, surface, "active:bg-accent")}>{list}</button>
+  ) : (
+    <div className={surface}>{list}</div>
   );
 }

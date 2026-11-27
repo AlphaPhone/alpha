@@ -15,8 +15,9 @@ export interface EdgeEnv {
   readonly API: ApiService
 }
 
-/** Where an address of the web host goes: the same path and query on the API origin, when that stays on it. */
+/** Where an address of the web host goes: the same path and query on the API origin, when that stays on it and is not an API route. */
 function onApi(url: URL, env: EdgeEnv): URL | null {
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return null
   const target = URL.parse(`${url.pathname}${url.search}`, env.PUBLIC_API_ORIGIN)
   return target !== null && target.origin === env.PUBLIC_API_ORIGIN ? target : null
 }
@@ -31,24 +32,26 @@ export function edgeRouteOf(url: URL, env: EdgeEnv): { readonly route: Route; re
 const noStore = { "Cache-Control": "no-store" }
 
 async function forwarded(request: Request, url: URL, target: URL, env: EdgeEnv): Promise<Response | null> {
-  const bodied = request.method !== "GET" && request.method !== "HEAD"
   try {
     return await env.API.fetch(new EdgeRequest(target, {
       method: request.method,
       headers: forwardedHeaders(request.headers, url.host),
       redirect: "manual",
-      ...(bodied ? { body: request.body, duplex: "half" } : {}),
     }))
   } catch {
     return null
   }
 }
 
-/** The web host Worker: its own health, and every other address of its origin answered by the API Worker, through its binding, as the web origin. */
+/** The web host Worker: its own health, and every non-API GET/HEAD address of its origin answered by the API Worker, through its binding, as the web origin. */
 const edgeWorker = {
   async fetch(request: Request, env: EdgeEnv): Promise<Response> {
     const url = new URL(request.url)
     const { route, target } = edgeRouteOf(url, env)
+    if (route === "NotFound") return new EdgeResponse("Not Found", { status: 404, headers: noStore })
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new EdgeResponse("Method Not Allowed", { status: 405, headers: { ...noStore, Allow: "GET, HEAD" } })
+    }
     const answer = route === "Forward" && target !== null ? await forwarded(request, url, target, env) : null
     switch (edgeAnswer(route, answer !== null)) {
       case "Healthy": return EdgeResponse.json({ ok: true }, { headers: noStore })

@@ -1,6 +1,7 @@
 // spec/app/notes/previous.md, "Story: Look at the notes from before"
-import { Alert, AppHeader, Button, EmptyState, NoteRow, Spinner } from "@repo/ui";
+import { Alert, AppHeader, Button, cn, dockClearance, EmptyState, NoteRow, Spinner } from "@repo/ui";
 import { ChevronLeft } from "lucide-react";
+import { useSyncExternalStore } from "react";
 import type { Event } from "../../gen/app__notes__previous.ts";
 import { useMachine } from "../../gen/app__notes__previous.react.ts";
 import type { Alpha } from "../runtime/ui.tsx";
@@ -9,30 +10,30 @@ import { EarlierNotes } from "./previous.vibe";
 export function Previous({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const machine = useMachine(runtime);
   const notes = runtime.runSync(EarlierNotes);
+  const byNumber = useSyncExternalStore(notes.subscribe, notes.snapshot, notes.snapshot);
   const state = machine.state;
   if (!state?.showing) return null;
   const send = (event: Event) => void machine.send(event, "Owner");
   const can = (event: Event) => machine.can(event, "Owner");
-  const get = (id: number) => runtime.runSync(notes.get(id));
-  const opened = state.old > 0 ? get(state.old) : undefined;
+  const opened = state.old > 0 ? byNumber.get(state.old) : undefined;
   const back = opened === undefined ? { type: "backToNotes" } as const : { type: "closeOld" } as const;
   const rows = (values: typeof state.olds) => values.map(({ id, kind }) => {
-    const note = get(id);
+    const note = byNumber.get(id);
     if (note === undefined) return null;
     const open = { type: "openOld", id } as const;
     return <NoteRow key={id} title={note.title || "Untitled"} date="" preview={note.body || note.details.join("\n")} voice={kind === "Voice"}
       onClick={can(open) ? () => send(open) : undefined} />;
   });
   return (
-    <section aria-label="Notes on this phone" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title={opened === undefined ? "On this phone" : opened.title || "Untitled"} detail={opened !== undefined} leading={can(back) && <Button size="icon" variant="ghost"
+    <section aria-label="Previous notes" className="flex min-h-0 flex-1 flex-col">
+      <AppHeader title={opened === undefined ? "Previous notes" : opened.title || "Untitled"} detail={opened !== undefined} leading={can(back) && <Button size="icon" variant="ghost"
         aria-label={opened === undefined ? "Return to Notes" : "Back to previous notes"} onClick={() => send(back)}><ChevronLeft /></Button>} />
-      <div className="flex flex-col gap-3 px-4 pb-12">
+      <div className={cn("flex min-h-0 flex-1 touch-pan-y flex-col gap-3 overflow-y-auto px-4", dockClearance)}>
         {state.read.status === "Loading" && <Spinner className="self-center" label="Reading previous notes" />}
         {state.read.status === "Failed" && <Alert variant="warn">The notes from this phone couldn't be read.
           {can({ type: "retry" }) && <Button className="ml-2" size="sm" onClick={() => send({ type: "retry" })}>Try again</Button>}
         </Alert>}
-        {opened ? <article className="mx-auto w-full max-w-180 whitespace-pre-wrap px-2 py-4">
+        {opened ? <article className="mx-auto w-full max-w-3xl whitespace-pre-wrap px-2 py-4">
           <p>{opened.body}</p>
           {opened.details.length > 0 && <p>{opened.details.join("\n\n")}</p>}
         </article> : <>

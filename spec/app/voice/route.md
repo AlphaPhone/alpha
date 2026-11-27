@@ -15,7 +15,7 @@ through these rules.
 ### The route knows the owner's account or key, whether Cloud has limited it, the owner's answer to the disclosure, and a hold after a failure
 
 The account's key tells one Cloud account or provider key from another; a
-hold names the key it was placed for. Times are in seconds.
+hold names the key it was placed for. Times are in milliseconds.
 
 ```quint
 type Account = SignedOut | CloudAccount | OwnKey | OwnKeyWithoutVoice
@@ -30,11 +30,11 @@ pure val rValues: Set[Route] =
     .union(Set({ ...signedOut, account: CloudAccount, key: 1, consent: true }))
     .union(Set({ ...signedOut, account: CloudAccount, key: 1, limited: true, consent: true }))
     .union(Set({ ...signedOut, account: OwnKey, key: 2, limited: true, consent: true }))
-    .union(Set({ ...signedOut, account: CloudAccount, key: 1, holdKey: 1, holdUntil: 60 }))
+    .union(Set({ ...signedOut, account: CloudAccount, key: 1, holdKey: 1, holdUntil: 60000 }))
     .union(Set({ ...signedOut, account: OwnKeyWithoutVoice, key: 3, consent: true }))
 pure val keyValues = Set(1, 2)
-pure val nowValues = Set(0, 59, 60, 700, 4000)
-pure val waitValues = Set(0, 20, 120, 5000)
+pure val nowValues = Set(0, 59000, 60000, 700000, 4000000)
+pure val waitValues = Set(0, 20000, 120000, 5000000)
 ```
 
 ### The owner's own key with a voice is used first, then Cloud when signed in and not limited, otherwise this phone
@@ -90,6 +90,19 @@ pure def lawANewAccountAsksAgain(r: Route, account: Account, key: int, now: int)
   way(changeAccount(r, account, key), now) == OnPhone
 ```
 
+### Settings names where speech goes as the owner set it up: this phone, Alpha Cloud or the owner's own key, leaving out a hold after a failure
+
+A hold lasts at most an hour and lifts by itself, so Privacy names the
+route the owner chose, as Alpha's earlier build named it on its Voice row,
+and it is where speech goes whenever no hold is in force.
+
+```quint
+pure def chosen(r: Route): Way = if (r.consent) wanted({ ...r, holdUntil: 0 }, 0) else OnPhone
+
+pure def lawSettingsNamesWhereSpeechGoesWithoutAHold(r: Route, now: int): bool =
+  not(held(r, now)) implies chosen(r) == way(r, now)
+```
+
 ## Story: Keep talking when the network fails
 
 > As the owner, I want a conversation to carry on on this phone when the
@@ -105,9 +118,9 @@ cancelled request or a recording with no speech, changes nothing.
 ```quint
 type Fault = Brief | AccountRefused | RateLimited | SignInNeeded | NotTheNetwork
 
-pure val briefHold = 60
-pure val accountHold = 600
-pure val longestHold = 3600
+pure val briefHold = 60000
+pure val accountHold = 600000
+pure val longestHold = 3600000
 
 pure def holdFor(fault: Fault, wait: int): int =
   if (fault == Brief) briefHold
@@ -121,17 +134,17 @@ pure def noteFailure(r: Route, fault: Fault, wait: int, now: int): Route =
   if (holdFor(fault, wait) > 0 and networked(r)) { ...r, holdKey: r.key, holdUntil: now + holdFor(fault, wait) } else r
 
 pure def lawABriefFailureHoldsAMinute(r: Route, now: int): bool =
-  networked(r) implies noteFailure(r, Brief, 0, now).holdUntil == now + 60
+  networked(r) implies noteFailure(r, Brief, 0, now).holdUntil == now + 60000
 
 pure def lawARefusedAccountHoldsTenMinutes(r: Route, wait: int, now: int): bool =
-  networked(r) implies noteFailure(r, AccountRefused, wait, now).holdUntil == now + 600
+  networked(r) implies noteFailure(r, AccountRefused, wait, now).holdUntil == now + 600000
 
 pure def lawARateLimitHoldsForTheServersWait(r: Route, wait: int, now: int): bool =
-  (networked(r) and wait > 0 and wait <= 3600) implies noteFailure(r, RateLimited, wait, now).holdUntil == now + wait
+  (networked(r) and wait > 0 and wait <= 3600000) implies noteFailure(r, RateLimited, wait, now).holdUntil == now + wait
 
 pure def lawAHoldIsNeverLongerThanAnHour(r: Route, fault: Fault, wait: int, now: int): bool =
   val after = noteFailure(r, fault, wait, now)
-  after == r or after.holdUntil <= now + 3600
+  after == r or after.holdUntil <= now + 3600000
 
 pure def lawAFailureOutsideTheNetworkChangesNothing(r: Route, wait: int, now: int): bool =
   noteFailure(r, NotTheNetwork, wait, now) == r and noteFailure(r, SignInNeeded, wait, now) == r

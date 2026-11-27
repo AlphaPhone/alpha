@@ -32,7 +32,7 @@ export function SettingsAppearancePicker({ theme, keeping = false, onChoose }: S
   };
   return (
     <ListGroup>
-      <div className="flex min-h-15 items-center gap-3 py-2 pr-2.5 pl-4.5">
+      <div className="flex min-h-15 flex-wrap items-center gap-3 py-2 pr-2.5 pl-4.5">
         <span aria-hidden className="min-w-0 flex-1 text-md">Theme</span>
         <RadioGroupPrimitive.Root
           value={theme}
@@ -41,7 +41,7 @@ export function SettingsAppearancePicker({ theme, keeping = false, onChoose }: S
           aria-label="Theme"
           aria-busy={keeping || undefined}
           orientation="horizontal"
-          className="flex shrink-0 gap-0.5 rounded-full bg-background p-0.75"
+          className="ml-auto flex shrink-0 gap-0.5 rounded-full bg-background p-0.75"
         >
           {choices.map(({ value, title }) => (
             <RadioGroupPrimitive.Item
@@ -49,7 +49,7 @@ export function SettingsAppearancePicker({ theme, keeping = false, onChoose }: S
               value={value}
               className={cn(
                 focusRing,
-                "min-h-11 min-w-13 rounded-full px-3.5 text-snippet font-semibold text-muted-foreground transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 data-[state=checked]:bg-alpha data-[state=checked]:text-alpha-foreground",
+                "min-h-11 min-w-13 rounded-full px-3.5 text-snippet font-semibold text-muted-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-50 data-[state=checked]:bg-alpha data-[state=checked]:text-alpha-foreground",
               )}
             >
               {title}

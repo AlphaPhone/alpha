@@ -7,7 +7,7 @@ import { Spinner } from "./Spinner.tsx";
 const buttonVariants = cva(
   [
     focusRing,
-    "inline-flex shrink-0 items-center justify-center gap-2 rounded-full text-base font-semibold whitespace-nowrap transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5.5",
+    "inline-flex shrink-0 items-center justify-center gap-2 rounded-full text-base font-semibold whitespace-nowrap transition-colors duration-fast ease-standard motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5.5",
   ],
   {
     variants: {
@@ -15,7 +15,7 @@ const buttonVariants = cva(
         primary: "bg-alpha text-alpha-foreground hover:bg-alpha/90 active:bg-alpha/80",
         secondary: "bg-secondary text-secondary-foreground hover:bg-accent active:bg-accent",
         outline: "border border-input bg-background text-foreground hover:bg-accent active:bg-accent",
-        ghost: "text-foreground hover:bg-accent active:bg-accent",
+        ghost: "hover:bg-accent active:bg-accent",
         destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80",
       },
       size: {
@@ -50,7 +50,7 @@ export function Button({ variant, size, loading = false, asChild = false, disabl
   return (
     <Comp type={asChild ? undefined : "button"} aria-busy={loading || undefined} className={cn(buttonVariants({ variant, size }), className)} {...props} {...state}>
       {loading && <Spinner size="sm" aria-hidden />}
-      <Slottable>{children}</Slottable>
+      {loading && size === "icon" && !asChild ? null : <Slottable>{children}</Slottable>}
     </Comp>
   );
 }

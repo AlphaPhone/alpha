@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ChevronDown, ChevronLeft, Cloud, CloudOff, Ellipsis, Mail, Paperclip, Send, Trash2, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, Cloud, CloudOff, Ellipsis, Mail, Paperclip, Send, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import type { InboxAccount } from "./InboxAccountList.tsx";
 import { InboxDraftClash, type InboxDraftClashProps } from "./InboxDraftClash.tsx";
@@ -27,6 +28,16 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
     onFromChange?: (id: string) => void;
     /** The To line. */
     to: Line;
+    /** People the owner has mail from, offered under the To line: a few while it is empty, every match while an address is typed. Choosing one adds it to To. */
+    suggestions?: { name: string; email: string; onChoose?: () => void }[];
+    /** Opens or closes the native address choices. */
+    onContacts?: () => void;
+    /** Whether the native address choices are showing. */
+    contactsOpen?: boolean;
+    /** What the phone said about its address choices. */
+    contactsStatus?: string;
+    /** Reads the next page of contacts where the phone has more. */
+    onMoreContacts?: () => void;
     /** The Cc line. */
     cc: Line;
     /** The Bcc line. */
@@ -51,6 +62,7 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
     notice?: InboxNoticeKind;
     /** Does the one thing the notice offers. */
     onNoticeAction?: () => void;
+    onTurnOnSending?: () => void;
     /** How the last send ended, while it is worth telling. */
     outcome?: InboxSendOutcomeProps;
     /** The phone's drafts are being looked up after a restart, or cannot be read; the form is not shown until they are. */
@@ -81,48 +93,72 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
  * @model spec/app/inbox/drafts.md
  */
 export function InboxComposer({
-  kind, accounts, from, onFromChange, to, cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
-  onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
+  kind, accounts, from, onFromChange, to, suggestions = [], onContacts, contactsOpen = false, contactsStatus, onMoreContacts, cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
+  onRestoreMine, onUseSaved, notice, onNoticeAction, onTurnOnSending, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
 }: InboxComposerProps) {
   const [more, setMore] = useState(false);
   const showMore = more || cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== "";
   const menu = onSaveToGmail || onCheckCopy || onDeleteGmailCopy || onDiscard;
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background pt-[env(safe-area-inset-top)] text-base text-foreground motion-safe:animate-rise">
-      <InboxHeader leading={<button type="button" aria-label="Back from draft" disabled={!onSetAside} onClick={onSetAside} className={inboxHeaderButton}><ChevronLeft className="size-5.5!" /></button>}>
-        <h1 className="min-w-0 flex-1 truncate text-body leading-tight font-semibold">{titles[kind]}</h1>
+    <div className="flex h-full min-h-0 flex-col bg-background pt-[var(--alpha-safe-top)] text-base text-foreground motion-safe:animate-rise">
+      <InboxHeader leading={<button type="button" aria-label="Back from draft" disabled={!onSetAside} onClick={onSetAside} className={inboxHeaderButton}><ChevronLeft aria-hidden className="size-5.5!" /></button>}>
+        <h1 className="min-w-0 flex-1 truncate text-md font-semibold">{titles[kind]}</h1>
         {menu ? (
           <Menu>
-            <MenuTrigger aria-label="Draft actions" className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Ellipsis /></MenuTrigger>
+            <MenuTrigger aria-label="Draft actions" className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Ellipsis aria-hidden /></MenuTrigger>
             <MenuContent className={inboxMenu}>
-              {onSaveToGmail ? <MenuItem onSelect={onSaveToGmail}><Cloud />Save to Gmail</MenuItem> : null}
-              {onCheckCopy ? <MenuItem onSelect={onCheckCopy}><Cloud />Check Gmail copy</MenuItem> : null}
-              {onDeleteGmailCopy ? <MenuItem onSelect={onDeleteGmailCopy}><CloudOff />Delete Gmail copy</MenuItem> : null}
-              {onDiscard ? <MenuItem onSelect={onDiscard}><Trash2 />Discard</MenuItem> : null}
+              {onSaveToGmail ? <MenuItem onSelect={onSaveToGmail}><Cloud aria-hidden />Save to Gmail</MenuItem> : null}
+              {onCheckCopy ? <MenuItem onSelect={onCheckCopy}><Cloud aria-hidden />Check Gmail copy</MenuItem> : null}
+              {onDeleteGmailCopy ? <MenuItem onSelect={onDeleteGmailCopy}><CloudOff aria-hidden />Delete Gmail copy</MenuItem> : null}
+              {onDiscard ? <MenuItem destructive onSelect={onDiscard}><Trash2 aria-hidden />Discard</MenuItem> : null}
             </MenuContent>
           </Menu>
         ) : null}
-        {onAttach ? <button type="button" aria-label="Attach file" onClick={onAttach} className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Paperclip /></button> : null}
-        <button type="button" aria-label="Send email" disabled={!onSend} onClick={onSend} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground [&_svg]:size-5.5")}><Send /></button>
+        {onAttach ? <button type="button" aria-label="Attach file" onClick={onAttach} className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Paperclip aria-hidden /></button> : null}
+        <button type="button" aria-label="Send email" disabled={!onSend} onClick={onSend} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full bg-alpha text-alpha-foreground disabled:opacity-50 [&_svg]:size-5.5")}><Send aria-hidden /></button>
       </InboxHeader>
-      <main aria-label={titles[kind]} tabIndex={0} className={cn(focusRing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-5 pb-28 [scrollbar-width:none] focus-visible:-outline-offset-2 *:shrink-0")}>
+      <main aria-label={titles[kind]} tabIndex={0} className={cn(
+        focusRing,
+        dockClearance,
+        "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-5 [scrollbar-width:none] focus-visible:-outline-offset-2 *:shrink-0",
+        "in-data-[alpha-wide]:px-[max(--spacing(5),calc((100%_-_720px)/2))]",
+      )}>
         {storage ? (
           <div role="status" className="flex flex-col items-center gap-3 px-6 pt-27.5 text-center text-muted-foreground">
             <span aria-hidden className="[&_svg]:size-7">{storage === "checking" ? <Mail /> : <TriangleAlert />}</span>
             <p className="text-base">{storage === "checking" ? "Checking local draft…" : "Local draft storage unavailable"}</p>
-            {storage === "unavailable" && onReloadStorage ? <button type="button" onClick={onReloadStorage} className={cn(focusRing, "mt-1 h-9 rounded-full bg-secondary px-4 text-sm font-semibold text-secondary-foreground")}>Try again</button> : null}
+            {storage === "unavailable" && onReloadStorage ? <button type="button" onClick={onReloadStorage} className={cn(focusRing, "mt-1 min-h-11 rounded-full bg-secondary px-4 text-sm font-semibold text-secondary-foreground")}>Try again</button> : null}
           </div>
         ) : (
           <>
             {notice ? <div className="py-2"><InboxNotice kind={notice} onAction={onNoticeAction} /></div> : null}
+            {onTurnOnSending ? <div className="py-2"><InboxNotice kind="sendingOff" onAction={onTurnOnSending} /></div> : null}
             {outcome ? <div className="py-2"><InboxSendOutcome {...outcome} /></div> : null}
             {clash && onRestoreMine ? <div className="py-2"><InboxDraftClash onRestoreMine={onRestoreMine} onUseSaved={onUseSaved} /></div> : null}
             <InboxFromField accounts={accounts} value={from} onChange={onFromChange} />
             <InboxRecipientField
               label="To"
               {...to}
-              trailing={<button type="button" aria-label="Cc and Bcc" aria-expanded={showMore} disabled={cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== ""} onClick={() => setMore(!more)} className={inboxLineButton}><ChevronDown aria-hidden /></button>}
+              trailing={<>
+                {onContacts ? <button type="button" aria-label="Choose contacts" aria-expanded={contactsOpen} onClick={onContacts} className={inboxLineButton}><UserRound aria-hidden /></button> : null}
+                <button type="button" aria-label="Cc and Bcc" aria-expanded={showMore} disabled={cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== ""} onClick={() => setMore(!more)} className={inboxLineButton}><ChevronDown aria-hidden /></button>
+              </>}
             />
+            {contactsStatus ? <p role="status" className="py-2 text-sm text-muted-foreground">{contactsStatus}</p> : null}
+            {suggestions.length > 0 ? (
+              <div role="group" aria-label={contactsOpen ? "Contact addresses" : "Suggested recipients"} className="flex max-h-82.5 flex-col overflow-y-auto border-b border-border py-1.5">
+                {suggestions.map(({ name, email, onChoose }) => (
+                  <button key={email} type="button" onClick={onChoose ?? (() => to.onAdd(email))} className={cn(focusRing, "flex items-center gap-3 rounded-md px-1 py-1.75 text-left active:bg-accent")}>
+                    <span aria-hidden className="flex size-9.5 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold whitespace-nowrap text-secondary-foreground">{Array.from(name.trim())[0]?.toUpperCase()}</span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-base">{name}</span>
+                      <span className="truncate text-meta text-muted-foreground">{email}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {onMoreContacts ? <button type="button" onClick={onMoreContacts} className={cn(focusRing, "min-h-11 self-start px-1 text-sm text-primary")}>More contacts</button> : null}
             {showMore ? (
               <>
                 <InboxRecipientField label="Cc" {...cc} />
@@ -135,7 +171,7 @@ export function InboxComposer({
               placeholder="Subject"
               value={subject}
               onChange={(event) => onSubjectChange(event.target.value)}
-              className="h-13 border-b border-border bg-transparent p-0 text-lg leading-tight font-semibold text-foreground outline-0 placeholder:text-muted-foreground"
+              className={cn(focusRing, "h-13 rounded-sm border-b border-border bg-transparent p-0 text-lg leading-tight font-semibold text-foreground placeholder:text-muted-foreground")}
             />
             {attachments.length > 0 ? (
               <ul aria-label="Attachments" className="flex flex-col gap-1.5 pt-2.5">
@@ -154,7 +190,7 @@ export function InboxComposer({
                 placeholder="Message"
                 value={text}
                 onChange={(event) => onTextChange(event.target.value)}
-                className="min-h-30 flex-1 resize-none bg-transparent p-0 pt-3.5 text-body text-foreground outline-0 placeholder:text-muted-foreground"
+                className={cn(focusRing, "min-h-30 flex-1 resize-none rounded-sm bg-transparent p-0 pt-3.5 text-body leading-message text-foreground placeholder:text-muted-foreground")}
               />
             </div>
           </>

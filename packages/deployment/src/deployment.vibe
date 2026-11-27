@@ -1,16 +1,27 @@
+// spec/cloud/index.md, "Story: Know which cloud the app talks to"
 import table from "../deployments.json" with { type: "json" }
 
-/** An origin a phone calls a deployed cloud at: always `https`. */
-const Https = Schema.String.check(Schema.isStartingWith("https://"))
+function isHttpsOrigin(value: string): boolean {
+  const parsed = URL.parse(value)
+  return parsed !== null
+    && parsed.protocol === "https:"
+    && parsed.hostname !== ""
+    && parsed.username === ""
+    && parsed.password === ""
+    && parsed.pathname === "/"
+    && parsed.search === ""
+    && parsed.hash === ""
+    && parsed.origin === value
+}
 
-/** Where a cloud answers and which host the phone's App Links name. */
-schema Hosts { cloud: Https; appLinkHost: string }
+/** An origin a phone calls a deployed cloud at: always an `https` origin with no credentials, path, or query. */
+const Https = Schema.String.check(Schema.makeFilter(isHttpsOrigin, { expected: "an https origin" }))
 
 /** The cloud the harness starts on loopback for one run: its origin is known only when it is listening. */
 schema Local { kind: "local"; profile: "staging" }
 
-/** A deployed cloud, and the one Alpha moves to when the cutover decision is taken (not used before it). */
-schema Hosted { kind: "hosted"; cloud: Https; appLinkHost: string; profile: "staging" | "production"; cutoverCandidate: Hosts }
+/** The deployed API origin and App Link host for one Alpha Cloud environment. */
+schema Hosted { kind: "hosted"; cloud: Https; appLinkHost: string; profile: "staging" | "production" }
 
 schema Deployments { local: Local; staging: Hosted; production: Hosted }
 

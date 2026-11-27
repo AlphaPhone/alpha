@@ -5,11 +5,19 @@ import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { MediaHandoff } from "../assistant/attachments.vibe"
-import { type Agent, NoteDevice, transcriptWindowMs, NoteStore, ownerAt } from "../platform/index.vibe"
+import { type Said, say } from "../notices/index.vibe"
+import type { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { NoteDevice, transcriptWindowMs } from "../platform/index.vibe"
+import { NoteStore } from "../platform/index.vibe"
+import { ownerAt } from "../platform/index.vibe"
 import { type Job, answer, following, reacting, run, together } from "../runtime/index.vibe"
-import { NoteContent, audioIdOf, formatChanged, numberOf, savedVoice } from "./content.vibe"
-import { type NotesSelection, notesSelection } from "./selection.vibe"
+import { createShelf } from "../runtime/index.vibe"
+import { type VoiceSharePorts, shareVoice } from "./actions.vibe"
+import { NoteContent, audioIdOf, formatChanged, numberOf, savedVoice, transcriptText } from "./content.vibe"
+import { type NotesSelection, type TranscriptSource, notesSelection, savedTranscriptRecord } from "./selection.vibe"
 
 module web {
   /** A linked page must still be its original HTTP(S) address. @throws {never} */
@@ -34,21 +42,42 @@ export { pageOf }
 const phone: Actor = "Phone"
 
 type TranscriptLine = { readonly s: "me"; readonly at: number; readonly t: string }
-type Heard = { readonly note: number; readonly owner: number; readonly revision: number; readonly upTo: number; readonly lines: readonly TranscriptLine[] }
+export type Heard = { readonly note: number; readonly owner: number; readonly revision: number; readonly upTo: number; readonly lines: readonly TranscriptLine[] }
 
-/** The last complete on-device transcript, held separately until its owner adds it to the note. */
+/** The last complete on-device transcript and seek target, held reactively until its owner acts on them. */
 export service VoiceReview {
+  readonly snapshot: () => Heard | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly match: (voice: Voice.VoiceNote) => Heard | undefined
+  readonly seekTo: (offsetMs: number | undefined) => void
+  readonly takeSeek: () => number | undefined
   get(voice: Voice.VoiceNote): (Heard | undefined)!!
   put(draft: Heard | undefined): void!!
 }
 
-const review = Layer.sync(VoiceReview, () => {
-  let staged: Heard | undefined
+const review = Layer.effect(VoiceReview, effect {
+  const shelf = createShelf<Heard | undefined>(undefined, { reset: () => undefined })
+  let pendingSeekMs: number | undefined
+  try Effect.addFinalizer(() => sync(() => { pendingSeekMs = undefined; shelf.reset() }))
+  const matches = (voice: Voice.VoiceNote): Heard | undefined => {
+    const staged = shelf.get()
+    return staged !== undefined && staged.owner === voice.owner && staged.note === voice.note &&
+      staged.revision === voice.revision && staged.upTo === voice.heard ? staged : undefined
+  }
   return {
-    get: (voice: Voice.VoiceNote) => sync(() =>
-      staged !== undefined && staged.owner === voice.owner && staged.note === voice.note &&
-      staged.revision === voice.revision && staged.upTo === voice.heard ? staged : undefined),
-    put: (draft: Heard | undefined) => sync(() => { staged = draft }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
+    match: matches,
+    seekTo(offsetMs: number | undefined) {
+      pendingSeekMs = offsetMs
+    },
+    takeSeek() {
+      const value = pendingSeekMs
+      pendingSeekMs = undefined
+      return value
+    },
+    get: (voice: Voice.VoiceNote) => sync(() => matches(voice)),
+    put: (draft: Heard | undefined) => sync(() => { shelf.set(draft) }),
   }
 })
 
@@ -81,7 +110,7 @@ effect function recognised(request: Extract<Voice.Effect, { readonly tag: "Trans
   const work = effect {
     const lines: TranscriptLine[] = []
     for (let offsetMs = 0; offsetMs < audio.durationMs; offsetMs += transcriptWindowMs) {
-      if (!listening(try voice.get(), request)) return failed
+      if (!listening(try voice.get(), request) || (ownerAt() catch () => "") !== owner) return failed
       const text = (try device.transcribe({ recordingId, noteId: note.id, offsetMs, durationMs: audio.durationMs })).trim()
       if (text !== "") {
         lines.push({ s: "me", at: offsetMs / 1000, t: text })
@@ -94,29 +123,31 @@ effect function recognised(request: Extract<Voice.Effect, { readonly tag: "Trans
     return { ...failed, ok: true }
   }
   const retired = Stream.runHead(Stream.filter(voice.changes, (state) => !listening(state, request)))
-  return Effect.raceFirst(work, Effect.as(retired, failed)) catch () => failed
+  return ensuring(Effect.raceFirst(work, Effect.as(retired, failed)), device.clearTranscriptAudio()) catch () => failed
 }
 
-effect function savedTranscript(fx: Extract<Voice.Effect, { readonly tag: "Writes" }>): Voice.Event!!(Agent | Notes | NoteContent | NoteStore | Voice.Machine | VoiceReview) {
+effect function writtenVoice(fx: Extract<Voice.Effect, { readonly tag: "Writes" }>): Voice.Event!!(Agent | Notes | NoteContent | NoteStore | Voice.Machine | VoiceReview) {
   const failed: Voice.Event = { type: "written", ticket: fx.ticket, ok: false, known: true, latest: 0 }
-  if (fx.part !== "Transcript") return failed
+  if (fx.part === "Summary") return failed
   const identity = ownerAt() catch () => ""
   const voice = try (try Voice.Machine).get()
-  const draft = try (try VoiceReview).get(voice)
+  const reviewStore = try VoiceReview
+  const draft = try reviewStore.get(voice)
   const collection = try (try NoteContent).collection()
   const note = collection.noteByNumber.get(fx.note)
-  if (draft === undefined || draft.upTo !== fx.upTo || draft.revision !== fx.base ||
-    draft.note !== fx.note || draft.owner !== fx.owner || !Voice.canWritten(voice, fx.ticket, false, 0, phone) ||
-    identity === "" || collection.owner !== identity || numberOf("owner", identity) !== fx.owner || collection.version !== fx.base ||
-    note === undefined || note.format?.kind !== "voice") return failed
-  const format = transcriptOf(note.format, draft.lines)
+  if (voice.owner !== fx.owner || voice.note !== fx.note || voice.revision !== fx.base ||
+    !Voice.canWritten(voice, fx.ticket, false, 0, phone) || identity === "" || collection.owner !== identity ||
+    numberOf("owner", identity) !== fx.owner || collection.version !== fx.base || note?.format?.kind !== "voice") return failed
+  const transcript = fx.part === "Transcript"
+  if (transcript && (draft === undefined || draft.upTo !== fx.upTo)) return failed
+  const format = transcript ? transcriptOf(note.format, draft?.lines ?? []) : formatChanged(note, { pinned: fx.part === "Pin" })
   if (format === undefined) return failed
   const store = try NoteStore
   return effect {
     const saved = try store.update({ id: note.id, expectedRevision: fx.base - 1, format })
     const latest = saved.state.revision + 1
     if ((ownerAt() catch () => "") !== identity || saved.note?.id !== note.id || latest <= fx.base) return { ...failed, known: false }
-    try (try VoiceReview).put(undefined)
+    try reviewStore.put(!transcript && draft !== undefined ? { ...draft, revision: latest } : undefined)
     try ignore((try Notes).send({ type: "storeChanged" }, phone))
     return { ...failed, ok: true, latest }
   } catch (error) => ({ ...failed, known: error.known })
@@ -154,8 +185,9 @@ function linkOut(fx: Link.Effect): Job<Link.Event, Agent | Notes | NoteContent |
   }
 }
 
-effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Voice.Event!!(Agent | NoteContent | NoteDevice | Shell | Voice.Machine) {
+effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Voice.Event!!(Agent | NoteContent | NoteDevice | Shell | Voice.Machine | VoiceReview) {
   const failed: Voice.Event = { type: "played", ticket: fx.ticket, ok: false }
+  const explicitOffset = (try VoiceReview).takeSeek()
   const collection = try (try NoteContent).collection()
   const identity = ownerAt() catch () => ""
   const note = collection.noteByNumber.get(fx.note)
@@ -166,8 +198,10 @@ effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Vo
   const saved = device.describe(audioId) catch () => undefined
   if (saved === undefined || saved.audioId !== audioId || saved.noteId !== note.id) return failed
   const segments = note.format?.data.segments
-  const offset = Array.isArray(segments) ? segments.slice(0, fx.from).reduce<number>((before, row) =>
+  const segmentOffset = Array.isArray(segments) ? segments.slice(0, fx.from).reduce<number>((before, row) =>
     before + (typeof row === "object" && row !== null && "durationMs" in row && typeof row.durationMs === "number" ? row.durationMs : 0), 0) : 0
+  const rawOffset = explicitOffset !== undefined && Number.isFinite(explicitOffset) ? explicitOffset : segmentOffset
+  const offset = Math.max(0, Math.min(Math.max(0, saved.durationMs - 1), Math.round(rawOffset)))
   const current = try (try Voice.Machine).get()
   if (!showing(try (try Shell).get(), "Notes") || !current.showing || current.halting || current.note !== fx.note ||
     current.owner !== numberOf("owner", identity) || !Voice.canPlayed(current, fx.ticket, phone)) return failed
@@ -195,6 +229,24 @@ effect function askAbout(fx: Extract<Voice.Effect, { readonly tag: "AsksAlpha" }
   }))
 }
 
+// spec/app/notes/voice.md, "Only the transcript the owner added leaves the note, and only what was shown is written to it"
+export effect function copyTranscript(source: TranscriptSource): void!!(NotesSelection | NoteStore | Toasts | Said) {
+  const note = try savedTranscriptRecord(source)
+  const onNotes = showing(try (try Shell).get(), "Notes")
+  if (note === undefined) {
+    if (onNotes) try say("This note changed. Reopen it to copy.", true)
+    return
+  }
+  const text = transcriptText(note)
+  if (text.trim() === "") return
+  if (new TextEncoder().encode(text).length > 65536) {
+    if (onNotes) try say("This transcript is too long to copy.", true)
+    return
+  }
+  const copied = !text.includes("\0") && (try (try Device).copyText(text))
+  if (onNotes) try say(copied ? "Text copied." : "Couldn’t copy text. Try again.", !copied)
+}
+
 /** The owner's request starts recognition for the exact recording still open. */
 export effect function generateTranscript(note: number, revision: number, retry: boolean): void!!Voice.Machine {
   const voice = try Voice.Machine
@@ -211,12 +263,13 @@ export effect function generateTranscript(note: number, revision: number, retry:
   }
 }
 
-function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | MediaHandoff | NoteDevice | NoteStore | VoiceReview, [Actor]> {
+function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | MediaHandoff | NoteDevice | NoteStore | VoiceReview | VoiceSharePorts, [Actor]> {
   if (fx.tag === "Plays") return answer("playback", played(fx), { type: "played", ticket: fx.ticket, ok: false }, phone)
   if (fx.tag === "Halts") return answer("playback", effect { return { type: "halted", ticket: fx.ticket, ok: try (try NoteDevice).halt() } satisfies Voice.Event }, { type: "halted", ticket: fx.ticket, ok: false }, phone)
+  if (fx.tag === "Shares") return answer("share voice note", shareVoice(fx), { type: "textShared", ticket: fx.ticket, notice: "ShareUnavailable" }, phone)
   if (fx.tag === "AsksAlpha") return run("ask about this transcript", askAbout(fx), phone)
   if (fx.tag === "Transcribes") return answer("transcribe", recognised(fx), { type: "transcribed", ticket: fx.ticket, ok: false }, phone)
-  if (fx.tag === "Writes") return answer("save transcript", savedTranscript(fx), { type: "written", ticket: fx.ticket, ok: false, known: false, latest: 0 }, phone)
+  if (fx.tag === "Writes") return answer("save voice note", writtenVoice(fx), { type: "written", ticket: fx.ticket, ok: false, known: false, latest: 0 }, phone)
   const failed: Voice.Event = { type: "summarised", ticket: fx.ticket, ok: false }
   return answer("summarise transcript", succeed(failed), failed, phone)
 }
@@ -224,4 +277,4 @@ function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | MediaHand
 // spec/app/notes/voice.md, "Story: Leave a voice note"
 const leaves = following(Shell, (shell) => showing(shell, "Notes"), Voice.Machine, (front): Voice.Event | undefined => front ? undefined : { type: "left" }, phone)
 
-export const sides = together(reacting(Link, { carry: linkOut }), reacting(Voice, { carry: voiceOut }), review, leaves)
+export const sides = together(reacting(Link, { keep: 1, open: [{ type: "restart" }, phone], carry: linkOut }), reacting(Voice, { carry: voiceOut }), review, leaves)

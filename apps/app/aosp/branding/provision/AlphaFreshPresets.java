@@ -20,6 +20,7 @@ import static com.android.provision.AlphaFreshSetupPolicy.nonempty;
 /** Privileged Provision adapter; never invoked for a completed or enterprise provisioning branch. */
 final class AlphaFreshPresets {
     private static final String GESTURE_OVERLAY = "com.android.internal.systemui.navbar.gestural";
+    private static final String THREE_BUTTON_OVERLAY = "com.android.internal.systemui.navbar.threebutton";
     private static final String NAVIGATION_CATEGORY = "com.android.internal.navigation_bar_mode";
     private AlphaFreshPresets() {}
     static boolean shouldRunWelcome(Context context) {
@@ -67,8 +68,16 @@ final class AlphaFreshPresets {
                     new AlphaFreshSetupPolicy.NavigationPort() {
                         public boolean eligible() { return AlphaFreshPresets.eligible(activity); }
                         public boolean hasEnabledMode() {
-                            for (OverlayInfo info : overlays.getOverlayInfosForTarget("android", user)) {
-                                if (NAVIGATION_CATEGORY.equals(info.category) && info.isEnabled()) return true;
+                            java.util.List<OverlayInfo> infos = overlays.getOverlayInfosForTarget("android", user);
+                            if (infos == null) return false;
+                            for (OverlayInfo info : infos) {
+                                if (info == null || !NAVIGATION_CATEGORY.equals(info.category) || !info.isEnabled()) {
+                                    continue;
+                                }
+                                // While USER_SETUP_COMPLETE == 0 (checked by eligible()), AOSP boots with
+                                // three-button enabled as its pre-setup fallback (config_navBarInteractionMode=0).
+                                // Only a non-default enabled mode counts as an explicit existing choice.
+                                if (!THREE_BUTTON_OVERLAY.equals(info.packageName)) return true;
                             }
                             return false;
                         }
@@ -102,11 +111,16 @@ final class AlphaFreshPresets {
                 public String target() {
                     InputMethodManager manager = activity.getSystemService(InputMethodManager.class);
                     if (manager == null) return null;
-                    for (InputMethodInfo method : manager.getInputMethodList()) {
+                    java.util.List<InputMethodInfo> methods = manager.getInputMethodList();
+                    if (methods == null) return null;
+                    for (InputMethodInfo method : methods) {
+                        if (method == null) continue;
+                        android.content.pm.ServiceInfo serviceInfo = method.getServiceInfo();
+                        if (serviceInfo == null || serviceInfo.applicationInfo == null) continue;
                         if ("com.android.inputmethod.latin".equals(method.getPackageName())
                                 && "com.android.inputmethod.latin.LatinIME".equals(method.getServiceName())
-                                && method.getServiceInfo().enabled && method.getServiceInfo().applicationInfo.enabled
-                                && (method.getServiceInfo().applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+                                && serviceInfo.enabled && serviceInfo.applicationInfo.enabled
+                                && (serviceInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
                             return method.getId();
                         }
                     }
@@ -123,7 +137,7 @@ final class AlphaFreshPresets {
                     return Settings.Secure.putString(activity.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD, value);
                 }
             });
-        } catch (IllegalStateException | SecurityException failure) {
+        } catch (IllegalStateException | SecurityException | NullPointerException failure) {
             return AlphaFreshSetupPolicy.ImeResult.FAILED;
         }
     }

@@ -2,7 +2,8 @@
 
 What a turn tells the agent about the phone besides the screen the
 [conversation](./index.md) tells it: the phone's last known location, the
-page open in Browser, what Maps shows, the time zone, the phone actions this
+page open in Browser, a reviewed email or selected voice-note transcript flag,
+the assistant overlay height, what Maps shows, the time zone, the phone actions this
 phone can carry out, and whether the owner's words go to a hosted model.
 Eliza encodes the turn context (`encodeTurnContext` of
 `@elizaos/agent`) and drops what a peer does not declare; no wire
@@ -237,7 +238,8 @@ pure def lawAPeerThatDoesNotTakeTheScreenGetsNoDay(observed: bool, onCalendar: b
 
 Each turn of a voice conversation reads the screen again when it is sent:
 the observation with its day, location and selected record, the Browser
-page beside it, the direct-request mode of approvals, and, from a screen
+page beside it, the direct-request mode of approvals (for Files filter and
+open only, since a spoken turn shows no review card), and, from a screen
 that is not sensitive, the claim of a view the agent prepares for it. Voice
 opens that view as it opens any screen it is asked for, and a saved note
 the owner names aloud opens as one named in writing would ([Notes](../notes/index.md),
@@ -257,6 +259,106 @@ pure def lawASpokenTurnCarriesWhatATypedTurnDoes(part: Part, observed: bool, dir
 pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
   not(carries(source, Observation, false, direct)) and not(carries(source, Page, false, direct))
     and not(carries(source, ViewClaim, false, direct))
+```
+
+### A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields
+
+Each typed or spoken turn sent to a peer that takes optional turn-context
+fields reports `observation.chatHeight` (`hidden`, `bar`, `typing`, `sheet`
+or `full`) from the live shell detent and dock state at send time: `Full`
+reports `full`, `Sheet` reports `sheet`, `Typing` reports `typing`, and
+`Bar` reports `hidden` when Ask Alpha is not drawn over the active bar app
+(`Phone`, `Messages` or `Contacts`) or is collapsed to the compact pill
+(either tucked by swipe-down or resting inside a non-Browser app), and
+`bar` otherwise. Following this document's rule that a sensitive screen
+sends no optional field, `chatHeight` is omitted when the screen is
+sensitive or when the peer does not take optional turn-context fields.
+
+```quint
+type OverlayDetent = DetentBar | DetentTyping | DetentSheet | DetentFull
+type ChatHeight = ChatHidden | ChatBar | ChatTyping | ChatSheet | ChatFull
+type TurnChatHeight = NoChatHeight | ReportedChatHeight({ height: ChatHeight })
+
+pure def chatHeightOf(detent: OverlayDetent, drawn: bool, pill: bool): ChatHeight =
+  match detent {
+    | DetentFull => ChatFull
+    | DetentSheet => ChatSheet
+    | DetentTyping => ChatTyping
+    | DetentBar => if (not(drawn) or pill) ChatHidden else ChatBar
+  }
+
+pure def sendsChatHeight(notSensitive: bool, peerTakes: bool): bool =
+  notSensitive and peerTakes
+
+pure def chatHeightForTurn(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): TurnChatHeight =
+  if (sendsChatHeight(notSensitive, peerTakes)) ReportedChatHeight({ height: chatHeightOf(detent, drawn, pill) }) else NoChatHeight
+
+pure def lawOpenSheetOrFullAlwaysReportsOpenHeight(detent: OverlayDetent, drawn: bool, pill: bool): bool =
+  (detent == DetentSheet implies chatHeightOf(detent, drawn, pill) == ChatSheet)
+    and (detent == DetentFull implies chatHeightOf(detent, drawn, pill) == ChatFull)
+
+pure def lawHiddenHeightOccursOnlyAtBarWhenUndrawnOrPill(detent: OverlayDetent, drawn: bool, pill: bool): bool =
+  (chatHeightOf(detent, drawn, pill) == ChatHidden) == (detent == DetentBar and (not(drawn) or pill))
+
+pure def lawSensitiveScreenSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, peerTakes: bool): bool =
+  not(sendsChatHeight(false, peerTakes))
+    and chatHeightForTurn(source, detent, drawn, pill, false, peerTakes) == NoChatHeight
+
+pure def lawUnsupportedPeerSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool): bool =
+  not(sendsChatHeight(notSensitive, false))
+    and chatHeightForTurn(source, detent, drawn, pill, notSensitive, false) == NoChatHeight
+
+pure def lawSpokenAndTypedTurnsReportSameChatHeight(detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): bool =
+  chatHeightForTurn(Spoken, detent, drawn, pill, notSensitive, peerTakes)
+    == chatHeightForTurn(Typed, detent, drawn, pill, notSensitive, peerTakes)
+```
+
+### A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it
+
+An agent older than the direct-request mode a turn asks for refuses the
+whole turn as an invalid voice view context, before it records the owner's
+words. The turn is then sent once more, the same in every other part,
+without the mode, so it is answered with no direct action; any other
+refusal stands.
+
+```quint
+type TurnAnswer = TurnAccepted | ContextRefused | OtherRefusal
+pure def resent(answer: TurnAnswer, askedDirect: bool): bool = askedDirect and answer == ContextRefused
+pure def lawOnlyAContextRefusalOfADirectTurnIsResent(answer: TurnAnswer, askedDirect: bool): bool =
+  resent(answer, askedDirect) implies (askedDirect and answer == ContextRefused)
+pure def lawATurnWithoutTheModeIsNeverResent(answer: TurnAnswer): bool = not(resent(answer, false))
+```
+
+### A turn asked while Files shows a readable document attaches it for that turn
+
+When Files is showing a readable text document, each turn the owner asks,
+typed or spoken, takes with it the text that Files confirmed for that same
+preview and send, and the agent decides whether the question is about it;
+the owner's words are never matched to decide it. Secret text, an
+unreadable file, a file larger than a chat attachment may be, and a file
+whose selection or contents changed supply no attachment, and a sensitive
+screen sends none. The file belongs only to that turn and does not enter
+the typed draft.
+
+```quint
+type OpenDocumentTurn = { filesShowing: bool, readable: bool, sensitive: bool, currentTurn: bool }
+
+pure val docValues = Set(
+  { filesShowing: true, readable: true, sensitive: false, currentTurn: true },
+  { filesShowing: false, readable: true, sensitive: false, currentTurn: true },
+  { filesShowing: true, readable: false, sensitive: false, currentTurn: true },
+  { filesShowing: true, readable: true, sensitive: true, currentTurn: true },
+  { filesShowing: true, readable: true, sensitive: false, currentTurn: false },
+)
+
+pure def sendsOpenDocument(source: Source, doc: OpenDocumentTurn): bool =
+  doc.filesShowing and doc.readable and not(doc.sensitive) and doc.currentTurn
+
+pure def lawAnOpenDocumentNeedsFilesShowingItReadableOnACurrentTurn(source: Source, doc: OpenDocumentTurn): bool =
+  sendsOpenDocument(source, doc) implies (doc.filesShowing and doc.readable and not(doc.sensitive) and doc.currentTurn)
+
+pure def lawATypedAndASpokenTurnTakeTheSameDocument(doc: OpenDocumentTurn): bool =
+  sendsOpenDocument(Typed, doc) == sendsOpenDocument(Spoken, doc)
 ```
 
 ## Story: Let my agent read the page I have open in Browser
@@ -286,6 +388,92 @@ pure def lawASensitiveScreenSendsNoPage(handed: bool, peer: Peer): bool = not(se
 pure def lawOffBrowserNoPageIsSent(handed: bool, peer: Peer): bool = not(sendsPage(true, false, handed, peer))
 
 pure def lawAPageBrowserWithheldIsNeverSent(peer: Peer): bool = not(sendsPage(true, true, false, peer))
+```
+
+## Story: Keep reviewed email and voice-note context out of my request words
+
+> As the owner, when I ask Alpha about an email I reviewed or a saved voice
+> note transcript, I want my typed request text to hold only the words I wrote,
+> so that untrusted email contents or synthetic transcript instructions never
+> mix into my authored request words.
+
+### A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text
+
+When the owner sends a turn carrying a reviewed email from Inbox or a saved
+voice-note transcript attached from Notes, the turn's `text` carries strictly
+the owner's trimmed typed text (including `""` when the owner sent only the
+attachment), never email headers, email body JSON, or a synthetic voice-note
+instruction prefix. The reviewed email is normalized and validated against the
+agent's `ReviewedEmail` schema at review time and revalidated on send so it
+goes in structured turn context (`metadata.reviewedEmail`), while the
+voice-note transcript goes as `metadata.useSelectedVoiceNoteTranscript: true`
+bound to the non-sensitive selected `canonical-note` observation, both encoded
+through `encodeTurnContext` only for a peer that takes optional turn-context
+fields. When peer support has not yet loaded or failed transiently on this
+connection, Alpha re-checks `/api/status` before refusing; when the peer does
+not take optional turn-context fields, Alpha refuses to post a turn carrying a
+reviewed email or voice-note transcript rather than concatenating untrusted
+data into `text` or silently dropping the attachment. A turn sent with only
+the reviewed email or transcript draws no empty bubble of the owner's, live
+or read again from history.
+
+```quint
+pure def sendsReviewedEmail(hasMail: bool, validMail: bool, peerTakes: bool): bool =
+  hasMail and validMail and peerTakes
+
+pure def sendsVoiceNoteTranscript(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  hasTranscript and exactNote and not(sensitive) and peerTakes
+
+pure def turnContextCarriesAttachment(hasMail: bool, validMail: bool, hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  (not(hasMail) or sendsReviewedEmail(hasMail, validMail, peerTakes))
+    and (not(hasTranscript) or sendsVoiceNoteTranscript(hasTranscript, exactNote, sensitive, peerTakes))
+
+pure def lawInvalidReviewedEmailRefusesTurn(hasTranscript: bool, exactNote: bool, sensitive: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(true, false, hasTranscript, exactNote, sensitive, peerTakes))
+
+pure def lawSensitiveScreenRefusesVoiceNoteTranscript(hasMail: bool, validMail: bool, exactNote: bool, peerTakes: bool): bool =
+  not(turnContextCarriesAttachment(hasMail, validMail, true, exactNote, true, peerTakes))
+
+pure def lawUnsupportedPeerRefusesStructuredContextAttachment(hasMail: bool, hasTranscript: bool, validMail: bool, exactNote: bool, sensitive: bool): bool =
+  (hasMail or hasTranscript) implies not(turnContextCarriesAttachment(hasMail, validMail, hasTranscript, exactNote, sensitive, false))
+```
+
+## Story: Let my agent see the Telegram or Slack chat I have open
+
+> As the owner, when I ask about the Telegram chat or Slack channel or
+> thread I have open, I want my agent to see only a bounded snapshot of that
+> conversation when I allowed it, never while signing in or entering a code
+> or password, and never once I turned that share off.
+
+### A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer
+
+Telegram and Slack each own what they hand over: bounded recent messages
+and non-secret draft metadata, stripped of every code, password, QR token,
+OAuth secret and session token. When the screen is sensitive, the session
+is not authenticated, the matching privacy share (`TelegramContext` or
+`SlackContext`) is off or unread, or another app is in front, nothing of
+the chat leaves the phone.
+
+```quint
+type MessagingApp = NoMessaging | OnTelegram | OnSlack
+
+pure def asksForMessagingContext(observed: bool, app: MessagingApp, authenticated: bool, shareAllowed: bool): bool =
+  observed and app != NoMessaging and authenticated and shareAllowed
+
+pure def sendsMessagingContext(observed: bool, app: MessagingApp, authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  asksForMessagingContext(observed, app, authenticated, shareAllowed) and handed and peer.takes
+
+pure def lawASensitiveScreenSendsNoMessagingContext(app: MessagingApp, authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(false, app, authenticated, shareAllowed, handed, peer))
+
+pure def lawOffMessagingNoMessagingContextIsSent(authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, NoMessaging, authenticated, shareAllowed, handed, peer))
+
+pure def lawUnauthenticatedSendsNoMessagingContext(app: MessagingApp, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, app, false, shareAllowed, handed, peer))
+
+pure def lawDisallowedShareSendsNoMessagingContext(app: MessagingApp, authenticated: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, app, authenticated, false, handed, peer))
 ```
 
 ## Story: Let my agent see what Maps shows when I ask about it

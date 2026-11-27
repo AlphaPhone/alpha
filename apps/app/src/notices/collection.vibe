@@ -223,6 +223,10 @@ function carry(fx: Collection.Effect): Job<Collection.Event, ShadeShelf | System
     when "ClearAll": run("collection-clear-all", effect { try (try ShadeShelf).performClearAll(fx.ticket) }, "Phone" as Actor);
     when "OpenSettings": run("collection-settings", effect { try (try ShadeShelf).performOpenSettings() }, "Phone" as Actor);
     when "DismissOwn": run("collection-dismiss-own", effect { try (try ShadeShelf).performDismissOwn() }, "Phone" as Actor);
+    when "ApplyPolicy": run("collection-apply-policy", succeed(undefined), "Phone" as Actor);
+    when "ReadPolicy": run("collection-read-policy", succeed(undefined), "Phone" as Actor);
+    when "ReadPolicyApps": run("collection-read-policy-apps", succeed(undefined), "Phone" as Actor);
+    when "ReadPolicyHistory": run("collection-read-policy-history", succeed(undefined), "Phone" as Actor);
   }
 }
 

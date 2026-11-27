@@ -8,18 +8,18 @@
 -keep @interface com.getcapacitor.annotation.** { *; }
 -keep @interface com.getcapacitor.PluginMethod { *; }
 -keep @interface com.getcapacitor.NativePlugin { *; }
--keep class ai.eliza.plugins.** { *; }
--keep class ai.eliza.os.agent.** { *; }
+-keep class ai.eliza.voice.** { *; }
+-keep class ai.eliza.os.agent.inference.** { *; }
 -keep class ai.elizaos.** { *; }
--keep class ai.alphacompute.alphaphone.** { *; }
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
--keep class androidx.** { *; }
--keep interface androidx.** { *; }
 -dontwarn org.jetbrains.annotations.**
 -dontwarn javax.annotation.**
 -keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}

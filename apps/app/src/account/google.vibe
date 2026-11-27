@@ -7,7 +7,7 @@ import * as Session from "../../gen/app__account__session.effect.vibe"
 import { Cloud, Device, ask } from "../platform/index.vibe"
 import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { AccountShelf, type ConnectedGoogleAccount } from "./bridge.vibe"
-import { accountIdNumber, secondsTime } from "./clock.vibe"
+import { accountIdNumber } from "./clock.vibe"
 
 const GoogleAccountEntry = Schema.Struct({
   connected: Schema.Boolean,
@@ -138,12 +138,9 @@ const resumeGoogleConsent = started(effect {
 }, "google consent resume watcher")
 
 /** Connected Google accounts, OAuth consent browser visit, and disconnect readback machine. */
-export const googleMachine = Layer.provide(
-  together(
-    reacting(Google, { keep: 1, open: [{ type: "restart", signIn: 0 }], carry: carryGoogle, timers: googleTimers }),
-    resumeGoogleConsent,
-  ),
-  secondsTime,
+export const googleMachine = together(
+  reacting(Google, { keep: 1, open: [{ type: "restart", signIn: 0 }], carry: carryGoogle, timers: googleTimers }),
+  resumeGoogleConsent,
 )
 
 schema StoredAccessSchema {

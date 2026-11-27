@@ -1,12 +1,12 @@
-import { Archive, Ellipsis, Forward, Mail, MailOpen, Reply, ReplyAll, Trash2 } from "lucide-react";
+import { Archive, Ellipsis, Forward, Mail, Reply, Trash2 } from "lucide-react";
 import { Button } from "../Button.tsx";
-import { Mark } from "../Mark.tsx";
+import { LogoMark, Mark } from "../Mark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 
 export type InboxMessageActionsProps = {
   /** Fits all message controls into the reader's header menu. */
   compact?: boolean;
-  /** The message is unread: marking offers "Mark as read"; else "Mark as unread". */
+  /** The message is unread: marking offers "Mark read"; else "Mark unread". */
   unread?: boolean;
   /** Starts a reply, to the Reply-To address when there is one; offered while the account may send. */
   onReply?: () => void;
@@ -37,15 +37,15 @@ export function InboxMessageActions({ compact = false, unread = false, onReply, 
       {!compact && onAskAlpha ? <Button onClick={onAskAlpha} className="bg-alpha text-alpha-foreground hover:bg-alpha/90"><Mark aria-hidden role="presentation" />Ask Alpha</Button> : null}
       {more ? (
         <Menu>
-          <MenuTrigger asChild><Button variant={compact ? "ghost" : "secondary"} size="icon" aria-label="More actions" className="ml-auto"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent>
-            {compact && onReply ? <MenuItem onSelect={onReply}><Reply />Reply</MenuItem> : null}
-            {onReplyAll ? <MenuItem onSelect={onReplyAll}><ReplyAll />Reply all</MenuItem> : null}
-            {onForward ? <MenuItem onSelect={onForward}><Forward />Forward</MenuItem> : null}
-            {compact && onAskAlpha ? <MenuItem onSelect={onAskAlpha}><Mark aria-hidden role="presentation" />Ask Alpha</MenuItem> : null}
-            {onToggleRead ? <MenuItem onSelect={onToggleRead}>{unread ? <MailOpen /> : <Mail />}{unread ? "Mark as read" : "Mark as unread"}</MenuItem> : null}
-            {onArchive ? <MenuItem onSelect={onArchive}><Archive />Archive</MenuItem> : null}
-            {onTrash ? <MenuItem destructive onSelect={onTrash}><Trash2 />Move to Trash</MenuItem> : null}
+          <MenuTrigger asChild><Button variant={compact ? "ghost" : "secondary"} size="icon" aria-label="More actions" className={compact ? "ml-auto size-11! min-w-11!" : "ml-auto"}><Ellipsis /></Button></MenuTrigger>
+          <MenuContent className={compact ? "min-w-52" : undefined}>
+            {compact && onReply ? <MenuItem onSelect={onReply}><Reply className="size-5.5" />Reply</MenuItem> : null}
+            {onReplyAll ? <MenuItem onSelect={onReplyAll}><Reply className="size-5.5" />Reply all</MenuItem> : null}
+            {onForward ? <MenuItem onSelect={onForward}><Forward className="size-5.5" />Forward</MenuItem> : null}
+            {compact && onAskAlpha ? <MenuItem onSelect={onAskAlpha}><LogoMark className="size-5" />Ask Alpha</MenuItem> : null}
+            {onToggleRead ? <MenuItem onSelect={onToggleRead}><Mail className="size-5.5" />{unread ? "Mark read" : "Mark unread"}</MenuItem> : null}
+            {onArchive ? <MenuItem onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem> : null}
+            {onTrash ? <MenuItem onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem> : null}
           </MenuContent>
         </Menu>
       ) : null}

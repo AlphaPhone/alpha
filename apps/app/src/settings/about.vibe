@@ -3,11 +3,13 @@ import * as Developer from "../../gen/app__settings__developer.effect.vibe"
 import * as Licences from "../../gen/app__settings__licences.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
-import { Device, native, type PhoneReport, type Problem, SystemSettings, VoiceBridge } from "../platform/index.vibe"
-import { type Job, answer, due, following, reacting, run, stop, together, untimed, Time } from "../runtime/index.vibe"
-import { development, versions } from "./build.ts"
+import { appVersion, Device, native, type PhoneReport, type Problem, SystemSettings, VoiceBridge } from "../platform/index.vibe"
+import { type Job, answer, due, following, reacting, run, stop, together, untimed, type Shelf, createShelf, Time } from "../runtime/index.vibe"
+import { development } from "./build.ts"
 
 module web {
+  let activeDownloadUrl: string | undefined
+
   /** The licence notices shipped with Alpha, beside its page: never a remote source. */
   export async function shipped(): Promise<unknown> {
     const response = await fetch("licenses/third-party-notices.json")
@@ -25,41 +27,69 @@ module web {
         return false
       }
     }
+    if (activeDownloadUrl !== undefined) URL.revokeObjectURL(activeDownloadUrl)
+    const href = URL.createObjectURL(file)
+    activeDownloadUrl = href
     const link = document.createElement("a")
-    link.href = URL.createObjectURL(file)
+    link.href = href
     link.download = name
     link.click()
-    URL.revokeObjectURL(link.href)
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", () => {
+        if (activeDownloadUrl === href) {
+          URL.revokeObjectURL(href)
+          activeDownloadUrl = undefined
+        }
+      }, { once: true })
+    }
     return true
   }
 }
 import { shared, shipped } from web
 
+schema NoticeObligation { flag: string; note: string }
+
 /** One licence as the notices file holds it. */
-export schema Notice { name: string; version: string; license: string; text: string; source?: string; flags?: ReadonlyArray<string> }
+export schema Notice {
+  name: string;
+  version: string;
+  license: string;
+  text: string;
+  source?: string;
+  flags?: ReadonlyArray<string>;
+  obligations?: ReadonlyArray<NoticeObligation>;
+}
 
 /** The licences loaded, kept beside the machine that counts them: the list the Licences page searches and shows. */
 export service Notices {
+  readonly shelf: Shelf<ReadonlyArray<Notice>>
   get(): ReadonlyArray<Notice>!!
   set(notices: ReadonlyArray<Notice>): void!!
 }
 
-const notices = Layer.sync(Notices, () => {
-  let held: ReadonlyArray<Notice> = []
-  return { get: () => sync(() => held), set: (next: ReadonlyArray<Notice>) => sync(() => { held = next }) }
+/** Read the runtime-scoped third-party notices shelf. */
+export const noticesShelf = effect {
+  return (try Notices).shelf
+}
+
+const notices = Layer.effect(Notices, effect {
+  const shelf = createShelf<ReadonlyArray<Notice>>([], { reset: () => [] })
+  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+  return { shelf, get: () => sync(() => shelf.get()), set: (next: ReadonlyArray<Notice>) => sync(() => { shelf.set(next) }) }
 })
 
 // spec/app/settings/licences.md, "A load ends with the licences it found, or as one that could not load"
-effect function loaded(load: number): Licences.Event!!Notices {
+effect function loaded(load: number): Licences.Event!!(Notices | Licences.Machine) {
   return effect {
     const found = try Schema.decodeUnknownEffect(Schema.Array(Notice))(try tryPromise(shipped))
-    try (try Notices).set(found)
-    return { type: "loaded", load, ok: true, found: found.length }
+    const event: Licences.Event = { type: "loaded", load, ok: true, found: found.length }
+    if (Licences.enabled(try (try Licences.Machine).get(), event)) try (try Notices).set(found)
+    return event
   } catch () => ({ type: "loaded", load, ok: false, found: 0 })
 }
 
 const licencesMachine = reacting(Licences, {
-  carry: (fx): Job<Licences.Event, Notices, []> => answer("load", loaded(fx.load), { type: "giveUpOnLoad", now: untimed }),
+  carry: (fx): Job<Licences.Event, Notices | Licences.Machine, []> => answer("load", loaded(fx.load), { type: "loaded", load: fx.load, ok: false, found: 0 }),
   timers: (state) => (state.load.read.status === "Loading" ? [due<Licences.Event, []>("load", state.load.due, { type: "giveUpOnLoad", now: untimed })] : []),
 })
 
@@ -127,7 +157,8 @@ export function reportOf(input: { readonly at: number; readonly native: boolean;
   const text = (value: unknown, shape: RegExp) => (typeof value === "string" && shape.test(value) ? value : undefined)
   const whole = (value: unknown, below: number) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value < below ? value : undefined)
   const hashes: Record<string, unknown> = typeof facts.runtimeHashes === "object" && facts.runtimeHashes !== null ? { ...facts.runtimeHashes } : {}
-  const { app, mode } = versions()
+  const app = appVersion() || "development"
+  const mode = import.meta.env.MODE
   const version = input.phone.readings.find((reading) => reading.fact === "Versions")?.value
   return {
     format: "alpha-diagnostics/v1",
@@ -174,9 +205,9 @@ const recoverPreferences = effect {
 
 function carryDeveloper(fx: Developer.Effect): Job<Developer.Event, SystemSettings | Device | Time | VoiceBridge | Prefs.Machine | Developer.Machine, []> {
   return match (fx) {
-    when { tag: "ReadLog", let reading }: answer("log", logRead(reading), { type: "giveUpOnLog", now: untimed });
-    when { tag: "ClearLog", let clearing }: answer("clear", logCleared(clearing), { type: "giveUpOnClearing", now: untimed });
-    when { tag: "ExportDiagnostics", let exporting }: answer("export", exported(exporting), { type: "giveUpOnExport", now: untimed });
+    when { tag: "ReadLog", let reading }: answer("log", logRead(reading), { type: "logRead", reading, ok: false, problems: 0, needs: [] });
+    when { tag: "ClearLog", let clearing }: answer("clear", logCleared(clearing), { type: "logCleared", clearing, ok: false, at: untimed });
+    when { tag: "ExportDiagnostics", let exporting }: answer("export", exported(exporting), { type: "exported", exporting, ok: false });
     when { tag: "TryMockMode" }: stop("mocks");
     when { tag: "RecoverStore", let store }: store === "DevicePreferences" ? run("recover", recoverPreferences) : stop("recover");
   }

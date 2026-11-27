@@ -141,23 +141,23 @@ public final class AlphaCallActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) setShowWhenLocked(true);
-        else getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
+        setShowWhenLocked(true);
         setTitle(TITLE);
         Window window = getWindow();
         window.setStatusBarColor(Color.BLACK);
         window.setNavigationBarColor(Color.BLACK);
         // The screen is black whatever the host theme: system bar icons stay light.
         View decor = window.getDecorView();
-        int lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-            | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
+        int lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         decor.setSystemUiVisibility(decor.getSystemUiVisibility() & ~lightBars);
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setFilterTouchesWhenObscured(true);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(Color.BLACK);
+        scroll.setFilterTouchesWhenObscured(true);
         scroll.addView(content, new ScrollView.LayoutParams(MATCH, WRAP));
         scroll.setOnApplyWindowInsetsListener((view, insets) -> {
             view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
@@ -204,6 +204,7 @@ public final class AlphaCallActivity extends Activity {
 
     private void acceptIntent(Intent intent) {
         tones.stop();
+        if (intent == null) return;
         selected = intent.getStringExtra("callId");
         Call call = AlphaInCallService.call(selected);
         if (call == null) return;
@@ -226,9 +227,7 @@ public final class AlphaCallActivity extends Activity {
         String id = selected;
         int state = call.getState();
         tones.retain(id, state == Call.STATE_ACTIVE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) setTurnScreenOn(AlphaCallPresentation.ringing(state));
-        else if (AlphaCallPresentation.ringing(state)) getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
-        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        setTurnScreenOn(AlphaCallPresentation.ringing(state));
         for (Iterator<String> keys = names.keySet().iterator(); keys.hasNext(); ) {
             String key = keys.next();
             if (!ids.contains(key.substring(0, key.indexOf('\n')))) keys.remove();
@@ -407,6 +406,7 @@ public final class AlphaCallActivity extends Activity {
 
     private ImageButton round(int fill, int glyph, int ink, int glyphSize, String description, Runnable action) {
         ImageButton button = new ImageButton(this);
+        button.setFilterTouchesWhenObscured(true);
         button.setBackground(pressable(GradientDrawable.OVAL, fill, 0));
         button.setImageDrawable(new Glyph(glyph, ink, dp(glyphSize)));
         button.setScaleType(ImageView.ScaleType.CENTER);
@@ -449,9 +449,7 @@ public final class AlphaCallActivity extends Activity {
             digits = null;
             TextView avatar = line(36, Color.WHITE);
             avatar.setBackground(shape(GradientDrawable.OVAL, NEUTRAL, 0));
-            avatar.setTypeface(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
-                ? Typeface.create(Typeface.DEFAULT, 600, false)
-                : Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            avatar.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
             avatar.setText(AlphaCallPresentation.initials(caller.name, caller.number != null));
             avatar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             content.addView(avatar, new LinearLayout.LayoutParams(dp(112), dp(112)));
@@ -515,6 +513,7 @@ public final class AlphaCallActivity extends Activity {
 
     private Button key(String id, char digit) {
         Button key = new Button(this);
+        key.setFilterTouchesWhenObscured(true);
         key.setText(String.valueOf(digit));
         key.setTextSize(28);
         key.setTextColor(Color.WHITE);
@@ -542,6 +541,7 @@ public final class AlphaCallActivity extends Activity {
     /** Another call, as a pill the owner taps to show it. The pill is 44dp inside a 48dp target. */
     private TextView chip(String other, String label) {
         TextView chip = line(15, Color.WHITE);
+        chip.setFilterTouchesWhenObscured(true);
         chip.setText(label);
         chip.setMaxWidth(dp(260));
         chip.setPadding(dp(16), 0, dp(16), 0);

@@ -1,15 +1,17 @@
 // spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
 import type { ListedVoicemail } from "@elizaos/os-bridges";
-import { Banner, Button, Spinner, cn, focusRing } from "@repo/ui";
-import { Effect } from "effect";
-import { MessageCircle, Pause, Phone, Play, RotateCw, Trash2, X } from "lucide-react";
+import { Banner, Button, Slider, Spinner, cn, focusRing } from "@repo/ui";
+import { Effect, Exit } from "effect";
+import { Phone as Handset, Play, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { PhoneProps } from "./Phone.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
-import { Player, Voicemails } from "./voicemail.vibe";
+import { Player, Voicemails, askVoicemailDeletion } from "./voicemail.vibe";
 import { callerTitle, clockLength, shortWhen } from "./words.ts";
+import { Bubble, Close, PauseGlyph, RetryGlyph } from "./icons.ts";
 
 type Props = Pick<PhoneProps, "runtime"> & { now: number };
 
@@ -18,12 +20,11 @@ const action = "flex-1 bg-background hover:bg-accent";
 
 function Position({ runtime, length, enabled }: Pick<Props, "runtime"> & { length: number; enabled: boolean }) {
   const player = runtime.runSync(Effect.flatMap(Player, (service) => service.controls()));
-  const position = useSyncExternalStore((listener) => player.subscribe(listener), () => player.position(), () => 0);
+  const position = useSyncExternalStore((wake) => player.subscribe(wake), () => player.position(), () => 0);
   return (
     <>
-      {/* eslint-disable-next-line no-restricted-syntax -- native range scrubber for voicemail playback */}
-      <input type="range" aria-label="Position" className="h-11 min-w-0 flex-1 accent-foreground" min={0} max={length}
-        value={Math.min(position, length)} disabled={!enabled} onChange={(event) => player.seek(event.currentTarget.valueAsNumber)} />
+      <Slider variant="playback" aria-label="Position" aria-valuetext={clockLength(position)} className="min-w-0 flex-1"
+        min={0} max={Math.max(1, length)} value={Math.min(position, length)} disabled={!enabled || length === 0} onValueChange={(value) => player.seek(value)} />
       <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{clockLength(position)} / {clockLength(length)}</span>
     </>
   );
@@ -37,6 +38,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
 }) {
   const { state, can, send } = useVoicemail(runtime);
   const phone = usePhone(runtime);
+  const route = useShell(runtime).state?.route;
   if (!state || !phone.state) return null;
   const held = runtime.runSync(Effect.flatMap(Voicemails, (store) => store.get()));
   const busy = state.removal.outcome === "Sent";
@@ -47,26 +49,26 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
   const call = { type: "reach", how: "CallBack" } as const;
   const canCall = phone.can({ type: "dialVoicemail", number: row.number });
   return (
-    <section aria-label="Open voicemail" data-alpha-phone-voicemail-open="" className="mx-4 my-2 flex flex-col gap-3.5 rounded-sheet bg-secondary p-3.5">
+    <section aria-label="Open voicemail" data-alpha-phone-voicemail-open="" className="mx-4 my-2 flex flex-col gap-3.5 rounded-panel bg-secondary p-3.5">
       <button type="button" aria-label={label} aria-expanded="true" className={cn(focusRing, "flex min-h-11 items-center gap-3 text-left")}
         disabled={!can({ type: "close" }) || busy} onClick={() => void send({ type: "close" })}>
         <CallAvatar name={title} raised />
-        <span className="min-w-0 flex-1 truncate font-bold">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-md font-bold">{title}</span>
         <span className="shrink-0 text-sm text-muted-foreground">{date}</span>
       </button>
-      {state.carrierText && row.carrierTranscript !== null && <p className="break-words text-lg" data-alpha-phone-transcript="">{row.carrierTranscript}</p>}
-      {state.transcript.status === "Loaded" && held.transcript !== "" && <p className="break-words text-lg" data-alpha-phone-transcript="">{held.transcript}</p>}
+      {state.carrierText && row.carrierTranscript !== null && <p className="text-lg leading-transcript wrap-anywhere" data-alpha-phone-transcript="">{row.carrierTranscript}</p>}
+      {state.transcript.status === "Loaded" && held.transcript !== "" && <p className="text-lg leading-transcript wrap-anywhere" data-alpha-phone-transcript="">{held.transcript}</p>}
       {state.transcript.status === "Loading" && <div role="status" aria-label="Transcribing" className="h-4 w-3/5 rounded-full bg-accent motion-safe:animate-pulse" />}
       {state.transcript.status === "Failed" && <p className="text-sm text-muted-foreground">No words were heard</p>}
       {state.noRecognizer && <p className="text-sm text-muted-foreground">No transcript is available on this phone</p>}
       <div className="flex items-center gap-3">
         {state.audio.status === "Loading" && <div role="status" aria-label="Loading audio" className={playbackPlaceholder} />}
-        {can({ type: "retryAudio" }) && <Button size="icon" variant="ghost" className="bg-background" aria-label="Try again" onClick={() => void send({ type: "retryAudio" })}><RotateCw className="size-5" /></Button>}
+        {can({ type: "retryAudio" }) && <Button size="icon" variant="ghost" className="bg-background" aria-label="Try again" onClick={() => void send({ type: "retryAudio" })}><RetryGlyph className="size-5" /></Button>}
         {state.audio.status === "Loaded" && (
-          <Button size="icon" className="bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80" data-alpha-phone-play=""
+          <Button size="icon" className={cn("bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80", state.confirming && "disabled:opacity-100")} data-alpha-phone-play=""
             aria-label={state.playback === "Playing" ? "Pause" : "Play"} disabled={!can(pause) && !can(play)}
             onClick={() => void send(can(pause) ? pause : play)}>
-            {state.playback === "Playing" ? <Pause className="size-4.5" /> : <Play className="size-4.5" />}
+            {state.playback === "Playing" ? <PauseGlyph className="size-4.5" /> : <Play className="size-4.5" />}
           </Button>
         )}
         <Position runtime={runtime} length={row.durationSeconds} enabled={state.audio.status === "Loaded" && !state.confirming && !busy} />
@@ -74,17 +76,21 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
       {live && <p role="status" className="text-sm text-muted-foreground">Voicemail does not play during a call</p>}
       {state.confirming ? (
         <div role="group" aria-label="Delete voicemail" className="flex gap-2">
-          <Button variant="ghost" size="icon" className={cn(action, "w-auto")} disabled={!can({ type: "keep" }) || busy}
-            aria-label="Keep" onClick={() => void send({ type: "keep" })}><X className="size-5" /></Button>
-          <Button variant="destructive" className="h-11 flex-2" disabled={!can({ type: "confirmDelete" }) || busy}
+          <Button variant="ghost" size="icon" className={cn(action, "w-auto basis-0")} disabled={!can({ type: "keep" }) || busy}
+            aria-label="Keep" onClick={() => void send({ type: "keep" })}><Close className="size-5" /></Button>
+          <Button className="h-11 flex-2 basis-0 bg-hangup px-0 text-md font-semibold text-alpha-foreground hover:bg-hangup/90 active:bg-hangup/80" disabled={!can({ type: "confirmDelete" }) || busy}
             data-alpha-phone-voicemail-confirm="" onClick={() => void send({ type: "confirmDelete" })}>Delete</Button>
         </div>
       ) : (
         <div className="flex gap-2">
-          {row.number !== "" && can(call) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Call back" disabled={!canCall} onClick={() => void send(call)}><Phone className="size-5" /></Button>}
-          {row.number !== "" && can(message) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Message" onClick={() => void send(message)}><MessageCircle className="size-5" /></Button>}
-          {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className={cn(action, "w-auto text-destructive")} aria-label="Delete"
-            data-alpha-phone-voicemail-delete="" onClick={() => void send({ type: "askDelete" })}><Trash2 className="size-5" /></Button>}
+          {row.number !== "" && can(call) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Call back" disabled={!canCall} onClick={() => void send(call)}><Handset className="size-5" /></Button>}
+          {row.number !== "" && can(message) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Message" onClick={() => {
+            if (route === undefined) return;
+            runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set({ message: { route, id: row.id, opening: state.audio.ticket, number: row.number } })));
+            void send(message);
+          }}><Bubble className="size-5" /></Button>}
+          {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className={cn(action, "w-auto text-hangup")} aria-label="Delete"
+            data-alpha-phone-voicemail-delete="" onClick={() => void runtime.runPromise(askVoicemailDeletion(row.id))}><Trash2 className="size-5" /></Button>}
         </div>
       )}
     </section>
@@ -100,8 +106,10 @@ export function VoicemailTab({ runtime, now }: Props) {
   const open = async (row: ListedVoicemail) => {
     const opening = { type: "open", carrierText: row.carrierTranscript !== null } as const;
     if (!can(opening)) return;
+    const previous = { open: held.open, audio: held.audio, transcript: held.transcript };
     runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set({ open: row.id, audio: "", transcript: "" })));
-    await send(opening);
+    const result = await send(opening);
+    if (Exit.isFailure(result)) runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set(previous)));
   };
   return (
     <div>
@@ -115,7 +123,6 @@ export function VoicemailTab({ runtime, now }: Props) {
       {state.undo === "Kept" && <Banner className="mx-4">Voicemail kept</Banner>}
       {state.removal.outcome === "Unknown" && <Banner variant="warn" className="mx-4">Alpha cannot tell whether the voicemail was deleted</Banner>}
       {state.removal.outcome === "Refused" && state.undo !== "Kept" && state.open && <Banner variant="destructive" className="mx-4">The voicemail was not deleted</Banner>}
-      {state.list.status === "Loaded" && state.items === 0 && <p role="status" className="p-5 text-center text-muted-foreground">No voicemail</p>}
       {rows.map((row) => {
         const title = callerTitle(row.number, row.cachedName);
         const date = shortWhen(row.date, now);
@@ -125,18 +132,18 @@ export function VoicemailTab({ runtime, now }: Props) {
         if (current) return <OpenVoicemail key={row.id} runtime={runtime} row={row} label={label} title={title} date={date} />;
         return (
           <button type="button" key={row.id} aria-label={label} aria-expanded="false" onClick={() => void open(row)}
-            disabled={state.confirming || state.removal.outcome === "Sent"}
-            className={cn(focusRing, "flex min-h-16 w-full items-start gap-3 px-5 py-2.5 text-left")}>
+            disabled={!can({ type: "open", carrierText: row.carrierTranscript !== null })}
+            className={cn(focusRing, "flex min-h-16 w-full items-start gap-3 px-5 py-2.5 text-left focus-visible:-outline-offset-focus")}>
             <CallAvatar name={title} />
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="flex items-center gap-1.5">
-                {unread && <span aria-hidden className="size-2 shrink-0 rounded-full bg-alpha" />}
-                <span className={cn("min-w-0 flex-1 truncate", unread ? "font-bold" : "font-semibold")}>{title}</span>
+                {unread && <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />}
+                <span className={cn("min-w-0 flex-1 truncate text-md", unread ? "font-bold" : "font-semibold")}>{title}</span>
                 <span className="shrink-0 text-sm text-muted-foreground">{date}</span>
               </span>
-              {row.carrierTranscript !== null && <span className="line-clamp-2 text-muted-foreground">{row.carrierTranscript}</span>}
+              {row.carrierTranscript !== null && <span className="line-clamp-2 text-base text-muted-foreground">{row.carrierTranscript}</span>}
             </span>
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{clockLength(row.durationSeconds)}</span>
+            <span className="shrink-0 text-caption text-muted-foreground tabular-nums">{clockLength(row.durationSeconds)}</span>
           </button>
         );
       })}

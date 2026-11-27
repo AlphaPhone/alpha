@@ -73,8 +73,9 @@ effect function written(fx: Extract<Transfer.Effect, { readonly tag: "Imports" |
   const note = collection.noteByNumber.get(fx.note)
   const draft = try content.draft()
   const saved = note === undefined ? undefined : noteShareText(note)
+  const exportedText = saved === undefined ? undefined : saved.title === "" ? saved.text : saved.text === "" ? saved.title : `${saved.title}\n${saved.text}`
   const body = fx.draft ? (draft?.owner === identity ? wordsOf(draft) : try content.rawDraft(identity))
-    : collection.version === fx.revision && saved !== undefined ? `${saved.title}\n${saved.text}` : undefined
+    : collection.version === fx.revision ? exportedText : undefined
   if (body === undefined) return failed
   const outcome = try (try NoteDocuments).write(handle, body)
   return { ...failed, ok: outcome.status === "exported", known: outcome.status !== "unverified" }
@@ -91,4 +92,4 @@ function carry(fx: Transfer.Effect): Job<Transfer.Event, Scope, [Actor]> {
 
 const leaves = following(Shell, (shell) => showing(shell, "Notes"), Transfer.Machine, (front): Transfer.Event | undefined => front ? undefined : { type: "left" }, phone)
 
-export const transfers = Layer.provideMerge(together(reacting(Transfer, { carry }), leaves), Layer.merge(noteDocuments, selected))
+export const transfers = Layer.provideMerge(together(reacting(Transfer, { keep: 1, open: [{ type: "restart" }, phone], carry }), leaves), Layer.merge(noteDocuments, selected))

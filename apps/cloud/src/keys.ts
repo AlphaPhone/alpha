@@ -2,11 +2,27 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
 
 /**
- * Thirty-two random bytes, base64url: a digest, sealing, email-code or connector-token key.
+ * Thirty-two random bytes, base64url: a digest or email-code key.
  * @throws {never}
  */
 export function randomKey(): string {
   return randomBytes(32).toString("base64url");
+}
+
+/**
+ * Thirty-two random bytes, standard base64: a 256-bit AES-GCM sealing key.
+ * @throws {never}
+ */
+export function sealingKey(): string {
+  return randomBytes(32).toString("base64");
+}
+
+/**
+ * Thirty-two random bytes as 64 lower-case hex characters: the Google connector token encryption key.
+ * @throws {never}
+ */
+export function hexKey(): string {
+  return randomBytes(32).toString("hex");
 }
 
 /**
@@ -18,20 +34,104 @@ export function entitlementKey(): string {
 }
 
 /**
- * The public JWK of an entitlement signing key, which the operator records in the inputs.
- * @throws {Error} the key is not PKCS #8 DER
+ * The public JWK of an EC P-256 entitlement signing key, which the operator records in the inputs.
+ * @throws {Error} the key is not PKCS #8 DER EC P-256
  */
-export function entitlementPublicKey(signingKey: string): { kty?: string; crv?: string; x?: string; y?: string } {
+export function entitlementPublicKey(signingKey: string): { kty: "EC"; crv: "P-256"; x: string; y: string } {
   const { kty, crv, x, y } = createPublicKey(createPrivateKey({ key: Buffer.from(signingKey, "base64"), format: "der", type: "pkcs8" })).export({ format: "jwk" });
+  if (kty !== "EC" || crv !== "P-256" || typeof x !== "string" || typeof y !== "string") {
+    throw new RangeError("the entitlement key is not EC P-256");
+  }
   return { kty, crv, x, y };
 }
 
 /**
- * How many bytes a base64url value holds.
+ * Whether a JWK is the committed example placeholder entitlement key that must never be deployed.
+ * @throws {never}
+ */
+export function isExampleEntitlementPublicKey(key: { readonly x?: string; readonly y?: string } | undefined): boolean {
+  return key?.x === "RwIpsg2vaG6Q8pJcPP8rnReb71VKZqTlEMeF14ahp-E" && key?.y === "rzJhMHg6SUtsGH4dntUcMgkpnt8qM_ITn_REryydY5U";
+}
+
+/**
+ * Whether `signingKey`'s derived public JWK matches the profile's published public key for `keyId`.
+ * @throws {never}
+ */
+export function entitlementPublicKeyMatches(
+  signingKey: string,
+  publicKeys: ReadonlyArray<{ readonly kid?: string; readonly kty?: string; readonly crv?: string; readonly x?: string; readonly y?: string }>,
+  keyId: string,
+): boolean {
+  try {
+    const derived = entitlementPublicKey(signingKey);
+    const listed = publicKeys.find((entry) => entry.kid === keyId);
+    return listed !== undefined
+      && derived.kty === "EC"
+      && derived.crv === "P-256"
+      && listed.kty === derived.kty
+      && listed.crv === derived.crv
+      && listed.x === derived.x
+      && listed.y === derived.y;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a value parses as a PKCS #8 DER EC P-256 entitlement signing key.
+ * @throws {never}
+ */
+export function isEntitlementKey(signingKey: string): boolean {
+  try {
+    entitlementPublicKey(signingKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * How many bytes a valid base64url value holds, or 0 when malformed.
  * @throws {never}
  */
 export function base64urlBytes(value: string): number {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return 0;
   return Buffer.from(value, "base64url").length;
+}
+
+/**
+ * How many bytes a valid hexadecimal value holds, or 0 when malformed.
+ * @throws {never}
+ */
+export function hexBytes(value: string): number {
+  if (value.length === 0 || value.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(value)) return 0;
+  return value.length / 2;
+}
+
+/**
+ * How many bytes a valid standard base64 value holds, or 0 when malformed.
+ * @throws {never}
+ */
+export function base64Bytes(value: string): number {
+  if (value.length === 0 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return 0;
+  return Buffer.from(value, "base64").length;
+}
+
+/**
+ * Decoded byte length of a base64 sealing key, or -1 if it contains non-base64 characters.
+ * @throws {never}
+ */
+export function sealingKeyBytes(value: string): number {
+  if (value.length === 0 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return -1;
+  return Buffer.from(value, "base64").length;
+}
+
+/**
+ * Whether a value is a 64-character hex string representing a 32-byte key.
+ * @throws {never}
+ */
+export function isHexKey(value: string): boolean {
+  return /^[0-9a-fA-F]{64}$/.test(value);
 }
 
 /**

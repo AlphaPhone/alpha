@@ -9,6 +9,11 @@ sent here. The agent never reads this list.
 
 - [Agent requests](./agent.md): a call or a contact change the agent proposes, for the owner to approve
 
+One contact and the form each rise over the list as Alpha's earlier build
+drew them, and the list stays under them as it was; Back takes them away at
+once. Before Contacts has its first answer, it shows its header, never a
+blank screen.
+
 ## Domain
 
 ### What Contacts holds
@@ -105,6 +110,10 @@ pure val weight_writeAnswered = 4
 > a filter, and to be told plainly when there are none, when nothing
 > matches and when Alpha has no access.
 
+Contacts are grouped from A to Z by the first letter without accents, with
+other names together at the end. Names use local alphabetical order
+within each section. Section headings appear from 20 contacts.
+
 ### Contacts reads the list each time it comes to the front
 
 ```quint
@@ -159,16 +168,25 @@ pure def pick(s: Contacts, chip: Chip): Moved = relisted(s.sought, chip, s)
 
 ### Back from the search field clears the query and returns to Contacts
 
-The search field opens from the list. Back clears its query and returns
-to All contacts. A filter that Alpha applied can be cleared from the list
-without opening the field.
+The search field opens from the list. Back, Android's or the field's own
+where one is drawn, closes the field first, even with nothing typed, clears
+its query and returns to All contacts; only the next Back leaves Contacts.
+As in Sunday's v119, while Alpha is the phone's launcher the field draws no
+Back of its own and runs the full width, in Contacts and on Phone's
+Contacts tab alike. A filter that Alpha applied can be cleared from the list
+without opening the field. As in Sunday's v119, opening the field over a
+filter that Alpha applied clears that filter first: the field opens empty
+over All contacts. Words the owner typed stay in the field. `applied` is
+whether the words on the list are a filter Alpha applied.
 
 ```quint
 pure def canBeginSearch(s: Contacts): bool =
   readable(s) and not(s.searching) and not(s.opened) and s.form == Shut
 
-pure def beginSearch(s: Contacts): Moved =
-  { state: { ...s, searching: true }, out: List() }
+pure def beginSearch(s: Contacts, applied: bool): Moved =
+  val opened = { ...s, searching: true }
+  if (applied and s.sought) relisted(false, Everyone, opened)
+  else { state: opened, out: List() }
 
 pure def canEndSearch(s: Contacts): bool =
   s.front and not(s.opened) and s.form == Shut and (s.searching or narrowed(s))
@@ -204,7 +222,7 @@ pure def canListed(s: Contacts, ticket: int, count: int): bool =
 pure def listed(s: Contacts, ticket: int, ok: bool, grant: P::Grant, count: int, further: bool, editable: bool): Contacts =
   val access = P::observe(s.access, grant)
   val good = ok and P::allows(access)
-  val kept = if (P::allows(access)) s else { ...s, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false }
+  val kept = if (P::allows(access)) s else { ...s, searching: false, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false }
   { ...kept,
     access: access, list: R::answer(s.list, good), editable: if (good) editable else s.editable and P::allows(access),
     rows: if (good) count else 0, more: good and further and count > 0,
@@ -270,7 +288,7 @@ pure def openSettings(s: Contacts): Moved = { state: s, out: List(Settings) }
 pure def accessReported(s: Contacts, grant: P::Grant): Moved =
   val access = P::observe(s.access, grant)
   if (not(P::allows(access)))
-    { state: { ...s, access: access, rows: 0, more: false, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false },
+    { state: { ...s, access: access, searching: false, rows: 0, more: false, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false },
       out: List() }
   else if (s.front and not(P::allows(s.access))) refresh({ ...s, access: access })
   else { state: { ...s, access: access }, out: List() }
@@ -310,6 +328,27 @@ pure def readCard(contact: str, s: Contacts): Moved =
 pure def openContact(s: Contacts, contact: str): Moved = readCard(contact, s)
 
 pure def alwaysAnOpenContactIsNamed(s: Contacts): bool = s.opened implies s.contact != ""
+```
+
+### Returning to a contact on the Ask Alpha stage reads that exact card again
+
+The stage names the contact it left and the preceding Contacts list ticket.
+The new visit rereads the list and card. If the new visit has already begun
+its list read, the return starts only the card read.
+
+```quint
+pure def canRestoreStageContact(s: Contacts, contact: str, ticket: int): bool =
+  P::allows(s.access) and contact != "" and contact == s.contact and not(s.opened) and s.form == Shut
+    and s.list.ticket == (if (s.front) ticket + 1 else ticket)
+
+pure def restoreStageContact(s: Contacts, contact: str, ticket: int): Moved =
+  val visit = if (s.front) { state: s, out: List() } else show(s)
+  val card = readCard(contact, visit.state)
+  { state: card.state, out: visit.out.concat(card.out) }
+
+pure def stepTheReturnedCardIsReadOnItsNewVisit(before: Contacts, via: str, after: Contacts): bool =
+  via == "restoreStageContact" implies (after.front and after.opened and after.contact == before.contact
+    and after.card.ticket == before.card.ticket + 1 and after.list.ticket == before.list.ticket + (if (before.front) 0 else 1))
 ```
 
 ### When the phone reports a change to the address book, Contacts reads the visible list and any open contact again

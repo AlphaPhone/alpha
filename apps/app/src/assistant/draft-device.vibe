@@ -1,0 +1,52 @@
+// spec/app/assistant/composer.md, "Story: Keep what I am writing"; spec/app/assistant/composer.md, "A saved draft can come back after a restart"
+import { registered } from "../platform/index.vibe"
+
+module bridge {
+  import { registerPlugin } from "@capacitor/core"
+
+  export interface DraftAddress {
+    readonly owner: string
+    readonly agent: string
+    readonly epoch: number
+    readonly conversation?: string
+    readonly room?: string
+  }
+
+  interface DraftPlugin {
+    read(address: DraftAddress): Promise<unknown>
+    exchange(address: DraftAddress & { expected?: string; next?: string }): Promise<unknown>
+  }
+
+  let bound: DraftPlugin | undefined
+
+  /** @throws {never} */
+  export function client(): DraftPlugin {
+    return (bound ??= registerPlugin<DraftPlugin>("AlphaAssistantDraft"))
+  }
+}
+import { type DraftAddress, client } from bridge
+export { type DraftAddress }
+
+const reply = Schema.Struct({
+  status: Schema.Literals(["read", "landed", "conflict", "denied", "unavailable", "failure"]),
+  raw: Schema.optionalKey(Schema.String),
+})
+
+export effect function readPhoneDraft(address: DraftAddress): { status: "read" | "refused" | "failure"; raw?: string }!! {
+  if (!registered("AlphaAssistantDraft")) return { status: "refused" }
+  const answer = tryPromise(() => client().read(address)) catch () => undefined
+  const decoded = Schema.decodeUnknownOption(reply)(answer)
+  if (Option.isNone(decoded)) return { status: "failure" }
+  if (decoded.value.status === "read") return { status: "read", ...(decoded.value.raw === undefined ? {} : { raw: decoded.value.raw }) }
+  return { status: decoded.value.status === "denied" || decoded.value.status === "unavailable" ? "refused" : "failure" }
+}
+
+export effect function exchangePhoneDraft(address: DraftAddress, expected: string | undefined, next: string | undefined): boolean!! {
+  const answer = tryPromise(() => client().exchange({
+    ...address,
+    ...(expected === undefined ? {} : { expected }),
+    ...(next === undefined ? {} : { next }),
+  })) catch () => undefined
+  const decoded = Schema.decodeUnknownOption(reply)(answer)
+  return Option.isSome(decoded) && decoded.value.status === "landed"
+}

@@ -1,0 +1,131 @@
+// spec/app/inbox/notices.md, "Story: Hear about new mail"; spec/app/inbox/notices.md, "Story: See whether mail is watched"; spec/app/inbox/notices.md, "Story: Open my message from a notice"
+import type { MailBackground, MailBackgroundSelection, MailBackgroundStatus } from "@elizaos/plugin-inbox-client"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { Cloud } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { backgroundMail, inboxNoticesAvailable } from "../platform/index.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/index.vibe"
+import { started, together } from "../runtime/index.vibe"
+import { externalStore } from "../runtime/index.vibe"
+import { Mail, asked } from "./gmail.vibe"
+
+interface View {
+  readonly delivery: MailBackgroundStatus
+  readonly account?: string
+}
+
+export service InboxNotices {
+  readonly supported: boolean
+  readonly background: MailBackground
+  snapshot(): View
+  subscribe(changed: () => void): () => void
+  show(view: View): void
+  settings(): void!!
+}
+
+const panel = Layer.sync(InboxNotices, () => {
+  const supported = inboxNoticesAvailable()
+  const background = backgroundMail()
+  const state = externalStore<View>({ delivery: { status: supported ? "disabled" : "web-unavailable" } })
+  return {
+    supported, background, snapshot: state.snapshot, subscribe: state.subscribe, show: state.set,
+    settings: () => ignore(background.notificationSettings()),
+  }
+})
+
+export function grantOf(status: Inbox.Mailbox, mail: Mail.Shape) {
+  const { account } = status.selected
+  const grant = Inbox.accessOf(status, account).grant
+  return status.signedIn && status.accounts.status === "Loaded" && grant.read ? mail.grant(account) : undefined
+}
+
+export effect function owner(grantId: string): (MailBackgroundSelection | undefined)!!Cloud {
+  const { client } = try Cloud
+  return effect {
+    const [credential, account] = try.all [
+      tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })),
+      asked((signal) => client.account({ signal })),
+    ]
+    return credential.account.kind === "signedIn"
+      ? { grantId, credentialId: credential.account.credentialId, userId: account.id, organizationId: account.organization_id }
+      : undefined
+  } catch () => undefined
+}
+
+effect function published(): MailBackgroundStatus!!(InboxNotices | Mail | Inbox.Machine) {
+  const panel = try InboxNotices
+  const mail = try Mail
+  const state = try (try Inbox.Machine).get()
+  const delivery = try panel.background.status()
+  const account = state.connected.find(({ account }) => delivery.grantId !== undefined && mail.grant(account) === delivery.grantId)
+  panel.show({ delivery, ...(account === undefined ? {} : { account: mail.email(account.account) }) })
+  return delivery
+}
+
+effect function reconcile(): void!!(InboxNotices | Mail | Inbox.Machine | Cloud | Device) {
+  const panel = try InboxNotices
+  const mail = try Mail
+  const inbox = try Inbox.Machine
+  const device = try Device
+  const delivery = try published()
+  const state = try inbox.get()
+  const grant = grantOf(state, mail)
+  const enabled = state.signedIn && delivery.notificationsAllowed !== false
+  if (delivery.grantId !== undefined && (!enabled || (state.accounts.status === "Loaded" && delivery.grantId !== grant))) {
+    try ignore(panel.background.withdraw(delivery.grantId))
+  }
+  if (!enabled || grant === undefined || delivery.grantId === grant || !(try device.showing())) return
+  const before = mail.generation(state.selected.account)
+  const selection = try owner(grant)
+  const current = try inbox.get()
+  if (selection === undefined || grantOf(current, mail) !== grant || mail.generation(current.selected.account) !== before || !(try device.showing())) return
+  try ignore(panel.background.configure(selection))
+  try ignore(published())
+}
+
+const watching = started(effect {
+  const panel = try InboxNotices
+  if (!panel.supported) return
+  const device = try Device
+  const list = try Inbox.Machine
+  const mail = try Mail
+  const choices = Stream.changesWith(Stream.map(list.changes, (state) => ({ signedIn: state.signedIn, status: state.accounts.status, grant: grantOf(state, mail) })),
+    (a, b) => a.signedIn === b.signedIn && a.status === b.status && a.grant === b.grant)
+  const active = Stream.map(Stream.filter(device.visible, (showing) => showing), () => undefined)
+  const selections = Stream.merge(Stream.map(choices, () => undefined), active)
+  try Stream.runForEach(Stream.merge(selections, panel.background.notices), () => reconcile())
+}, "watching the selected Gmail account")
+
+export const signals = (background: MailBackground) => Stream.unwrap(effect {
+  const device = try Device
+  const list = try Inbox.Machine
+  const shell = try Shell.Machine
+  const resumed = Stream.map(Stream.filter(device.visible, (visible) => visible), () => undefined)
+  const ready = Stream.map(Stream.changes(Stream.map(list.changes, (state) => state.accounts.status)), () => undefined)
+  const unlocked = Stream.map(Stream.changes(Stream.map(shell.changes, (state) => state.assistant)), () => undefined)
+  return Stream.merge(Stream.merge(resumed, ready), Stream.merge(unlocked, background.notices))
+})
+
+const opening = started(effect {
+  const panel = try InboxNotices
+  if (!panel.supported) return
+  const device = try Device
+  const list = try Inbox.Machine
+  const mail = try Mail
+  const shell = try Shell.Machine
+  try Stream.runForEach(signals(panel.background), () => effect {
+    const state = try shell.get()
+    if (Shell.showing(state, "Inbox") || state.assistant !== "Bar" || !(try device.showing())) return
+    const grant = grantOf(try list.get(), mail)
+    if (grant === undefined) return
+    const tap = panel.background.pending() catch () => null
+    if (tap === null || tap.grantId !== grant || tap.messageId === undefined || tap.threadId === undefined) return
+    const current = try shell.get()
+    if (!Shell.showing(current, "Inbox") && current.assistant === "Bar" && grantOf(try list.get(), mail) === grant && (try device.showing())) {
+      try ignore(exit(shell.send({ type: "openView", view: "Inbox" })))
+    }
+  })
+}, "opening Inbox for an Android mail notification")
+
+export const notices = together(panel, watching, opening)

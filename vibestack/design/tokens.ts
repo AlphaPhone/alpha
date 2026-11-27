@@ -43,26 +43,28 @@ export interface Tokens {
   keyframes: Named
   /** Animations: `animate-<name>`, such as `"blink 1s step-end infinite"`. */
   animate: Named
+  /** Additional CSS custom properties emitted on `:root` (`--<name>: <value>;`). */
+  custom: Named
 }
 /** A font size with the line height and letter spacing that go with it, as Tailwind's `--text-<name>--line-height`. */
 export interface TextSize { size: string; leading?: string; tracking?: string }
 /** The only way a proposed change enters: a token's dotted path, its new value and why. */
 interface TokenChange { path: string; value: string; reason: string }
 
-const text: [RegExp, string] = [/\S/, "a value"]
+const text: [RegExp, string] = [/^(?=.*\S)[^;{}|\r\n]+$/, "a value"]
 const length: [RegExp, string] = [/^\d*\.?\d+(?:rem|px)$/, "a length in rem or px"]
 const leading: [RegExp, string] = [/^\d*\.?\d+(?:rem|px)?$/, "a line height: a number, or a length in rem or px"]
 const tracking: [RegExp, string] = [/^(?:0|-?\d*\.?\d+em)$/, "a letter spacing in em"]
 /** What each token path holds; `*` is a name the project chooses, `#` one that may also start with a digit (`2xl`, `10`). */
 const kinds: [path: string, [RegExp, string]][] = [
-  ["color.(?:light|dark).*", [/^oklch\((?:0|1|0?\.\d+) (?:0|0?\.\d+) \d{1,3}(?:\.\d+)?\)$/, "oklch(L C H), opaque, with L from 0 to 1"]],
+  ["color.(?:light|dark).*", [/^oklch\((?:0(?:\.\d+)?|1(?:\.0+)?|\.\d+) (?:0|0?\.\d+) (?:(?:[0-9]|[1-9]\d|[12]\d\d|3[0-5]\d)(?:\.\d+)?|360(?:\.0+)?)\)$/, "oklch(L C H), opaque, with L from 0 to 1"]],
   ["radius", length], ["font.*", text], ["shadow.*", text], ["dropShadow.*", text],
   ["motion.duration.*", [/^\d+ms$/, "a duration in ms"]], ["motion.ease.*", text], ["breakpoint.*", length],
   ["rounded.*", length], ["gradient.*", text], ["text.#", length], ["blur.*", length],
   ["text.#.size", length], ["text.#.leading", leading], ["text.#.tracking", tracking],
   ["weight.#", [/^(?:[1-9]\d{0,2}|1000)$/, "a font weight from 1 to 1000"]], ["leading.#", leading], ["tracking.#", tracking],
   ["z.#", [/^-?(?:0|[1-9]\d{0,8})$/, "an integer z-index"]], ["focus.width", length], ["focus.offset", [/^-?\d*\.?\d+(?:rem|px)$/, "a length in rem or px"]],
-  ["keyframes.*", [/^(?:[^{}]*\{[^{}]*\})+$/, "keyframe stops, such as 50%{opacity:0}"]], ["animate.*", text],
+  ["keyframes.*", [/^(?:[^{}]*\{[^{}]*\})+$/, "keyframe stops, such as 50%{opacity:0}"]], ["animate.*", text], ["custom.*", text],
 ]
 const tokenPath = (pattern: string) => new RegExp(`^${pattern.replaceAll(".", "\\.").replace("*", "[a-z][a-z0-9-]*").replace("#", "[a-z0-9][a-z0-9-]*")}$`)
 const tokenKinds = kinds.map(([pattern, kind]) => ({ path: tokenPath(pattern), kind }))
@@ -122,7 +124,7 @@ export function parseTokens(input: unknown): Tokens {
     .concat(names("color.light").includes("focus") && group("focus").width !== undefined ? ["color.light.focus: also the focus ring width, so outline-focus would be ambiguous; rename one"] : [])
   if (problems.length) throw new Error(problems.join("\n"))
   const given = structuredClone(input) as Partial<Tokens>
-  return { ...given, shadow: given.shadow ?? {}, dropShadow: given.dropShadow ?? {}, motion: { duration: {}, ease: {}, ...given.motion }, breakpoint: given.breakpoint ?? {}, rounded: given.rounded ?? {}, gradient: given.gradient ?? {}, text: given.text ?? {}, weight: given.weight ?? {}, leading: given.leading ?? {}, tracking: given.tracking ?? {}, z: given.z ?? {}, blur: given.blur ?? {}, keyframes: given.keyframes ?? {}, animate: given.animate ?? {} } as Tokens
+  return { ...given, shadow: given.shadow ?? {}, dropShadow: given.dropShadow ?? {}, motion: { duration: {}, ease: {}, ...given.motion }, breakpoint: given.breakpoint ?? {}, rounded: given.rounded ?? {}, gradient: given.gradient ?? {}, text: given.text ?? {}, weight: given.weight ?? {}, leading: given.leading ?? {}, tracking: given.tracking ?? {}, z: given.z ?? {}, blur: given.blur ?? {}, keyframes: given.keyframes ?? {}, animate: given.animate ?? {}, custom: given.custom ?? {} } as Tokens
 }
 
 const linear = (color: string) => {

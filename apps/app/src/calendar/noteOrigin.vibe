@@ -1,0 +1,47 @@
+// spec/app/notes/note.md, "Story: Review a Calendar draft from a note"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { recordNoteOriginOf } from "@elizaos/plugin-notes-client"
+import { type ResidentOwner, launchOwnerAt, sameResidentOwner } from "../platform/index.vibe"
+
+export schema NoteOrigin {
+  readonly version: 2
+  readonly noteId: string
+  readonly revision: string
+  readonly agent: string
+  readonly owner: string
+}
+
+export type Target = "AgentEvent" | "PhoneEvent" | "Reminder"
+
+export function eventKey(calendarId: string, eventId: string): string {
+  return JSON.stringify([calendarId, eventId])
+}
+
+function originKey(account: number, target: Target, id: string): string {
+  return "alpha.calendar.note/" + JSON.stringify([account, target, id])
+}
+
+export function originOwner(origin: NoteOrigin): ResidentOwner {
+  return { agentId: origin.agent, identityId: origin.owner }
+}
+
+export effect function storeOrigin(account: number, target: Target, id: string, origin: NoteOrigin) {
+  const owner = launchOwnerAt() catch () => undefined
+  if (!sameResidentOwner(originOwner(origin), owner) || id === "" || recordNoteOriginOf(origin) === undefined) return false
+  const keys = try KeyValueStore.KeyValueStore
+  const slot = originKey(account, target, id)
+  const value = JSON.stringify(origin)
+  return effect {
+    try keys.set(slot, value)
+    return (try keys.get(slot)) === value
+  } catch () => false
+}
+
+export effect function storedOrigin(account: number, target: Target, id: string) {
+  const raw = (try KeyValueStore.KeyValueStore).get(originKey(account, target, id)) catch () => undefined
+  if (raw === undefined) return undefined
+  const origin = Schema.decodeUnknownEffect(Schema.fromJsonString(NoteOrigin))(raw) catch () => undefined
+  if (origin === undefined || recordNoteOriginOf(origin) === undefined) return undefined
+  const owner = launchOwnerAt() catch () => undefined
+  return sameResidentOwner(originOwner(origin), owner) ? origin : undefined
+}

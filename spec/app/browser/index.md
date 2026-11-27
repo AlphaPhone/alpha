@@ -1,8 +1,10 @@
 # Browser
 
-Web pages in native tabs. Normal tabs share one kept profile, with its
-cookies and sign-ins, and come back after a restart; private tabs are
-ephemeral and are never saved. This spec is the tabs and the saved session.
+Web pages in tabs. On Android normal tabs share one kept profile, with its
+cookies and sign-ins, and come back after a restart. Private tabs are never
+saved. In a web browser the pages are sandboxed frames, and the enclosing
+browser controls site cookies and sign-ins. This spec is the tabs and the
+saved session.
 What one tab does is in the specs beside it:
 
 - [Address](./address.md): one tab's page: the address bar, loading, the secure mark, back and forward, and find in page
@@ -24,15 +26,15 @@ and the sites' remembered answers.
 
 ### The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page
 
-A tab is a number, never used twice. A native tab is the web view Android
-keeps for a tab that has loaded a page. The saved session is the record on
-the phone; the writer carries one copy of it at a time.
+A tab is a number, never used twice. A hosted tab is the web view Android
+keeps or the frame a web browser keeps for that tab. The saved session is
+the record on the device; the writer carries one copy of it at a time.
 
 ```quint
 import read as R from "../../kit/read"
 
 type Kind = Normal | Private
-type Layer = Uncovered | Address | Switcher | Menu | Library
+type Layer = Uncovered | Address | Switcher | Menu | Library | ReadingReview
 type Erasing = Kept | Asked | Running
 type Effect = Restore({ ticket: int }) | Create({ tab: int, kind: Kind }) | Close({ tab: int }) | Save({ write: int }) | Erase | Halt({ driven: int })
 type Browser = {
@@ -69,6 +71,7 @@ pure val tabValues = Set(1, 2, 3, 4, 5)
 pure val insteadValues = tabValues
 pure val openerValues = tabValues
 pure val shownValues = tabValues
+pure val incomingValues = Set(Set(), Set(2), Set(2, 3), Set(2, 3, 4, 5, 6, 7, 8, 9))
 pure val ticketValues = Set(1, 2)
 pure val nowValues = Set(0, 3, 70)
 pure val weight_openTab = 4
@@ -159,7 +162,7 @@ pure def popup(s: Browser, opener: int): Step =
 ### One layer at a time covers the page, and Back uncovers it
 
 The address being edited with its suggestions, the tab switcher, the menu
-or the library. The find bar, page history and leaving the Browser come
+the library or the reading review. The find bar, page history and leaving the Browser come
 after, in [Address](./address.md) and the [Shell](../shell/).
 
 ```quint
@@ -171,7 +174,7 @@ pure def canUncover(s: Browser): bool = s.layer != Uncovered
 
 pure def uncover(s: Browser): Browser = { ...s, layer: Uncovered }
 
-pure def pageShown(s: Browser): bool = s.layer == Uncovered and s.native.contains(s.selected) and steady(s)
+pure def pageShown(s: Browser): bool = s.layer == Uncovered and s.erasing == Kept and s.native.contains(s.selected) and steady(s)
 ```
 
 ### Between one and eight tabs are open, and the one shown is among them
@@ -248,17 +251,29 @@ The tab shown after a restore is one of the saved tabs. After a failed
 read the owner browses unsaved; a later read that finds more saved tabs
 than fit beside the open ones leaves the saved session unread.
 
-```quint
-pure def canRestored(s: Browser, ticket: int, shown: int): bool =
-  R::canAnswer(s.restore, ticket) and (s.kept.size() == 0 or s.kept.contains(shown))
+When a web installation has saved tabs and no tab numbers on record yet,
+the restore assigns fresh numbers in saved order and keeps the saved
+selection. Those tabs count toward the same limit and an already active
+tab keeps its place.
 
-pure def restored(s: Browser, ticket: int, ok: bool, shown: int): Browser =
-  val fits = s.untouched or s.open.size() + s.kept.size() <= maxTabs
+```quint
+pure def canRestored(s: Browser, ticket: int, ok: bool, shown: int, incoming: Set[int]): bool =
+  R::canAnswer(s.restore, ticket) and (
+    if (not(ok)) incoming.size() == 0
+    else if (incoming.size() == 0) s.kept.size() == 0 or s.kept.contains(shown)
+    else s.kept.size() == 0 and incoming.size() <= maxTabs and incoming.contains(shown)
+      and incoming.forall(tab => tab > s.issued and tab <= s.issued + maxTabs)
+  )
+
+pure def restored(s: Browser, ticket: int, ok: bool, shown: int, incoming: Set[int]): Browser =
+  val fromDisk = if (incoming.size() == 0) s.kept else incoming
+  val issued = if (incoming.size() == 0) s.issued else s.issued + maxTabs
+  val fits = s.untouched or s.open.size() + fromDisk.size() <= maxTabs
   val read = { ...s, restore: R::answer(s.restore, ok and fits) }
   if (not(ok and fits)) read
-  else if (s.kept.size() == 0) { ...read, hydrated: true }
-  else if (s.untouched) { ...read, hydrated: true, open: s.kept, selected: shown }
-  else { ...read, hydrated: true, open: s.open.union(s.kept), stale: true }
+  else if (fromDisk.size() == 0) { ...read, hydrated: true }
+  else if (s.untouched) { ...read, hydrated: true, issued: issued, open: fromDisk, selected: shown }
+  else { ...read, hydrated: true, issued: issued, open: s.open.union(fromDisk), stale: true }
 ```
 
 ### A restart ends every private tab and every native tab, and starts from one new tab
@@ -312,6 +327,17 @@ A private tab never does.
 pure def canTouch(s: Browser, tab: int): bool = s.open.contains(tab) and not(s.privates.contains(tab))
 
 pure def touch(s: Browser, tab: int): Browser = { ...s, stale: true }
+```
+
+### A history edit is carried by the same session writer
+
+Marking the saved session stale lets it carry an exact history edit even if
+the selected tab is private. Its write still carries only normal tabs.
+
+```quint
+pure def canHistoryChanged(s: Browser): bool = s.hydrated and s.erasing == Kept
+
+pure def historyChanged(s: Browser): Browser = { ...s, stale: true }
 ```
 
 ### A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared
@@ -401,8 +427,9 @@ pure def sometimesAFailedSaveWaits(s: Browser): bool = s.failures > 1 and s.stal
 > As the owner, I want to clear everything the Browser kept, after
 > confirming, and to keep my private tabs open.
 
-### Clearing is asked for from the menu, and confirmed or cancelled
+### Clearing is asked for from the Library's history, and confirmed or cancelled
 
+Reset browser data, under the time range for clearing history, asks for it.
 Not while the saved session is being read or a write is in flight.
 
 ```quint
@@ -466,13 +493,15 @@ pure def sometimesPrivateTabsOutliveAClearing(s: Browser): bool =
 
 ## Story: Let the agent open a page
 
-> As the owner, I want the agent to open a page I approved in a tab of its
-> own, and to take that tab back whenever I like.
+> As the owner, I want the agent to open a page I asked for or approved in
+> a tab of its own, and to take that tab back whenever I like.
 
 ### The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time
 
-The approval comes from the approvals area. The tab gets its native tab at
-once and does not take the place of the tab the owner is on.
+The owner's request or approval comes from the approvals area, or from the
+Browser's own card for a page the agent handed to this screen (next rule).
+The tab gets its native tab at once and does not take the place of the tab
+the owner is on.
 
 ```quint
 pure def canAgentOpen(s: Browser, secure: bool, userInfo: bool): bool =
@@ -482,6 +511,42 @@ pure def agentOpen(s: Browser, secure: bool, userInfo: bool): Step =
   val tab = s.issued + 1
   { state: { ...s, open: s.open.union(Set(tab)), native: s.native.union(Set(tab)), issued: tab, agent: tab, untouched: false, stale: true },
     out: List(Create({ tab: tab, kind: Normal })) }
+```
+
+### A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open
+
+As on Sunday's v119 demo phone, where "Open https://www.alphacompute.ai/ in
+Browser." loaded the site with no card, typed or said in Talk. The phone
+runs `browser.open-direct.v1` (eliza's `spec/browser/control.md`): a
+`browser_navigate` step the agent offers as asked by the owner's whole
+message runs at once, after the reply, through the same approvals path and
+journal as an approved one, and a page the agent hands to this screen marked
+to open at once opens with no card. Whether the message asked for that
+address is the agent's grounding; the phone reads nothing of the owner's
+words. Any other page, such as a link of the page or an address the agent
+proposed, waits for the owner's Open on its card, in Ask Alpha or on the
+Browser's card, as before. While the owner has "Ask before Alpha acts" on,
+or the phone has not read that preference or is still reading or saving it
+(`asksBeforeActing(WebAction)` in [Preferences](../settings/preferences.md)),
+even a page the whole message asked for waits for the owner's Open on its
+card, as v119 asked first for every direct run. So a typed or spoken turn
+declares `browser.open-direct.v1` only while such a page would open at
+once, read as the turn is sent, as v119 dropped its direct request while it
+asked first: the agent then keeps the open for review, and its card shows
+in Ask Alpha for a spoken request too, from Files as from any other
+screen. Every page still opens only under the rule above.
+
+```quint
+pure val directOpenCapability: str = "browser.open-direct.v1"
+pure def opensWithoutCard(askedWhole: bool, asksFirst: bool): bool = askedWhole and not(asksFirst)
+pure def pageOpens(askedWhole: bool, asksFirst: bool, ownerChoseOpen: bool, secure: bool, userInfo: bool): bool =
+  (opensWithoutCard(askedWhole, asksFirst) or ownerChoseOpen) and secure and not(userInfo)
+pure def lawAPageNotAskedWholeWaitsForTheOwner(asksFirst: bool, secure: bool, userInfo: bool): bool =
+  not(pageOpens(false, asksFirst, false, secure, userInfo))
+pure def lawAskingFirstWaitsForTheOwner(askedWhole: bool, secure: bool, userInfo: bool): bool =
+  not(pageOpens(askedWhole, true, false, secure, userInfo))
+pure def lawNoPageOpensOutsideHttps(askedWhole: bool, asksFirst: bool, ownerChoseOpen: bool, userInfo: bool): bool =
+  not(pageOpens(askedWhole, asksFirst, ownerChoseOpen, false, userInfo))
 ```
 
 ### "Stop and take over" stops the agent and gives its tab to the owner

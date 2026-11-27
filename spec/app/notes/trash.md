@@ -180,6 +180,19 @@ pure def discard(s: Trash, id: int, revision: int, recording: int, asked: int, n
   begun(Discard, id, revision, now, List(), by, { ...s, loose: recording, holding: id, asked: asked })
 ```
 
+### A note from the reviewed list selection moves to Recently deleted under its own attempt number
+
+This has the same durable attempt as a deletion from an editor. There is
+no editor to answer or to keep open when the store refuses the move.
+
+```quint
+pure def canDiscardSelected(s: Trash, id: int, revision: int, recording: int, by: Actor): bool =
+  by == Owner and ready(s) and not(s.showing) and id > 0 and revision > 0 and recording >= 0 and not(has(s.entries, id))
+
+pure def discardSelected(s: Trash, id: int, revision: int, recording: int, now: int, by: Actor): Moved =
+  begun(Discard, id, revision, now, List(), by, { ...s, loose: recording, holding: 0, asked: 0 })
+```
+
 ### An action is carried out only once it is written down, and one that could not be written is dropped, and a deletion so dropped is answered as refused
 
 Only a deletion's own end lets go of the note the editor holds open for
@@ -190,7 +203,7 @@ a note Recently deleted had no room for, leaves that question about it.
 pure def released(s: Trash): int = if (s.act == Discard) 0 else s.holding
 
 pure def answer(binned: bool, told: Told, s: Trash): List[Effect] =
-  if (s.act == Discard) List(Answers({ ticket: s.asked, note: s.subject, binned: binned, told: told })) else List()
+  if (s.act == Discard and s.asked > 0) List(Answers({ ticket: s.asked, note: s.subject, binned: binned, told: told })) else List()
 
 pure def canKept(s: Trash, ticket: int, by: Actor): bool =
   by == Phone and A::canDispatch(s.attempt) and s.pending and ticket == s.attempt.id
@@ -228,7 +241,7 @@ been. Once the owner's action leaves Recently deleted empty, it closes.
 type Verdict = Done | Denied | NoRoom | Lost
 
 pure def remaining(s: Trash): List[Entry] =
-  if (s.act == Discard) s.entries.append({ id: s.subject, at: s.asOf, revision: s.revision, recording: s.loose })
+  if (s.act == Discard) (if (has(s.entries, s.subject)) s.entries else s.entries.append({ id: s.subject, at: s.asOf, revision: s.revision, recording: s.loose }))
   else if (s.act == Recover or s.act == Erase) s.entries.select(e => e.id != s.subject)
   else if (s.act == EmptyAll) List()
   else if (s.act == Sweep) s.entries.select(e => not(due(e, s.asOf)))
@@ -310,6 +323,21 @@ pure def canRecover(s: Trash, id: int, now: int, storage: bool, by: Actor): bool
 
 pure def recover(s: Trash, id: int, now: int, storage: bool, by: Actor): Moved =
   begun(Recover, id, entryOf(s, id).revision, now, List(), by, s)
+```
+
+### Undo from the Notes list recovers an exact unexpired deletion under its own attempt number
+
+The Notes list offers one Undo for the confirmed moves. The phone re-reads
+each reviewed deletion and names its identity, deletion time and current
+revision. If one is no longer there, expired or cannot be recovered, the
+phone stops and reports the outcome.
+
+```quint
+pure def canRecoverSelected(s: Trash, id: int, revision: int, deletedAt: int, now: int, by: Actor): bool =
+  by == Owner and ready(s) and id > 0 and revision > 0 and deletedAt > 0 and now >= deletedAt and now < deletedAt + retention
+
+pure def recoverSelected(s: Trash, id: int, revision: int, deletedAt: int, now: int, by: Actor): Moved =
+  begun(Recover, id, revision, now, List(), by, s)
 ```
 
 ### The note that is open is one that is listed
@@ -657,7 +685,9 @@ pure def canOwnerChanged(s: Trash, owner: int, by: Actor): bool = by == Phone an
 
 pure def ownerChanged(s: Trash, owner: int, by: Actor): Trash =
   { ...s, owner: owner, showing: false, read: dropped(s.read), entries: List(), opened: 0, holding: 0,
-    question: NoQuestion, review: V::dismiss(s.review), pending: false, unsure: false, failed: false,
+    question: NoQuestion, target: 0, refused: 0, loose: 0, review: V::dismiss(s.review),
+    act: Sweep, subject: 0, revision: 0, asOf: 0, recordings: List(),
+    pending: false, unsure: false, failed: false,
     attempt: if (s.attempt.outcome == A::Recorded) A::plan(s.attempt.id) else cutOff(s.attempt), audio: cutOff(s.audio) }
 ```
 

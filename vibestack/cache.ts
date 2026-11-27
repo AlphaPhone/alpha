@@ -119,6 +119,7 @@ type Check = {
   evaluators: Map<string, Evaluator>;
   pending: Map<string, Buffer>;
   pendingDafny: Map<string, Buffer>;
+  pendingCaptures: { dafny: boolean; capture: () => void }[];
   verify: Set<Pick<Program, "unchanged">>;
   solverAt?: string;
   dafnyBytes: number;
@@ -148,9 +149,19 @@ function includePrograms(check: Check) {
 function resetPending(check: Check) {
   check.pending.clear();
   check.pendingDafny.clear();
+  check.pendingCaptures.length = 0;
   check.verify.clear();
   check.dafnyBytes = 0;
   check.bytes = 0;
+}
+
+function flushCaptures(check: Check, dafny: boolean) {
+  const remaining: { dafny: boolean; capture: () => void }[] = [];
+  for (const item of check.pendingCaptures) {
+    if (item.dafny === dafny) item.capture();
+    else remaining.push(item);
+  }
+  check.pendingCaptures = remaining;
 }
 
 function verifyPrograms(check: Check, complete: boolean): boolean {
@@ -171,6 +182,7 @@ function publishChecked() {
   check.verify.clear();
   check.bytes = 0;
   check.lastPublished = performance.now();
+  flushCaptures(check, false);
 }
 
 function publishDafny(check: Check) {
@@ -185,6 +197,7 @@ function publishDafny(check: Check) {
   for (const [file, bytes] of check.pendingDafny) writeWhole(file, bytes);
   check.pendingDafny.clear();
   check.dafnyBytes = 0;
+  flushCaptures(check, true);
 }
 
 export function certifyInstallation() {
@@ -193,6 +206,7 @@ export function certifyInstallation() {
   publishDafny(check);
   if (check.changed) throw new InstallationChanged();
   for (const [file, bytes] of check.pending) writeWhole(file, bytes);
+  flushCaptures(check, false);
   resetPending(check);
   check.certified = true;
 }
@@ -228,7 +242,7 @@ function installation(): DafnyInstall | { at: string; files?: undefined } {
 }
 /** Run a check, which reads Dafny's installation once: its final certification checks that installation even after a wholly warm run. */
 export const steady = <T>(run: () => Promise<T>) => {
-  const check: Check = { programs: new Map(), evaluators: new Map(), pending: new Map(), pendingDafny: new Map(), verify: new Set(), touched: new Set(), bytes: 0, dafnyBytes: 0, lastPublished: -Infinity };
+  const check: Check = { programs: new Map(), evaluators: new Map(), pending: new Map(), pendingDafny: new Map(), pendingCaptures: [], verify: new Set(), touched: new Set(), bytes: 0, dafnyBytes: 0, lastPublished: -Infinity };
   return checking.run(check, async () => {
     try {
       const result = await run();
@@ -846,7 +860,7 @@ export async function toolchainFingerprint() {
 
 const ext = path.extname(import.meta.filename);
 /** A tool's imports of other tools that run with it, as it starts or once it asks for them: `import type` and `export type` load nothing. */
-const IMPORT = /(?:^(?:import\s+(?!type\b)(?:[^;"]*?\bfrom\s+)?|export\s+(?!type\b)[^;"]*?\bfrom\s+)|\bimport\(\s*)"(\.\.?\/[^"$]+)"/gm;
+const IMPORT = /(?:^(?:import\s+(?!type\b)(?:[^;"']*?\bfrom\s+)?|export\s+(?!type\b)[^;"']*?\bfrom\s+)|\bimport\(\s*)(["'])(\.\.?\/[^"'$]+)\1/gm;
 /** The tools' directories: their commands, the generator, and what a project's tests, stories and design tokens load of them. */
 const TOOL_DIRS = ["", "gen", "testing", "stories", "design"];
 /**
@@ -875,8 +889,8 @@ function loadTools() {
       } catch { /* re-read below */ }
     }
     const text = fs.readFileSync(file, "utf8");
-    const imports = [...text.matchAll(IMPORT)].map(([, to]) => path.join(path.dirname(f), to.replace(/\.ts$/, ext)));
-    const codeHash = sha(...tokenize(text)?.map((t) => `${t.fresh ? "\n" : ""}${t.text}`) ?? [text]);
+    const imports = [...text.matchAll(IMPORT)].map(([, , to]) => path.join(path.dirname(f), to.replace(/\.ts$/, ext)));
+    const codeHash = sha(...tokenize(text, /\.[jt]sx$|\.vibex$/i.test(f))?.map((t) => `${t.fresh ? "\n" : ""}${t.text}`) ?? [text]);
     keep(JSON.stringify([codeHash, imports]));
     tools.set(f, { code: codeHash, imports });
     imports.forEach(load);
@@ -922,7 +936,7 @@ type Stage = (typeof STAGES)[number];
  * The versions and the verifier are read for each key, so a process that outlives a reinstall, as `watch` does, keys by
  * what is installed now.
  */
-const toolchains = new Map<string, Promise<string>>();
+const toolchains = new Map<string, string>();
 async function toolchainId(root: string, stage: Stage): Promise<string | undefined> {
   const everything = stage === "tests" || stage === "traces" || stage === "explore";
   const proofVerifier = stage === "prove" ? await verifierIdentity() : "";
@@ -935,21 +949,23 @@ async function toolchainId(root: string, stage: Stage): Promise<string | undefin
     versions.push(program?.id ?? `no ${tool} launcher`);
   }
   const verifier = everything ? await verifierIdentity().catch(() => "no verifier") : proofVerifier;
-  const known = [stage, ...versions, verifier].join(" ");
+  const compiler = stage === "action" || stage === "prove" || stage === "simulate" ? null : await findVibelangBinary();
+  const compilerDigest = compiler ? executableDigest(compiler) : "";
+  const known = [stage, ...versions, compilerDigest, verifier].join(" ");
   let id = toolchains.get(known);
   if (id) return id;
-  toolchains.set(known, (id = (async () => {
-    if (stage === "action") return `${stage} ${code([`action${ext}`, `run${ext}`])}`;
+  if (stage === "action") id = `${stage} ${code([`action${ext}`, `run${ext}`])}`;
+  else {
     const node = `node@${process.versions.node}:${process.platform}:${process.arch}`;
-    if (stage === "prove") return [stage, node, code(closure("prove")), ...versions, verifier].join(" ");
-    if (stage === "simulate") return [stage, ...versions, node, code(closure("simulate", "units"))].join(" ");
-    const [quint, typescript, vibelang, ...rest] = versions;
-    const compiler = await findVibelangBinary();
-    const vibelangId = compiler ? `${vibelang}:${executableDigest(compiler)}` : "no vibelang";
-    return [stage, quint, node, code(stage === "explore" ? closure("explore") : [...tools.keys()]), typescript, vibelangId, ...rest, verifier].filter(Boolean).join(" ");
-  })()));
-  // A failed probe is not remembered: the next check probes again.
-  id.catch(() => toolchains.delete(known));
+    if (stage === "prove") id = [stage, node, code(closure("prove")), ...versions, verifier].join(" ");
+    else if (stage === "simulate") id = [stage, ...versions, node, code(closure("simulate", "units"))].join(" ");
+    else {
+      const [quint, typescript, vibelang, ...rest] = versions;
+      const vibelangId = compiler ? `${vibelang}:${compilerDigest}` : "no vibelang";
+      id = [stage, quint, node, code(stage === "explore" ? closure("explore") : [...tools.keys()]), typescript, vibelangId, ...rest, verifier].filter(Boolean).join(" ");
+    }
+  }
+  toolchains.set(known, id);
   return id;
 }
 
@@ -1065,8 +1081,8 @@ export function store(memory: Memory, raw: Entry, value: unknown, source?: { pro
   if (check && (source === "dafny" || /^(?:prove|tests|traces|explore)-/.test(raw.name))) {
     check.dafnyBytes += bytes.length - (check.pendingDafny.get(file)?.length ?? 0);
     check.pendingDafny.set(file, bytes);
+    if (memory.captureReceipt) check.pendingCaptures.push({ dafny: true, capture: () => memory.captureReceipt!({ name, bytes }) });
     if (pendingLimit(check)) publishDafny(check);
-    memory.captureReceipt?.({ name, bytes });
     return;
   }
   if (action) check?.verify.add(action.program);
@@ -1074,14 +1090,16 @@ export function store(memory: Memory, raw: Entry, value: unknown, source?: { pro
     const quint = check.programs.get(`quint\0${path.resolve(memory.root)}`);
     if (quint?.id) check.verify.add(quint);
   }
-  if (!check?.verify.size) writeWhole(file, bytes);
-  else {
+  if (!check?.verify.size) {
+    writeWhole(file, bytes);
+    memory.captureReceipt?.({ name, bytes });
+  } else {
     check.bytes += bytes.length - (check.pending.get(file)?.length ?? 0);
     check.pending.set(file, bytes);
+    if (memory.captureReceipt) check.pendingCaptures.push({ dafny: false, capture: () => memory.captureReceipt!({ name, bytes }) });
     if (!action || pendingLimit(check)
       || performance.now() - Math.min(check.lastPublished, action.began) >= PUBLISH_INTERVAL_MS) publishChecked();
   }
-  memory.captureReceipt?.({ name, bytes });
 }
 
 /**

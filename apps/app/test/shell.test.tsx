@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Focus } from "../gen/app__shell__focus.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import type { Event as LayerEvent } from "../gen/app__shell__layers.ts";
-import { closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { Effect } from "effect";
 import { act } from "react";
@@ -51,6 +51,42 @@ describe("the shell", () => {
     expect((await alpha.runtime.runPromise(Layers.use((l) => l.get()))).open).toEqual([]);
   });
 
+  it("Open text Ask Alpha from Android (spec/app/shell/index.md, \"Story: Open text Ask Alpha from Android\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const visit = { ticket: 0, canReturn: false, returned: [] as number[] };
+    world.settings.textAsk = visit;
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image && state.assistant === "Bar");
+    await press("Notes");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes");
+
+    const invoke = (ticket: number) => drawn(() => {
+      visit.ticket = ticket;
+      window.dispatchEvent(new CustomEvent("alpha-text-ask", { detail: { prompt: "Ignore this", startVoice: true } }));
+    });
+    await invoke(10);
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Full");
+    await vi.waitFor(() => expect(button("Close Ask Alpha")).toBeDefined());
+    expect(document.body.textContent).not.toContain("Ignore this");
+
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.textAsk.tag === "TextAskVisit" && !state.textAsk.closing);
+    expect(visit.returned).toEqual([]);
+    visit.canReturn = true;
+    await press("Close Ask Alpha");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar" && state.trail.at(-1) === "Notes");
+    expect(visit.returned).toEqual([10]);
+
+    await invoke(10);
+    await drawn(() => Promise.resolve());
+    expect(button("Close Ask Alpha")).toBeUndefined();
+    await invoke(11);
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Full");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+    expect(visit.returned).toEqual([10, 11]);
+  });
+
   // spec/app/shell/focus.md, "Story: Keep my place when the screen changes under me"
   it("Keep my place when the screen changes under me (spec/app/shell/focus.md, \"Story: Keep my place when the screen changes under me\")", async () => {
     const { alpha } = await open({ ...scene(), phone: true });
@@ -84,11 +120,32 @@ describe("the shell", () => {
     expect(document.documentElement.hasAttribute("data-alpha-keyboard")).toBe(false);
   });
 
+  it("Waiting for a missing opener does not block tracking the next layer (spec/app/shell/focus.md, \"A layer that closes gives focus back to the control that opened it, never over a control that took it\")", async () => {
+    const { alpha } = await open({ ...scene(), phone: true }, only("home"));
+    const send = (event: LayerEvent) => alpha.runtime.runPromise(Effect.flatMap(Layers, (layers) => layers.send(event)));
+    const opener = document.body.appendChild(document.createElement("button"));
+    opener.textContent = "Temporary trigger";
+    await drawn(() => opener.focus());
+    await send({ type: "openLayer", id: "first", kind: "SheetLayer", covers: true });
+    await until(alpha, alpha.runtime, Focus, (f) => f.openers.some((one) => one.layer === "first"));
+    await drawn(() => opener.blur());
+    opener.remove();
+    await send({ type: "closeLayer", id: "first" });
+    await until(alpha, alpha.runtime, Focus, (f) => f.waiting === "button:Temporary trigger");
+    await send({ type: "openLayer", id: "second", kind: "DialogLayer", covers: true });
+    await later(alpha, 50);
+    expect((await alpha.runtime.runPromise(Focus.use((f) => f.get()))).openers.some((one) => one.layer === "second")).toBe(true);
+  });
+
   // spec/app/shell/gestures.md, "Story: Swipe the way the phone expects"
   it("Swipe the way the phone expects (spec/app/shell/gestures.md, \"Story: Swipe the way the phone expects\")", async () => {
     const world = { ...scene(), phone: true };
-    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home"
+      ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] }
+      : role);
     const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.mounted);
+    expect((await alpha.runtime.runPromise(Canvas.use((c) => c.get()))).launcher).toBe(true);
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     const page = document.querySelector("main");
@@ -120,7 +177,6 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
 
     // spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"
-    await until(alpha, alpha.runtime, Canvas, (c) => c.mounted && c.launcher);
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     await swiped({ x: 200, y: Math.round(height / 2) }, { x: 200, y: Math.round(height / 2) - 100 });
@@ -130,6 +186,27 @@ describe("the shell", () => {
   });
 
   // spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"
+  it("Move from one app to another with nothing of Home between them, and back at once (spec/app/shell/index.md, \"The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits\")", async () => {
+    const { alpha } = await open({ ...scene(), phone: true });
+    const home = () => document.querySelector("[data-alpha-home-layer]");
+    await press("Notes");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
+    const layer = home()?.nextElementSibling;
+    const shown = () => ({ homeHidden: home()?.classList.contains("invisible"), sameLayer: home()?.nextElementSibling === layer, headings: document.querySelectorAll("h1").length });
+    expect([shown(), layer?.classList.contains("motion-safe:animate-rise")]).toEqual([{ homeHidden: false, sameLayer: true, headings: 1 }, true]);
+    await drawn(() => alpha.runtime.runPromise(Shell.use((s) => s.send({ type: "openView", view: "Settings" }))));
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
+    expect(shown()).toEqual({ homeHidden: false, sameLayer: true, headings: 1 });
+    await drawn(() => layer?.dispatchEvent(new Event("animationend", { bubbles: true })));
+    expect(shown()).toEqual({ homeHidden: true, sameLayer: true, headings: 1 });
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes" && s.trail.length === 1);
+    expect(shown()).toEqual({ homeHidden: true, sameLayer: true, headings: 1 });
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+    expect([home()?.classList.contains("contents"), document.querySelectorAll("h1").length]).toEqual([true, 1]);
+  });
+
   it("Let Phone's own bar stand in for Ask Alpha at rest (spec/app/shell/index.md, \"On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises\")", async () => {
     const { alpha } = await open({ ...scene(), phone: true, image: true });
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
@@ -147,7 +224,7 @@ describe("the shell", () => {
 
   // spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"; spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"
   it("Keep layout consistent across resizes, large text, and backgrounding the composer (spec/app/shell/keyboard.md, \"Story: Type without the page turning sideways\"; spec/app/shell/keyboard.md, \"Story: Read everything at the text size I chose\")", async () => {
-    const { alpha } = await open(scene());
+    const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Canvas, (c) => c.mounted);
 
     // spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"
@@ -157,16 +234,16 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Canvas, (c) => c.canvasWidth === 1280 && c.split && c.days === 5);
     expect([document.documentElement.hasAttribute("data-alpha-split"), document.documentElement.hasAttribute("data-alpha-agenda")]).toEqual([true, false]);
 
-    await drawn(() => { document.documentElement.style.fontSize = "150%"; });
+    await drawn(() => { document.documentElement.style.fontSize = "24px"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 150 && c.agenda && !c.split && c.days === 1);
     expect(["data-alpha-split", "data-alpha-agenda", "data-alpha-title-row"].map((mark) => document.documentElement.hasAttribute(mark))).toEqual([false, true, false]);
 
     // spec/app/shell/keyboard.md, "Above 150% text, larger than Alpha's own largest size, an app's header gives its title a row of its own under the way back and the screen's actions"
-    await drawn(() => { document.documentElement.style.fontSize = "300%"; });
+    await drawn(() => { document.documentElement.style.fontSize = "48px"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 300);
     expect(document.documentElement.hasAttribute("data-alpha-title-row")).toBe(true);
 
-    await drawn(() => { document.documentElement.style.fontSize = "100%"; });
+    await drawn(() => { document.documentElement.style.fontSize = "16px"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 100 && c.split && !c.agenda);
 
     // spec/app/shell/keyboard.md, "Alpha going to the background puts the composer away"

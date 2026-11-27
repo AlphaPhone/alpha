@@ -17,13 +17,20 @@ export function TabsList({ className, ...props }: TabsListProps) {
   return <TabsPrimitive.List className={cn("flex rounded-full bg-secondary p-0.5", className)} {...props} />;
 }
 
-/** One segment: pressing it shows the `TabsContent` of the same value; the chosen one is filled, as an on `Chip` is. */
-export function TabsTrigger({ className, ...props }: TabsTriggerProps) {
+/**
+ * One segment: pressing it shows the `TabsContent` of the same value; the chosen one is filled, as an on `Chip` is.
+ * A pointer press focuses it without the keyboard ring, before Radix focuses it from script.
+ */
+export function TabsTrigger({ className, onPointerDown, ...props }: TabsTriggerProps) {
   return (
     <TabsPrimitive.Trigger
+      onPointerDown={(event) => {
+        onPointerDown?.(event);
+        if (!event.defaultPrevented && event.button === 0 && !event.currentTarget.disabled) event.currentTarget.focus({ focusVisible: false });
+      }}
       className={cn(
         focusRing,
-        "min-h-11 min-w-11 flex-1 rounded-full px-4 text-sm font-semibold text-muted-foreground transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-foreground data-[state=active]:text-background",
+        "min-h-11 min-w-11 flex-1 rounded-full px-4 text-sm font-semibold text-muted-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-foreground data-[state=active]:text-background",
         className,
       )}
       {...props}

@@ -111,7 +111,8 @@ pure def canReadAutomations(a: Automations): bool = a.list.status != R::Loading 
 
 pure def readAutomations(a: Automations): Moved =
   val asked = R::ask(a.list)
-  { state: { ...a, list: asked }, out: List(ReadAutomations({ ticket: asked.ticket, owner: a.owner })) }
+  val review = if (a.review.showing and powerChange(a.proposed)) V::dismiss(V::revise(a.review)) else a.review
+  { state: { ...a, list: asked, review: review }, out: List(ReadAutomations({ ticket: asked.ticket, owner: a.owner })) }
 
 pure def canAutomationsRead(a: Automations, ticket: int, count: int, issues: int): bool =
   R::canAnswer(a.list, ticket) and count >= 0 and issues >= 0 and issues <= count
@@ -173,7 +174,8 @@ pure def sometimesARowHasAnIssue(a: Automations): bool = a.list.status == R::Loa
 
 > As the owner, I want to turn an automation on or off, snooze it, mark it
 > done, dismiss or skip it, reopen one that ended, remove it or run it now,
-> one change at a time, and never on a list that is only partly read.
+> one change at a time, and never on a list that is only partly read. I want
+> to see which prompt I am turning on or pausing before I confirm.
 
 ### Nothing is changed until the whole list was read, nor while another change is kept
 
@@ -189,14 +191,19 @@ pure def ended(status: Status): bool = status != Scheduled
 
 pure def offers(a: Automations, wanted: Change): bool =
   a.present and (if (ended(a.status)) wanted == Reopen
-    else if (wanted == Enable) not(a.on) else if (wanted == Disable) a.on
+    else if (wanted == Enable) a.rowKind == PromptTask and not(a.on)
+    else if (wanted == Disable) a.rowKind == PromptTask and a.on
     else wanted != Reopen and wanted != Create)
 ```
 
-### Turning on or off, snoozing for 1 to 1440 minutes, marking done, dismissing, skipping and reopening take one tap
+### Snoozing for 1 to 1440 minutes, marking done, dismissing, skipping and reopening take one tap
 
 ```quint
-pure def oneTap(wanted: Change): bool = wanted != Remove and wanted != Fire and wanted != Create and wanted != Edit
+pure def powerChange(wanted: Change): bool = wanted == Enable or wanted == Disable
+
+pure def needsRowReview(wanted: Change): bool = powerChange(wanted) or wanted == Remove or wanted == Fire
+
+pure def oneTap(wanted: Change): bool = not(needsRowReview(wanted)) and wanted != Create and wanted != Edit
 
 pure def rowAsked(a: Automations, minutes: int): Asked = { ...nothingAsked, kind: a.rowKind, minutes: minutes }
 
@@ -207,10 +214,14 @@ pure def act(a: Automations, wanted: Change, minutes: int): Automations =
   { ...a, change: Q::file(a.change), changing: wanted, asked: rowAsked(a, if (wanted == Snooze) minutes else 0), fired: NotFired }
 ```
 
-### Removing an automation or running it now is reviewed first, and confirmed only while the row is as it was shown
+### Turning a prompt on or off, removing an automation, and running it now require confirmation of the row and action shown
+
+The prompt's power review names the exact prompt and whether it will be
+enabled or paused. The agent changes it only at the revision shown in that
+review. Closing the review or reading the prompt again sends nothing.
 
 ```quint
-pure def canReviewChange(a: Automations, wanted: Change): bool = free(a) and (wanted == Remove or wanted == Fire) and offers(a, wanted)
+pure def canReviewChange(a: Automations, wanted: Change): bool = free(a) and needsRowReview(wanted) and offers(a, wanted)
 
 pure def reviewChange(a: Automations, wanted: Change): Automations = { ...a, review: V::present(a.review), proposed: wanted }
 
@@ -220,6 +231,7 @@ pure def cancelReview(a: Automations): Automations = { ...a, review: V::dismiss(
 
 pure def canConfirmChange(a: Automations): bool =
   V::canConfirm(a.review) and Q::canFile(a.change) and (a.proposed == Create or a.proposed == Edit or offers(a, a.proposed))
+    and (powerChange(a.proposed) implies (a.list.status == R::Loaded and a.complete))
 
 pure def confirmChange(a: Automations): Automations =
   val content = if (a.proposed == Create or a.proposed == Edit) { kind: a.kind, when: a.when, text: a.text, target: a.target, minutes: 0 }
@@ -298,7 +310,7 @@ pure def alwaysOneChangeIsKeptHonestly(a: Automations): bool = and {
 }
 ```
 
-### Only the owner's tap records a change, of what the row or editor showed, and removing, running, creating and editing only after a confirmed review
+### Only the owner's tap records the change shown, with confirmation for prompt power, removing, running, creating and editing
 
 ```quint
 pure def stepOnlyTheOwnerRecordsAChange(before: Automations, via: str, after: Automations): bool =

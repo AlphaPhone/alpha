@@ -6,22 +6,27 @@ import { Machine as Changes } from "../../gen/app__inbox__sending.effect.vibe"
 import type { Composer, Effect as Out, Event } from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Kind, Policy } from "../../gen/app__inbox__letter.ts"
 import type { Actor } from "../../gen/app__inbox__access.ts"
-import type { GmailDraftContent } from "@elizaos/plugin-inbox-client"
+import { MailProtocolFailed, type GmailDraftContent } from "@elizaos/plugin-inbox-client"
+import type { MailMessage } from "@elizaos/cloud"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { Cloud, Device } from "../platform/index.vibe"
-import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
-import { Mail, asked } from "./gmail.vibe"
+import { Cloud } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import type { Install } from "../runtime/index.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed, migratedStore } from "../runtime/index.vibe"
+import { Mail, operationReceipt } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { provider } from "./provider.vibe"
 
 module pure {
-  /** A file attached to a draft: what Gmail is sent, as the owner picked it. */
-  export interface Attached {
+  /** A copy read from the phone or the exact part of the message being forwarded. */
+  export type Attached = {
     readonly name: string
     readonly mimeType: string
     readonly size: number
-    readonly data: string
-  }
+  } & (
+    | { readonly data: string; readonly original?: undefined }
+    | { readonly data?: undefined; readonly original: { readonly messageId: string; readonly historyId: string; readonly partId: string } }
+  )
 
   /** What the owner wrote in one draft, beside the counts the rules keep of it. */
   export interface Words {
@@ -36,8 +41,6 @@ module pure {
     readonly answers: string | undefined
     /** How Gmail is asked to send it. */
     readonly mode: "compose" | "reply" | "reply-all" | "forward"
-    /** The earlier Alpha's draft this one was carried over from: its account's grant and its own id. */
-    readonly earlier?: string
   }
 
   /** The drafts kept under `text`, or none where nothing readable is kept. @throws {never} */
@@ -49,22 +52,44 @@ module pure {
     } catch { return undefined }
   }
 
-  /** Whether `cause`, or what it wraps, is the page's storage refusing a write for want of room. @throws {never} */
-  export function exhausted(cause: unknown): boolean {
-    let at: unknown = cause
-    for (let depth = 0; at !== null && typeof at === "object" && depth < 8; depth += 1) {
-      if ((at as { readonly name?: unknown }).name === "QuotaExceededError") return true
-      at = (at as { readonly cause?: unknown }).cause
-    }
-    return false
-  }
-
   /** Whether `address` is one Gmail accepts: one mailbox, written whole. @throws {never} */
   export function acceptable(address: string): boolean {
     return /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/u.test(address)
   }
+
+  /** Whether a storage write failed because browser storage quota was exceeded. @throws {never} */
+  export function isQuotaError(cause: unknown): boolean {
+    if (typeof DOMException !== "undefined" && cause instanceof DOMException) {
+      return cause.name === "QuotaExceededError" || cause.name === "NS_ERROR_DOM_QUOTA_REACHED"
+    }
+    if (typeof cause === "object" && cause !== null) {
+      const record = cause as { name?: unknown; message?: unknown; cause?: unknown }
+      if (record.name === "QuotaExceededError" || record.name === "NS_ERROR_DOM_QUOTA_REACHED") return true
+      if (typeof record.message === "string" && /quota/iu.test(record.message)) return true
+      if (record.cause !== undefined && record.cause !== cause) return isQuotaError(record.cause)
+    }
+    return false
+  }
+
+  /** Parse one draft record kept under its own storage key. @throws {never} */
+  export function readOneWords(text: string | undefined): Words | undefined {
+    if (text === undefined) return undefined
+    try {
+      const found = JSON.parse(text) as unknown
+      return found !== null && typeof found === "object" && !Array.isArray(found) ? found as Words : undefined
+    } catch { return undefined }
+  }
+
+  /** Parse the list of stored draft IDs. @throws {never} */
+  export function readDraftIds(text: string | undefined): string[] | undefined {
+    if (text === undefined) return undefined
+    try {
+      const found = JSON.parse(text) as unknown
+      return Array.isArray(found) && found.every((one): one is string => typeof one === "string") ? found : undefined
+    } catch { return undefined }
+  }
 }
-import { type Attached, type Words, acceptable, exhausted, readWords } from pure
+import { type Attached, type Words, acceptable, isQuotaError, readDraftIds, readOneWords, readWords } from pure
 export { type Attached, type Words, acceptable }
 
 /** A draft with nothing written yet. */
@@ -74,13 +99,9 @@ export const nothing: Words = { to: [], cc: [], bcc: [], subject: "", text: "", 
 export const policy: Policy = { files: 10, mib: 5 }
 
 const key = "alpha/inbox/letters"
+const draftKeyPrefix = "alpha/inbox/letter/"
+const draftIdsKey = "alpha/inbox/letter-ids"
 const copyKey = "alpha/inbox/gmail-draft-copies"
-
-/** How a write of the drafts to the phone ended: kept, or not, and if not whether the phone's storage was full. */
-export interface Keeping {
-  readonly ok: boolean
-  readonly full: boolean
-}
 const SavedWords = Schema.Struct({
   to: Schema.Array(Schema.String), cc: Schema.Array(Schema.String), bcc: Schema.Array(Schema.String),
   subject: Schema.String, text: Schema.String,
@@ -90,6 +111,8 @@ const CopySchema = Schema.Struct({ account: Schema.Number, id: Schema.String, di
 type Copy = typeof CopySchema.Type
 type Seen = typeof SeenSchema.Type
 const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(CopySchema)))
+/** The storage charged to the draft for a file. */
+export const mibOf = (bytes: number) => Math.max(1, Math.ceil(bytes / 1_048_576))
 
 /**
  * The words of each draft of this session, by its number: what the screen shows and edits, what a write keeps on the
@@ -98,21 +121,22 @@ const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array
 export service Letters {
   words(draft: number): Words
   set(draft: number, words: Words): void
+  subscribe(listener: () => void): () => void
+  version(): number
   /** Write the words of `draft` to the phone; whether the phone kept them. */
-  keep(draft: number): Keeping!!
+  keep(draft: number): boolean!!
+  /** Write the words of `draft` to the phone, distinguishing quota exhaustion. */
+  keepDraft(draft: number): { readonly ok: boolean; readonly full: boolean }!!
   /** Read back what the phone kept; whether it could be read. */
   load(): boolean!!
-  forget(draft: number): void!!
-  /** Whether a draft carried over from the earlier Alpha's draft `earlier` is held. */
-  adopted(earlier: string): boolean
-  /** Hold `words` as the words of `draft` and write them to the phone; nothing of them stays where the phone did not keep them. */
-  adopt(draft: number, words: Words): boolean!!
+  forget(drafts: ReadonlyArray<number>): void!!
   clear(): void!!
   /** Gmail's copy of a draft, by the number the rules know it by: its draft id and the digest Gmail holds it at. */
   copy(gmail: number): Copy | undefined
   knownCopy(account: number, id: string): number
   /** Number Gmail's copy `id`, saved at `digest`. */
   copied(account: number, id: string, digest: string): number
+  keepCopies(): boolean!!
   observed(gmail: number, seen: Seen): void
   keepObserved(gmail: number): void
 }
@@ -120,60 +144,113 @@ export service Letters {
 export const letters = Layer.effect(Letters, effect {
   const store = try KeyValueStore.KeyValueStore
   let held: Record<string, Words> = readWords(store.get(key) catch () => undefined) ?? {}
+  const initialIds = readDraftIds(store.get(draftIdsKey) catch () => undefined) ?? []
+  for (const id of initialIds) {
+    const one = readOneWords(store.get(`${draftKeyPrefix}${id}`) catch () => undefined)
+    if (one !== undefined) held = { ...held, [id]: one }
+  }
   const savedCopies = (store.get(copyKey) catch () => undefined) ?? "[]"
   const copies = [...(readCopies(savedCopies) catch () => [])]
   const knownCopy = (account: number, id: string) => copies.findIndex((copy) => copy.account === account && copy.id === id) + 1
   let copiesChanged = false
-  // spec/app/inbox/drafts.md, "Only the newest write's answer is taken: one that lands becomes the copy kept; one that fails says the draft is not kept on this phone, or that the phone's storage is full, and is tried again with the next edit or Retry"
-  const kept = effect () => {
-    if (copiesChanged) {
-      const copied = store.set(copyKey, JSON.stringify(copies)) catch (cause) => (exhausted(cause) ? "full" : "failed")
-      if (copied === "full" || copied === "failed") return { ok: false, full: copied === "full" }
-      copiesChanged = false
+  let revision = 0
+  const listeners = new Set<() => void>()
+  const notify = () => {
+    revision += 1
+    for (const listener of [...listeners]) listener()
+  }
+  const writeKey = effect (name: string, value: string): { readonly ok: boolean; readonly full: boolean }!! => {
+    const res = try exit(store.set(name, value))
+    return Exit.isSuccess(res) ? { ok: true, full: false } : { ok: false, full: isQuotaError(res.cause) }
+  }
+  const persistCopies = effect () => {
+    if (!copiesChanged) return { ok: true, full: false }
+    const written = try writeKey(copyKey, JSON.stringify(copies))
+    if (written.ok) copiesChanged = false
+    return written
+  }
+  const keepCopies = effect () => (try persistCopies()).ok
+  const keepDraft = effect (draft: number) => {
+    const copied = try persistCopies()
+    if (!copied.ok) return copied
+    const id = String(draft)
+    const entry = held[id]
+    if (entry !== undefined) {
+      const wrote = try writeKey(`${draftKeyPrefix}${id}`, JSON.stringify(entry))
+      if (!wrote.ok) return wrote
     }
-    const written = store.set(key, JSON.stringify(held)) catch (cause) => (exhausted(cause) ? "full" : "failed")
-    return { ok: written !== "full" && written !== "failed", full: written === "full" }
+    const ids = Object.keys(held)
+    return try writeKey(draftIdsKey, JSON.stringify(ids))
   }
   return {
     words: (draft: number) => held[String(draft)] ?? nothing,
     set(draft: number, words: Words) {
       held = { ...held, [String(draft)]: words }
+      notify()
     },
-    effect keep(_draft: number) {
-      return try kept()
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
     },
+    version: () => revision,
+    effect keep(draft: number) {
+      return (try keepDraft(draft)).ok
+    },
+    keepDraft,
     effect load() {
-      const text = store.get(key) catch () => null
-      if (text === null) return false
-      held = { ...readWords(text), ...held }
+      const legacyText = store.get(key) catch () => null
+      if (legacyText === null) return false
+      if (legacyText !== undefined && legacyText !== "") {
+        const parsedLegacy = readWords(legacyText)
+        if (parsedLegacy === undefined) return false
+        held = { ...parsedLegacy, ...held }
+      }
+      const idsText = store.get(draftIdsKey) catch () => null
+      if (idsText === null) return false
+      if (idsText !== undefined && idsText !== "") {
+        const ids = readDraftIds(idsText)
+        if (ids === undefined) return false
+        for (const id of ids) {
+          const itemText = store.get(`${draftKeyPrefix}${id}`) catch () => null
+          if (itemText === null) return false
+          if (itemText !== undefined && itemText !== "") {
+            const parsed = readOneWords(itemText)
+            if (parsed === undefined) return false
+            if (!(id in held)) held = { ...held, [id]: parsed }
+          }
+        }
+      }
+      notify()
       return true
     },
-    effect forget(draft: number) {
-      const { [String(draft)]: _gone, ...rest } = held
-      held = rest
-      try ignore(kept())
-    },
-    adopted: (earlier: string) => Object.values(held).some((words) => words.earlier === earlier),
-    effect adopt(draft: number, words: Words) {
-      const before = held
-      held = { ...held, [String(draft)]: words }
-      const { ok } = try kept()
-      if (!ok) held = before
-      return ok
+    effect forget(drafts: ReadonlyArray<number>) {
+      const gone = new Set(drafts.map(String))
+      held = Object.fromEntries(Object.entries(held).filter(([id]) => !gone.has(id)))
+      notify()
+      for (const id of gone) try ignore(store.remove(`${draftKeyPrefix}${id}`))
+      try ignore(store.set(draftIdsKey, JSON.stringify(Object.keys(held))))
+      try ignore(persistCopies())
     },
     effect clear() {
+      const ids = Object.keys(held)
       held = {}
       copies.length = 0
       copiesChanged = true
-      try ignore(kept())
+      notify()
+      for (const id of ids) try ignore(store.remove(`${draftKeyPrefix}${id}`))
+      try ignore(store.remove(draftIdsKey))
+      try ignore(store.remove(key))
+      try ignore(persistCopies())
     },
     copy: (gmail: number) => copies[gmail - 1],
     knownCopy,
+    keepCopies,
     copied(account: number, id: string, digest: string) {
       const same = knownCopy(account, id)
       const at = same === 0 ? copies.length : same - 1
       copies[at] = { account, id, digest }
       copiesChanged = true
+      notify()
       return at + 1
     },
     observed(gmail: number, seen: Seen) {
@@ -181,12 +258,14 @@ export const letters = Layer.effect(Letters, effect {
       if (copy === undefined) return
       copies[gmail - 1] = { ...copy, seen }
       copiesChanged = true
+      notify()
     },
     keepObserved(gmail: number) {
       const copy = copies[gmail - 1]
       if (copy?.seen === undefined) return
       copies[gmail - 1] = { account: copy.account, id: copy.id, digest: copy.seen.digest }
       copiesChanged = true
+      notify()
     },
   }
 })
@@ -201,25 +280,57 @@ function editableCopy(content: GmailDraftContent): typeof SavedWords.Type | unde
 }
 
 // spec/app/inbox/drafts.md, "Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read"
-effect function lookedUp(ticket: number, draft: number, account: number, gmail: number): Event!!(Cloud | Mail | Letters | Drafts.Machine | Inbox.Machine) {
+effect function lookedUp(ticket: number, draft: number, account: number, gmail: number, attempt: number): Event!!(Cloud | Mail | Letters | Install | KeyValueStore.KeyValueStore | Changes | Drafts.Machine | Inbox.Machine) {
   const letters = try Letters
   const ledger = try Mail
   const composer = try Drafts.Machine
   const list = try Inbox.Machine
-  const copy = letters.copy(gmail)
+  const cloud = try Cloud
   const grant = ledger.grant(account)
+  const generation = ledger.generation(account)
   const before = try composer.get()
-  if (copy?.account !== account || grant === undefined || before.letter.unsure) return copyFailed(ticket)
-  const found = provider(try Cloud).gmailDraftContent(grant, copy.id) catch () => undefined
-  const state = try composer.get()
-  if (found === undefined || state.session !== before.session || !state.open || state.letter.id !== draft ||
-    state.lookup.ticket !== ticket || state.lookup.status !== "Loading" || state.letter.unsure || state.letter.sending !== 0 ||
-    grant !== ledger.grant(account) || !Inbox.accessOf(try list.get(), account).grant.read) return copyFailed(ticket)
+  const current = effect {
+    const state = try composer.get()
+    return state.session === before.session && state.open && state.letter.id === draft && state.letter.account === account
+      && state.lookup.ticket === ticket && state.lookup.status === "Loading" && state.letter.copyAttempt === attempt && state.letter.sending === 0
+      && grant === ledger.grant(account) && generation === ledger.generation(account) && Inbox.accessOf(try list.get(), account).grant.read
+      ? state.letter : undefined
+  }
+  const letter = try current
+  if (letter === undefined || grant === undefined) return copyFailed(ticket)
+  const copy = letters.copy(gmail)
+  if (letter.unsure) {
+    if (attempt === 0 || (gmail !== 0 && copy?.account !== account)) return copyFailed(ticket)
+    const kind = letter.use === "ToDelete" ? "DeleteDraft" : gmail === 0 ? "SaveDraft" : "ReplaceDraft"
+    const receipt = try operationReceipt(account, attempt, kind === "DeleteDraft" ? "draft-delete" : kind === "SaveDraft" ? "draft-create" : "draft-replace")
+    if ((receipt?.state !== "succeeded" && receipt?.state !== "rejected") || (try current) === undefined) return copyFailed(ticket)
+    const done = receipt.state === "succeeded"
+    let read: Extract<Event, { type: "copyRead" }> = { type: "copyRead", ticket, ok: true, found: false, held: 0, gmail: 0 }
+    if (kind === "DeleteDraft") {
+      if (!done) read = { ...read, found: true, held: Math.max(1, letter.draft.base), gmail }
+    } else if (done) {
+      const id = receipt.providerResult?.["draftId"]
+      const digest = receipt.providerResult?.["providerDigest"]
+      if (typeof id !== "string" || id === "" || typeof digest !== "string" || digest === "" || (kind === "ReplaceDraft" && copy?.id !== id)) return copyFailed(ticket)
+      const saved = letters.copied(account, id, digest)
+      if (!(try letters.keepCopies()) || (try current) === undefined) return copyFailed(ticket)
+      read = { ...read, found: true, held: letter.draft.base + 1, gmail: saved }
+    }
+    try ignore((try Changes).send({ type: "reconciledDraft", kind, draft, attempt, done }, "World"))
+    return read
+  }
+  if (copy?.account !== account) return copyFailed(ticket)
+  const found = (Effect.map(provider(cloud).gmailDraftContent(grant, copy.id), (content) => ({ content })) catch (failure) =>
+    failure instanceof MailProtocolFailed && failure.status === 404 ? { content: undefined } : undefined)
+  const after = try current
+  if (found === undefined || after === undefined) return copyFailed(ticket)
+  if (found.content === undefined) return { type: "copyRead", ticket, ok: true, found: false, held: 0, gmail }
 
-  const base = state.letter.draft.base
-  if (found.providerDigest === copy.digest) return { type: "copyRead", ticket, ok: true, found: true, held: base, gmail }
-  const words = editableCopy(found)
-  letters.observed(gmail, words === undefined ? { digest: found.providerDigest } : { digest: found.providerDigest, words })
+  const base = after.draft.base
+  const { providerDigest } = found.content
+  if (providerDigest === copy.digest) return { type: "copyRead", ticket, ok: true, found: true, held: base, gmail }
+  const words = editableCopy(found.content)
+  letters.observed(gmail, words === undefined ? { digest: providerDigest } : { digest: providerDigest, words })
   return { type: "copyRead", ticket, ok: true, found: true, held: base + 1, gmail }
 }
 
@@ -247,7 +358,7 @@ function addressCounts(words: Pick<Words, "to" | "cc" | "bcc">) {
 }
 
 // spec/app/inbox/drafts.md, "On a clash the owner chooses Restore my edits or Use latest saved draft, is told which was kept, and the choice is written to the phone"
-export effect function useLatestSavedDraft(): void!!(Drafts.Machine | Letters) {
+export effect function chooseLatestSavedDraft(): void!!(Drafts.Machine | Letters) {
   const composer = try Drafts.Machine
   const letters = try Letters
   const state = try composer.get()
@@ -295,23 +406,28 @@ export effect function openGmailDraft(account: number, id: string): boolean!!(Cl
   return Exit.isSuccess(try exit(composer.send(event, "Owner"))) && content !== undefined
 }
 
-// spec/app/inbox/drafts.md, "A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone"
-/** Whether Gmail's Sent holds the draft: a message to its first recipient with its subject. */
-effect function inSent(ticket: number, draft: number, account: number): Event!!(Cloud | Mail | Letters) {
-  const { client } = try Cloud
-  const ledger = try Mail
-  const words = (try Letters).words(draft)
-  const grant = ledger.grant(account)
-  return effect {
-    const query = `in:sent to:${words.to[0] ?? ""} subject:"${words.subject.replace(/"/gu, "")}"`
-    const found = try asked(() => client.gmailSearch({ ...(grant === undefined ? {} : { grantId: grant }), query, maxResults: 5 }))
-    return { type: "checkedSent", ticket, ok: true, found: found.messages.some((card) => card.subject === words.subject) }
-  } catch () => ({ type: "checkedSent", ticket, ok: false, found: false })
+// spec/app/inbox/drafts.md, "An unknown send is checked once by reading its own Gmail operation receipt, while its account may be read and no new send of the draft is handed over"
+effect function inSent(ticket: number, draft: number, account: number, attempt: number): Event!!(Cloud | Mail | Install | KeyValueStore.KeyValueStore | Changes | Drafts.Machine | Inbox.Machine) {
+  const composer = try Drafts.Machine
+  const list = try Inbox.Machine
+  const current = effect {
+    const state = try composer.get()
+    const letter = Drafts.letterNamed(state, draft)
+    return Drafts.canCheckedSent(state, ticket) && state.checking === draft && letter.doubt.attempt === attempt && letter.account === account
+      && Inbox.accessOf(try list.get(), account).grant.read
+  }
+  const unknown = { type: "checkedSent", ticket, ok: false, found: false } as const
+  if (!(try current)) return unknown
+  const receipt = try operationReceipt(account, attempt, "send")
+  if ((receipt?.state !== "succeeded" && receipt?.state !== "rejected") || !(try current)) return unknown
+  const found = receipt.state === "succeeded"
+  try ignore((try Changes).send({ type: "reconciledDraft", kind: "Send", draft, attempt, done: found }, "World"))
+  return { ...unknown, ok: true, found }
 }
 
 effect function written(ticket: number, draft: number): Event!!Letters {
-  const { ok, full } = try (try Letters).keep(draft)
-  return { type: "written", ticket, ok, full }
+  const result = try (try Letters).keepDraft(draft)
+  return { type: "written", ticket, ok: result.ok, full: result.full }
 }
 
 effect function loaded(ticket: number): Event!!Letters {
@@ -320,9 +436,9 @@ effect function loaded(ticket: number): Event!!Letters {
 }
 
 const keptAside = (draft: number) => effect { try ignore((try Letters).keep(draft)) }
-const forgotten = (draft: number) => effect { try (try Letters).forget(draft) }
+const forgotten = (drafts: ReadonlyArray<number>) => effect { try (try Letters).forget(drafts) }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Drafts.Machine | Inbox.Machine, [by: Actor]> {
+function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Install | KeyValueStore.KeyValueStore | Changes | Drafts.Machine | Inbox.Machine, [by: Actor]> {
   return match (fx) {
     // spec/app/inbox/drafts.md, "A write goes out only when none is in flight, under the newest ticket, carrying the draft as it is"
     when { tag: "Keep", let ticket, let draft }:
@@ -331,11 +447,13 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Drafts.Machine | In
     // spec/app/inbox/drafts.md, "A restart reopens the draft as last kept on the phone once the phone's drafts have loaded; a save, a send or a deletion handed over is ended by its operation"
     when { tag: "Load", let ticket }:
       answer("load", loaded(ticket), { type: "loaded", ticket, ok: false }, "World");
-    when { tag: "ReadCopy", let ticket, let draft, let account, let gmail }:
-      answer("copy", lookedUp(ticket, draft, account, gmail), copyFailed(ticket), "World");
-    when { tag: "ReadSent", let ticket, let draft, let account }:
-      answer("sent", inSent(ticket, draft, account), { type: "checkedSent", ticket, ok: false, found: false }, "World");
-    when { tag: "Forget", let draft }: run("forget", forgotten(draft), "World");
+    when { tag: "ReadCopy", let ticket, let draft, let account, let gmail, let attempt }:
+      answer("copy", lookedUp(ticket, draft, account, gmail, attempt), copyFailed(ticket), "World");
+    when { tag: "ReadSent", let ticket, let draft, let account, let attempt }:
+      answer("sent", inSent(ticket, draft, account, attempt), { type: "checkedSent", ticket, ok: false, found: false }, "World");
+    when { tag: "Forget", let draft }: run("forget", forgotten([draft]), "World");
+    // spec/app/inbox/drafts.md, "The owner can review and delete selected local drafts on the shelf, at the revisions shown"
+    when { tag: "ForgetSelected", let drafts }: run("forget", forgotten(drafts), "World");
   }
 }
 
@@ -360,12 +478,25 @@ const sessions = started(effect {
   })
 }, "a new cloud session")
 
+const leavingShelf = started(effect {
+  const list = try Inbox.Machine
+  const shell = try Shell
+  const composer = try Drafts.Machine
+  try Stream.runForEach(Stream.zipLatest(list.changes, shell.changes), effect ([mail, visit]) => {
+    const selection = (try composer.get()).shelfSelection
+    if (selection.account !== 0 && (
+      !showing(visit, "Inbox") || mail.selected.folder !== "DraftsFolder" ||
+      mail.selected.account !== selection.account || !Inbox.readable(mail)
+    )) try ignore(exit(composer.send({ type: "endShelfSelection" }, "World")))
+  })
+}, "leaving the local draft selection")
+
 /** How a draft begins, for the screen: a new message, or a reply, reply to all or forward of the message open. */
 export interface Beginning {
   readonly kind: Kind
   readonly account: number
   /** The message answered, as Gmail names it, with its sender, other recipients, subject and attachments. */
-  readonly message?: { readonly id: string; readonly from: string; readonly others: ReadonlyArray<string>; readonly subject: string; readonly body?: string; readonly files: number }
+  readonly message?: { readonly id: string; readonly from: string; readonly replyTo?: string; readonly others: ReadonlyArray<string>; readonly subject: string; readonly body: string; readonly historyId: string | null; readonly files: MailMessage["attachments"] }
 }
 
 const addressOf = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from.trim()
@@ -377,24 +508,56 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
   const ledger = try Mail
   const words = try Letters
   const { kind, account, message } = beginning
-  const sender = message === undefined ? "" : addressOf(message.from)
+  const replyTo = message?.replyTo ?? ""
+  const directsReply = acceptable(replyTo)
+  const sender = directsReply ? replyTo : addressOf(message?.from ?? "")
   const own = ledger.email(account).toLowerCase()
-  const others = message === undefined ? [] : message.others.map(addressOf).filter((one) => one.toLowerCase() !== own && one !== sender)
-  const replying = kind === "Reply" || kind === "ReplyAll"
-  const event: Event = {
-    type: "compose", kind, account, others: kind === "ReplyAll" ? others.length : 0, replyTo: false,
-    addressable: acceptable(sender), files: kind === "Forward" ? message?.files ?? 0 : 0, mib: 0, forwardable: false, policy,
+  const covered = new Set([own, sender.toLowerCase()])
+  const others: string[] = []
+  for (const recipient of message?.others ?? []) {
+    const address = addressOf(recipient)
+    const key = address.toLowerCase()
+    if (acceptable(address) && !covered.has(key)) {
+      covered.add(key)
+      others.push(address)
+    }
   }
-  const sent = try exit(composer.send(event, "Owner"))
-  if (!Exit.isSuccess(sent) || !sent.value.state.open) return false
+  const replying = kind === "Reply" || kind === "ReplyAll"
+  const forward = kind === "Forward" ? message : undefined
+  const files = forward?.files ?? []
+  const mib = files.reduce((total, file) => total + mibOf(file.size), 0)
+  const historyId = forward?.historyId
+  const forwardable = historyId != null && /^[1-9][0-9]*$/.test(historyId) && ledger.canOperate(account, "send")
+    && files.every((file) => file.partId !== "" && file.name !== "" && Number.isSafeInteger(file.size) && file.size >= 0)
+    && new Set(files.map((file) => file.partId)).size === files.length
+    && new Set(files.map((file) => file.name.toLowerCase())).size === files.length
+  const event: Event = {
+    type: "compose", kind, account, others: kind === "ReplyAll" ? others.length : 0, replyTo: directsReply,
+    addressable: acceptable(sender), files: files.length, mib, forwardable, policy,
+  }
+  const nextId = (try composer.get()).made + 1
   const prefix = replying ? "Re: " : kind === "Forward" ? "Fwd: " : ""
   const subject = message === undefined || message.subject.toLowerCase().startsWith(prefix.toLowerCase()) ? message?.subject ?? "" : `${prefix}${message.subject}`
-  const forward = kind === "Forward" && message !== undefined
-  const text = forward ? `\n\n---------- Forwarded message ----------\nFrom: ${message.from}\nSubject: ${message.subject}\n\n${message.body ?? ""}` : ""
-  words.set(sent.value.state.letter.id, {
+  const text = forward === undefined ? "" : `\n\nForwarded message from ${forward.from}\nSubject: ${forward.subject}\n\n${forward.body}`
+  const carried: readonly Attached[] = !forwardable || forward === undefined || historyId == null ? []
+    : files.map(({ name, mimeType, size, partId }) => ({ name, mimeType: mimeType.toLowerCase(), size, original: { messageId: forward.id, historyId, partId } }))
+  const prepared: Words = {
     ...nothing, subject, text, answers: replying ? message?.id : undefined, mode: kind === "Reply" ? "reply" : kind === "ReplyAll" ? "reply-all" : kind === "Forward" ? "forward" : "compose",
-    to: replying ? [sender] : [], cc: kind === "ReplyAll" ? others : [],
-  })
+    to: replying ? [sender] : [], cc: kind === "ReplyAll" ? others : [], files: carried,
+  }
+  words.set(nextId, prepared)
+  const sent = try exit(composer.send(event, "Owner"))
+  if (!Exit.isSuccess(sent) || !sent.value.state.open) {
+    try words.forget([nextId])
+    return false
+  }
+  const actual: Words = sent.value.state.letter.attachments === 0 && carried.length > 0 ? { ...prepared, files: [] } : prepared
+  if (sent.value.state.letter.id !== nextId) {
+    try words.forget([nextId])
+    words.set(sent.value.state.letter.id, actual)
+  } else if (actual !== prepared) {
+    words.set(nextId, actual)
+  }
   return true
 }
 
@@ -403,7 +566,11 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
 export const backFromDraft = effect {
   const composer = try Drafts.Machine
   const state = try composer.get()
-  if (!state.open) return false
+  if (!state.open) {
+    if (state.shelfSelection.reviewing) return Exit.isSuccess(try exit(composer.send({ type: "closeShelfReview" }, "Owner")))
+    if (state.shelfSelection.account !== 0) return Exit.isSuccess(try exit(composer.send({ type: "endShelfSelection" }, "Owner")))
+    return false
+  }
   const changes = try Changes
   if ((try changes.get()).review.showing) {
     try ignore(exit(changes.send({ type: "cancel" }, "Owner")))
@@ -436,9 +603,35 @@ export const backFromDraft = effect {
   return true
 }
 
+const fieldsOf = Schema.Record(Schema.String, Schema.Unknown)
+const readComposer = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.StructWithRest(Schema.Struct({
+  letter: fieldsOf, kept: fieldsOf, copy: fieldsOf, shelf: Schema.Struct({ shelved: Schema.Array(Schema.Number), letters: Schema.Record(Schema.String, fieldsOf) }),
+}), [fieldsOf])))
+
+function copyAttemptOf(letter: Readonly<Record<string, unknown>>) {
+  return "copyAttempt" in letter ? letter : { ...letter, copyAttempt: 0 }
+}
+
+effect function composerRecord(raw: string | undefined): (string | undefined)!! {
+  if (raw === undefined) return undefined
+  const fields = readComposer(raw) catch () => undefined
+  if (fields === undefined || ("copyAttempt" in fields.letter && "shelfSelection" in fields)) return raw
+  const shelf = { ...fields.shelf, letters: Object.fromEntries(Object.entries(fields.shelf.letters).map(([id, letter]) => [id, copyAttemptOf(letter)])) }
+  const migrated = Drafts.decodeState({
+    ...fields, shelf, shelfSelection: fields.shelfSelection ?? Drafts.noShelfSelection,
+    letter: copyAttemptOf(fields.letter), kept: copyAttemptOf(fields.kept), copy: copyAttemptOf(fields.copy),
+  }) catch () => undefined
+  return migrated === undefined ? raw : JSON.stringify(migrated)
+}
+
+function stored(key: string, start = Drafts.initial) {
+  return Layer.provide(Drafts.stored(key, start), migratedStore(key, composerRecord))
+}
+
 /** The composer: kept on the phone as it is typed, set aside and taken back, and written to the phone before Alpha leaves. */
 export const composer = together(
-  Layer.provideMerge(reacting(Drafts, { keep: 1, open: [{ type: "restart" }, "World"], carry, timers }), letters),
+  Layer.provideMerge(reacting({ ...Drafts, stored }, { keep: 1, open: [{ type: "restart" }, "World"], carry, timers }), letters),
   leaving,
+  leavingShelf,
   sessions,
 )

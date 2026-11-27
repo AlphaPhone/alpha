@@ -1,5 +1,6 @@
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useState } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 
 /** The height of one hour of the timeline, in pixels. */
 export const calendarHourHeight = 56;
@@ -51,8 +52,8 @@ export function CalendarEventBlock({ block, first, showTime = true, className, s
   const description = !showTime || block.label !== `${block.title}, ${block.time}` ? block.label : undefined;
   return (
     <button type="button" aria-label={label} aria-description={description} disabled={!block.onOpen} onClick={block.onOpen} style={{ top, height, ...style }}
-      className={cn(focusRing, "absolute box-border flex items-center gap-2 overflow-hidden rounded-md pr-3 pl-4 text-left disabled:cursor-default",
-        short ? "py-0" : "py-2", invite ? "border-[1.5px] border-dashed border-muted-foreground bg-background" : "bg-secondary", className)} {...props}>
+      className={cn(focusRing, "absolute box-border flex items-center gap-2 rounded-md pr-3 pl-4 text-left focus-visible:-outline-offset-focus disabled:cursor-default",
+        short ? "py-0 before:absolute before:inset-x-0 before:top-1/2 before:min-h-11 before:-translate-y-1/2" : "py-2", invite ? "border-[1.5px] border-dashed border-muted-foreground bg-background" : "bg-secondary", className)} {...props}>
       <span aria-hidden className={cn("absolute top-1.5 bottom-1.5 left-1.5 w-0.75 rounded-full", invite || !block.stripe ? "bg-transparent" : block.stripe === "primary" ? "bg-primary" : "bg-foreground")} />
       <span className="flex min-h-0 min-w-0 grow flex-col flex-wrap justify-center self-stretch overflow-hidden">
         <span className="w-full shrink-0 truncate text-sm leading-plain font-semibold">{block.title}</span>
@@ -76,15 +77,32 @@ export type CalendarTimelineProps = Omit<ComponentProps<"div">, "children"> & {
   columns?: ReactNode;
 };
 
+/** The timeline's edge fade: 12px at the top over its first 24px of scroll, and 12px at the bottom until its last 24px, eased in and out. */
+function fadeOf(el: HTMLElement): { top: number; bottom: number } {
+  const room = el.scrollHeight - el.clientHeight;
+  if (room <= 0) return { top: 0, bottom: 0 };
+  const run = Math.min(24, room);
+  const eased = (x: number) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+  return { top: 12 * eased(el.scrollTop / run), bottom: 12 * (1 - eased((el.scrollTop - room + run) / run)) };
+}
+
 /** A day's hours, from the first to the last, with each timed event in its place and the time now. */
-export function CalendarTimeline({ hours, blocks = [], now, empty, columns, className, ...props }: CalendarTimelineProps) {
+export function CalendarTimeline({ hours, blocks = [], now, empty, columns, className, style, onScroll, ...props }: CalendarTimelineProps) {
+  const [fade, setFade] = useState({ top: 0, bottom: 0 });
+  const refade = (el: HTMLElement | null) => {
+    if (!el) return;
+    const next = fadeOf(el);
+    setFade((was) => (was.top === next.top && was.bottom === next.bottom ? was : next));
+  };
+  const mask = `linear-gradient(to bottom, transparent 0, black ${fade.top}px, black calc(100% - ${fade.bottom}px), transparent 100%)`;
   const first = hours[0]?.hour ?? 7;
   const last = hours.at(-1)?.hour ?? 23;
   const height = (last - first) * calendarHourHeight + 16;
   return (
-    <div role="region" aria-label="Calendar timeline" tabIndex={0}
-      className={cn(focusRing, "grow touch-pan-y overflow-y-auto border-t border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)} {...props}>
-      <div className="relative mb-27.5" style={{ height }}>
+    <div ref={refade} role="region" aria-label="Calendar timeline" tabIndex={0} onScroll={(event) => { refade(event.currentTarget); onScroll?.(event); }}
+      style={{ maskImage: mask, WebkitMaskImage: mask, maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", ...style }}
+      className={cn(focusRing, dockClearance, "grow touch-pan-y overflow-y-auto border-t border-border pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)} {...props}>
+      <div className="relative" style={{ height }}>
         {hours.map(({ hour, label }) => (
           <div key={hour}>
             <div aria-hidden className="absolute right-4 left-15 h-px bg-border opacity-70" style={{ top: (hour - first) * calendarHourHeight + 8 }} />

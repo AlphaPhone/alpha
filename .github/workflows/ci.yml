@@ -4,9 +4,9 @@ name: ci
 # Consumer verification can precompute root simulations on four runners.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   push:
-    branches: [main]
+    branches: [main, develop]
 
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_attempt == '1' && github.ref || github.run_id }}
@@ -40,6 +40,8 @@ jobs:
         uses: ./.github/actions/setup
         with:
           job: ${{ matrix.name }}
+      - if: matrix.name == 'verify'
+        run: pnpm eliza
       - id: tool-selftest-cache
         if: startsWith(matrix.name, 'selftest-') && (env.TURBO_CACHE == 'local:rw' || github.event_name == 'push')
         continue-on-error: true
@@ -428,6 +430,7 @@ jobs:
               listing = f'runs/{run["id"]}/artifacts?' + urlencode({"name": name, "per_page": 2})
               delay = 90
               etag = None
+              run_etag = None
               while time.monotonic() < deadline:
                   try:
                       with get(listing, etag) as response:
@@ -441,6 +444,14 @@ jobs:
                       artifacts = []
                   if len(artifacts) == 1:
                       break
+                  if not artifacts and run["status"] != "completed":
+                      try:
+                          with get(f'runs/{run["id"]}', run_etag) as response:
+                              run_etag = response.headers.get("etag")
+                              run = json.load(response)
+                      except HTTPError as error:
+                          if error.code != 304:
+                              raise
                   if artifacts or run["status"] == "completed":
                       return
                   time.sleep(delay)

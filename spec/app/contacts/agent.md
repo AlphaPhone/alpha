@@ -281,17 +281,16 @@ pure def showAgain(r: Request, by: Actor): Request = { ...r, review: V::present(
 ### Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call
 
 `clear` is Phone's fact that no call which may be an emergency call is
-live. Approving acts once, under the next number. A text to a number the
-owner wrote, shown on its card, whose whole review is showing, can also be
-approved by the owner saying "Send this text" as the next thing said in
-Talk. A text to a contact has its number picked on the phone, by touch.
-Nothing else is approved by voice, and the phrase is never spoken back.
+live. Approving acts once, under the next number. The owner approves by
+touch on the shown review, also during Talk. A text to a contact has its
+number picked on the phone, by touch. Nothing is approved by voice, and the
+owner's words are never matched against a phrase to approve.
 
 ```quint
-pure def canApprove(r: Request, clear: bool, spoken: bool, by: Actor): bool =
-  by == Owner and r.stage == Shown and V::canConfirm(r.review) and clear and (spoken implies (r.ask == Text and r.addressed))
+pure def canApprove(r: Request, clear: bool, by: Actor): bool =
+  by == Owner and r.stage == Shown and V::canConfirm(r.review) and clear
 
-pure def approve(r: Request, clear: bool, spoken: bool, by: Actor): Moved =
+pure def approve(r: Request, clear: bool, by: Actor): Moved =
   val attempt = A::dispatch(A::record(A::plan(r.attempt.id + 1)))
   { state: { ...r, stage: Acting, review: V::confirm(r.review), attempt: attempt }, out: acting(attempt.id, r) }
 ```
@@ -308,7 +307,30 @@ pure def canWithdraw(r: Request, by: Actor): bool = by == Device and (r.stage ==
 pure def withdraw(r: Request, by: Actor): Moved = finish(Withdrawn, { ...r, review: V::dismiss(r.review) })
 ```
 
-### Only a text to a number the owner wrote is approved by voice, and only that text names the number at once
+### A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it
+
+A text is reviewed in one card of two rows, as Sunday's v119 drew it. The
+first row says Review SMS, who the text goes to, the text exactly as it
+will be sent and the SIM it goes from, and ends in Send; the second says
+"Keep things as they are." and ends in Decline. Each row is one control:
+the owner's tap anywhere on the first row is the approval by touch, held to
+every rule of an approval above, and a tap anywhere on the second row is
+the owner's decline. A row takes a tap only while its event is allowed, so
+while the decision is being made both rows stay shown and neither can be
+pressed.
+
+```quint
+type ReviewRow = TextRow | KeepRow
+
+pure def rowApproves(row: ReviewRow): bool = row == TextRow
+
+pure def rowTakesTheTap(row: ReviewRow, r: Request, clear: bool): bool =
+  r.ask == Text and (if (rowApproves(row)) canApprove(r, clear, Owner) else canDecline(r, Owner))
+
+pure def lawOnlyTheTextRowApproves(row: ReviewRow): bool = rowApproves(row) iff row != KeepRow
+```
+
+### Only a text to a number the owner wrote names the number at once
 
 ```quint
 pure def alwaysAnAddressedRequestReachesANumber(r: Request): bool = r.addressed implies reachesANumber(r.ask)
@@ -457,7 +479,10 @@ pure def lawOnlyWhatIsOpenAndReadIsShared(opened: Opened): bool = (readOf(opened
 The phone reads the newest incoming text's address, never its words: the
 last four digits, or the whole number and its conversation when the agent
 asked for it, so a reply can be drafted to that sender. No text, a sender
-that is not a number, and a failed read are each said as such.
+that is not a number, and a failed read are each said as such. Its review
+card says in plain words what it reads, the last four digits or the phone
+number of the latest incoming text, and never names the conversation's
+internal identifier.
 
 ```quint
 type SenderSaid = WholeNumber | LastFour | NoText | NotANumber | ReadFailed

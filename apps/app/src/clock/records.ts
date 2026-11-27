@@ -1,10 +1,14 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/timers.md, "Story: Run multiple countdown timers"
+import type { ClockSound } from "@repo/launcher-records";
+import { Option, Schema } from "effect";
+import { createShelf } from "../runtime/store.ts";
 
-/** Supported alarm and timer chime profiles. */
-export type AlarmSound = "radar" | "chime" | "pulse" | "gentle" | "classic";
+const ClockSoundSchema = Schema.Literals(["radar", "chime", "pulse", "gentle", "classic"]);
+
+const decodeClockSound = Schema.decodeUnknownOption(ClockSoundSchema);
 
 /** Selectable alarm sound metadata. */
-export const ALARM_SOUNDS: ReadonlyArray<{ readonly id: AlarmSound; readonly label: string }> = [
+export const ALARM_SOUNDS: ReadonlyArray<{ readonly id: ClockSound; readonly label: string }> = [
   { id: "radar", label: "Radar" },
   { id: "chime", label: "Chime" },
   { id: "pulse", label: "Pulse" },
@@ -25,63 +29,10 @@ export const TIMER_PRESETS: ReadonlyArray<{ readonly label: string; readonly dur
 /** Selectable snooze minute options. */
 export const SNOOZE_OPTIONS: ReadonlyArray<number> = [1, 5, 9, 10, 15, 20, 30, 45, 60];
 
-/** Shared wire contract for one alarm synced with `/api/alpha/clock`. */
-export interface ClockAlarmRecord {
-  readonly id: string;
-  readonly hour: number;
-  readonly minute: number;
-  readonly daysMask: number;
-  readonly label: string;
-  readonly sound: AlarmSound;
-  readonly vibrate: boolean;
-  readonly enabled: boolean;
-  readonly snoozeMinutes: number;
-  readonly phase: "idle" | "ringing" | "snoozed";
-  readonly fireAtMs: number | null;
-  readonly snoozeUntilMs: number | null;
-  readonly missed: boolean;
-  readonly revision: number;
-  readonly updatedAtMs: number;
-}
-
-/** Shared wire contract for one countdown timer synced with `/api/alpha/clock`. */
-export interface ClockTimerRecord {
-  readonly id: string;
-  readonly label: string;
-  readonly durationMs: number;
-  readonly remainingMs: number;
-  readonly status: "ready" | "running" | "paused" | "ringing";
-  readonly startedAtMs: number | null;
-  readonly endAtMs: number | null;
-  readonly ringStartedAtMs: number | null;
-  readonly revision: number;
-  readonly updatedAtMs: number;
-}
-
-/** Shared wire contract for one world city synced with `/api/alpha/clock`. */
-export interface WorldCityRecord {
-  readonly id: string;
-  readonly city: string;
-  readonly region: string;
-  readonly timeZone: string;
-  readonly order: number;
-}
-
-/** Full Clock sync snapshot exchanged with `/api/alpha/clock`. */
-export interface ClockSnapshot {
-  readonly version: number;
-  readonly updatedAtMs: number;
-  readonly alarms: ReadonlyArray<ClockAlarmRecord>;
-  readonly timers: ReadonlyArray<ClockTimerRecord>;
-  readonly world: ReadonlyArray<WorldCityRecord>;
-  readonly deletedAlarmIds: ReadonlyArray<string>;
-  readonly deletedTimerIds: ReadonlyArray<string>;
-}
-
 /** Rich UI metadata kept outside the integer/enum Quint state for one alarm. */
 export interface AlarmMeta {
   readonly label: string;
-  readonly sound: AlarmSound;
+  readonly sound: ClockSound;
   readonly remoteId: string;
   readonly updatedAtMs: number;
 }
@@ -101,6 +52,8 @@ export interface ClockMetaState {
   readonly deletedTimerIds: ReadonlyArray<string>;
   readonly version: number;
   readonly hour24: boolean;
+  readonly dirty: boolean;
+  readonly localSeq: number;
 }
 
 interface PersistedMeta {
@@ -109,168 +62,304 @@ interface PersistedMeta {
   readonly deletedAlarmIds: ReadonlyArray<string>;
   readonly deletedTimerIds: ReadonlyArray<string>;
   readonly version: number;
+  readonly dirty: boolean;
 }
 
-const VALID_SOUNDS = new Set<string>(ALARM_SOUNDS.map((item) => item.id));
+const PersistedAlarmEntrySchema = Schema.Tuple([
+  Schema.Finite,
+  Schema.Struct({
+    label: Schema.optionalKey(Schema.String),
+    sound: Schema.optionalKey(Schema.Unknown),
+    remoteId: Schema.optionalKey(Schema.String),
+    updatedAtMs: Schema.optionalKey(Schema.Finite),
+  }),
+]);
+
+const PersistedTimerEntrySchema = Schema.Tuple([
+  Schema.Finite,
+  Schema.Struct({
+    label: Schema.optionalKey(Schema.String),
+    remoteId: Schema.optionalKey(Schema.String),
+    updatedAtMs: Schema.optionalKey(Schema.Finite),
+  }),
+]);
+
+const PersistedMetaSchema = Schema.fromJsonString(
+  Schema.Struct({
+    alarms: Schema.optionalKey(Schema.Array(PersistedAlarmEntrySchema)),
+    timers: Schema.optionalKey(Schema.Array(PersistedTimerEntrySchema)),
+    deletedAlarmIds: Schema.optionalKey(Schema.Array(Schema.String)),
+    deletedTimerIds: Schema.optionalKey(Schema.Array(Schema.String)),
+    version: Schema.optionalKey(Schema.Finite),
+    dirty: Schema.optionalKey(Schema.Boolean),
+  }),
+);
+
+const decodePersistedMeta = Schema.decodeUnknownOption(PersistedMetaSchema);
 
 /**
- * Coerce an untrusted sound string to a valid AlarmSound.
+ * Type guard verifying an untrusted value is a valid ClockSound.
  * @throws {never}
  */
-export function normalizeSound(value: unknown): AlarmSound {
-  return typeof value === "string" && VALID_SOUNDS.has(value) ? (value as AlarmSound) : "radar";
+export function isAlarmSound(value: unknown): value is ClockSound {
+  return Option.isSome(decodeClockSound(value));
 }
 
-/** Label of an AlarmSound for display. */
-export function soundLabel(sound: AlarmSound): string {
+/**
+ * Coerce an untrusted sound string to a valid ClockSound.
+ * @throws {never}
+ */
+export function normalizeSound(value: unknown): ClockSound {
+  const decoded = decodeClockSound(value);
+  return Option.isSome(decoded) ? decoded.value : "radar";
+}
+
+/** Label of a ClockSound for display. */
+export function soundLabel(sound: ClockSound): string {
   return ALARM_SOUNDS.find((item) => item.id === sound)?.label ?? "Radar";
 }
 
-let current: ClockMetaState = {
-  alarms: new Map(),
-  timers: new Map(),
-  deletedAlarmIds: [],
-  deletedTimerIds: [],
-  version: 0,
-  hour24: false,
-};
-
-const listeners = new Set<() => void>();
-
-function publish(next: ClockMetaState) {
-  current = next;
-  for (const listener of [...listeners]) listener();
+/**
+ * Read alarm UI metadata from a reactive ClockMetaState snapshot.
+ * @throws {never}
+ */
+export function alarmMetaOf(state: ClockMetaState, id: number): AlarmMeta {
+  return state.alarms.get(id) ?? { label: "", sound: "radar", remoteId: `alarm-${id}`, updatedAtMs: 0 };
 }
 
-/** External store for Clock labels, sounds, remote sync IDs, tombstones, and 24-hour preference. */
-export const clockRecords = {
+/**
+ * Read timer UI metadata from a reactive ClockMetaState snapshot.
+ * @throws {never}
+ */
+export function timerMetaOf(state: ClockMetaState, id: number): TimerMeta {
+  return state.timers.get(id) ?? { label: "", remoteId: `timer-${id}`, updatedAtMs: 0 };
+}
+
+/** Fresh initial ClockMetaState snapshot. */
+export function emptyClockMeta(hour24 = false): ClockMetaState {
+  return {
+    alarms: new Map(),
+    timers: new Map(),
+    deletedAlarmIds: [],
+    deletedTimerIds: [],
+    version: 0,
+    hour24,
+    dirty: false,
+    localSeq: 0,
+  };
+}
+
+/** Scoped reactive metadata store interface for Clock labels, sounds, sync IDs, tombstones, and dirty tracking. */
+export interface ClockRecordsStore {
   /** @throws {never} */
-  snapshot: (): ClockMetaState => current,
+  readonly snapshot: () => ClockMetaState;
   /** @throws {never} */
-  subscribe: (listener: () => void): (() => void) => {
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
-  },
+  readonly subscribe: (listener: () => void) => () => void;
   /** @throws {never} */
-  reset: (hour24 = false): void => {
-    publish({ alarms: new Map(), timers: new Map(), deletedAlarmIds: [], deletedTimerIds: [], version: 0, hour24 });
-  },
+  readonly reset: (hour24?: boolean) => void;
   /** @throws {never} */
-  setHour24: (hour24: boolean): void => {
-    if (current.hour24 === hour24) return;
-    publish({ ...current, hour24 });
-  },
+  readonly setHour24: (hour24: boolean) => void;
   /** @throws {never} */
-  setAlarm: (id: number, patch: Partial<AlarmMeta>): void => {
-    const existing = current.alarms.get(id);
-    const next = new Map(current.alarms);
-    next.set(id, {
-      label: patch.label ?? existing?.label ?? "",
-      sound: patch.sound ?? existing?.sound ?? "radar",
-      remoteId: patch.remoteId ?? existing?.remoteId ?? `alarm-${id}`,
-      updatedAtMs: patch.updatedAtMs ?? existing?.updatedAtMs ?? 0,
-    });
-    publish({ ...current, alarms: next });
-  },
+  readonly setAlarm: (id: number, patch: Partial<AlarmMeta>) => void;
   /** @throws {never} */
-  alarm: (id: number): AlarmMeta => {
-    return current.alarms.get(id) ?? { label: "", sound: "radar", remoteId: `alarm-${id}`, updatedAtMs: 0 };
-  },
+  readonly deleteAlarm: (id: number) => void;
   /** @throws {never} */
-  markAlarmDeleted: (id: number): void => {
-    const remoteId = current.alarms.get(id)?.remoteId ?? `alarm-${id}`;
-    const deletedAlarmIds = current.deletedAlarmIds.includes(remoteId)
-      ? current.deletedAlarmIds
-      : [...current.deletedAlarmIds, remoteId];
-    publish({ ...current, deletedAlarmIds });
-  },
+  readonly alarm: (id: number) => AlarmMeta;
   /** @throws {never} */
-  unmarkAlarmDeleted: (id: number): void => {
-    const remoteId = current.alarms.get(id)?.remoteId ?? `alarm-${id}`;
-    publish({ ...current, deletedAlarmIds: current.deletedAlarmIds.filter((item) => item !== remoteId) });
-  },
+  readonly markAlarmDeleted: (id: number) => void;
   /** @throws {never} */
-  setTimer: (id: number, patch: Partial<TimerMeta>): void => {
-    const existing = current.timers.get(id);
-    const next = new Map(current.timers);
-    next.set(id, {
-      label: patch.label ?? existing?.label ?? "",
-      remoteId: patch.remoteId ?? existing?.remoteId ?? `timer-${id}`,
-      updatedAtMs: patch.updatedAtMs ?? existing?.updatedAtMs ?? 0,
-    });
-    publish({ ...current, timers: next });
-  },
+  readonly unmarkAlarmDeleted: (id: number) => void;
   /** @throws {never} */
-  timer: (id: number): TimerMeta => {
-    return current.timers.get(id) ?? { label: "", remoteId: `timer-${id}`, updatedAtMs: 0 };
-  },
+  readonly setTimer: (id: number, patch: Partial<TimerMeta>) => void;
   /** @throws {never} */
-  markTimerDeleted: (id: number): void => {
-    const remoteId = current.timers.get(id)?.remoteId ?? `timer-${id}`;
-    const nextTimers = new Map(current.timers);
-    nextTimers.delete(id);
-    const deletedTimerIds = current.deletedTimerIds.includes(remoteId)
-      ? current.deletedTimerIds
-      : [...current.deletedTimerIds, remoteId];
-    publish({ ...current, timers: nextTimers, deletedTimerIds });
-  },
+  readonly deleteTimer: (id: number) => void;
   /** @throws {never} */
-  setVersion: (version: number): void => {
-    if (version <= current.version) return;
-    publish({ ...current, version });
-  },
+  readonly timer: (id: number) => TimerMeta;
   /** @throws {never} */
-  replaceAll: (next: Pick<ClockMetaState, "alarms" | "timers" | "deletedAlarmIds" | "deletedTimerIds" | "version">): void => {
-    publish({ ...current, ...next });
-  },
+  readonly markTimerDeleted: (id: number) => void;
   /** @throws {never} */
-  serialize: (): string => {
-    const payload: PersistedMeta = {
-      alarms: [...current.alarms.entries()],
-      timers: [...current.timers.entries()],
-      deletedAlarmIds: current.deletedAlarmIds,
-      deletedTimerIds: current.deletedTimerIds,
-      version: current.version,
-    };
-    return JSON.stringify(payload);
-  },
+  readonly unmarkTimerDeleted: (id: number) => void;
   /** @throws {never} */
-  restore: (raw: string): void => {
-    try {
-      const parsed = JSON.parse(raw) as Partial<PersistedMeta>;
+  readonly markDirty: () => number;
+  /** @throws {never} */
+  readonly clearDirty: (seq: number) => void;
+  /** @throws {never} */
+  readonly localSeq: () => number;
+  /** @throws {never} */
+  readonly setVersion: (version: number) => void;
+  /** @throws {never} */
+  readonly replaceAll: (
+    next: Pick<ClockMetaState, "alarms" | "timers" | "deletedAlarmIds" | "deletedTimerIds" | "version"> & { readonly dirty?: boolean },
+  ) => void;
+  /** @throws {never} */
+  readonly serialize: () => string;
+  /** @throws {never} */
+  readonly restore: (raw: string) => void;
+}
+
+/**
+ * Create a scoped Clock metadata store backed by `createShelf`.
+ * @throws {never}
+ */
+export function createClockRecords(initialHour24 = false): ClockRecordsStore {
+  const shelf = createShelf<ClockMetaState>(emptyClockMeta(initialHour24), {
+    reset: () => emptyClockMeta(initialHour24),
+  });
+  return {
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
+    reset: (hour24 = false): void => {
+      shelf.set(emptyClockMeta(hour24));
+    },
+    setHour24: (hour24: boolean): void => {
+      const state = shelf.get();
+      if (state.hour24 === hour24) return;
+      shelf.set({ ...state, hour24 });
+    },
+    setAlarm: (id: number, patch: Partial<AlarmMeta>): void => {
+      const state = shelf.get();
+      const existing = state.alarms.get(id);
+      const next = new Map(state.alarms);
+      next.set(id, {
+        label: patch.label ?? existing?.label ?? "",
+        sound: patch.sound ?? existing?.sound ?? "radar",
+        remoteId: patch.remoteId ?? existing?.remoteId ?? `alarm-${id}`,
+        updatedAtMs: patch.updatedAtMs ?? existing?.updatedAtMs ?? 0,
+      });
+      shelf.set({ ...state, alarms: next });
+    },
+    deleteAlarm: (id: number): void => {
+      const state = shelf.get();
+      if (!state.alarms.has(id)) return;
+      const next = new Map(state.alarms);
+      next.delete(id);
+      shelf.set({ ...state, alarms: next });
+    },
+    alarm: (id: number): AlarmMeta => alarmMetaOf(shelf.get(), id),
+    markAlarmDeleted: (id: number): void => {
+      const state = shelf.get();
+      const remoteId = state.alarms.get(id)?.remoteId ?? `alarm-${id}`;
+      const deletedAlarmIds = state.deletedAlarmIds.includes(remoteId)
+        ? state.deletedAlarmIds
+        : [...state.deletedAlarmIds, remoteId];
+      shelf.set({ ...state, deletedAlarmIds });
+    },
+    unmarkAlarmDeleted: (id: number): void => {
+      const state = shelf.get();
+      const remoteId = state.alarms.get(id)?.remoteId ?? `alarm-${id}`;
+      shelf.set({ ...state, deletedAlarmIds: state.deletedAlarmIds.filter((item) => item !== remoteId) });
+    },
+    setTimer: (id: number, patch: Partial<TimerMeta>): void => {
+      const state = shelf.get();
+      const existing = state.timers.get(id);
+      const next = new Map(state.timers);
+      next.set(id, {
+        label: patch.label ?? existing?.label ?? "",
+        remoteId: patch.remoteId ?? existing?.remoteId ?? `timer-${id}`,
+        updatedAtMs: patch.updatedAtMs ?? existing?.updatedAtMs ?? 0,
+      });
+      shelf.set({ ...state, timers: next });
+    },
+    deleteTimer: (id: number): void => {
+      const state = shelf.get();
+      if (!state.timers.has(id)) return;
+      const next = new Map(state.timers);
+      next.delete(id);
+      shelf.set({ ...state, timers: next });
+    },
+    timer: (id: number): TimerMeta => timerMetaOf(shelf.get(), id),
+    markTimerDeleted: (id: number): void => {
+      const state = shelf.get();
+      const remoteId = state.timers.get(id)?.remoteId ?? `timer-${id}`;
+      const nextTimers = new Map(state.timers);
+      nextTimers.delete(id);
+      const deletedTimerIds = state.deletedTimerIds.includes(remoteId)
+        ? state.deletedTimerIds
+        : [...state.deletedTimerIds, remoteId];
+      shelf.set({ ...state, timers: nextTimers, deletedTimerIds });
+    },
+    unmarkTimerDeleted: (id: number): void => {
+      const state = shelf.get();
+      const remoteId = state.timers.get(id)?.remoteId ?? `timer-${id}`;
+      shelf.set({ ...state, deletedTimerIds: state.deletedTimerIds.filter((item) => item !== remoteId) });
+    },
+    markDirty: (): number => {
+      const state = shelf.get();
+      const localSeq = state.localSeq + 1;
+      shelf.set({ ...state, dirty: true, localSeq });
+      return localSeq;
+    },
+    clearDirty: (seq: number): void => {
+      const state = shelf.get();
+      if (!state.dirty || state.localSeq !== seq) return;
+      shelf.set({ ...state, dirty: false });
+    },
+    localSeq: (): number => shelf.get().localSeq,
+    setVersion: (version: number): void => {
+      const state = shelf.get();
+      if (version <= state.version) return;
+      shelf.set({ ...state, version });
+    },
+    replaceAll: (next): void => {
+      const state = shelf.get();
+      shelf.set({
+        ...state,
+        alarms: next.alarms,
+        timers: next.timers,
+        deletedAlarmIds: next.deletedAlarmIds,
+        deletedTimerIds: next.deletedTimerIds,
+        version: next.version,
+        dirty: next.dirty ?? state.dirty,
+      });
+    },
+    serialize: (): string => {
+      const state = shelf.get();
+      const payload: PersistedMeta = {
+        alarms: [...state.alarms.entries()],
+        timers: [...state.timers.entries()],
+        deletedAlarmIds: state.deletedAlarmIds,
+        deletedTimerIds: state.deletedTimerIds,
+        version: state.version,
+        dirty: state.dirty,
+      };
+      return JSON.stringify(payload);
+    },
+    restore: (raw: string): void => {
+      const decoded = decodePersistedMeta(raw);
+      if (Option.isNone(decoded)) return;
+      const parsed = decoded.value;
       const alarms = new Map<number, AlarmMeta>();
-      if (Array.isArray(parsed.alarms)) {
-        for (const entry of parsed.alarms) {
-          if (Array.isArray(entry) && typeof entry[0] === "number" && typeof entry[1] === "object" && entry[1] !== null) {
-            const meta = entry[1] as Partial<AlarmMeta>;
-            alarms.set(entry[0], {
-              label: typeof meta.label === "string" ? meta.label : "",
-              sound: normalizeSound(meta.sound),
-              remoteId: typeof meta.remoteId === "string" && meta.remoteId !== "" ? meta.remoteId : `alarm-${entry[0]}`,
-              updatedAtMs: typeof meta.updatedAtMs === "number" ? meta.updatedAtMs : 0,
-            });
-          }
-        }
+      for (const [id, meta] of parsed.alarms ?? []) {
+        if (!Number.isSafeInteger(id) || id <= 0) continue;
+        alarms.set(id, {
+          label: meta.label ?? "",
+          sound: normalizeSound(meta.sound),
+          remoteId: meta.remoteId !== undefined && meta.remoteId !== "" ? meta.remoteId : `alarm-${id}`,
+          updatedAtMs: meta.updatedAtMs ?? 0,
+        });
       }
       const timers = new Map<number, TimerMeta>();
-      if (Array.isArray(parsed.timers)) {
-        for (const entry of parsed.timers) {
-          if (Array.isArray(entry) && typeof entry[0] === "number" && typeof entry[1] === "object" && entry[1] !== null) {
-            const meta = entry[1] as Partial<TimerMeta>;
-            timers.set(entry[0], {
-              label: typeof meta.label === "string" ? meta.label : "",
-              remoteId: typeof meta.remoteId === "string" && meta.remoteId !== "" ? meta.remoteId : `timer-${entry[0]}`,
-              updatedAtMs: typeof meta.updatedAtMs === "number" ? meta.updatedAtMs : 0,
-            });
-          }
-        }
+      for (const [id, meta] of parsed.timers ?? []) {
+        if (!Number.isSafeInteger(id) || id <= 0) continue;
+        timers.set(id, {
+          label: meta.label ?? "",
+          remoteId: meta.remoteId !== undefined && meta.remoteId !== "" ? meta.remoteId : `timer-${id}`,
+          updatedAtMs: meta.updatedAtMs ?? 0,
+        });
       }
-      const deletedAlarmIds = Array.isArray(parsed.deletedAlarmIds) ? parsed.deletedAlarmIds.filter((x): x is string => typeof x === "string") : [];
-      const deletedTimerIds = Array.isArray(parsed.deletedTimerIds) ? parsed.deletedTimerIds.filter((x): x is string => typeof x === "string") : [];
-      const version = typeof parsed.version === "number" && Number.isFinite(parsed.version) ? parsed.version : 0;
-      publish({ ...current, alarms, timers, deletedAlarmIds, deletedTimerIds, version });
-    } catch {
-      return;
-    }
-  },
-};
+      const state = shelf.get();
+      shelf.set({
+        ...state,
+        alarms,
+        timers,
+        deletedAlarmIds: [...new Set(parsed.deletedAlarmIds ?? [])],
+        deletedTimerIds: [...new Set(parsed.deletedTimerIds ?? [])],
+        version: parsed.version !== undefined && parsed.version >= 0 ? Math.floor(parsed.version) : 0,
+        dirty: parsed.dirty ?? false,
+      });
+    },
+  };
+}
+
+/** Fallback metadata store for standalone callers outside a ClockRecords layer. */
+export const clockRecords: ClockRecordsStore = createClockRecords();

@@ -2,15 +2,64 @@
 import { NOT_DISPATCHED, readResult, type DeviceOperation } from "@elizaos/agent"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, available, showing } from "../../gen/app__shell.effect.vibe"
-import { Device, type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/index.vibe"
+import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
+import type { VoicemailId } from "@elizaos/os-bridges"
+import { Device } from "../platform/index.vibe"
+import { type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/index.vibe"
 import { contained } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import { currentPhoneContact, phoneQuery, type ReviewedPhoneContact } from "./named-review.vibe"
 import { Dialer, classifyDialNumber, prefilled } from "./phone.vibe"
+import { Voicemails, askVoicemailDeletion } from "./voicemail.vibe"
 
 type PhoneOperation = Extract<DeviceOperation, { type: "phone_keypad" | "phone_dial" | "phone_call" }>
 type NumberOperation = Extract<PhoneOperation, { type: "phone_dial" | "phone_call" }>
 
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+
+/** The listed provider row shown for an approved removal, until its inline confirmation expires. */
+export interface ReviewedVoicemailDeletion {
+  readonly id: VoicemailId
+  readonly opening: number
+  readonly witness: string
+  readonly expiresAt: number
+}
+
+// spec/app/phone/voicemail.md, "Delete asks first, stops playback, and Keep closes the question"
+/** Passing the review to Phone opens a question. The normal Delete action stages and settles it. */
+export effect function deleteReviewedVoicemail(target: ReviewedVoicemailDeletion, current: () => Promise<boolean>) {
+  const shell = try Shell
+  const handset = try Phone
+  const voicemail = try Voicemail
+  const store = try Voicemails
+  const device = try Device
+  const time = try Time
+  if (!(try stillApproved(current)) || !(try device.showing()) || !clear(try handset.get())
+    || !showing(try shell.get(), "Phone") || (try time.now()) >= target.expiresAt) return refused
+  const detent = (try shell.get()).assistant
+  for (const layer of detent === "Full" ? ["Full", "Sheet"] : detent === "Bar" ? [] : [detent]) {
+    if ((try shell.get()).assistant !== layer || !showing(try shell.get(), "Phone")
+      || !(try contained(shell.send({ type: "goBack" }), "showing the voicemail confirmation"))) return refused
+  }
+  if ((try shell.get()).assistant !== "Bar" || !showing(try shell.get(), "Phone")
+    || !(try device.showing()) || !clear(try handset.get()) || (try time.now()) >= target.expiresAt) return refused
+  const attempt = (try voicemail.get()).removal.id + 1
+  if (!(try askVoicemailDeletion(target.id, target))) return refused
+  const confirmation = (try store.get()).confirmation
+  const decided = Stream.runHead(Stream.filter(voicemail.changes, (state) => !state.confirming || state.removal.id >= attempt))
+  try.race [Effect.asVoid(decided), time.until(target.expiresAt)]
+  const after = try voicemail.get()
+  if (after.removal.id !== attempt) {
+    if (after.confirming && (try store.get()).confirmation === confirmation) try ignore(voicemail.send({ type: "keep" }))
+    return after.removal.id < attempt ? refused : undefined
+  }
+  const settled = Option.getOrUndefined(try Stream.runHead(Stream.filter(voicemail.changes,
+    (state) => state.removal.id > attempt || (state.removal.id === attempt && state.removal.outcome !== "Sent"))))
+  if (settled?.removal.id !== attempt || settled.removal.outcome === "Unknown") return undefined
+  return settled.removal.outcome === "Confirmed"
+    ? { kind: "applied", result: { kind: "voicemail-delete", status: "deleted" } } as const
+    : refused
+}
 
 function answer(operation: PhoneOperation, raw: unknown, applied: boolean): unknown {
   const result = readResult(operation, raw)
@@ -67,6 +116,14 @@ effect function keypad(number: string | undefined, current: () => Promise<boolea
   return state.front && state.tab === "Keypad" && state.digits === digits.length && (try store.get()).digits === digits
 }
 
+effect function approvedTarget(operation: NumberOperation, current: () => Promise<boolean>, selected: ReviewedPhoneContact | undefined) {
+  if (!(try canDispatch(current))) return undefined
+  const target = try destination(operation, selected)
+  if (target === undefined) return undefined
+  if ((try classifyDialNumber(target.number)) !== "OrdinaryNumber" || !(try canDispatch(current))) return undefined
+  return target
+}
+
 /** The already reviewed Phone operations. The SDK owns approval, claim and dispatch journaling. */
 export effect function phoneAction(operation: DeviceOperation, current: () => Promise<boolean>, selected?: ReviewedPhoneContact): unknown!!(Device | Dialer | Phone | Shell | Telephony) {
   switch (operation.type) {
@@ -75,23 +132,17 @@ export effect function phoneAction(operation: DeviceOperation, current: () => Pr
       return answer(operation, { kind: "phone-keypad", status: opened ? "opened" : "unavailable" }, opened)
     }
     case "phone_dial": {
-      if (!(try canDispatch(current))) return refused
-      const target = try destination(operation, selected)
+      const target = try approvedTarget(operation, current, selected)
       if (target === undefined) return refused
-      const { number, contact } = target
-      if (contact && ((try classifyDialNumber(number)) !== "OrdinaryNumber" || !(try canDispatch(current)))) return refused
-      const report = telephony("dial", (client) => client.phone.dial(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
+      const report = telephony("dial", (client) => client.phone.dial(target.number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
       if (report === undefined) return undefined
       const status = report?.dialStatus === "DialHandedOff" ? "handed-off" : report?.dialStatus === "DialFailed" ? "failed" : "unavailable"
-      return answer(operation, { kind: "phone-dial", status, handler: status === "handed-off" ? report?.handler ?? null : null, contact }, status === "handed-off")
+      return answer(operation, { kind: "phone-dial", status, handler: status === "handed-off" ? report?.handler ?? null : null, contact: target.contact }, status === "handed-off")
     }
     case "phone_call": {
-      if (!(try canDispatch(current))) return refused
-      const target = try destination(operation, selected)
+      const target = try approvedTarget(operation, current, selected)
       if (target === undefined) return refused
-      const { number, contact } = target
-      if ((try classifyDialNumber(number)) !== "OrdinaryNumber" || !(try canDispatch(current))) return refused
-      const report = telephony("placeCall", (client) => client.phone.placeCall(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
+      const report = telephony("placeCall", (client) => client.phone.placeCall(target.number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
       if (report === undefined) return undefined
       const status = match (report?.placeStatus) {
         when "CallPlaced": "placed";
@@ -100,7 +151,7 @@ export effect function phoneAction(operation: DeviceOperation, current: () => Pr
         when "CallFailed": "failed";
         default: "unavailable";
       }
-      return answer(operation, { kind: "phone-call", status, contact }, status === "placed" || status === "emergency-handoff")
+      return answer(operation, { kind: "phone-call", status, contact: target.contact }, status === "placed" || status === "emergency-handoff")
     }
     default: return refused
   }

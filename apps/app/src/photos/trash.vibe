@@ -2,17 +2,22 @@
 import type { TrashConfirmation } from "@elizaos/os-bridges"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
 import * as Library from "../../gen/app__photos.effect.vibe"
+import * as Changes from "../../gen/app__photos__changes.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
-import { PhotosPort, type BrowserCapture, type Device } from "../platform/index.vibe"
+import { PhotosPort, type BrowserCapture } from "../platform/index.vibe"
+import type { Device } from "../platform/index.vibe"
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import type { say } from "../notices/index.vibe"
+import { say } from "../notices/index.vibe"
 import { answer, applying, following, reacting, started, together, type Job } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import { Catalog, type Row } from "./catalog.vibe"
 import { browserTargets, changedItems, targets } from "./photos.vibe"
 
+const confirmationWindowMs = 5 * 60_000
+
 type Review =
-  | { readonly kind: "phone"; readonly confirmation: TrashConfirmation; readonly rows: readonly number[] }
-  | { readonly kind: "browser"; readonly captures: readonly BrowserCapture[]; readonly rows: readonly number[] }
+  | { readonly kind: "phone"; readonly confirmation: TrashConfirmation; readonly rows: readonly number[]; readonly expiresAt: number }
+  | { readonly kind: "browser"; readonly entire: boolean; readonly captures: readonly BrowserCapture[]; readonly rows: readonly number[]; readonly expiresAt: number }
 
 service Prepared {
   get(): (Review | undefined)!!
@@ -50,18 +55,18 @@ effect function fetched(ticket: number, more: boolean): Trash.Event!!(PhotosPort
   }
   if (Option.isNone(phone)) return fail(ticket)
   const cursor = more ? try cache.cursor(true) : null
-  const revision = try cache.revision()
-  const page = tryPromise(() => phone.value.list({ before: cursor ?? undefined, trashed: true, thumbnails: true })) catch () => undefined
+  const page = tryPromise(() => phone.value.list({ before: cursor ?? undefined, trashed: true, limit: 120, thumbnails: false })) catch () => undefined
   if (page === undefined || !Trash.canListed(try bin.get(), ticket, "Phone")) return fail(ticket)
   const rows = page.items.map((item): Row => ({ kind: "phone", item }))
   const ids = try cache.index(rows)
   try cache.publish(rows, ids)
   try cache.next(true, page.next)
-  return { type: "listed", ticket, ok: true, rows: ids, revision, more: page.next !== null }
+  return { type: "listed", ticket, ok: true, rows: ids, revision: try cache.revision(), more: page.next !== null }
 }
 
-effect function ready(ticket: number, items: readonly number[]): Trash.Event!!(PhotosPort | Catalog | Prepared | Trash.Machine) {
+effect function ready(ticket: number, items: readonly number[]): Trash.Event!!(PhotosPort | Catalog | Prepared | Trash.Machine | Time) {
   const { phone, browser } = try PhotosPort
+  const time = try Time
   if (Option.isSome(browser)) {
     const local = browser.value
     const captures = try browserTargets(items)
@@ -70,7 +75,7 @@ effect function ready(ticket: number, items: readonly number[]): Trash.Event!!(P
     if (current === undefined || captures.length !== items.length || !Trash.canReadied(try (try Trash.Machine).get(), ticket, "Phone")) return failed
     const rows = new Map(current.map((row) => [row.id, row]))
     if (captures.some((one) => one.trashedAt === undefined || rows.get(one.id)?.trashedAt !== one.trashedAt || rows.get(one.id)?.revision !== one.revision)) return failed
-    try (try Prepared).hold({ kind: "browser", rows: items, captures })
+    try (try Prepared).hold({ kind: "browser", entire: false, rows: items, captures, expiresAt: (try time.now()) + confirmationWindowMs })
     return { type: "readied", ticket, ok: true }
   }
   const rows = try targets(items)
@@ -81,11 +86,28 @@ effect function ready(ticket: number, items: readonly number[]): Trash.Event!!(P
     try ignore(tryPromise(() => phone.value.cancelDeleteTrash(reply.confirmation)))
     return { type: "readied", ticket, ok: false }
   }
-  try (try Prepared).hold({ kind: "phone", rows: items, confirmation: reply.confirmation })
+  const expiresAt = "expiresAt" in reply && typeof reply.expiresAt === "number" && Number.isFinite(reply.expiresAt)
+    ? reply.expiresAt
+    : (try time.now()) + confirmationWindowMs
+  try (try Prepared).hold({ kind: "phone", rows: items, confirmation: reply.confirmation, expiresAt })
   return { type: "readied", ticket, ok: true }
 }
 
-effect function deleted(attempt: number, items: readonly number[]): Trash.Event!!(PhotosPort | Prepared | Catalog) {
+effect function readyEmpty(ticket: number, revision: number): Trash.Event!!(PhotosPort | Catalog | Prepared | Trash.Machine | Time) {
+  const { browser } = try PhotosPort
+  const time = try Time
+  const failed: Trash.Event = { type: "emptyReadied", ticket, revision, ok: false, items: [] }
+  if (Option.isNone(browser)) return failed
+  const captures = (tryPromise(() => browser.value.rows()) catch () => undefined)?.filter((item) => item.trashedAt !== undefined)
+  const state = try (try Trash.Machine).get()
+  if (captures === undefined || captures.length === 0 || !Trash.canEmptyReadied(state, ticket, "Phone") || state.revision !== revision || state.read.status !== "Loaded") return failed
+  const cache = try Catalog
+  const items = try cache.index(captures.map((item): Row => ({ kind: "browser", item })))
+  try (try Prepared).hold({ kind: "browser", entire: true, rows: items, captures, expiresAt: (try time.now()) + confirmationWindowMs })
+  return { ...failed, ok: true, items }
+}
+
+effect function deleted(attempt: number, items: readonly number[]): Trash.Event!!(PhotosPort | Prepared | Catalog | Effect.Services<ReturnType<typeof say>>) {
   const { phone, browser } = try PhotosPort
   const stored = try Prepared
   const prepared = try stored.get()
@@ -94,9 +116,15 @@ effect function deleted(attempt: number, items: readonly number[]): Trash.Event!
   try stored.hold(undefined)
   if (prepared.kind === "browser" && Option.isSome(browser)) {
     const local = browser.value
-    const receipt = tryPromise(() => local.change("delete", prepared.captures)) catch () => undefined
+    const receipt = tryPromise(() => prepared.entire ? local.emptyTrash(prepared.captures) : local.change("delete", prepared.captures)) catch () => undefined
     if (receipt?.some((row) => row.status === "done")) try (try Catalog).changed()
-    return { ...refused, known: receipt !== undefined && !receipt.some((row) => row.status === "unverified"), confirmed: receipt?.length === items.length && receipt.every((row) => row.status === "done") }
+    const confirmed = receipt?.length === items.length && receipt.every((row) => row.status === "done")
+    if (prepared.entire && !confirmed) {
+      const changed = receipt?.length === items.length && receipt.every((row) => row.status === "stale")
+      try say(changed ? "Recently deleted changed. Review it again." : "Couldn’t confirm that Recently deleted was emptied.", true)
+    }
+    const partial = !confirmed && receipt?.some((row) => row.status === "done") === true
+    return { ...refused, known: receipt !== undefined && !partial && !receipt.some((row) => row.status === "unverified"), confirmed }
   }
   if (prepared.kind !== "phone" || Option.isNone(phone)) return refused
   const receipt = tryPromise(() => phone.value.deletePreparedTrash(prepared.confirmation)) catch () => undefined
@@ -104,7 +132,7 @@ effect function deleted(attempt: number, items: readonly number[]): Trash.Event!
   return { type: "deletedForever", attempt, known: receipt !== undefined, confirmed: receipt?.status === "deleted" && receipt.deletedIds.length === items.length }
 }
 
-type Needs = PhotosPort | Catalog | Trash.Machine | Prepared | Library.Machine | Device | Shell | Effect.Services<ReturnType<typeof say>>
+type Needs = PhotosPort | Catalog | Trash.Machine | Prepared | Library.Machine | Device | Shell | Time | Effect.Services<ReturnType<typeof say>>
 
 function carry(fx: Trash.Effect): Job<Trash.Event, Needs, [Actor]> {
   return match (fx) {
@@ -115,14 +143,28 @@ function carry(fx: Trash.Effect): Job<Trash.Event, Needs, [Actor]> {
       return { type: "recovered", attempt, ...result } satisfies Trash.Event
     }, { type: "recovered", attempt, known: false, declined: false, done: [], stale: [] }, "Phone");
     when { tag: "Prepare", let ticket, let items }: answer("prepare", ready(ticket, items), { type: "readied", ticket, ok: false }, "Phone");
+    when { tag: "PrepareEmpty", let ticket, let revision }: answer("prepare empty", readyEmpty(ticket, revision), { type: "emptyReadied", ticket, revision, ok: false, items: [] }, "Phone");
     when { tag: "DeletePrepared", let attempt, let items }: answer(`delete ${attempt}`, deleted(attempt, items), { type: "deletedForever", attempt, known: false, confirmed: false }, "Phone");
   }
 }
 
 const batches = following(Trash.Machine, (state) => state.job, Trash.Machine,
-  (job): Trash.Event | undefined => job.left.length > 0 && job.request.outcome !== "Sent" ? { type: "sendNext", items: job.left.slice(0, 20) } : undefined, "Phone")
+  (job): Trash.Event | undefined => job.left.length > 0 && job.request.outcome !== "Sent" ? { type: "sendNext", items: job.left.slice(0, Changes.maxRequest) } : undefined, "Phone")
 
-const release = applying(Trash.Machine, (state) => state.prepared.length === 0 && state.forever.outcome !== "Sent", (clear) => effect {
+const expiring = started(effect {
+  const bin = try Trash.Machine
+  const stored = try Prepared
+  const time = try Time
+  const showing = Stream.changesWith(Stream.map(bin.changes, (state) => state.confirm.showing && state.prepared.length > 0 ? state.confirm.revision : 0), (a, b) => a === b)
+  try Stream.runDrain(Stream.switchMap(showing, (rev) => rev === 0 ? Stream.empty : Stream.fromEffect(effect {
+    const review = try stored.get()
+    if (review === undefined || !Number.isFinite(review.expiresAt) || review.expiresAt <= 0) return
+    try time.until(review.expiresAt)
+    if (Trash.canForeverExpired(try bin.get(), "Phone")) try ignore(bin.send({ type: "foreverExpired" }, "Phone"))
+  })))
+}, "Photos trash confirmation expiry")
+
+const release = applying(Trash.Machine, (state) => state.scope === "Chosen" && state.prepared.length === 0 && state.forever.outcome !== "Sent", (clear) => effect {
   if (!clear) return
   const { phone } = try PhotosPort
   const stored = try Prepared
@@ -143,4 +185,4 @@ const refreshing = started(effect {
 
 const refreshed = following(Trash.Machine, (state) => state.job.done.length + state.attempts, Library.Machine, (count): Library.Event | undefined => count > 0 ? { type: "libraryChanged" } : undefined, "Phone")
 
-export const trash = together(prepared, reacting(Trash, { carry }), batches, release, refreshing, refreshed)
+export const trash = together(prepared, reacting(Trash, { carry }), batches, expiring, release, refreshing, refreshed)

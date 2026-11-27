@@ -1,17 +1,18 @@
 // spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"; spec/app/notes/note.md, "Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open"
 import { type Request, isOwner, mayOpenNote } from "../../gen/app__notes__note.effect.vibe"
-import * as Actions from "../../gen/app__notes__actions.effect.vibe"
-import * as Editor from "../../gen/app__notes__editor.effect.vibe"
-import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
-import * as Mic from "../../gen/app__notes__microphone.effect.vibe"
 import * as Notes from "../../gen/app__notes.effect.vibe"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
+import { Machine as Actions } from "../../gen/app__notes__actions.effect.vibe"
+import * as Mic from "../../gen/app__notes__microphone.effect.vibe"
 import * as Previous from "../../gen/app__notes__previous.effect.vibe"
 import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
 import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
 import * as Trash from "../../gen/app__notes__trash.effect.vibe"
-import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { contained } from "../runtime/index.vibe"
-import { numberOf } from "./content.vibe"
+import { NoteContent, numberOf } from "./content.vibe"
 import { Opens } from "./opens.vibe"
 
 /** The owner's request an open is for: its number, the number of the owner's request that is current, and whether the screen it was asked from is sensitive. */
@@ -58,16 +59,17 @@ effect function alreadyOpen(id: number) {
  * question, a voice note, the proposal card or the actions menu; and the editor while it deletes, or at all for a voice
  * note, which the editor does not give way to. A saved note open in the editor gives way to a text note.
  */
-effect function covering(voice: boolean) {
+export effect function covering(voice: boolean) {
   const recorder = try (try Recorder.Machine).get()
   const trash = try (try Trash.Machine).get()
   const editor = try (try Editor.Machine).get()
+  const microphone = try (try Mic.Machine).get()
   return Previous.canBack(try (try Previous.Machine).get()) || Recorder.unfinished(recorder) || Recorder.canBack(recorder)
-    || (try (try Mic.Machine).get()).asking || (try (try Transfer.Machine).get()).job !== "NoJob"
+    || microphone.asking || microphone.browserDenied || (try (try Transfer.Machine).get()).job !== "NoJob"
     || Link.canBack(try (try Link.Machine).get()) || (try (try Voice.Machine).get()).showing
     || trash.showing || trash.question !== "NoQuestion" || Trash.canBack(trash)
     || editor.deleting || editor.dropping || (voice && editor.showing)
-    || Notes.canBack(try (try Notes.Machine).get()) || (try (try Actions.Machine).get()).open
+    || Notes.canBack(try (try Notes.Machine).get()) || (try (try Actions).get()).open
 }
 
 /** What the list is told of an agent's open of note `id` for `asked`, from Notes as it is now. */
@@ -105,7 +107,33 @@ export effect function agentOpen(noteId: string, asked: Asked) {
   const { req, covered } = try requestOf(s, id, asked)
   const opens = try Opens
   const waiting = try opens.expect(asked.turn)
-  if (!(try contained(list.send({ type: "agentOpen", id, covered, req }, "Agent"), "the agent opening a note"))) try opens.settle(asked.turn, false)
-  const shown = try Effect.timeoutOption(Deferred.await(waiting), "10 seconds")
-  return Option.getOrElse(shown, () => false)
+  return try Effect.ensuring(effect {
+    if (!(try contained(list.send({ type: "agentOpen", id, covered, req }, "Agent"), "the agent opening a note"))) {
+      try opens.settle(asked.turn, false)
+      return false
+    }
+    const shown = try Effect.timeoutOption(Deferred.await(waiting), "10 seconds")
+    return Option.getOrElse(shown, () => false)
+  }, opens.drop(asked.turn))
+}
+
+/** Follow an owner's Calendar link using the ordinary note-opening rules. */
+export effect function openNoteLink(noteId: string, owner: string, route: number) {
+  const id = numberOf("note", noteId)
+  const list = try Notes.Machine
+  const first = try listedWith(id)
+  const current = try (try NoteContent).collection()
+  const where = try (try Shell).get()
+  if (current.owner !== owner || where.route !== route || !showing(where, "Notes") ||
+      !Notes.hasNote(first.rows, id) || current.noteByNumber.get(id)?.id !== noteId) return false
+  if (try alreadyOpen(id)) return true
+  const voice = Notes.rowOf(first, id).kind === "Voice"
+  if ((try covering(voice)) || Editor.waiting(try (try Editor.Machine).get()) ||
+      (try (try Editor.Machine).get()).showing) return false
+  if (!Notes.shown(first).some((row) => row.id === id) && Notes.canClearFilter(first)) {
+    try ignore(list.send({ type: "clearFilter" }, "Owner"))
+  }
+  const again = try (try Shell).get()
+  if (again.route !== route || !showing(again, "Notes") || (try covering(voice))) return false
+  return try contained(list.send({ type: "openRow", id, covered: false }, "Owner"), "opening the Calendar item’s source note")
 }

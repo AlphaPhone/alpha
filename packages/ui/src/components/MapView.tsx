@@ -1,12 +1,10 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
 import mapWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
-import { Compass, Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
-import { cn } from "../lib/cn.ts";
+import { cn, focusRing } from "../lib/cn.ts";
 import { Button } from "./Button.tsx";
-
-maplibregl.setWorkerCount(1);
 
 /** A point of the map in degrees. */
 export interface MapPoint {
@@ -27,7 +25,7 @@ export interface MapPin {
 export type MapCamera =
   | { kind: "keep" }
   | { kind: "follow"; key: string; at: MapPoint }
-  | { kind: "centre"; key: string; at: MapPoint; zoom: number }
+  | { kind: "centre"; key: string; at: MapPoint; zoom: number; lift?: number }
   | { kind: "fit"; key: string; points: readonly MapPoint[]; maxZoom: number }
   | { kind: "northUp"; key: string };
 
@@ -76,6 +74,10 @@ export interface MapViewProps {
   drawn?: boolean;
   /** Whether to show zoom buttons alongside the compass. */
   zoomControls?: boolean;
+  /** Where the camera first stands, before any `camera` moves it; the whole world from above Africa unless given. */
+  opening?: { at: MapPoint; zoom: number };
+  /** How far the compass stands from the foot of the map, in pixels, when it stands over the map's corner rather than with the zoom buttons. */
+  compassBottom?: number;
   onReady: (surface: number) => void;
   onTrouble: (surface: number, trouble: MapTrouble) => void;
   onPin: (key: string) => void;
@@ -85,8 +87,6 @@ export interface MapViewProps {
   onPressMove: (pixels: number) => void;
   /** The press ended: lifted, a second finger, or the menu that follows a held finger. */
   onPressEnd: () => void;
-  /** A secondary click, or a menu opened with no finger down, at a point of the map. */
-  onMenu?: (at: MapPoint) => void;
   /** The camera came to rest on this view. */
   onSettled: (view: MapBounds) => void;
   /** The owner began to drag the map. */
@@ -94,23 +94,16 @@ export interface MapViewProps {
   /** What sits over the map: its credits and its controls. */
   children?: ReactNode;
   className?: string;
-  /** The least zoom the camera follows the phone at. */
-  followZoom?: number;
-  /** The pixels kept clear on every side of what the camera fits. */
-  fitPadding?: number;
 }
 
 let protocols = 0;
 
-function styleOf(style: MapStyle, protocol: string, land: string): string | StyleSpecification {
+function styleOf(style: MapStyle, protocol: string): string | StyleSpecification {
   if (style.kind === "vector") return style.url;
   return {
     version: 8,
     sources: { cloud: { type: "raster", tiles: [`${protocol}://tiles/{z}/{x}/{y}`], tileSize: style.tileSize, minzoom: style.minZoom, maxzoom: style.maxZoom } },
-    layers: [
-      { id: "land", type: "background", paint: { "background-color": land } },
-      { id: "cloud-raster", type: "raster", source: "cloud" },
-    ],
+    layers: [{ id: "cloud-raster", type: "raster", source: "cloud" }],
   };
 }
 
@@ -120,17 +113,75 @@ const lineOf = (points: readonly MapPoint[] | undefined) => ({
   geometry: { type: "LineString" as const, coordinates: (points ?? []).map((p) => [p.lng, p.lat]) },
 });
 
-function dot(className: string, label: string, onClick?: () => void): HTMLElement {
-  const element = document.createElement(onClick ? "button" : "span");
-  if (element instanceof HTMLButtonElement) element.type = "button";
-  element.setAttribute("aria-label", label);
-  element.className = className;
-  if (onClick) element.addEventListener("click", onClick);
+const reducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+const hexByte = (value: number) => value.toString(16).padStart(2, "0");
+
+function resolveCssColor(node: HTMLElement, token: string): string {
+  const raw = getComputedStyle(node).getPropertyValue(token).trim();
+  if (!raw || typeof document === "undefined") return raw || "currentColor";
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return raw;
+  ctx.clearRect(0, 0, 1, 1);
+  ctx.fillStyle = raw;
+  ctx.fillRect(0, 0, 1, 1);
+  const data = ctx.getImageData(0, 0, 1, 1).data;
+  if (!data[3]) return raw;
+  return `#${hexByte(data[0] ?? 0)}${hexByte(data[1] ?? 0)}${hexByte(data[2] ?? 0)}`;
+}
+
+const pinDotClass = (chosen: boolean) =>
+  chosen
+    ? "block size-5.5 rounded-full border-2 border-alpha-foreground bg-map shadow-sm"
+    : "block size-5.5 rounded-full border-3 border-map bg-alpha-foreground shadow-sm";
+
+function pinElement(pin: MapPin, onClick: () => void): { button: HTMLButtonElement; dot: HTMLSpanElement } {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("aria-label", pin.label);
+  button.className = "flex size-11 cursor-pointer items-center justify-center rounded-full p-0 focus-visible:outline-solid focus-visible:outline-focus focus-visible:outline-offset-focus focus-visible:outline-ring";
+  const dot = document.createElement("span");
+  dot.setAttribute("aria-hidden", "true");
+  dot.className = pinDotClass(pin.chosen === true);
+  button.append(dot);
+  button.addEventListener("click", onClick);
+  return { button, dot };
+}
+
+/** The map accent, `--map`, resolved to a MapLibre-safe hex color. */
+const mapAccent = (node: HTMLElement) => {
+  const raw = getComputedStyle(node).getPropertyValue("--map").trim();
+  return resolveCssColor(node, raw ? "--map" : "--primary");
+};
+
+/** Where the phone is: a dot in the map accent ringed in white, the same in both themes. */
+function puck(): HTMLElement {
+  const element = document.createElement("span");
+  element.setAttribute("role", "img");
+  element.setAttribute("aria-label", "Your location");
+  element.className = "pointer-events-none relative block size-7";
+  const spot = document.createElement("span");
+  spot.className = "absolute top-1.25 left-1.25 size-4.5 rounded-full border-3 border-alpha-foreground bg-map shadow-sm";
+  element.append(spot);
   return element;
 }
 
+interface PinEntry {
+  marker: maplibregl.Marker;
+  button: HTMLButtonElement;
+  dot: HTMLSpanElement;
+  chosen: boolean;
+  lat: number;
+  lng: number;
+  label: string;
+}
+
 interface Painted {
-  readonly markers: maplibregl.Marker[];
+  readonly markers: Map<string, PinEntry>;
   here: maplibregl.Marker | undefined;
   pins: string;
   spot: string;
@@ -140,13 +191,37 @@ interface Painted {
 
 /** Bring `map` to what `props` shows: only the pins, position, route or camera that changed. */
 function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key: string) => void): void {
-  const pins = JSON.stringify(props.pins.map((pin) => [pin.key, pin.at, pin.chosen === true]));
+  const pins = JSON.stringify(props.pins.map((pin) => [pin.key, pin.at, pin.label, pin.chosen === true]));
   if (pins !== painted.pins) {
-    for (const marker of painted.markers.splice(0)) marker.remove();
+    const keep = new Set(props.pins.map((pin) => pin.key));
+    for (const [key, entry] of painted.markers) {
+      if (!keep.has(key)) {
+        entry.marker.remove();
+        painted.markers.delete(key);
+      }
+    }
     for (const pin of props.pins) {
-      const look = pin.chosen ? "size-5 bg-destructive" : "size-4 bg-primary";
-      const element = dot(`rounded-full border-2 border-background shadow ${look}`, pin.label, () => onPin(pin.key));
-      painted.markers.push(new maplibregl.Marker({ element }).setLngLat([pin.at.lng, pin.at.lat]).addTo(map));
+      const chosen = pin.chosen === true;
+      const existing = painted.markers.get(pin.key);
+      if (existing) {
+        if (existing.lat !== pin.at.lat || existing.lng !== pin.at.lng) {
+          existing.marker.setLngLat([pin.at.lng, pin.at.lat]);
+          existing.lat = pin.at.lat;
+          existing.lng = pin.at.lng;
+        }
+        if (existing.label !== pin.label) {
+          existing.button.setAttribute("aria-label", pin.label);
+          existing.label = pin.label;
+        }
+        if (existing.chosen !== chosen) {
+          existing.dot.className = pinDotClass(chosen);
+          existing.chosen = chosen;
+        }
+      } else {
+        const { button, dot: dotEl } = pinElement(pin, () => onPin(pin.key));
+        const marker = new maplibregl.Marker({ element: button }).setLngLat([pin.at.lng, pin.at.lat]).addTo(map);
+        painted.markers.set(pin.key, { marker, button, dot: dotEl, chosen, lat: pin.at.lat, lng: pin.at.lng, label: pin.label });
+      }
     }
     painted.pins = pins;
   }
@@ -154,8 +229,7 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   if (spot !== painted.spot) {
     painted.here?.remove();
     painted.here = props.here === undefined ? undefined
-      : new maplibregl.Marker({ element: dot("size-3 rounded-full border-2 border-background bg-primary ring-4 ring-primary/30", "Your location") })
-        .setLngLat([props.here.lng, props.here.lat]).addTo(map);
+      : new maplibregl.Marker({ element: puck() }).setLngLat([props.here.lng, props.here.lat]).addTo(map);
     painted.spot = spot;
   }
   const route = JSON.stringify(props.line ?? []);
@@ -166,12 +240,13 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   const camera = props.camera;
   if (camera.kind === "keep" || camera.key === painted.camera) return;
   painted.camera = camera.key;
-  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), props.followZoom ?? 16), duration: 500 });
-  else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, duration: 0 });
-  else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: 350 });
+  const motion = (ms: number) => (reducedMotion() ? 0 : ms);
+  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), 16.5), duration: motion(500) });
+  else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, offset: [0, -(camera.lift ?? 0)], duration: 0 });
+  else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: motion(350) });
   else if (camera.points.length > 0) {
     const bounds = camera.points.reduce((b, p) => b.extend([p.lng, p.lat]), new maplibregl.LngLatBounds());
-    map.fitBounds(bounds, { padding: props.fitPadding ?? 48, maxZoom: camera.maxZoom, duration: 350 });
+    map.fitBounds(bounds, { padding: 48, maxZoom: camera.maxZoom, duration: motion(350) });
   }
 }
 
@@ -185,22 +260,25 @@ const apart = (a: { x: number; y: number }, b: { x: number; y: number }) => Math
  * nothing: whether a trouble breaks the map, whether the compass shows and what a press does are its owner's.
  */
 export function MapView(props: MapViewProps) {
-  const { label, surface, style, drawn = true, zoomControls = true, children, className } = props;
+  const { label, surface, style, drawn = true, zoomControls = true, compassBottom, children, className } = props;
   const latestRef = useRef(props);
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
-  const paintedRef = useRef<Painted>({ markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" });
+  const paintedRef = useRef<Painted>({ markers: new Map(), here: undefined, pins: "", spot: "", route: "", camera: "" });
   const styleKey = style.kind === "raster" ? `${style.tileSize}/${style.minZoom}/${style.maxZoom}` : style.url;
 
   const mount = useCallback((node: HTMLDivElement | null) => {
     if (!node || !drawn) return;
     const protocol = `alphamap${++protocols}`;
     const chosen = latestRef.current.style;
+    const opening = latestRef.current.opening;
     if (chosen.kind === "raster") {
       maplibregl.addProtocol(protocol, async (params, abort) => {
         const address = /:\/\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})$/.exec(params.url);
         if (!address) throw new Error("This is not a map tile.");
-        const bytes = await chosen.tile(Number(address[1]), Number(address[2]), Number(address[3]), abort.signal);
+        const current = latestRef.current.style;
+        if (current.kind !== "raster") throw new Error("Map style changed.");
+        const bytes = await current.tile(Number(address[1]), Number(address[2]), Number(address[3]), abort.signal);
         if (abort.signal.aborted) throw new DOMException("The map tile is no longer needed.", "AbortError");
         return { data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer };
       });
@@ -210,7 +288,8 @@ export function MapView(props: MapViewProps) {
     try {
       maplibregl.setWorkerUrl(mapWorkerUrl);
       instance = new maplibregl.Map({
-        container: node, style: styleOf(chosen, protocol, getComputedStyle(node).getPropertyValue("--muted") || "transparent"), center: [0, 20], zoom: 1.5, attributionControl: false,
+        container: node, style: styleOf(chosen, protocol), attributionControl: false,
+        center: opening === undefined ? [0, 20] : [opening.at.lng, opening.at.lat], zoom: opening?.zoom ?? 1.5,
         ...(chosen.kind === "raster" ? { minZoom: chosen.minZoom, maxZoom: chosen.maxZoom } : {}),
       });
     } catch {
@@ -219,11 +298,18 @@ export function MapView(props: MapViewProps) {
       return;
     }
     const pin = (key: string) => latestRef.current.onPin(key);
+    let themeObserver: MutationObserver | undefined;
     instance.once("style.load", () => { styleLoaded = true; });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
-      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
-      paintedRef.current = { markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" };
+      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": mapAccent(node) } });
+      if (typeof MutationObserver !== "undefined") {
+        themeObserver = new MutationObserver(() => {
+          if (instance.getLayer("route-line")) instance.setPaintProperty("route-line", "line-color", mapAccent(node));
+        });
+        themeObserver.observe(node.ownerDocument.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+      }
+      paintedRef.current = { markers: new Map(), here: undefined, pins: "", spot: "", route: "", camera: "" };
       paint(instance, paintedRef.current, latestRef.current, pin);
       setMap(instance);
       latestRef.current.onReady(surface);
@@ -256,20 +342,25 @@ export function MapView(props: MapViewProps) {
     instance.on("mousedown", (event) => { if (event.originalEvent.button === 0) press(event.lngLat, event.point); });
     instance.on("mousemove", (event) => moved(event.point));
     instance.on("mouseup", end);
-    instance.on("contextmenu", (event) => {
-      if (down === undefined) latestRef.current.onMenu?.({ lat: event.lngLat.lat, lng: event.lngLat.lng });
-      end();
-    });
+    instance.on("contextmenu", end);
+    window.addEventListener("mouseup", end);
     instance.on("dragstart", () => latestRef.current.onDragged?.());
     instance.on("moveend", () => {
       const bounds = instance.getBounds();
       latestRef.current.onSettled({ north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest(), zoom: Math.round(instance.getZoom()) });
     });
-    const turned = () => setTurn({ bearing: Math.trunc(instance.getBearing()), pitch: Math.trunc(instance.getPitch()) });
+    const turned = () => {
+      const bearing = Math.trunc(instance.getBearing());
+      const pitch = Math.trunc(instance.getPitch());
+      setTurn((prev) => (prev.bearing === bearing && prev.pitch === pitch ? prev : { bearing, pitch }));
+    };
     instance.on("rotate", turned);
     instance.on("pitch", turned);
     return () => {
-      for (const marker of paintedRef.current.markers.splice(0)) marker.remove();
+      window.removeEventListener("mouseup", end);
+      themeObserver?.disconnect();
+      for (const entry of paintedRef.current.markers.values()) entry.marker.remove();
+      paintedRef.current.markers.clear();
       paintedRef.current.here?.remove();
       instance.remove();
       if (chosen.kind === "raster") maplibregl.removeProtocol(protocol);
@@ -283,24 +374,30 @@ export function MapView(props: MapViewProps) {
   };
 
   const northUp = () => {
-    map?.easeTo({ bearing: 0, pitch: 0, duration: 300 });
+    map?.easeTo({ bearing: 0, pitch: 0, duration: reducedMotion() ? 0 : 300 });
     map?.getCanvas().focus({ preventScroll: true });
   };
+
+  const compass = map && props.compass(turn.bearing, turn.pitch) && (
+    <button type="button" aria-label="Turn map north up" onClick={northUp}
+      className={cn(focusRing, "flex size-12 items-center justify-center rounded-full bg-background text-foreground shadow-float ring-1 ring-border active:bg-accent dark:shadow-float-dark")}>
+      <svg aria-hidden viewBox="0 0 24 24" className="size-5.5 fill-none stroke-current stroke-2" style={{ transform: `rotate(${-turn.bearing}deg)` }}><path d="M12 3l6 18-6-4-6 4z" strokeLinejoin="round" /></svg>
+    </button>
+  );
 
   return (
     <div className={cn("relative h-72 w-full overflow-hidden rounded-lg bg-muted", className)}>
       <span ref={repaint} hidden />
       <div key={styleKey} ref={mount} role="application" aria-label={label} data-alpha-own-gesture="" className="size-full" />
-      {map && (
-        <div className="absolute top-2 right-2 flex flex-col gap-1">
-          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>}
-          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus /></Button>}
-          {props.compass(turn.bearing, turn.pitch) && (
-            <Button size="icon" variant="outline" aria-label="Turn map north up" onClick={northUp}>
-              <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />
-            </Button>
-          )}
+      {map && zoomControls && (
+        <div className="absolute top-2 right-2 z-10 flex flex-col gap-1">
+          <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn(reducedMotion() ? { duration: 0 } : undefined)}><Plus aria-hidden /></Button>
+          <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut(reducedMotion() ? { duration: 0 } : undefined)}><Minus aria-hidden /></Button>
+          {compassBottom === undefined && compass}
         </div>
+      )}
+      {map && (!zoomControls || compassBottom !== undefined) && compass && (
+        <div className="absolute right-4.5 z-10" style={{ bottom: compassBottom === undefined ? undefined : `min(${compassBottom}px, calc(100% - 116px))`, top: compassBottom === undefined ? 8 : undefined }}>{compass}</div>
       )}
       {children}
     </div>

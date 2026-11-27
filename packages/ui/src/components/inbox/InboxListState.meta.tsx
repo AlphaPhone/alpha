@@ -8,7 +8,9 @@ export const meta: ComponentMeta<InboxListStateProps> = {
   args: { kind: "signedOut", onAction },
   examples: {
     Empty: { kind: "empty", onAction: undefined },
+    "Search prompt": { kind: "searchPrompt", onAction: undefined },
     "No matches": { kind: "noResults", onAction: undefined },
+    Checking: { kind: "checking", onAction: undefined },
     "Not connected": { kind: "notConnected" },
     "Needs access": { kind: "needsAccess" },
     "Spam unavailable": { kind: "unavailable", onAction: undefined },
@@ -23,7 +25,7 @@ export const meta: ComponentMeta<InboxListStateProps> = {
     },
     "Not connected": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAction.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Add account" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Connect Gmail" }));
       await expect(onAction.mock.calls.length).toBe(1);
     },
     Empty: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button")).toBeNull(),

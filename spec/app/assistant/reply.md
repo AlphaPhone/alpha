@@ -49,29 +49,49 @@ pure def canBegin(r: Reply, turn: int): bool = turn > r.turn
 pure def begin(r: Reply, turn: int): Reply = { ...initial, turn: turn, status: Planning }
 ```
 
-### The planning label shows until the first text, and provisional text is shown but never spoken
+### The planning label shows until the first settled text, and provisional text is neither shown nor spoken
 
 The label is the newest of the stream's status and the label of the tool
 it runs, naming the app it chose, except that once the acknowledgment is
-taken it stays the label until text or the reply arrives.
+taken it stays the label until text or the reply arrives. Provisional text
+may still be taken back: a tool call can replace it, and a check of the
+reply can revise it after it was written. So it is never shown, and the
+owner sees one reply that is never contradicted mid-turn (shown, it
+visibly rewrote its first text in 10 of 130 gate turns). Settled text is
+the reply the agent decided: it arrives as soon as the agent decides it,
+after its tools and its check of the reply and ahead of the stored reply,
+and it shows and is spoken at once; the stored reply, announced ahead of
+its last frame, is settled text too. The label stays until settled text or
+the reply arrives. While a reply is still being written, with neither text
+shown nor a label, it shows as replying, with the pulsing dots of a turn at
+work; once it settles or ends the dots go, though the turn may still be
+finishing.
 
 ```quint
 pure def canToken(r: Reply, turn: int, units: int, provisional: bool): bool = live(r) and turn == r.turn and units >= 1
 
 pure def token(r: Reply, turn: int, units: int, provisional: bool): Reply =
-  { ...r, status: if (r.status == Working) Working else Streaming, shown: units, provisional: provisional,
+  { ...r, status: if (r.status == Working) Working else Streaming, shown: if (provisional) r.shown else units, provisional: provisional,
     spoken: if (provisional) r.spoken else units }
 
 pure def stepProvisionalTextIsNotSpoken(before: Reply, via: str, after: Reply): bool =
   (via == "token" and after.provisional) implies after.spoken == before.spoken
 
-pure def sometimesProvisionalTextShows(r: Reply): bool = r.status == Streaming and r.provisional
+pure def stepProvisionalTextIsNotShown(before: Reply, via: str, after: Reply): bool =
+  (via == "token" and after.provisional) implies after.shown == before.shown
+
+pure def sometimesProvisionalTextIsHeldBack(r: Reply): bool = r.status == Streaming and r.provisional and r.shown == 0
+
+pure def sometimesSettledTextShowsBeforeTheReply(r: Reply): bool = r.status == Streaming and not(r.provisional) and r.shown > 0 and r.final == 0
 ```
 
 ### One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs
 
 The agent writes its acknowledgment with its first tool calls, in at most
-120 units, and the stream then starts again with the reply. A tool frame
+120 units, and the stream then starts again with the reply. Text it
+streamed before the acknowledgment is the acknowledgment's own words: the
+acknowledgment is still taken, replaces any of that text not yet spoken,
+and the reply is read from its start. A tool frame
 never acknowledges, a second frame or one after a tool has run is refused,
 and text written before the first tool is never an acknowledgment. "Sure."
 counts only after an instruction, and a request that only navigates gets
@@ -127,7 +147,12 @@ pure def sometimesAcknowledgedThenAnsweredInFull(r: Reply): bool = r.status == S
 ### A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s
 
 In a voice turn the acknowledgment is prepared as soon as it arrives, with
-no hold. Stop, barge-in and leaving the turn cancel it at once.
+no hold, and plays on its own so the reply never queues behind it. It is
+audible at the first playback the speaker reports, never at synthesis. The
+reply is ready when its first sentence is ready to speak: an acknowledgment
+not yet audible is then dropped and never said after, and an audible one
+plays out first, but once the ready reply has waited 2.5 s it is cut and
+the reply starts. Stop, barge-in and leaving the turn cancel it at once.
 
 ```quint
 type Cue = Preparing | Audible | Ended | Dropped
@@ -159,20 +184,31 @@ pure def lawAReadyReplyWaitsAtMostTheBound(cue: Cue, leftMs: int): bool =
 ### A failure refused before any output replaces the streamed text; any other failure is added after it
 
 The kinds are a refused credential, spent credits, a limit reached, a
-provider issue, a timeout, a missing capability, no provider, a plan limit,
-out of funds, and any other failure; a stop reads as any other. Out of funds
-is Cloud refusing the turn with its own code for an account with no plan
-allowance and no credits left, which the agent has no funds to explain: it
-reads as one fixed line in the transcript, the same one Talk posts, and is
-never spoken. Spent credits the agent reports without that code keep their
-own words. Every kind but a timeout
+provider issue, a timeout, a missing capability, no provider, out of funds,
+and any other failure; a stop reads as any other. Out of funds is Cloud
+refusing the turn with its own code for an account with no plan allowance
+and no credits left, which the agent has no funds to explain: it reads as
+the one fixed line Alpha keeps for it, "You’re out of plan allowance and
+credits, so I couldn’t reply.", the same line live, in a conversation read
+again from history (the agent's history route, eliza's agent-host
+conversation/history.vibe, keeps Cloud's code on the reply it stored) and
+for a Talk turn, and it is never spoken. Spent credits the agent reports
+without that code keep their own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
-removes its bubble. Stop keeps what was shown, and the conversation's check
-of a stopped reply owns the only notice.
+removes its bubble. Stop keeps what was shown, which is only settled text:
+a reply stopped before any of its text settled keeps no bubble. The
+conversation's check of a stopped reply owns the only notice. Read again
+from history it keeps no bubble either: eliza stores such a reply as
+aborted, with the provisional text it had and the cause `stop`, and
+neither that text nor a failure notice is drawn for it. A reply whose
+stream Alpha closed before it was stored (the cause `client_left`: a
+limit on the stream, a reload, or a Stop whose stream closed first) says
+only that it did not finish, never its provisional text. A reply the
+runtime ended or a restart cut reads as before.
 
 ```quint
 type Failure = CredentialInvalid | InsufficientCredits | LimitReached | ProviderIssue | TimedOut
-  | MissingCapability | NoProvider | PlanLimit | OutOfFunds | OtherFailure
+  | MissingCapability | NoProvider | OutOfFunds | OtherFailure
 
 pure def refusedBeforeOutput(kind: Failure): bool = kind != OtherFailure and kind != TimedOut
 
@@ -207,16 +243,19 @@ pure def sometimesAFailureReplacesTheText(r: Reply): bool = r.status == Interrup
 
 Sign in offers Sign in, funding offers Manage plan, and retry offers Try
 again, which puts the message back in the composer for the owner to send.
-A reply that names no fix offers Manage plan only for spent credits, a
-plan limit or out of funds. A limit reached answered live says "Try again in about …"
+A reply that names no fix offers Manage plan only for spent credits or
+out of funds. A limit reached answered live says "Try again in about …"
 (seconds under 90, then minutes under 90, then hours); a reply read again
-from history carries no wait and says to wait a moment. Nothing is sent
-again, bought or upgraded by itself.
+from history carries no wait and says to wait a moment. A failure shows
+once: when the page showing holds the same reply read again with the same
+failure, the live notice is left out unless it offers more than that reply
+does, a fix other than Manage plan or a live wait. Nothing is sent again,
+bought or upgraded by itself.
 
 ```quint
 type Fix = NoFix | SignInFix | FundingFix | RetryFix
 
-pure def managesPlan(kind: Failure): bool = kind == PlanLimit or kind == InsufficientCredits or kind == OutOfFunds
+pure def managesPlan(kind: Failure): bool = kind == InsufficientCredits or kind == OutOfFunds
 
 pure def fixShown(fix: Fix, kind: Failure): bool = fix != NoFix or managesPlan(kind)
 
@@ -233,11 +272,28 @@ pure def lawOnlyALimitShowsAWait(kind: Failure, waitMs: int): bool = showsWait(k
 pure def lawHistoryShowsNoWait(kind: Failure): bool = not(showsWait(kind, -1))
 
 pure def lawAWaitIsAtLeastASecond(waitMs: int): bool = waitMs >= 0 implies waitSeconds(waitMs) >= 1
+
+pure def liveAddsToHistory(kind: Failure, fix: Fix, waitMs: int): bool =
+  showsWait(kind, waitMs) or not(fix == NoFix or (fix == FundingFix and managesPlan(kind)))
+
+pure def lawALiveWaitIsNeverLeftOut(fix: Fix, waitMs: int): bool =
+  showsWait(LimitReached, waitMs) implies liveAddsToHistory(LimitReached, fix, waitMs)
+
+pure def lawLiveOutOfFundsRepeatsItsReadAgainReply(waitMs: int): bool = not(liveAddsToHistory(OutOfFunds, FundingFix, waitMs))
 ```
 
 ### Out of funds is refused before any output, is never spoken, and offers only Manage plan
 
+A reply read again from history is out of funds exactly when the agent
+stored Cloud's code with its failure, whichever code it is, as a live reply is.
+
 ```quint
+pure def readAgain(stored: Failure, coded: bool): Failure = if (coded) OutOfFunds else stored
+
+pure def lawHistoryReadsCloudsCodeAsOutOfFunds(stored: Failure): bool = readAgain(stored, true) == OutOfFunds
+
+pure def lawHistoryWithoutTheCodeKeepsItsKind(stored: Failure): bool = readAgain(stored, false) == stored
+
 pure def lawOutOfFundsIsNeverSpokenAndManagesThePlan(r: Reply, turn: int): bool =
   canFailed(r, turn, OutOfFunds) implies (failed(r, turn, OutOfFunds).spoken == 0 and failed(r, turn, OutOfFunds).shown == 0 and fixShown(NoFix, OutOfFunds))
 ```
@@ -266,11 +322,13 @@ a fence of three or more backticks or tildes. A recognized block is Maps
 markup, a map choice, a workflow block, a Calendar approval of exactly its
 approve and reject lines, or a calendar or email result. Any other bracket
 tag is never a card: outside a fence it reads as text. A form block, a
-broken workflow block and a tool call the model wrote out as text (from
-`<tool_call>` or `<function=` to its closing tag, or to the end of a reply
-that never closes it) are hidden, never shown raw, as in Alpha before
-VibeStack; nothing else is dropped, so the prose after a card is kept, and
-a reply left with nothing to show leaves no bubble.
+broken workflow block and a tool call the model wrote out as text in prose
+(from `<tool_call>` or `<function=` to its closing tag, never inside inline
+code) are hidden, never shown,
+copied or spoken raw. A call still open is held back while the reply
+streams, like any unclosed block, and a finished reply keeps it as text.
+Nothing else is dropped, so the prose after a card is kept, and a reply
+left with nothing to show leaves no bubble.
 
 ```quint
 type CardOf = MapsCard | CalendarCard | EmailCard | WorkflowCard | ChoiceCard | BrowserCard
@@ -325,6 +383,94 @@ pure val countValues = Set(-1, 0, 5, 6)
 pure def lawNoMoreThanFiveNotices(count: int): bool = keptNotices(count) >= 0 and keptNotices(count) <= noticeLimit
 
 pure def lawAReplyAfterASystemNoticeHidesIt(latest: bool): bool = not(systemNoticeShown(latest, true))
+```
+
+## Story: Read a reply as it was written
+
+> As the owner, I want Alpha's bold words, lists, quotes, code and links
+> drawn the way they read, never as raw asterisks and angle brackets, and
+> only its plain words when I copy, quote, email or hear it.
+
+### Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text
+
+The marks are the model's, read from its words; a mark left open reads as
+written. A heading is drawn as a bold line. A link opens through the
+phone's own link path, and a link to any other kind of address shows only
+its words.
+
+```quint
+type Mark = Strong | Emphasis | InlineCode | HeadingLine | ListItem | QuoteLine | CodeBlock | Link({ https: bool }) | Html
+type Drawn = Styled | Linked | AsText
+
+pure def drawn(mark: Mark): Drawn = match mark {
+  | Link(l) => if (l.https) Linked else AsText
+  | Html => AsText
+  | _ => Styled
+}
+
+pure val markValues = Set(Strong, Emphasis, InlineCode, HeadingLine, ListItem, QuoteLine, CodeBlock, Link({ https: true }), Link({ https: false }), Html)
+
+pure def lawOnlyAnHttpsLinkIsALink(mark: Mark): bool = drawn(mark) == Linked iff mark == Link({ https: true })
+
+pure def lawHtmlIsNeverDrawn(mark: Mark): bool = mark == Html implies drawn(mark) == AsText
+```
+
+### Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks
+
+Copied, quoted and emailed words keep a list item's number or bullet and a
+link's address after its words; read aloud and Talk say a list item's
+number and only a link's words.
+
+```quint
+type Use = Shown | Copied | Quoted | ReadAloud | Emailed | Spoken
+
+pure def keepsMarks(use: Use): bool = use == Shown
+
+pure val useValues = Set(Shown, Copied, Quoted, ReadAloud, Emailed, Spoken)
+
+pure def lawOnlyTheShownReplyKeepsItsMarks(use: Use): bool = keepsMarks(use) iff use == Shown
+```
+
+### The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one
+
+eliza asks the model to begin a reply that runs no tool with a turn tag,
+`[answer]` or `[promise]`, and does not always take it out. Alpha takes
+the exact lowercase tag, `[answer]`, `[promise]`, `<answer>` or
+`<promise>`, out of the model's prose wherever it stands: at the start of
+a line, inside one or at its end, with the spaces after it. Anything else
+that looks like one is kept as written: another case (`Promise<Answer>`),
+a closing tag, any text inside a code fence or inline code, and a link's
+words (`[answer](https://example.com)`). A reply still being written
+holds back an opening bracket at its end, or one followed by the start of
+a tag (`[ans`, `<pro`), and a whole `[answer]` or `[promise]` at its end,
+which may still become a link's words, until the next words decide; a
+finished reply keeps such an ending as written. The owner's own words are
+never read for it and keep every tag as written.
+
+```quint
+type Author = OwnerWrote | ModelWrote
+type TagRun = OtherWords | TurnTag | TurnTagSoFar | TagAsCodeOrLink
+
+pure def keptRun(words: TagRun, author: Author, writing: bool): bool =
+  author == OwnerWrote or match words {
+    | OtherWords => true
+    | TurnTag => false
+    | TurnTagSoFar => not(writing)
+    | TagAsCodeOrLink => true
+  }
+
+pure val authorValues = Set(OwnerWrote, ModelWrote)
+pure val wordsValues = Set(OtherWords, TurnTag, TurnTagSoFar, TagAsCodeOrLink)
+
+pure def lawTheModelsTurnTagIsNeverKept(writing: bool): bool = not(keptRun(TurnTag, ModelWrote, writing))
+
+pure def lawTheOwnersWordsAreKeptAsWritten(words: TagRun, writing: bool): bool = keptRun(words, OwnerWrote, writing)
+
+pure def lawATagStillBeingWrittenWaits(author: Author): bool = keptRun(TurnTagSoFar, author, true) iff author == OwnerWrote
+
+pure def lawCodeAndLinkWordsAreKept(author: Author, writing: bool): bool = keptRun(TagAsCodeOrLink, author, writing)
+
+pure def lawAFinishedReplyKeepsAnUnfinishedTag(author: Author): bool = keptRun(TurnTagSoFar, author, false)
 ```
 
 ## Story: Know what my agent changed

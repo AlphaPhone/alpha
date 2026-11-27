@@ -73,6 +73,7 @@ final class AlphaNoteRecorder {
  private String ownerDigest;
  private String folderId;
  private boolean canonicalSavePending;
+ private boolean canonicalSaveInFlight;
  private boolean recoveryUnavailable;
  private final Runnable rollover=this::rollover;
 
@@ -222,7 +223,7 @@ final class AlphaNoteRecorder {
  }
  synchronized JSObject resume(String recordingId) throws IOException {
   owned(recordingId);
-  if(canonicalSavePending)throw new IOException("Note save is unconfirmed");
+  if(canonicalSavePending||canonicalSaveInFlight)throw new IOException("Note save is unconfirmed");
   if(!"paused".equals(state)&&!"stopped".equals(state))return status();
   if(usableSpace()<MIN_FREE_BYTES)throw new IOException("storage");
   if(recorder!=null){recorder.resume();pausedTotal+=SystemClock.elapsedRealtime()-pausedAt;pausedAt=0;state="recording";scheduleRollover();}
@@ -238,14 +239,24 @@ final class AlphaNoteRecorder {
  /** The transcript of one finished segment, journaled with it. */
  synchronized void setText(String recordingId,String segmentId,String text) throws IOException {
   owned(recordingId);int i=segmentIndex(segmentId);if(i<0)throw new IllegalArgumentException("Unknown segment");
-  if(canonicalSavePending)throw new IOException("Note save is unconfirmed");
+  if(canonicalSavePending||canonicalSaveInFlight)throw new IOException("Note save is unconfirmed");
   if(text==null||text.length()>20_000)throw new IllegalArgumentException("Invalid transcript");
   finished.get(i).text=text;writeJournal();
  }
- synchronized boolean claimCanonicalSave(String recordingId)throws IOException{
+ synchronized boolean beginCanonicalSave(String recordingId){
   owned(recordingId);
-  if(canonicalSavePending||ownerDigest==null||!"stopped".equals(state)||finished.isEmpty())return false;
-  canonicalSavePending=true;writeJournal();return true;
+  if(canonicalSavePending||canonicalSaveInFlight||ownerDigest==null||!"stopped".equals(state)||finished.isEmpty())return false;
+  canonicalSaveInFlight=true;
+  return true;
+ }
+ synchronized void commitCanonicalSave(String recordingId)throws IOException{
+  owned(recordingId);
+  canonicalSavePending=true;
+  canonicalSaveInFlight=false;
+  writeJournal();
+ }
+ synchronized void abortCanonicalSave(String recordingId){
+  if(owns(recordingId))canonicalSaveInFlight=false;
  }
  /** Deletes the recording and every segment. */
  synchronized void discard(){
@@ -253,7 +264,7 @@ final class AlphaNoteRecorder {
   MediaRecorder active=recorder;recorder=null;
   if(active!=null){try{active.stop();}catch(RuntimeException ignored){}active.release();}
   if(dir!=null)deleteTree(dir);
-  id=null;dir=null;ownerDigest=null;folderId=null;canonicalSavePending=false;finished.clear();index=0;state="idle";stopReason=null;recovered=false;pausedTotal=0;pausedAt=0;
+  id=null;dir=null;ownerDigest=null;folderId=null;canonicalSavePending=false;canonicalSaveInFlight=false;finished.clear();index=0;state="idle";stopReason=null;recovered=false;pausedTotal=0;pausedAt=0;
   publish();
  }
  synchronized boolean owns(String recordingId){return id!=null&&id.equals(recordingId);}

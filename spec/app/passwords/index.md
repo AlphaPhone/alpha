@@ -459,11 +459,12 @@ pure def sometimesResetAfterLeaving(v: Vault): bool = not(v.open) and outstandin
 ### The autofill status says whether Browser autofill is on and which service Android uses
 
 ```quint
-pure def canStatusRead(v: Vault, ticket: int, service: Service, browserFill: bool): bool =
-  R::canAnswer(v.status, ticket) and service != Unknown
+pure def canStatusRead(v: Vault, ticket: int, ok: bool, service: Service, browserFill: bool): bool =
+  R::canAnswer(v.status, ticket) and (ok implies service != Unknown)
 
-pure def statusRead(v: Vault, ticket: int, service: Service, browserFill: bool): Vault =
-  { ...v, status: R::answer(v.status, true), service: service, browserFill: browserFill }
+pure def statusRead(v: Vault, ticket: int, ok: bool, service: Service, browserFill: bool): Vault =
+  if (ok) { ...v, status: R::answer(v.status, true), service: service, browserFill: browserFill }
+  else { ...v, status: R::answer(v.status, false) }
 ```
 
 ### "Use for autofill" opens Android's settings, offered only where Android has autofill and Alpha is not already chosen; coming back reads the status again
@@ -498,7 +499,7 @@ neither the Browser nor these pages ever hold it.
 
 ```quint
 pure def canFill(v: Vault, origin: int): bool =
-  v.browserFill and v.foreground and v.field != 0 and origin == v.field
+  v.browserFill and v.foreground and not(v.damaged) and v.field != 0 and origin == v.field
 
 pure def fill(v: Vault, origin: int): Step = { state: { ...v, field: 0, notice: Filled }, out: List(Fill({ origin: origin })) }
 

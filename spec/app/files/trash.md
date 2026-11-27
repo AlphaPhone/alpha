@@ -481,17 +481,17 @@ pure def sometimesAnItemIsComingBack(s: Trash): bool = busy(s) and s.job.kind ==
 pure def canAskToErase(s: Trash, entry: Entry, by: Actor): bool =
   by == Owner and fresh(s) and s.entries.includes(entry) and not(s.erasing.showing)
 
-pure def askToErase(s: Trash, entry: Entry, by: Actor): Trash = { ...s, doomed: List(entry), erasing: V::present(s.erasing) }
+pure def askToErase(s: Trash, entry: Entry, by: Actor): Trash = { ...s, details: 0, doomed: List(entry), erasing: V::present(s.erasing) }
 
 pure def canAskToEmpty(s: Trash, by: Actor): bool =
   by == Owner and fresh(s) and s.entries.length() > 0 and not(s.erasing.showing)
 
-pure def askToEmpty(s: Trash, by: Actor): Trash = { ...s, doomed: s.entries, erasing: V::present(s.erasing) }
+pure def askToEmpty(s: Trash, by: Actor): Trash = { ...s, details: 0, doomed: s.entries, erasing: V::present(s.erasing) }
 
 pure def canAskToEraseMarked(s: Trash, by: Actor): bool =
   by == Owner and fresh(s) and picks(s).length() > 0 and not(s.erasing.showing)
 
-pure def askToEraseMarked(s: Trash, by: Actor): Trash = { ...s, doomed: picks(s), erasing: V::present(s.erasing) }
+pure def askToEraseMarked(s: Trash, by: Actor): Trash = { ...s, details: 0, doomed: picks(s), erasing: V::present(s.erasing) }
 
 pure def canKeepThem(s: Trash, by: Actor): bool = by == Owner and s.erasing.showing
 

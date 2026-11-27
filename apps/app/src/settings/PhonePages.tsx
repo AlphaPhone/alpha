@@ -1,6 +1,7 @@
 // spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/network.md, "Story: See whether I am online"; spec/app/settings/carrier.md, "Story: Read what my carrier needs to activate a SIM"
 import { SettingsCarrierPage, type SettingsCarrierField, type SettingsNearbyNetwork, type SettingsNetworkPageProps, SettingsNetworkPage, type SettingsNetworkSecurity } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
+import type { ManagedRuntime } from "effect";
+import { useMemo, useSyncExternalStore } from "react";
 import * as CarrierGen from "../../gen/app__settings__carrier.ts";
 import { useMachine as useCarrier } from "../../gen/app__settings__carrier.react.ts";
 import type { Machine as CarrierMachine } from "../../gen/app__settings__carrier.effect.vibe";
@@ -8,8 +9,9 @@ import type * as NetworkGen from "../../gen/app__settings__network.ts";
 import { useMachine as useNetwork } from "../../gen/app__settings__network.react.ts";
 import type { Machine as NetworkMachine } from "../../gen/app__settings__network.effect.vibe";
 import { useTimed } from "../runtime/ui.tsx";
-import { untimed, type Time } from "../runtime/index.vibe";
-import { Found } from "./phone.vibe";
+import { untimed } from "../runtime/index.vibe";
+import type { Time } from "../runtime/index.vibe";
+import { type Found, foundShelf } from "./phone.vibe";
 import type { Common } from "./Settings.tsx";
 
 export interface PhoneProps {
@@ -38,13 +40,13 @@ const printable = (text: string) => [...text].every((one) => one >= " " && one <
 const joining = (network: SettingsNearbyNetwork, passphrase: string) =>
   ({ type: "requestJoin", name: network.name, security: securitiesNamed[network.security], characters: passphrase.length, printable: printable(passphrase), passphrase, at: untimed }) as const;
 
-const readFound = Effect.flatMap(Found, (found) => found.get());
-
 /** Nearby networks, a join through Android's approval with a passphrase typed here and kept nowhere, and whether the phone is online. */
 export function Network({ runtime, common }: PhoneProps) {
   const { state, can, send } = useTimed(runtime, useNetwork);
+  const shelf = useMemo(() => runtime.runSync(foundShelf), [runtime]);
+  const stored = useSyncExternalStore(shelf.subscribe, shelf.snapshot, shelf.snapshot);
   if (!state) return null;
-  const networks = state.scan === "Found" ? runtime.runSync(readFound) : [];
+  const networks = state.scan === "Found" ? stored : [];
   const rescan = { type: "rescan", at: untimed } as const;
   return (
     <SettingsNetworkPage

@@ -1,8 +1,9 @@
 // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "Story: Never lose End"; spec/app/phone/comms.md, "Story: See what Alpha is acting on"; spec/app/phone/comms.md, "Story: Keep what I was asking Alpha"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type Shell as Where } from "../../gen/app__shell.effect.vibe"
 import { Machine as Strip, shownCall } from "../../gen/app__phone__call.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import type { Event } from "../../gen/app__phone__comms.effect.vibe"
+import { Machine as Contacts } from "../../gen/app__contacts.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
@@ -49,7 +50,7 @@ export effect function commsHeld(held: () => void): void!! {
   try sync(held)
 }
 
-// spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
+// spec/app/phone/comms.md, "End is above the view when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCall: liveCall(phone) && !clear(phone) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
 
 // spec/app/phone/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"
@@ -71,26 +72,58 @@ const detents = started(effect {
   })
 }, "comms sheet detents")
 
-// spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
-/** The subject on screen, of Phone or Messages in front; Contacts tells its own. */
+/** The shell popped exactly the embedded Contacts visit while keeping its sheet. */
+function returnedToPhone(before: Where, after: Where): boolean {
+  return after.route === before.route + 1 && (before.assistant === "Sheet" || before.assistant === "Full")
+    && after.assistant === before.assistant && before.trail.at(-1) === "Contacts" && before.trail.at(-2) === "Phone"
+    && after.trail.length === before.trail.length - 1 && after.trail.every((view, at) => view === before.trail[at])
+}
+
+// spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"; spec/app/phone/comms.md, "Returning through an embedded Contacts tab follows the Phone stage without adding history"
+/** The subject of the communications app currently on screen. */
 const subjects = started(effect {
   const shell = try Shell
   const phone = try Phone
   const messages = try Messages
+  const contacts = try Contacts
   const comms = try Comms.Machine
-  let told = ""
-  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(shell.changes, phone.changes), messages.changes), effect ([[where, dialer], texts]) => {
+  let observed = try shell.get()
+  let returnRoute = -1
+  const views = Stream.zipLatest(Stream.zipLatest(shell.changes, phone.changes), messages.changes)
+  try Stream.runForEach(Stream.zipLatest(views, contacts.changes), effect ([[[where, dialer], texts], book]) => {
+    if (where.route !== observed.route) {
+      returnRoute = returnedToPhone(observed, where) ? where.route : -1
+      observed = where
+    }
     const top = where.trail.at(-1)
     const event: Event | undefined = top === "Phone"
-      ? { type: "subjectShown", app: "PhoneApp", subject: dialer.tab === "Keypad" ? "KeypadSubject" : "RecentsSubject", key: dialer.tab === "Keypad" ? "phone:keypad:" : "phone:recents:" }
+      ? {
+        type: "subjectShown",
+        app: "PhoneApp",
+        subject: dialer.tab === "Keypad" ? "KeypadSubject" : "RecentsSubject",
+        key: dialer.tab === "Keypad" ? "phone:keypad:" : "phone:recents:",
+      }
       : top === "Messages"
         ? texts.pane === "Conversation"
           ? { type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: `messages:thread:${texts.thread}` }
-          : { type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: texts.pane === "Picker" ? "messages:new:" : "messages:list:" }
-        : undefined
-    if (event === undefined || event.type !== "subjectShown" || event.key === told) return
-    told = event.key
-    try contained(comms.send(event, "Device"), "the subject on screen")
+          : { type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: texts.pane === "New"
+            ? `messages:new:${texts.newDraft.visit}`
+            : texts.pane === "Picker" ? "messages:new:" : "messages:list:" }
+        : top === "Contacts" && book.front
+          ? book.opened
+            ? { type: "subjectShown", app: "ContactsApp", subject: "ContactSubject", key: `contacts:contact:${book.contact}` }
+            : { type: "subjectShown", app: "ContactsApp", subject: "ListSubject", key: "contacts:list:" }
+          : undefined
+    if (event === undefined || event.type !== "subjectShown") return
+    const current = try comms.get()
+    if ((try shell.get()).route !== where.route) return
+    const returning = returnRoute === where.route && event.app === "PhoneApp"
+    if (current.app === event.app && current.subject === event.subject && current.key === event.key) {
+      if (returning) returnRoute = -1
+      return
+    }
+    const reported: Event = returning ? { type: "phoneTabReturned", subject: event.subject, key: event.key } : event
+    if ((try contained(comms.send(reported, "Device"), "the subject on screen")) && returning) returnRoute = -1
   })
 }, "comms subjects")
 
@@ -122,7 +155,8 @@ const phoneBriefing = started(effect {
     if (page.trail.at(-1) !== "Phone" || (page.assistant !== "Sheet" && page.assistant !== "Full")
       || stage.app !== "PhoneApp" || !Comms.canBriefingShown(stage, stage.key, "Device")) return
     const log = calls.log.grant === "Granted" ? (try dialer.get()).source : undefined
-    const missed = calls.log.grant === "Granted" ? Math.max(calls.missed, log?.filter((entry) => entry.isNew && entry.type === "missed").length ?? 0) : 0
+    const seenAt = try dialer.seenMissedAt()
+    const missed = calls.log.grant === "Granted" ? Math.max(calls.missed, log?.filter((entry) => entry.isNew && entry.type === "missed" && entry.date > seenAt).length ?? 0) : 0
     const unheard = calls.voicemail ? messages.unheard : 0
     const text = [
       missed > 0 ? `You have ${missed} missed ${missed === 1 ? "call" : "calls"}.` : "",

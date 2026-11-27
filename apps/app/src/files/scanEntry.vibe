@@ -1,31 +1,39 @@
 // spec/app/camera/index.md, "Story: Scan a document"; spec/app/files/scan.md, "Story: Arrange the pages"
 import type { SelectionId } from "@elizaos/os-bridges"
+import type { ResidentOwner } from "../platform/index.vibe"
 import type { Fields } from "../calendar/editor.vibe"
 
 /** The scanned event is a draft for the Calendar editor, still requiring owner save. */
 export interface ScannedEvent { readonly day: number; readonly fields: Fields; readonly disclosures: ReadonlyArray<string> }
+
+/** A draft from Notes is bound to the one requested Calendar visit. */
+export interface CalendarDraft extends ScannedEvent {
+  readonly noteSource?: { readonly route: number; readonly owner: ResidentOwner }
+}
 
 /** The owner opened the scanner, for the active or next Files view alone. */
 export service ScanEntry {
   readonly requests: Stream.Stream<boolean>
   ask(): void!!
   take(): boolean!!
-  readonly events: Stream.Stream<ScannedEvent | undefined>
-  calendar(draft: ScannedEvent): void!!
-  takeEvent(): (ScannedEvent | undefined)!!
+  readonly events: Stream.Stream<CalendarDraft | undefined>
+  calendar(draft: CalendarDraft): void!!
+  takeEvent(): (CalendarDraft | undefined)!!
+  releaseEvent(draft: CalendarDraft): void!!
 }
 
 /** A single handoff is consumed while Files is visible. */
 export const scanEntry = Layer.effect(ScanEntry, effect {
   const waiting = try SubscriptionRef.make(false)
-  const event = try SubscriptionRef.make<ScannedEvent | undefined>(undefined)
+  const event = try SubscriptionRef.make<CalendarDraft | undefined>(undefined)
   return {
     requests: SubscriptionRef.changes(waiting),
     ask: () => SubscriptionRef.set(waiting, true),
     take: () => SubscriptionRef.getAndSet(waiting, false),
     events: SubscriptionRef.changes(event),
-    calendar: (draft: ScannedEvent) => SubscriptionRef.set(event, draft),
+    calendar: (draft: CalendarDraft) => SubscriptionRef.set(event, draft),
     takeEvent: () => SubscriptionRef.getAndSet(event, undefined),
+    releaseEvent: (draft: CalendarDraft) => SubscriptionRef.update(event, (current) => current === draft ? undefined : current),
   }
 })
 

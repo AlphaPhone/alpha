@@ -1,0 +1,368 @@
+// spec/app/home/cards.md, "The Telegram and Slack cards show unread and mention counts with up to two preview rows, marked not up to date when stale, and are not drawn when disconnected or with nothing unread"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as SlackWorkspaces from "../../gen/app__slack.effect.vibe"
+import * as SlackAgent from "../../gen/app__slack__agent.effect.vibe"
+import * as SlackAuth from "../../gen/app__slack__auth.effect.vibe"
+import * as SlackConversation from "../../gen/app__slack__conversation.effect.vibe"
+import * as SlackNotices from "../../gen/app__slack__notices.effect.vibe"
+import * as TelegramList from "../../gen/app__telegram.effect.vibe"
+import * as TelegramAgent from "../../gen/app__telegram__agent.effect.vibe"
+import * as TelegramAuth from "../../gen/app__telegram__auth.effect.vibe"
+import * as TelegramConversation from "../../gen/app__telegram__conversation.effect.vibe"
+import { type MessagingFailure, MessagingSessions, tokenValue } from "../platform/index.vibe"
+import { Unreachable, Unsent } from "../platform/index.vibe"
+import { Slack } from "../platform/index.vibe"
+import { Telegram } from "../platform/index.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
+import { SlackLedger, slackSessionKey } from "../slack/ledger.vibe"
+import { slackAmbientSnapshot, slackHomeCard } from "../slack/resident.vibe"
+import { telegramAmbientSnapshot, telegramHomeCard } from "../telegram/resident.vibe"
+import {
+  TelegramStore,
+  chatKindOf,
+  currentSessionToken,
+  dialogTitle,
+  isDialogMuted,
+  upsertHistoryMessage,
+} from "../telegram/store.vibe"
+import {
+  MessagingBridge,
+  type MessagingContextSnapshot,
+  type MessagingDraftProposal,
+  type MessagingPane,
+  type MessagingSendOutcome,
+} from "./bridge.vibe"
+
+function sendFailureOutcome(platform: "Telegram" | "Slack", failure: MessagingFailure): MessagingSendOutcome {
+  if (failure instanceof Unreachable || failure instanceof Unsent) {
+    return { status: "unknown", error: `Delivery unconfirmed — check ${platform} before sending again` }
+  }
+  return { status: "failed", error: `${platform} refused the message` }
+}
+
+function telegramPaneOf(pane: TelegramAgent.Pane): MessagingPane {
+  return pane === "ChatPane" ? "conversation" : pane === "ListPane" ? "list" : "auth"
+}
+
+function slackPaneOf(pane: SlackAgent.Pane): MessagingPane {
+  return pane === "ThreadPane" ? "thread" : pane === "ChannelPane" ? "conversation" : pane === "ListPane" ? "list" : "auth"
+}
+
+const syncTelegramCard = effect {
+  const bridge = try MessagingBridge
+  const card = try telegramHomeCard
+  bridge.publishHomeCard("Telegram", {
+    connected: card.standing !== "SignedOut",
+    unread: card.unread,
+    mentions: card.mentions,
+    rows: card.rows.slice(0, 2).map((row) => ({
+      title: row.title,
+      detail: row.preview !== "" ? row.preview : row.unreadCount > 0 ? `${row.unreadCount} unread` : "",
+    })),
+    current: card.standing === "Ready",
+  })
+}
+
+const syncSlackCard = effect {
+  const bridge = try MessagingBridge
+  const card = try slackHomeCard
+  bridge.publishHomeCard("Slack", {
+    connected: card.standing !== "SignedOut",
+    unread: card.unread,
+    mentions: card.mentions,
+    rows: card.rows.slice(0, 2),
+    current: card.standing === "Ready",
+  })
+}
+
+const syncTelegramContext = effect {
+  const bridge = try MessagingBridge
+  const auth = try (try TelegramAuth.Machine).get()
+  const snap = try telegramAmbientSnapshot
+  if (auth.step !== "Authenticated") {
+    bridge.publishContext("Telegram", {
+      platform: "telegram",
+      authenticated: false,
+      sensitive: true,
+      pane: "auth",
+      accountLabel: "",
+      recentMessages: [],
+    })
+    return
+  }
+  const storeSnap = try (try TelegramStore).get()
+  const me = storeSnap.auth.user
+  const accountLabel = me ? (me.username ? `@${me.username}` : me.first_name) : "Telegram"
+  if (!snap.available) {
+    bridge.publishContext("Telegram", {
+      platform: "telegram",
+      authenticated: true,
+      sensitive: snap.sensitive,
+      pane: telegramPaneOf(snap.pane),
+      accountLabel,
+      recentMessages: [],
+    })
+    return
+  }
+  const dialog = snap.peerKey === undefined ? undefined : storeSnap.dialogs.find((item) => item.peer_key === snap.peerKey)
+  const snapshot: MessagingContextSnapshot = {
+    platform: "telegram",
+    authenticated: true,
+    sensitive: false,
+    pane: telegramPaneOf(snap.pane),
+    accountLabel,
+    ...(snap.peerKey === undefined ? {} : {
+      conversation: {
+        id: snap.peerKey,
+        title: snap.chatTitle ?? (dialog ? dialogTitle(dialog, storeSnap.users, storeSnap.chats) : snap.peerKey),
+        kind: dialog?.peer._type ?? "chat",
+        muted: dialog ? isDialogMuted(dialog) : false,
+        unreadCount: dialog?.unread_count ?? 0,
+      },
+    }),
+    recentMessages: snap.messages.map((msg) => ({
+      id: String(msg.id),
+      sender: msg.sender,
+      at: msg.date,
+      text: msg.body,
+      isOwn: msg.out,
+    })),
+  }
+  bridge.publishContext("Telegram", snapshot)
+}
+
+const syncSlackContext = effect {
+  const bridge = try MessagingBridge
+  const auth = try (try SlackAuth.Machine).get()
+  if (SlackAuth.sensitive(auth)) {
+    bridge.publishContext("Slack", {
+      platform: "slack",
+      authenticated: false,
+      sensitive: true,
+      pane: "auth",
+      accountLabel: "",
+      recentMessages: [],
+    })
+    return
+  }
+  const snap = try slackAmbientSnapshot
+  if (snap === undefined) {
+    bridge.publishContext("Slack", {
+      platform: "slack",
+      authenticated: auth.connected.length > 0,
+      sensitive: false,
+      pane: "list",
+      accountLabel: "",
+      recentMessages: [],
+    })
+    return
+  }
+  const snapshot: MessagingContextSnapshot = {
+    platform: "slack",
+    authenticated: true,
+    sensitive: false,
+    pane: slackPaneOf(snap.pane),
+    accountLabel: snap.workspaceName,
+    ...(snap.channelId === undefined ? {} : {
+      conversation: {
+        id: snap.channelId,
+        title: snap.channelName ?? snap.channelId,
+        kind: "channel",
+        muted: false,
+        unreadCount: 0,
+      },
+    }),
+    ...(snap.threadTs === undefined ? {} : {
+      thread: {
+        parentTs: snap.threadTs,
+        parentText: snap.messages[0]?.text ?? "",
+        replyCount: Math.max(0, snap.messages.length - 1),
+      },
+    }),
+    recentMessages: snap.messages.map((msg) => ({
+      id: msg.ts,
+      sender: msg.sender,
+      at: Math.floor(Number(msg.ts) * 1000) || 0,
+      text: msg.text,
+      isOwn: false,
+    })),
+  }
+  bridge.publishContext("Slack", snapshot)
+}
+
+const telegramBridgeSync = started(effect {
+  const list = try TelegramList.Machine
+  const auth = try TelegramAuth.Machine
+  const agent = try TelegramAgent.Machine
+  const conv = try TelegramConversation.Machine
+  const store = try TelegramStore
+  const storeChanges = Stream.callback<number>((queue) => effect {
+    Queue.offerUnsafe(queue, store.snapshot().version)
+    const stop = store.subscribe(() => { Queue.offerUnsafe(queue, store.snapshot().version) })
+    try Effect.addFinalizer(() => Effect.sync(stop))
+  })
+  const signals = Stream.mergeAll([
+    Stream.map(list.changes, () => 0),
+    Stream.map(auth.changes, () => 0),
+    Stream.map(agent.changes, () => 0),
+    Stream.map(conv.changes, () => 0),
+    storeChanges,
+  ], { concurrency: "unbounded" })
+  let lastKey = ""
+  try Stream.runForEach(signals, () => effect {
+    const authState = try auth.get()
+    const listState = try list.get()
+    const convState = try conv.get()
+    const agentState = try agent.get()
+    const key = JSON.stringify([authState.step, listState.authenticated, listState.count, listState.pages, convState.chat, agentState.pane, agentState.activeChat, store.snapshot().version])
+    if (key === lastKey) return
+    lastKey = key
+    try syncTelegramCard
+    try syncTelegramContext
+  })
+}, "syncing Telegram to MessagingBridge")
+
+const slackBridgeSync = started(effect {
+  const workspaces = try SlackWorkspaces.Machine
+  const auth = try SlackAuth.Machine
+  const agent = try SlackAgent.Machine
+  const conv = try SlackConversation.Machine
+  const notices = try SlackNotices.Machine
+  const ledger = try SlackLedger
+  const ledgerChanges = Stream.callback<number>((queue) => effect {
+    Queue.offerUnsafe(queue, ledger.snapshot())
+    const stop = ledger.subscribe(() => { Queue.offerUnsafe(queue, ledger.snapshot()) })
+    try Effect.addFinalizer(() => Effect.sync(stop))
+  })
+  const signals = Stream.mergeAll([
+    Stream.map(workspaces.changes, () => 0),
+    Stream.map(auth.changes, () => 0),
+    Stream.map(agent.changes, () => 0),
+    Stream.map(conv.changes, () => 0),
+    Stream.map(notices.changes, () => 0),
+    ledgerChanges,
+  ], { concurrency: "unbounded" })
+  let lastKey = ""
+  try Stream.runForEach(signals, () => effect {
+    const authState = try auth.get()
+    const wsState = try workspaces.get()
+    const convState = try conv.get()
+    const agentState = try agent.get()
+    const key = JSON.stringify([authState.step, authState.connected.length, wsState.selected.workspace, wsState.list.status, convState.channel, convState.threadTs, agentState.pane, agentState.activeWorkspace, agentState.activeChannel, ledger.snapshot()])
+    if (key === lastKey) return
+    lastKey = key
+    try syncSlackCard
+    try syncSlackContext
+  })
+}, "syncing Slack to MessagingBridge")
+
+const messagingHandlers = started(effect {
+  const bridge = try MessagingBridge
+  const telegram = try Telegram
+  const slack = try Slack
+  const sessions = try MessagingSessions
+  const tgStore = try TelegramStore
+  const tgConv = try TelegramConversation.Machine
+  const slackLedger = try SlackLedger
+  const slackWorkspaces = try SlackWorkspaces.Machine
+  const slackConv = try SlackConversation.Machine
+  const shell = try Shell.Machine
+
+  const sendTelegramDraft = (draft: MessagingDraftProposal) => effect {
+    const tokenOpt = try currentSessionToken().pipe(Effect.provideService(MessagingSessions, sessions))
+    if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Sign in to Telegram first" }
+    const replyTo = draft.replyToMessageId ? Number(draft.replyToMessageId) : undefined
+    const res = telegram.sendMessage(
+      tokenOpt.value,
+      {
+        peer: draft.targetId,
+        message: draft.body,
+        ...(replyTo !== undefined && Number.isFinite(replyTo) && replyTo > 0 ? { reply_to_msg_id: replyTo } : {}),
+      },
+      `alpha-card-${draft.id}-r${draft.revision}`,
+    ) catch (failure) => ({ failed: failure })
+    if ("failed" in res) return sendFailureOutcome("Telegram", res.failed)
+    try upsertHistoryMessage(draft.targetId, res.message, res.pts).pipe(Effect.provideService(TelegramStore, tgStore))
+    return { status: "sent" as const }
+  }
+
+  const openTelegramTarget = (draft: MessagingDraftProposal) => effect {
+    if (draft.targetId !== "") {
+      const chatId = try tgStore.chatIdOf(draft.targetId)
+      const snap = try tgStore.get()
+      const dialog = snap.dialogs.find((item) => item.peer_key === draft.targetId)
+      const kind = dialog ? chatKindOf(dialog, snap.chats) : "DirectMessage"
+      const canPost = dialog ? dialog.can_post : true
+      const convState = try tgConv.get()
+      if (TelegramConversation.canOpenChat(convState, chatId, kind, canPost, true)) {
+        try contained(tgConv.send({ type: "openChat", chat: chatId, kind, canPost, front: true }), "open Telegram draft target")
+      }
+    }
+    const shellState = try shell.get()
+    if (Shell.canOpenView(shellState, "Telegram")) {
+      try contained(shell.send({ type: "openView", view: "Telegram" }), "open Telegram view")
+    }
+  }
+
+  const sendSlackDraft = (draft: MessagingDraftProposal) => effect {
+    const wsState = try slackWorkspaces.get()
+    const meta = draft.workspaceId
+      ? slackLedger.workspaceByTeamId(draft.workspaceId)
+      : slackLedger.workspaceMeta(wsState.selected.workspace)
+    if (meta === undefined) return { status: "failed" as const, error: "Connect a Slack workspace first" }
+    const tokenOpt = try sessions.get(slackSessionKey(meta.teamId))
+    if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Reconnect your Slack workspace" }
+    const res = slack.postMessage(
+      tokenValue(tokenOpt.value),
+      {
+        channel: draft.targetId,
+        text: draft.body,
+        ...(draft.threadTs ? { thread_ts: draft.threadTs } : {}),
+      },
+      `alpha-card-${draft.id}-r${draft.revision}`,
+    ) catch (failure) => ({ failed: failure })
+    if ("failed" in res) return sendFailureOutcome("Slack", res.failed)
+    slackLedger.upsertMessage(meta.num, res.channel, res.message, false)
+    return { status: "sent" as const }
+  }
+
+  const openSlackTarget = (draft: MessagingDraftProposal) => effect {
+    const wsState = try slackWorkspaces.get()
+    const meta = draft.workspaceId
+      ? slackLedger.workspaceByTeamId(draft.workspaceId)
+      : slackLedger.workspaceMeta(wsState.selected.workspace)
+    if (meta !== undefined) {
+      if (SlackWorkspaces.canSwitchWorkspace(wsState, meta.num)) {
+        try contained(slackWorkspaces.send({ type: "switchWorkspace", workspace: meta.num }), "switch Slack workspace")
+      }
+      if (draft.targetId !== "") {
+        const channel = slackLedger.channelNum(meta.num, draft.targetId)
+        const convState = try slackConv.get()
+        if (SlackConversation.canOpenChannel(convState, meta.num, channel, "PublicChannel", true)) {
+          try contained(slackConv.send({ type: "openChannel", workspace: meta.num, channel, kind: "PublicChannel", front: true }), "open Slack draft channel")
+        }
+        if (draft.threadTs) {
+          const threadTs = slackLedger.tsNum(meta.num, channel, draft.threadTs)
+          const nextConv = try slackConv.get()
+          if (SlackConversation.canOpenThread(nextConv, threadTs)) {
+            try contained(slackConv.send({ type: "openThread", threadTs }), "open Slack draft thread")
+          }
+        }
+      }
+    }
+    const shellState = try shell.get()
+    if (Shell.canOpenView(shellState, "Slack")) {
+      try contained(shell.send({ type: "openView", view: "Slack" }), "open Slack view")
+    }
+  }
+
+  const stopTg = bridge.registerHandler("Telegram", { sendDraft: sendTelegramDraft, openTarget: openTelegramTarget })
+  const stopSl = bridge.registerHandler("Slack", { sendDraft: sendSlackDraft, openTarget: openSlackTarget })
+  try Effect.ensuring(Effect.never, Effect.sync(() => {
+    stopTg()
+    stopSl()
+  }))
+}, "registering Telegram and Slack MessagingBridge handlers")
+
+/** Resident bridge layer syncing Telegram and Slack Home cards, Ask Alpha ambient context, and staged-draft send/open handlers. */
+export const messagingWire = together(telegramBridgeSync, slackBridgeSync, messagingHandlers)

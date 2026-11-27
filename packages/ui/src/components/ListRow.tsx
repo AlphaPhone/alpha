@@ -33,10 +33,10 @@ const refuse = (event: MouseEvent) => {
  * it is the element it is given.
  */
 export function ListRow({ title, detail, leading, trailing, selected = false, asChild = false, disabled = false, className, children, ...props }: ListRowProps) {
-  const pressable = asChild || Boolean(props.onClick ?? props.onPointerDown ?? props.onKeyDown);
+  const pressable = asChild || disabled || Boolean(props.onClick ?? props.onPointerDown ?? props.onKeyDown);
   const row = cn(
     "flex min-h-14.5 w-full items-center gap-3.5 py-2 pr-4 pl-4.5 text-left text-foreground",
-    pressable && [focusRing, "transition-colors duration-fast ease-standard hover:bg-accent/60 focus-visible:-outline-offset-focus active:bg-accent disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"],
+    pressable && [focusRing, "transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent/60 focus-visible:-outline-offset-focus active:bg-accent disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"],
     selected && "bg-accent",
     className,
   );

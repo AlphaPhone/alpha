@@ -48,8 +48,8 @@ pure val initial: Session = {
 pure val accountValues = Set(0, 1, 2)
 pure val signInValues = Set(0, 1, 3)
 pure val ticketValues = Set(1, 2, 3, 4)
-pure val nowValues = Set(0, 500, 5000)
-pure val endsAtValues = Set(1000)
+pure val nowValues = Set(0, 500000, 5000000)
+pure val endsAtValues = Set(1000000)
 pure val weight_agentHeld = 10
 pure val weight_signInStored = 10
 pure val weight_signInRead = 10
@@ -183,7 +183,7 @@ pure def signInStored(s: Session, ticket: int, ok: bool, revoked: bool, endsAt: 
 A clock that went back gives it up too.
 
 ```quint
-pure val holdLimit = 120
+pure val holdLimit = 120000
 
 pure def overdue(since: int, now: int): bool = now < since or now - since >= holdLimit
 
@@ -357,7 +357,7 @@ Renew opens [Sign-in](./signIn.md); the account stays signed in until the
 new sign-in is stored.
 
 ```quint
-pure val renewWindow = 259200
+pure val renewWindow = 259200000
 
 pure def renewOffered(s: Session, now: int): bool = s.account > 0 and s.work == Resting and now >= s.endsAt - renewWindow
 

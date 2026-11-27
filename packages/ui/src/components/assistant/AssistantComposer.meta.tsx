@@ -7,8 +7,6 @@ const onSend = fn();
 const onStop = fn();
 const onAttach = fn();
 const onFocusField = fn();
-const onDragRelease = fn();
-const onDragLift = fn();
 
 export const meta: ComponentMeta<AssistantComposerProps> = {
   args: {
@@ -17,14 +15,10 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     onAttach,
     onTalk: fn(),
     onSearch: fn(),
-    onNew: fn(),
-    onHistory: fn(),
     onFocusField,
     onSend: undefined,
     onStop: undefined,
     onOpen: undefined,
-    onType: undefined,
-    onDictate: undefined,
     onRemoveAttachment: undefined,
     onPreviewAttachment: undefined,
     onUnquote: undefined,
@@ -34,7 +28,7 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     "Send not offered": { value: "What is on my calendar on Friday?" },
     "Reply in flight": { value: "", onStop },
     Stopping: { value: "", stopping: true },
-    Bar: { variant: "bar", value: "", onOpen: fn(), drag: { onPress: fn(), onDrag: fn(), onRelease: onDragRelease, onLift: onDragLift } },
+    Bar: { variant: "bar", value: "", onOpen: fn() },
     "Files and a quote": {
       value: "Summarise these",
       onSend,
@@ -45,6 +39,7 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     },
     Editing: { value: "What is on Friday?", editing: true, onSend },
     "Storage failed": { value: "Ask Ana about lunch", notice: { status: "failed", onRetry: fn() }, onSend },
+    Closed: { value: "", closed: true },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -52,10 +47,21 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
       onFocusField.mockClear();
       await userEvent.type(within(canvasElement).getByRole("textbox", { name: "Message Alpha" }), "Hi");
       await expect([onValueChange.mock.calls.length, onFocusField.mock.calls.length]).toEqual([2, 1]);
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Chat actions" }));
-      await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat", "New chat", "Chat history"]);
-      await userEvent.keyboard("{Escape}");
+      const actions = within(canvasElement).getByRole("button", { name: "Chat actions" });
+      await userEvent.click(actions);
+      await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat"]);
+      await userEvent.click(await within(canvasElement.ownerDocument.body).findByRole("menuitem", { name: "Search chat" }));
       await waitFor(() => expect(canvasElement.ownerDocument.querySelector("[data-aria-hidden]")).toBeNull());
+      if (actions.getBoundingClientRect().width === 0) return;
+      // spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown": the + a touch opened keeps its focus without a ring once its menu closes, and one opened from the keyboard, or whose menu Escape closed, keeps its ring
+      await expect([canvasElement.ownerDocument.activeElement === actions, actions.matches(":focus-visible")]).toEqual([true, false]);
+      for (const open of [() => userEvent.click(actions), () => userEvent.keyboard("{Enter}")]) {
+        await open();
+        await within(canvasElement.ownerDocument.body).findAllByRole("menuitem");
+        await userEvent.keyboard("{Escape}");
+        await waitFor(() => expect(canvasElement.ownerDocument.querySelector("[data-aria-hidden]")).toBeNull());
+        await expect([canvasElement.ownerDocument.activeElement === actions, actions.matches(":focus-visible")]).toEqual([true, true]);
+      }
     },
     Writing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onSend.mockClear();
@@ -74,20 +80,6 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     },
     Stopping: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("button", { name: "Stop reply" })).toHaveAttribute("aria-busy", "true");
-    },
-    Bar: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      onDragRelease.mockClear();
-      onDragLift.mockClear();
-      const background = canvasElement.querySelector<HTMLElement>("[data-alpha-bar-drag]");
-      if (!background) throw new Error("no drag background on the bar");
-      await userEvent.pointer([
-        { keys: "[MouseLeft>]", target: background, coords: { clientX: 20, clientY: 400 } },
-        { coords: { clientX: 20, clientY: 300 } },
-        { keys: "[/MouseLeft]", coords: { clientX: 20, clientY: 200 } },
-      ]);
-      await userEvent.pointer([{ keys: "[MouseLeft]", target: background, coords: { clientX: 20, clientY: 400 } }]);
-      const releaseArg = onDragRelease.mock.calls[0]?.[0] as { direction?: string } | undefined;
-      await expect([onDragRelease.mock.calls.length, releaseArg?.direction, onDragLift.mock.calls.length]).toEqual([1, "up", 1]);
     },
     Closed: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("textbox", { name: "Message Alpha" })).toBeDisabled();

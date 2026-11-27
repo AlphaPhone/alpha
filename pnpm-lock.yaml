@@ -286,12 +286,21 @@ importers:
       '@elizaos/agent-host':
         specifier: link:../../.eliza/packages/agent-host
         version: link:../../.eliza/packages/agent-host
+      '@elizaos/plugin-notes':
+        specifier: link:../../.eliza/packages/plugin-notes
+        version: link:../../.eliza/packages/plugin-notes
+      '@elizaos/plugin-notes-client':
+        specifier: link:../../.eliza/packages/plugin-notes-client
+        version: link:../../.eliza/packages/plugin-notes-client
       '@repo/deployment':
         specifier: workspace:*
         version: link:../../packages/deployment
       '@repo/eliza-harness':
         specifier: workspace:*
         version: link:../../packages/eliza-harness
+      '@repo/launcher-records':
+        specifier: workspace:*
+        version: link:../../packages/launcher-records
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -350,15 +359,24 @@ importers:
       '@elizaos/plugin-inbox-client':
         specifier: link:../../.eliza/packages/plugin-inbox-client
         version: link:../../.eliza/packages/plugin-inbox-client
+      '@elizaos/plugin-maps-client':
+        specifier: link:../../.eliza/packages/plugin-maps-client
+        version: link:../../.eliza/packages/plugin-maps-client
       '@elizaos/plugin-notes-client':
         specifier: link:../../.eliza/packages/plugin-notes-client
         version: link:../../.eliza/packages/plugin-notes-client
+      '@elizaos/plugin-wallet-client':
+        specifier: link:../../.eliza/packages/plugin-wallet-client
+        version: link:../../.eliza/packages/plugin-wallet-client
       '@elizaos/plugin-workflow-client':
         specifier: link:../../.eliza/packages/plugin-workflow-client
         version: link:../../.eliza/packages/plugin-workflow-client
       '@repo/design-system':
         specifier: workspace:*
         version: link:../../packages/design-system
+      '@repo/launcher-records':
+        specifier: workspace:*
+        version: link:../../packages/launcher-records
       '@repo/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -508,6 +526,9 @@ importers:
 
   apps/site:
     dependencies:
+      '@repo/deployment':
+        specifier: workspace:*
+        version: link:../../packages/deployment
       '@repo/design-system':
         specifier: workspace:*
         version: link:../../packages/design-system
@@ -569,6 +590,21 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4)(jsdom@31.0.1)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/cli:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
       vitest:
         specifier: 'catalog:'
         version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4)(jsdom@31.0.1)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
@@ -649,6 +685,8 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4)(jsdom@31.0.1)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/launcher-records: {}
 
   packages/ui:
     dependencies:

@@ -12,14 +12,42 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.provider.Settings;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 /** Device facts, allowlisted settings, explicit bounded text handoffs and verified app self-updates. */
-@CapacitorPlugin(name="AlphaDevice")
+@CapacitorPlugin(name = "AlphaDevice", permissions = {
+ @Permission(alias = "camera", strings = {Manifest.permission.CAMERA}),
+ @Permission(alias = "notifications", strings = {Manifest.permission.POST_NOTIFICATIONS})
+})
 public final class AlphaDevicePlugin extends Plugin {
+ @PluginMethod public void takeBillingReturn(PluginCall call) {
+  String session = BillingReturn.take();
+  call.resolve(new JSObject().put("session", session == null ? org.json.JSONObject.NULL : session));
+ }
+
+ @PluginMethod public void textAsk(PluginCall call) {
+  if (!(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("ticket", 0));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("ticket", activity.textAskTicket())));
+ }
+
+ @PluginMethod public void closeTextAsk(PluginCall call) {
+  Integer ticket = call.getInt("ticket");
+  if (ticket == null || !(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("closed", false));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("closed", activity.closeTextAsk(ticket))));
+ }
+
  /** Explicit bounded text handoff; chooser opening never claims a sent message. */
  static String boundedShareText(String text){
   if(text==null||text.isBlank()||text.indexOf('\0')>=0||text.length()>65536)throw new IllegalArgumentException();
@@ -28,10 +56,17 @@ public final class AlphaDevicePlugin extends Plugin {
   return text;
  }
  static boolean shareForeground(android.app.Activity activity){
-  if(activity==null||activity.isFinishing()||activity.isDestroyed()||!activity.hasWindowFocus())return false;
+  if(activity==null||activity.isFinishing()||activity.isDestroyed())return false;
+  if(activity instanceof MainActivity){
+   if(!((MainActivity)activity).isForegroundFocused())return false;
+  }else if(android.os.Looper.myLooper()==android.os.Looper.getMainLooper()){
+   if(!activity.hasWindowFocus()||!(activity instanceof androidx.lifecycle.LifecycleOwner)||!((androidx.lifecycle.LifecycleOwner)activity).getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))return false;
+  }else{
+   return false;
+  }
   android.app.KeyguardManager lock=activity.getSystemService(android.app.KeyguardManager.class);
   android.os.UserManager users=activity.getSystemService(android.os.UserManager.class);
-  return lock!=null&&users!=null&&!lock.isDeviceLocked()&&users.isUserUnlocked()&&activity instanceof androidx.lifecycle.LifecycleOwner&&((androidx.lifecycle.LifecycleOwner)activity).getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED);
+  return lock!=null&&users!=null&&!lock.isDeviceLocked()&&users.isUserUnlocked();
  }
  @PluginMethod public void shareText(PluginCall call){
   final String text,title;try{text=boundedShareText(call.getString("text"));title=call.getString("title","");if(title.length()>200||title.chars().anyMatch(c->c<32||c==127))throw new IllegalArgumentException();}catch(Exception invalid){call.reject("Choose valid text of at most 64 KiB.");return;}
@@ -48,20 +83,30 @@ public final class AlphaDevicePlugin extends Plugin {
  }
  static int textScalePercent(Context context){int value=context.getSharedPreferences("alpha-appearance",Context.MODE_PRIVATE).getInt("text-scale-percent",100);return value>=75&&value<=150?value:100;}
  static int effectiveTextZoom(Context context,int percent){float scale=context.getResources().getConfiguration().fontScale;if(!Float.isFinite(scale)||scale<=0)scale=1;return Math.max(1,Math.round(percent*scale));}
- static void applyTextScale(MainActivity activity){activity.getBridge().getWebView().getSettings().setTextZoom(effectiveTextZoom(activity,textScalePercent(activity)));}
+ static void applyTextScale(MainActivity activity){
+  if(activity==null||activity.getBridge()==null||activity.getBridge().getWebView()==null)return;
+  activity.getBridge().getWebView().getSettings().setTextZoom(effectiveTextZoom(activity,textScalePercent(activity)));
+ }
  @PluginMethod public void setTextScale(PluginCall call){
   Integer percent=call.getInt("percent");if(percent==null||percent<75||percent>150){call.reject("Text size must be 75 to 150 percent.");return;}
-  getActivity().runOnUiThread(()->{
-   if(!(getActivity() instanceof MainActivity)||getActivity().isFinishing()||getActivity().isDestroyed()){call.reject("Alpha view is unavailable");return;}
+  android.app.Activity current=getActivity();if(!(current instanceof MainActivity)){call.reject("Alpha view is unavailable");return;}
+  diagnostics(call,()->{
    if(!getContext().getSharedPreferences("alpha-appearance",Context.MODE_PRIVATE).edit().putInt("text-scale-percent",percent).commit()){call.reject("Text size could not be saved");return;}
-   applyTextScale((MainActivity)getActivity());JSObject out=new JSObject();out.put("textScalePercent",textScalePercent(getContext()));out.put("effectiveTextZoom",getBridge().getWebView().getSettings().getTextZoom());call.resolve(out);
+   android.app.Activity activity=getActivity();
+   if(!(activity instanceof MainActivity)||activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
+   activity.runOnUiThread(()->{
+    com.getcapacitor.Bridge bridge=getBridge();
+    if(activity.isFinishing()||activity.isDestroyed()||bridge==null||bridge.getWebView()==null){call.reject("Alpha view is unavailable");return;}
+    applyTextScale((MainActivity)activity);JSObject out=new JSObject();out.put("textScalePercent",textScalePercent(getContext()));out.put("effectiveTextZoom",bridge.getWebView().getSettings().getTextZoom());call.resolve(out);
+   });
   });
  }
- /** Android's "Time to take action" setting applied to a renderer notice timeout; the base when unset or before API 29. */
+ /** Android's "Time to take action" setting applied to a renderer notice timeout; the base when unset. */
  @PluginMethod public void recommendedTimeout(PluginCall call){
   Integer base=call.getInt("baseMs");if(base==null||base<1||base>600000){call.reject("Base timeout must be 1 to 600000 ms.");return;}
   int timeout=base;
-  if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q){android.view.accessibility.AccessibilityManager accessibility=getContext().getSystemService(android.view.accessibility.AccessibilityManager.class);if(accessibility!=null)timeout=accessibility.getRecommendedTimeoutMillis(base,android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT|android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS);}
+  android.view.accessibility.AccessibilityManager accessibility=getContext().getSystemService(android.view.accessibility.AccessibilityManager.class);
+  if(accessibility!=null)timeout=accessibility.getRecommendedTimeoutMillis(base,android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT|android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS);
   JSObject out=new JSObject();out.put("timeoutMs",timeout);call.resolve(out);
  }
  @PluginMethod public void snapshot(PluginCall call) {
@@ -83,6 +128,7 @@ public final class AlphaDevicePlugin extends Plugin {
  @PluginMethod public void settingsFacts(PluginCall call) {
   JSObject out=new JSObject();
   out.put("androidRelease",Build.VERSION.RELEASE);
+  out.put("startupPermissionDefaults", AlphaImageCapabilities.startupPermissionDefaults(getContext()));
   try {
    int boot=Settings.Global.getInt(getContext().getContentResolver(),Settings.Global.BOOT_COUNT,-1);
    if(boot>=0)out.put("bootCount",boot);
@@ -90,6 +136,58 @@ public final class AlphaDevicePlugin extends Plugin {
   putSettingsGrants(getContext(),out);
   call.resolve(out);
  }
+
+ /** Reads or requests exactly one permission from the Access walkthrough. */
+ private static String accessPermission(PluginCall call) {
+  String permission = call.getString("permission", "");
+  return "camera".equals(permission) || "notifications".equals(permission) ? permission : null;
+ }
+
+ private PermissionState accessPermissionState(String permission) {
+  if ("notifications".equals(permission) && Build.VERSION.SDK_INT < 33) return PermissionState.GRANTED;
+  return getPermissionState(permission);
+ }
+
+ @PluginMethod public void accessPermissionStatus(PluginCall call) {
+  String permission = accessPermission(call);
+  if (permission == null) {
+   call.reject("Unknown access permission");
+   return;
+  }
+  PermissionState state = accessPermissionState(permission);
+  if (state == null) call.reject("Android permission is unavailable");
+  else call.resolve(new JSObject().put("state", state.toString()));
+ }
+
+ @PluginMethod public void requestAccessPermission(PluginCall call) {
+  String permission = accessPermission(call);
+  android.app.Activity activity = getActivity();
+  if (permission == null || activity == null) {
+   call.reject("Android permission is unavailable");
+   return;
+  }
+  activity.runOnUiThread(() -> {
+   if (!shareForeground(activity)) {
+    call.reject("Open and unlock Alpha before asking for access");
+    return;
+   }
+   PermissionState state = accessPermissionState(permission);
+   if (state != PermissionState.PROMPT && state != PermissionState.PROMPT_WITH_RATIONALE) {
+    accessPermissionStatus(call);
+    return;
+   }
+   LateLaunch.ask(call, () -> requestPermissionForAlias(permission, call, "accessPermissionAnswered"));
+  });
+ }
+
+ @Override @PluginMethod public void requestPermissions(PluginCall call) {
+  requestAccessPermission(call);
+ }
+
+ @PermissionCallback private void accessPermissionAnswered(PluginCall call) {
+  accessPermissionStatus(call);
+ }
+
  private static void putSettingsGrants(Context context,JSObject out) {
   JSObject grants=new JSObject();
   boolean fine=context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
@@ -111,17 +209,30 @@ public final class AlphaDevicePlugin extends Plugin {
   for(java.util.Map.Entry<String,Object> fact:facts.entrySet())out.put(fact.getKey(),fact.getValue());
  }
  /** As HOME, an outside screen gets its own task, as stock launchers do, so HOME does not clear it. Never for a result start. */
- private static Intent handOff(Intent intent){return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
+ public static Intent handOff(Intent intent){return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
+ @PluginMethod public void passwordProviderStatus(PluginCall call) {
+  call.resolve(PasswordProviderSupport.status(getContext()));
+ }
+
  @PluginMethod public void openPasswordProvider(PluginCall call) {
-  String action=call.getString("action","");
-  getActivity().runOnUiThread(()->{
+  String action = call.getString("action", "");
+  android.app.Activity activity = getActivity();
+  if (activity == null) {
+    call.reject("Open and unlock Alpha before choosing a password provider.");
+    return;
+  }
+  activity.runOnUiThread(() -> {
+    if (!shareForeground(activity)) {
+      call.reject("Open and unlock Alpha before choosing a password provider.");
+      return;
+    }
    try {
     Intent target=PasswordProviderSupport.intent(getContext(),action);
     String destination=Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE.equals(target.getAction())?"provider-picker":"external";
-    try { getActivity().startActivity(handOff(target)); }
+    try { activity.startActivity(handOff(target)); }
     catch(android.content.ActivityNotFoundException missing) {
      if(!"settings".equals(action)||!Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE.equals(target.getAction()))throw missing;
-     getActivity().startActivity(handOff(new Intent(Settings.ACTION_SETTINGS)));destination="system-settings";
+     activity.startActivity(handOff(new Intent(Settings.ACTION_SETTINGS)));destination="system-settings";
     }
     if(Settings.ACTION_SETTINGS.equals(target.getAction()))destination="system-settings";
     JSObject out=new JSObject();out.put("status","opened");out.put("destination",destination);call.resolve(out);
@@ -151,7 +262,8 @@ public final class AlphaDevicePlugin extends Plugin {
    android.app.Activity activity=getActivity();
    if(activity==null){call.reject("This Android settings page is unavailable");return;}
    activity.runOnUiThread(()->{
-    try{activity.startActivity(new Intent(Settings.ACTION_SETTINGS));}
+    if(activity.isFinishing()||activity.isDestroyed()){call.reject("This Android settings page is unavailable");return;}
+    try{activity.startActivity(handOff(new Intent(Settings.ACTION_SETTINGS)));}
     catch(RuntimeException unavailable){call.reject("This Android settings page is unavailable");return;}
     JSObject out=new JSObject();out.put("status","opened");out.put("page",page);out.put("specific",true);call.resolve(out);
    });
@@ -174,9 +286,12 @@ public final class AlphaDevicePlugin extends Plugin {
    return;
   }
   if(SystemSettingsPages.actions(page)==null){call.reject("Unsupported settings page");return;}
-  getActivity().runOnUiThread(()->{
+  android.app.Activity activity=getActivity();
+  if(activity==null){call.reject("This Android settings page is unavailable");return;}
+  activity.runOnUiThread(()->{
+   if(activity.isFinishing()||activity.isDestroyed()){call.reject("This Android settings page is unavailable");return;}
    // The shared allowlist (SystemSettingsPages); "specific" is false when only the broader fallback opened.
-   int opened=SystemSettingsPages.open(page,getContext().getPackageName(),intent->getActivity().startActivity(handOff(intent)));
+   int opened=SystemSettingsPages.open(page,getContext().getPackageName(),intent->activity.startActivity(handOff(intent)));
    if(opened<0){call.reject("This Android settings page is unavailable");return;}
    JSObject out=new JSObject();out.put("status","opened");out.put("page",page);out.put("specific",opened==0);call.resolve(out);
   });
@@ -217,10 +332,13 @@ public final class AlphaDevicePlugin extends Plugin {
   if(text==null||text.length()>256*1024){call.reject("Diagnostics are too large");return;}
   try{Object parsed=new org.json.JSONTokener(text).nextValue();if(!(parsed instanceof org.json.JSONObject)||!"alpha-diagnostics/v1".equals(((org.json.JSONObject)parsed).optString("format")))throw new IllegalArgumentException();}
   catch(Exception invalid){call.reject("Diagnostics are not valid");return;}
-  getActivity().runOnUiThread(()->{
+  android.app.Activity activity=getActivity();
+  if(activity==null){call.reject("Open and unlock Alpha before sharing.");return;}
+  activity.runOnUiThread(()->{
+   if(!shareForeground(activity)){call.reject("Open and unlock Alpha before sharing.");return;}
    try{
     Intent send=new Intent(Intent.ACTION_SEND);send.setType("text/plain");send.putExtra(Intent.EXTRA_TEXT,text);send.putExtra(Intent.EXTRA_SUBJECT,"Alpha Phone diagnostics");
-    getActivity().startActivity(Intent.createChooser(send,"Share diagnostics"));JSObject out=new JSObject();out.put("status","opened");call.resolve(out);
+    activity.startActivity(Intent.createChooser(send,"Share diagnostics"));JSObject out=new JSObject();out.put("status","opened");call.resolve(out);
    }catch(RuntimeException unavailable){call.reject("Sharing is unavailable");}
   });
  }
@@ -295,22 +413,12 @@ public final class AlphaDevicePlugin extends Plugin {
    if(!AlphaImageCapability.verified(context))return true;
    android.telecom.TelecomManager calls=context.getSystemService(android.telecom.TelecomManager.class);
    // A grant arriving after Telecom returned false cannot authenticate that read.
-   if(calls==null||!canReadUpdateCallState(context,calls))return false;
+   if(calls==null||!AlphaCallState.canRead(context,calls))return false;
    // Lint cannot infer the privileged, default-dialer and AppOps checks in the helper.
    @android.annotation.SuppressLint("MissingPermission") boolean inCall=calls.isInCall();
-   return !inCall&&canReadUpdateCallState(context,calls);
+   return !inCall&&AlphaCallState.stillCanRead(context,calls);
   }catch(SecurityException denied){return false;}
   catch(RuntimeException unknown){return false;}
- }
- /** Telecom can report false when phone-state access is denied. Only use a negative with known access. */
- private static boolean canReadUpdateCallState(Context context,android.telecom.TelecomManager calls){
-  String packageName=context.getPackageName();
-  if(context.checkSelfPermission("android.permission.READ_PRIVILEGED_PHONE_STATE")==PackageManager.PERMISSION_GRANTED||
-     packageName.equals(calls.getDefaultDialerPackage()))return true;
-  if(context.checkSelfPermission("android.permission.READ_PHONE_STATE")!=PackageManager.PERMISSION_GRANTED)return false;
-  android.app.AppOpsManager ops=context.getSystemService(android.app.AppOpsManager.class);
-  return ops!=null&&ops.noteOpNoThrow(android.app.AppOpsManager.OPSTR_READ_PHONE_STATE,context.getApplicationInfo().uid,packageName)
-    ==android.app.AppOpsManager.MODE_ALLOWED;
  }
  /** SHA-256 of the original certificate of Alpha's one signer (apksigner's digest), which key rotation never changes: an update manifest offers an APK only to installs of that signing lineage. */
  static String appSigner(Context context)throws Exception{
@@ -475,8 +583,9 @@ public final class AlphaDevicePlugin extends Plugin {
    if(resume!=null&&id.equals(resume.id)){
     updateResume=null;
     if("canceled".equals(outcome)){
-     AlphaDevicePlugin confirming=updateOwner;
-     if(updateBridges.contains(confirming)&&resume.eligible.contains(confirming.updateBridgeId))settledResumeBridge=confirming.updateBridgeId;
+     AlphaDevicePlugin confirming;
+     synchronized(updateUiLock){confirming=updateOwner;}
+     if(confirming!=null&&updateBridges.contains(confirming)&&resume.eligible.contains(confirming.updateBridgeId))settledResumeBridge=confirming.updateBridgeId;
      else if(resume.eligible.contains(resume.initiatingBridge)&&updateBridges.stream().anyMatch(bridge->resume.initiatingBridge.equals(bridge.updateBridgeId)))settledResumeBridge=resume.initiatingBridge;
     }
    }
@@ -492,7 +601,8 @@ public final class AlphaDevicePlugin extends Plugin {
    var record=UpdatePause.store().read();
    JSObject result=new JSObject().put("bridgeId",updateBridgeId).put("pending",record!=null);
    if(record!=null){
-    Intent confirm=record.session==updateSession?updateConfirm:null;
+    Intent confirm;
+    synchronized(updateUiLock){confirm=record.session==updateSession?updateConfirm:null;}
     boolean canContinue=false;
     if(record.committing&&record.boot==updateBoot()){
      var session=getContext().getPackageManager().getPackageInstaller().getSessionInfo(record.session);
@@ -527,44 +637,66 @@ public final class AlphaDevicePlugin extends Plugin {
  }
  /** Downloads run here, never on the problem-log worker. */
  private final java.util.concurrent.ExecutorService updateWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+ /** Guards all static update confirmation UI state below; never held across IPC or UI calls. */
+ private static final Object updateUiLock=new Object();
  /** The session this process last handed to Android, set before its commit. Only updateOwner acts on a forwarded status. */
- private static volatile int updateSession;
+ private static int updateSession;
  /**
   * Android's request for the owner's confirmation of updateSession, kept until that session ends: Android offers no way to
   * ask again but a second commit, which can end an install already accepted, so a tap after a dismissal opens this same request.
   */
- private static volatile Intent updateConfirm;
+ private static Intent updateConfirm;
  /** The private receiver has recorded the current platform callback before forwarding it. */
- private static volatile boolean updateReceiptRequired;
+ private static boolean updateReceiptRequired;
  /** updateConfirm waits for its owner: Android silently drops an activity Alpha starts while it is not in front (screen locked during the download, another app open). */
- private static volatile boolean updateDue;
+ private static boolean updateDue;
  /** updateConfirm has started and its owner has not resumed since, so the confirmation may still be up, in a task another bridge cannot see. */
- private static volatile boolean updateOpen;
+ private static boolean updateOpen;
  /** Automatic attempts never open Android's optional confirmation without an explicit Continue/Install tap. */
- private static volatile boolean updateAutomatic;
+ private static boolean updateAutomatic;
  /** System.nanoTime() of Alpha's last exchange with Android on this session (a commit, a confirmation opened, or the owner's return from one), 0 with none. */
- private static volatile long updateAsked;
+ private static long updateAsked;
  /** The bridge that last committed a session, reconnected to one or opened its confirmation, until its destroy: the one that opens what Android asks next. A commit that threw keeps it. The fence is Android's list. */
- private static volatile AlphaDevicePlugin updateOwner;
+ private static AlphaDevicePlugin updateOwner;
+ private boolean updateStatusRegistered;
  /** Android's status for the owner's update session. A request for confirmation is not an end; any other status is Android's last for the session, and a confirmation kept for it would open on nothing. */
  private final android.content.BroadcastReceiver updateStatus=new android.content.BroadcastReceiver(){
   @Override public void onReceive(Context context,Intent intent){
    int id=intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID,-1);
    // A restart or a destroy lost the owner. Only a status of this boot for a session bound to this boot takes it up: a pending request is the one way left to reach its confirmation.
-   if(updateOwner==null)try{
+   boolean needsOwner;
+   synchronized(updateUiLock){needsOwner=updateOwner==null;}
+   if(needsOwner)try{
     PackageInstaller.SessionInfo session=getContext().getPackageManager().getPackageInstaller().getSessionInfo(id);
     java.util.regex.Matcher binding=session==null?null:updateBinding(session);
-    if(binding!=null&&binding.group(4).equals(String.valueOf(updateBoot()))){updateAutomatic=binding.group(6)!=null;updateOwner=AlphaDevicePlugin.this;updateSession=id;}
+    if(binding!=null&&binding.group(4).equals(String.valueOf(updateBoot()))){
+     synchronized(updateUiLock){
+      if(updateOwner==null){updateAutomatic=binding.group(6)!=null;updateOwner=AlphaDevicePlugin.this;updateSession=id;}
+     }
+    }
    }catch(Exception unanswered){/* Unknown stays fenced. */}
-   if(updateOwner!=AlphaDevicePlugin.this||id!=updateSession)return;
-   updateDue=intent.getIntExtra(PackageInstaller.EXTRA_STATUS,PackageInstaller.STATUS_FAILURE)==PackageInstaller.STATUS_PENDING_USER_ACTION;
-   updateConfirm=updateDue?androidx.core.content.IntentCompat.getParcelableExtra(intent,Intent.EXTRA_INTENT,Intent.class):null;
-   updateReceiptRequired=updateDue&&intent.getBooleanExtra(AlphaUpdateStatusReceiver.RECEIPT_REQUIRED,false);
-   if(inFront()&&!updateAutomatic)confirmUpdate();
+   boolean due=intent.getIntExtra(PackageInstaller.EXTRA_STATUS,PackageInstaller.STATUS_FAILURE)==PackageInstaller.STATUS_PENDING_USER_ACTION;
+   Intent confirm=due?androidx.core.content.IntentCompat.getParcelableExtra(intent,Intent.EXTRA_INTENT,Intent.class):null;
+   boolean receiptRequired=due&&intent.getBooleanExtra(AlphaUpdateStatusReceiver.RECEIPT_REQUIRED,false);
+   boolean automatic;
+   synchronized(updateUiLock){
+    if(updateOwner!=AlphaDevicePlugin.this||id!=updateSession)return;
+    updateDue=due;
+    updateConfirm=confirm;
+    updateReceiptRequired=receiptRequired;
+    automatic=updateAutomatic;
+   }
+   if(inFront()&&!automatic)confirmUpdate();
    PluginWorkers.submit(updateWorker,()->reconcileUpdate(),()->{});
   }
  };
- private boolean inFront(){return getActivity().getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED);}
+ private boolean inFront(){
+  android.app.Activity activity=getActivity();
+  if(activity==null||activity.isFinishing()||activity.isDestroyed())return false;
+  if(activity instanceof MainActivity)return ((MainActivity)activity).isResumedActive();
+  if(android.os.Looper.myLooper()!=android.os.Looper.getMainLooper())return false;
+  return activity instanceof androidx.lifecycle.LifecycleOwner&&((androidx.lifecycle.LifecycleOwner)activity).getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED);
+ }
  /**
   * Android has moved past asking the owner about this session, or the session is gone: a confirmation opened now could end an
   * install already accepted. Staging counts 0.8, and only after an accept does Android add 0.1, ahead of marking the stage
@@ -572,7 +704,7 @@ public final class AlphaDevicePlugin extends Plugin {
   * reaches it. A developer-verification request (Android 17) comes on an active session.
   */
  private static boolean pastConfirmation(PackageInstaller.SessionInfo session,Intent confirm){
-  return session==null||session.getProgress()>0.8f||session.isActive()&&!"android.content.pm.action.CONFIRM_DEVELOPER_VERIFICATION".equals(confirm.getAction());
+  return session==null||confirm==null||session.getProgress()>0.8f||session.isActive()&&!"android.content.pm.action.CONFIRM_DEVELOPER_VERIFICATION".equals(confirm.getAction());
  }
  /** Only a received, unopened callback for the sealed session survives a process restart. */
  private Intent readUpdateConfirmation(ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Record record,PackageInstaller.SessionInfo session){
@@ -585,38 +717,54 @@ public final class AlphaDevicePlugin extends Plugin {
  }
 
  private void recoverUpdateConfirmation(int sessionId){
-  getActivity().runOnUiThread(()->{
-   if(updateWorker.isShutdown()||!inFront()||updateConfirm!=null&&updateSession==sessionId)return;
-   try{
-    var record=UpdatePause.store().read();
-    if(record==null||record.session!=sessionId)return;
-    var current=getContext().getPackageManager().getPackageInstaller().getSessionInfo(sessionId);
-    Intent received=readUpdateConfirmation(record,current);
-    if(received==null)return;
+  Intent received;
+  try{
+   var record=UpdatePause.store().read();
+   if(record==null||record.session!=sessionId)return;
+   var current=getContext().getPackageManager().getPackageInstaller().getSessionInfo(sessionId);
+   received=readUpdateConfirmation(record,current);
+   if(received==null)return;
+  }catch(Exception unavailable){return;/* A changed or unknown session stays fenced. */}
+  android.app.Activity activity=getActivity();
+  if(activity==null)return;
+  activity.runOnUiThread(()->{
+   if(updateWorker.isShutdown()||!inFront())return;
+   synchronized(updateUiLock){
+    if(updateConfirm!=null&&updateSession==sessionId)return;
     updateOwner=this;updateSession=sessionId;updateConfirm=received;updateReceiptRequired=true;
     updateAutomatic=false;updateOpen=false;updateDue=true;
-    confirmUpdate();
-   }catch(Exception unavailable){/* A changed or unknown session stays fenced. */}
+   }
+   confirmUpdate();
   });
  }
  /** Reopens only Android's kept confirmation, using the same session and timing fence as the Settings tap. */
  private void reopenUpdateConfirmation(PackageInstaller.SessionInfo pending){
   int id=pending.getSessionId();
-  Intent confirm=id==updateSession?updateConfirm:null;
+  Intent confirm;AlphaDevicePlugin owner;long asked;boolean open,due;
+  synchronized(updateUiLock){
+   confirm=id==updateSession?updateConfirm:null;
+   owner=updateOwner;
+   asked=updateAsked;
+   open=updateOpen;
+   due=updateDue;
+  }
   if(confirm==null){recoverUpdateConfirmation(id);return;}
-  AlphaDevicePlugin owner=updateOwner;
-  long asked=updateAsked;
   // Leave time for a queued accept, an activity not yet covering Alpha, or a status in flight.
-  if(confirm!=null&&!pastConfirmation(pending,confirm)&&(asked==0||System.nanoTime()-asked>=java.util.concurrent.TimeUnit.SECONDS.toNanos(3))&&(!updateOpen||owner==null||owner.inFront())&&(!updateDue||owner==null||owner==this)){
-   getActivity().runOnUiThread(()->{
+  if(!pastConfirmation(pending,confirm)&&(asked==0||System.nanoTime()-asked>=java.util.concurrent.TimeUnit.SECONDS.toNanos(3))&&(!open||owner==null||owner.inFront())&&(!due||owner==null||owner==this)){
+   android.app.Activity activity=getActivity();
+   if(activity==null)return;
+   activity.runOnUiThread(()->{
     // An accept, a new status, an earlier tap's open (updateAsked moved), another bridge taking the kept confirmation, or a
     // retired bridge can overtake this queued launch. The writes happen here on main so two taps queued ahead of main open once.
-    if(updateSession!=id||updateConfirm!=confirm||updateAsked!=asked||updateDue&&updateOwner!=null&&updateOwner!=this||updateWorker.isShutdown()||!inFront())return;
+    if(updateWorker.isShutdown()||!inFront())return;
     try{
      var current=getContext().getPackageManager().getPackageInstaller().getSessionInfo(id);
      if(pastConfirmation(current,confirm))return;
     }catch(RuntimeException unavailable){return;}
-    updateAutomatic=false;updateOwner=this;updateOpen=false;updateDue=true;
+    synchronized(updateUiLock){
+     if(updateSession!=id||updateConfirm!=confirm||updateAsked!=asked||updateDue&&updateOwner!=null&&updateOwner!=this)return;
+     updateAutomatic=false;updateOwner=this;updateOpen=false;updateDue=true;
+    }
     confirmUpdate();
    });
   }
@@ -639,25 +787,44 @@ public final class AlphaDevicePlugin extends Plugin {
  }
  /** Opens the kept confirmation once, never over one still open, on the main thread like updateStatus and handleOnResume. */
  private void confirmUpdate(){
-  if(!updateDue||updateOpen||updateConfirm==null)return;
-  if(updateReceiptRequired){
+  final Intent confirm;final boolean receiptRequired;final int session;
+  synchronized(updateUiLock){
+   if(!updateDue||updateOpen||updateConfirm==null)return;
+   confirm=updateConfirm;receiptRequired=updateReceiptRequired;session=updateSession;
+  }
+  if(receiptRequired){
    try{
     var record=UpdatePause.store().read();
-    if(record==null||!record.committing||record.session!=updateSession||record.boot!=updateBoot()||
-       !UpdateConfirmationReceipt.markOpened(getContext(),record,updateConfirm))return;
+    if(record==null||!record.committing||record.session!=session||record.boot!=updateBoot()||
+       !UpdateConfirmationReceipt.markOpened(getContext(),record,confirm))return;
    }catch(Exception unavailable){return;}
   }
-  updateDue=false;updateOpen=true;updateAsked=System.nanoTime();
-  try{getActivity().startActivity(updateConfirm);}catch(RuntimeException unavailable){updateOpen=false;/* The next tap opens it. */}
+  android.app.Activity activity=getActivity();
+  if(activity==null||activity.isFinishing()||activity.isDestroyed())return;
+  synchronized(updateUiLock){
+   if(!updateDue||updateOpen||updateConfirm!=confirm||updateSession!=session)return;
+   updateDue=false;updateOpen=true;updateAsked=System.nanoTime();
+  }
+  try{activity.startActivity(confirm);}catch(RuntimeException unavailable){synchronized(updateUiLock){if(updateOwner==this)updateOpen=false;}/* The next tap opens it. */}
  }
  /** A resume follows a pause, so what this bridge opened above itself is gone: answered, or dismissed with no status. Time may have passed since Android asked for what it kept. */
  @Override protected void handleOnResume(){
   super.handleOnResume();
   PluginWorkers.submit(updateWorker,()->reconcileUpdate(),()->{});
-  if(updateOwner!=this)return;
-  if(updateOpen){updateOpen=false;updateAsked=System.nanoTime();}
-  try{if(updateDue&&pastConfirmation(getContext().getPackageManager().getPackageInstaller().getSessionInfo(updateSession),updateConfirm))updateDue=false;}catch(RuntimeException unanswered){/* It opens as kept. */}
-  if(!updateAutomatic)confirmUpdate();
+  boolean due,automatic;int session;Intent confirm;
+  synchronized(updateUiLock){
+   if(updateOwner!=this)return;
+   if(updateOpen){updateOpen=false;updateAsked=System.nanoTime();}
+   due=updateDue;automatic=updateAutomatic;session=updateSession;confirm=updateConfirm;
+  }
+  if(due&&confirm!=null){
+   try{
+    if(pastConfirmation(getContext().getPackageManager().getPackageInstaller().getSessionInfo(session),confirm)){
+     synchronized(updateUiLock){if(updateOwner==this&&updateSession==session&&updateConfirm==confirm)updateDue=false;}
+    }
+   }catch(RuntimeException unanswered){/* It opens as kept. */}
+  }
+  if(!automatic)confirmUpdate();
  }
  /** One download; only a verified automatic lifecycle deferral may keep it for this process. */
  private java.io.File updateApk(){return new java.io.File(getContext().getCacheDir(),"alpha-update.apk");}
@@ -678,24 +845,56 @@ public final class AlphaDevicePlugin extends Plugin {
  @Override public void load(){
   super.load();
   registerUpdateBridge();
-  PluginWorkers.submit(updateWorker,()->reconcileUpdate(),()->{});
-  // A process restart has no hint, so its orphan is swept. A sibling bridge may
-  // keep this process's deferred verified file, never a file another attempt owns.
-  if(updating.compareAndSet(false,true)){if(updateVerified==null||!java.nio.file.Files.isRegularFile(updateApk().toPath(),java.nio.file.LinkOption.NOFOLLOW_LINKS)){updateVerified=null;updateApk().delete();}updating.set(false);}
+  PluginWorkers.submit(updateWorker,()->{
+   reconcileUpdate();
+   // A process restart has no hint, so its orphan is swept. A sibling bridge may
+   // keep this process's deferred verified file, never a file another attempt owns.
+   if(updating.compareAndSet(false,true)){
+    try{if(updateVerified==null||!java.nio.file.Files.isRegularFile(updateApk().toPath(),java.nio.file.LinkOption.NOFOLLOW_LINKS)){updateVerified=null;updateApk().delete();}}
+    finally{updating.set(false);}
+   }
+  },()->{});
   androidx.core.content.ContextCompat.registerReceiver(getContext(),updateStatus,new android.content.IntentFilter(UPDATE_STATUS),androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
+  updateStatusRegistered=true;
  }
  /** The connection updateWorker opened last, for handleOnDestroy: interrupting a worker does not stop its socket I/O. */
  private volatile javax.net.ssl.HttpsURLConnection updateActive;
- /** HTTPS only: a redirect never changes protocol, and the network security config refuses cleartext. */
- private static javax.net.ssl.HttpsURLConnection openUpdateConnection(String url,int connectMillis,int readMillis)throws java.io.IOException{
-  javax.net.ssl.HttpsURLConnection connection=(javax.net.ssl.HttpsURLConnection)new java.net.URL(url).openConnection();
-  connection.setConnectTimeout(connectMillis);connection.setReadTimeout(readMillis);connection.setUseCaches(false);
-  return connection;
+ private static final int MAX_UPDATE_REDIRECTS=5;
+ private static java.net.URI requireHttpsUpdateUri(String url)throws java.io.IOException{
+  if(url==null||url.isBlank())throw new java.io.IOException("Update URL is invalid");
+  final java.net.URI uri;
+  try{uri=java.net.URI.create(url.trim());}catch(IllegalArgumentException invalid){throw new java.io.IOException("Update URL is invalid",invalid);}
+  if(!"https".equalsIgnoreCase(uri.getScheme())||uri.getHost()==null||uri.getHost().isBlank()||uri.getUserInfo()!=null)
+   throw new java.io.IOException("Update URL must use HTTPS");
+  return uri;
  }
- private javax.net.ssl.HttpsURLConnection updateConnection(String url)throws java.io.IOException{
-  javax.net.ssl.HttpsURLConnection connection=openUpdateConnection(url,20000,60000);
-  updateActive=connection;
-  return connection;
+ /** HTTPS only with manual redirect validation so redirects cannot downgrade protocol or loop indefinitely. */
+ private static javax.net.ssl.HttpsURLConnection openUpdateConnection(String url,int connectMillis,int readMillis,boolean noCache,long deadline,java.util.function.Consumer<javax.net.ssl.HttpsURLConnection> track)throws java.io.IOException{
+  java.net.URI current=requireHttpsUpdateUri(url);
+  for(int hop=0;hop<=MAX_UPDATE_REDIRECTS;hop++){
+   checkOfferDeadline(deadline);
+   javax.net.ssl.HttpsURLConnection connection=(javax.net.ssl.HttpsURLConnection)current.toURL().openConnection();
+   connection.setInstanceFollowRedirects(false);
+   connection.setConnectTimeout(connectMillis);connection.setReadTimeout(readMillis);connection.setUseCaches(false);
+   if(noCache)connection.setRequestProperty("Cache-Control","no-cache");
+   if(track!=null)track.accept(connection);
+   int status=connection.getResponseCode();
+   checkOfferDeadline(deadline);
+   if(status==301||status==302||status==303||status==307||status==308){
+    String location=connection.getHeaderField("Location");
+    connection.disconnect();
+    if(location==null||location.isBlank()||hop==MAX_UPDATE_REDIRECTS)throw new java.io.IOException("Update redirect refused");
+    final java.net.URI next;
+    try{next=current.resolve(location.trim());}catch(IllegalArgumentException invalid){throw new java.io.IOException("Update redirect invalid",invalid);}
+    current=requireHttpsUpdateUri(next.toString());
+    continue;
+   }
+   return connection;
+  }
+  throw new java.io.IOException("Update redirect refused");
+ }
+ private javax.net.ssl.HttpsURLConnection updateConnection(String url,boolean noCache)throws java.io.IOException{
+  return openUpdateConnection(url,20000,60000,noCache,0,connection->updateActive=connection);
  }
  private static final int UPDATE_MANIFEST_LIMIT=64*1024;
  private static final int UPDATE_MANIFEST_RECHECK_MILLIS=10000;
@@ -710,7 +909,6 @@ public final class AlphaDevicePlugin extends Plugin {
  /** Both discovery and automatic commit read the configured feed. A 404 withdraws the offer. */
  private static byte[] readUpdateManifest(javax.net.ssl.HttpsURLConnection connection,long deadline)throws Exception{
   try{
-   connection.setRequestProperty("Cache-Control","no-cache");
    checkOfferDeadline(deadline);
    int status=connection.getResponseCode();
    checkOfferDeadline(deadline);
@@ -744,7 +942,7 @@ public final class AlphaDevicePlugin extends Plugin {
   var result=new java.util.concurrent.FutureTask<>(()->{
    checkOfferDeadline(deadline);
    return readUpdateManifest(openUpdateConnection(BuildConfig.ALPHA_UPDATE_MANIFEST_URL,
-    UPDATE_MANIFEST_RECHECK_MILLIS,UPDATE_MANIFEST_RECHECK_MILLIS),deadline);
+    UPDATE_MANIFEST_RECHECK_MILLIS,UPDATE_MANIFEST_RECHECK_MILLIS,true,deadline,null),deadline);
   });
   if(!PluginWorkers.submit(updateOfferReader,result,()->result.cancel(false)))
    throw new java.io.IOException("Update offer reader unavailable");
@@ -761,7 +959,7 @@ public final class AlphaDevicePlugin extends Plugin {
   PluginWorkers.submit(updateWorker,()->{
    try{
     reconcileUpdate();
-    byte[] manifest=readUpdateManifest(updateConnection(BuildConfig.ALPHA_UPDATE_MANIFEST_URL),0);
+    byte[] manifest=readUpdateManifest(updateConnection(BuildConfig.ALPHA_UPDATE_MANIFEST_URL,true),0);
     call.resolve(manifest==null?new JSObject():new JSObject()
       .put("manifest",new String(manifest,java.nio.charset.StandardCharsets.UTF_8))
       .put("manifestSha256",manifestDigest(manifest)));
@@ -795,9 +993,10 @@ public final class AlphaDevicePlugin extends Plugin {
  /** The fresh bytes must still be the discovery response and offer this exact update. */
  private void requireCurrentUpdateOffer(String manifestSha256,String apkUrl,String sha256,long size,long versionCode,String signer)throws UpdateOfferUnavailable{
   try{
+   if(signer==null)throw new UpdateOfferUnavailable("offer-unavailable",null);
    byte[] manifest=readFinalUpdateManifest();
    if(manifest==null)throw new UpdateOfferUnavailable("offer-withdrawn",null);
-   if(!manifestSha256.equals(manifestDigest(manifest))){
+   if(manifestSha256!=null&&!manifestSha256.equals(manifestDigest(manifest))){
     // The renderer can distinguish a valid replacement from malformed bytes using its strict parser.
     String decoded=java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(manifest)).toString();
     throw new UpdateOfferUnavailable("offer-response-changed",decoded);
@@ -847,10 +1046,17 @@ public final class AlphaDevicePlugin extends Plugin {
    return;
   }
   final String manifestSha256=call.getString("manifestSha256");
-  if(automatic&&(manifestSha256==null||!manifestSha256.matches("[0-9a-f]{64}"))){
+  if(manifestSha256!=null&&!manifestSha256.matches("[0-9a-f]{64}")){
+   call.resolve(new JSObject().put("status","offer-unavailable"));return;
+  }
+  if(automatic&&manifestSha256==null){
    call.resolve(new JSObject().put("status","offer-unavailable"));return;
   }
   final String apkUrl=call.getString("apkUrl"),sha256=call.getString("sha256");final long size=call.getData().optLong("sizeBytes"),versionCode=call.getData().optLong("versionCode");
+  if(apkUrl==null||sha256==null||!sha256.matches("[0-9a-f]{64}")||size<=0||size>UPDATE_MAX_BYTES||versionCode<=BuildConfig.VERSION_CODE){
+   call.reject("Update request is invalid");return;
+  }
+  try{requireHttpsUpdateUri(apkUrl);}catch(java.io.IOException invalid){call.reject("Update request is invalid");return;}
   final int seen=updatesCommitted.get();
   PluginWorkers.submit(updateWorker,()->{
    if(!updating.compareAndSet(false,true)){call.resolve();return;}
@@ -885,7 +1091,11 @@ public final class AlphaDevicePlugin extends Plugin {
       if(!automatic)reopenUpdateConfirmation(pending);
      }else{
       if(UpdatePause.store().read()!=null)throw new java.io.IOException("Update outcome is pending");
+      String signer=appSigner(getContext());
+      if(signer==null)throw new java.io.IOException("Update does not match this installation");
       if(automatic&&!automaticUpdateReady()){keepApk=cacheKey.equals(updateVerified);throw new java.io.IOException("Automatic update deferred");}
+      // Verify against the live official update feed before downloading any caller-supplied URL.
+      requireCurrentUpdateOffer(manifestSha256,apkUrl,sha256,size,versionCode,signer);
       long deadline=System.nanoTime()+UPDATE_DEADLINE_NANOS;
       boolean cached=false;
       if(cacheKey.equals(updateVerified)&&java.nio.file.Files.isRegularFile(apk.toPath(),java.nio.file.LinkOption.NOFOLLOW_LINKS)){
@@ -896,7 +1106,7 @@ public final class AlphaDevicePlugin extends Plugin {
       if(!cached){
        updateVerified=null;
        if(java.nio.file.Files.exists(apk.toPath(),java.nio.file.LinkOption.NOFOLLOW_LINKS)&&!apk.delete())throw new java.io.IOException("Update cache unavailable");
-       javax.net.ssl.HttpsURLConnection connection=updateConnection(apkUrl);
+       javax.net.ssl.HttpsURLConnection connection=updateConnection(apkUrl,false);
        try{
         if(connection.getResponseCode()!=200)throw new java.io.IOException("Update unavailable");
         try(java.io.InputStream in=connection.getInputStream();java.io.OutputStream out=java.nio.file.Files.newOutputStream(apk.toPath(),java.nio.file.StandardOpenOption.CREATE_NEW,java.nio.file.StandardOpenOption.WRITE,java.nio.file.LinkOption.NOFOLLOW_LINKS)){copyVerified(in,out,size,sha256,deadline);}
@@ -906,12 +1116,11 @@ public final class AlphaDevicePlugin extends Plugin {
       android.content.pm.PackageInfo archive=getContext().getPackageManager().getPackageArchiveInfo(
        apk.getPath(),PackageManager.GET_PERMISSIONS|PackageManager.GET_SIGNING_CERTIFICATES);
       if(archive==null||!getContext().getPackageName().equals(archive.packageName)||archive.getLongVersionCode()!=versionCode||versionCode<=BuildConfig.VERSION_CODE)throw new java.io.IOException("Update does not match its manifest");
-      String signer=appSigner(getContext());
       // The release verifier requires READ_CONTACTS only in the launcher manifest.
       // Read that existing flavor marker from the APK, independent of the offer.
       if(archive.requestedPermissions==null||
        !java.util.Arrays.asList(archive.requestedPermissions).contains("android.permission.READ_CONTACTS")||
-       signer==null||!signer.equals(signingRoot(archive.signingInfo)))
+       !signer.equals(signingRoot(archive.signingInfo)))
        throw new java.io.IOException("Update does not match this installation");
       throwIfDestroyed();
       String binding="alpha-update://"+getContext().getPackageName()+"/"+versionCode+"/"+sha256+"/"+signer+"/"+updateBoot()+"/intent"+(automatic?"/automatic":"");
@@ -939,10 +1148,10 @@ public final class AlphaDevicePlugin extends Plugin {
        pauseOwned=true;UpdatePause.acquire(preparation.id,id,versionCode,sha256,updateBoot());
        UpdatePause.stop();
        throwIfDestroyed();
+       if(automatic&&!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
+       requireCurrentUpdateOffer(manifestSha256,apkUrl,sha256,size,versionCode,signer);
+       throwIfDestroyed();
        if(automatic){
-        if(!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
-        requireCurrentUpdateOffer(manifestSha256,apkUrl,sha256,size,versionCode,signer);
-        throwIfDestroyed();
         if(!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
         if(!selfUpdateAdmitted(getContext()))throw new UpdateInstallPermissionRequired();
        }
@@ -955,10 +1164,11 @@ public final class AlphaDevicePlugin extends Plugin {
        // Owned before commit, because Android's status can arrive as soon as commit reaches it. From here nothing proves refusal:
        // a commit can succeed ahead of a lost reply and the close after it can throw, and no exception class means the same on
        // every Android, so the session and its owner stay, and what happened comes from Android's status or list.
-       updateAutomatic=automatic;
-       updateOwner=this;updateSession=id;updateConfirm=null;updateReceiptRequired=false;updateDue=false;updateOpen=false;updateAsked=System.nanoTime();
-       // A destroy past the last check cannot stop this commit, and a dead owner would keep every live receiver from its status. handleOnDestroy interrupts ahead of reading updateOwner, so one side always sees the other.
-       if(Thread.currentThread().isInterrupted())updateOwner=null;
+       synchronized(updateUiLock){
+        updateAutomatic=automatic;
+        updateOwner=Thread.currentThread().isInterrupted()?null:this;
+        updateSession=id;updateConfirm=null;updateReceiptRequired=false;updateDue=false;updateOpen=false;updateAsked=System.nanoTime();
+       }
        commitAttempted=true;
        session.commit(status);
        updatesCommitted.incrementAndGet();
@@ -987,8 +1197,29 @@ public final class AlphaDevicePlugin extends Plugin {
    catch(Exception unavailable){call.reject("Update unavailable");}
   },()->call.reject("Update unavailable"));
  }
- /** Stops an update download too: disconnect only closes the raw socket, which Android allows on this main thread. A session outlives its owner, for a later tap on any bridge. */
- @Override protected void handleOnDestroy(){retireUpdateBridge();UpdateActivation pending=activation;if(pending!=null&&pending.owner==this)pending.ready.complete(false);diagnosticsWorker.shutdown();updateWorker.shutdownNow();javax.net.ssl.HttpsURLConnection active=updateActive;if(active!=null)active.disconnect();getContext().unregisterReceiver(updateStatus);if(updateOwner==this){updateOwner=null;updateDue=false;updateOpen=false;}super.handleOnDestroy();}
+ /** Stops an update download off the main thread. A session outlives its owner, for a later tap on any bridge. */
+ @Override protected void handleOnDestroy(){
+  retireUpdateBridge();
+  UpdateActivation pending=activation;
+  if(pending!=null&&pending.owner==this)pending.ready.complete(false);
+  diagnosticsWorker.shutdown();
+  updateWorker.shutdownNow();
+  javax.net.ssl.HttpsURLConnection active=updateActive;
+  updateActive=null;
+  if(active!=null){
+   Thread closer=new Thread(()->{try{active.disconnect();}catch(RuntimeException ignored){}},"AlphaUpdateDisconnect");
+   closer.setDaemon(true);
+   closer.start();
+  }
+  if(updateStatusRegistered){
+   updateStatusRegistered=false;
+   try{getContext().unregisterReceiver(updateStatus);}catch(IllegalArgumentException ignored){}
+  }
+  synchronized(updateUiLock){
+   if(updateOwner==this){updateOwner=null;updateDue=false;updateOpen=false;}
+  }
+  super.handleOnDestroy();
+ }
  // End of updater methods for host replay.
  /** Camera's volume-key shutter: while on, MainActivity takes the volume keys as Camera's shutter. */
  @PluginMethod public void setVolumeShutter(PluginCall call){
@@ -1018,7 +1249,8 @@ public final class AlphaDevicePlugin extends Plugin {
   int feedback=AlphaHaptics.constant(call.getString("kind"),Build.VERSION.SDK_INT);if(feedback<0){call.reject("Unknown feedback");return;}
   android.app.Activity activity=getActivity();if(activity==null||getBridge()==null){call.reject("Alpha view is unavailable");return;}
   activity.runOnUiThread(()->{
-   android.view.View view=getBridge().getWebView();
+   com.getcapacitor.Bridge bridge=getBridge();
+   android.view.View view=bridge==null?null:bridge.getWebView();
    if(view==null||activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
    JSObject result=new JSObject();result.put("performed",view.performHapticFeedback(feedback));call.resolve(result);
   });

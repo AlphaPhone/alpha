@@ -1,0 +1,46 @@
+// spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+import { Machine as Conversation, asksWarmUp, raisedFromTheBar, type WarmTrigger } from "../../gen/app__assistant.effect.vibe"
+import { type Detent, Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { ask } from "../platform/index.vibe"
+import { VoiceBridge } from "../platform/index.vibe"
+import { started } from "../runtime/index.vibe"
+import { MediaReview } from "./media-review.vibe"
+
+schema Answering { readonly canRespond: boolean }
+
+/** How long one warm-up may take, the device's enrollment included, before Alpha stops it; the agent answers at once and warms on its own time. */
+const bound = "15 seconds"
+
+/** Ask the agent to warm its model, if its status says it can answer and no sensitive screen shows, with the enrolled device's headers. */
+effect function warmUp(trigger: WarmTrigger): void!!(Agent | MediaReview | Conversation) {
+  const answering = ask(Agent, HttpClientRequest.get("/api/status"), Answering) catch () => ({ canRespond: false })
+  const { context } = try (try Conversation).get()
+  if (!asksWarmUp(trigger, answering.canRespond, context.sensitive)) return
+  const enrolled = try (try MediaReview).session()
+  const { runtime } = try Agent
+  try ignore(tryPromise(() => runtime.request("/api/turns/warm", {}, enrolled?.headers)))
+}
+
+/** One warm-up, detached and bounded as a whole: no trigger and no screen waits for it, and it never outlives its bound. */
+effect function asked(trigger: WarmTrigger): void!!(Agent | MediaReview | Conversation) {
+  fork.detached ignore(timeout(warmUp(trigger), bound))
+}
+
+/** Each moment the owner may be about to talk: Ask Alpha loaded at launch, Alpha back in the foreground, the phone's sign-in settled, Ask Alpha raised from its bar. The only warm-up of the agent; Talk's warms speech alone. */
+export const agentWarmUp = started(effect {
+  const device = try Device
+  const shell = try Shell
+  const signIns = Stream.map((try VoiceBridge).signIns, (): WarmTrigger => "SignedIn")
+  try asked("Launched")
+  let detent: Detent = (try shell.get()).assistant
+  const foreground = Stream.map(Stream.filter(device.visible, (shown) => shown), (): WarmTrigger => "Foreground")
+  const raisedStates = Stream.filter(shell.changes, (state) => {
+    const before = detent
+    detent = state.assistant
+    return raisedFromTheBar(before, state.assistant)
+  })
+  const raised = Stream.map(raisedStates, (): WarmTrigger => "Raised")
+  try Stream.runForEach(Stream.mergeAll([foreground, signIns, raised], { concurrency: "unbounded" }), asked)
+}, "warming the agent on launch, foreground, sign-in and Ask Alpha raised")

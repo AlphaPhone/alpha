@@ -2,16 +2,23 @@ package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.notifications.HostNoticePoster;
 import ai.eliza.plugins.notifications.NoticeDelivery;
+import ai.eliza.plugins.notifications.NoticeOwner;
 import ai.eliza.plugins.notifications.NoticeRoutes;
 import ai.eliza.plugins.notifications.NotificationMirror;
 import ai.eliza.plugins.notifications.NotificationMirrorConfig;
 import ai.eliza.plugins.notifications.NotificationsHostPlugin;
+import ai.eliza.plugins.signin.CredentialPolicy.Custody;
+import ai.eliza.plugins.signin.DeviceCredentialStore;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import org.json.JSONObject;
 
 @CapacitorPlugin(name="ElizaNotifications")
 public final class AlphaNotificationsPlugin extends NotificationsHostPlugin {
  static final NotificationMirror MIRROR=new NotificationMirror(new NotificationMirrorConfig(
-   "alpha-notification-access","alpha.notification.history.v1","notification-history.enc",AlphaNotificationListener.class));
+   "alpha-notification-access","alpha.notification.history.v1","notification-history.enc",AlphaNotificationListener.class),AlphaNotificationOwner::admitted);
  private static final NoticeDelivery.Config DELIVERY=new NoticeDelivery.Config(
    "workflow-notice-delivery:v1","workflow-approval-notices:v1","Workflow step waiting for approval",
    "Open Alpha Phone to review it. Nothing runs until you approve it on this phone.",7L*86400000);
@@ -37,4 +44,34 @@ public final class AlphaNotificationsPlugin extends NotificationsHostPlugin {
  @Override protected NoticeRoutes.Config routesConfig(){return ROUTES;}
  @Override protected HostNoticePoster.Config posterConfig(){return POSTER;}
  @Override protected NotificationMirror mirror(){return MIRROR;}
+
+ private ResidentDigestChannel.Session noticeSession()throws Exception{
+  var reader=new AlphaAgentCredentials(getContext()).reader();
+  if(!(reader instanceof DeviceCredentialStore store))throw new SecurityException();
+  var status=store.state();
+  if(status.custody() instanceof Custody.SignedOut||status.custody() instanceof Custody.Expired){
+   if(store.generation()!=status.generation())throw new SecurityException();
+   return null;
+  }
+  return new ResidentDigestChannel(store,store::generation).openAccount();
+ }
+
+ @Override protected void requireWorkflowNoticeOwner(JSONObject owner)throws Exception{
+  var session=noticeSession();
+  if(session==null&&owner==null)return;
+  if(session==null||owner==null||!NoticeOwner.matches(owner,new JSONObject().put("origin","agent:local")
+   .put("ownerId",session.organizationId()+":"+session.scope().ownerId()).put("agentId",session.scope().agentId())))throw new SecurityException();
+  session.check();
+ }
+
+ @PluginMethod public void workflowApprovalScope(PluginCall call){
+  noticeWork(call,"Workflow notification owner is unavailable.",()->{
+   var session=noticeSession();
+   requireNoticeForeground();
+   if(session==null){call.resolve(new JSObject().put("kind","signedOut"));return;}
+   session.check();
+   call.resolve(new JSObject().put("kind","owned").put("userId",session.scope().ownerId())
+     .put("organizationId",session.organizationId()).put("agentId",session.scope().agentId()).put("epoch",session.epoch()));
+  });
+ }
 }

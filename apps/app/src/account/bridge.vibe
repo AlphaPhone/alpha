@@ -24,7 +24,7 @@ import type * as ProviderGen from "../../gen/app__account__provider.ts"
 import type * as SessionGen from "../../gen/app__account__session.ts"
 import type * as SignInGen from "../../gen/app__account__signIn.ts"
 import { Cloud, cloudPlugin, registered, signInAccounts, WiFi } from "../platform/index.vibe"
-import { accountIdNumber, toSeconds } from "./clock.vibe"
+import { accountIdNumber, toMillis } from "./clock.vibe"
 
 module nativeBridge {
   /** Opens a URL in a browser window when running outside the native Android shell. @throws {never} */
@@ -370,7 +370,7 @@ export function identityFromSignInAccount(account: SignInAccount): AccountIdenti
     email: "",
     phone: "",
     name: "",
-    endsAt: toSeconds(account.keyExpiresAt),
+    endsAt: toMillis(account.keyExpiresAt),
   }
 }
 
@@ -392,7 +392,7 @@ export function verdictFromNative(verdict: SignInReceipt["verdict"]): {
   if (verdict.kind === "FactorAsked") {
     const first = verdict.factors[0]
     const factor: SignInGen.Factor = first === "sms" ? "Sms" : "Totp"
-    return { verdict: "NeedsSecond", account: 0, factor, credentialId: "", endsAt: toSeconds(verdict.expiresAt) }
+    return { verdict: "NeedsSecond", account: 0, factor, credentialId: "", endsAt: toMillis(verdict.expiresAt) }
   }
   if (verdict.kind === "TryAgain") {
     const retry = verdict.retry

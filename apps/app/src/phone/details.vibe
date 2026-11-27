@@ -2,9 +2,10 @@
 import type { PhoneLine, TelephonyStatus } from "@elizaos/os-bridges"
 import * as Info from "../../gen/app__phone__details.effect.vibe"
 import type { Effect as Out, Event, Holders, Line, Network, VoicemailSetup } from "../../gen/app__phone__details.effect.vibe"
-import { type Telephony, telephony, Device } from "../platform/index.vibe"
+import { type Telephony, telephony } from "../platform/index.vibe"
 import { Machine as Pages } from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/index.vibe"
 import { type Job, answer, hearing, reacting, together } from "../runtime/index.vibe"
 
 const networks = {

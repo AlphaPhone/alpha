@@ -15,7 +15,7 @@ export type StartupAssistantSurfaceProps = {
  */
 export function StartupAssistantSurface({ children, onClose }: StartupAssistantSurfaceProps) {
   return (
-    <div className="flex size-full min-h-0 flex-1 flex-col bg-background pt-[env(safe-area-inset-top)] text-foreground">
+    <div className="flex size-full min-h-0 flex-1 flex-col bg-background pt-[var(--alpha-safe-top)] text-foreground">
       <div className="flex shrink-0 justify-end px-2 pt-2">
         <Button variant="ghost" size="icon" aria-label="Close" disabled={!onClose} onClick={onClose}>
           <X />

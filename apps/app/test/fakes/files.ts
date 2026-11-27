@@ -1,6 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesAccess, StorageEntry, StorageVolume, TrashEntry, SelectedDocumentsPlugin } from "@elizaos/os-bridges";
-import { type Faked, plugin } from "./phone.ts";
+import type { StorageAttachmentRow, StorageAttachmentTarget } from "../../src/platform/documents.vibe";
+import { answered, type Faked, plugin } from "./phone.ts";
 
 /** One file or folder the fake storage holds, by its volume and its path from that volume's root. */
 export interface Stored {
@@ -12,10 +13,11 @@ export interface Stored {
   modified: number;
 }
 
-/** A file in a volume's Trash: what it was, and the id the phone gave it. */
+/** A file in a volume's Trash: what it was, any nested descendants if a folder, and the id the phone gave it. */
 interface Binned {
   readonly id: string;
   readonly was: Stored;
+  readonly descendants?: Stored[];
   readonly deletedAt: number;
 }
 
@@ -56,6 +58,15 @@ export interface FilesScene {
   selectedByPicker: string | undefined;
   pickerRenameNeedsReselection: boolean;
   readonly selections: Map<string, DocumentSelection>;
+  /** A PDF page comes back as a drawn picture, as Android's renderer gives one, rather than an address no page can load. */
+  drawsPages: boolean;
+}
+
+/** A drawn PDF page: white paper with the file's name, lines of text and its page number, as an image the page can load. */
+function drawnPage(path: string, page: number): string {
+  const lines = [88, 92, 80, 95, 70, 90, 84, 60].map((width, at) => `<rect x='56' y='${160 + at * 28}' width='${width * 5}' height='10' rx='5' fill='#ddd'/>`).join("");
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='612' height='792'><rect width='612' height='792' fill='#fff'/><text x='56' y='110' font-family='Georgia,serif' font-size='30' fill='#1a1a1a'>${leaf(path)}</text>${lines}<text x='572' y='766' font-family='sans-serif' font-size='14' text-anchor='end' fill='#555'>${page}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -74,14 +85,13 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false, selections: new Map(),
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false, selections: new Map(), drawsPages: false,
   };
 }
 
 const parent = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 const leaf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const join = (folder: string, name: string) => (folder === "" ? name : `${folder}/${name}`);
-const entry = (one: Stored): StorageEntry => ({ path: one.path, name: leaf(one.path), directory: one.directory, mimeType: one.mimeType, size: one.size, modified: one.modified });
 
 function authorize(scene: FilesScene, { volume, path }: Stored, canRename: boolean): string {
   const id = crypto.randomUUID();
@@ -99,6 +109,8 @@ export function elizaFiles(scene: FilesScene): Faked {
     const find = (volume: string, path: string) => scene.stored.find((one) => one.volume === volume && one.path === path);
     const inside = (volume: string, path: string) => scene.stored.filter((one) => one.volume === volume && (one.path === path || one.path.startsWith(`${path}/`)));
     const called = (method: string) => scene.calls.push(method);
+    const entry = (one: Stored): StorageEntry => ({ path: one.path, name: leaf(one.path), directory: one.directory, mimeType: one.mimeType, size: one.size, modified: one.modified,
+      ...(one.directory ? { children: scene.stored.filter((other) => other.volume === one.volume && other.path !== one.path && parent(other.path) === one.path).length } : {}) });
     const identity = (one: Stored) => `${one.path}@${one.modified}:${one.size}`.padEnd(43, "_").slice(0, 43).replace(/[^A-Za-z0-9_-]/g, "_");
     const unchanged = (volume: string, paths: readonly string[], reviewed: readonly string[] | undefined) =>
       (path: string) => { const found = find(volume, path); return reviewed === undefined || (found !== undefined && reviewed[paths.indexOf(path)] === identity(found)); };
@@ -158,8 +170,8 @@ export function elizaFiles(scene: FilesScene): Faked {
       },
       storageReviewedIdentities({ volume, paths }) {
         called("reviewed");
-        const found = paths.map((path) => find(on(volume), path));
-        return Promise.resolve(found.every((one) => one !== undefined) ? { status: "ready", reviewed: found.map((one) => identity(one)) } : { status: "missing" });
+        const found = paths.map((path) => find(on(volume), path)).filter((one): one is Stored => one !== undefined);
+        return Promise.resolve(found.length === paths.length ? { status: "ready", reviewed: found.map((one) => identity(one)) } : { status: "missing" });
       },
       storageTransfer({ volume, paths, dest, copy, reviewed }) {
         called(copy ? "copy" : "move");
@@ -189,9 +201,11 @@ export function elizaFiles(scene: FilesScene): Faked {
           const found = find(on(volume), path);
           if (!found) return { path, status: "missing" };
           if (!same(path)) return { path, status: "changed" };
-          const id = String(scene.trash.length + 1);
-          for (const one of inside(on(volume), path)) scene.stored.splice(scene.stored.indexOf(one), 1);
-          scene.trash.push({ id, was: found, deletedAt: scene.now });
+          const id = String(Math.max(0, ...scene.trash.map((one) => Number(one.id) || 0)) + 1);
+          const all = inside(on(volume), path);
+          const descendants = all.filter((one) => one !== found);
+          for (const one of all) scene.stored.splice(scene.stored.indexOf(one), 1);
+          scene.trash.push({ id, was: found, descendants, deletedAt: scene.now });
           return { path, status: "trashed", to: id };
         }) });
       },
@@ -210,7 +224,7 @@ export function elizaFiles(scene: FilesScene): Faked {
           const found = scene.trash.find((one) => one.id === id && one.was.volume === on(volume));
           if (!found) return { path: id, status: "missing" };
           scene.trash.splice(scene.trash.indexOf(found), 1);
-          scene.stored.push(found.was);
+          scene.stored.push(found.was, ...(found.descendants ?? []));
           return { path: id, status: "restored", to: found.was.path };
         }) });
       },
@@ -227,10 +241,12 @@ export function elizaFiles(scene: FilesScene): Faked {
       },
       storageOpen({ path }) {
         called("open");
+        if (scene.refusing.includes("storageOpen")) return Promise.resolve({ status: "unsupported" });
         scene.opened.push(path);
         return Promise.resolve({ status: "opened", count: 1 });
       },
       storageSelect({ volume, path }) {
+        called("storageSelect");
         if (denied()) return Promise.resolve(refused());
         const found = find(on(volume), path);
         return Promise.resolve(found && !found.directory ? {
@@ -256,7 +272,12 @@ export function selectedDocuments(scene: FilesScene): Faked {
   return plugin<SelectedDocumentsPlugin & {
     pickSelected(): Promise<unknown>;
     attachmentSelected(options: { selectionId: string }): Promise<unknown>;
+    reviewStorageAttachment(options: StorageAttachmentRow): Promise<unknown>;
+    readStorageAttachment(options: StorageAttachmentTarget & { reviewed: string }): Promise<unknown>;
   }, Record<string, never>>(() => {
+    const reviewed = new Map<string, { file: Stored; revision: number }>();
+    const storedAttachment = ({ path, volume = "primary" }: StorageAttachmentTarget) =>
+      scene.access === "granted" ? scene.stored.find((file) => !file.directory && file.volume === volume && file.path === path) : undefined;
     const held = (selectionId: string) => {
       const selection = scene.selections.get(selectionId);
       return selection === undefined ? undefined : scene.stored.find((one) =>
@@ -277,8 +298,30 @@ export function selectedDocuments(scene: FilesScene): Faked {
       attachmentSelected({ selectionId }) {
         const found = held(selectionId);
         if (!found) return Promise.reject(new Error("Access ended"));
-        return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64: btoa(scene.texts[found.path] ?? `The words of ${leaf(found.path)}`) });
+        const raw = scene.texts[found.path] ?? `The words of ${leaf(found.path)}`;
+        const hasWideChar = Array.from(raw).some((ch) => (ch.codePointAt(0) ?? 0) > 0xff);
+        const dataBase64 = hasWideChar
+          ? btoa(Array.from(new TextEncoder().encode(raw), (byte) => String.fromCharCode(byte)).join(""))
+          : btoa(raw);
+        return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64 });
       },
+      reviewStorageAttachment: (input) => answered(() => {
+        const file = storedAttachment(input);
+        if (!file || leaf(file.path) !== input.name || file.mimeType !== input.mimeType || file.size !== input.size || file.modified !== input.modified) {
+          throw new Error("The listed file changed");
+        }
+        const receipt = crypto.randomUUID().padEnd(43, "_");
+        reviewed.set(receipt, { file, revision: file.modified });
+        return { reviewed: receipt };
+      }),
+      readStorageAttachment: (input) => answered(() => {
+        const review = reviewed.get(input.reviewed);
+        const file = storedAttachment(input);
+        if (!file || !review || review.file !== file || review.revision !== file.modified) throw new Error("The reviewed file changed");
+        const text = scene.texts[file.path];
+        if (text === undefined || text.length !== file.size) throw new Error("Fixture attachment bytes unavailable");
+        return { name: leaf(file.path), mimeType: file.mimeType, dataBase64: btoa(text) };
+      }),
       describeSelected({ selectionId }) {
         const found = held(selectionId);
         return Promise.resolve(found ? described(selectionId, found) : { status: "unavailable", message: "" });
@@ -299,9 +342,10 @@ export function selectedDocuments(scene: FilesScene): Faked {
       },
       pdfSelected({ selectionId, page }) {
         const found = held(selectionId);
-        return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
+        return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: scene.drawsPages ? drawnPage(found.path, page) : `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
       },
       readSelected({ selectionId }) {
+        if (scene.refusing.includes("readSelected")) return Promise.resolve({ status: "failed", message: "" });
         const found = held(selectionId);
         return Promise.resolve(found ? { status: "read", message: "", text: scene.texts[found.path] ?? `The words of ${leaf(found.path)}`, mimeType: found.mimeType, bytes: found.size } : { status: "unavailable", message: "" });
       },

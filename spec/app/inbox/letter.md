@@ -21,8 +21,8 @@ a draft begins at revision 1.
 A recipient is counted invalid until its address is one Gmail accepts.
 Attachments are counted with their total size in MiB. A draft is handed
 to one operation at a time, to be sent, saved to Gmail or deleted from
-it; `doubt` names a send whose outcome is unknown, with the revision it
-carried.
+it. `copyAttempt` names an unknown Gmail save or deletion. `doubt`
+names a send whose outcome is unknown, with the revision it carried.
 
 ```quint
 import draft as D from "../../kit/draft"
@@ -34,7 +34,7 @@ type Policy = { files: int, mib: int }
 type Letter = {
   id: int, session: int, kind: Kind, account: int, toReplyTo: bool,
   recipients: int, invalid: int, attachments: int, mib: int, textOnly: bool,
-  draft: D::Draft, revision: int, gmail: int, unsure: bool, verified: int,
+  draft: D::Draft, revision: int, gmail: int, unsure: bool, copyAttempt: int, verified: int,
   sending: int, use: Use, sent: int, doubt: Doubt,
 }
 
@@ -43,7 +43,7 @@ pure val noDoubt: Doubt = { attempt: 0, revision: 0 }
 pure val blank: Letter = {
   id: 0, session: 0, kind: Fresh, account: 0, toReplyTo: false,
   recipients: 0, invalid: 0, attachments: 0, mib: 0, textOnly: false,
-  draft: D::blank, revision: 0, gmail: 0, unsure: false, verified: 0,
+  draft: D::blank, revision: 0, gmail: 0, unsure: false, copyAttempt: 0, verified: 0,
   sending: 0, use: ToSend, sent: 0, doubt: noDoubt,
 }
 
@@ -73,6 +73,9 @@ pure def lawAttachingStaysWithinTheLimit(attachments: int, mib: int, policy: Pol
 
 A new message starts empty. `others` counts the addresses on To and Cc
 other than the owner and the one replied to.
+A forwarded file stays tied to its original message, revision and part.
+Gmail must confirm the names, types and sizes of those same parts before
+Alpha dispatches a send or a save.
 
 ```quint
 pure def begin(id: int, session: int, kind: Kind, account: int, others: int, replyTo: bool, files: int, mib: int, forwardable: bool, policy: Policy): Letter =
@@ -192,21 +195,22 @@ pure def unsent(l: Letter): Letter =
   { ...l, sending: 0, draft: if (l.draft.sync == D::Saving) { ...l.draft, sync: D::Edited } else l.draft }
 
 pure def lost(l: Letter): Letter =
-  { ...l, sending: 0, unsure: true, verified: 0, draft: if (l.draft.sync == D::Saving) { ...l.draft, sync: D::Edited } else l.draft }
+  { ...l, sending: 0, unsure: true, copyAttempt: l.sending, verified: 0, draft: if (l.draft.sync == D::Saving) { ...l.draft, sync: D::Edited } else l.draft }
 ```
 
 ### A draft unsure of its Gmail copy is not saved again until Gmail's drafts are read
 
-What the read finds is taken as the save landing; finding nothing means
-it did not, and a save may create the copy.
+Only the receipt of that operation, on that account, settles it. An
+unanswered receipt leaves the draft unsure. A confirmed deletion
+removes the Gmail copy and leaves the open draft on the phone.
 
 ```quint
 pure def found(l: Letter, held: int, gmail: int): Letter = {
-  ...l, unsure: false, gmail: if (l.gmail == 0) gmail else l.gmail,
+  ...l, unsure: false, copyAttempt: 0, gmail: if (l.gmail == 0) gmail else l.gmail,
   draft: { ...l.draft, base: held, sync: if (l.draft.edits == l.draft.carried) D::Kept else D::Edited },
 }
 
-pure def notFound(l: Letter): Letter = { ...l, unsure: false }
+pure def notFound(l: Letter): Letter = { ...l, unsure: false, copyAttempt: 0 }
 
 pure def lawALostSaveIsNotRepeated(edits: int, base: int): bool =
   not(saveable(lost(handed({ ...blank, draft: { sync: D::Edited, edits: edits, carried: 0, base: base } }, 1, ToSave))))
@@ -236,7 +240,7 @@ pure def lawAnEditedDraftIsNotForgotten(revision: int): bool =
   not(forgettable(edited({ ...blank, revision: revision }), revision))
 ```
 
-### A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone
+### The send's own confirmed receipt counts as sent and changes what the draft shows; only a rejection clears the uncertainty as unsent
 
 ```quint
 pure def foundSent(l: Letter): Letter = { ...l, sent: l.doubt.revision, doubt: noDoubt, revision: l.revision + 1 }

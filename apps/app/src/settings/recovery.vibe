@@ -3,8 +3,11 @@ import * as Records from "../../gen/app__account__records.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
-import type { AgentStatus, EnvironmentName } from "@elizaos/os-bridges"
-import { Agent, Device, SystemSettings, signInAccounts } from "../platform/index.vibe"
+import type { AgentStatus } from "@elizaos/os-bridges"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { SystemSettings } from "../platform/index.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/index.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
 
 export const needsRecords = (status: AgentStatus | undefined): boolean => status?.state === "failed" && status.failure === "storage"
@@ -19,7 +22,7 @@ export const activityInFront = effect {
 }
 
 effect function owner(): (string | undefined)!! {
-  const signIn = timeout(tryPromise(() => signInAccounts().status({ environment: "production" as EnvironmentName })), "5 seconds") catch () => undefined
+  const signIn = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
   if (signIn === undefined) return undefined
   const account = signIn.account
   return account.kind === "signedIn" ? JSON.stringify([account.organizationId, account.userId]) : "local"
@@ -79,6 +82,7 @@ effect function archive(attempt: number): Records.Event!!Ports {
   const host = (try Agent).life
   const custody = try RecoveryAuthority
   const held = try custody.review()
+  try custody.hold(undefined)
   const model = try Records.Machine
   const account = try owner()
   const before = host.status() catch () => undefined
@@ -86,7 +90,6 @@ effect function archive(attempt: number): Records.Event!!Ports {
   const ended = (result: Records.Archived): Records.Event => ({ type: "archived", ticket: attempt, result })
   if (held === undefined || !now.showing || !Records.canArchived(now, attempt) || held.check !== now.review.ticket
     || held.count !== now.kept || held.owner !== account || before?.epoch !== held.epoch || !needsRecords(before) || !(try activityInFront)) return ended("NoneArchived")
-  try custody.hold(undefined)
   const receipt = timeout(host.archive(held.token), "30 seconds") catch () => undefined
   if (receipt?.kind !== "archived" || receipt.archivedCount !== held.count) return ended("ArchiveUnknown")
   try custody.clear({ owner: held.owner, epoch: held.epoch })

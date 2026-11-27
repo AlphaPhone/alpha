@@ -8,7 +8,8 @@ phone has) and which tiles are shown; this machine keeps the list, the read
 of what was saved and the save on its way.
 
 Old saved names, such as the Workflows tile saved under its earlier name,
-are turned into today's tiles by the storage service as it parses the
+or Wallet saved as `alpha:inventory` by a development build of that time
+(Alpha 45f6bed30, `alpha-product-registration.ts:308`, `:326`), are turned into today's tiles by the storage service as it parses the
 record; a record it cannot parse is unreadable. An earlier Alpha's record
 (`alpha.launcher.favorites.v1`, its versions 1 and 2) is read only while
 Home has no record of its own, so it is taken up once: the first save
@@ -50,16 +51,25 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
   match tile { | Own(o) => S::available(shell, o.view) | Installed(i) => apps.contains(i.app) }
 ```
 
-### Home's defaults are every one of Alpha's own apps, in Home order, and Home holds at most 4096 tiles
+### Home's defaults use the product's Home order, and Home holds at most 4096 tiles
+
+The order is the one the owner approved on the Sunday demo build (Alpha
+45f6bed30, `apps/app/src/product/alpha-product-registration.ts:308`). That
+build's Home held only the apps its install admitted, and it admitted no
+Wallet ("Wallet is removed from MVP", `apps/app/src/prototype/mvp-features.ts:4`,
+`:17`; `prototype/model.js:4210`), so the demo's Home has thirteen apps with
+Workflows right after Files. Wallet, like Telegram and Slack, starts in Apps
+until the owner adds it to Home.
 
 ```quint
 pure val homeOrder: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Clock, S::Reminders, S::Browser, S::Camera, S::Photos,
+  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
   S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
+
+pure val homeCatalog: List[S::View] = homeOrder.append(S::Wallet).append(S::Telegram).append(S::Slack)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
-  Own({ view: S::Clock }), Own({ view: S::Reminders }),
   Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
   Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
   Own({ view: S::Settings }))
@@ -77,6 +87,14 @@ pure val noTile: Tile = Installed({ app: "" })
 pure def lawTheDefaultsAreHomeOrder(i: int): bool =
   defaults.length() == homeOrder.length()
     and ((0 <= i and i < homeOrder.length()) implies shows(defaults.nthOr(i, noTile), homeOrder.nthOr(i, S::Phone)))
+
+pure def lawTheCatalogOffersEveryDefaultAndOptionalApp(i: int): bool =
+  homeCatalog.length() == homeOrder.length() + 3
+    and not(homeOrder.includes(S::Wallet))
+    and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Wallet
+    and homeCatalog.nthOr(homeOrder.length() + 1, S::Phone) == S::Telegram
+    and homeCatalog.nthOr(homeOrder.length() + 2, S::Phone) == S::Slack
+    and ((0 <= i and i < homeOrder.length()) implies homeCatalog.nthOr(i, S::Phone) == homeOrder.nthOr(i, S::Phone))
 ```
 
 ### What the simulator tries
@@ -93,7 +111,7 @@ pure val tilesValues = Set(
   List(Own({ view: S::Inbox }), Own({ view: S::Inbox }), Installed({ app: "clock" })))
 pure val leftValues = Set(List(), List(Own({ view: S::Notes })), List(Installed({ app: "clock" }), Own({ view: S::Inbox })))
 pure val rightValues = leftValues
-pure val iValues = Set(-1, 0, 5, 14, 15)
+pure val iValues = Set(-1, 0, 5, homeOrder.length() - 1, homeOrder.length())
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6)
 ```
 
@@ -318,19 +336,27 @@ pure def sometimesARearrangedHomeIsReadBack(t: Tiles): bool =
 
 ## Story: See what waits in an app
 
-> As the owner, I want Phone, Messages and Inbox to show that something
-> waits in them, and no badge to distract me while I rearrange Home.
+> As the owner, I want Phone, Messages, Inbox, Telegram and Slack to show
+> that something waits in them, and no badge to distract me while I
+> rearrange Home.
 
-### Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited
+### Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited
+
+As the Sunday demo build drew them (Alpha 45f6bed30,
+`apps/app/src/prototype/model.js:342`, `:828`, `:1150`;
+`home-shell.ts:186`), Phone's dot is an unheard voicemail (missed
+calls wait on the Phone card), Messages' an unread conversation and Inbox's
+an unread message.
 
 ```quint
-pure val badgeViews: Set[S::View] = Set(S::Phone, S::Messages, S::Inbox)
+pure val badgeViews: Set[S::View] = Set(S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack)
 
 pure def badged(tile: Tile, something: bool, editing: bool): bool =
   something and not(editing) and (match tile { | Own(o) => badgeViews.contains(o.view) | _ => false })
 
-pure def lawOnlyPhoneMessagesAndInboxCarryABadge(view: S::View, app: str, something: bool, editing: bool): bool =
+pure def lawOnlyBadgedAppsCarryABadge(view: S::View, app: str, something: bool, editing: bool): bool =
   (badged(Own({ view: view }), something, editing)
-    iff (something and not(editing) and (view == S::Phone or view == S::Messages or view == S::Inbox)))
+    iff (something and not(editing)
+      and (view == S::Phone or view == S::Messages or view == S::Inbox or view == S::Telegram or view == S::Slack)))
     and not(badged(Installed({ app: app }), something, editing))
 ```

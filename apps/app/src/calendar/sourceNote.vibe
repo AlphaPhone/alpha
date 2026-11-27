@@ -1,0 +1,49 @@
+// spec/app/notes/note.md, "Story: Review a Calendar draft from a note"
+import { recordNoteRevision } from "@elizaos/plugin-notes-client"
+import { Machine as View } from "../../gen/app__calendar.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
+import { openNoteLink } from "../notes/agent.vibe"
+import { say } from "../notices/index.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { noteClientFor } from "../platform/index.vibe"
+import { launchOwnerAt, sameResidentOwner } from "../platform/index.vibe"
+import { contained } from "../runtime/index.vibe"
+import { type Target, originOwner, storedOrigin } from "./noteOrigin.vibe"
+
+effect function selected(account: number, selection: number, target: Target, route: number) {
+  const view = try (try View).get()
+  const where = try (try Shell).get()
+  return view.front && view.owner === account && (target === "Reminder" ? view.reminder : view.open) === selection &&
+    where.route === route && showing(where, "Calendar") && !where.drawer &&
+    where.assistant !== "Sheet" && where.assistant !== "Full" &&
+    (try (try Device).showing()) && !pageInert(try (try Layers).get())
+}
+
+/** Open the still-selected item's exact canonical note. A missing note never selects another. */
+export effect function followSourceNote(account: number, selection: number, target: Target, record: string) {
+  const shell = try Shell
+  const route = (try shell.get()).route
+  if (!(try selected(account, selection, target, route))) return
+  const origin = try storedOrigin(account, target, record)
+  if (origin === undefined || !(try selected(account, selection, target, route))) return
+  const client = noteClientFor((try Agent).runtime)
+  const snapshot = tryPromise((signal) => client.readState(signal)) catch () => undefined
+  const note = snapshot?.notes.find((row) => row.id === origin.noteId)
+  const revision = note === undefined ? undefined : (tryPromise(() => recordNoteRevision(note)) catch () => undefined)
+  const owner = launchOwnerAt() catch () => undefined
+  if (!sameResidentOwner(originOwner(origin), owner) || !(try selected(account, selection, target, route))) return
+  if (snapshot === undefined || (note !== undefined && revision === undefined)) {
+    try say("Notes unavailable", true)
+    return
+  }
+  if (note === undefined) {
+    try say("Source gone", true)
+    return
+  }
+  if (!(try contained(shell.send({ type: "openView", view: "Notes" }), "opening the selected Calendar item's Notes source"))) return
+  if (!(try openNoteLink(note.id, origin.agent, route + 1))) {
+    try say("Couldn’t open the source note", true)
+  } else if (revision !== origin.revision) try say("Edited")
+}

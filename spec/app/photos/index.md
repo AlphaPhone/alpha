@@ -14,6 +14,11 @@ the senders are [Who acts on photos](./actor.md). Photos are taken in the
 [Camera](../camera/). The shell decides when Photos is showing and from
 where; Notices shows Undo and says when it is gone.
 
+A photo opened full screen fades in over the grid and an album rises over the
+albums, as Alpha's earlier build drew them; Back takes them away at once.
+Before Photos has its first answer, it shows its header, never a blank
+screen or a spinner.
+
 ## Story: Scan text from a selected image
 
 > As the owner, I want to read text from one image I choose, with on-device
@@ -32,6 +37,13 @@ library, at a revision the phone numbers: each change to the library has a
 higher one. A browser's library consists of captures and images saved in
 that browser and needs no phone permission. It has the same Favorites,
 custom albums, selection and Recently deleted controls.
+
+As in the existing app, the Library is headed by the day each item was
+taken, counted back from Alpha's time in the owner's zone: "Today",
+"Yesterday", then the short weekday and date ("Sat, Oct 31", with the year
+when it is not this year) for the rest of the last 30 days, and the month
+and year ("October 2026") before that, each heading with the number of items
+under it beside it. An album and Recently deleted are not headed.
 
 ```quint
 import permission as P from "../../kit/permission"
@@ -333,8 +345,9 @@ pure def sometimesOwnBeforeAsking(s: Photos): bool =
 
 ## Story: Browse the library
 
-> As the owner, I want to see my photos and albums, narrow them by
-> favourites, videos, people or a search, scroll on through them, change the thumbnail size, and be
+> As the owner, I want to see my photos and albums, find my favourites and
+> videos in their albums, see the Library as Alpha narrowed it and clear that,
+> scroll on through them, change the thumbnail size, and be
 > told when they are loading, empty, locked, or could not be read, with a
 > way to try again.
 
@@ -583,6 +596,9 @@ pure def alwaysSelectionIsListed(s: Photos): bool =
 
 ### Selection starts over a grid of items, toggles only items it lists, and has no limit
 
+Select all takes every item listed in that grid. When all are already
+selected, Deselect all clears the selection and keeps selection mode open.
+
 ```quint
 pure def canStartSelect(s: Photos, by: Actor): bool =
   by == Owner and unlocked(s) and showsItems(s) and s.rows.size() > 0 and not(s.selecting) and s.shelf.dialog == AL::NoDialog
@@ -597,7 +613,8 @@ pure def toggle(s: Photos, photo: int, by: Actor): Photos =
 
 pure def canSelectAll(s: Photos, by: Actor): bool = by == Owner and s.selecting and s.shelf.dialog == AL::NoDialog
 
-pure def selectAll(s: Photos, by: Actor): Photos = { ...s, selected: s.rows }
+pure def selectAll(s: Photos, by: Actor): Photos =
+  { ...s, selected: if (s.rows.subseteq(s.selected)) Set() else s.rows }
 
 pure def canEndSelect(s: Photos, by: Actor): bool = by == Owner and s.selecting and s.shelf.dialog == AL::NoDialog
 
@@ -754,13 +771,13 @@ pure def sometimesWaitingForReadBack(s: Photos): bool = s.job.request.outcome ==
 
 ```quint
 pure def canNewAlbum(s: Photos, by: Actor): bool =
-  by == Owner and unlocked(s) and AL::canOpenDialog(s.shelf, AL::NewAlbum, 0)
+  by == Owner and unlocked(s) and fresh(s) and AL::canOpenDialog(s.shelf, AL::NewAlbum, 0)
     and ((s.shelf.dialog == AL::NoDialog and s.tab == Albums and s.album == 0) or s.shelf.dialog == AL::ChooseAlbum)
 
 pure def newAlbum(s: Photos, by: Actor): Photos = { ...s, shelf: AL::openDialog(s.shelf, AL::NewAlbum, 0) }
 
 pure def canRenameAlbum(s: Photos, by: Actor): bool =
-  by == Owner and unlocked(s) and s.album != 0 and not(s.selecting) and AL::canOpenDialog(s.shelf, AL::RenameAlbum, s.album)
+  by == Owner and unlocked(s) and fresh(s) and s.album != 0 and not(s.selecting) and AL::canOpenDialog(s.shelf, AL::RenameAlbum, s.album)
     and s.shelf.dialog == AL::NoDialog
 
 pure def renameAlbum(s: Photos, by: Actor): Photos = { ...s, shelf: AL::openDialog(s.shelf, AL::RenameAlbum, s.album) }
@@ -770,10 +787,13 @@ pure def canDeleteAlbum(s: Photos, by: Actor): bool = canRenameAlbum(s, by)
 pure def deleteAlbum(s: Photos, by: Actor): Photos = { ...s, shelf: AL::openDialog(s.shelf, AL::DeleteAlbum, s.album) }
 
 pure def canChooseAlbum(s: Photos, by: Actor): bool =
-  by == Owner and unlocked(s) and s.selecting and s.selected.size() > 0 and AL::canOpenDialog(s.shelf, AL::ChooseAlbum, 0)
+  by == Owner and unlocked(s) and fresh(s) and s.selecting and s.selected.size() > 0 and AL::canOpenDialog(s.shelf, AL::ChooseAlbum, 0)
     and s.shelf.dialog == AL::NoDialog
 
-pure def chooseAlbum(s: Photos, by: Actor): Photos = { ...s, shelf: AL::openDialog(s.shelf, AL::ChooseAlbum, 0) }
+pure def chooseAlbum(s: Photos, by: Actor): Done =
+  val ticket = s.cameraAlbumTicket + 1
+  emit(List(ReadCameraAlbums({ photo: 0, ticket: ticket })),
+    { ...s, cameraAlbumTicket: ticket, shelf: AL::openDialog(s.shelf, AL::ChooseAlbum, 0) })
 
 pure def canCloseDialog(s: Photos, by: Actor): bool = by == Owner and AL::canCloseDialog(s.shelf)
 
@@ -798,11 +818,12 @@ pure def chooseCameraAlbum(s: Photos, photo: int, revision: int, by: Actor): Don
     { ...s, cameraAlbum: photo, cameraAlbumTicket: ticket, shelf: AL::openDialog(s.shelf, AL::ChooseAlbum, 0) })
 
 pure def canCameraAlbumsLoaded(s: Photos, photo: int, ticket: int, by: Actor): bool =
-  by == Phone and unlocked(s) and s.cameraAlbum == photo and photo > 0 and s.cameraAlbumTicket == ticket
+  by == Phone and unlocked(s) and s.cameraAlbum == photo and s.cameraAlbumTicket == ticket
+    and (photo > 0 or s.selecting)
     and (s.shelf.dialog == AL::ChooseAlbum or s.shelf.dialog == AL::NewAlbum)
 
 pure def cameraAlbumsLoaded(s: Photos, photo: int, ticket: int, choices: Set[int], by: Actor): Photos =
-  { ...s, albums: choices }
+  { ...s, albums: if (s.album == 0) choices else choices.union(Set(s.album)) }
 
 pure def sometimesCameraAlbum(s: Photos): bool = s.cameraAlbum > 0 and s.shelf.dialog == AL::ChooseAlbum
 ```

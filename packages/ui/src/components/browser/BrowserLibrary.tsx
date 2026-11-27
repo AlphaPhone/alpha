@@ -1,14 +1,23 @@
-import { ChevronLeft, Star, X } from "lucide-react";
+import { ChevronLeft, Star, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { Button } from "../Button.tsx";
-import { SearchField } from "../SearchField.tsx";
+import { Label } from "../Label.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "../Select.tsx";
 import { Spinner } from "../Spinner.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../Tabs.tsx";
 
 export interface BrowserLibraryEntry {
   url: string;
   title?: string;
+}
+
+export interface BrowserHistoryRange {
+  /** Names the range. */
+  id: string;
+  /** What the time range picker says. */
+  label: string;
 }
 
 export interface BrowserLibraryProps {
@@ -19,61 +28,92 @@ export interface BrowserLibraryProps {
   onBack: () => void;
   onOpen: (url: string) => void;
   onRemoveBookmark?: (entry: BrowserLibraryEntry) => void;
+  onRemoveHistory?: (entry: BrowserLibraryEntry) => void;
+  /** The time ranges history can be cleared over, the first chosen at first. */
+  historyRanges?: readonly BrowserHistoryRange[];
+  /** Clears history over the chosen range; absent while history cannot be cleared. */
+  onClearHistory?: (range: string) => void;
+  /** Asks to clear every kind of browsing data; absent while that cannot be asked. */
+  onResetData?: () => void;
   onRetry?: () => void;
 }
 
 const sections = ["Bookmarks", "History"] as const;
 
-/** Bookmarks and history from the phone's Browser session. */
-export function BrowserLibrary({ bookmarks, history, loading, failed, onBack, onOpen, onRemoveBookmark, onRetry }: BrowserLibraryProps) {
-  const [query, setQuery] = useState("");
+/**
+ * Bookmarks and history from the phone's Browser session, as v119 (Alpha 45f6bed30
+ * apps/app/src/prototype/template.html:1802-1846): the back control and the Bookmarks and History segments in a 56px
+ * header, and on History a trash button that opens the time range for clearing history, with Reset browser data. The
+ * time range is the repo's `Select` and the actions its `Button`, drawn as v119's: a 44px white field with a 14px corner
+ * beside a dark Clear history, and Reset browser data as quiet text under them.
+ */
+export function BrowserLibrary({ bookmarks, history, loading, failed, onBack, onOpen, onRemoveBookmark, onRemoveHistory, historyRanges = [], onClearHistory, onResetData, onRetry }: BrowserLibraryProps) {
+  const [section, setSection] = useState<typeof sections[number]>("Bookmarks");
+  const [clearOpen, setClearOpen] = useState(false);
+  const [range, setRange] = useState(historyRanges[0]?.id ?? "");
+  const historyShown = section === "History";
   return (
-    <Tabs defaultValue="Bookmarks" onValueChange={() => setQuery("")} className="absolute inset-0 z-50 min-h-0 gap-0 bg-background motion-safe:animate-rise">
+    <Tabs value={section} onValueChange={(value) => { setSection(value as typeof section); setClearOpen(false); }} className="absolute inset-0 z-50 min-h-0 gap-0 bg-background motion-safe:animate-rise">
       <header data-host-chrome="" className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:mt-11 in-data-[alpha-launcher]:min-h-14 in-data-[alpha-launcher]:gap-2 in-data-[alpha-launcher]:pr-3">
-        <Button variant="ghost" size="icon" aria-label="Back to page" className="size-13 rounded-lg in-data-[alpha-launcher]:size-11" onClick={onBack}><ChevronLeft /></Button>
+        <h1 className="sr-only">Browser library</h1>
+        <Button variant="ghost" size="icon" aria-label="Back to page" className="size-13 rounded-lg in-data-[alpha-launcher]:size-11" onClick={onBack}><ChevronLeft aria-hidden /></Button>
         <TabsList aria-label="Browser library" className="gap-0.5 p-0.75">
-          {sections.map((section) => <TabsTrigger key={section} value={section} className="min-h-9.5 flex-none data-[state=active]:bg-alpha data-[state=active]:text-alpha-foreground">{section}</TabsTrigger>)}
+          {sections.map((one) => <TabsTrigger key={one} value={one} className="min-h-11 flex-none data-[state=active]:bg-alpha data-[state=active]:text-alpha-foreground">{one}</TabsTrigger>)}
         </TabsList>
+        {historyShown && (onClearHistory || onResetData) && (
+          <Button variant="ghost" size="icon" aria-label="Clear history" aria-expanded={clearOpen} aria-controls="alpha-history-clear" className="ml-auto rounded-full" onClick={() => setClearOpen(!clearOpen)}>
+            <Trash2 aria-hidden />
+          </Button>
+        )}
       </header>
-      {sections.map((section) => (
-        <TabsContent key={section} value={section} className="flex min-h-0 flex-1 flex-col rounded-none data-[state=inactive]:hidden">
-          <LibraryList title={section} entries={section === "Bookmarks" ? bookmarks : history} query={query} onQuery={setQuery}
-            loading={loading} failed={failed} onRetry={onRetry} onOpen={onOpen} onRemoveBookmark={section === "Bookmarks" ? onRemoveBookmark : undefined} />
+      {sections.map((one) => (
+        <TabsContent key={one} value={one} className="flex min-h-0 flex-1 flex-col rounded-none data-[state=inactive]:hidden">
+          <div className={cn(dockClearance, "min-h-0 flex-1 overflow-y-auto pt-2")}>
+            {one === "History" && clearOpen && (
+              <div id="alpha-history-clear" role="group" aria-label="Clear history options" className="mx-5 mt-1 mb-2.5 flex flex-col gap-2 rounded-xl bg-secondary p-3.5">
+                <Label htmlFor="alpha-history-range" className="font-semibold">Time range</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Select value={range} onValueChange={setRange}>
+                    <SelectTrigger id="alpha-history-range" className="h-auto min-h-11 w-auto min-w-32.5 flex-1 rounded-md bg-background px-3 text-base" />
+                    <SelectContent>
+                      {historyRanges.map((choice) => <SelectItem key={choice.id} value={choice.id}>{choice.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={() => onClearHistory?.(range)} disabled={onClearHistory === undefined}
+                    className="h-auto min-h-11 rounded-md bg-foreground px-3.5 text-background hover:bg-foreground/90 active:bg-foreground/80">Clear history</Button>
+                </div>
+                {onResetData && <Button variant="ghost" onClick={onResetData}
+                  className="h-auto min-h-11 self-start rounded-none px-0 text-sm font-normal text-muted-foreground hover:bg-transparent active:bg-transparent">Reset browser data</Button>}
+              </div>
+            )}
+            <LibraryList title={one} entries={one === "Bookmarks" ? bookmarks : history}
+              loading={loading} failed={failed} onRetry={onRetry} onOpen={onOpen}
+              onRemove={one === "Bookmarks" ? onRemoveBookmark : onRemoveHistory} />
+          </div>
         </TabsContent>
       ))}
     </Tabs>
   );
 }
 
-type LibraryListProps = Pick<BrowserLibraryProps, "onOpen" | "onRemoveBookmark" | "onRetry" | "loading" | "failed"> & {
+type LibraryListProps = Pick<BrowserLibraryProps, "onOpen" | "onRetry" | "loading" | "failed"> & {
+  onRemove?: (entry: BrowserLibraryEntry) => void;
   title: typeof sections[number];
   entries: readonly BrowserLibraryEntry[];
-  query: string;
-  onQuery: (query: string) => void;
 };
 
-function LibraryList({ title, entries, query, onQuery, loading, failed, onRetry, onOpen, onRemoveBookmark }: LibraryListProps) {
+function LibraryList({ title, entries, loading, failed, onRetry, onOpen, onRemove }: LibraryListProps) {
   if (failed) return <div className="flex flex-col items-center gap-3 px-6 py-10" role="status"><p>Could not read the library</p>{onRetry && <Button variant="secondary" onClick={onRetry}>Retry</Button>}</div>;
   if (loading) return <div className="flex justify-center py-10"><Spinner label={`Loading ${title.toLowerCase()}`} /></div>;
-  const seeking = query.trim().toLowerCase();
-  const visible = entries.filter(({ title, url }) => url.toLowerCase().includes(seeking) || title?.toLowerCase().includes(seeking));
-  const label = `Search ${title.toLowerCase()}`;
+  if (entries.length === 0) return <div role="status" aria-label={`No ${title.toLowerCase()}`} className="flex flex-col items-center gap-2.5 px-6 py-15 text-center text-body text-muted-foreground"><Star aria-hidden className="size-7" />Empty</div>;
   return (
-    <>
-      <SearchField value={query} onValueChange={onQuery} aria-label={label} placeholder={label}
-        className="mx-4 mb-1.5 shrink-0 [&>input]:h-11 [&>input]:rounded-full [&>input]:pl-10 [&>svg]:left-3.5 [&>svg]:size-4" />
-      <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-35">
-        {title === "History" && visible.length > 0 && <h3 className="mx-5 mt-3.5 mb-1 text-fine font-semibold text-muted-foreground">Earlier</h3>}
-        {visible.length > 0 && <ul>{visible.map((entry) => <li key={entry.url} className="flex items-center pr-2.5">
-          <LibraryRow entry={entry} onOpen={onOpen} />
-          {onRemoveBookmark && <Button variant="ghost" size="icon" aria-label={`Remove bookmark ${entry.title || entry.url}`}
-            className="size-11 shrink-0 rounded-full text-muted-foreground" onClick={() => onRemoveBookmark(entry)}><X className="size-4.5" /></Button>}
-        </li>)}</ul>}
-        {visible.length === 0 && (seeking
-          ? <p role="status" className="px-6 py-10 text-center text-base leading-plain text-muted-foreground">No matches</p>
-          : <div role="status" aria-label={`No ${title.toLowerCase()}`} className="flex flex-col items-center gap-2.5 px-6 py-15 text-base leading-plain text-muted-foreground"><Star aria-hidden className="size-7" />Empty</div>)}
-      </div>
-    </>
+    <ul>{entries.map((entry) => (
+      <li key={entry.url} className="flex items-center pr-2.5">
+        <LibraryRow entry={entry} onOpen={onOpen} />
+        {onRemove && <Button variant="ghost" size="icon" aria-label={`${title === "Bookmarks" ? "Remove bookmark" : "Remove from history"} ${entry.title || entry.url}`}
+          className="size-11 shrink-0 rounded-full text-muted-foreground" onClick={() => onRemove(entry)}><X aria-hidden className="size-4.5" /></Button>}
+      </li>
+    ))}</ul>
   );
 }
 
@@ -84,7 +124,7 @@ function LibraryRow({ entry, onOpen }: { entry: BrowserLibraryEntry; onOpen: Bro
   const title = entry.title || host;
   return (
     <button type="button" className={cn(focusRing, "flex min-h-14 min-w-0 flex-1 items-center gap-3.5 py-2 pr-3 pl-5 text-left active:bg-accent")} onClick={() => onOpen(entry.url)}>
-      <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-display text-date">{title.slice(0, 1).toUpperCase()}</span>
+      <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-full font-display text-date">{title.slice(0, 1)}</span>
       <span className="min-w-0">
         <span className="block truncate text-prose leading-plain">{title}</span>
         <span className="mt-0.5 block truncate text-fine text-muted-foreground">{where}</span>

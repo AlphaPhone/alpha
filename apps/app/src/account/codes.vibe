@@ -1,0 +1,203 @@
+// spec/app/account/codes.md, "Story: Redeem a code"; spec/app/account/codes.md, "Story: Keep codes to their sign-in"
+import { type Account as CloudProfile, CloudError, normalizeSubscriptionCode, pathOf, redeemResultFromResponse, routesByName, idempotencyKey } from "@elizaos/cloud"
+import { bindPlanChanges, changeIsOpen } from "./change.vibe"
+import type { Machine as Changes } from "../../gen/app__account__change.effect.vibe"
+import * as Billing from "../../gen/app__account__billing.effect.vibe"
+import * as Model from "../../gen/app__account__codes.effect.vibe"
+import { type Account, Cloud } from "../platform/index.vibe"
+import { attemptedUsing } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run } from "../runtime/index.vibe"
+import { type Attempts } from "../runtime/index.vibe"
+import { accountIsInFront, AccountWrites, type Buyer, buyerOf, readAccount, sameBuyer } from "./profile.vibe"
+import { purchaseVisibility } from "./billing.vibe"
+
+module receipts {
+  /** Names a normalized code without storing the code itself. */
+  export async function codeReceipt(owner: string, code: string): Promise<string> {
+    const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([owner, code]))))
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+}
+import { codeReceipt } from receipts
+
+interface Submission { readonly buyer: Buyer; readonly receipt: string; readonly code: string }
+
+service SubmissionSlot {
+  select(submission: Submission): boolean!!
+  take(receipt: string): (Submission | undefined)!!
+  referral(authority: string): (string | undefined)!!
+  storeReferral(authority: string, code: string | undefined): void!!
+}
+
+const submissionSlot = Layer.sync(SubmissionSlot, () => {
+  let held: Submission | undefined
+  let referral: { readonly authority: string; readonly code: string | undefined } | undefined
+  return {
+    select: (submission: Submission) => sync(() => {
+      if (held !== undefined) return false
+      held = submission
+      return true
+    }),
+    take: (receipt: string) => sync(() => {
+      if (held?.receipt !== receipt) return undefined
+      const found = held
+      held = undefined
+      return found
+    }),
+    referral: (authority: string) => sync(() => referral?.authority === authority ? referral.code : undefined),
+    storeReferral: (authority: string, code: string | undefined) => sync(() => { referral = { authority, code } }),
+  }
+})
+
+type View = Effect.Services<typeof accountIsInFront>
+type Needs = Cloud | Model.Machine | SubmissionSlot | Billing.Machine | View
+
+effect function verifiedBuyer(cloud: Account): (Buyer | undefined)!! {
+  const account = readAccount(cloud) catch () => undefined
+  return account === undefined ? undefined : try buyerOf(account)
+}
+
+/** Bind the saved outcome to the live native sign-in before showing it. */
+export effect function bindCodes(owner: CloudProfile): boolean!!Model.Machine {
+  const buyer = try buyerOf(owner)
+  if (buyer === undefined) return false
+  const machine = try Model.Machine
+  if (Model.canBind(try machine.get(), buyer.credentialId)) {
+    try contained(machine.send({ type: "bind", authority: buyer.credentialId }), "binding account codes")
+  }
+  return (try machine.get()).authority === buyer.credentialId
+}
+
+/** Current receipt visibility for both places Account can send a payment-related request. */
+export effect function accountAccess(owner: CloudProfile) {
+  try bindPlanChanges(owner)
+  return { purchase: try purchaseVisibility(owner), codesAvailable: try bindCodes(owner) }
+}
+
+/** Start the code operation that the owner requested in Account. */
+export effect function submitCode(raw: string, kind: "redeem" | "applyReferral" = "redeem"): boolean!!(Needs | AccountWrites | Changes) {
+  const code = kind === "redeem" ? normalizeSubscriptionCode(raw) : raw.trim()
+  if (code === null || code === "" || code.length > 100 || !(try accountIsInFront)) return false
+  const cloud = try Cloud
+  const buyer = try verifiedBuyer(cloud)
+  if (buyer === undefined || !(try accountIsInFront)) return false
+  const receipt = tryPromise(() => codeReceipt(buyer.credentialId, code)) catch () => ""
+  if (receipt === "") return false
+  const machine = try Model.Machine
+  return try (try AccountWrites).admission.withPermits(1)(effect {
+    if (try changeIsOpen()) return false
+    const current = try machine.get()
+    if (current.authority !== buyer.credentialId || !(try accountIsInFront)) return false
+    const billing = try (try Billing.Machine).get()
+    const elsewhere = billing.pending || billing.unsettled || billing.visit.open || billing.visit.orphan || billing.confirm.outcome === "Sent"
+    const event: Model.Event = { type: kind, code: receipt, signIn: 1, origin: "ByOwner", elsewhere }
+    const allowed = kind === "redeem" ? Model.canRedeem(current, receipt, 1, "ByOwner", elsewhere)
+      : Model.canApplyReferral(current, receipt, 1, "ByOwner", elsewhere)
+    if (!allowed) return false
+    const slot = try SubmissionSlot
+    if (!(try slot.select({ buyer, receipt, code }))) return false
+    const admitted = try contained(machine.send(event), "submitting the code")
+    if (!admitted) try ignore(slot.take(receipt))
+    return admitted
+  })
+}
+
+effect function redeemed(attempt: number, receipt: string): Model.Event!!(Needs | Attempts) {
+  const submission = try (try SubmissionSlot).take(receipt)
+  const denied: Model.Event = { type: "redeemed", attempt, ok: false, known: true }
+  if (submission === undefined || !(try accountIsInFront)) return denied
+  const cloud = try Cloud
+  const buyer = submission.buyer
+  if (!sameBuyer(buyer, try verifiedBuyer(cloud)) || !(try accountIsInFront)) return denied
+  const sent = try attemptedUsing((request) => cloud.callFor(request, buyer.credentialId), (key) =>
+    HttpClientRequest.post(pathOf(routesByName.redeem)) |> HttpClientRequest.setHeader(%, idempotencyKey, key)
+      |> HttpClientRequest.bodyJsonUnsafe(%, { code: submission.code }), attempt)
+  if (!sameBuyer(buyer, try verifiedBuyer(cloud))) return { ...denied, known: false }
+  if (!sent.confirmed) return { ...denied, known: sent.known }
+  const result = redeemResultFromResponse(sent.body, try Clock.currentTimeMillis) catch () => undefined
+  return { ...denied, ok: result?.kind === "redeemed", known: result !== undefined }
+}
+
+/** Show the latest referral only after an explicit read in that Account visit. */
+export effect function readReferral(): void!!(Model.Machine | View) {
+  if (try accountIsInFront) try ignore(contained((try Model.Machine).send({ type: "readReferral", signIn: 1 }), "reading a referral"))
+}
+
+export effect function referralCode(owner: string): (string | undefined)!!SubmissionSlot {
+  return try (try SubmissionSlot).referral(owner)
+}
+
+effect function readReferralAt(ticket: number): Model.Event!!Needs {
+  const failure: Model.Event = { type: "referralRead", ticket, ok: false }
+  const machine = try Model.Machine
+  const opened = try machine.get()
+  if (!(try accountIsInFront) || !Model.canReferralRead(opened, ticket)) return failure
+  const cloud = try Cloud
+  const buyer = try verifiedBuyer(cloud)
+  if (buyer === undefined || buyer.credentialId !== opened.authority) return failure
+  const client = cloud.clientFor(buyer.credentialId)
+  if (client === undefined) return failure
+  const found = tryPromise((signal) => client.referral({ signal })) catch () => undefined
+  const live = try machine.get()
+  if (!sameBuyer(buyer, try verifiedBuyer(cloud)) || live.authority !== opened.authority || !Model.canReferralRead(live, ticket)
+    || !(try accountIsInFront)) return failure
+  const code = found?.is_active ? found.code : undefined
+  try (try SubmissionSlot).storeReferral(buyer.credentialId, code)
+  return { ...failure, ok: code !== undefined && code !== "" }
+}
+
+function referralFailure(cause: unknown): Model.Applied {
+  if (!(cause instanceof CloudError)) return "CodeUnknown"
+  const refused = cause.failure
+  if (refused.tag === "CloudRefused") {
+    if (refused.code === "ReferralAlreadyApplied") return "CodeUsed"
+    if (refused.code === "NotFound" || refused.code === "InvalidRequest" || refused.code === "GrantCodeInvalid") return "CodeInvalid"
+    return "CodeRefused"
+  }
+  return refused.tag === "CloudNetwork" || refused.tag === "CloudUnavailable" || refused.tag === "CloudProviderIssue" ? "CodeUnknown" : "CodeRefused"
+}
+
+effect function applyReferralAt(attempt: number, receipt: string): Model.Event!!Needs {
+  const denied: Model.Event = { type: "referralApplied", attempt, result: "CodeRefused" }
+  const submission = try (try SubmissionSlot).take(receipt)
+  if (submission === undefined || !(try accountIsInFront)) return denied
+  const cloud = try Cloud
+  const buyer = submission.buyer
+  if (!sameBuyer(buyer, try verifiedBuyer(cloud)) || !(try accountIsInFront)) return denied
+  const client = cloud.clientFor(buyer.credentialId)
+  if (client === undefined) return denied
+  const result = effect {
+    try tryPromise({ try: (signal) => client.applyReferral(submission.code, { signal }), catch: (cause) => cause })
+    return "CodeTaken" as const
+  } catch (cause) => referralFailure(cause)
+  return { ...denied, result: sameBuyer(buyer, try verifiedBuyer(cloud)) ? result : "CodeUnknown" }
+}
+
+/** Check an unknown outcome under the same credential before letting another code through. */
+export effect function checkCodePlan() {
+  const machine = try Model.Machine
+  const current = try machine.get()
+  if (!Model.canPlanAnswered(current)) return
+  const cloud = try Cloud
+  const buyer = try verifiedBuyer(cloud)
+  if (buyer === undefined || buyer.credentialId !== current.authority) return
+  const client = cloud.clientFor(buyer.credentialId)
+  if (client === undefined) return
+  const snapshot = tryPromise((signal) => client.snapshot({ signal })) catch () => undefined
+  const live = try machine.get()
+  if (snapshot !== undefined && snapshot.account.status === "active" && live.authority === current.authority
+    && sameBuyer(buyer, try verifiedBuyer(cloud))) try contained(machine.send({ type: "planAnswered" }), "checking the redeemed plan")
+}
+
+function effects(refresh: () => void) {
+  return (fx: Model.Effect): Job<Model.Event, Needs | Attempts, []> => match (fx) {
+    when { tag: "Redeem", let attempt, let code }: answer("redeeming the code", redeemed(attempt, code), { type: "redeemed", attempt, ok: false, known: false });
+    when { tag: "CheckPlan" }: run("reading the redeemed plan", effect { try sync(refresh); try checkCodePlan() });
+    when { tag: "ReadReferral", let check }: answer("reading referral", readReferralAt(check), { type: "referralRead", ticket: check, ok: false });
+    when { tag: "ApplyReferral", let attempt, let code }: answer("applying referral", applyReferralAt(attempt, code), { type: "referralApplied", attempt, result: "CodeUnknown" });
+  }
+}
+
+export function codes(refresh: () => void) {
+  return Layer.provideMerge(reacting(Model, { keep: 1, open: [{ type: "restart" }], carry: effects(refresh) }), submissionSlot)
+}

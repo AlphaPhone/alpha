@@ -10,7 +10,7 @@ import type { Profile } from "./profile.vibe";
 import { ProviderView } from "./ProviderView.tsx";
 import { RecordsView } from "./RecordsView.tsx";
 import { SignInView } from "./SignInView.tsx";
-import { type AccountRuntime, currentSeconds, useAccountShelf, useAccountTimed } from "./useAccount.ts";
+import { type AccountRuntime, currentMillis, useAccountShelf, useAccountTimed } from "./useAccount.ts";
 
 const sessionTroubles: Partial<Record<SessionTrouble, string>> = {
   NotStored: "Couldn’t store that sign-in. Your previous session was kept.",
@@ -21,15 +21,24 @@ const sessionTroubles: Partial<Record<SessionTrouble, string>> = {
 
 /** Verified Cloud profile read summary matching Settings's account read contract. */
 function VerifiedProfileSummary({ profile }: { readonly profile: Profile }) {
-  if (profile.tag === "Reading") return <Spinner label="Reading account" className="text-muted-foreground" />;
-  if (profile.tag === "SignInRequired") return <p role="status" className="text-sm text-muted-foreground">Sign-in required</p>;
-  if (profile.tag === "Unavailable") return <p role="status" className="text-sm text-muted-foreground">Couldn’t read your account</p>;
-  return (
-    <div className="min-w-0 wrap-anywhere">
-      <p className="text-sm text-muted-foreground">{profile.contact || profile.name || "Signed in"}</p>
-      {profile.contact && profile.name && profile.contact !== profile.name ? <p className="text-sm text-muted-foreground">{profile.name}</p> : null}
-    </div>
-  );
+  switch (profile.tag) {
+    case "Reading":
+      return <Spinner label="Reading account" className="text-muted-foreground" />;
+    case "SignInRequired":
+      return <p role="status" className="text-sm text-muted-foreground">Sign-in required</p>;
+    case "Unavailable":
+      return <p role="status" className="text-sm text-muted-foreground">Couldn’t read your account</p>;
+    case "Read": {
+      const primary = profile.contact || profile.name || "Signed in";
+      const secondary = profile.contact && profile.name && profile.contact !== profile.name ? profile.name : undefined;
+      return (
+        <div className="min-w-0 wrap-anywhere">
+          <p className="text-sm text-muted-foreground">{primary}</p>
+          {secondary ? <p className="text-sm text-muted-foreground">{secondary}</p> : null}
+        </div>
+      );
+    }
+  }
 }
 
 /** Full Account panel combining Session, Sign-In, Plan & Billing, AI Provider, Google, and Resident Agent controls. */
@@ -40,9 +49,9 @@ export function AccountPanel({ runtime, profile }: { readonly runtime: AccountRu
 
   const sesState = session.state;
   const sigState = signIn.state;
-  const nowSec = currentSeconds(runtime);
+  const nowMs = currentMillis(runtime);
   const signedIn = sesState !== undefined && sesState.account > 0 && sesState.known;
-  const showRenew = sesState !== undefined && renewOffered(sesState, nowSec);
+  const showRenew = sesState !== undefined && renewOffered(sesState, nowMs);
   const troubleText = sesState ? sessionTroubles[sesState.trouble] : undefined;
   const beginEvent = { type: "begin", origin: "ByOwner" } as const;
 

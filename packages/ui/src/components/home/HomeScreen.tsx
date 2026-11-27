@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import { isValidElement, type ReactNode, type Ref, useCallback } from "react";
 import { cn } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
 import { AddToHomeSheet } from "./AddToHomeSheet.tsx";
@@ -9,22 +9,38 @@ import { HomeTileGrid, type HomeTileItem, type HomeTileMove } from "./HomeTileGr
 import type { LauncherHold } from "./launcherPress.ts";
 
 export type HomeScreenProps = {
-  /** The cards drawn above the tiles, in order, each with its key; the row is not drawn without one. */
+  /** The cards drawn above the tiles, in order, each with its key; the row is not drawn without one, keeps its place while cards come and go, and starts again at its first card when that card changes. */
   cards?: readonly ReactNode[];
+  /** Cards an app draws itself, such as Clock's running timer, in a row of their own under the day's cards; the row is hidden while none draws. */
+  appCards?: ReactNode;
   /** The tiles shown, in Home's order; left out until what was saved has been read. */
   tiles?: readonly HomeTileItem[];
   /** Home is being edited. */
   editing?: boolean;
   /** Another launcher surface is over Home. */
   covered?: boolean;
+  /** Home is kept under an app that covers it, laid out for the way back: it names no page, so the app's own title is the page's only heading. */
+  held?: boolean;
+  /** The card rows remain visible while their controls cannot take input. */
+  cardsInert?: boolean;
+  /** The separately owned app cards cannot take input while Ask is above Home. */
+  appCardsInert?: boolean;
+  /** The Apps tile remains visible while it cannot take input. */
+  drawerInert?: boolean;
   /** The launcher reserves the status bar above the Home cards. */
   launcher?: boolean;
   /** Opens a tile's app; left out where nothing may be opened. */
   onOpenTile?: (id: string) => void;
+  /** A press has begun on a tile, before it opens or holds: time to fetch what opening it needs. */
+  onPressTile?: (id: string) => void;
+  /** Opens the phone's installed Apps drawer. */
+  onOpenDrawer?: () => void;
   /** Starts editing from a long press on a tile; left out off the phone, before the tiles are read and under a layer. */
   onBeginEditing?: () => void;
   /** Schedules and cancels a stationary press on a tile. */
   hold?: LauncherHold;
+  /** Replaces the tiles' gesture surface when its owning frame or route changes. */
+  tileGestureScope?: string;
   /** While editing, takes a tile off Home; left out while a change is being saved. */
   onRemoveTile?: (id: string) => void;
   /** While editing, moves a tile beside another; left out while a change is being saved. */
@@ -39,6 +55,8 @@ export type HomeScreenProps = {
   notice?: HomeNoticeMessage;
   /** Add to Home is open. */
   adding?: boolean;
+  /** The frame of a Home sheet that leaves the neighboring Ask pane available. */
+  addInFrame?: HTMLElement;
   /** What Add to Home lists: Alpha's own apps this phone admits that Home does not hold. */
   hidden?: readonly Omit<HomeTileItem, "badge">[];
   /** Puts an app back on Home from Add to Home; left out while a change is being saved. */
@@ -50,6 +68,7 @@ export type HomeScreenProps = {
 
 /** Fit the 412-point Home proportions on narrow phones, keeping app faces at least 48px. */
 const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spacing))]";
+const noop = () => undefined;
 
 /**
  * Home: the day's cards and the owner's tiles; while editing, the edit bar and Add to Home. A pull down on its
@@ -57,34 +76,49 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], tiles, editing = false, covered = false, launcher = false, onOpenTile, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
-  onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
+  cards = [], appCards, tiles, editing = false, covered = false, held = false, cardsInert = false, appCardsInert = cardsInert, drawerInert = false, launcher = false, onOpenTile, onPressTile, onOpenDrawer, onBeginEditing, hold, tileGestureScope, onRemoveTile, onMoveTile, scrollRef,
+  onShowHidden, onDone, notice, adding = false, addInFrame, hidden = [], onAddToHome, onCloseAdding = noop, className,
 }: HomeScreenProps) {
+  const first = String(cards.find(isValidElement)?.key ?? "");
+  const startAtFirstCard = useCallback((row: HTMLElement | null) => {
+    if (!row || row.dataset.homeFirstCard === first) return;
+    row.dataset.homeFirstCard = first;
+    row.scrollTo({ left: 0 });
+  }, [first]);
   return (
     <div inert={covered || undefined} className={cn("@container flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
       <div ref={scrollRef} className={cn(dockClearance, homeSpacing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
-        <div className={cn("shrink-0", launcher ? "min-h-[max(calc(var(--alpha-home-spacing)*16),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))]" : "min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+var(--alpha-home-spacing)*3)]")}>
-          <h1 className="sr-only">Home</h1>
+        <div className={cn("shrink-0", launcher ? "min-h-[max(calc(var(--alpha-home-spacing)*16),calc(var(--alpha-safe-top)+--spacing(3)))]" : "min-h-[calc(var(--alpha-safe-top)+var(--alpha-home-spacing)*3)]")}>
+          {held ? null : <h1 className="sr-only">Home</h1>}
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
-        {cards.length > 0 ? <HomeCardRow>{cards}</HomeCardRow> : null}
+        {cards.length > 0 ? <HomeCardRow ref={startAtFirstCard} inert={cardsInert || undefined}>{cards}</HomeCardRow> : null}
+        {appCards ? <HomeCardRow inert={appCardsInert || undefined} aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
+          <div className="contents" onPointerDownCapture={onPressTile ? (event) => {
+            const id = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-home-tile]")?.dataset.homeTile : undefined;
+            if (id) onPressTile(id);
+          } : undefined}>
           <HomeTileGrid
+            tileGestureScope={tileGestureScope}
             tiles={tiles}
             editing={editing}
             onOpen={onOpenTile}
+            onOpenDrawer={onOpenDrawer}
+            drawerInert={drawerInert}
             onBeginEditing={onBeginEditing}
             hold={hold}
             onRemove={onRemoveTile}
             onMove={onMoveTile}
           />
+          </div>
         ) : (
-          <div aria-busy className="min-h-24" />
+          <div role="status" aria-label="Loading apps" aria-busy className="min-h-24" />
         )}
         <div aria-hidden className="min-h-4 flex-1" />
       </div>
-      <AddToHomeSheet open={adding} apps={hidden} onAdd={onAddToHome} onClose={onCloseAdding} />
+      <AddToHomeSheet open={adding} inFrame={addInFrame} apps={hidden} onAdd={onAddToHome} onClose={onCloseAdding} />
     </div>
   );
 }

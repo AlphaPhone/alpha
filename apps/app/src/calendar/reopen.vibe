@@ -1,0 +1,71 @@
+// spec/app/calendar/reminderReopen.md, "Story: Review reopening the selected reminder without an alert"
+import { Machine as View } from "../../gen/app__calendar.effect.vibe"
+import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
+import * as Reopen from "../../gen/app__calendar__reminderReopen.effect.vibe"
+import type { Event, ReopenEffect } from "../../gen/app__calendar__reminderReopen.effect.vibe"
+import { say } from "../notices/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { reopenDatedReminder } from "../reminders/reminders.vibe"
+import { remindersStore } from "../reminders/store.ts"
+import { answer, contained, reacting, started, together } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
+
+effect function stillSelected(id: number) {
+  if (!(try (try Device).showing())) return false
+  const view = try (try View).get()
+  const editor = try (try Editor.Machine).get()
+  return view.front && view.reminder === id && !editor.shown
+}
+
+/** Offer the visible completed selection and remember the due time the confirmation will bind. */
+export effect function reviewReopening(id: number, reminderKey: string, revision: number, due: number) {
+  if (!(try stillSelected(id))) return
+  const view = remindersStore.snapshot()
+  const item = view.snapshot.items.find((row) => row.id === reminderKey)
+  if (item?.revision !== revision || !item.completed || item.recurrence !== "none" || view.hiddenIds.has(reminderKey)) return
+  const now = try (try Time).now()
+  const dueAt = Math.max(due, Math.ceil((now + 60_000) / 60_000) * 60_000)
+  const reopen = try Reopen.Machine
+  if (Reopen.canOffer(try reopen.get(), id, reminderKey, revision, dueAt, now)) {
+    try contained(reopen.send({ type: "offer", id, reminderKey, revision, dueAt, now }), "reviewing whether to reopen the reminder")
+  }
+}
+
+/** Confirm the still-shown review or retire it if its time passed. */
+export effect function confirmReopening() {
+  const reopen = try Reopen.Machine
+  const state = try reopen.get()
+  if (!(try stillSelected(state.id)) || !Reopen.canCancel(state)) return
+  const now = try (try Time).now()
+  if (!Reopen.canConfirm(state, now)) {
+    try contained(reopen.send({ type: "cancel" }), "retiring the expired reminder review")
+    try say("Time passed", true)
+    return
+  }
+  try contained(reopen.send({ type: "confirm", now }), "confirming the reminder review")
+}
+
+function carry(request: ReopenEffect) {
+  const done: Event = { type: "reopenAnswered", attempt: request.attempt }
+  return answer(`reopen ${request.attempt}`, effect {
+    if (try stillSelected(request.id)) try reopenDatedReminder(request.reminderKey, request.revision, request.dueAt, request.attempt)
+    return done
+  }, done)
+}
+
+const retire = started(effect {
+  const view = try View
+  const device = try Device
+  const reopen = try Reopen.Machine
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const drawing = Stream.zipLatestWith(view.changes, visible, (page, shown) => ({ page, shown }))
+  try Stream.runForEach(drawing, effect ({ page, shown }) => {
+    const review = try reopen.get()
+    if (Reopen.canCancel(review) && (!shown || !page.front || page.reminder !== review.id)) {
+      try contained(reopen.send({ type: "cancel" }), "retiring a reminder review after leaving")
+    }
+  })
+}, "retiring the Calendar reminder review")
+
+/** The reviewed reopen lives only while the selected Calendar reminder is open. */
+export const reopening = together(reacting(Reopen, { carry }), retire)

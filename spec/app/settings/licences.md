@@ -99,7 +99,8 @@ pure def alwaysLicencesAreCountedOnceLoaded(s: Licences): bool =
 
 ### Searching narrows the loaded list to the licences that match, from its top, and an empty search shows them all
 
-The page counts which licences match the words searched for.
+The page counts which licences match the words searched for across their name,
+version or licence. Search is shown once the notices have loaded.
 
 ```quint
 pure val queryValues = Set("", "mit")

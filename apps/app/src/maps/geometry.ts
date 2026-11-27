@@ -1,4 +1,4 @@
-// spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"
+// spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75"
 
 /** A point in whole millionths of a degree, as every Maps machine keeps one. */
 export interface Point {
@@ -13,11 +13,23 @@ export interface Shape {
 }
 
 const earth = 6_371_000;
+const farAway = 1_000_000;
 const radians = (micro: number) => (micro / 1e6) * (Math.PI / 180);
 
-/** Where `p` lies in meters east and north of `origin`, flat over the short distances guidance measures. */
+/** Wrap longitude in degrees into `[-180, 180]`, preserving `+180` and avoiding `-0`. @throws {never} */
+export function normalizeLng(lng: number): number {
+  if (!Number.isFinite(lng)) return 0;
+  let wrapped = ((lng + 180) % 360 + 360) % 360 - 180;
+  if (wrapped === -180 && lng > 0) wrapped = 180;
+  return wrapped || 0;
+}
+
+/** Where `p` lies in meters east and north of `origin`, wrapping across the antimeridian. */
 function local(origin: Point, p: Point): [number, number] {
-  return [(radians(p.lng) - radians(origin.lng)) * Math.cos(radians(origin.lat)) * earth, (radians(p.lat) - radians(origin.lat)) * earth];
+  let dlng = p.lng - origin.lng;
+  if (dlng > 180_000_000) dlng -= 360_000_000;
+  else if (dlng < -180_000_000) dlng += 360_000_000;
+  return [radians(dlng) * Math.cos(radians(origin.lat)) * earth, radians(p.lat - origin.lat) * earth];
 }
 
 /** The distance between two points, in whole meters. @throws {never} */
@@ -37,9 +49,16 @@ function toSegment(p: Point, a: Point, b: Point): { away: number; along: number 
 
 /** The distance from `p` to the nearest point of `line`, in whole meters. @throws {never} */
 export function toLine(p: Point, line: readonly Point[]): number {
+  const first = line[0];
+  if (first === undefined) return farAway;
+  if (line.length === 1) return meters(p, first);
   let nearest = Number.POSITIVE_INFINITY;
-  for (let at = 1; at < line.length; at++) nearest = Math.min(nearest, toSegment(p, line[at - 1], line[at]).away);
-  return Math.round(line.length === 1 ? meters(p, line[0]) : nearest);
+  for (let at = 1; at < line.length; at++) {
+    const start = line[at - 1];
+    const end = line[at];
+    if (start !== undefined && end !== undefined) nearest = Math.min(nearest, toSegment(p, start, end).away);
+  }
+  return Math.round(nearest);
 }
 
 /**
@@ -48,20 +67,23 @@ export function toLine(p: Point, line: readonly Point[]): number {
  * @throws {never}
  */
 export function measured(p: Point, shape: Shape, step: number): { toStep: number; beyond: number; toRoute: number; toEnd: number } {
-  const end = shape.line.at(-1) ?? p;
+  const end = shape.line.at(-1);
+  if (end === undefined) return { toStep: farAway, beyond: 0, toRoute: farAway, toEnd: farAway };
+  const prev = shape.turns[step];
   const ahead = shape.turns[step + 1] ?? end;
   const after = shape.turns[step + 2] ?? end;
-  const passed = meters(p, after) < meters(ahead, after);
-  return { toStep: meters(p, ahead), beyond: passed ? meters(p, ahead) : 0, toRoute: toLine(p, shape.line), toEnd: meters(p, end) };
+  const nextLeg = toSegment(p, ahead, after);
+  const onNextLeg = nextLeg.along > 0 && (prev === undefined || nextLeg.away <= toSegment(p, prev, ahead).away);
+  return { toStep: meters(p, ahead), beyond: onNextLeg ? Math.round(nextLeg.along) : 0, toRoute: toLine(p, shape.line), toEnd: meters(p, end) };
 }
 
 /** `text` as a point when it reads `latitude, longitude` within the globe. @throws {never} */
 export function pointIn(text: string): Point | undefined {
-  const found = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(text);
+  const found = /^\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*$/.exec(text);
   if (!found) return undefined;
   const [lat, lng] = [Number(found[1]), Number(found[2])];
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return undefined;
-  return { lat: Math.round(lat * 1e6), lng: Math.round(lng * 1e6) };
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return undefined;
+  return { lat: Math.round(lat * 1e6) || 0, lng: Math.round(lng * 1e6) || 0 };
 }
 
 /** A point as Cloud's coordinate, in degrees. @throws {never} */
@@ -71,7 +93,9 @@ export function coordinateOf(p: Point) {
 
 /** Cloud's coordinate as a point. @throws {never} */
 export function pointOf(c: { readonly latitude: number; readonly longitude: number }): Point {
-  return { lat: Math.round(c.latitude * 1e6), lng: Math.round(c.longitude * 1e6) };
+  const lat = Math.max(-90, Math.min(90, Number.isFinite(c.latitude) ? c.latitude : 0));
+  const lng = normalizeLng(c.longitude);
+  return { lat: Math.round(lat * 1e6) || 0, lng: Math.round(lng * 1e6) || 0 };
 }
 
 /** A point as degrees, as the map draws it. @throws {never} */

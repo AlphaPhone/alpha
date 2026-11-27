@@ -1,0 +1,111 @@
+{
+  "terms": {
+    "title": "Alpha Cloud Terms of Service",
+    "revision": "2026-11-25",
+    "sections": [
+      {
+        "title": "About these terms",
+        "paragraphs": [
+          "These Terms govern your use of the Alpha Phone software and Alpha Cloud services provided by Alpha Compute Corp. (we, us, or Alpha). Alpha Phone runs a personal agent on your device. Alpha Cloud provides account sign-in and features such as model inference, speech, and connections to services you choose to use. The Privacy Policy explains how we handle personal information."
+        ]
+      },
+      {
+        "title": "Eligibility and your account",
+        "paragraphs": [
+          "You must be at least 18 years old, be able to agree to these Terms, and use the service where it is offered and lawful. If you use Alpha on behalf of an organization, you must have authority to accept these Terms for it. Use accurate account information, protect your sign-in methods and devices, and contact us at developer@elizalabs.ai if you suspect unauthorized access."
+        ]
+      },
+      {
+        "title": "Using Alpha",
+        "paragraphs": [
+          "Use Alpha lawfully and respect other people’s rights. You must have permission to access, record, submit, or share information through the service. Do not use Alpha to send spam, impersonate someone, access accounts without permission, distribute malicious code, or interfere with the service or its security.",
+          "You keep your rights in the information you provide. You authorize us to process and transmit it as needed to provide the features you request, subject to the Privacy Policy and your permissions. When you connect a service or approve an action, such as sending email or changing an event, Alpha can carry out that action. Check the details before you approve. Review AI-generated responses for accuracy before relying on them, especially for decisions with important consequences."
+        ]
+      },
+      {
+        "title": "Plans and recurring billing",
+        "paragraphs": [
+          "Free has no recurring subscription or paid usage allowance. Where offered, Plus costs US$30 per month and includes US$25 of eligible monthly Cloud usage. Pro costs US$100 per month and includes US$90 of eligible monthly Cloud usage. These paid plans cover one seat. Unused allowance expires at the end of the monthly period and has no cash value. Features and usage limits for the plan you choose are shown in Alpha.",
+          "Before you confirm a purchase, review the price, billing interval, applicable charges, and renewal terms shown at checkout. By confirming, you authorize the displayed initial charge and recurring monthly charges until you cancel. Stripe processes payment. We will give any required advance notice of changes to the renewal charge and explain how to cancel before the change takes effect."
+        ]
+      },
+      {
+        "title": "Canceling a plan and closing an account",
+        "paragraphs": [
+          "To stop future renewals, open Manage plan in Alpha and select Cancel plan. Complete account verification if prompted. Cancel before the next renewal to avoid the next charge. Paid access generally continues until the end of the current paid period. If you cannot cancel in Alpha, contact developer@elizalabs.ai.",
+          "Contact developer@elizalabs.ai about billing errors and refund requests. Any refund terms displayed when you purchase apply alongside your rights under applicable law. Ask the same support channel to delete your Alpha Cloud account. We verify account ownership and address active billing and connected services as described in the Privacy Policy."
+        ]
+      },
+      {
+        "title": "Connected services and Google Maps",
+        "paragraphs": [
+          "Connected services are subject to the terms and permissions of their providers. Alpha includes Google Maps features and content. Your use of those features is subject to the Google Maps End User Additional Terms of Service (https://maps.google.com/help/terms_maps/) and the Google Privacy Policy (https://policies.google.com/privacy)."
+        ]
+      },
+      {
+        "title": "Service changes and your rights",
+        "paragraphs": [
+          "Availability can vary by device, region, network, and third-party service. We may update or suspend features for maintenance, safety, security, or legal reasons. We may restrict access for a serious violation of these Terms. We will provide notice and a way to contact us when required by law.",
+          "We will post updated Terms and provide any notice or obtain any agreement required by law. These Terms preserve consumer rights that cannot be waived under applicable law. For questions or notices, contact developer@elizalabs.ai or write to Alpha Compute Corp., Clarence Thomas Building, P.O. Box 4649, Road Town, Tortola, British Virgin Islands VG1110."
+        ]
+      }
+    ]
+  },
+  "privacy": {
+    "title": "Alpha Cloud Privacy Policy",
+    "revision": "2026-11-25",
+    "sections": [
+      {
+        "title": "Who is responsible",
+        "paragraphs": [
+          "Alpha Compute Corp. operates Alpha Phone and Alpha Cloud and is responsible for the personal information described in this policy. It explains what we collect when you use Alpha, how optional Cloud and connected features use that information, and how you can exercise your choices. Contact us at privacy@alphacompute.ai or Clarence Thomas Building, P.O. Box 4649, Road Town, Tortola, British Virgin Islands VG1110."
+        ]
+      },
+      {
+        "title": "Information on your device and in the cloud",
+        "paragraphs": [
+          "Alpha’s resident agent runs on your phone, where Alpha keeps its main conversation history. When you use a Cloud feature, we receive the inputs it needs, such as a prompt, relevant context, audio for transcription, or text for speech. You manage copies on your device or in third-party accounts.",
+          "We keep account and sign-in information, such as your email address, sign-in method and provider identifiers. We process device and session identifiers, sign-in and connection activity, service usage and costs, and technical data such as request or error details. We use these records to authenticate you, operate and secure the service, administer your account, troubleshoot problems, and enforce plan limits. If you contact support, we receive the information you include in your request.",
+          "For paid plans, Stripe handles payment collection. Alpha receives customer, subscription and invoice identifiers, payment status, amounts, and related billing events. We use these records for checkout, renewal, payments, refunds, reconciliation, and accounting. We may retain billing event information while processing it or retrying failed processing."
+        ]
+      },
+      {
+        "title": "Google sign in and optional Workspace access",
+        "paragraphs": [
+          "Google sign-in uses your Google account identifier, email, and basic profile to sign you in to Alpha. You choose separately whether to connect Gmail or Calendar. Google shows the permissions for the features you request, and you can decline them.",
+          "With your permission, Alpha can search and read mail, compose drafts, send messages, manage mail, or read and change calendar events at your request. We store your connection identity, granted permissions, timestamps, and encrypted authorization tokens. Action records track requests and results. Calendar records can include submitted fields such as title, description, location, attendees, and time.",
+          "Alpha’s use and transfer of information received from Google APIs comply with the Google API Services User Data Policy (https://developers.google.com/terms/api-services-user-data-policy), including its Limited Use requirements. We limit Google user data to the user-facing features and other narrow purposes the policy permits. The policy restricts onward transfers and human access and prohibits uses such as advertising, resale, and training generalized AI models.",
+          "When a feature would transfer Google user data to another service to perform an action for you, we identify the data and the purpose and obtain the consent Google requires before that transfer. You can disconnect Google in Alpha or revoke Alpha’s access in your Google Account (https://myaccount.google.com/connections). Disconnecting in Alpha removes the stored grant and stops future access. Messages already sent and changes already made remain in Google."
+        ]
+      },
+      {
+        "title": "Maps and location",
+        "paragraphs": [
+          "When you use maps, place search or directions, Alpha sends relevant searches, addresses or coordinates to Google Maps Platform. Those inputs can include a location you enter or share, or device location if you grant permission. You can manage device location permission in system settings."
+        ]
+      },
+      {
+        "title": "Service providers and other disclosures",
+        "paragraphs": [
+          "We use Cloudflare for hosting, network services and sign-in email, and Railway for the Cloud database. We send inputs for Cloud model requests to Cerebras and inputs for Cloud speech requests to Cartesia. Google provides sign-in, Workspace connections and Maps where used. Stripe processes billing. Each provider receives the information needed for its role.",
+          "When you ask Alpha to send a message, invite someone to an event, or take another action involving other people, the service sends the information needed for that action to the relevant provider and recipients. We may also disclose information when legally required, to protect users and the service, or in a business transfer subject to applicable safeguards. Google data remains subject to the separate Limited Use restrictions, including any required prior consent.",
+          "Service providers may process personal information in more than one country. Where applicable law requires safeguards for an international transfer, we use those safeguards. You can contact our Privacy Officer for information about transfers that apply to your data."
+        ]
+      },
+      {
+        "title": "Retention and account deletion",
+        "paragraphs": [
+          "We use encrypted connections and store Google authorization tokens in encrypted form. We retain personal information for the period needed to provide the service, protect it, resolve disputes, and meet legal and accounting obligations. We keep account records while your account is active. We keep action records to track requests and prevent duplicate actions, and keep operational records as needed to diagnose and resolve issues. Backup copies age out on their backup schedule. Providers handle retained copies under the terms that apply to the service.",
+          "To request Alpha Cloud account deletion, contact privacy@alphacompute.ai. After we verify account ownership, deletion blocks account and session access, addresses active billing, revokes connected Google access, and removes covered account information. We keep billing records, invoices and internal identifiers for accounting and other legitimate retention purposes. Manage copies on your device and records in Google or other connected services separately."
+        ]
+      },
+      {
+        "title": "Your choices and privacy rights",
+        "paragraphs": [
+          "You can manage device permissions and connected services in Alpha and through the relevant provider. Depending on applicable law, you may request access, a copy, correction or deletion of your personal information, or ask us to restrict or stop certain processing. You may also have the right to withdraw consent, appeal a request decision, or complain to your local privacy authority. To make a request, contact privacy@alphacompute.ai. We may need to verify that the account belongs to you.",
+          "Alpha is intended for people who meet the age requirement in the Terms of Service. If you believe a child has provided us personal information, contact privacy@alphacompute.ai. We will post updates to this policy and give additional notice and request consent when required."
+        ]
+      }
+    ]
+  }
+}

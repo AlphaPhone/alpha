@@ -4,24 +4,24 @@ import { afterEach, expect, it } from "vitest";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
-import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Adding } from "../gen/app__inbox__adding.effect.vibe";
 import inbox from "../src/inbox/index.tsx";
 import { Incoming } from "../src/inbox/adding.vibe";
 import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
 import { Drafts as MessageDrafts } from "../src/messages/composer.vibe";
 import photosArea from "../src/photos/index.tsx";
-import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { headingOf } from "../src/runtime/dateHeading.ts";
+import { button, closeAll, drawn, fill, hardware, only, open, press, readInboxFirst, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import type { FixturePicture } from "./fakes/photos.ts";
 
 underAct();
 afterEach(closeAll);
 
-const photoAction = async (label: string) => {
+const photoAction = async (label: string, menuLabel = "Photo actions") => {
   await drawn(() => {
-    const menu = button("Photo actions");
-    if (!menu) throw new Error("No Photo actions menu");
+    const menu = button(menuLabel);
+    if (!menu) throw new Error(`No ${menuLabel} menu`);
     menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   });
   await drawn(() => {
@@ -31,7 +31,7 @@ const photoAction = async (label: string) => {
   });
 };
 
-it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/index.md, \"Story: Browse the library\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\"; spec/app/photos/viewer.md, \"Story: Edit a photo or trim a video\")", async () => {
+it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/index.md, \"Story: Browse the library\"; spec/app/photos/index.md, \"Story: Select photos\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\"; spec/app/photos/viewer.md, \"Story: Edit a photo or trim a video\")", async () => {
   const world = { ...scene(), phone: true, now: 1795400000000 + 86_400_000 + 240_000 };
   const { alpha } = await open(world, only("home", "view:Photos", "notice"));
   await press("Photos");
@@ -45,6 +45,26 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
   // spec/app/photos/index.md, "Story: Browse the library": the Library is headed by day as v121 headed it, counted back from Alpha's time
   expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section h2")].map((heading) => heading.textContent)).toEqual(["Yesterday"]);
+  // spec/app/photos/index.md, "each heading with the number of items under it beside it": as v119's live camera adapter drew it
+  expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section header")].map((header) => [header.querySelector("h2")?.textContent, header.querySelector("span")?.textContent]))
+    .toEqual([["Yesterday", "3"]]);
+  // spec/app/photos/index.md, "Story: Browse the library": v119's live camera adapter drew images.svg on the Library tab and folder.svg on Albums
+  expect([...document.querySelectorAll('[aria-label="Photos sections"] button')].map((tab) => [tab.textContent, tab.querySelector("svg")?.classList.contains("lucide-images"), tab.querySelector("svg")?.classList.contains("lucide-folder")]))
+    .toEqual([["Library", true, false], ["Albums", false, true]]);
+  const localNoon = new Date(2026, 10, 24, 12).getTime();
+  const captureDaysBack = (days: number) => new Date(2026, 10, 24 - days, 9).getTime();
+  expect([0, 1, 3, 29, 30].map((days) => headingOf(captureDaysBack(days), localNoon))).toEqual(["Today", "Yesterday", "Sat, Nov 21", "Mon, Oct 26", "October 2026"]);
+  expect(headingOf(new Date(2026, 11, 28, 9).getTime(), new Date(2027, 0, 10, 12).getTime())).toBe("Mon, Dec 28, 2026");
+  expect(headingOf(new Date(2025, 9, 20, 9).getTime(), localNoon)).toBe("October 2025");
+  expect(headingOf(new Date(2026, 9, 15, 9).getTime(), localNoon, true)).toBe("Thu, Oct 15, 2026");
+
+  await photoAction("Select", "Photos tools");
+  await press("Select all");
+  await until(alpha, runtime, Library, (state) => state.selecting && state.selected.length === 3);
+  await press("Deselect all");
+  await until(alpha, runtime, Library, (state) => state.selecting && state.selected.length === 0);
+  await drawn(() => expect(button("Delete")?.disabled).toBe(true));
+  await press("Cancel selection");
 
   await press("Park.jpg");
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");
@@ -52,7 +72,7 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.read.ticket === 2);
   expect(world.photos.readCount).toBe(2);
 
-  await press("Edit");
+  await press("Edit photo");
   await until(alpha, runtime, Viewer, (state) => state.editing && state.preview.showing);
   await press("Noir");
   await until(alpha, runtime, Viewer, (state) => state.edit.look === "Noir" && state.preview.showing);
@@ -96,7 +116,7 @@ it('Use a photo in Messages from its still-open viewer (spec/app/photos/viewer.m
   await openPicture();
   await photoAction("Use in Messages");
   await started.promise;
-  await press("Back to photos");
+  await press("Back from photo");
   await until(alpha, runtime, Viewer, (state) => state.open === 0);
   await openPicture();
   await drawn(async () => { late.resolve(received); await late.promise; });
@@ -109,7 +129,8 @@ it('Use a photo in Messages from its still-open viewer (spec/app/photos/viewer.m
   await fill("To", "+15550123456");
   await press("Text +15550123456");
   await until(alpha, alpha.runtime, MessageComposer, (state) => state.pictures === 1);
-  expect(alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()))).toEqual([
+  const { thread } = alpha.runtime.runSync(MessageComposer.use((composer) => composer.get()));
+  expect(alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures(thread)))).toEqual([
     { name: source.name, wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(binary, (byte) => byte.charCodeAt(0)) },
   ]);
   expect(world.telephony.sent).toEqual([]);
@@ -126,14 +147,8 @@ it('Offer the original photo for Inbox to review (spec/app/photos/viewer.md, "St
   source.mutationRevision = source.revision;
   world.photos.selectedPicture = () => Promise.resolve({ name: source.name, mimeType: "image/png", size: source.size, dataBase64 });
   const { alpha } = await open(world, only("home", "view:Photos", "view:Inbox", "notice"));
-  await drawn(() => {
-    const inboxTile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
-    if (!inboxTile) throw new Error("No Inbox home tile");
-    inboxTile.click();
-  });
   const letters = inbox.runtime(alpha);
-  await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
-  await hardware("back");
+  await readInboxFirst(alpha, letters);
   await press("Photos");
   const runtime = photosArea.runtime(alpha);
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded");
@@ -171,4 +186,67 @@ it("Resume an already-sent photo edit from an older viewer record (spec/app/phot
   expect(localStorage.getItem(kept + ".epoch")).toBe("earlier-viewer");
   expect(localStorage.getItem("alpha/photos/edit/4")).toBe(operationId);
   expect(localStorage.getItem(kept + ".unreadable")).toBeNull();
+});
+
+it("Keep Viewer open on Limited-to-Limited library updates and offer both Limited permission actions (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+  const world = { ...scene(), phone: true };
+  const { alpha } = await open(world, only("home", "view:Photos", "notice"));
+  await press("Photos");
+  const runtime = photosArea.runtime(alpha);
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Denied");
+  await press("Allow access");
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.asked);
+  world.photos.access = { scope: "selected", images: "selected", videos: "denied" };
+  await drawn(() => {
+    world.photos.changed();
+  });
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Limited");
+  expect([Boolean(button("Choose items or allow all")), Boolean(button("Allow all photos"))]).toEqual([true, true]);
+
+  await press("Park.jpg");
+  await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.open > 0);
+  const opened = runtime.runSync(Viewer.use((viewer) => viewer.get())).open;
+  await drawn(() => {
+    world.photos.changed();
+  });
+  await until(alpha, runtime, Library, (state) => state.access.grant === "Limited" && state.library.status === "Loaded");
+  expect(runtime.runSync(Viewer.use((viewer) => viewer.get())).open).toBe(opened);
+
+  const viewport = document.querySelector<HTMLElement>("[role=group][tabindex='0']");
+  expect(viewport).not.toBeNull();
+  if (viewport) {
+    viewport.setPointerCapture = () => { throw new DOMException("Not active", "InvalidStateError"); };
+    await drawn(() => {
+      viewport.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, pointerType: "touch", clientX: 50, clientY: 50 }));
+      viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, pointerType: "touch", clientX: 50, clientY: 50 }));
+    });
+  }
+  expect(runtime.runSync(Viewer.use((viewer) => viewer.get())).open).toBe(opened);
+});
+
+it("Stops playing when a video ends even if currentTime rounds slightly short of duration (spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+  const world = { ...scene(), phone: true };
+  world.photos.access = { scope: "full", images: "full", videos: "full" };
+  world.photos.rows.unshift({
+    id: "m:external_primary:v:9", name: "Clip.mp4", owned: true, kind: "video",
+    image: world.photos.rows[0]?.image ?? "", width: 1280, height: 720, size: 10_000,
+    date: 1795400500000, revision: "rev-video-9", duration: 5, path: "https://localhost/_alpha_video_/clip.mp4",
+  });
+  const { alpha } = await open(world, only("home", "view:Photos", "notice"));
+  await press("Photos");
+  const runtime = photosArea.runtime(alpha);
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded");
+  await press("Clip.mp4");
+  await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.kind === "Clip" && state.duration === 50);
+  const clip = document.querySelector("video");
+  if (!clip) throw new Error("No video element");
+  clip.play = () => Promise.resolve();
+  clip.pause = () => {};
+  await press("Play video");
+  await until(alpha, runtime, Viewer, (state) => state.playing);
+  await drawn(() => {
+    clip.currentTime = 4.92;
+    clip.dispatchEvent(new Event("ended"));
+  });
+  await until(alpha, runtime, Viewer, (state) => !state.playing && state.position === 50);
 });

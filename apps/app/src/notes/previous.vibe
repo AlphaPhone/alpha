@@ -1,8 +1,11 @@
 // spec/app/notes/previous.md, "Story: Look at the notes from before"; spec/app/notes/previous.md, "The phone says whether there are notes from before, and only then is Previous notes offered"
 import * as Previous from "../../gen/app__notes__previous.effect.vibe"
 import type { Actor, Kind } from "../../gen/app__notes__note.effect.vibe"
-import { type Agent, NoteDevice, ownerAt } from "../platform/index.vibe"
+import type { Agent } from "../platform/index.vibe"
+import { NoteDevice } from "../platform/index.vibe"
+import { ownerAt } from "../platform/index.vibe"
 import { type Job, answer, reacting } from "../runtime/index.vibe"
+import { createShelf } from "../runtime/index.vibe"
 import { numberOf } from "./content.vibe"
 
 const phone: Actor = "Phone"
@@ -32,9 +35,9 @@ export interface PreviousNote {
   readonly details: ReadonlyArray<string>
 }
 
-function shaped(entry: typeof Entry.Type): PreviousNote {
+function shaped(namespace: "old-note" | "old-trash", entry: typeof Entry.Type): PreviousNote {
   return {
-    id: numberOf("old-note", entry.id),
+    id: numberOf(namespace, entry.id),
     kind: kinds[entry.kind], title: entry.title, body: entry.body ?? "",
     details: [
       ...(entry.url === undefined ? [] : [entry.url]),
@@ -48,15 +51,20 @@ function shaped(entry: typeof Entry.Type): PreviousNote {
 }
 
 export service EarlierNotes {
+  readonly snapshot: () => ReadonlyMap<number, PreviousNote>
+  readonly subscribe: (listener: () => void) => () => void
   get(id: number): (PreviousNote | undefined)!!
   replace(notes: ReadonlyArray<PreviousNote>): void!!
 }
 
-const earlier = Layer.sync(EarlierNotes, () => {
-  let byNumber = new Map<number, PreviousNote>()
+const earlier = Layer.effect(EarlierNotes, effect {
+  const shelf = createShelf<ReadonlyMap<number, PreviousNote>>(new Map(), { reset: () => new Map() })
+  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
   return {
-    get: (id: number) => sync(() => byNumber.get(id)),
-    replace: (notes: ReadonlyArray<PreviousNote>) => sync(() => { byNumber = new Map(notes.map((note) => [note.id, note])) }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
+    get: (id: number) => sync(() => shelf.get().get(id)),
+    replace: (notes: ReadonlyArray<PreviousNote>) => sync(() => { shelf.set(new Map(notes.map((note) => [note.id, note]))) }),
   }
 })
 
@@ -64,17 +72,29 @@ effect function listed(ticket: number, owner: number): Previous.Event!!(NoteDevi
   const failed: Previous.Event = { type: "listed", ticket, ok: false, olds: [], binned: [] }
   const identity = ownerAt() catch () => ""
   if (identity === "" || numberOf("owner", identity) !== owner) return failed
-  return effect {
-    const device = try NoteDevice
-    const records = try device.earlier("records")
-    const trash = try device.earlier("trash")
-    const saved = records === null ? [] : (try Schema.decodeUnknownEffect(Current)((try Schema.decodeUnknownEffect(Legacy)(records)).currentRaw)).records.map(shaped)
-    const binned = trash === null ? [] : (try Schema.decodeUnknownEffect(Bin)(trash)).entries.map((row) => shaped(row.note))
-    const state = try (try Previous.Machine).get()
-    if (!Previous.canListed(state, ticket, phone) || state.owner !== owner || (ownerAt() catch () => "") !== identity) return failed
-    try (try EarlierNotes).replace([...saved, ...binned])
-    return { type: "listed", ticket, ok: true, olds: saved.map(({ id, kind }) => ({ id, kind })), binned: binned.map(({ id, kind }) => ({ id, kind })) } satisfies Previous.Event
-  } catch () => failed
+  const device = try NoteDevice
+  const recordsRaw = device.earlier("records") catch () => undefined
+  const trashRaw = device.earlier("trash") catch () => undefined
+  if (recordsRaw === undefined && trashRaw === undefined) return failed
+  const saved = recordsRaw === null || recordsRaw === undefined
+    ? []
+    : (effect {
+        const legacy = try Schema.decodeUnknownEffect(Legacy)(recordsRaw)
+        return (try Schema.decodeUnknownEffect(Current)(legacy.currentRaw)).records.map((entry) => shaped("old-note", entry))
+      } catch () => undefined)
+  const binned = trashRaw === null || trashRaw === undefined
+    ? []
+    : (effect {
+        return (try Schema.decodeUnknownEffect(Bin)(trashRaw)).entries.map((row) => shaped("old-trash", row.note))
+      } catch () => undefined)
+  if (saved === undefined && binned === undefined) return failed
+  const okSaved = saved ?? []
+  const okBinned = binned ?? []
+  if (saved === undefined && okBinned.length === 0) return failed
+  const state = try (try Previous.Machine).get()
+  if (!Previous.canListed(state, ticket, phone) || state.owner !== owner || (ownerAt() catch () => "") !== identity) return failed
+  try (try EarlierNotes).replace([...okSaved, ...okBinned])
+  return { type: "listed", ticket, ok: true, olds: okSaved.map(({ id, kind }) => ({ id, kind })), binned: okBinned.map(({ id, kind }) => ({ id, kind })) }
 }
 
 function carry(fx: Previous.Effect): Job<Previous.Event, NoteDevice | Agent | Previous.Machine | EarlierNotes, [Actor]> {

@@ -2,18 +2,18 @@
 import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os-bridges"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os-bridges"
 import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os-bridges"
-import type { PhoneClient, PhoneNumber } from "@elizaos/os-bridges"
+import type { PhoneClient, PhoneNumber, TelephonySubscription } from "@elizaos/os-bridges"
 
 module held {
-  import { registerPlugin } from "@capacitor/core"
   import { Schema, Semaphore } from "effect"
   import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os-bridges"
   import { rejectionCode } from "@elizaos/os-bridges"
-  import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os-bridges"
+  import { createAddressBookClient, createContactNames, type AddressBookNativePlugin } from "@elizaos/os-bridges"
   import { messagesClient, type MessagesNativePlugin } from "@elizaos/os-bridges"
   import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
   import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os-bridges"
-  import { composerPlugin } from "./composerPort.vibe"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
+  import { approvedSmsPlugin, composerPlugin, type SmsApproval } from "./composerPort.vibe"
 
   type OwnerDialPlugin = PhoneNativePlugin & {
     classifyDialNumber(input: { number: PhoneNumber }): Promise<unknown>
@@ -53,10 +53,25 @@ module held {
     return phase === "deleted" || phase === "undone" || phase === "conflict" || phase === "unknown" ? phase : undefined
   }
 
-  function make() {
-    const journal = registerPlugin<Journal>("ElizaActionJournal")
-    const nativePhone = registerPlugin<OwnerDialPlugin & MessagesNativePlugin>("ElizaTelephony")
-    const addressBook = addressBookPlugin("ElizaContacts")
+  const unavailableContacts = (): Promise<never> => Promise.reject(Object.assign(new Error("ElizaContacts is not registered"), { code: "UNIMPLEMENTED" }))
+
+  const absentAddressBook: AddressBookNativePlugin = {
+    openAddressBook: unavailableContacts,
+    listContacts: unavailableContacts,
+    getContact: unavailableContacts,
+    resolveContactNames: unavailableContacts,
+    createContact: unavailableContacts,
+    updateContact: unavailableContacts,
+    deleteContact: unavailableContacts,
+    stageContactDeletion: unavailableContacts,
+    contactDeletionReceipt: unavailableContacts,
+    contactChangeReceipt: unavailableContacts,
+  } as unknown as AddressBookNativePlugin
+
+  function make(withContacts: boolean) {
+    const journal = capacitorPlugin<Journal>("ElizaActionJournal")
+    const nativePhone = capacitorPlugin<OwnerDialPlugin & MessagesNativePlugin>("ElizaTelephony")
+    const addressBook = withContacts ? capacitorPlugin<AddressBookNativePlugin>("ElizaContacts") : absentAddressBook
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
@@ -66,6 +81,8 @@ module held {
       messages: messagesClient(nativePhone, journal),
       composer: (trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>) =>
         messagesClient(composerPlugin(nativePhone, trustedTap, signal, current), journal),
+      approvedSms: (approval: SmsApproval, signal: AbortSignal, current: () => Promise<boolean>) =>
+        messagesClient(approvedSmsPlugin(nativePhone, approval, signal, current), journal),
       async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
         const raw = await nativePhone.mmsSendResult({ operationId: operation })
         return parseMmsSendResult(raw, binding, operation, hash)
@@ -75,10 +92,11 @@ module held {
       names: createContactNames(addressBook),
     }
   }
-  let made: ReturnType<typeof make> | undefined
+  let madeWithContacts: ReturnType<typeof make> | undefined
+  let madeWithoutContacts: ReturnType<typeof make> | undefined
   /** eliza's clients of the image's telephony and contacts plugins, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function clients() {
-    return (made ??= make())
+  export function clients(withContacts: boolean) {
+    return withContacts ? (madeWithContacts ??= make(true)) : (madeWithoutContacts ??= make(false))
   }
   /** The code a plugin rejected a call with, or none for an answer that never came. @throws {never} */
   export function codeOf(cause: unknown): string | undefined {
@@ -91,6 +109,7 @@ module held {
 }
 import { clients, codeOf, tagOf, type AndroidDialKind, type TelephonyDeletionPhase } from held
 import { registered } from "./device.vibe"
+import type { SmsApproval } from "./composerPort.vibe"
 
 /** eliza's clients of an Alpha image's telephony: calls, the call log and voicemail; conversations and sends; the address book. */
 export interface TelephonyClients {
@@ -99,6 +118,7 @@ export interface TelephonyClients {
   ownerDialScreen(number: PhoneNumber): Promise<boolean>
   readonly messages: MessagesClient
   composer(trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>): MessagesClient
+  approvedSms(approval: SmsApproval, signal: AbortSignal, current: () => Promise<boolean>): MessagesClient
   /** Reads the native record and checks it against the original review digest, without the picture bytes. */
   mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>
   readonly contacts: AddressBookClient
@@ -117,23 +137,45 @@ export error TelephonyAbsent { method: string }
  */
 export error TelephonyRefused { method: string; code: string | undefined; tag: string; cause: unknown }
 
+/** These bridge results prove that Android did not stage a telephony deletion. */
+export function deletionRefused(failure: TelephonyAbsent | TelephonyRefused): boolean {
+  if (failure instanceof TelephonyAbsent) return true
+  if (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest"
+    || failure.tag === "PhoneRequestRefused" || failure.tag === "VoicemailRefused") return true
+  const cause = failure.cause
+  if (failure.method === "deleteVoicemail" && (failure.tag === "NativeRejection" || failure.tag === "MalformedReply")
+    && typeof cause === "object" && cause !== null && "method" in cause
+    && (cause.method === "status" || cause.method === "voicemailStatus")) return true
+  return failure.code === "invalid" || failure.code === "permission-required" || failure.code === "role-required"
+}
+
 /** The phone's telephony, through eliza's clients of the image's plugins; absent off the image. */
 export service Telephony {
   clients(): TelephonyClients!TelephonyAbsent
 }
 
-/** The contacts' names for `numbers`, as the phone names a number for `surface`; a number it cannot name, or a phone that cannot be asked, has none. */
-export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<string>): ReadonlyMap<string, string>!!Telephony {
+/** The granted names that the phone could still show for this exact screen. */
+export effect function readNames(surface: NameSurface, numbers: ReadonlyArray<string>): ReadonlyMap<string, string>!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const asked = [...new Set(numbers.filter((number) => number !== ""))]
   if (asked.length === 0) return new Map()
-  const named = telephony("names", (c) => c.names.resolve({ surface, numbers: asked })) catch () => []
-  return new Map(named.flatMap((one) => (one.name === null ? [] : [[one.number, one.name as string] as const])))
+  const named = try telephony("names", (c) => c.names.resolve({ surface, numbers: asked }))
+  return new Map<string, string>(named.flatMap((one) => one.name === null ? [] : [[one.number, one.name] as const]))
+}
+
+/** The contacts' names for `numbers`, as the phone names a number for `surface`; a number it cannot name, or a phone that cannot be asked, has none. */
+export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<string>): ReadonlyMap<string, string>!!Telephony {
+  return readNames(surface, numbers) catch () => new Map()
+}
+
+/** The SIM a text goes out on when none was picked: the phone's default for texts or its only SIM; with several and no default, none. */
+export function textingDefault(sims: ReadonlyArray<TelephonySubscription>): number | undefined {
+  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
 }
 
 /** One call of eliza's clients: refused before the phone where there is no image, and typed where the phone refused. */
-export effect function telephony<A>(method: string, run: (clients: TelephonyClients) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
+export effect function telephony<A>(method: string, run: (clients: TelephonyClients, signal: AbortSignal) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const found = try (try Telephony).clients()
-  return try nativeCall(method, () => run(found))
+  return try nativeCall(method, (signal) => run(found, signal))
 }
 
 effect function nativeCall<A>(method: string, call: (signal: AbortSignal) => Promise<A>): A!TelephonyRefused {
@@ -149,15 +191,24 @@ export effect function sendFromComposer<A>(trustedTap: boolean, current: () => P
   return try nativeCall("composerSend", (signal) => send(clients.composer(trustedTap, signal, current)))
 }
 
+const addressBookTimeout = "15 seconds"
+
 /** The address book keeps one read ticket, shared by list, card and number searches. A new read waits until the outstanding native answer settles. */
 export effect function readAddressBook<A>(method: string, read: (book: AddressBookClient) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const clients = try (try Telephony).clients()
-  return try clients.addressBookRead.withPermit(Effect.uninterruptible(nativeCall(method, () => read(clients.contacts))))
+  return try clients.addressBookRead.withPermit(effect {
+    return timeout(nativeCall(method, () => read(clients.contacts)), addressBookTimeout) catch effect (cause) => match (cause) {
+      when TelephonyRefused: throw cause;
+      default: throw new TelephonyRefused({ method, code: undefined, tag: "Timeout", cause });
+    }
+  })
 }
 
 /** On an Alpha image: eliza's own clients of `ElizaTelephony`, `ElizaContacts` and `ElizaActionJournal`, which the image's host registers. */
 export const phoneTelephony = Layer.succeed(Telephony, {
-  clients: (): TelephonyClients!TelephonyAbsent => registered("ElizaTelephony") ? sync(() => clients()) : Effect.fail(new TelephonyAbsent({ method: "clients" })),
+  clients: (): TelephonyClients!TelephonyAbsent => registered("ElizaTelephony")
+    ? sync(() => clients(registered("ElizaContacts")))
+    : Effect.fail(new TelephonyAbsent({ method: "clients" })),
 })
 
 /** In a browser there is no image: every call is refused before anything is asked. */

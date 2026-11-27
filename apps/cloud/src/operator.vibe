@@ -7,23 +7,35 @@ import { Machine, machine, paymentKeyFits, secretsFileAccepted } from "../gen/cl
 import apiTemplate from "../wrangler/api.template.json" with { type: "json" }
 import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { entryOf, registrationAt } from "./alpha.vibe"
-import { candidateProblems, candidates, type CandidateUnknown } from "./candidate.vibe"
+import { hostedClouds, hostedProfileProblems, type HostedCloudUnknown } from "./hosted.vibe"
 import { reconcileResources } from "./cloudflare.vibe"
-import { base64urlBytes, entitlementKey, entitlementPublicKey, randomKey } from "./keys.ts"
+import { base64urlBytes, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexKey, isEntitlementKey, isExampleEntitlementPublicKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
 import { PROFILE_ASSET } from "./profile-asset.ts"
 import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResources } from "./wrangler.vibe"
+
+schema CloudResourcesSchema {
+  workerName: string
+  accountId: string
+  zone: string
+  hyperdriveId: string
+}
+
+schema ResourcesFileSchema {
+  production: CloudResourcesSchema
+  staging: CloudResourcesSchema
+}
 
 /** A step of the operator's command could not be carried out; the message says which and why, and holds no secret. */
 export error OperatorFailed { problem: string }
 
 /** The secrets each environment's operator supplies. */
-const providedSecrets = ["DATABASE_URL", "RESEND_API_KEY", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
+const providedSecrets = ["DATABASE_URL", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
 /** The secrets the operator command generates once and keeps in the secrets file; it never rotates one. */
 const internalSecrets = ["CLOUD_DIGEST_KEY", "CLOUD_SEALING_KEY", "CLOUD_ENTITLEMENT_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CONNECT_TOKEN_KEY"]
 /** The API Worker's secrets, each by the secrets file entry it is read from. */
 const workerSecretSource: Readonly<Record<string, string>> = {
   CLOUD_DIGEST_KEY: "CLOUD_DIGEST_KEY", CLOUD_SEALING_KEY: "CLOUD_SEALING_KEY", CLOUD_ENTITLEMENT_KEY: "CLOUD_ENTITLEMENT_KEY",
-  EMAIL_CODE_SECRET: "EMAIL_CODE_SECRET", RESEND_API_KEY: "RESEND_API_KEY", GOOGLE_CLIENT_SECRET: "GOOGLE_CLIENT_SECRET",
+  EMAIL_CODE_SECRET: "EMAIL_CODE_SECRET", GOOGLE_CLIENT_SECRET: "GOOGLE_CLIENT_SECRET",
   GOOGLE_CONNECT_CLIENT_SECRET: "GOOGLE_CONNECT_CLIENT_SECRET", GOOGLE_CONNECT_TOKEN_KEY: "GOOGLE_CONNECT_TOKEN_KEY",
   STRIPE_SECRET_KEY: "STRIPE_SECRET_KEY", STRIPE_WEBHOOK_SECRET: "STRIPE_WEBHOOK_SECRET",
   CEREBRAS_API_KEY: "CEREBRAS_API_KEY", CARTESIA_API_KEY: "CARTESIA_API_KEY",
@@ -47,32 +59,67 @@ function parseSecrets(text: string): Record<string, string> {
   return values
 }
 
+/** Resolve `target` through any symlinks, including dangling ones, so containment checks cannot be bypassed. */
+effect function canonicalPath(target: string, depth = 0): string!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
+  if (depth > 16) throw new OperatorFailed({ problem: `${target} contains too many symbolic links` })
+  const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  const resolved = path.resolve(target)
+  const real = (fs.realPath(resolved) catch () => undefined)
+  if (real !== undefined) return real
+  const linked = (fs.readLink(resolved) catch () => undefined)
+  if (linked !== undefined) return try canonicalPath(path.resolve(path.dirname(resolved), linked), depth + 1)
+  const parent = path.dirname(resolved)
+  if (parent === resolved) return resolved
+  return path.join(try canonicalPath(parent, depth + 1), path.basename(resolved))
+}
+
 /** The secrets file at `file`, refused inside the checkout or readable by anyone but its owner; nothing yet when it does not exist. */
 export effect function readSecrets(file: string): Record<string, string>!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
   const fs = try FileSystem.FileSystem
   const path = try Path.Path
   const resolved = path.resolve(file)
-  const checkout = path.resolve(try packageDirectory(), "../..")
-  const exists = (fs.exists(resolved) catch () => false)
-  const mode = exists ? ((fs.stat(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) })).mode : 0o600
-  if (!secretsFileAccepted(resolved.startsWith(checkout + path.sep), (mode & 0o077) !== 0))
+  const canonical = try canonicalPath(resolved)
+  const checkout = try canonicalPath(path.resolve(try packageDirectory(), "../.."))
+  const exists = (fs.exists(canonical) catch () => false)
+  const info = exists ? (fs.stat(canonical) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }) : undefined
+  if (info !== undefined && info.type !== "File") throw new OperatorFailed({ problem: `${resolved} must be a regular file` })
+  const mode = info?.mode ?? 0o600
+  const insideCheckout = canonical === checkout || canonical.startsWith(checkout + path.sep)
+  if (!secretsFileAccepted(insideCheckout, (mode & 0o077) !== 0))
     throw new OperatorFailed({ problem: `${resolved} must lie outside the checkout and be readable by its owner alone (chmod 600)` })
   if (!exists) return {}
-  return parseSecrets((fs.readFileString(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
+  return parseSecrets((fs.readFileString(canonical) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
 }
 
-effect function writeSecrets(file: string, values: Readonly<Record<string, string>>): void!OperatorFailed!FileSystem.FileSystem {
+effect function writeSecrets(file: string, values: Readonly<Record<string, string>>): void!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
   if (Object.values(values).some((value) => /[\r\n]/.test(value))) throw new OperatorFailed({ problem: "a secret cannot span lines" })
   const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  const resolved = try canonicalPath(file)
   const text = Object.entries(values).map(([name, value]) => `${name}=${value}`).join("\n") + "\n"
-  fs.writeFileString(file, text, { mode: 0o600 }) catch effect () => { throw new OperatorFailed({ problem: `cannot write ${file}` }) }
-  fs.chmod(file, 0o600) catch effect () => { throw new OperatorFailed({ problem: `cannot make ${file} private` }) }
+  const staged = path.join(path.dirname(resolved), `.${path.basename(resolved)}.${hexKey().slice(0, 16)}.tmp`)
+  fs.writeFileString(staged, text, { mode: 0o600 }) catch effect () => { throw new OperatorFailed({ problem: `cannot write ${resolved}` }) }
+  fs.chmod(staged, 0o600) catch effect () => {
+    fs.remove(staged, { force: true }) catch () => undefined
+    throw new OperatorFailed({ problem: `cannot make ${resolved} private` })
+  }
+  fs.rename(staged, resolved) catch effect () => {
+    fs.remove(staged, { force: true }) catch () => undefined
+    throw new OperatorFailed({ problem: `cannot replace ${resolved}` })
+  }
 }
 
 /** Every internal secret that is absent, generated; those present are kept as they are. */
 export function generated(values: Readonly<Record<string, string>>): Record<string, string> {
   const next = { ...values }
-  for (const name of internalSecrets) if (!next[name]) next[name] = name === "CLOUD_ENTITLEMENT_KEY" ? entitlementKey() : randomKey()
+  for (const name of internalSecrets) {
+    if (next[name]) continue
+    next[name] = name === "CLOUD_ENTITLEMENT_KEY" ? entitlementKey()
+      : name === "CLOUD_SEALING_KEY" ? sealingKey()
+      : name === "GOOGLE_CONNECT_TOKEN_KEY" ? hexKey()
+      : randomKey()
+  }
   return next
 }
 
@@ -83,7 +130,10 @@ export function secretProblems(values: Readonly<Record<string, string>>, environ
   if (stripe && (!/^(sk|rk)_(live|test)_/.test(stripe) || !paymentKeyFits(environment === "production", /^(sk|rk)_live_/.test(stripe))))
     problems.push(environment === "production" ? "STRIPE_SECRET_KEY must be a live key in production" : "STRIPE_SECRET_KEY must be a test key in staging")
   if (values.DATABASE_URL && !/^postgres(ql)?:\/\//.test(values.DATABASE_URL)) problems.push("DATABASE_URL must be a postgres:// URL")
-  for (const name of internalSecrets) if (values[name] && name !== "CLOUD_ENTITLEMENT_KEY" && base64urlBytes(values[name]) < 32) problems.push(`${name} must hold at least 32 bytes`)
+  if (values.CLOUD_ENTITLEMENT_KEY && !isEntitlementKey(values.CLOUD_ENTITLEMENT_KEY)) problems.push("CLOUD_ENTITLEMENT_KEY must be a PKCS #8 EC P-256 private key")
+  if (values.CLOUD_SEALING_KEY && sealingKeyBytes(values.CLOUD_SEALING_KEY) !== 32) problems.push("CLOUD_SEALING_KEY must hold exactly 32 base64 bytes")
+  if (values.GOOGLE_CONNECT_TOKEN_KEY && !isHexKey(values.GOOGLE_CONNECT_TOKEN_KEY)) problems.push("GOOGLE_CONNECT_TOKEN_KEY must be 64 hex characters")
+  for (const name of ["CLOUD_DIGEST_KEY", "EMAIL_CODE_SECRET"] as const) if (values[name] && base64urlBytes(values[name]) < 32) problems.push(`${name} must hold at least 32 bytes`)
   for (const [name, value] of Object.entries(values)) if (leakedElizaHost(value) !== undefined) problems.push(`${name} names a deployed Eliza Cloud host`)
   return problems
 }
@@ -102,9 +152,9 @@ export effect function settledSecrets(file: string, environment: CloudEnvironmen
   const read = try rollout.send({ type: "readSecrets", internalMissing, providedFit: provided.length === 0 })
   const settled = read.generated ? generated(values) : values
   if (read.generated) try writeSecrets(file, settled)
-  const signingKey = settled.CLOUD_ENTITLEMENT_KEY
-  const publicKey = signingKey ? (Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }) : undefined
   if (read.vault !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
+  const signingKey = settled.CLOUD_ENTITLEMENT_KEY ?? ""
+  const publicKey = Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }
   return { values: settled, entitlementPublicKey: publicKey }
 }
 
@@ -146,14 +196,14 @@ effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSy
   return try Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => new OperatorFailed({ problem: `${file} is not JSON` }) })
 }
 
-/** The profile's candidate hosts no longer fit, or the profile breaks a rule of Alpha's own cloud. */
+/** The profile disagrees with Alpha Cloud's hosts or another rule of its deployment. */
 export error CandidateRefused { problems: ReadonlyArray<string> }
 
-/** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping every rule of the candidate. */
-export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | CandidateUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
+/** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping its deployment rules. */
+export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | HostedCloudUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
   const profile = parseProfile(try readJson(file)) catch effect (refusal) => { throw new OperatorFailed({ problem: `${file}: ${refusal.problem}` }) }
-  const hosts = try candidates()
-  const problems = candidateProblems(profile, hosts)
+  const hosts = try hostedClouds()
+  const problems = hostedProfileProblems(profile, hosts)
   if (problems.length > 0) throw new CandidateRefused({ problems })
   return { profile, hosts }
 }
@@ -166,14 +216,18 @@ export function registrationOn(profile: CloudProfile, environment: CloudEnvironm
 /** `apps/cloud/resources.json`, or the file `override` names. */
 export effect function resourcesOf(override?: string): Readonly<Record<CloudEnvironment, CloudResources>>!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
   const path = try Path.Path
-  return (try readJson(override ?? path.join(try packageDirectory(), "resources.json"))) as Record<CloudEnvironment, CloudResources>
+  const target = override ?? path.join(try packageDirectory(), "resources.json")
+  const raw = try readJson(target)
+  return Schema.decodeUnknownEffect(ResourcesFileSchema)(raw) catch effect () => {
+    throw new OperatorFailed({ problem: `${target} is not a valid resources.json` })
+  }
 }
 
 const siblingOf = (environment: CloudEnvironment): CloudEnvironment => environment === "production" ? "staging" : "production"
 
 /** Checks, and with `creating` completes, an environment's Cloudflare resources against what `resources.json` records. */
 export effect function reconciled(environment: CloudEnvironment, resources: Readonly<Record<CloudEnvironment, CloudResources>>, databaseUrl: string | undefined, creating: boolean) {
-  const hosts = (try candidates())[environment]
+  const hosts = (try hostedClouds())[environment]
   const accountId = (Config.withDefault(Config.String("CLOUDFLARE_ACCOUNT_ID"), "") catch () => "")
   const token = (Config.withDefault(Config.String("CLOUDFLARE_API_TOKEN"), "") catch () => "")
   return try reconcileResources({
@@ -186,12 +240,15 @@ export effect function reconciled(environment: CloudEnvironment, resources: Read
 /** Records one environment's verified resources, unless the file changed since it was read. */
 export effect function recordResources(file: string, environment: CloudEnvironment, expected: CloudResources, verified: CloudResources) {
   const fs = try FileSystem.FileSystem
-  const current = (try readJson(file)) as Record<CloudEnvironment, CloudResources>
+  const current = try resourcesOf(file)
   if (JSON.stringify(current[environment]) === JSON.stringify(verified)) return
   if (JSON.stringify(current[environment]) !== JSON.stringify(expected)) throw new OperatorFailed({ problem: `resources.json changed for ${environment}; run provision again` })
-  const staged = `${file}.${environment}.next`
+  const staged = `${file}.${environment}.${hexKey().slice(0, 12)}.next`
   fs.writeFileString(staged, JSON.stringify({ ...current, [environment]: verified }, null, 2) + "\n") catch effect () => { throw new OperatorFailed({ problem: `cannot write ${staged}` }) }
-  fs.rename(staged, file) catch effect () => { throw new OperatorFailed({ problem: `cannot replace ${file}` }) }
+  fs.rename(staged, file) catch effect () => {
+    fs.remove(staged, { force: true }) catch () => undefined
+    throw new OperatorFailed({ problem: `cannot replace ${file}` })
+  }
 }
 
 /** Both Workers of one environment, rendered into `out`: their Wrangler files, and the API Worker's assets, eliza's pages and the profile. */
@@ -230,8 +287,15 @@ export effect function deploy(at: { readonly environment: CloudEnvironment; read
     provide machine() {
       const rollout = try Machine
       try rollout.send({ type: "freeze" })
-      const { values } = try settledSecrets(at.secrets, at.environment)
+      const { values, entitlementPublicKey: derivedKey } = try settledSecrets(at.secrets, at.environment)
       const { profile } = try profiled(at.profile)
+      const entitlement = profile.environments[at.environment].entitlement
+      if (isExampleEntitlementPublicKey(derivedKey) || entitlement.publicKeys.some(isExampleEntitlementPublicKey)) {
+        throw new OperatorFailed({ problem: "the profile still holds the example placeholder entitlement public key" })
+      }
+      if (!entitlementPublicKeyMatches(values.CLOUD_ENTITLEMENT_KEY ?? "", entitlement.publicKeys, entitlement.keyId)) {
+        throw new OperatorFailed({ problem: `CLOUD_ENTITLEMENT_KEY does not match entitlement.publicKeys[${entitlement.keyId}] in ${at.profile}` })
+      }
       const resources = try resourcesOf(at.resources)
       const verified = reconciled(at.environment, resources, values.DATABASE_URL, false) catch effect (refused) => {
         try rollout.send({ type: "checkResources", recorded: false })

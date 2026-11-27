@@ -10,6 +10,8 @@ agent keeps carries its attachments in the [conversation](./index.md).
 > As the owner, I want to pick photos or documents a page at a time, to be
 > asked for access once and sent to Settings after that, to try again when
 > a folder fails to open, and to be told when a file I chose cannot go.
+> I can search the current source, open a folder and choose files across
+> both tabs before I attach them to the same draft.
 
 ### The picker shows photos or documents, with the room the composer has left, Android's access to each, a page of files, the files chosen and those refused
 
@@ -27,11 +29,13 @@ type Tab = Photos | Documents
 type Attachments = {
   open: bool, tab: Tab, room: int, photos: P::Permission, documents: P::Permission,
   rows: R::Read, more: bool, selected: int, reading: A::Attempt, refused: int, preview: int,
+  query: str, folder: int, visit: int,
 }
 
 pure val initial: Attachments = {
   open: false, tab: Photos, room: 0, photos: P::unasked, documents: P::unasked,
   rows: R::unread, more: false, selected: 0, reading: A::plan(0), refused: 0, preview: 0,
+  query: "", folder: 0, visit: 0,
 }
 
 pure def access(tab: Tab, a: Attachments): P::Permission = if (tab == Photos) a.photos else a.documents
@@ -40,24 +44,29 @@ pure def access(tab: Tab, a: Attachments): P::Permission = if (tab == Photos) a.
 ### What the picker needs done outside comes back as an answer naming its ticket
 
 A page of the tab's files listed, Android asked for access or its Settings
-opened, the chosen files read and checked against the upload limits, and
-what was read added to the composer.
+opened, or the chosen files read and checked against the upload limits.
+The read's answer counts only files added to the same composer draft.
 
 ```quint
+type AccessMode = Probe | Request | Settings | ChooseItems
+
 type Effect =
-  | Browse({ tab: Tab, more: bool, ticket: int })
-  | Access({ tab: Tab, settings: bool })
-  | ReadFiles({ attempt: int, count: int })
-  | Attach({ count: int })
+  | Browse({ tab: Tab, more: bool, ticket: int, visit: int, query: str, folder: int })
+  | Access({ tab: Tab, mode: AccessMode, visit: int })
+  | ReadFiles({ attempt: int, count: int, visit: int })
 type Moved = { state: Attachments, out: List[Effect] }
 
 pure def browse(more: bool, a: Attachments): Moved =
   val rows = R::ask(a.rows)
-  { state: { ...a, rows: rows, more: false }, out: List(Browse({ tab: a.tab, more: more, ticket: rows.ticket })) }
+  { state: { ...a, rows: rows, more: false }, out: List(Browse({
+    tab: a.tab, more: more, ticket: rows.ticket, visit: a.visit, query: a.query,
+    folder: if (a.tab == Documents) a.folder else 0,
+  })) }
 
-pure def shown(tab: Tab, a: Attachments): Moved =
-  val at = { ...a, tab: tab, selected: 0, refused: 0, rows: X::dropped(a.rows), more: false }
-  if (P::allows(access(tab, a))) browse(false, at) else { state: at, out: List() }
+pure def requestObservation(tab: Tab, a: Attachments): Moved =
+  { state: { ...a, tab: tab, rows: X::dropped(a.rows), more: false }, out: List(Access({ tab: tab, mode: Probe, visit: a.visit })) }
+
+pure def shown(tab: Tab, a: Attachments): Moved = requestObservation(tab, { ...a, query: "", refused: 0 })
 ```
 
 ### What the simulator tries
@@ -69,24 +78,59 @@ pure val roomValues = Set(1, 4)
 pure val countValues = Set(0, 1, 2, 4)
 pure val acceptedValues = Set(0, 1, 2)
 pure val attachmentValues = Set(1, 2)
+pure val visitValues = Set(0, 1, 2, 3)
+pure val folderValues = Set(0, 1, 2, 3)
+pure val queryValues = Set("", "notes", "holiday")
 pure val weight_listed = 4
 pure val weight_granted = 3
 ```
 
 ### The picker opens on photos when the composer has room, and lists them if Android allows it
 
+Each opening remembers its own visit. It asks what the selected source
+allows without prompting. Answers from before this opening cannot fill it.
+
 ```quint
 pure def canOpenPicker(a: Attachments, room: int): bool = not(a.open) and room > 0
 
-pure def openPicker(a: Attachments, room: int): Moved = shown(Photos, { ...a, open: true, room: room })
+pure def openPicker(a: Attachments, room: int): Moved =
+  shown(Photos, { ...a, open: true, room: room, folder: 0, visit: a.visit + 1 })
 ```
 
-### The owner switches between photos and documents, and the choice starts again
+### Switching sources starts a new listing and keeps the files already chosen
 
 ```quint
 pure def canSwitchTab(a: Attachments, tab: Tab): bool = a.open and tab != a.tab and a.reading.outcome != A::Sent
 
 pure def switchTab(a: Attachments, tab: Tab): Moved = shown(tab, a)
+
+pure def stepSwitchingSourcesKeepsTheChoice(before: Attachments, via: str, after: Attachments): bool =
+  via == "switchTab" implies (after.selected == before.selected and after.query == "")
+```
+
+### Searching, changing folders and refreshing leave the old listing behind
+
+Search runs in the showing source and, for Files, its current folder.
+Opening a folder or going up resets the search. The files already chosen
+stay selected while other pages, sources and folders are shown.
+
+```quint
+pure def canSetQuery(a: Attachments, query: str): bool =
+  a.open and a.reading.outcome != A::Sent and query != a.query
+
+pure def setQuery(a: Attachments, query: str): Moved =
+  val filtered = { ...a, query: query }
+  if (P::allows(access(a.tab, a))) browse(false, filtered) else { state: filtered, out: List() }
+
+pure def canSetFolder(a: Attachments, folder: int): bool =
+  a.open and a.tab == Documents and a.reading.outcome != A::Sent and folder >= 0 and folder != a.folder
+    and P::allows(access(a.tab, a))
+
+pure def setFolder(a: Attachments, folder: int): Moved = browse(false, { ...a, folder: folder, query: "" })
+
+pure def canRefresh(a: Attachments): bool = a.open and a.reading.outcome != A::Sent
+
+pure def refresh(a: Attachments): Moved = requestObservation(a.tab, a)
 ```
 
 ### Access is asked of Android once; after that Settings is offered
@@ -96,24 +140,41 @@ pure def canRequestAccess(a: Attachments): bool = a.open and P::canAsk(access(a.
 
 pure def requestAccess(a: Attachments): Moved =
   { state: if (a.tab == Photos) { ...a, photos: P::ask(a.photos) } else { ...a, documents: P::ask(a.documents) },
-    out: List(Access({ tab: a.tab, settings: false })) }
+    out: List(Access({ tab: a.tab, mode: Request, visit: a.visit })) }
 
 pure def canOpenSettings(a: Attachments): bool = a.open and P::needsSettings(access(a.tab, a))
 
-pure def openSettings(a: Attachments): Moved = { state: a, out: List(Access({ tab: a.tab, settings: true })) }
+pure def openSettings(a: Attachments): Moved =
+  { state: a, out: List(Access({ tab: a.tab, mode: Settings, visit: a.visit })) }
+```
+
+### Limited photo access offers Android's own chooser for more items
+
+```quint
+pure def canChoosePhotoItems(a: Attachments): bool =
+  a.open and a.tab == Photos and a.photos.grant == P::Limited and a.reading.outcome != A::Sent
+
+pure def choosePhotoItems(a: Attachments): Moved =
+  { state: a, out: List(Access({ tab: Photos, mode: ChooseItems, visit: a.visit })) }
 ```
 
 ### What Android reports is believed: files are listed as soon as access allows, and dropped as soon as it is taken away
 
 ```quint
-pure def canGranted(a: Attachments, tab: Tab, grant: P::Grant): bool = grant != access(tab, a).grant
+pure def canGranted(a: Attachments, tab: Tab, grant: P::Grant, visit: int): bool =
+  a.open and visit == a.visit and tab == a.tab and a.reading.outcome != A::Sent
 
-pure def granted(a: Attachments, tab: Tab, grant: P::Grant): Moved =
+pure def granted(a: Attachments, tab: Tab, grant: P::Grant, visit: int): Moved =
   val seen = if (tab == Photos) { ...a, photos: P::observe(a.photos, grant) } else { ...a, documents: P::observe(a.documents, grant) }
-  if (not(a.open) or tab != a.tab) { state: seen, out: List() }
-  else if (P::allows(access(tab, seen))) browse(false, seen)
-  else { state: { ...seen, rows: X::dropped(a.rows), more: false, selected: 0 }, out: List() }
+  if (P::allows(access(tab, seen))) browse(false, seen)
+  else { state: { ...seen, rows: X::dropped(a.rows), more: false }, out: List() }
 ```
+
+On a Contact, Chat actions opens the same picker over the current card. Cancel returns focus
+to the card's Chat actions. Accepted files raise the conversation over the
+same card. Leaving the card, reopening it, or replacing its selected subject
+retires a pending chooser. Its reviewed files stay separate from the ordinary
+Ask Alpha draft and are only offered to the agent on Send.
 
 ### Only the newest listing is shown; a denied folder asks for access, and one that fails offers Retry
 
@@ -143,7 +204,10 @@ pure def more(a: Attachments): Moved = browse(true, a)
 pure def stepFilesAreListedOnlyWithAccess(before: Attachments, via: str, after: Attachments, out: List[Effect]): bool =
   out.every(e => match e {
     | Browse(b) => after.open and b.tab == after.tab and P::allows(access(b.tab, after)) and b.ticket == after.rows.ticket
-    | Access(x) => after.open and (x.settings or not(access(x.tab, before).asked))
+      and b.visit == after.visit and b.query == after.query and b.folder == (if (b.tab == Documents) after.folder else 0)
+    | Access(x) => after.open and x.tab == after.tab and x.visit == after.visit
+      and (x.mode != Request or not(access(x.tab, before).asked))
+      and (x.mode != ChooseItems or (x.tab == Photos and after.photos.grant == P::Limited))
     | _ => true
   })
 ```
@@ -152,23 +216,38 @@ pure def stepFilesAreListedOnlyWithAccess(before: Attachments, via: str, after: 
 
 ```quint
 pure def canChoose(a: Attachments, count: int): bool =
-  a.open and a.rows.status == R::Loaded and a.reading.outcome != A::Sent and 0 <= count and count <= a.room
+  a.open and a.reading.outcome != A::Sent and 0 <= count and count <= a.room
+    and (count <= a.selected or a.rows.status == R::Loaded)
 
 pure def choose(a: Attachments, count: int): Attachments = { ...a, selected: count, refused: 0 }
+```
+
+### An explicit system choice can be staged without permission to list the whole library
+
+The system supplies only the files the owner chose. They count against the
+same room as photos and documents chosen from a listing.
+
+```quint
+pure def canIncludePicked(a: Attachments, count: int): bool =
+  a.open and a.reading.outcome != A::Sent and count > a.selected and count <= a.room
+
+pure def includePicked(a: Attachments, count: int): Attachments = choose(a, count)
 ```
 
 ### Attach reads the chosen files once, and adds only those within the type, name and size limits
 
 A file refused is named to the owner and never attached. When every file
-went, the picker closes.
+went, the picker closes. The chooser opens over the current dock position.
+A fully accepted selection raises a closed or typing dock to the sheet
+while its original draft and route are still current.
 
 ```quint
 pure def canAttachChosen(a: Attachments): bool =
-  a.open and a.selected > 0 and a.rows.status == R::Loaded and a.reading.outcome != A::Sent
+  a.open and a.selected > 0 and a.reading.outcome != A::Sent
 
 pure def attachChosen(a: Attachments): Moved =
   val reading = A::dispatch(A::record(A::plan(a.reading.id + 1)))
-  { state: { ...a, reading: reading }, out: List(ReadFiles({ attempt: reading.id, count: a.selected })) }
+  { state: { ...a, reading: reading }, out: List(ReadFiles({ attempt: reading.id, count: a.selected, visit: a.visit })) }
 
 pure def canFilesRead(a: Attachments, attempt: int, accepted: int): bool =
   A::canConclude(a.reading, attempt) and 0 <= accepted and accepted <= a.selected
@@ -176,8 +255,8 @@ pure def canFilesRead(a: Attachments, attempt: int, accepted: int): bool =
 pure def filesRead(a: Attachments, attempt: int, accepted: int): Moved =
   val refused = a.selected - accepted
   val done = { ...a, reading: A::conclude(a.reading, true, true), selected: 0, refused: refused, room: a.room - accepted }
-  { state: if (refused == 0) { ...done, open: false, rows: X::dropped(a.rows) } else done,
-    out: if (accepted > 0) List(Attach({ count: accepted })) else List() }
+  { state: if (refused == 0) { ...done, open: false, query: "", folder: 0, rows: X::dropped(a.rows), more: false } else done,
+    out: List() }
 ```
 
 ### Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together
@@ -225,11 +304,11 @@ pure def lawAudioAndVideoNeverGo(bytes: int, nameLength: int): bool = not(fits(M
 ### A file refused for its type, name or size is never attached, and nothing beyond the room is
 
 ```quint
-pure def stepARefusedFileIsNeverAttached(before: Attachments, via: str, after: Attachments, out: List[Effect]): bool =
-  out.every(e => match e {
-    | Attach(x) => via == "filesRead" and x.count > 0 and x.count == before.selected - after.refused and x.count <= before.room
-    | _ => true
-  })
+pure def stepARefusedFileIsNeverAttached(before: Attachments, via: str, after: Attachments): bool =
+  via == "filesRead" implies (
+    before.room - after.room == before.selected - after.refused
+      and 0 <= before.room - after.room and before.room - after.room <= before.room
+  )
 ```
 
 ### Cancel closes the picker, and files still being read are not attached
@@ -238,7 +317,7 @@ pure def stepARefusedFileIsNeverAttached(before: Attachments, via: str, after: A
 pure def canCancel(a: Attachments): bool = a.open
 
 pure def cancel(a: Attachments): Attachments =
-  { ...a, open: false, selected: 0, refused: 0, rows: X::dropped(a.rows), more: false,
+  { ...a, open: false, selected: 0, refused: 0, query: "", folder: 0, rows: X::dropped(a.rows), more: false,
     reading: if (a.reading.outcome == A::Sent) A::conclude(a.reading, false, false) else a.reading }
 ```
 
@@ -254,7 +333,7 @@ pure def alwaysTheChoiceStaysWithinTheRoom(a: Attachments): bool =
 
 ```quint
 pure def stepTicketsNeverGoBack(before: Attachments, via: str, after: Attachments): bool =
-  after.rows.ticket >= before.rows.ticket and after.reading.id >= before.reading.id
+  after.rows.ticket >= before.rows.ticket and after.reading.id >= before.reading.id and after.visit >= before.visit
 ```
 
 ### Files can be listed a page at a time, refused, or need access
@@ -278,9 +357,12 @@ pure def sometimesAFileIsRefused(a: Attachments): bool = a.open and a.refused > 
 
 A sent file kept on this installation belongs to the verified owner and
 agent that received it, under its conversation, room and client send key.
-A page can display it only on a user row that the agent returned with that
-key. The agent's owner, identity and running epoch must agree across a
-lookup or send. The recorded key leaves out the epoch so the same owner
+A page can display it only on an unredacted user row that the agent
+returned with that key. A row the pinned agent returns as
+`[Private information removed]` can no longer open its local file, and
+retiring the loaded copy closes its preview. The agent's owner, identity
+and running epoch must agree across a lookup or send. The recorded key
+leaves out the epoch so the same owner
 can reopen the attachment after a restart. When the running epoch changes
 or the agent leaves, already displayed copies and their previews are
 dropped. An older local copy without verified identity is left in storage.
@@ -295,8 +377,11 @@ pure def archiveAddress(authority: ArchiveAuthority, conversationKey: str, roomK
 pure def sameArchiveAuthority(captured: ArchiveAuthority, observed: ArchiveAuthority): bool =
   captured.owner != "" and captured.agent != "" and captured.epoch >= 0 and captured == observed
 
-pure def archiveReadAdmitted(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, sendKey: str): bool =
-  sameArchiveAuthority(captured, observed) and mine and sendKey != ""
+pure def archiveRowNamesFile(mine: bool, redacted: bool, sendKey: str): bool =
+  mine and not(redacted) and sendKey != ""
+
+pure def archiveReadAdmitted(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, redacted: bool, sendKey: str): bool =
+  sameArchiveAuthority(captured, observed) and archiveRowNamesFile(mine, redacted, sendKey)
 
 pure val capturedValues: Set[ArchiveAuthority] = Set(
   { owner: "alice", agent: "one", epoch: 1 },
@@ -308,11 +393,14 @@ pure val capturedValues: Set[ArchiveAuthority] = Set(
 
 pure val observedValues = capturedValues
 
-pure def lawAnArchiveReadNeedsTheSameOwnerAndAgent(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, sendKey: str): bool =
-  archiveReadAdmitted(captured, observed, mine, sendKey) implies captured.owner == observed.owner and captured.agent == observed.agent
+pure def lawAnArchiveReadNeedsTheSameOwnerAndAgent(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, redacted: bool, sendKey: str): bool =
+  archiveReadAdmitted(captured, observed, mine, redacted, sendKey) implies captured.owner == observed.owner and captured.agent == observed.agent
 
-pure def lawARestartInvalidatesAnInFlightArchiveRead(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, sendKey: str): bool =
-  captured.epoch != observed.epoch implies not(archiveReadAdmitted(captured, observed, mine, sendKey))
+pure def lawARestartInvalidatesAnInFlightArchiveRead(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, redacted: bool, sendKey: str): bool =
+  captured.epoch != observed.epoch implies not(archiveReadAdmitted(captured, observed, mine, redacted, sendKey))
+
+pure def lawARedactedRowNeverReopensItsFile(mine: bool, sendKey: str): bool =
+  not(archiveRowNamesFile(mine, true, sendKey))
 ```
 
 ### An attachment opens in place over the conversation and closes back to it, never opening a view

@@ -1,0 +1,124 @@
+// spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Only the newest listing is shown; a denied folder asks for access, and one that fails offers Retry"
+import type { LibraryAccess, MediaCursor, MediaItem } from "@elizaos/os-bridges"
+import { base64Of, fits, imageIntakeBytes, nameLimit } from "../../gen/app__assistant__attachments.effect.vibe"
+import type { Grant } from "../../gen/kit__permission.effect.vibe"
+import type { Row as AttachmentPhotoRow } from "../photos/catalog.vibe"
+import { PhotosPort, type BrowserCapture } from "../platform/index.vibe"
+
+export type { AttachmentPhotoRow }
+export type AttachmentPhotoGrant = Exclude<Grant, "Unasked">
+export type AttachmentPhotoCursor =
+  | { readonly kind: "phone"; readonly value: MediaCursor }
+  | { readonly kind: "browser"; readonly created: number; readonly id: string }
+
+export type AttachmentPhotoPage =
+  | { readonly kind: "Listed"; readonly rows: readonly AttachmentPhotoRow[]; readonly next: AttachmentPhotoCursor | undefined; readonly grant: Exclude<AttachmentPhotoGrant, "Denied"> }
+  | { readonly kind: "Denied" }
+  | { readonly kind: "Failed" }
+
+module web {
+  /** The native catalog supplies bounded, scaled image pixels as a data URL. */
+  export function scaledPhoto(image: string, name: string, maxEncoded: number, maxName: number): File | undefined {
+    if (image.length > maxEncoded + 32) return undefined
+    const [, mime, data] = /^data:(image\/(?:jpeg|png|gif|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(image) ?? []
+    if (mime === undefined || data === undefined || data.length > maxEncoded || data.length % 4 !== 0) return undefined
+    const extension = mime === "image/jpeg" ? "jpg" : mime.slice(6)
+    const source = name.trim() || "Photo"
+    const matching = extension === "jpg" ? /\.jpe?g$/i.test(source) : source.toLowerCase().endsWith(`.${extension}`)
+    const titled = matching ? source : `${source.replace(/\.[^.]+$/, "")}.${extension}`
+    const dot = titled.lastIndexOf(".")
+    const suffix = titled.slice(dot)
+    const filename = `${titled.slice(0, dot).slice(0, maxName - suffix.length) || "Photo"}${suffix}`
+    return new File([Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0))], filename, { type: mime })
+  }
+
+  export function captureFile(file: Blob, name: string): File {
+    return new File([file], name, { type: file.type })
+  }
+}
+import { captureFile, scaledPhoto } from web
+
+function photoGrant(access: LibraryAccess): AttachmentPhotoGrant {
+  return access.images === "full" ? "Granted" : access.images === "selected" || access.images === "owned" ? "Limited" : "Denied"
+}
+
+/** Observe existing access, or request it only after the picker's permission rule admits the user's press. */
+export effect function attachmentPhotoAccess(ask = false): (AttachmentPhotoGrant | undefined)!!PhotosPort {
+  const { phone, browser } = try PhotosPort
+  if (Option.isNone(phone)) return Option.isSome(browser) ? "Granted" : undefined
+  const access = tryPromise(() => ask ? phone.value.requestLibraryAccess() : phone.value.libraryAccess()) catch () => undefined
+  return access === undefined ? undefined : photoGrant(access)
+}
+
+/** Open the current Android application's library settings after an explicit press. */
+export effect function openAttachmentPhotoSettings(): boolean!!PhotosPort {
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return false
+  return Exit.isSuccess(try exit(tryPromise(() => phone.value.openLibrarySettings())))
+}
+
+const browserPageSize = 30
+
+function browserPhotoPage(captures: readonly BrowserCapture[], query: string, before: Extract<AttachmentPhotoCursor, { kind: "browser" }> | undefined): AttachmentPhotoPage {
+  const needle = query.toLocaleLowerCase()
+  const ordered = captures.filter((item) => item.trashedAt === undefined && item.mimeType.startsWith("image/")
+    && item.name.toLocaleLowerCase().includes(needle)
+    && (before === undefined || item.created < before.created || (item.created === before.created && item.id > before.id)))
+    .sort((a, b) => b.created - a.created || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const page = ordered.slice(0, browserPageSize)
+  const last = page.at(-1)
+  return {
+    kind: "Listed", grant: "Granted", rows: page.map((item) => ({ kind: "browser", item })),
+    next: ordered.length > browserPageSize && last !== undefined ? { kind: "browser", created: last.created, id: last.id } : undefined,
+  }
+}
+
+/** A still-image page from Android's permitted catalog or the browser's locally saved captures. */
+export effect function listAttachmentPhotos(query: string, before?: AttachmentPhotoCursor): AttachmentPhotoPage!!PhotosPort {
+  const { phone, browser } = try PhotosPort
+  const words = query.trim()
+  if (Option.isSome(phone)) {
+    if (before?.kind === "browser") return { kind: "Failed" }
+    const page = tryPromise(() => phone.value.listPermitted({ kind: "image", query: words, before: before?.value, thumbnails: true })) catch () => undefined
+    if (page?.access === undefined) return { kind: (try attachmentPhotoAccess()) === "Denied" ? "Denied" : "Failed" }
+    const grant = photoGrant(page.access)
+    if (grant === "Denied") return { kind: "Denied" }
+    const rows: AttachmentPhotoRow[] = page.items.filter((item) => item.kind === "image" && item.trashed !== true).map((item) => ({ kind: "phone", item }))
+    return { kind: "Listed", grant, rows, next: page.next === null ? undefined : { kind: "phone", value: page.next } }
+  }
+  if (Option.isNone(browser) || before?.kind === "phone") return { kind: "Failed" }
+  const captures = tryPromise(() => browser.value.rows()) catch () => undefined
+  return captures === undefined ? { kind: "Failed" } : browserPhotoPage(captures, words, before)
+}
+
+function samePhonePhoto(listed: MediaItem, seen: MediaItem): boolean {
+  return listed.kind === "image" && seen.kind === "image" && seen.trashed !== true && seen.id === listed.id && seen.revision === listed.revision
+    && (seen.mutationRevision ?? seen.revision) === (listed.mutationRevision ?? listed.revision)
+    && (listed.contentRevision === undefined || seen.contentRevision === listed.contentRevision)
+    && (listed.identity === undefined || seen.identity === listed.identity)
+}
+
+function sameBrowserCapture(listed: BrowserCapture, seen: BrowserCapture): boolean {
+  return seen.id === listed.id && seen.revision === listed.revision && seen.sourceRevision === listed.sourceRevision
+    && seen.created === listed.created && seen.width === listed.width && seen.height === listed.height
+    && seen.thumbnail === listed.thumbnail && seen.trashedAt === undefined
+}
+
+/** Load only the chosen still, recheck its listed identity, and hand a bounded File to the existing intake. */
+export effect function readPickedPhoto(row: AttachmentPhotoRow): (File | undefined)!!PhotosPort {
+  const { phone, browser, capture } = try PhotosPort
+  if (row.kind === "phone") {
+    if (Option.isNone(phone) || row.item.kind !== "image" || row.item.trashed === true) return undefined
+    const listed = row.item
+    const seen = tryPromise(() => phone.value.readPermitted({ id: listed.id, revision: listed.revision, pixels: true })) catch () => undefined
+    if (seen?.image === undefined || !samePhonePhoto(listed, seen)) return undefined
+    const picture = seen.image
+    const file = Effect.try(() => scaledPhoto(picture, seen.name || listed.name || "Photo", base64Of(imageIntakeBytes), nameLimit)) catch () => undefined
+    return file !== undefined && fits("Image", file.size, file.name.length) ? file : undefined
+  }
+  if (Option.isNone(browser) || row.item.trashedAt !== undefined || !row.item.mimeType.startsWith("image/")) return undefined
+  const source = capture(row.item.id) catch () => undefined
+  if (source === undefined || !sameBrowserCapture(row.item, source.item) || !source.file.type.startsWith("image/")
+    || !fits("Image", source.file.size, source.item.name.length)) return undefined
+  return Effect.try(() => captureFile(source.file, source.item.name)) catch () => undefined
+}

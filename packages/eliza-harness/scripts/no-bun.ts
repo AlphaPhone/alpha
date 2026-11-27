@@ -10,10 +10,11 @@ const commands = [
   String.raw`/bin/bunx?${after}`,
   String.raw`^#!.*[[:space:]/]bun${after}`,
   String.raw`${before}bun:[[:alnum:]_/-]+`,
+  String.raw`(from[[:space:]]+|import[[:space:]]*\([[:space:]]*|require[[:space:]]*\([[:space:]]*)["']bun["']`,
   String.raw`${before}Bun[[:space:]]*(\??\.[[:space:]]*[[:alpha:]_$]|\[)`,
-  String.raw`["'](bun|@oven/bun[^"']*)["'][[:space:]]*:`,
+  String.raw`["'](bun|@oven/bun[^"']*|@types/bun|bun-types)["'][[:space:]]*:`,
   String.raw`["']packageManager["'][[:space:]]*:[[:space:]]*["']bun@`,
-  String.raw`setup-bun@|bun\.sh/install|github\.com/oven-sh/bun/releases|(^|[/[:space:]"'])(oven|oven-sh)/bun${after}`,
+  String.raw`setup-bun@|bun\.(sh|com)/install|github\.com/oven-sh/bun/releases|(^|[/[:space:]"'])(oven|oven-sh)/bun${after}`,
 ].join("|");
 
 const excluded = [

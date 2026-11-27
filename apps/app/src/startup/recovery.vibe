@@ -14,8 +14,22 @@ module page {
   export function reloadBeforeMount(): void {
     window.location.reload()
   }
+
+  /** Whether the document marks Alpha as the Android launcher before startup completes. @throws {never} */
+  export function launcherBeforeMount(): boolean {
+    return typeof document !== "undefined" && document.documentElement.hasAttribute("data-alpha-launcher")
+  }
 }
-export { reloadBeforeMount } from page
+export { launcherBeforeMount, reloadBeforeMount } from page
+
+/** Open Android's Home / default apps settings when Alpha fails while acting as Home. */
+export effect function openHomeSettings(): boolean!!SystemSettings {
+  const settings = try SystemSettings
+  for (const target of ["DefaultApps", "AndroidHome"] as const) {
+    if ((try settings.open(target, "")) !== "NotAtAll") return true
+  }
+  return false
+}
 
 /** Hooks for testing or integrating native WebView rebuild, draft flush, and Switch Home handoffs. */
 export interface RecoveryHooks {
@@ -135,6 +149,7 @@ function carry(fx: Recovery.Effect): Job<Recovery.Event, RecoveryDesk | Journal.
       }),
       lost: Option.some<Recovery.Event>({ type: "flushed", side, ticket, ok: false, now: untimed }),
       by: ["Owner" as Actor],
+      allowEmpty: false,
     });
     when { tag: "SwitchHome", let route, let ticket }: answer(
       `recovery-switch-${ticket}`,

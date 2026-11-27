@@ -72,10 +72,13 @@ export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, ext
   fs.writeFileSync(file, JSON.stringify({
     schema: 1, character: read("character.json"), policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins }, model,
     account: { userId: key.accountId, organizationId: key.organizationId }, embeddings: host.embeddings, persistMemory: host.persistMemory,
-    callerRole: host.callerRole, privacy: host.privacy, google: host.google, ...extra,
+    callerRole: host.callerRole, views: host.views, privacy: host.privacy, google: host.google, ...extra,
   }), { mode: 0o600 });
   return file;
 }
+
+/** A fresh 32-byte task storage key, as eliza's TaskKeyCustody releases one for a signed-in launch. */
+export const taskStorageKey = () => randomBytes(32).toString("base64");
 
 /** One agent process of the pack, as the phone runs it: the launch token it was given, and how it ended. */
 export interface Running {
@@ -87,10 +90,10 @@ export interface Running {
 
 /**
  * Start `agent.mjs serve` exactly as eliza's agent service does: a cleared environment, one launch frame on stdin
- * with a fresh token and the device key as the credential. The only addition is the run certificate of the local
+ * with a fresh token and the device key as the credential, and the account's task storage key when one is given. The only addition is the run certificate of the local
  * cloud, the one origin the agent must trust here.
  */
-export function startPhoneAgent(launch: string, state: string, cloud: Cloud, key: DeviceKey): Running {
+export function startPhoneAgent(launch: string, state: string, cloud: Cloud, key: DeviceKey, storageKey?: string): Running {
   const home = path.join(state, "agent");
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const socket = path.join(state, "agent.sock");
@@ -100,7 +103,7 @@ export function startPhoneAgent(launch: string, state: string, cloud: Cloud, key
     stdio: ["pipe", "ignore", "ignore"],
   });
   const exited = new Promise<number | null>((done) => child.once("close", (code) => done(code)));
-  child.stdin?.end(`${JSON.stringify({ version: 1, token, epoch: Date.now(), credential: { version: 1, value: key.token } })}\n`);
+  child.stdin?.end(`${JSON.stringify({ version: 1, token, epoch: Date.now(), credential: { version: 1, value: key.token }, ...(storageKey === undefined ? {} : { storageKey }) })}\n`);
   return { token, socket, exited, stop: () => { child.kill("SIGTERM"); return exited; } };
 }
 
@@ -177,6 +180,6 @@ export async function ready(running: Running, within = 120_000) {
     if (ended !== undefined) throw new Error(`the agent exited with ${ended} before it was ready`);
     if ((await call(running, "GET", "/api/health").catch(() => ({ status: 0 }))).status === 200) return;
     if (Date.now() > deadline) throw new Error("the agent was not ready in time");
-    await Effect.runPromise(Effect.sleep("100 millis"));
+    await Effect.runPromise(Effect.sleep(100));
   }
 }

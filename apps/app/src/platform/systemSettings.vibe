@@ -1,18 +1,31 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScopeKind, LocationPermissionStatus, MirrorStatus, NativeCrashEntry, SettingsHandoff, StorageVolume, SystemFacts, SystemSettingsPage } from "@elizaos/os-bridges"
+import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScopeKind, LocationPermissionStatus, MirrorStatus, NativeCrashEntry, PasswordsClient, SettingsHandoff, StorageVolume, SystemFacts, SystemSettingsPage } from "@elizaos/os-bridges"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Alert, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
+import { appVersion } from "./build.ts"
+import { calendarAccess } from "./calendar.vibe"
 import { openCarrierSettings } from "./carrier.vibe"
 import { registered } from "./device.vibe"
+import { microphoneAccess } from "./voice.vibe"
 
 module held {
-  import { registerPlugin } from "@capacitor/core"
-  import { type SystemClient, createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient } from "@elizaos/os-bridges"
+  import {
+    type ElizaFilesPlugin, type ElizaPasswordsPlugin, type LocationPlugin, type NotificationsNativePlugin, type PermittedPhotosPlugin, type SystemClient, type WiFiPlugin,
+    createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient,
+  } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
+
+  export type PasswordProviderAction = "settings" | "install" | "open"
+  export type AppPermission = "camera" | "notifications"
 
   interface SettingsHost {
     settingsFacts(): Promise<unknown>
     openSettings(input: { page: "screen-lock" | "all-files" }): Promise<{ status: "opened"; specific: boolean }>
+    passwordProviderStatus(): Promise<unknown>
+    openPasswordProvider(input: { action: PasswordProviderAction }): Promise<unknown>
+    accessPermissionStatus(input: { permission: AppPermission }): Promise<unknown>
+    requestAccessPermission(input: { permission: AppPermission }): Promise<unknown>
   }
 
   let system: Promise<SystemClient> | undefined
@@ -20,9 +33,10 @@ module held {
   let wifi: ReturnType<typeof wifiClient> | undefined
   let files: ReturnType<typeof filesClient> | undefined
   let photos: ReturnType<typeof permittedPhotosClient> | undefined
+  interface ApprovalNoticeHost extends NotificationsNativePlugin { workflowApprovalScope(): Promise<unknown> }
+  let noticeHost: ApprovalNoticeHost | undefined
   let notices: ReturnType<typeof noticesClient> | undefined
   let passwords: ReturnType<typeof createPasswordsClient> | undefined
-  let host: SettingsHost | undefined
   /**
    * eliza's client of `ElizaSystem`, which its bridge makes as it loads: loaded at first use, once the phone's host is
    * up, since Capacitor binds a plugin to the platform it finds when the plugin is first registered.
@@ -32,35 +46,39 @@ module held {
   }
   /** eliza's clients of the other plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function locationOf(): ReturnType<typeof locationClient> {
-    return (location ??= locationClient())
+    return (location ??= locationClient(capacitorPlugin<LocationPlugin>("ElizaLocation")))
   }
   /** @throws {never} */
   export function wifiOf(): ReturnType<typeof wifiClient> {
-    return (wifi ??= wifiClient())
+    return (wifi ??= wifiClient(capacitorPlugin<WiFiPlugin>("ElizaWiFi")))
   }
   /** @throws {never} */
   export function filesOf(): ReturnType<typeof filesClient> {
-    return (files ??= filesClient())
+    return (files ??= filesClient(capacitorPlugin<ElizaFilesPlugin>("ElizaFiles")))
   }
   /** @throws {never} */
   export function photosOf(): ReturnType<typeof permittedPhotosClient> {
-    return (photos ??= permittedPhotosClient())
+    return (photos ??= permittedPhotosClient(capacitorPlugin<PermittedPhotosPlugin>("ElizaPhotos"), "ElizaPhotos"))
+  }
+  /** @throws {never} */
+  export function noticeHostOf(): ApprovalNoticeHost {
+    return (noticeHost ??= capacitorPlugin<ApprovalNoticeHost>("ElizaNotifications"))
   }
   /** @throws {never} */
   export function noticesOf(): ReturnType<typeof noticesClient> {
-    return (notices ??= noticesClient())
+    return (notices ??= noticesClient({ plugin: noticeHostOf() }))
   }
   /** @throws {never} */
   export function passwordsOf(): ReturnType<typeof createPasswordsClient> {
-    return (passwords ??= createPasswordsClient())
+    return (passwords ??= createPasswordsClient(capacitorPlugin<ElizaPasswordsPlugin>("ElizaPasswords")))
   }
   /** @throws {never} */
   export function hostOf(): SettingsHost {
-    return (host ??= registerPlugin<SettingsHost>("AlphaDevice"))
+    return capacitorPlugin<SettingsHost>("AlphaDevice")
   }
 }
-import { filesOf, hostOf, locationOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
-export { passwordsOf }
+import { type AppPermission, type PasswordProviderAction, filesOf, hostOf, locationOf, noticeHostOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
+export { type PasswordProviderAction, noticeHostOf, noticesOf, passwordsOf }
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */
@@ -85,13 +103,41 @@ export interface PhoneReport {
   readonly launcher: boolean
 }
 
+schema ProviderStatus {
+  installation: "installed" | "disabled" | "absent" | "unrecognized-publisher" | "unknown"
+  selection: "proton" | "other" | "none" | "unknown"
+  support: "available" | "unavailable" | "unknown"
+}
+schema ProviderHandoff {
+  status: "opened"
+  destination: "provider-picker" | "system-settings" | "external"
+}
+export type PasswordProvider = typeof ProviderStatus.Type
+
+export interface StartupAccessReading {
+  readonly grant: Grant
+  readonly on: boolean
+  readonly requestable: boolean
+}
+
 /** The phone's own settings, as Android reports them: its facts, its roles, its settings pages and the problem log it keeps. */
 export service SystemSettings {
+  readonly passwordVault: () => Pick<PasswordsClient, "status" | "unlock" | "lock" | "list" | "openEditor" | "reveal" | "copy" | "remove"> | undefined
+  /** Facts from Android about Proton Pass and its autofill service. */
+  passwordProvider(): Option.Option<PasswordProvider>!!
+  /** Acknowledges the Android handoff, after an owner action. */
+  openPasswordProvider(action: PasswordProviderAction): boolean!!
   /** What the phone reports now; what it could not read is left out, never guessed. */
   report(include?: { readonly autofill: boolean }): PhoneReport!!
   boot(): number!!
   /** Whether Android could check one permission under review. */
   access(access: Access): Option.Option<{ readonly grant: Grant; readonly on: boolean }>!!
+  /** Android's answer, including whether the owner's first request can show its prompt. */
+  startupAccess(access: Access): Option.Option<StartupAccessReading>!!
+  /** Ask Android for just this permission, then read its answer. */
+  askStartupAccess(access: Access): Option.Option<StartupAccessReading>!!
+  /** Whether this verified Alpha image grants its startup permissions ahead. */
+  startupPermissionDefaults(): boolean!!
   /** Android's dialog for the Home role; returns when it closes. Whether Alpha holds the role is read again, never taken from the dialog. */
   requestHome(): void!!
   /** Android's own page for `target`, for Alpha itself where the page is about Alpha. */
@@ -149,6 +195,7 @@ function filesGrantOf(access: FilesAccess | undefined): Grant | undefined {
 
 const HostFacts = Schema.Struct({
   androidRelease: Schema.optionalKey(Schema.NonEmptyString),
+  startupPermissionDefaults: Schema.optionalKey(Schema.Boolean),
   bootCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   permissions: Schema.optionalKey(Schema.Struct({
     Camera: Schema.optionalKey(Schema.Boolean),
@@ -186,6 +233,13 @@ function mirrorWord(mirror: MirrorStatus): string {
   return mirror.connected ? "on" : "waiting"
 }
 
+// spec/app/settings/facts.md, "Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight"
+/** Alpha's version: the one its package reports, or, where it reports none, the one this build was made as. */
+function bundled(packaged: string): ReadonlyArray<Reading> {
+  const version = packaged || appVersion()
+  return version === "" ? [] : [{ fact: "Versions", value: version }]
+}
+
 /** What the phone reports through its SDK plugins and Alpha's own build facts. */
 effect function phoneReport(include?: { readonly autofill: boolean }): PhoneReport!! {
   const [facts, status, build, located, stored, host, photo, delivery, deviceSettings, collection, passwords] = try.all [
@@ -213,7 +267,7 @@ effect function phoneReport(include?: { readonly autofill: boolean }): PhoneRepo
   const readings = [
     ...(Option.isSome(facts) ? switched(facts.value) : []),
     ...(Option.isSome(status) ? [{ fact: "Roles" as const, value: "" }] : []),
-    ...(Option.isSome(build) && build.value.version !== "" ? [{ fact: "Versions" as const, value: build.value.version }] : []),
+    ...bundled(Option.isSome(build) ? build.value.version : ""),
     ...(settings?.androidRelease === undefined ? [] : [{ fact: "AndroidVersion" as const, value: settings.androidRelease }]),
     ...(notices === undefined ? [] : [{ fact: "Alerts" as const, value: !allowedAlerts ? "off" : alerts.some(({ blocked }) => blocked) ? "some off" : "on" }]),
     ...(storage === undefined ? [] : [storage]),
@@ -256,12 +310,75 @@ effect function phoneAccess(access: Access) {
     case "PhotosAccess": return Option.map(try settled(() => photosOf().libraryAccess()), (status) => ({ grant: photoGrant(status.scope), on: true }))
     case "FilesAccess": return Option.flatMap(try settled(() => filesOf().storageState()), (status) => permission(filesGrantOf(status.access)))
     case "NotificationsAccess": return Option.map(try settled(() => noticesOf().delivery()), (status) => ({ grant: status.permissionGranted ? "Granted" as const : "Denied" as const, on: status.appEnabled }))
-    default: {
+    case "CameraAccess":
+    case "MicrophoneAccess":
+    case "CalendarAccess": {
       const permissions = Option.getOrUndefined(try hostFacts())?.permissions
       const seen = access === "CameraAccess" ? permissions?.Camera : access === "MicrophoneAccess" ? permissions?.Microphone : permissions?.Calendar
       return permission(seen === undefined ? undefined : seen ? "Granted" : "Denied")
     }
+    default: {
+      const exhaustive: never = access
+      return exhaustive
+    }
   }
+}
+
+schema AppPermissionStatus { state: "granted" | "denied" | "prompt" | "prompt-with-rationale" }
+
+function startupWord(raw: string | undefined, on = true): Option.Option<StartupAccessReading> {
+  if (raw === "granted") return Option.some({ grant: "Granted", on, requestable: false })
+  if (raw === "denied") return Option.some({ grant: "Denied", on, requestable: false })
+  if (raw === "prompt" || raw === "prompt-with-rationale") return Option.some({ grant: "Unasked", on, requestable: true })
+  return Option.none()
+}
+
+effect function appPermission(permission: AppPermission, ask: boolean): (string | undefined)!! {
+  if (!registered("AlphaDevice")) return undefined
+  const status = try Effect.option(Effect.flatMap(
+    tryPromise(() => ask ? hostOf().requestAccessPermission({ permission }) : hostOf().accessPermissionStatus({ permission })),
+    Schema.decodeUnknownEffect(AppPermissionStatus),
+  ))
+  return Option.getOrUndefined(status)?.state
+}
+
+effect function observedStartupAccess(access: Access, ask: boolean): Option.Option<StartupAccessReading>!! {
+  switch (access) {
+    case "CameraAccess": return startupWord(try appPermission("camera", ask))
+    case "MicrophoneAccess": return startupWord(try microphoneAccess(ask))
+    case "CalendarAccess": return startupWord(try calendarAccess(ask))
+    case "NotificationsAccess": {
+      const state = try appPermission("notifications", ask)
+      const delivery = try settled(() => noticesOf().delivery())
+      if (Option.isNone(delivery)) return Option.none()
+      return startupWord(state, delivery.value.appEnabled)
+    }
+    case "LocationAccess": {
+      const found = try settled(() => ask ? locationOf().requestPermissions() : locationOf().checkPermissions())
+      if (Option.isNone(found)) return Option.none()
+      const facts = try settled(async () => (await systemOf()).getSystemFacts())
+      const on = Option.getOrUndefined(facts)?.locationEnabled !== false
+      if (found.value.location === "granted" && found.value.accuracy === "approximate") {
+        return Option.some({ grant: "Limited", on, requestable: false })
+      }
+      return startupWord(found.value.location, on)
+    }
+    case "PhotosAccess": {
+      const found = try settled(() => ask ? photosOf().requestLibraryAccess() : photosOf().libraryAccess())
+      return Option.map(found, (value) => ({
+        grant: photoGrant(value.scope),
+        on: true,
+        requestable: value.scope === "owned" || value.scope === "denied",
+      }))
+    }
+    case "FilesAccess": return Option.map(try phoneAccess(access), (read) => ({ ...read, requestable: false }))
+  }
+}
+
+effect function askedStartupAccess(access: Access): Option.Option<StartupAccessReading>!! {
+  const observed = try observedStartupAccess(access, false)
+  if (Option.isNone(observed) || !observed.value.requestable) return observed
+  return try observedStartupAccess(access, true)
 }
 
 effect function browserAccess(access: Access) {
@@ -269,14 +386,14 @@ effect function browserAccess(access: Access) {
   return name === undefined ? Option.none<{ readonly grant: Grant; readonly on: boolean }>() : permission(grantOf(try promise(() => asked(name))))
 }
 
-/** What a browser reports: no facts of a phone, and the browser's own answer for each access it knows. */
+/** What a browser reports: no facts of a phone, the version this build was made as, and the browser's own answer for each access it knows. */
 effect function browserReport(): PhoneReport!! {
   const grants: AccessGrant[] = []
   for (const access of ["CameraAccess", "MicrophoneAccess", "LocationAccess", "NotificationsAccess"] as const) {
     const seen = try browserAccess(access)
     if (Option.isSome(seen)) grants.push({ access, grant: seen.value.grant })
   }
-  return { ...empty, grants }
+  return { ...empty, readings: bundled(""), grants }
 }
 
 /** Android's pages for each target, as eliza's client opens them; a target eliza has no page for opens none. */
@@ -306,18 +423,24 @@ effect function opening(target: Target, channel: string): Opened!! {
       return result.destination === "autofill-picker" ? "Exactly" : "Nearby"
     }
     if (target === "AlertChannel") {
+      if (channel === "" || !registered("ElizaNotifications")) return "NotAtAll"
       try tryPromise(() => noticesOf().openChannelSettings(channel))
       return "Exactly"
     }
     if (target === "NotificationAccess") {
+      if (!registered("ElizaNotifications")) return "NotAtAll"
       try tryPromise(() => noticesOf().openNotificationAccess())
       return "Exactly"
     }
     if (target === "PhotoPermissions") {
+      if (!registered("ElizaPhotos")) return "NotAtAll"
       try tryPromise(() => photosOf().openLibrarySettings())
       return "Exactly"
     }
-    if (target === "InternetPanel") return (try tryPromise(() => wifiOf().openInternetPanel())) === "Opened" ? "Exactly" : "NotAtAll"
+    if (target === "InternetPanel") {
+      if (!registered("ElizaWiFi")) return "NotAtAll"
+      return (try tryPromise(() => wifiOf().openInternetPanel())) === "Opened" ? "Exactly" : "NotAtAll"
+    }
     const system = try tryPromise(() => systemOf())
     if (target === "AndroidHome") return openedOf(try tryPromise(() => system.openSettings()))
     const page = target === "WorkflowAlerts" ? "notifications" : pages[target]
@@ -327,9 +450,19 @@ effect function opening(target: Target, channel: string): Opened!! {
 
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
+  passwordVault: () => registered("ElizaPasswords") ? passwordsOf() : undefined,
+  passwordProvider: () => Effect.option(Effect.flatMap(
+    tryPromise(() => hostOf().passwordProviderStatus()), Schema.decodeUnknownEffect(ProviderStatus),
+  )),
+  openPasswordProvider: (action) => Effect.map(Effect.option(Effect.flatMap(
+    tryPromise(() => hostOf().openPasswordProvider({ action })), Schema.decodeUnknownEffect(ProviderHandoff),
+  )), Option.isSome),
   report: phoneReport,
   boot: () => Effect.map(hostFacts(), (facts) => Option.map(facts, (found) => found.bootCount === undefined ? 0 : found.bootCount + 1).pipe(Option.getOrElse(() => 0))),
   access: phoneAccess,
+  startupAccess: (access) => observedStartupAccess(access, false),
+  askStartupAccess: askedStartupAccess,
+  startupPermissionDefaults: () => Effect.map(hostFacts(), (facts) => Option.getOrUndefined(facts)?.startupPermissionDefaults === true),
   requestHome: () => ignore(tryPromise(async () => (await systemOf()).requestRole({ role: "home" }))),
   open: opening,
   problems: () => Effect.map(settled(async () => (await systemOf()).crashLog()), Option.map((log) => log.entries.map(problemOf))),
@@ -338,9 +471,15 @@ export const phoneSystemSettings = Layer.succeed(SystemSettings, {
 
 /** A browser: none of the phone's facts, roles, pages or log. */
 export const browserSystemSettings = Layer.succeed(SystemSettings, {
+  passwordVault: () => undefined,
+  passwordProvider: () => succeed(Option.none<PasswordProvider>()),
+  openPasswordProvider: () => succeed(false),
   report: browserReport,
   boot: () => succeed(0),
   access: browserAccess,
+  startupAccess: (access) => Effect.map(browserAccess(access), Option.map((read) => ({ ...read, requestable: false }))),
+  askStartupAccess: () => succeed(Option.none<StartupAccessReading>()),
+  startupPermissionDefaults: () => succeed(false),
   requestHome: () => Effect.void,
   open: () => succeed<Opened>("NotAtAll"),
   problems: () => succeed(Option.none<ReadonlyArray<Problem>>()),

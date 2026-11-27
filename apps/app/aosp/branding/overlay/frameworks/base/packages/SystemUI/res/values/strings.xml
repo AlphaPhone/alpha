@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_label">Alpha System UI</string>
-    <string name="system_ui_tuner">Alpha System UI Tuner</string>
+    <string name="app_label" translatable="false">Alpha System UI</string>
+    <string name="system_ui_tuner" translatable="false">Alpha System UI Tuner</string>
 </resources>

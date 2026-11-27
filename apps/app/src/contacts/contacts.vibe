@@ -1,13 +1,16 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
 import { type AddressBookContact, type ContactCursor, type ContactDetail, type ContactDraft, type ContactDraftProblem, contactDraftProblem, isContactId } from "@elizaos/os-bridges"
-import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone__comms.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
-import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { SystemSettings, type Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/index.vibe"
-import { type Job, answer, applying, following, reacting, run, together, Time } from "../runtime/index.vibe"
-import { Dialer, grantOf, prefilled, Callers, on, visiting } from "../comms/index.vibe"
+import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { SystemSettings } from "../platform/index.vibe"
+import { type Telephony, type TelephonyAbsent, TelephonyRefused, readAddressBook, telephony } from "../platform/index.vibe"
+import { type Job, answer, applying, reacting, run, together } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
+import { type Dialer, dialing, grantOf } from "../comms/index.vibe"
+import { Callers } from "../comms/index.vibe"
+import { on, visiting } from "../comms/index.vibe"
 
 /** What the form holds: a name, numbers, addresses and notes, as the owner typed them. */
 export interface Form {
@@ -26,13 +29,22 @@ export interface Book {
   readonly card: ContactDetail | undefined
   readonly editBase: ContactDetail | undefined
   readonly form: Form
-  readonly reach: string
+  readonly reach: {
+    readonly how: Contacts.Reach
+    readonly route: number
+    readonly contact: string
+    readonly card: number
+    readonly number: string
+  } | undefined
   readonly problem: ContactDraftProblem | "stale" | "not-found" | undefined
+  /** Who narrowed the list to `sought`: a filter Alpha applied shows as a chip the owner can clear. */
+  readonly filteredBy: "Owner" | "Alpha"
+  readonly refusedWrite: number | undefined
 }
 
 export const blankForm: Form = { givenName: "", familyName: "", phones: [""], emails: [""], notes: "" }
 
-const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", problem: undefined }
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: undefined, problem: undefined, filteredBy: "Owner", refusedWrite: undefined }
 
 /** The contacts behind Contacts' counts. */
 export service Rows {
@@ -48,11 +60,20 @@ const rows = Layer.sync(Rows, () => {
 /** What a contact has, as Contacts counts it: notes are counted only where the phone lets them be read and edited here. */
 export function sheetOf(found: ContactDetail | Form): Sheet {
   if ("phones" in found) {
-    return { names: found.givenName.trim() + found.familyName.trim() === "" ? 0 : 1, phones: found.phones.filter((value) => value.trim() !== "").length, emails: found.emails.filter((value) => value.trim() !== "").length, notes: found.notes === "" ? 0 : 1, notable: true }
+    return {
+      names: found.givenName.trim() + found.familyName.trim() === "" ? 0 : 1,
+      phones: Math.min(found.phones.filter((value) => value.trim() !== "").length, Contacts.maxEach),
+      emails: Math.min(found.emails.filter((value) => value.trim() !== "").length, Contacts.maxEach),
+      notes: found.notes === "" ? 0 : 1,
+      notable: true,
+    }
   }
   return {
-    names: found.displayName === "" ? 0 : 1, phones: found.phoneNumbers.length, emails: found.emailAddresses.length,
-    notes: found.notes === undefined || found.notes === "" ? 0 : 1, notable: found.notes !== undefined,
+    names: found.displayName === "" ? 0 : 1,
+    phones: Math.min(found.phoneNumbers.length, Contacts.maxEach),
+    emails: Math.min(found.emailAddresses.length, Contacts.maxEach),
+    notes: found.notes === undefined || found.notes === "" ? 0 : 1,
+    notable: found.notes !== undefined,
   }
 }
 
@@ -94,6 +115,40 @@ function linesOfForm(form: Form, card: ContactDetail | undefined): Lines {
   }
 }
 
+/** Page forward through the phone's address book until at least one new accepted row arrives, with cursor-cycle protection. */
+export effect function pageAddressBook(options: {
+  readonly query: string
+  readonly limit: number
+  readonly existing: ReadonlyArray<AddressBookContact>
+  readonly start: ContactCursor | undefined
+  readonly maxPages?: number
+  readonly kind?: "ExplicitRead"
+  readonly accept: (row: AddressBookContact) => boolean
+}): { readonly rows: ReadonlyArray<AddressBookContact>; readonly next: ContactCursor | undefined }!(TelephonyAbsent | TelephonyRefused)!Telephony {
+  const found = new Map(options.existing.map((one) => [one.id, one] as const))
+  const seen = new Set<ContactCursor>()
+  let cursor = options.start
+  let more = true
+  let pages = 0
+  const minimum = found.size
+  while (more && found.size === minimum && (options.maxPages === undefined || pages < options.maxPages)) {
+    pages += 1
+    const position = cursor
+    const page = try readAddressBook("list contacts", (c) => c.list({
+      query: options.query,
+      limit: options.limit,
+      ...(options.kind === undefined ? {} : { kind: options.kind }),
+      ...(position === undefined ? {} : { cursor: position }),
+    }))
+    for (const row of page.contacts) if (!("incomplete" in row) && options.accept(row)) found.set(row.id, row)
+    const next = page.next ?? undefined
+    more = next !== undefined && !seen.has(next)
+    if (next !== undefined) seen.add(next)
+    cursor = next
+  }
+  return { rows: Array.from(found.values()), next: more ? cursor : undefined }
+}
+
 // spec/app/contacts/index.md, "Only the newest list read is taken, and with it what Android says about access"
 effect function listed(ticket: number, further: boolean): Event!!(Telephony | Rows | Contacts.Machine) {
   const store = try Rows
@@ -107,21 +162,15 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
   if (grant !== "Granted") return { type: "listed", ticket, ok: status !== undefined, grant, count: 0, further: false, editable: false }
   const read = effect {
     const book = try readAddressBook("open contacts", (c) => c.open())
-    const found = new Map((further ? held.rows : []).map((one) => [one.id, one] as const))
-    let cursor = further ? held.next : undefined
-    const seen = new Set<ContactCursor>()
-    let more = true
-    const minimum = found.size
-    while (more && found.size === minimum) {
-      const position = cursor
-      const page = try readAddressBook("list contacts", (c) => c.list({ query, limit: 50, kind: "ExplicitRead", ...(position === undefined ? {} : { cursor: position }) }))
-      for (const row of page.contacts) if (!("incomplete" in row) && (chip === "Everyone" || row.starred)) found.set(row.id, row)
-      const next = page.next ?? undefined
-      more = next !== undefined && !seen.has(next)
-      if (next !== undefined) seen.add(next)
-      cursor = next
-    }
-    return { found: Array.from(found.values()), next: more ? cursor : undefined, editable: book.writable }
+    const paged = try pageAddressBook({
+      query,
+      limit: 50,
+      kind: "ExplicitRead",
+      existing: further ? held.rows : [],
+      start: further ? held.next : undefined,
+      accept: (row) => chip === "Everyone" || row.starred,
+    })
+    return { found: paged.rows, next: paged.next, editable: book.writable }
   } catch () => undefined
   if (read === undefined) return { type: "listed", ticket, ok: false, grant, count: 0, further: false, editable: false }
   const { found, next, editable } = read
@@ -137,7 +186,7 @@ effect function read(ticket: number): Event!!(Telephony | Rows | Contacts.Machin
   const blank: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable: true }
   const found = !isContactId(contact) ? undefined : readAddressBook("read contact", (c) => c.get(contact, "ExplicitRead")) catch () => undefined
   const seen = found === undefined ? blank : sheetOf(found)
-  if (Contacts.canContactRead(try machine.get(), ticket, seen)) try store.set({ card: found, reach: "" })
+  if (Contacts.canContactRead(try machine.get(), ticket, seen)) try store.set({ card: found, reach: undefined })
   return { type: "contactRead", ticket, ok: found !== undefined, seen }
 }
 
@@ -193,26 +242,25 @@ effect function written(id: number, change: Change, contact: string): Event!!(Te
     if (done.status === "stale" || done.status === "not-found") try store.set({ problem: done.status })
     return done.status === "unknown" ? { made: false, known: false } : answered(done.status === "saved")
   } catch (failure) => answered(false, failure)
+  if (change !== "Remove") try store.set({ refusedWrite: !outcome.made && outcome.known ? id : undefined })
   return { type: "writeAnswered", id, ...outcome }
 }
 
 // spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
-effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachine | Shell | Callers) {
-  const held = try (try Rows).get()
-  const number = held.reach !== "" ? held.reach : held.card?.phoneNumbers[0]?.number ?? ""
-  if (number === "") return
-  if (how === "Message") {
-    try (try Callers).message(number)
-    return
-  }
-  const handoff = prefilled(number)
-  if (!handoff) return
-  const dialer = try Dialer
-  try dialer.set({ digits: handoff.digits })
-  const phone = try PhoneMachine
-  try ignore(phone.send(handoff.event))
-  const shell = try Shell
-  try ignore(shell.send({ type: "openView", view: "Phone" }))
+effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachine | Shell | Callers | Contacts.Machine) {
+  const store = try Rows
+  const held = try store.get()
+  const request = held.reach
+  if (request?.how !== how) return
+  const source = try (try Shell).get()
+  const card = try (try Contacts.Machine).get()
+  if (request.route !== source.route || !showing(source, "Contacts") || !Contacts.canReach(card)
+    || request.contact !== card.contact || request.card !== card.card.ticket || held.card?.id !== request.contact
+    || !held.card.phoneNumbers.some((phone) => phone.number === request.number)) return
+  try store.set({ reach: undefined })
+  const owner = { view: "Contacts", route: request.route } as const
+  if (how === "Message") try (try Callers).message(request.number, owner)
+  else try ignore(dialing(request.number, owner))
 }
 
 // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
@@ -255,14 +303,10 @@ const forget = applying(Contacts.Machine, (state) => ({
 }), effect ({ list, card, form }) => {
   try (try Rows).set({
     ...(list ? { rows: [], next: undefined } : {}),
-    ...(card ? { card: undefined, reach: "" } : {}),
-    ...(form ? { form: blankForm, editBase: undefined, problem: undefined } : {}),
+    ...(card ? { card: undefined, reach: undefined } : {}),
+    ...(form ? { form: blankForm, editBase: undefined, problem: undefined, refusedWrite: undefined } : {}),
   })
 })
 
-// spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
-const subject = following(Contacts.Machine, (state) => (!state.front ? "" : state.opened ? `contacts:contact:${state.contact}` : "contacts:list:"), Comms,
-  (key): CommsEvent | undefined => (key === "" ? undefined : { type: "subjectShown", app: "ContactsApp", subject: key === "contacts:list:" ? "ListSubject" : "ContactSubject", key }), "Device")
-
 /** Contacts: resident, so that a form the owner was filling in waits while Contacts is not showing; it reads only while its view is in front. */
-export const contacts = together(machine, rows, shown, subject, forget)
+export const contacts = together(machine, rows, shown, forget)

@@ -5,8 +5,10 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import * as Updates from "../../gen/app__update.effect.vibe"
 import type { Activity, Effect as Out, Event, Feed, Release } from "../../gen/app__update.effect.vibe"
-import { Device, LauncherUpdates } from "../platform/index.vibe"
-import { type Job, answer, reacting, run, started, together, untimed, Time } from "../runtime/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { LauncherUpdates } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import { type Engagement, Engagements, engagements, notesReported } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
 
@@ -77,8 +79,9 @@ effect function releaseOf(row: Row): Release!!Names {
 }
 
 // spec/app/update/index.md, "Only the answer to the newest check is taken: a complete manifest replaces the offer, a withdrawn one removes it, and anything else keeps it"
-effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names) {
+effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names | Updates.Machine) {
   const store = try KeyValueStore.KeyValueStore
+  const updates = try Updates.Machine
   const reply = try race(
     Effect.option((try LauncherUpdates).check()),
     Effect.as((try Time).until((try (try Time).now()) + patience), Option.none()),
@@ -88,7 +91,7 @@ effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore
   const { manifest, digest } = reply.value
   if (Option.isNone(manifest)) {
     if (Option.isSome(digest)) return unreadable
-    try ignore(store.remove(kept))
+    if (Updates.canAnswer(try updates.get(), ticket)) try ignore(store.remove(kept))
     return { type: "answer", ticket, reply: { tag: "Withdrawn" }, now: untimed }
   }
   const found = rowsOf(manifest.value)
@@ -97,7 +100,7 @@ effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore
   for (const row of found.value.rows) releases.push(try releaseOf(row))
   const signed = Option.isSome(digest) && hex64.test(digest.value) ? try (try Names).number(digest.value) : 0
   const feed: Feed = { index: found.value.index, releases, manifest: signed }
-  try ignore(store.set(kept, manifest.value))
+  if (Updates.complete(feed) && Updates.canAnswer(try updates.get(), ticket)) try ignore(store.set(kept, manifest.value))
   return { type: "answer", ticket, reply: { tag: "Answered", ...feed }, now: untimed }
 }
 
@@ -116,7 +119,7 @@ effect function installing(fx: { readonly version: number; readonly digest: numb
   return { type: "endInstall", ending, now: untimed }
 }
 
-function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names, []> {
+function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names | Updates.Machine, []> {
   return match (fx) {
     when { tag: "CheckFeed", let ticket }: answer("check", checked(ticket), { type: "answer", ticket, reply: { tag: "Unreadable" }, now: untimed });
     when { tag: "StartInstall", let version, let digest, let signer, let manifest, let automatic }:
@@ -133,7 +136,7 @@ effect function observed(): void!!(LauncherUpdates | Names | Updates.Machine) {
   const mine = Option.getOrUndefined(try Effect.option((try LauncherUpdates).installed()))
   if (mine === undefined || !hex64.test(mine.signer)) return
   const signer = try (try Names).number(mine.signer)
-  try ignore((try Updates.Machine).send({ type: "observePhone", installed: whole(mine.version), signer, permission: mine.permission }))
+  try contained((try Updates.Machine).send({ type: "observePhone", installed: whole(mine.version), signer, permission: mine.permission }), "observing phone for updates")
 }
 
 /** What the phone reports, read at launch and each time Alpha comes back to the front. */
@@ -146,13 +149,13 @@ const phone = started(effect {
 const shown = started(effect {
   const updates = try Updates.Machine
   const device = try Device
-  try ignore(updates.send({ type: "show", visible: try device.showing() }))
-  try Stream.runForEach(device.visible, (visible) => ignore(updates.send({ type: "show", visible })))
+  try contained(updates.send({ type: "show", visible: try device.showing() }), "showing updates")
+  try Stream.runForEach(device.visible, (visible) => contained(updates.send({ type: "show", visible }), "showing updates"))
 }, "following whether Alpha is on screen for updates")
 
 /** What the owner's activity is read from: the shell, what covers or holds the phone, a call, Alpha in front, a field with focus and the other areas' reports. */
 interface Facts {
-  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly assistant: string }
+  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly drawer: boolean; readonly assistant: string }
   readonly layers: { readonly open: ReadonlyArray<{ readonly kind: string }>; readonly holds: ReadonlyArray<string>; readonly steps: ReadonlyArray<string> }
   readonly call: boolean
   readonly front: boolean
@@ -160,13 +163,13 @@ interface Facts {
   readonly reported: Engagement
 }
 
-/** The owner's activity: what an automatic update waits on. Audio counts as normal while no call is up; Alpha's updater reads Android's audio mode itself before it commits. */
+/** The owner's activity: what an automatic update waits on. The phone reports no audio mode apart from a call. */
 function activityOf({ shell, layers, call, front, typing, reported }: Facts): Activity {
   const held = layers.holds.some((id) => id !== holder)
   return Updates.withSignIn({
     home: shell.trail.length === 0,
-    open: shell.trail.length > 0 || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
-    typing: typing || shell.assistant === "Typing", voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
+    open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
+    typing: reported.card !== "Resting" && (typing || shell.assistant === "Typing"), voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
     busy: reported.connecting, recording: reported.recording, front, call, audio: !call,
   }, reported.card)
 }
@@ -182,28 +185,37 @@ const activity = started(effect {
   )
   const activities = Stream.map(facts, ([shell, layers, call, front, typing, reported]) => activityOf({ shell, layers, call, front, typing, reported }))
   try Stream.runForEach(Stream.changesWith(activities, (a, b) => JSON.stringify(a) === JSON.stringify(b)),
-    (fact) => ignore(updates.send({ type: "observeActivity", activity: fact })))
+    (fact) => contained(updates.send({ type: "observeActivity", activity: fact }), "observing activity for updates"))
 }, "following the owner's activity for updates")
 
-/** The earliest time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
-function nextWake(state: Updates.Updates): Option.Option<number> {
+/** The earliest future time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
+function nextWake(state: Updates.Updates, now: number): Option.Option<number> {
   if (!state.visible || !Updates.free(state)) return Option.none()
   const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.backoff(state.misses) : Updates.interval)
-  return Option.some(state.deferrals > 0 && state.retryAt < check ? state.retryAt : check)
+  const candidates = [check, ...(state.deferrals > 0 ? [state.retryAt] : [])].filter((at) => at > now)
+  return candidates.length > 0 ? Option.some(Math.min(...candidates)) : Option.none()
 }
 
 // spec/app/update/index.md, "Alpha checks on its own only while on screen, when a check is due, and never during another check or an install"; spec/app/update/index.md, "An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded"
 const schedule = started(effect {
   const updates = try Updates.Machine
   const time = try Time
+  let handed: { readonly version: number; readonly manifest: number } | undefined
   for (;;) {
     const state = try updates.get()
     const now = try time.now()
-    const due: Event | undefined = Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
+    if ((!state.installing && state.deferrals > 0) || state.offer.release.version !== handed?.version || state.offer.manifest !== handed?.manifest) {
+      handed = undefined
+    }
+    const alreadyHanded = handed !== undefined && state.offer.release.version === handed.version && state.offer.manifest === handed.manifest
+    const due: Event | undefined = !alreadyHanded && Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
       : Updates.canPoll(state, now) ? { type: "poll", now: untimed } : undefined
-    const taken = due !== undefined && (effect { try updates.send(due); return true } catch () => false)
-    if (taken) continue
-    const next = Option.filter(nextWake(state), (at) => at > now)
+    const taken = due !== undefined && (try contained(updates.send(due), "the update schedule"))
+    if (taken) {
+      if (due?.type === "startAutomatically") handed = { version: state.offer.release.version, manifest: state.offer.manifest }
+      continue
+    }
+    const next = nextWake(state, now)
     const changed = Stream.runHead(Stream.drop(updates.changes, 1))
     if (Option.isSome(next)) try race(Effect.asVoid(changed), time.until(next.value))
     else try changed

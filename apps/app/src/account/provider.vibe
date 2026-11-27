@@ -4,7 +4,6 @@ import * as Provider from "../../gen/app__account__provider.effect.vibe"
 import * as SignIn from "../../gen/app__account__signIn.effect.vibe"
 import { type Job, answer, contained, due, following, reacting, run, together, untimed } from "../runtime/index.vibe"
 import { AccountShelf, checkOwnKeyFormat } from "./bridge.vibe"
-import { secondsTime } from "./clock.vibe"
 
 const keyChanger: Resident.Changer = "KeyChange"
 
@@ -116,10 +115,7 @@ const ownKeyEndsRequiredSignIn = following(
 )
 
 /** AI provider selection machine supporting Alpha Cloud, own Cerebras key, and independent voice key swaps. */
-export const providerMachine = Layer.provide(
-  together(
-    reacting(Provider, { keep: 1, open: [{ type: "restart" }], carry: carryProvider, timers: providerTimers }),
-    ownKeyEndsRequiredSignIn,
-  ),
-  secondsTime,
+export const providerMachine = together(
+  reacting(Provider, { keep: 1, open: [{ type: "restart" }], carry: carryProvider, timers: providerTimers }),
+  ownKeyEndsRequiredSignIn,
 )

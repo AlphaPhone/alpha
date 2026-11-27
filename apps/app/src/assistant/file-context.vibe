@@ -1,0 +1,14 @@
+// spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"
+import type { FileSelection } from "../files/preview.vibe"
+import type { Attached } from "./talk.vibe"
+
+/** The safe selection and exact read offered by the Files area while it is on screen. */
+export service FileContext {
+  selected(): (FileSelection | undefined)!!
+  read(expected: FileSelection): (Attached | undefined)!!
+  static readonly defaultValue = () => ({ selected: () => succeed(undefined), read: () => succeed(undefined) })
+}
+
+export function documentObservation(selection: FileSelection) {
+  return { kind: "document" as const, id: `file:${selection.item}`, revision: `${selection.viewer}.${selection.revision}` }
+}

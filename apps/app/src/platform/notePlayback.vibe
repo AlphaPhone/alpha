@@ -1,0 +1,66 @@
+// spec/app/notes/voice.md, "Story: Listen to a voice note"
+module browser {
+  import type { NotesAudioStore } from "@elizaos/plugin-notes-client"
+
+  /** Play local audio only for the ID and note named by the current selection. */
+  export function browserNotePlayback(store: NotesAudioStore, connection: () => string | undefined) {
+    let active: ((finished: boolean) => void) | undefined
+    let generation = 0
+
+    function halt(): boolean {
+      generation += 1
+      active?.(false)
+      return true
+    }
+
+    return {
+      halt,
+      async describe(audioId: string) {
+        const owner = connection()
+        if (owner === undefined) throw Error("Recording connection changed")
+        const row = await store.audioRecord(audioId, owner)
+        if (connection() !== owner) throw Error("Recording connection changed")
+        return { audioId: row.audioId, noteId: row.noteId, durationMs: row.durationMs }
+      },
+      async play(audioId: string, noteId: string, offsetMs: number): Promise<boolean> {
+        halt()
+        const ticket = generation
+        const owner = connection()
+        if (owner === undefined) return false
+        const row = await store.audioRecord(audioId, owner)
+        if (ticket !== generation || connection() !== owner || document.hidden || row.noteId !== noteId || row.expired ||
+          !Number.isFinite(offsetMs) || offsetMs < 0 || offsetMs >= row.durationMs) return false
+
+        return new Promise((resolve) => {
+          const player = new Audio()
+          const url = URL.createObjectURL(row.blob)
+          const watching = new AbortController()
+          const finish = (ended: boolean) => {
+            if (active !== finish) return
+            active = undefined
+            watching.abort()
+            player.pause()
+            player.removeAttribute("src")
+            player.load()
+            URL.revokeObjectURL(url)
+            resolve(ended)
+          }
+          const lifetime = { signal: watching.signal }
+          active = finish
+          player.addEventListener("ended", () => finish(true), lifetime)
+          player.addEventListener("error", () => finish(false), lifetime)
+          document.addEventListener("visibilitychange", () => { if (document.hidden) finish(false) }, lifetime)
+          try {
+            player.src = url
+            player.currentTime = offsetMs / 1000
+            void player.play().catch(() => finish(false))
+          } catch {
+            finish(false)
+          }
+        })
+      },
+    }
+  }
+}
+import { browserNotePlayback } from browser
+export { browserNotePlayback }

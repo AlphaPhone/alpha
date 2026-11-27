@@ -33,7 +33,7 @@ export function SettingsSoundPage({ sound, media, ring, alarm, told, onBack, sta
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsFactRow title="Do Not Disturb" icon={<BellOff />} reading={sound} />
+        <SettingsFactRow title="Sound" icon={<Volume2 />} reading={sound} />
         <SettingsAndroidRow target="sound-settings" title="Sound settings" icon={<Volume2 />} starting={starting} onAndroid={onAndroid} />
         <SettingsAndroidRow target="do-not-disturb" title="Do Not Disturb" icon={<BellOff />} starting={starting} onAndroid={onAndroid} />
       </ListGroup>

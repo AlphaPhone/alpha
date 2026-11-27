@@ -92,14 +92,18 @@ pure def start(s: Timers, id: int, at: int): Timers =
       else { ...t, status: Running, startedAt: at, endAt: at + t.durationMs,
         remainingMs: t.durationMs, ringStartedAt: 0, revision: t.revision + 1 }) }
 
+pure def pausedRemaining(t: Timer, now: int): int =
+  if (now < t.startedAt) t.endAt - t.startedAt else t.endAt - now
+
 pure def canPause(s: Timers, id: int, now: int): bool =
   hasTimer(s.items, id) and timerOf(s.items, id).status == Running
-    and now >= timerOf(s.items, id).startedAt and now < timerOf(s.items, id).endAt
+    and now >= 0 and now < timerOf(s.items, id).endAt
+    and timerOf(s.items, id).endAt > timerOf(s.items, id).startedAt
 
 pure def pause(s: Timers, id: int, now: int): Timers =
   { ...s, items: s.items.listMap(t =>
       if (t.id != id) t
-      else { ...t, status: Paused, remainingMs: t.endAt - now, startedAt: 0, endAt: 0, revision: t.revision + 1 }) }
+      else { ...t, status: Paused, remainingMs: pausedRemaining(t, now), startedAt: 0, endAt: 0, revision: t.revision + 1 }) }
 
 pure def stepPausePreservesRemaining(before: Timers, via: str, after: Timers): bool =
   via == "pause" implies after.items.every(t =>
@@ -186,7 +190,7 @@ pure def reopen(s: Timers, now: int): Timers =
   { ...s, items: s.items.listMap(t =>
       if (t.status != Running) t
       else if (now >= t.endAt) { ...t, status: Ringing, remainingMs: 0, ringStartedAt: now }
-      else { ...t, remainingMs: t.endAt - now }) }
+      else { ...t, remainingMs: if (now < t.startedAt) t.remainingMs else t.endAt - now }) }
 
 pure def canApplySync(s: Timers, synced: List[Timer], nextIssued: int): bool =
   synced.length() <= maxTimers and synced.every(t => validTimer(t)) and uniqueTimerIds(synced)

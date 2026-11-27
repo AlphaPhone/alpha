@@ -27,6 +27,11 @@ calendar area); the password vault (the passwords area); the conversations (Ask 
 approvals area). Browser, Files and Messages on the Apps page open the app itself
 through the [shell](../shell/). Messages is listed on an Alpha image.
 
+Each page rises over the one it was opened from, as Alpha's earlier build
+drew it, and the pages on the way to it stay under it; Back takes the page
+away at once and shows its parent at the row the owner left. Before Settings
+knows its page, it shows the first page's header, never a blank screen.
+
 ## Story: Find a setting and come back
 
 > As the owner, I want every setting on a page I can reach in a few taps,
@@ -34,21 +39,23 @@ through the [shell](../shell/). Messages is listed on an Alpha image.
 
 ### Settings is a small tree of pages, each with one parent
 
-General holds Display, Sound, Notifications, Battery and, on a phone,
-Network and Carrier & SIM setup, and on an Alpha image, Phone. Privacy
+General holds Display, Notifications and Carrier & SIM setup. On a phone
+it also offers Sound, Battery and Network, and on an Alpha image, Phone.
+In a browser the carrier page gives setup guidance without reading the phone. Privacy
 holds Permissions. Apps holds a page for each app with something to set:
-Inbox, Workflows, Calendar, Camera, Photos, Maps, Notes and, on a phone, Passwords. About holds
+Inbox, Workflows, Calendar, Camera, Photos, Maps, Notes and Passwords. About holds
 Agent activity and the Licences. Developer and its Problem log hang from
 the first page.
 
 ```quint
-import facts as F from "./facts"
 
-type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | About | Activity | Licences | Developer | Problems
+type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | CarrierInfoPage | PhonePage | Privacy | Permissions | PrivacyNotifications | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | BrowserPasswordsPage | About | Activity | Licences | Developer | Problems
+
+pure def passwordPage(page: Page): bool = page == PasswordsPage or page == BrowserPasswordsPage
 
 pure def parent(page: Page): Page =
-  if (page == Display or page == Sound or page == Notifications or page == Battery or page == NetworkPage or page == CarrierPage or page == PhonePage) General
-  else if (page == Permissions) Privacy
+  if (page == Display or page == Sound or page == Notifications or page == Battery or page == NetworkPage or page == CarrierPage or page == CarrierInfoPage or page == PhonePage) General
+  else if (page == Permissions or page == PrivacyNotifications) Privacy
   else if (page == InboxApp or page == WorkflowsApp or page == CalendarApp or page == CameraApp or page == PhotosApp or page == MapsApp or page == NotesApp or page == PasswordsPage) Apps
   else if (page == Activity or page == Licences) About
   else if (page == Problems) Developer
@@ -90,17 +97,23 @@ pure def refocused(places: List[int], focused: int): List[int] =
 ### The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image
 
 The Developer page and its Problem log exist only in a development build,
-Network, Carrier & SIM setup and Passwords only on a phone, which a browser is not,
-and the Phone page only on an Alpha image, which is a phone. What the build
+Network and the carrier identifiers only on a phone, and the carrier
+guidance without identifiers only in a browser. The Phone page is only on
+an Alpha image, which is a phone. What the build
 and the phone are never changes while Alpha runs. A development build is
 the development server or a build that allows test mocks
-([platform](../platform/index.md)); a production build, a release or a
-debug one, never shows the developer pages or their controls.
+([platform](../platform/index.md)), opened with the explicit `?tools=1`
+query, as Alpha's earlier build gated its Developer page; that query alone
+admits nothing, and a development build opened without it shows Settings
+as a production build does. A production build, a release or a debug one,
+never shows the developer pages or their controls.
 
 ```quint
 pure def admitted(s: Settings, page: Page): bool =
   if (page == Developer or page == Problems) s.development
-  else if (page == NetworkPage or page == CarrierPage or page == PasswordsPage) s.phone
+  else if (page == NetworkPage or page == CarrierPage) s.phone
+  else if (page == CarrierInfoPage) s.told and not(s.phone)
+  else if (page == PrivacyNotifications) s.told
   else if (page == PhonePage) s.image
   else true
 
@@ -129,9 +142,52 @@ pure def alwaysEveryPageShownIsAdmitted(s: Settings): bool = admitted(s, s.page)
 ### A row opens only an admitted page that hangs from the page showing, at its top
 
 ```quint
-pure def canOpen(s: Settings, page: Page): bool = page != Top and parent(page) == s.page and admitted(s, page)
+pure def canOpen(s: Settings, page: Page): bool =
+  page != Top and page != BrowserPasswordsPage and page != PrivacyNotifications and parent(page) == s.page and admitted(s, page)
 
 pure def open(s: Settings, page: Page): Settings = { ...s, page: page, places: s.places.append(0) }
+```
+
+### The owner can open Password manager from the Browser menu
+
+The shortcut opens the same Password manager as the Apps row. Its Back
+goes to the first Settings page. Back from the Apps row returns to Apps.
+In a browser build the page shows the provider information alone.
+
+```quint
+pure def canOpenBrowserPasswords(s: Settings): bool = s.page == Top
+
+pure def openBrowserPasswords(s: Settings): Settings =
+  { ...s, page: BrowserPasswordsPage, places: s.places.append(0) }
+```
+
+### The Browser shortcut opens Password manager at its top
+
+```quint
+pure def stepTheBrowserShortcutReturnsToSettings(before: Settings, via: str, after: Settings): bool =
+  via == "openBrowserPasswords" implies
+    (before.page == Top and after.page == BrowserPasswordsPage and parent(after.page) == Top)
+```
+
+### The owner can open Notifications from App permissions
+
+This replaces App permissions with the same Notifications settings found in
+General. Back returns to Privacy at the row the owner left there. A notice
+or Ask Alpha opening Notifications still goes back to General.
+
+```quint
+pure def canOpenPrivacyNotifications(s: Settings): bool =
+  s.page == Permissions and admitted(s, PrivacyNotifications)
+
+pure def openPrivacyNotifications(s: Settings): Settings =
+  { ...s, page: PrivacyNotifications, places: refocused(s.places, 0) }
+```
+
+### Notifications reached from App permissions can show with the place on Privacy remembered
+
+```quint
+pure def sometimesNotificationsOpenedFromPermissions(s: Settings): bool =
+  s.page == PrivacyNotifications and row(s, Privacy) == 2
 ```
 
 ### A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent
@@ -221,14 +277,15 @@ pure def sometimesProblemLogShowing(s: Settings): bool = s.page == Problems
 pure def sometimesPhonePageShowing(s: Settings): bool = s.page == PhonePage
 ```
 
-### Carrier & SIM setup and Phone are sensitive screens, only on a phone
+### The carrier identifiers and Phone are sensitive screens, only on a phone
 
-While either page shows, phone numbers and identifiers stay on the phone. Passwords is also a sensitive page only on a phone, where it reports Android's autofill choice and takes the owner to Android's own provider selection.
+While either page shows, phone numbers and identifiers stay on the phone.
+The browser carrier page contains public setup guidance alone. Password manager is also sensitive on a phone, where it reports Android's autofill choice and takes the owner to Android's own provider selection.
 The assistant is told only that the screen is sensitive and admits
 nothing that acts on it ([assistant](../assistant/index.md)).
 
 ```quint
-pure def sensitive(s: Settings): bool = s.page == CarrierPage or s.page == PhonePage or s.page == PasswordsPage
+pure def sensitive(s: Settings): bool = s.page == CarrierPage or s.page == PhonePage or (s.phone and passwordPage(s.page))
 
 pure def alwaysASensitivePageIsOnAPhone(s: Settings): bool = sensitive(s) implies s.phone
 ```
@@ -242,7 +299,7 @@ pure def selectionOf(page: Page): str =
   if (page == General) "settings-general"
   else if (page == Display) "display"
   else if (page == Sound) "sound"
-  else if (page == Notifications) "notifications"
+  else if (page == Notifications or page == PrivacyNotifications) "notifications"
   else if (page == Battery) "battery"
   else if (page == Privacy) "settings-privacy"
   else if (page == Permissions) "settings-permissions"
@@ -277,24 +334,26 @@ pure def sometimesCarrierOnALauncher(s: Settings): bool = s.page == CarrierPage 
 
 Account and plan is on the first page. Google and email is on the Inbox
 page, and Google Calendar and its saved events on the Calendar page. Collecting other apps' notifications, with its
-history, is on Notifications. The listener is on Privacy, and on the first
-page while the voice area reports that it could not confirm the microphone
-stopped. The conversations are on Agent activity, and in a development
+history, is on Notifications. The listener is on Privacy on an Alpha
+image, the only phone that has one ([the listener](../voice/listener.md)),
+and on the first page while the voice area reports that it could not
+confirm the microphone stopped. Where speech goes is shown on Privacy as
+the voice area holds it ([where speech goes](../voice/route.md)). The conversations are on Agent activity, and in a development
 build the agent's restart details too and, on Developer, the calendar's
 backups. Settings hands over and keeps nothing.
 
 ```quint
 type Neighbour = AccountAndPlan | GoogleAndEmail | CalendarAccount | NotificationCollection | Listener | Conversations | RestartDetails | CalendarBackups
 
-type Effect = Handed({ neighbour: Neighbour }) | ReviewAccess({ access: F::Access }) | ReviewAllAccess
+type Effect = Handed({ neighbour: Neighbour }) | ReviewAllAccess
 type Moved = { state: Settings, out: List[Effect] }
 
 pure def links(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool =
   if (neighbour == AccountAndPlan) s.page == Top
   else if (neighbour == GoogleAndEmail) s.page == InboxApp
   else if (neighbour == CalendarAccount) s.page == CalendarApp
-  else if (neighbour == NotificationCollection) s.page == Notifications
-  else if (neighbour == Listener) s.page == Privacy or (s.page == Top and micMayBeOn)
+  else if (neighbour == NotificationCollection) (s.page == Notifications or s.page == PrivacyNotifications)
+  else if (neighbour == Listener) (s.page == Privacy and s.image) or (s.page == Top and micMayBeOn)
   else if (neighbour == Conversations) s.page == Activity
   else if (neighbour == RestartDetails) s.page == Activity and s.development
   else s.page == Developer
@@ -304,23 +363,18 @@ pure def canHandOver(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool 
 pure def handOver(s: Settings, neighbour: Neighbour, micMayBeOn: bool): Moved = { state: s, out: List(Handed({ neighbour: neighbour })) }
 ```
 
-### Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access
+### Set up Alpha access opens all permissions in review
 
-The startup area owns the walkthrough. Settings never asks it to start
-over, so a walkthrough already finished stays finished.
+The startup area owns the walkthrough and lets the owner choose one access
+from its list. A finished walkthrough stays finished.
 
 ```quint
 pure def canReviewAllAccess(s: Settings): bool = s.page == Privacy
 
 pure def reviewAllAccess(s: Settings): Moved = { state: s, out: List(ReviewAllAccess) }
 
-pure def canReviewAccess(s: Settings, access: F::Access): bool = s.page == Permissions
-
-pure def reviewAccess(s: Settings, access: F::Access): Moved = { state: s, out: List(ReviewAccess({ access: access })) }
-
-pure def stepTheWalkthroughOnlyReviewsOneAccess(before: Settings, after: Settings, out: List[Effect]): bool =
+pure def stepTheWalkthroughOpensFromPrivacy(before: Settings, after: Settings, out: List[Effect]): bool =
   out.every(e => match e {
-    | ReviewAccess(r) => out.length() == 1 and before.page == Permissions
     | ReviewAllAccess => out.length() == 1 and before.page == Privacy
     | _ => true
   })

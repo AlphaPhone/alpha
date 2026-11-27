@@ -32,7 +32,7 @@ pure val maxSnooze = 60
 
 pure val noAlarm: Alarm = {
   id: 0, hour: 0, minute: 0, daysMask: 0, enabled: false,
-  snoozeMinutes: 9, vibrate: true, phase: Idle, fireAt: 0,
+  snoozeMinutes: defaultSnooze, vibrate: true, phase: Idle, fireAt: 0,
   snoozeUntil: 0, missed: false, revision: 0,
 }
 
@@ -66,15 +66,21 @@ pure val idValues = Set(1, 2)
 pure val hourValues = Set(6, 7)
 pure val minuteValues = Set(0, 30)
 pure val daysMaskValues = Set(0, 62)
-pure val snoozeMinutesValues = Set(5, 9)
+pure val snoozeMinutesValues = Set(5, defaultSnooze)
 pure val fireAtValues = Set(1000, 2000)
 pure val nextFireAtValues = Set(700000, 900000)
 pure val nowValues = Set(500, 1000, 2000, 6000, 7000, 602000)
 pure val nextIssuedValues = Set(2, 3)
 pure val syncedValues = Set(
   List(),
-  List({ id: 1, hour: 7, minute: 30, daysMask: 62, enabled: true, snoozeMinutes: 9, vibrate: true, phase: Idle, fireAt: 1000, snoozeUntil: 0, missed: false, revision: 1 })
+  List({ id: 1, hour: 7, minute: 30, daysMask: 62, enabled: true, snoozeMinutes: defaultSnooze, vibrate: true, phase: Idle, fireAt: 1000, snoozeUntil: 0, missed: false, revision: 1 })
 )
+```
+
+### A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did
+
+```quint
+pure val defaultSnooze = 10
 ```
 
 ### Creating an alarm assigns the next id and schedules it enabled when under the limit
@@ -125,9 +131,11 @@ pure def toggle(s: Alarms, id: int, on: bool, fireAt: int): Alarms =
 
 ### Deleting an alarm holds it for a five-second Undo window before committing removal
 
+Deleting a second alarm while an earlier deletion is still held commits the earlier deletion and holds the newer one.
+
 ```quint
 pure def canRequestDelete(s: Alarms, id: int, now: int): bool =
-  not(s.hasHidden) and hasAlarm(s.items, id) and now >= 0
+  hasAlarm(s.items, id) and now >= 0
 
 pure def requestDelete(s: Alarms, id: int, now: int): Alarms =
   val target = alarmOf(s.items, id)
@@ -235,15 +243,31 @@ pure def ackMissed(s: Alarms, id: int): Alarms =
   { ...s, items: s.items.listMap(a => if (a.id != id) a else { ...a, missed: false }) }
 ```
 
-### Reopening after a restart clears pending Undo and settles timed-out rings without double-firing
+### Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing
+
+Timed-out repeating alarms settle to `Idle` with `fireAt: 0` so they never double-fire on restart; `reschedule` arms their next future fire time while preserving `missed`.
 
 ```quint
+pure def timedOutAt(a: Alarm, now: int): bool =
+  (a.phase == Ringing and now >= a.fireAt + ringTimeout)
+    or (a.enabled and a.phase != Ringing and dueAtOf(a) > 0 and now >= dueAtOf(a) + ringTimeout)
+
 pure def reopen(s: Alarms, now: int): Alarms =
   { ...s, hidden: noAlarm, hasHidden: false, undo: U::free,
     items: s.items.listMap(a =>
-      if (a.phase == Ringing and now >= a.fireAt + ringTimeout)
-        { ...a, enabled: a.daysMask > 0, phase: Idle, fireAt: if (a.daysMask > 0) a.fireAt else 0, snoozeUntil: 0, missed: true }
+      if (timedOutAt(a, now))
+        { ...a, enabled: a.daysMask > 0, phase: Idle, fireAt: 0, snoozeUntil: 0, missed: true }
       else a) }
+
+pure def canReschedule(s: Alarms, id: int, nextFireAt: int, now: int): bool =
+  hasAlarm(s.items, id) and alarmOf(s.items, id).enabled and alarmOf(s.items, id).daysMask > 0
+    and alarmOf(s.items, id).phase == Idle and alarmOf(s.items, id).fireAt == 0
+    and now >= 0 and nextFireAt > now
+
+pure def reschedule(s: Alarms, id: int, nextFireAt: int, now: int): Alarms =
+  { ...s, items: s.items.listMap(a =>
+      if (a.id != id) a
+      else { ...a, fireAt: nextFireAt }) }
 ```
 
 ### Syncing from the resident agent admits only valid, unique, bounded alarm lists

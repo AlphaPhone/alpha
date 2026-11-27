@@ -9,27 +9,35 @@ export type CalendarHeaderProps = Omit<ComponentProps<"header">, "title"> & {
   expanded?: boolean;
   /** Opens or closes the month dialog; left out, the title only names the month. */
   onTitle?: () => void;
+  /** The month dialog returns focus to this button when it closes. */
+  titleRef?: ComponentProps<"button">["ref"];
   /** The control that leaves Calendar, usually the shell's back button. */
   leading?: ReactNode;
   /** Calendar's own actions, at the end: Today, search, a new event. */
   children?: ReactNode;
 };
 
+/** v119 45f6bed30 prototype/template.html:1136 and prototype.css:13: on the launcher the header is 56px tall, 20px in from the left with no Back, and its actions are 44px. */
+const launcherHeader = "in-data-[alpha-launcher]:min-h-14 in-data-[alpha-launcher]:pl-5 in-data-[alpha-launcher]:has-[>button[aria-label=Back]]:pl-2 in-data-[alpha-launcher]:[&>div>button]:size-11";
+
 /**
  * The top of Calendar: Back, the month that opens the month dialog, and Calendar's actions. On the launcher
- * (`data-alpha-launcher`, the phone's Home) the month is the serif display title, as v121 drew it on the phone.
+ * (`data-alpha-launcher`, the phone's Home) the month is the serif display title. The actions move to the
+ * next row when the whole title needs more room. At large text sizes the month gets a row below the controls.
  */
-export function CalendarHeader({ title, expanded = false, onTitle, leading, className, children, ...props }: CalendarHeaderProps) {
+export function CalendarHeader({ title, expanded = false, onTitle, titleRef, leading, className, children, ...props }: CalendarHeaderProps) {
   const Chevron = expanded ? ChevronUp : ChevronDown;
   return (
-    <header data-host-chrome="" className={cn("flex h-13 shrink-0 items-center gap-0.5 px-2", className)} {...props}>
+    <header data-host-chrome="" className={cn("flex min-h-13 shrink-0 flex-wrap items-center gap-x-0.5 gap-y-1 px-2 in-data-[alpha-title-row]:in-data-[alpha-launcher]:@container", launcherHeader, className)} {...props}>
       {leading}
-      <button type="button" aria-label={`Choose date: ${title}`} aria-expanded={expanded} disabled={!onTitle} onClick={onTitle}
-        className={cn(focusRing, "flex min-h-12 min-w-0 grow items-center gap-1.5 rounded-lg text-left disabled:cursor-default")}>
-        <h1 className="m-0 min-w-0 truncate text-xl leading-plain font-semibold in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-3xl in-data-[alpha-launcher]:font-light">{title}</h1>
-        <Chevron aria-hidden className="mt-1 size-4.5 text-muted-foreground" />
-      </button>
-      {children}
+      <h1 className="m-0 flex min-w-0 max-w-full grow items-center text-xl leading-plain font-semibold wrap-anywhere in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-3xl in-data-[alpha-launcher]:font-light in-data-[alpha-title-row]:order-last in-data-[alpha-title-row]:basis-full in-data-[alpha-title-row]:in-data-[alpha-launcher]:[font-size:min(var(--text-3xl),calc((100cqi_-_30px)/4.4*var(--alpha-own-text-scale,1)/var(--alpha-text-scale,1)))]">
+        <button ref={titleRef} type="button" aria-label={`Choose date: ${title}`} aria-expanded={expanded} disabled={!onTitle} onClick={onTitle}
+          className={cn(focusRing, "flex min-h-12 min-w-0 max-w-full grow items-center gap-1.5 rounded-lg text-left disabled:cursor-default")}>
+          <span className="min-w-0">{title}</span>
+          <Chevron aria-hidden className="mt-1 size-4.5 shrink-0 text-muted-foreground" />
+        </button>
+      </h1>
+      <div className="ms-auto flex shrink-0 gap-0.5 empty:hidden">{children}</div>
     </header>
   );
 }

@@ -8,7 +8,6 @@ import * as Session from "../../gen/app__account__session.effect.vibe"
 import { Agent } from "../platform/index.vibe"
 import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { AccountShelf } from "./bridge.vibe"
-import { secondsTime } from "./clock.vibe"
 
 const residentBy: Resident.Changer = "SignInChange"
 
@@ -113,13 +112,10 @@ const watchAgentStatus = started(effect {
 }, "resident status watcher")
 
 /** Resident agent lifecycle machine: boot, retries, holds for sign-in/key changes, probes, and recovery. */
-export const residentMachine = Layer.provide(
-  together(
-    reacting(Resident, { open: [{ type: "reopened", rebooted: false }, residentBy], carry: carryResident, timers: residentTimers }),
-    bootResident,
-    watchAgentStatus,
-  ),
-  secondsTime,
+export const residentMachine = together(
+  reacting(Resident, { open: [{ type: "reopened", rebooted: false }, residentBy], carry: carryResident, timers: residentTimers }),
+  bootResident,
+  watchAgentStatus,
 )
 
 effect function bindCloudAi(ticket: number, signIn: number, cloud: boolean): Binding.Event!!Agent {

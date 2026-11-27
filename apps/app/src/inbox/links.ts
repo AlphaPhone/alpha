@@ -7,16 +7,34 @@ export interface Link {
 }
 
 const written = /\bhttps?:\/\/[^\s<>"'()]+[^\s<>"'().,;:!?]/giu;
+const explicitUrl = /^(?:https?:)?\/\//iu;
+const bareDomain = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:[/:?#]|$)/iu;
+
+function claimedHost(label: string): string | undefined {
+  const trimmed = label.trim();
+  if (trimmed === "" || /\s/u.test(trimmed)) return undefined;
+  if (explicitUrl.test(trimmed)) {
+    const claimed = URL.parse(trimmed, "https://placeholder.invalid");
+    return claimed !== null && (claimed.protocol === "http:" || claimed.protocol === "https:") &&
+      claimed.hostname !== "" && claimed.hostname !== "placeholder.invalid" ? claimed.hostname : undefined;
+  }
+  if (bareDomain.test(trimmed)) {
+    const claimed = URL.parse(`https://${trimmed}`);
+    return claimed !== null && claimed.hostname !== "" ? claimed.hostname : undefined;
+  }
+  return undefined;
+}
 
 /** The destination and the host the sender's label appears to claim. @throws {never} */
 export function linkOf(url: string, label: string): Link {
   const parsed = URL.parse(url);
-  const claimed = URL.parse(label.trim()) ?? URL.parse(label.trim(), "https://placeholder.invalid");
+  const trimmed = label.trim();
+  const claimed = claimedHost(trimmed);
   return {
     url: parsed?.href ?? url,
-    label: label.trim() || parsed?.hostname || url,
+    label: trimmed || parsed?.hostname || url,
     secure: parsed?.protocol === "https:" && parsed.username === "" && parsed.password === "",
-    mismatch: claimed !== null && claimed.hostname !== "placeholder.invalid" && parsed?.hostname !== claimed.hostname,
+    mismatch: claimed !== undefined && parsed?.hostname !== claimed,
   };
 }
 

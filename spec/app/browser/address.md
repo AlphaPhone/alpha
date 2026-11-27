@@ -27,13 +27,13 @@ type Way = Address | Query | Again | Backward | Onward
 type Effect = Go({ load: int, way: Way }) | Halt({ load: int }) | Visit({ load: int }) | Find({ ticket: int }) | FindNext({ forward: bool }) | ClearFind
 type Page = {
   kind: Kind, phase: Phase, load: int, secure: bool, behind: int, ahead: int, refused: bool,
-  finding: bool, find: R::Read, matches: int,
+  finding: bool, find: R::Read, matches: int, position: int,
 }
 type Step = { state: Page, out: List[Effect] }
 
 pure val initial: Page = {
   kind: Normal, phase: Blank, load: 0, secure: false, behind: 0, ahead: 0, refused: false,
-  finding: false, find: R::unread, matches: 0,
+  finding: false, find: R::unread, matches: 0, position: 0,
 }
 
 pure def forget(r: R::Read): R::Read = { ...r, status: R::Idle }
@@ -47,6 +47,7 @@ pure def isGo(e: Effect): bool = match e { | Go(g) => true | _ => false }
 pure val loadValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2)
 pure val countValues = Set(0, 3)
+pure val positionValues = Set(0, 1, 2, 3)
 pure val iValues = Set(
   { blank: false, tooLong: false, userInfo: false, web: true, spaced: false, colon: false, host: true, numeric: false, mail: false },
   { blank: false, tooLong: false, userInfo: false, web: false, spaced: false, colon: false, host: true, numeric: false, mail: false },
@@ -97,7 +98,7 @@ bar. A refusal leaves the page as it was and says why under the address bar.
 
 ```quint
 pure def started(p: Page): Page =
-  { ...p, phase: Loading, load: p.load + 1, secure: false, refused: false, finding: false, find: forget(p.find), matches: 0 }
+  { ...p, phase: Loading, load: p.load + 1, secure: false, refused: false, finding: false, find: forget(p.find), matches: 0, position: 0 }
 
 pure def canSubmit(p: Page, i: Input): bool = not(i.blank)
 
@@ -175,6 +176,31 @@ pure def canFailed(p: Page, load: int): bool = p.phase == Loading and load == p.
 pure def failed(p: Page, load: int): Page = { ...p, phase: Failed }
 ```
 
+### A browser frame can be shown for the latest request, with no secure mark
+
+The web host can tell that a frame finished loading for the address the owner
+requested. It cannot inspect the page inside or say that the site served
+it. A normal tab remembers the requested address. A private tab leaves
+no entry.
+
+```quint
+pure def canFramed(p: Page, load: int): bool = canCommitted(p, load)
+
+pure def framed(p: Page, load: int): Step = committed(p, load, false)
+```
+
+### Another load of the shown browser frame reports that the page is blocked
+
+An additional load of the current opaque frame may have left the requested
+document. The frame stays where it is, and Alpha can reload the requested
+address. There is no second history entry.
+
+```quint
+pure def canFrameBlocked(p: Page, load: int): bool = p.phase == Shown and not(p.secure) and load == p.load
+
+pure def frameBlocked(p: Page, load: int): Page = { ...started(p), phase: Failed, load: p.load }
+```
+
 ### Stop ends the load under way, and its late answer is refused
 
 ```quint
@@ -188,10 +214,15 @@ pure def lawAStoppedLoadNeverCommits(load: int): bool =
 
 ### Reload loads a shown, failed or stopped page again
 
-```quint
-pure def canReload(p: Page): bool = p.phase == Shown or p.phase == Failed or p.phase == Stopped
+Reload is also shown in the menu on a new tab, where it closes the menu
+without loading a page.
 
-pure def reload(p: Page): Step = { state: started(p), out: List(Go({ load: p.load + 1, way: Again })) }
+```quint
+pure def canReload(p: Page): bool = p.phase == Blank or p.phase == Shown or p.phase == Failed or p.phase == Stopped
+
+pure def reload(p: Page): Step =
+  if (p.phase == Blank) { state: p, out: List() }
+  else { state: started(p), out: List(Go({ load: p.load + 1, way: Again })) }
 ```
 
 ### A page can go on to another page by itself, through a link or a redirect
@@ -261,6 +292,19 @@ While a page loads, after it fails and once it is stopped there is no mark.
 pure def alwaysTheSecureMarkIsForAShownPage(p: Page): bool = p.secure implies p.phase == Shown
 ```
 
+### The secure mark is drawn only in the phone's own Browser, beside a page that committed over HTTPS
+
+Only the phone's Browser hears from Android that a page came over HTTPS
+with a certificate it accepted. A page shown anywhere else, such as a
+browser frame on a computer, has no mark, as in Sunday's v119.
+
+```quint
+pure def showsTheLock(p: Page, native: bool): bool = native and p.secure
+
+pure def lawTheLockIsOnlyForASecurePageOnThePhone(p: Page, native: bool): bool =
+  showsTheLock(p, native) implies (native and p.secure and p.phase == Shown)
+```
+
 ### Load numbers only go forward
 
 ```quint
@@ -270,11 +314,17 @@ pure def stepLoadsGoForward(before: Page, via: str, after: Page): bool = after.l
 ### Only a page that committed in a normal tab becomes history
 
 A page that failed, was stopped or is still loading never does, and a
-private tab's pages never do.
+private tab's pages never do. A web frame that finished the current request
+records the requested address without claiming a secure page or a site response.
 
 ```quint
 pure def stepHistoryOnlyFromCommittedPages(before: Page, via: str, after: Page, out: List[Effect]): bool =
-  out.every(e => match e { | Visit(v) => via == "committed" and after.phase == Shown and after.kind == Normal | _ => true })
+  out.every(e => match e {
+    | Visit(v) => (via == "committed" or (via == "framed" and not(after.secure)))
+      and before.phase == Loading and v.load == before.load and v.load == after.load
+      and after.phase == Shown and after.kind == Normal
+    | _ => true
+  })
 ```
 
 ### A secure page can be shown, a load can be stopped, and the owner can go forward again
@@ -309,6 +359,18 @@ pure def stepATabKeepsItsKind(before: Page, via: str, after: Page): bool =
 pure def sometimesPrivatePage(p: Page): bool = p.kind == Private and p.phase == Shown
 ```
 
+### A tab with no page says "Search or address" in its bar, a private tab as a normal one, and only the private mark tells them apart
+
+As in Sunday's v119, the bar of a tab with no page shows the muted hint
+"Search or address", never "New tab" or "New private tab". A private tab
+carries its private mark before the hint.
+
+```quint
+pure def addressHint(p: Page): str = "Search or address"
+
+pure def lawEveryTabHasTheSameHint(p: Page): bool = addressHint(p) == addressHint({ ...p, kind: Normal })
+```
+
 ## Story: Find in page
 
 > As the owner, I want to find text on the page, step through the matches,
@@ -316,10 +378,15 @@ pure def sometimesPrivatePage(p: Page): bool = p.kind == Private and p.phase == 
 
 ### The find bar opens over a shown page
 
+On Android, choosing Find with no shown page keeps the menu open and asks
+the owner to load a page. As on Sunday's v119 phone, the page keeps its full
+size while the find bar is open, and the find bar is drawn over it: the phone
+leaves the find bar's place to Alpha, so the page never covers it.
+
 ```quint
 pure def canOpenFind(p: Page): bool = p.phase == Shown and not(p.finding)
 
-pure def openFind(p: Page): Page = { ...p, finding: true, matches: 0 }
+pure def openFind(p: Page): Page = { ...p, finding: true, matches: 0, position: 0 }
 ```
 
 ### Typing searches the page, and clearing the text clears the search
@@ -329,8 +396,8 @@ pure def canTypeFind(p: Page, empty: bool): bool = p.finding
 
 pure def typeFind(p: Page, empty: bool): Step =
   val asked = R::ask(p.find)
-  if (empty) { state: { ...p, find: forget(p.find), matches: 0 }, out: List(ClearFind) }
-  else { state: { ...p, find: asked, matches: 0 }, out: List(Find({ ticket: asked.ticket })) }
+  if (empty) { state: { ...p, find: forget(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
+  else { state: { ...p, find: asked, matches: 0, position: 0 }, out: List(Find({ ticket: asked.ticket })) }
 ```
 
 ### Only the answer to the latest search counts
@@ -338,17 +405,30 @@ pure def typeFind(p: Page, empty: bool): Step =
 An answer for text since changed, or for a page since left, is refused.
 
 ```quint
-pure def canFound(p: Page, ticket: int, count: int): bool = R::canAnswer(p.find, ticket) and count >= 0
+pure def validPosition(count: int, position: int): bool =
+  (count == 0 and position == 0) or (position > 0 and position <= count)
 
-pure def found(p: Page, ticket: int, count: int): Page = { ...p, find: R::answer(p.find, true), matches: count }
+pure def canFound(p: Page, ticket: int, count: int, position: int): bool =
+  R::canAnswer(p.find, ticket) and validPosition(count, position)
+
+pure def found(p: Page, ticket: int, count: int, position: int): Page =
+  { ...p, find: R::answer(p.find, true), matches: count, position: position }
 ```
 
 ### Next and previous move between the matches there are
+
+The displayed position follows the current search's native match selection.
 
 ```quint
 pure def canFindNext(p: Page, forward: bool): bool = p.finding and p.matches > 0
 
 pure def findNext(p: Page, forward: bool): Step = { state: p, out: List(FindNext({ forward: forward })) }
+
+pure def canMatchSelected(p: Page, ticket: int, count: int, position: int): bool =
+  p.find.status == R::Loaded and p.find.ticket == ticket and p.matches > 0 and p.matches == count
+    and validPosition(count, position)
+
+pure def matchSelected(p: Page, ticket: int, count: int, position: int): Page = { ...p, position: position }
 ```
 
 ### Closing the find bar clears the search
@@ -356,7 +436,7 @@ pure def findNext(p: Page, forward: bool): Step = { state: p, out: List(FindNext
 ```quint
 pure def canCloseFind(p: Page): bool = p.finding
 
-pure def closeFind(p: Page): Step = { state: { ...p, finding: false, find: forget(p.find), matches: 0 }, out: List(ClearFind) }
+pure def closeFind(p: Page): Step = { state: { ...p, finding: false, find: forget(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
 ```
 
 ### The find bar is open only over a shown page, and matches are only counted while it is open
@@ -365,7 +445,8 @@ Loading another page closes it.
 
 ```quint
 pure def alwaysFindIsOverAShownPage(p: Page): bool =
-  (p.finding implies p.phase == Shown) and (p.matches > 0 implies p.finding) and p.matches >= 0
+  (p.finding implies p.phase == Shown) and (p.matches > 0 implies p.finding)
+    and validPosition(p.matches, p.position)
 ```
 
 ### A search of the page is under way only while the find bar is open

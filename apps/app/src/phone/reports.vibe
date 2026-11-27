@@ -1,59 +1,66 @@
 // spec/app/phone/index.md, "The phone reports missed calls not yet seen"; spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"; spec/app/messages/index.md, "The phone reports how many conversations are unread, for the list and Home"; spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import type { Row } from "../../gen/app__home__cards.effect.vibe"
-import { Conversations } from "../messages/messages.vibe"
+import { Conversations, titleOf } from "../messages/messages.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { Device, type Telephony, telephony } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { type Telephony, namesOf, telephony } from "../platform/index.vibe"
 import { fromAreas } from "../home/cards.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { applying, contained, started, together } from "../runtime/index.vibe"
-import { recentsLimit } from "./phone.vibe"
-import { callerTitle, clockLength } from "./words.ts"
+import { Dialer, recentsLimit } from "./phone.vibe"
+import { clockLength, displayNumber } from "./words.ts"
 
-type Dated = Row & { readonly at: number }
+/** Who called, as Home's Phone card names them: the contact's name, the name the phone cached, or the number. */
+const caller = (row: { readonly cachedName: string | null; readonly number: string }, names: ReadonlyMap<string, string>): string =>
+  row.number === "" ? "Unknown" : names.get(row.number) ?? (row.cachedName || displayNumber(row.number))
 
-/** The Phone card's rows as v121 drew them, newest first: each number's new missed calls as one row, then each unheard voicemail. */
-function callRows(
+/** The new missed calls grouped by caller, then the unheard voicemail, newest first, as Home's Phone card rows. */
+function phoneRows(
   missed: ReadonlyArray<{ readonly cachedName: string | null; readonly number: string; readonly date: number }>,
   unheard: ReadonlyArray<{ readonly cachedName: string | null; readonly number: string; readonly date: number; readonly durationSeconds: number }>,
-): ReadonlyArray<Dated> {
-  const groups = new Map<string, { title: string; count: number; at: number }>()
+  names: ReadonlyMap<string, string>,
+): Array<Row & { readonly date: number }> {
+  const groups = new Map<string, { title: string; count: number; date: number }>()
   for (const call of missed) {
-    const group = groups.get(call.number)
-    if (group) groups.set(call.number, { ...group, count: group.count + 1, at: Math.max(group.at, call.date) })
-    else groups.set(call.number, { title: callerTitle(call.number, call.cachedName), count: 1, at: call.date })
+    const key = call.number === "" ? `unknown:${call.date}` : call.number
+    const group = groups.get(key)
+    if (group === undefined) groups.set(key, { title: caller(call, names), count: 1, date: call.date })
+    else groups.set(key, { ...group, count: group.count + 1, date: Math.max(group.date, call.date) })
   }
   return [
-    ...[...groups.values()].map((group) => ({ title: group.title, detail: group.count > 1 ? `Missed · ${group.count}` : "Missed", at: group.at })),
-    ...unheard.map((one) => ({ title: callerTitle(one.number, one.cachedName), detail: `Voicemail · ${clockLength(one.durationSeconds)}`, at: one.date })),
-  ].sort((a, b) => b.at - a.at)
+    ...[...groups.values()].map((group) => ({ date: group.date, title: group.title, detail: group.count > 1 ? `Missed · ${group.count}` : "Missed" })),
+    ...unheard.map((one) => ({ date: one.date, title: caller(one, names), detail: `Voicemail · ${clockLength(one.durationSeconds)}` })),
+  ].sort((a, b) => b.date - a.date)
 }
-
-const plain = (rows: ReadonlyArray<Dated>): ReadonlyArray<Row> => rows.slice(0, 2).map(({ title, detail }) => ({ title, detail }))
 
 // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"
 /** The phone's existing native reports are the source of both the counts and the Home card rows. */
-effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
+effect function report(): void!!(Telephony | Dialer | Phone | Messages | Voicemail) {
+  const seenAt = try (try Dialer).seenMissedAt()
   const calls = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
-  const missed = calls?.calls.filter((call) => call.type === "missed" && call.isNew)
+  const missed = calls?.calls.filter((call) => call.type === "missed" && call.isNew && call.date > seenAt)
   const threads = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
-  const unread = threads?.rows.flatMap((row) => "incomplete" in row || !row.unread ? [] : [row])
+  const unread = threads?.rows.flatMap((row) => "incomplete" in row || !row.unread ? [] : [row]).sort((a, b) => b.date - a.date)
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
   const unheard = listing?.carrier === "CarrierReady" ? listing.voicemails.filter((one) => !one.heard) : undefined
   if (unread !== undefined) {
-    const newest = [...unread].sort((a, b) => b.date - a.date)
+    const names = try namesOf("messages", unread.flatMap((row) => row.addresses))
     fromAreas.messages(
-      newest.slice(0, 2).map((row) => ({ title: row.addresses.map((address) => callerTitle(address, null)).join(", ") || "Unknown sender", detail: row.snippet })),
-      newest[0] === undefined ? undefined : { count: newest.length, what: `${newest.length} unread`, at: newest[0].date },
+      unread.slice(0, 2).map((row) => ({ title: titleOf(row.addresses, names) || "Unknown", detail: row.snippet })),
+      unread.length, unread[0]?.date ?? 0,
     )
   }
   if (missed !== undefined || unheard !== undefined) {
-    const rows = callRows(missed ?? [], unheard ?? [])
-    const [calls, voicemails] = [missed?.length ?? 0, unheard?.length ?? 0]
-    const what = [calls > 0 ? `${calls} missed` : "", voicemails > 0 ? `${voicemails} ${voicemails === 1 ? "voicemail" : "voicemails"}` : ""].filter(Boolean).join(", ")
-    fromAreas.phone(plain(rows), rows[0] === undefined ? undefined : { count: calls + voicemails, what, at: rows[0].at })
+    const names = try namesOf("phone", [...(missed ?? []), ...(unheard ?? [])].map((row) => row.number))
+    const rows = phoneRows(missed ?? [], unheard ?? [], names)
+    const missedCount = missed?.length ?? 0
+    const unheardCount = unheard?.length ?? 0
+    const said = [missedCount > 0 ? `${missedCount} missed ${missedCount === 1 ? "call" : "calls"}` : "", unheardCount > 0 ? `${unheardCount} voicemail` : ""]
+      .filter((part) => part !== "").join(", ")
+    fromAreas.phone(rows.slice(0, 2).map(({ title, detail }) => ({ title, detail })), missedCount + unheardCount, rows[0]?.date ?? 0, said)
   }
   if (missed !== undefined) try contained((try Phone).send({ type: "missedReported", count: missed.length }), "missed calls")
   if (unread !== undefined) try contained((try Messages).send({ type: "unreadReported", count: unread.length }), "unread conversations")
@@ -64,7 +71,7 @@ effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
 const reporting = started(effect {
   const shell = try Shell
   const device = try Device
-  const visible = Stream.concat(Stream.succeed(true), device.visible)
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
   const home = Stream.map(Stream.zipLatest(Stream.map(shell.changes, (where) => where.trail.length === 0), visible), ([bare, seen]) => bare && seen)
   try Stream.runForEach(Stream.changesWith(home, (a, b) => a === b), effect (shown) => {
     if (shown) try report()
@@ -77,7 +84,7 @@ const messageBadge = applying(Messages, (state) => state.unread, (unread) => syn
 const phoneBadge = started(effect {
   const calls = Stream.map((try Phone).changes, (state) => ({ missed: state.missed, ready: state.voicemail }))
   const voicemails = Stream.map((try Voicemail).changes, (state) => state.unheard)
-  const badge = Stream.map(Stream.zipLatest(calls, voicemails), ([phone, unheard]) => phone.missed > 0 ? `${phone.missed} missed` : phone.ready && unheard > 0 ? `${unheard} unheard` : undefined)
+  const badge = Stream.map(Stream.zipLatest(calls, voicemails), ([phone, unheard]) => phone.ready && unheard > 0 ? `${unheard} unheard` : undefined)
   try Stream.runForEach(Stream.changes(badge), (said) => sync(() => waiting.tell("Phone", said)))
 }, "badging Home's Phone tile")
 
@@ -99,7 +106,8 @@ export effect function openCalls(): void!!(Phone | Voicemail | Shell) {
 export effect function openUnread(): void!!(Telephony | Messages | Conversations | Shell) {
   try contained((try Shell).send({ type: "openView", view: "Messages" }), "the unread card")
   const messages = try Messages
-  try Stream.runHead(Stream.filter(messages.changes, (s) => s.front && s.pane === "Threads" && s.sms.grant === "Granted"))
+  const ready = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (s) => s.front && s.pane === "Threads" && s.sms.grant === "Granted")), "3 seconds")
+  if (Option.isNone(ready) || Option.isNone(ready.value)) return
   const page = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   const unread = (page?.rows ?? []).flatMap((row) => ("incomplete" in row || !row.unread ? [] : [row]))
   const only = unread.length === 1 ? try (try Conversations).of({ id: unread[0].id, addresses: unread[0].addresses }) : 0

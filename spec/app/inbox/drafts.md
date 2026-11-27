@@ -36,40 +36,44 @@ import letter as L from "./letter"
 import shelf as S from "./shelf"
 import access.* from "./access"
 
-type Notice = Clear | NoReplyAddress | NotEditable | MineRestored | SavedTaken | SaveFound | SaveNotFound
+type Notice = Clear | NoReplyAddress | NotEditable | MineRestored | SavedTaken | SaveFound | SaveNotFound | CopyDeleted | CopyNotDeleted
+type ShelfPick = { draft: int, revision: int }
+type ShelfSelection = { account: int, picks: List[ShelfPick], reviewing: bool }
 type Composer = {
   session: int, open: bool, letter: L::Letter, made: int,
   kept: L::Letter, copy: L::Letter, stored: bool,
   write: R::Read, pending: bool, burst: int, due: int, clock: int, unkept: bool, full: bool, leaving: bool,
   load: R::Read, lookup: R::Read, check: R::Read, checking: int, checked: Set[int],
-  shelf: S::Shelf, discarding: bool, notice: Notice,
+  shelf: S::Shelf, shelfSelection: ShelfSelection, discarding: bool, notice: Notice,
 }
 
 type Effect =
   | Keep({ ticket: int, session: int, draft: int, revision: int })
   | KeepAside({ session: int, draft: int, revision: int })
   | Load({ ticket: int, session: int })
-  | ReadCopy({ ticket: int, draft: int, account: int, gmail: int })
+  | ReadCopy({ ticket: int, draft: int, account: int, gmail: int, attempt: int })
   | ReadSent({ ticket: int, draft: int, account: int, attempt: int })
   | Forget({ session: int, draft: int })
+  | ForgetSelected({ session: int, drafts: List[int] })
 type Written = { state: Composer, out: List[Effect] }
 
-pure val pause = 2
-pure val longest = 5
+pure val pause = 2000
+pure val longest = 5000
+pure val noShelfSelection: ShelfSelection = { account: 0, picks: List(), reviewing: false }
 
 pure val initial: Composer = {
   session: 0, open: false, letter: L::blank, made: 0,
   kept: L::blank, copy: L::blank, stored: false,
   write: R::unread, pending: false, burst: 0, due: 0, clock: 0, unkept: false, full: false, leaving: false,
   load: R::unread, lookup: R::unread, check: R::unread, checking: 0, checked: Set(),
-  shelf: S::initial, discarding: false, notice: Clear,
+  shelf: S::initial, shelfSelection: noShelfSelection, discarding: false, notice: Clear,
 }
 
 pure val accountValues = Set(0, 1, 2)
 pure val othersValues = Set(0, 2)
 pure val filesValues = Set(0, 2)
 pure val mibValues = Set(1, 3)
-pure val nowValues = Set(0, 1, 3, 7)
+pure val nowValues = Set(0, 1000, 3000, 7000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 pure val attemptValues = Set(1, 2, 3)
 pure val draftValues = Set(1, 2, 3, 4)
@@ -352,7 +356,7 @@ pure def restart(s: Composer): Written =
   {
     state: {
       ...s, open: s.open and s.stored, letter: s.kept, copy: s.kept, write: { ...s.write, status: R::Idle },
-      pending: false, unkept: false, full: false, leaving: false, discarding: false, notice: Clear, load: load,
+      pending: false, unkept: false, full: false, leaving: false, discarding: false, notice: Clear, load: load, shelfSelection: noShelfSelection,
       lookup: { ...s.lookup, status: R::Idle }, check: { ...s.check, status: R::Idle }, checking: 0,
     },
     out: List(Load({ ticket: load.ticket, session: s.session })),
@@ -378,7 +382,7 @@ out happens outside Inbox, after leaving it wrote the waiting edits.
 ```quint
 pure def sessionChanged(s: Composer): Composer = {
   ...s, session: s.session + 1, open: false, write: { ...s.write, status: R::Idle }, pending: false,
-  unkept: false, full: false, leaving: false, shelf: S::sessionChanged(s.shelf), discarding: false, notice: Clear,
+  unkept: false, full: false, leaving: false, shelf: S::sessionChanged(s.shelf), shelfSelection: noShelfSelection, discarding: false, notice: Clear,
   load: { ...s.load, status: R::Idle }, lookup: { ...s.lookup, status: R::Idle },
   check: { ...s.check, status: R::Idle }, checking: 0,
 }
@@ -507,6 +511,10 @@ pure def stepADraftIsForgottenOnlyWhenDiscardedOrGone(before: Composer, via: str
         and ((via == "discard" and before.discarding and f.draft == before.letter.id)
           or ((via == "sentAway" or via == "ended") and letterNamed(before, f.draft).sending >= 1)
           or (via == "checkedSent" and letterNamed(before, f.draft).doubt.attempt >= 1))
+    | ForgetSelected(f) => via == "discardShelfSelection" and before.shelfSelection.reviewing
+        and f.session == before.session and f.drafts.length() == before.shelfSelection.picks.length()
+        and f.drafts.every(draft => before.shelfSelection.picks.some(pick => pick.draft == draft)
+          and not(after.shelf.shelved.contains(draft)) and not(after.open))
     | _ => true
   })
 ```
@@ -542,12 +550,12 @@ pure def sometimesADraftAsideIsHandedOn(s: Composer): bool = s.shelf.shelved.exi
 > As the owner, I want to check once whether a send Alpha could not
 > confirm reached Gmail, rather than send it twice or never know.
 
-### An unknown send is checked once, by reading Gmail's Sent for it, while its account may be read and no new send of the draft is handed over
+### An unknown send is checked once by reading its own Gmail operation receipt, while its account may be read and no new send of the draft is handed over
 
-Found, it counts as sent, and a send of it again that waits no longer
-matches what was reviewed. Not found, it is known not to have gone. If
-the check fails, it stays unknown, and only the owner's choice sends it
-again.
+A receipt that confirms the send counts as sent, and a resend already
+under review must be reviewed again. A receipt that explicitly rejects
+the send counts as unsent. An unavailable receipt or one that is still
+unsettled leaves the send unknown. Only the owner can choose to send again.
 
 ```quint
 pure def canCheckSent(s: Composer, draft: int, access: Access): bool =
@@ -610,11 +618,15 @@ pure def lookUp(s: Composer, access: Access): Written =
   val lookup = R::ask(s.lookup)
   {
     state: { ...s, lookup: lookup },
-    out: List(ReadCopy({ ticket: lookup.ticket, draft: s.letter.id, account: s.letter.account, gmail: s.letter.gmail })),
+    out: List(ReadCopy({ ticket: lookup.ticket, draft: s.letter.id, account: s.letter.account, gmail: s.letter.gmail, attempt: s.letter.copyAttempt })),
   }
 ```
 
 ### What the read finds settles an unsure draft, and the owner is told whether the lost save was found; it lets a draft be saved over a copy unchanged since it was made, or stops it at a clash; nothing is saved over either until the owner chooses
+
+For an unknown save the answer says whether that save landed. For an
+unknown deletion it says whether its provider copy remains. A receipt
+still pending does not settle either.
 
 ```quint
 pure def canCopyRead(s: Composer, ticket: int, found: bool, held: int, gmail: int): bool =
@@ -623,6 +635,10 @@ pure def canCopyRead(s: Composer, ticket: int, found: bool, held: int, gmail: in
 pure def copyRead(s: Composer, ticket: int, ok: bool, found: bool, held: int, gmail: int): Written =
   val told = { ...s, lookup: R::answer(s.lookup, ok) }
   if (not(ok) or s.letter.sending != 0) { state: told, out: List() }
+  else if (s.letter.unsure and s.letter.use == L::ToDelete) {
+    if (found) touched(L::notFound(s.letter), { ...told, notice: CopyNotDeleted })
+    else touched(L::readCopy(L::notFound(s.letter), false, 0), { ...told, notice: CopyDeleted })
+  }
   else if (s.letter.unsure and found) touched(L::found(s.letter, held, gmail), { ...told, notice: SaveFound })
   else if (s.letter.unsure) touched(L::notFound(s.letter), { ...told, notice: SaveNotFound })
   else if (s.letter.draft.sync == D::Edited and s.letter.gmail != 0) touched(L::readCopy(s.letter, found, held), told)
@@ -776,6 +792,73 @@ pure def canDiscard(s: Composer, by: Actor): bool =
 
 pure def discard(s: Composer, by: Actor): Written =
   { state: closing(s.letter, s), out: List(Forget({ session: s.session, draft: s.letter.id })) }
+```
+
+### The owner can review and delete selected local drafts on the shelf, at the revisions shown
+
+Choose drafts for the account whose Drafts folder is showing. Drafts with
+a send or a Gmail copy still to recover stay out of the selection. A
+changed draft must be selected again. This removes only the phone's
+drafts. A copy already saved in Gmail stays there.
+
+```quint
+pure val picksValues = Set(List(), List({ draft: 1, revision: 1 }), List({ draft: 1, revision: 1 }, { draft: 2, revision: 1 }))
+
+pure def deletableShelfDraft(s: Composer, account: int, draft: int): bool =
+  val l = S::held(s.shelf, draft)
+  S::canTake(s.shelf, draft) and account != 0 and l.account == account
+    and l.sending == 0 and l.doubt.attempt == 0 and l.copyAttempt == 0 and not(l.unsure) and l.draft.sync != D::Saving
+
+pure def canStartShelfSelection(s: Composer, account: int, by: Actor): bool =
+  by == Owner and free(s) and s.shelfSelection.account == 0 and s.shelf.shelved.exists(draft => deletableShelfDraft(s, account, draft))
+
+pure def startShelfSelection(s: Composer, account: int, by: Actor): Composer =
+  { ...s, shelfSelection: { ...noShelfSelection, account: account } }
+
+pure def canPickShelfDraft(s: Composer, draft: int, by: Actor): bool =
+  by == Owner and free(s) and not(s.shelfSelection.reviewing) and deletableShelfDraft(s, s.shelfSelection.account, draft)
+
+pure def pickShelfDraft(s: Composer, draft: int, by: Actor): Composer =
+  val picks = s.shelfSelection.picks
+  val remaining = picks.select(pick => pick.draft != draft)
+  val chosen = if (remaining.length() == picks.length()) picks.append({ draft: draft, revision: S::held(s.shelf, draft).revision }) else remaining
+  { ...s, shelfSelection: { ...s.shelfSelection, picks: chosen } }
+
+pure def liveShelfSelection(s: Composer, picks: List[ShelfPick]): bool =
+  s.shelfSelection.account != 0 and picks.every(pick =>
+    deletableShelfDraft(s, s.shelfSelection.account, pick.draft) and S::held(s.shelf, pick.draft).revision == pick.revision
+      and picks.select(other => other.draft == pick.draft).length() == 1)
+
+pure def canPickAllShelfDrafts(s: Composer, picks: List[ShelfPick], by: Actor): bool =
+  by == Owner and free(s) and not(s.shelfSelection.reviewing) and liveShelfSelection(s, picks)
+
+pure def pickAllShelfDrafts(s: Composer, picks: List[ShelfPick], by: Actor): Composer =
+  { ...s, shelfSelection: { ...s.shelfSelection, picks: picks } }
+
+pure def canReviewShelfDiscard(s: Composer, by: Actor): bool =
+  by == Owner and free(s) and not(s.shelfSelection.reviewing) and s.shelfSelection.picks.length() > 0
+    and liveShelfSelection(s, s.shelfSelection.picks)
+
+pure def reviewShelfDiscard(s: Composer, by: Actor): Composer =
+  { ...s, shelfSelection: { ...s.shelfSelection, reviewing: true } }
+
+pure def canCloseShelfReview(s: Composer, by: Actor): bool = by == Owner and s.shelfSelection.reviewing
+
+pure def closeShelfReview(s: Composer, by: Actor): Composer =
+  { ...s, shelfSelection: { ...s.shelfSelection, reviewing: false } }
+
+pure def canEndShelfSelection(s: Composer, by: Actor): bool = s.shelfSelection.account != 0
+
+pure def endShelfSelection(s: Composer, by: Actor): Composer = { ...s, shelfSelection: noShelfSelection }
+
+pure def canDiscardShelfSelection(s: Composer, by: Actor): bool =
+  by == Owner and free(s) and s.shelfSelection.reviewing and s.shelfSelection.picks.length() > 0
+    and liveShelfSelection(s, s.shelfSelection.picks)
+
+pure def discardShelfSelection(s: Composer, by: Actor): Written =
+  val picks = s.shelfSelection.picks
+  { state: { ...s, shelfSelection: noShelfSelection, shelf: picks.foldl(s.shelf, (shelf, pick) => S::take(shelf, pick.draft)) },
+    out: List(ForgetSelected({ session: s.session, drafts: picks.foldl(List(), (ids, pick) => ids.append(pick.draft)) })) }
 ```
 
 ### A draft can wait on the shelf, come back from it, and be asked about before discarding

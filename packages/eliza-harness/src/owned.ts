@@ -15,7 +15,7 @@ export async function owned(name: string) {
   const operator = <A>(route: string, body?: unknown) => said<A>(`${mine.cloud.provider}/operator/${route}`, { body });
   return {
     ...mine,
-    script: (reply: Reply) => operator("model", { system: mine.system, reply }),
+    script: (reply: Reply, prompt?: string) => operator("model", { system: mine.system, prompt, reply }),
     asked: () => operator<{ role: string; content?: unknown }[][]>(`asked?system=${encodeURIComponent(mine.system)}`),
     agentSays: <A>(route: string, body?: unknown) => said<A>(`${mine.agent.origin}${route}`, { body, headers: { authorization: `Bearer ${mine.agent.token}` } }),
   };

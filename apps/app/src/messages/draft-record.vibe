@@ -1,0 +1,191 @@
+// spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, normalizePhoneNumber, operationIdOf, threadIdOf, type MmsAttachmentType, type OperationId, type PhoneNumber, type ThreadId } from "@elizaos/os-bridges"
+import type { Author } from "../../gen/app__messages__composer.effect.vibe"
+import type { SmsDraftSlot } from "../platform/index.vibe"
+
+export interface DraftPicture {
+  readonly name: string
+  readonly wireName?: string
+  readonly contentType: MmsAttachmentType
+  readonly bytes: Uint8Array
+}
+
+type NewSource = { readonly kind: "new" }
+type ThreadSource = { readonly kind: "thread"; readonly thread: ThreadId; readonly recipients: readonly PhoneNumber[] }
+type RecipientSource = { readonly kind: "recipients"; readonly recipients: readonly PhoneNumber[] }
+export type DraftSource = NewSource | ThreadSource | RecipientSource
+
+interface DraftContents {
+  readonly revision: number
+  readonly author: Author
+  readonly body: string
+  readonly pictures: readonly DraftPicture[]
+  readonly completedOperation?: OperationId
+}
+
+export type DraftRecord = DraftContents & (
+  | { readonly source: NewSource; readonly recipients: string; readonly androidInbound?: AndroidInboundDraft }
+  | { readonly source: ThreadSource | RecipientSource }
+)
+
+const maxThreadAddresses = 20
+const maxRecipientText = 512
+const maxSerialized = Math.ceil(MMS_MAX_TOTAL_BYTES / 3) * 4 + 24 * 1024
+const revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER))
+export const AndroidDraftToken = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,128}$/u)).pipe(Schema.brand("AndroidDraftToken"))
+const androidInbound = Schema.Struct({ token: AndroidDraftToken, admittedRevision: revision.check(Schema.isGreaterThanOrEqualTo(1)) })
+export type AndroidInboundDraft = typeof androidInbound.Type
+const addresses = Schema.Array(Schema.String.check(Schema.isMaxLength(64))).check(Schema.isMinLength(1), Schema.isMaxLength(maxThreadAddresses))
+const picture = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+  wireName: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u))),
+  contentType: Schema.Literals(MMS_ATTACHMENT_TYPES),
+  bytes: Schema.Uint8ArrayFromBase64.check(Schema.isMinLength(1), Schema.isMaxLength(MMS_MAX_TOTAL_BYTES)),
+})
+const contents = {
+  version: Schema.Literal(2),
+  revision,
+  author: Schema.Literals(["Nobody", "OwnerWrote", "AlphaWrote"]),
+  body: Schema.String.check(Schema.isMaxLength(MMS_MAX_BODY)),
+  pictures: Schema.Array(picture).check(Schema.isMaxLength(MMS_MAX_ATTACHMENTS)),
+  completedOperation: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(128))),
+}
+const stored = Schema.fromJsonString(Schema.Union([
+  Schema.Struct({
+    ...contents,
+    source: Schema.Struct({ kind: Schema.Literal("new") }),
+    recipients: Schema.String.check(Schema.isMaxLength(maxRecipientText)),
+    androidInbound: Schema.optionalKey(androidInbound),
+  }),
+  Schema.Struct({
+    ...contents,
+    source: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("thread"), thread: Schema.String.check(Schema.isMaxLength(25)), recipients: addresses }),
+      Schema.Struct({ kind: Schema.Literal("recipients"), recipients: addresses }),
+    ]),
+  }),
+]))
+
+const storedReference = Schema.Struct({
+  revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  source: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("new") }),
+    Schema.Struct({ kind: Schema.Literal("thread"), thread: Schema.String.check(Schema.isMaxLength(25)), recipients: addresses }),
+    Schema.Struct({ kind: Schema.Literal("recipients"), recipients: addresses }),
+  ]),
+})
+
+export interface DraftReference {
+  readonly source: DraftSource
+  readonly revision: number
+}
+
+/** Canonical address identity for a provider or a provisional conversation. */
+export function canonicalDraftRecipients(raw: readonly string[]): readonly PhoneNumber[] | undefined {
+  if (raw.length === 0 || raw.length > maxThreadAddresses) return undefined
+  const recipients = new Set<PhoneNumber>()
+  for (const address of raw) {
+    const number = normalizePhoneNumber(address)
+    if (number === null) return undefined
+    recipients.add(number)
+  }
+  return Array.from(recipients).sort()
+}
+
+function equalRecipients(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((address, at) => address === right[at])
+}
+
+export function sameDraftSource(left: DraftSource, right: DraftSource): boolean {
+  if (left.kind === "new") return right.kind === "new"
+  if (left.kind === "thread") return right.kind === "thread" && left.thread === right.thread && equalRecipients(left.recipients, right.recipients)
+  return right.kind === "recipients" && equalRecipients(left.recipients, right.recipients)
+}
+
+export function androidInboundOf(record: DraftRecord | null): AndroidInboundDraft | undefined {
+  return record !== null && "androidInbound" in record ? record.androidInbound : undefined
+}
+
+function sourceOf(source: typeof stored.Type["source"]): DraftSource | undefined {
+  if (source.kind === "new") return source
+  const recipients = canonicalDraftRecipients(source.recipients)
+  if (recipients === undefined || !equalRecipients(recipients, source.recipients)) return undefined
+  if (source.kind === "recipients") return recipients.length <= MMS_MAX_RECIPIENTS ? { kind: "recipients", recipients } : undefined
+  const thread = threadIdOf(source.thread)
+  return thread === null ? undefined : { kind: "thread", thread, recipients }
+}
+
+/** The native slot identity and revision sealed in one recoverable outgoing send. */
+export function decodeDraftReference(value: unknown): DraftReference | undefined {
+  const found = Schema.decodeUnknownOption(storedReference, { onExcessProperty: "error" })(value)
+  if (Option.isNone(found)) return undefined
+  const source = sourceOf(found.value.source)
+  return source === undefined ? undefined : { source, revision: found.value.revision }
+}
+
+function validPictures(pictures: readonly DraftPicture[]): boolean {
+  const labels = new Set<string>()
+  const wireNames = new Set<string>()
+  let bytes = 0
+  for (const one of pictures) {
+    const wireName = one.wireName ?? one.name
+    bytes += one.bytes.byteLength
+    if (bytes > MMS_MAX_TOTAL_BYTES || labels.has(one.name) || wireNames.has(wireName)) return false
+    labels.add(one.name)
+    wireNames.add(wireName)
+  }
+  return true
+}
+
+/** Encode the exact revision for a compare-and-exchange in the phone's draft vault. */
+export function encodeDraftRecord(draft: DraftRecord): string | undefined {
+  if (sourceOf(draft.source) === undefined || (draft.author === "Nobody" && draft.body !== "") || !validPictures(draft.pictures)
+    || (draft.completedOperation !== undefined && operationIdOf(draft.completedOperation) === null)) return undefined
+  const inbound = androidInboundOf(draft)
+  if (inbound !== undefined && (draft.source.kind !== "new" || inbound.admittedRevision > draft.revision)) return undefined
+  return Option.getOrUndefined(Schema.encodeOption(stored)({ version: 2, ...draft }))
+}
+
+/** A receipt cannot cross a draft's source identity even if its storage key matches. */
+export function decodeDraftRecord(raw: string, expected: DraftSource): DraftRecord | undefined {
+  if (raw.length > maxSerialized) return undefined
+  const decoded = Schema.decodeUnknownOption(stored, { onExcessProperty: "error" })(raw)
+  if (Option.isNone(decoded)) return undefined
+  const { source, revision, author, body, pictures, completedOperation } = decoded.value
+  const bound = sourceOf(source)
+  if (bound === undefined || !sameDraftSource(expected, bound) || (author === "Nobody" && body !== "") || !validPictures(pictures)) return undefined
+  const operation = operationIdOf(completedOperation)
+  if (completedOperation !== undefined && operation === null) return undefined
+  const details = { revision, author, body, pictures, ...(operation === null ? {} : { completedOperation: operation }) }
+  if (bound.kind !== "new") return { ...details, source: bound }
+  if (!("recipients" in decoded.value)) return undefined
+  const inbound = decoded.value.androidInbound
+  if (inbound !== undefined && inbound.admittedRevision > revision) return undefined
+  return { ...details, source: bound, recipients: decoded.value.recipients, ...(inbound === undefined ? {} : { androidInbound: inbound }) }
+}
+
+module web {
+  export async function recipientDigest(recipients: readonly string[]): Promise<string> {
+    const bytes = new TextEncoder().encode(JSON.stringify(recipients))
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
+    return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+}
+import { recipientDigest } from web
+
+function isProviderSlot(slot: string): slot is SmsDraftSlot {
+  return /^sms-draft:v2:thread:[1-9][0-9]{0,18}$/u.test(slot)
+}
+
+/** The provider ID stays decimal text, including IDs larger than a safe JavaScript integer. */
+export effect function draftSlot(source: DraftSource): (SmsDraftSlot | undefined)!! {
+  const bound = sourceOf(source)
+  if (bound === undefined) return undefined
+  if (bound.kind === "new") return "sms-draft:v2:new"
+  if (bound.kind === "thread") {
+    const slot = `sms-draft:v2:${bound.thread}`
+    return isProviderSlot(slot) ? slot : undefined
+  }
+  const digest = tryPromise(() => recipientDigest(bound.recipients)) catch () => undefined
+  return digest === undefined ? undefined : `sms-draft:v2:recipients:${digest}`
+}

@@ -2,7 +2,9 @@
 
 A workflow's history and the sheet of one run: the runs the agent kept,
 read page by page, and one run opened with its output, read aloud on
-request, and handed to Ask Alpha. A removed workflow keeps its history.
+request, and handed to Ask Alpha. A scheduled run names its scheduled time.
+The run's Details show the execution, version, status, reconciliation, stop
+time and activity recorded by the agent. A removed workflow keeps its history.
 
 The run's status as reported, the workflow's newest version and whether
 it was removed are facts of [Runs](./runs.md) and [Workflows](./index.md),
@@ -10,6 +12,17 @@ passed in with the events that need them; who is signed in is a fact of
 the account area. Run again is the Run now review of [Runs](./runs.md).
 The agent keeps the runs (eliza's `workflow/execution`); the phone only
 reads them.
+
+## Story: Open a finished workflow from its notification
+
+> As the owner, I want a result notice to open the exact finished run it names.
+> When I choose Ask Alpha from the notice, I want to start with that run attached.
+
+The phone reads the named workflow and run again before opening the sheet.
+The result belongs to the same owner, run and version as the notification.
+The phone consumes the tap after the exact finished run has been shown.
+An Ask Alpha tap uses the sheet’s existing handoff. It opens a draft the
+owner can review.
 
 ## Story: See a workflow's history
 

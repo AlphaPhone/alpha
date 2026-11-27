@@ -210,7 +210,7 @@ pure def propose(s: Helper, change: C::Change, items: Set[int], basis: int, revi
   proposing({ ...s.request, ask: Alter, change: change, items: items, basis: basis }, revision, s)
 
 pure def canProposeAlbum(s: Helper, name: str, letters: int, items: Set[int], basis: int, revision: int, listed: bool, running: bool, allowed: bool, secure: bool, by: Actor): bool =
-  canPropose(s, C::Favorite, items, basis, revision, listed, running, allowed, secure, by) and name != "" and letters >= 1
+  canPropose(s, C::Favorite, items, basis, revision, listed, running, allowed, secure, by) and name != "" and letters >= 1 and letters <= 80
 
 pure def proposeAlbum(s: Helper, name: str, letters: int, items: Set[int], basis: int, revision: int, listed: bool, running: bool, allowed: bool, secure: bool, by: Actor): Done =
   proposing({ ...s.request, ask: Collect, name: name, letters: letters, items: items, basis: basis }, revision, s)

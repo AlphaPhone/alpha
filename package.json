@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "turbo run dev //#studio",
     "studio": "node vibestack/spec.ts studio",
+    "cli": "node packages/cli/src/main.ts",
     "eliza": "pnpm --filter @repo/eliza-harness eliza",
     "cloud": "node vibestack/spec.ts tasks @repo/cloud#build && node apps/cloud/dist/src/main.js",
     "no-bun": "node packages/eliza-harness/scripts/no-bun.ts",
@@ -31,7 +32,7 @@
     "test:models": "node vibestack/spec.ts tasks check",
     "typecheck": "vibelang --noEmit -p tsconfig.json",
     "lint": "node vibestack/spec.ts tasks //#lint:js //#lint:css",
-    "lint:js": "eslint . --max-warnings 0",
+    "lint:js": "eslint --max-warnings 0 --ignore-pattern \"apps/**\" --ignore-pattern \"packages/**\" . && eslint --max-warnings 0 packages && eslint --max-warnings 0 --ignore-pattern \"apps/app/**\" apps && eslint --max-warnings 0 apps/app",
     "lint:css": "stylelint \"**/*.css\" --allow-empty-input",
     "analyze": "knip && madge --circular vibestack packages apps && jscpd .",
     "quick": "node vibestack/spec.ts tasks typecheck test //#lint:js //#lint:css",
@@ -71,7 +72,7 @@
     "README.md",
     "AGENTS.md",
     "SPEC.md",
-    "LICENSE"
+    "vibestack/LICENSE"
   ],
   "dependencies": {
     "@antithesishq/bombadil": "0.7.10",

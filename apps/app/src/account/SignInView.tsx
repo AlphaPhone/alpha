@@ -6,7 +6,7 @@ import { useMachine as useSignIn } from "../../gen/app__account__signIn.react.ts
 import type { Method } from "../../gen/app__account__session.ts";
 import { untimed } from "../runtime/index.vibe";
 import { normalizePhoneNumber } from "./phone.ts";
-import { type AccountRuntime, currentSeconds, useAccountShelf, useAccountTimed } from "./useAccount.ts";
+import { type AccountRuntime, currentMillis, useAccountShelf, useAccountTimed } from "./useAccount.ts";
 
 const troubleMessages: Partial<Record<Trouble, string>> = {
   WrongCode: "That code didn’t match. Try again.",
@@ -32,13 +32,13 @@ export function SignInView({ runtime }: { readonly runtime: AccountRuntime }) {
   if (!state || state.step === "Closed") return null;
 
   const online = shelf.online;
-  const nowSec = currentSeconds(runtime);
+  const nowMs = currentMillis(runtime);
   const displayedAddress = address === "" && state.prefill ? state.address : address;
   const normalizedPhone = method === "Phone" ? normalizePhoneNumber(displayedAddress) : displayedAddress;
   const troubleText = troubleMessages[state.trouble];
   const smsOffered = offered(state, "Phone");
   const googleOffered = offered(state, "Google");
-  const waitSeconds = Math.max(0, state.resendAt - nowSec);
+  const waitSeconds = Math.ceil(Math.max(0, state.resendAt - nowMs) / 1000);
   const sendEvent = { type: "sendCode", method, address: displayedAddress, now: untimed, online } as const;
   const googleEvent = { type: "chooseGoogle", now: untimed, online } as const;
   const resendEvent = { type: "resend", now: untimed, online } as const;

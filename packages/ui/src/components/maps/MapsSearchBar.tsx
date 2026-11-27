@@ -24,7 +24,7 @@ export function MapsSearchBar({ leading, back, lead, onLead, onSubmit, onClear, 
       role="search"
       data-host-chrome=""
       onSubmit={(event) => { event.preventDefault(); onSubmit?.(); }}
-      className={cn("flex h-13 items-center gap-0.5 rounded-full bg-background px-2 text-foreground shadow-md ring-1 ring-border in-data-[alpha-launcher]:h-13.5 in-data-[alpha-launcher]:gap-0 in-data-[alpha-launcher]:px-1.25", className)}
+      className={cn("flex h-13 items-center gap-0.5 rounded-full bg-background px-2 text-foreground shadow-float ring-1 ring-border has-[>input:focus-visible]:outline-solid has-[>input:focus-visible]:outline-focus has-[>input:focus-visible]:outline-offset-focus has-[>input:focus-visible]:outline-ring in-data-[alpha-launcher]:h-13.5 in-data-[alpha-launcher]:gap-0 in-data-[alpha-launcher]:px-1.25 dark:shadow-float-dark", className)}
     >
       {leading ? <div className="contents in-data-[alpha-launcher]:hidden [&>button]:size-13">{leading}</div> : back}
       <button type="button" aria-label={lead === "search" ? "Search" : "Back"} onClick={onLead} className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-full active:bg-accent in-data-[alpha-launcher]:size-11 [&_svg]:size-5.5")}>

@@ -1,19 +1,62 @@
 // spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"
 import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
 import type { Event, Field } from "../../gen/app__shell__keyboard.effect.vibe"
-import { Device, Launcher } from "../platform/index.vibe"
+import { Device, native } from "../platform/index.vibe"
+import { Launcher } from "../platform/index.vibe"
 import { applying, contained, reacting, started, together } from "../runtime/index.vibe"
 
 module page {
   export type Heard = "resize" | "focus" | "front" | number | { readonly keyboard: boolean }
 
+  export interface DesktopPreview {
+    readonly left: number
+    readonly top: number
+    readonly width: number
+    readonly height: number
+    readonly scale: number
+  }
+
+  import { createShelf } from "../runtime/index.vibe"
+
+  const reference = { width: 412, height: 915, top: 24 }
+  const previewShelf = createShelf<DesktopPreview | undefined>(undefined)
+
+  /** The desktop preview's logical canvas and its position in the measured browser window. @throws {never} */
+  export const desktopPreview = { snapshot: previewShelf.snapshot, subscribe: previewShelf.subscribe, reset: previewShelf.reset }
+
+  function publishPreview(next: DesktopPreview | undefined): void {
+    const current = previewShelf.get()
+    if (current?.left === next?.left && current?.scale === next?.scale) return
+    previewShelf.set(next)
+  }
+
   /** The window as measured: its width, its height, and the height left to the page above the keyboard. @throws {never} */
-  export function measured(): { width: number; height: number; visible: number } {
+  export function measured(phone: boolean): { width: number; height: number; visible: number } {
     const width = Math.round(window.innerWidth)
     const height = Math.round(window.innerHeight)
-    const visible = Math.round(Math.min(height, window.visualViewport?.height ?? height))
-    return { width, height, visible: Math.max(1, visible) }
+    const visible = Math.max(1, Math.round(Math.min(height, window.visualViewport?.height ?? height)))
+    if (phone || width <= 600 || window.matchMedia("(pointer: coarse)").matches) {
+      publishPreview(undefined)
+      return { width, height, visible }
+    }
+    const scale = Math.min(1, Math.max(1, visible - 2 * reference.top) / reference.height)
+    publishPreview({ ...reference, left: (width - reference.width * scale) / 2, scale })
+    return { width: reference.width, height: reference.height, visible: reference.height }
   }
+  function primaryPointer(): MediaQueryList | undefined {
+    return typeof window === "undefined" ? undefined : window.matchMedia?.("(pointer: coarse)")
+  }
+
+  /** @throws {never} */
+  export function coarsePointer(): boolean { return primaryPointer()?.matches ?? false }
+
+  /** @throws {never} */
+  export function watchPrimaryPointer(changed: () => void): () => void {
+    const media = primaryPointer()
+    media?.addEventListener("change", changed)
+    return () => media?.removeEventListener("change", changed)
+  }
+
   const textInputs = new Set(["email", "number", "password", "search", "tel", "text", "url"])
 
   function editable(element: Element | null): element is HTMLElement {
@@ -40,6 +83,7 @@ module page {
   /** Each change of the window, of the space above the keyboard and of focus. @throws {never} */
   export function watched(heard: (what: Heard) => void): () => void {
     const resize = () => heard("resize")
+    const pointer = window.matchMedia("(pointer: coarse)")
     const focus = () => heard("focus")
     const front = () => heard("front")
     const insets = (event: Event) => {
@@ -62,6 +106,7 @@ module page {
     changed.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
     text()
     window.addEventListener("resize", resize)
+    pointer.addEventListener("change", resize)
     window.addEventListener("focus", front)
     window.addEventListener("alpha-insets", insets)
     window.visualViewport?.addEventListener("resize", resize)
@@ -71,6 +116,7 @@ module page {
     if (keyboard !== undefined) heard({ keyboard })
     return () => {
       window.removeEventListener("resize", resize)
+      pointer.removeEventListener("change", resize)
       window.removeEventListener("focus", front)
       window.removeEventListener("alpha-insets", insets)
       window.visualViewport?.removeEventListener("resize", resize)
@@ -86,7 +132,19 @@ module page {
 
   /** Publish measured text scale for CSS alongside the canvas state. @throws {never} */
   export function sized(scale: number): void {
-    if (typeof document !== "undefined") document.documentElement.style.setProperty("--alpha-text-scale", String(scale / 100))
+    if (typeof document === "undefined") return
+    const next = String(scale / 100)
+    if (document.documentElement.style.getPropertyValue("--alpha-text-scale") !== next) {
+      document.documentElement.style.setProperty("--alpha-text-scale", next)
+    }
+  }
+
+  /** Publish the available viewport height for CSS modals and sheets (Contract C1). @throws {never} */
+  export function viewportHeight(value: string): void {
+    if (typeof document === "undefined") return
+    if (document.documentElement.style.getPropertyValue("--alpha-viewport-height") !== value) {
+      document.documentElement.style.setProperty("--alpha-viewport-height", value)
+    }
   }
 
   /** Put away the composer if it still owns the field. @throws {never} */
@@ -95,16 +153,28 @@ module page {
     if (editable(active) && active.closest("[data-alpha-composer]")) active.blur()
   }
 }
-import { type Heard, focused, measured, nativeKeyboard, paged, releaseComposer, sized, watched } from page
+import { type DesktopPreview, type Heard, coarsePointer, desktopPreview, focused, measured, nativeKeyboard, paged, releaseComposer, sized, viewportHeight, watched, watchPrimaryPointer } from page
+export { type DesktopPreview, coarsePointer, desktopPreview, watchPrimaryPointer }
+
+export function landscapeHomeInput(frame: Canvas.Canvas | undefined): boolean {
+  return native() && frame?.mounted === true && frame.landscape && !frame.voice
+}
+
+export function homeEditFrame(frame: Canvas.Canvas | undefined): boolean {
+  return frame?.mounted === true && !frame.voice && !frame.covered && frame.keyboard !== "Shown" && frame.field === "NoField"
+}
 
 // spec/app/shell/keyboard.md, "Where Android reports the keyboard, the keyboard hiding puts the composer away, unless it hid to hand the composer to voice"
 /** Preserve the focused composer during a voice handoff on a phone reporting its keyboard. */
 export effect function keyboardVoice(voice: boolean): void!!Canvas.Machine {
   const shown = nativeKeyboard()
-  if (shown === undefined) return
   const canvas = try Canvas.Machine
   const state = try canvas.get()
-  if (state.voice !== voice && Canvas.canKeyboardReported(state, shown, voice)) try contained(canvas.send({ type: "keyboardReported", shown, voice }), "the keyboard")
+  if (shown === undefined) {
+    if (Canvas.canVoiceBeforeKeyboard(state, voice)) try contained(canvas.send({ type: "voiceBeforeKeyboard", voice }), "voice owning the composer")
+  } else if (state.voice !== voice && Canvas.canKeyboardReported(state, shown, voice)) {
+    try contained(canvas.send({ type: "keyboardReported", shown, voice }), "the keyboard")
+  }
 }
 
 // spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured"
@@ -115,7 +185,7 @@ const followed = started(effect {
   const device = try Device
   const presented = try launcher.presentation()
   const tell = (event: Event) => contained(canvas.send(event), "the canvas")
-  const window0 = measured()
+  const window0 = measured(presented.phone)
   try tell({ type: "mount", width: window0.width, height: window0.height, launcher: presented.launcher })
   const dom = Stream.callback<Heard>((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
   const changes = Stream.merge(dom, Stream.as(Stream.filter(device.visible, (shown) => shown), "front" as const))
@@ -140,8 +210,8 @@ const followed = started(effect {
       if (state.field !== field) try tell({ type: "focusField", focus: field })
       return
     }
-    const now = measured()
-    try tell({ type: "resize", width: now.width, height: now.height, visible: now.visible })
+    const now = measured(presented.phone)
+    if (Canvas.canResize(state, now.width, now.height, now.visible)) try tell({ type: "resize", width: now.width, height: now.height, visible: now.visible })
   })
 }, "the canvas")
 
@@ -160,8 +230,13 @@ const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: 
 // spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"
 const text = applying(Canvas.Machine, (c) => c.textScale, (scale) => sync(() => sized(scale)))
 
+// spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"
+const height = applying(Canvas.Machine, (c) => (c.covered && c.visible > 0 ? `${c.visible}px` : "100dvh"), (value) => sync(() => viewportHeight(value)))
+
+const previewCleanup = Layer.effectDiscard(Effect.addFinalizer(() => sync(() => { desktopPreview.reset() })))
+
 // spec/app/shell/keyboard.md, "Only the composer is put away, and only when it had focus"
 const release = applying(Canvas.Machine, (c) => c.released, (count) => sync(() => { if (count > 0) releaseComposer() }))
 
 /** The canvas, in memory: measured when the shell mounts and at every change of the window, and marked on the page. */
-export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked, text, release)
+export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked, text, height, previewCleanup, release)

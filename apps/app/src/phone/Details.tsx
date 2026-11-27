@@ -1,13 +1,14 @@
 // spec/app/phone/details.md, "Story: See my SIM, carrier and number on the image"; spec/app/phone/details.md, "Story: Keep Alpha as my phone and SMS app"
-import { Alert, Banner, Button, ListGroup, ListRow, Spinner } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Alert, Banner, Button, ListGroup, ListRow, SettingsFactRow, Spinner } from "@repo/ui";
+import { Effect, type ManagedRuntime } from "effect";
 import type { Line, Machine as DetailsMachine } from "../../gen/app__phone__details.effect.vibe";
 import { imeiElsewhere, simSummary } from "../../gen/app__phone__details.ts";
 import { useMachine } from "../../gen/app__phone__details.react.ts";
+import { SystemSettings } from "../platform/index.vibe";
 
 export interface DetailsProps {
-  /** Provides the page's machine, the area's own. */
-  runtime: ManagedRuntime.ManagedRuntime<DetailsMachine, unknown>;
+  /** Provides the page's machine, the area's own, and Android settings handoffs. */
+  runtime: ManagedRuntime.ManagedRuntime<DetailsMachine | SystemSettings, unknown>;
 }
 
 const networks = { NoService: "No service", Network2g: "2G", Network3g: "3G", Network4g: "4G", Network5g: "5G", WifiCalling: "Wi-Fi calling", NetworkUnknown: "Unknown network" } as const;
@@ -16,12 +17,12 @@ const voicemails = { VoicemailOn: "Set up", VoicemailNotSetUp: "Not set up", Voi
 function LineRows({ line }: { line: Line }) {
   return (
     <ListGroup heading={line.simName || line.carrier || `SIM ${line.slot + 1}`}>
-      <ListRow title="Carrier" trailing={line.carrier} />
-      <ListRow title="Number" trailing={line.number || "Not shown"} />
-      <ListRow title="Network" trailing={`${networks[line.network]}${line.roaming ? " · Roaming" : ""}`} />
-      <ListRow title="Signal" trailing={line.signal < 0 ? "Unknown" : `${line.signal} of 4`} />
-      {line.embedded && <ListRow title="eSIM" />}
-      {line.imei !== "" && <ListRow title="IMEI" trailing={line.imei} />}
+      <SettingsFactRow title="Carrier" reading={{ word: "reported", value: line.carrier }} />
+      <SettingsFactRow title="Number" reading={{ word: "reported", value: line.number || "Not shown" }} />
+      <SettingsFactRow title="Network" reading={{ word: "reported", value: `${networks[line.network]}${line.roaming ? " · Roaming" : ""}` }} />
+      <SettingsFactRow title="Signal" reading={{ word: "reported", value: line.signal < 0 ? "Unknown" : `${line.signal} of 4` }} />
+      {line.embedded && <SettingsFactRow title="eSIM" />}
+      {line.imei !== "" && <SettingsFactRow title="IMEI" reading={{ word: "reported", value: line.imei }} />}
     </ListGroup>
   );
 }
@@ -36,12 +37,17 @@ export function Details({ runtime }: DetailsProps) {
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not read the phone's details</Alert>;
   if (!state?.shown) return null;
   const summary = simSummary(state);
+  const openSettings = (target: "AppPermissions" | "MobileNetworks" | "AboutPhone") => {
+    void runtime.runPromiseExit(Effect.flatMap(SystemSettings, (settings) => settings.open(target, "")));
+  };
   return (
     <section aria-label="Phone details" className="flex flex-col gap-3">
       {state.info.status === "Loading" && <Spinner label="Reading the phone" />}
       {state.info.status === "Failed" && <Banner variant="destructive" action={can({ type: "refresh" }) && <Button variant="outline" size="sm" onClick={() => void send({ type: "refresh" })}>Try again</Button>}>The phone's details could not be read</Banner>}
       {summary === "SimsUnread" && (
-        <Banner variant="warn" action={can({ type: "allow" }) && <Button size="sm" onClick={() => void send({ type: "allow" })}>Allow</Button>}>
+        <Banner variant="warn" action={can({ type: "allow" })
+          ? <Button size="sm" onClick={() => void send({ type: "allow" })}>Allow</Button>
+          : <Button variant="outline" size="sm" onClick={() => openSettings("AppPermissions")}>Open Settings</Button>}>
           {can({ type: "allow" }) ? "Alpha needs access to the phone's state to show your SIMs" : "Allow phone access for Alpha in Android's settings"}
         </Banner>
       )}
@@ -49,12 +55,13 @@ export function Details({ runtime }: DetailsProps) {
       {state.lines.map((line) => <LineRows key={line.slot} line={line} />)}
       {state.info.status === "Loaded" && (
         <ListGroup heading="Apps">
-          <ListRow title="Calls" trailing={state.holders.phoneAlpha ? "Alpha" : state.holders.phoneApp || "None"} />
+          <SettingsFactRow title="Calls" reading={{ word: "reported", value: state.holders.phoneAlpha ? "Alpha" : state.holders.phoneApp || "None" }} />
           {can({ type: "roleAsked", sms: false }) && <ListRow title="Make Alpha your phone app" onClick={() => void send({ type: "roleAsked", sms: false })} />}
-          <ListRow title="Texts" trailing={state.holders.smsAlpha ? "Alpha" : state.holders.smsApp || "None"} />
+          <SettingsFactRow title="Texts" reading={{ word: "reported", value: state.holders.smsAlpha ? "Alpha" : state.holders.smsApp || "None" }} />
           {can({ type: "roleAsked", sms: true }) && <ListRow title="Make Alpha your SMS app" onClick={() => void send({ type: "roleAsked", sms: true })} />}
-          <ListRow title="Voicemail" trailing={voicemails[state.voicemail]} />
-          {imeiElsewhere(state) && <ListRow title="IMEI" detail="Shown in Android's device status" />}
+          <SettingsFactRow title="Voicemail" reading={{ word: "reported", value: voicemails[state.voicemail] }} />
+          <ListRow title="Mobile network" detail="Manage SIM and mobile network in Android settings" onClick={() => openSettings("MobileNetworks")} />
+          {imeiElsewhere(state) && <SettingsFactRow title="IMEI" reading={{ word: "reported", value: "Shown in Android's device status" }} />}
         </ListGroup>
       )}
     </section>

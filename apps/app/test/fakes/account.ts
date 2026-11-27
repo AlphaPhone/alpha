@@ -401,8 +401,16 @@ function accountPlugins(scene: AccountScene): Record<string, Faked> {
         headers: { ...headers, ...(body === undefined ? {} : { "content-type": "application/json" }) },
         body,
       })).catch(() => { throw rejection("network"); });
-      const found = { etag: response.headers.get("etag"), contentType: response.headers.get("content-type"), retryAfter: response.headers.get("retry-after") };
-      return { status: response.status, body: toBase64(new Uint8Array(await response.arrayBuffer())), ...Object.fromEntries(Object.entries(found).filter(([, value]) => value !== null)) };
+      const etag = response.headers.get("etag");
+      const contentType = response.headers.get("content-type");
+      const retryAfter = response.headers.get("retry-after");
+      return {
+        status: response.status,
+        body: toBase64(new Uint8Array(await response.arrayBuffer())),
+        ...(etag === null ? {} : { etag }),
+        ...(contentType === null ? {} : { contentType }),
+        ...(retryAfter === null ? {} : { retryAfter }),
+      };
     },
     readGrant: () => Promise.reject(rejection("grant-unknown")),
     cancel: () => Promise.resolve({ cancelled: false }),

@@ -23,7 +23,8 @@ has a creation number of its own, issued once, so that a save repeated
 after a restart creates it once. A new note is made in the folder the list
 was narrowed to. The editor also remembers whether the last save failed,
 whether the note was deleted meanwhile, whether the phone could store, or
-read back, the draft, and how a deletion of the note was answered.
+read back, the draft, how a deletion of the note was answered, and whether
+the owner asked to share a new note once its first save lands.
 
 ```quint
 import draft as D from "../../kit/draft"
@@ -32,13 +33,13 @@ import note.* from "./note"
 type Editor = {
   owner: int, note: int, fresh: bool, made: int, issued: int, folder: int, kind: Kind, draft: D::Draft,
   showing: bool, ticket: int, failed: bool, gone: bool, full: bool, unreadable: bool, link: Source,
-  deleting: bool, told: Told, rescued: bool, dropping: bool,
+  deleting: bool, told: Told, rescued: bool, dropping: bool, asked: bool,
 }
 
 pure val initial: Editor = {
   owner: 0, note: 0, fresh: false, made: 0, issued: 0, folder: 0, kind: Text, draft: D::blank,
   showing: false, ticket: 0, failed: false, gone: false, full: false, unreadable: false, link: unlinked,
-  deleting: false, told: NotTold, rescued: false, dropping: false,
+  deleting: false, told: NotTold, rescued: false, dropping: false, asked: false,
 }
 
 pure def held(e: Editor): bool = e.note > 0 or e.fresh
@@ -49,7 +50,7 @@ pure def unsent(d: D::Draft): D::Draft = { ...d, sync: D::Edited }
 pure def letGo(owner: int, e: Editor): Editor =
   { ...e, owner: owner, note: 0, fresh: false, made: 0, folder: 0, draft: D::blank, showing: false, failed: false,
     gone: false, full: false, unreadable: false, link: unlinked, deleting: false, told: NotTold, rescued: false,
-    dropping: false }
+    dropping: false, asked: false }
 ```
 
 ### What the editor asks of the world
@@ -99,6 +100,11 @@ lost. A new note needs the
 owner's notes available (Notes,
 "Nothing new can be made while the notes are unavailable or storage has
 failed"), and is made in the folder the list is narrowed to (none is 0).
+A new note starts titled New note, the owner free to type over it; when a
+note or a note in Recently deleted is already titled New note, or New note
+and a number, it starts at the next number up, so the next is New note 2.
+Only that starting title is the phone's; every title the owner typed is
+left as it is.
 
 ```quint
 pure def free(e: Editor): bool = not(e.showing) and not(waiting(e)) and isOwner(e.owner)
@@ -194,9 +200,9 @@ pure def saved(e: Editor, ticket: int, verdict: Verdict, revision: int, id: int,
   if (verdict == Landed)
     { ...e, draft: landed, failed: false, note: if (e.fresh) id else e.note, fresh: false, made: 0, folder: 0,
       full: e.full and D::unsaved(landed) }
-  else if (verdict == Collided) { ...e, draft: D::collide(e.draft, revision), failed: false }
-  else if (verdict == Gone) { ...e, draft: unsent(e.draft), gone: true, failed: false }
-  else { ...e, draft: unsent(e.draft), failed: true }
+  else if (verdict == Collided) { ...e, draft: D::collide(e.draft, revision), failed: false, asked: false }
+  else if (verdict == Gone) { ...e, draft: unsent(e.draft), gone: true, failed: false, asked: false }
+  else { ...e, draft: unsent(e.draft), failed: true, asked: false }
 ```
 
 ### When a save found a newer revision, only the owner chooses whose to keep
@@ -251,7 +257,7 @@ pure def canNoteRead(e: Editor, note: int, latest: int, present: bool, link: Sou
     and (present implies (latest > e.draft.base and sound(link) and link.tie != AudioLink))
 
 pure def noteRead(e: Editor, note: int, latest: int, present: bool, link: Source, by: Actor): Editor =
-  if (D::unsaved(e.draft)) (if (present) { ...e, link: link } else { ...e, gone: true })
+  if (D::unsaved(e.draft)) (if (present) { ...e, link: link } else { ...e, gone: true, asked: false })
   else if (present) { ...e, draft: { ...e.draft, base: latest }, link: link }
   else letGo(e.owner, e)
 ```
@@ -270,17 +276,27 @@ pure def stepTheBaseNeverGoesBack(before: Editor, via: str, after: Editor): bool
 
 ### Closing the editor keeps an unsaved draft for later, and lets go of a saved one
 
+A new note that holds only the title it started with, with no words and no
+items, has nothing of the owner's: it is never saved, and closing it lets it
+go as Discard does, so no note titled only New note is made and no draft of
+it waits. Pinning or sharing it from More makes it the owner's ("More over
+a new note offers Share, Pin and Delete, as v119's did"), and then it is
+saved. Closing forgets a share the owner asked for.
+
 ```quint
 pure def canClose(e: Editor): bool = e.showing and not(e.deleting)
 
-pure def close(e: Editor): Editor = if (D::unsaved(e.draft)) { ...e, showing: false } else letGo(e.owner, e)
+pure def close(e: Editor): Editor = if (D::unsaved(e.draft)) { ...e, showing: false, asked: false } else letGo(e.owner, e)
 ```
 
-### Only the owner discards an unsaved draft, and never one being saved
+### Only the owner discards an unsaved draft, or a new note open in the editor, and never one being saved
+
+Delete in More over a new note discards it this way, with nothing asked
+first, as v119's Delete let go of a new note it had never saved.
 
 ```quint
 pure def canDiscardDraft(e: Editor, by: Actor): bool =
-  by == Owner and waiting(e) and e.draft.sync != D::Saving and not(e.unreadable)
+  by == Owner and (waiting(e) or (e.fresh and e.showing)) and e.draft.sync != D::Saving and not(e.unreadable)
 
 pure def discardDraft(e: Editor, by: Actor): Editor = letGo(e.owner, e)
 ```
@@ -379,6 +395,57 @@ pure def sometimesStorageFull(e: Editor): bool = e.full and e.showing
 pure def sometimesANewNoteInAFolder(e: Editor): bool = e.fresh and e.folder > 0 and e.draft.sync == D::Saving
 ```
 
+### More over a new note offers Share, Pin and Delete, as v119's did
+
+v119 drew More over every note it held, a new one too, and its menu
+offered Share, Pin and Delete before the note's first save. Delete discards
+the new note ("Only the owner discards an unsaved draft, or a new note open
+in the editor, and never one being saved"). Pin or Unpin is part of the new
+note's draft, allowed only while the new note is open and editable and no
+save is on its way; it is kept on the phone and saved with its words as any
+edit is ("The owner types, adds or ticks an item, and each change is kept on
+the phone at once"), and saved at once, so its first save makes the note
+pinned, as v119 saved it pinned. Share saves the draft first: asking counts
+as an edit, the owner's save is sent at once, and once that save lands with
+nothing left unsaved, the phone opens the actions menu over the saved note
+with its share panel ([the actions menu](./actions.md), "The phone opens
+the share the owner asked for on a new note, once its first save lands"),
+where the text of the saved revision is reviewed as any other note's is.
+Closing or discarding the note, deleting it, a save that does not land, a
+restart or another owner taking the phone forgets the share asked for.
+
+```quint
+pure def canPinNew(e: Editor, by: Actor): bool =
+  canEdit(e, by) and e.fresh and e.draft.sync != D::Saving and not(e.unreadable)
+
+pure def pinNew(e: Editor, kept: bool, by: Actor): Editor =
+  edit(e, kept, by)
+
+pure def stepPinningANewNoteLeavesItReadyToSave(before: Editor, via: str, after: Editor): bool =
+  via == "pinNew" implies (before.fresh and before.draft.sync != D::Saving and after.fresh and canSave(after, Owner))
+
+pure def canShareNew(e: Editor, by: Actor): bool =
+  by == Owner and e.showing and e.fresh and not(e.asked) and not(e.unreadable)
+
+pure def shareNew(e: Editor, kept: bool, by: Actor): Editor =
+  if (D::unsaved(e.draft)) { ...e, asked: true } else { ...edit(e, kept, by), asked: true }
+
+pure def canShareShown(e: Editor, by: Actor): bool =
+  by == Phone and e.asked and e.showing and not(e.fresh) and e.note > 0 and e.draft.sync == D::Kept and not(e.deleting)
+
+pure def shareShown(e: Editor, by: Actor): Editor = { ...e, asked: false }
+
+pure def alwaysAShareWaitsOnTheNoteShown(e: Editor): bool =
+  e.asked implies (e.showing and held(e) and not(e.gone) and not(e.deleting) and not(e.unreadable))
+
+pure def stepAShareIsAskedOnlyOfANewNote(before: Editor, via: str, after: Editor): bool =
+  (after.asked and not(before.asked)) implies (via == "shareNew" and before.fresh)
+
+pure def sometimesAShareWaitsOnTheFirstSave(e: Editor): bool = e.asked and e.fresh and e.draft.sync == D::Saving
+
+pure def sometimesASharedNewNoteIsSaved(e: Editor): bool = e.asked and not(e.fresh) and e.note > 0 and e.draft.sync == D::Kept
+```
+
 ## Story: Delete the note I am writing
 
 > As the owner, I want to delete the note I have open, without a save of it
@@ -399,7 +466,7 @@ pure def canDeleteNote(e: Editor, ready: bool, by: Actor): bool =
   by == Owner and e.showing and e.note > 0 and e.draft.sync == D::Kept and not(e.gone) and not(e.deleting) and ready
 
 pure def deleteNote(e: Editor, ready: bool, by: Actor): Moved =
-  { state: { ...e, deleting: true, told: NotTold, ticket: e.ticket + 1 },
+  { state: { ...e, deleting: true, told: NotTold, ticket: e.ticket + 1, asked: false },
     out: List(Deletes({ ticket: e.ticket + 1, owner: e.owner, note: e.note, revision: e.draft.base })) }
 ```
 
@@ -468,7 +535,7 @@ pure def canRestart(e: Editor, by: Actor): bool = by == Phone
 
 pure def restart(e: Editor, readable: bool, by: Actor): Editor =
   if (D::unsaved(e.draft))
-    { ...e, showing: false, full: false, unreadable: e.unreadable or not(readable) or e.full,
+    { ...e, showing: false, full: false, unreadable: e.unreadable or not(readable) or e.full, asked: false,
       draft: if (e.draft.sync == D::Saving) unsent(e.draft) else e.draft }
   else letGo(e.owner, e)
 
@@ -548,11 +615,11 @@ phone could not read comes back unreadable.
 ```quint
 pure def canDraftFound(e: Editor, note: int, made: int, kind: Kind, base: int, edits: int, folder: int, link: Source, readable: bool, by: Actor): bool =
   by == Phone and not(held(e)) and not(e.showing) and isOwner(e.owner) and writable(kind) and edits > 0
-    and note >= 0 and ((note == 0) iff (base == 0)) and ((note == 0) iff (made > 0)) and made <= e.issued
+    and note >= 0 and made >= 0 and ((note == 0) iff (base == 0)) and ((note == 0) iff (made > 0))
     and base >= 0 and folder >= 0 and (folder > 0 implies note == 0) and sound(link) and link.tie != AudioLink
 
 pure def draftFound(e: Editor, note: int, made: int, kind: Kind, base: int, edits: int, folder: int, link: Source, readable: bool, by: Actor): Editor =
-  { ...letGo(e.owner, e), note: note, fresh: note == 0, made: made, folder: folder, kind: kind, link: link,
+  { ...letGo(e.owner, e), note: note, fresh: note == 0, made: made, issued: if (made > e.issued) made else e.issued, folder: folder, kind: kind, link: link,
     unreadable: not(readable), draft: { sync: D::Edited, edits: edits, carried: 0, base: base } }
 ```
 

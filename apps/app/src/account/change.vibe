@@ -1,0 +1,380 @@
+// spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
+import type { Account as CloudProfile, SnapshotSubscription, SubscriptionCommand } from "@elizaos/cloud"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Billing from "../../gen/app__account__billing.effect.vibe"
+import * as Change from "../../gen/app__account__change.effect.vibe"
+import * as Codes from "../../gen/app__account__codes.effect.vibe"
+import { Cloud, openCloudInvoice } from "../platform/index.vibe"
+import { Attempts } from "../runtime/index.vibe"
+import { answer, contained, due, type Job, reacting, run, untimed } from "../runtime/index.vibe"
+import { type BillingVerification, billingSession, BillingSession, reviewedBuyer } from "./change-authority.vibe"
+import { bindCommand, type CommandBinding, CommandBindingSchema, matchesCommand, planTier, type PlanAction, type PlanDirection, readInvoice, readQuote, type ReviewedQuote, sendPlanAction } from "./change-cloud.vibe"
+import { accountIsInFront, AccountWrites, type Buyer, buyerOf, sameBuyer } from "./profile.vibe"
+
+type Choice = "Upgrade" | "Downgrade" | "Cancel" | "Keep"
+type Selection = { readonly choice: Choice; readonly buyer: Buyer; readonly subscription: SnapshotSubscription }
+type Work = { readonly attempt: number; readonly action: PlanAction }
+type Payment = { readonly buyer: Buyer; readonly command: SubscriptionCommand }
+
+export interface ChangeReview {
+  readonly selection?: Selection
+  readonly quote?: ReviewedQuote
+  readonly payment?: Payment
+}
+
+export service ChangeReviewPort {
+  get(): ChangeReview!!
+  set(next: ChangeReview): void!!
+  stage(work: Work): void!!
+  take(attempt: number): (Work | undefined)!!
+}
+
+const changeWords = Layer.sync(ChangeReviewPort, () => {
+  let unlocked: ChangeReview = {}
+  let pending: Work | undefined
+  return {
+    get: () => sync(() => unlocked),
+    set: (next: ChangeReview) => sync(() => { unlocked = next }),
+    stage: (work: Work) => sync(() => { pending = work }),
+    take: (attempt: number) => sync(() => {
+      if (pending?.attempt !== attempt) return undefined
+      const action = pending
+      pending = undefined
+      return action
+    }),
+  }
+})
+
+type View = Effect.Services<typeof accountIsInFront>
+type Inputs = View | Cloud | Change.Machine | ChangeReviewPort | BillingSession | Billing.Machine | Codes.Machine | AccountWrites | KeyValueStore.KeyValueStore
+
+function samePlan(basis: SnapshotSubscription, live: SnapshotSubscription | null | undefined): boolean {
+  return live !== null && live !== undefined && live.id === basis.id && live.revision === basis.revision &&
+    live.planKey === basis.planKey && live.status === basis.status && live.periodEnd === basis.periodEnd &&
+    live.pendingPlanKey === basis.pendingPlanKey && live.cancelAtPeriodEnd === basis.cancelAtPeriodEnd
+}
+
+effect function holdingAccount(): boolean!!(Billing.Machine | Codes.Machine) {
+  const bill = try (try Billing.Machine).get()
+  const codes = try (try Codes.Machine).get()
+  return bill.pending || bill.unsettled || bill.visit.open || codes.unsettled || codes.redeem.outcome === "Sent" || codes.apply.outcome === "Sent"
+}
+
+effect function liveSelection(selection: Selection): boolean!!(View | Cloud) {
+  if (!(try accountIsInFront)) return false
+  const cloud = try Cloud
+  const buyer = selection.buyer
+  const client = cloud.clientFor(buyer.credentialId)
+  if (client === undefined || !sameBuyer(buyer, try reviewedBuyer(cloud))) return false
+  const snapshot = tryPromise((signal) => client.snapshot({ signal })) catch () => undefined
+  return snapshot?.account.status === "active" && snapshot.plan.source === "subscription" &&
+    samePlan(selection.subscription, snapshot.subscription) && (try accountIsInFront) &&
+    sameBuyer(buyer, try reviewedBuyer(cloud))
+}
+
+const directionOf = (choice: Choice): PlanDirection | undefined =>
+  choice === "Upgrade" ? "upgrade" : choice === "Downgrade" ? "downgrade" : undefined
+
+const billingAuthorityKey = "alpha/account/plan-change-authority"
+const planCommandKey = "alpha/account/plan-command"
+
+effect function pendingCommand() {
+  const storage = try KeyValueStore.KeyValueStore
+  const raw = storage.get(planCommandKey) catch () => undefined
+  if (raw === undefined) return undefined
+  const saved = Schema.decodeUnknownOption(Schema.fromJsonString(CommandBindingSchema))(raw)
+  return Option.isSome(saved) ? saved.value : undefined
+}
+
+effect function forgetCommand(binding: CommandBinding) {
+  const storage = try KeyValueStore.KeyValueStore
+  const previous = try pendingCommand()
+  if (previous?.owner === binding.owner && previous.commandId === binding.commandId) try ignore(storage.remove(planCommandKey))
+}
+
+/** Keep a persisted plan outcome visible only to the sign-in that started it. */
+export effect function bindPlanChanges(owner: CloudProfile): void!!(Change.Machine | ChangeReviewPort | BillingSession | AccountWrites | KeyValueStore.KeyValueStore) {
+  const buyer = try buyerOf(owner)
+  if (buyer === undefined) return
+  const storage = try KeyValueStore.KeyValueStore
+  const machine = try Change.Machine
+  const shelf = try ChangeReviewPort
+  try (try AccountWrites).admission.withPermits(1)(effect {
+    const recorded = storage.get(billingAuthorityKey) catch () => undefined
+    if (recorded === buyer.credentialId) return
+    try (try BillingSession).retire()
+    try shelf.set({})
+    try ignore(storage.remove(planCommandKey))
+    try contained(machine.send({ type: "reset", signIn: 1 }), "binding plan changes to the signed-in owner")
+    try ignore(storage.set(billingAuthorityKey, buyer.credentialId))
+  })
+}
+
+/** Code redemption and new checkout share the same admission lock with plan changes. */
+export effect function changeIsOpen(): boolean!!Change.Machine {
+  const current = try (try Change.Machine).get()
+  return !Change.quiet(current) || current.notice === "ConfirmItIsYou" || current.notice === "FinishPayment"
+}
+
+/** Elect a control for the exact displayed subscription. The effect is still guarded by the server's fresh session. */
+export effect function chooseChange(choice: Choice, subscription: SnapshotSubscription): boolean!!Inputs {
+  const cloud = try Cloud
+  const buyer = try reviewedBuyer(cloud)
+  if (buyer === undefined || !(try accountIsInFront)) return false
+  const machine = try Change.Machine
+  return try (try AccountWrites).admission.withPermits(1)(effect {
+    const live = try (try ChangeReviewPort).get()
+    if (live.selection !== undefined && !sameBuyer(live.selection.buyer, buyer)) {
+      try (try BillingSession).retire()
+      try contained(machine.send({ type: "reset", signIn: 1 }), "retiring the previous plan")
+    }
+    if (!(try accountIsInFront) || (try holdingAccount())) return false
+    const previousCommand = try pendingCommand()
+    if (previousCommand?.owner === buyer.credentialId) return false
+    const selection = { choice, subscription, buyer }
+    if (!(try liveSelection(selection))) return false
+    const shelf = try ChangeReviewPort
+    const previous = try shelf.get()
+    const state = try machine.get()
+    const tier = planTier(subscription)
+    const direction = directionOf(choice)
+    if (tier === undefined || !Change.quiet(state) ||
+        (direction !== undefined && (subscription.status !== "active" || subscription.pendingPlanKey !== null ||
+          (direction === "upgrade" ? tier !== "Plus" : tier !== "Pro"))) ||
+        (direction === undefined && (!subscription.control.eligible || subscription.control.action !== (choice === "Cancel" ? "cancel" : "undo") ||
+          subscription.control.expectedSubscriptionRevision !== subscription.revision))) return false
+    try shelf.set({ selection })
+    const accepted = choice === "Cancel"
+      ? try contained(machine.send({ type: "askCancel", member: true, ending: subscription.cancelAtPeriodEnd, elsewhere: false }), "reviewing cancellation")
+      : try advance(selection)
+    if (!accepted) try shelf.set(previous)
+    return accepted
+  })
+}
+
+effect function advance(selection: Selection): boolean!!Inputs {
+  const machine = try Change.Machine
+  const { buyer, choice, subscription } = selection
+  const authorized = try (try BillingSession).authorized(buyer)
+  if (!authorized) {
+    return try contained(machine.send({ type: "askToVerify", member: true, authorized: false }), "asking the Cloud owner to confirm")
+  }
+  if (choice === "Keep") {
+    const state = try machine.get()
+    const action = { tag: "Keep", buyer, subscription } as const
+    try (try ChangeReviewPort).stage({ attempt: state.attempt.id + 1, action })
+    return try contained(machine.send({ type: "keepPlan", member: true, ending: subscription.cancelAtPeriodEnd, revision: subscription.revision,
+      authorized, elsewhere: false }), "keeping the exact plan")
+  }
+  const direction = directionOf(choice)
+  const tierNow = planTier(subscription)
+  if (direction === undefined || tierNow === undefined) return false
+  return try contained(machine.send({ type: "reviewChange", tier: direction === "upgrade" ? "Pro" : "Plus", member: true,
+    tierNow, revision: subscription.revision, authorized, elsewhere: false }), "quoting the exact plan")
+}
+
+effect function quote(ticket: number, revision: number): Change.Event!!Inputs {
+  const refused: Change.Event = { type: "quoted", ticket, ok: false, quote: 0, ends: 0 }
+  const shelf = try ChangeReviewPort
+  const state = try shelf.get()
+  const selected = state.selection
+  if (selected === undefined || selected.subscription.revision !== revision || !(try liveSelection(selected))) return refused
+  const direction = directionOf(selected.choice)
+  if (direction === undefined) return refused
+  const cloud = try Cloud
+  const fetched = readQuote(cloud, selected.buyer, selected.subscription, direction) catch () => undefined
+  if (fetched === undefined || selected !== (try shelf.get()).selection || !(try liveSelection(selected))) return refused
+  try shelf.set({ ...state, quote: fetched })
+  return { type: "quoted", ticket, ok: true, quote: ticket, ends: fetched.answer.review.expiresAt }
+}
+
+effect function submit(attempt: number): Change.Event!!(Inputs | Attempts) {
+  const machine = try Change.Machine
+  const shelf = try ChangeReviewPort
+  const work = try shelf.take(attempt)
+  const view = try shelf.get()
+  const select = view.selection
+  const missing: Change.Event = { type: "concluded", attempt, result: "NotMade" }
+  if (work === undefined || select === undefined || !(try liveSelection(select))) return missing
+  const owner = select.buyer
+  const cloud = try Cloud
+  const key = try (try Attempts).key(attempt)
+  const binding = try bindCommand(work.action, owner, key)
+  const stored = try (try AccountWrites).admission.withPermits(1)(effect {
+    if ((try shelf.get()).selection !== select || !Change.canConcluded(try machine.get(), attempt) ||
+        !(try accountIsInFront) || !sameBuyer(owner, try reviewedBuyer(cloud))) return false
+    const storage = try KeyValueStore.KeyValueStore
+    const authority = storage.get(billingAuthorityKey) catch () => undefined
+    if (authority !== owner.credentialId || (try pendingCommand()) !== undefined) return false
+    return try contained(storage.set(planCommandKey, JSON.stringify(binding)), "retaining the exact plan command")
+  })
+  if (!stored) return missing
+  const verdict = try sendPlanAction((request) => cloud.callBillingFor(request, owner.credentialId), work.action, key, binding)
+  const after = try reviewedBuyer(cloud)
+  const current = try machine.get()
+  if ((try shelf.get()).selection !== select || !Change.canConcluded(current, attempt) || !sameBuyer(owner, after)) return { ...missing, result: "NotKnown" }
+  if (verdict.result === "NotAuthorized") try (try BillingSession).retire()
+  if (verdict.result === "PayNeeded" && verdict.command !== undefined) {
+    try shelf.set({ selection: select, payment: { buyer: owner, command: verdict.command } })
+  } else {
+    try shelf.set({ selection: select })
+    if (verdict.result !== "NotKnown") {
+      try (try AccountWrites).admission.withPermits(1)(forgetCommand(binding))
+    }
+  }
+  return { type: "concluded", attempt, result: verdict.result }
+}
+
+/** Take the exact review once, before it expires and while its owner is still in Account. */
+export effect function confirmReviewedChange(): boolean!!Inputs {
+  return try (try AccountWrites).admission.withPermits(1)(effect {
+    const machine = try Change.Machine
+    const shelf = try ChangeReviewPort
+    const view = try shelf.get()
+    const selected = view.selection
+    if (selected === undefined || (try holdingAccount()) || !(try liveSelection(selected))) return false
+    const state = try machine.get()
+    const { subscription, buyer } = selected
+    const authorized = try (try BillingSession).authorized(buyer)
+    if (!authorized) {
+      if (Change.canNotNow(state)) try ignore(machine.send({ type: "notNow" }))
+      if (Change.canKeepCancelling(state)) try ignore(machine.send({ type: "keepCancelling" }))
+      try shelf.set({ selection: selected })
+      return try contained(machine.send({ type: "askToVerify", member: true, authorized: false }), "reconfirming the plan owner")
+    }
+    if (selected.choice === "Cancel" && Change.canCancelPlan(state, subscription.revision, authorized)) {
+      try shelf.stage({ attempt: state.attempt.id + 1, action: { tag: "Cancel", subscription, buyer } })
+      return try contained(machine.send({ type: "cancelPlan", revision: subscription.revision, authorized }), "canceling the reviewed plan at period end")
+    }
+    const now = try Clock.currentTimeMillis
+    if (view.quote === undefined || !sameBuyer(view.quote.buyer, buyer) || !Change.canConfirmChange(state, now, authorized)) return false
+    try shelf.stage({ attempt: state.attempt.id + 1, action: { tag: "Change", quote: view.quote } })
+    return try contained(machine.send({ type: "confirmChange", now: untimed, authorized }), "confirming the exact quote")
+  })
+}
+
+export effect function beginBillingVerification(): BillingVerification!!Inputs {
+  const selected = (try (try ChangeReviewPort).get()).selection
+  const state = try (try Change.Machine).get()
+  return selected === undefined || state.notice !== "ConfirmItIsYou" || !(try accountIsInFront) ? { tag: "Unavailable" }
+    : try (try BillingSession).email(selected.buyer)
+}
+
+export effect function sendBillingFactor(): boolean!!Inputs {
+  const selected = (try (try ChangeReviewPort).get()).selection
+  const state = try (try Change.Machine).get()
+  return selected !== undefined && state.notice === "ConfirmItIsYou" && (try accountIsInFront) && (try (try BillingSession).sendSms(selected.buyer))
+}
+
+export effect function leaveBillingVerification(): void!!Inputs {
+  const machine = try Change.Machine
+  if ((try machine.get()).notice !== "ConfirmItIsYou") return
+  try (try BillingSession).retire()
+  try ignore(machine.send({ type: "dismissNotice" }))
+}
+
+export effect function settleBillingVerification(typed: string, factor?: "sms" | "totp"): BillingVerification!!Inputs {
+  const shelf = try ChangeReviewPort
+  const selected = (try shelf.get()).selection
+  if (selected === undefined || (try (try Change.Machine).get()).notice !== "ConfirmItIsYou" || !(try accountIsInFront)) return { tag: "Unavailable" }
+  const result = try (try BillingSession).verify(selected.buyer, typed, factor)
+  if (result.tag !== "Verified") return result
+  return try (try AccountWrites).admission.withPermits(1)(effect {
+    if (selected !== (try shelf.get()).selection || (try holdingAccount()) || !(try liveSelection(selected))) return { tag: "Unavailable" } as const
+    if (selected.choice === "Cancel") {
+      const machine = try Change.Machine
+      return (try contained(machine.send({ type: "askCancel", member: true, ending: selected.subscription.cancelAtPeriodEnd, elsewhere: false }), "restoring the cancellation review"))
+        ? result : { tag: "Unavailable" } as const
+    }
+    return (try advance(selected)) ? result : { tag: "Unavailable" } as const
+  })
+}
+
+export effect function payInvoice(): void!!Inputs {
+  const shelf = try ChangeReviewPort
+  const payment = (try shelf.get()).payment
+  if (payment === undefined || !(try accountIsInFront)) return
+  const cloud = try Cloud
+  if (!sameBuyer(payment.buyer, try reviewedBuyer(cloud))) return
+  const invoice = try readInvoice(cloud, payment.buyer, payment.command)
+  if (invoice === undefined || (try shelf.get()).payment !== payment || !(try accountIsInFront) ||
+      !sameBuyer(payment.buyer, try reviewedBuyer(cloud))) return
+  try openCloudInvoice(invoice)
+}
+
+/** Check the exact retained request through the owner's read-only command history. */
+export effect function checkPlanChange(refresh: () => void, fromOwner?: Buyer) {
+  if (!(try accountIsInFront)) return
+  const model = try Change.Machine
+  const state = try model.get()
+  if (!state.unsettled && state.notice !== "FinishPayment") return
+  const binding = try pendingCommand()
+  const cloud = try Cloud
+  const buyer = fromOwner ?? (try reviewedBuyer(cloud))
+  if (binding === undefined || buyer === undefined || binding.owner !== buyer.credentialId) return
+  const client = cloud.clientFor(buyer.credentialId)
+  if (client === undefined) return
+  let cursor: string | undefined
+  let command: SubscriptionCommand | undefined
+  for (let index = 0; index < 10; index++) {
+    const page = tryPromise((signal) => client.subscriptionCommands({ limit: 100, ...(cursor === undefined ? {} : { cursor }) }, { signal })) catch () => undefined
+    if (page === undefined || !(try accountIsInFront) || !sameBuyer(buyer, try reviewedBuyer(cloud))) return
+    command = page.items.find((entry) => matchesCommand(entry, binding))
+    if (command !== undefined || page.nextCursor === null || page.nextCursor === cursor) break
+    cursor = page.nextCursor
+  }
+  if (command === undefined) return
+  if (command.status === "awaiting_payment" && command.kind === "upgrade") {
+    const payment = command
+    try (try AccountWrites).admission.withPermits(1)(effect {
+      const saved = try pendingCommand()
+      if (saved?.owner !== binding.owner || saved.commandId !== binding.commandId ||
+          !(try accountIsInFront) || !sameBuyer(buyer, try reviewedBuyer(cloud))) return
+      const shelf = try ChangeReviewPort
+      try shelf.set({ ...(try shelf.get()), payment: { buyer, command: payment } })
+    })
+    return
+  }
+  if (command.status !== "succeeded" && command.status !== "rejected") return
+  const snapshot = tryPromise((signal) => client.snapshot({ signal })) catch () => undefined
+  if (snapshot?.account.status !== "active" || snapshot.subscription?.id !== binding.subscriptionId ||
+      snapshot.subscription.revision < (command.resultRevision ?? binding.expectedRevision)) return
+  try (try AccountWrites).admission.withPermits(1)(effect {
+    const saved = try pendingCommand()
+    if (saved?.owner !== binding.owner || saved.commandId !== binding.commandId ||
+        !(try accountIsInFront) || !sameBuyer(buyer, try reviewedBuyer(cloud))) return
+    const now = try model.get()
+    if (Change.canPlanAnswered(now)) try contained(model.send({ type: "planAnswered" }), "reconciling the plan command")
+    if (now.notice === "FinishPayment" || now.notice === "OutcomeUnknown") {
+      try contained(model.send({ type: "dismissNotice" }), "retiring the settled plan action")
+    }
+    const shelf = try ChangeReviewPort
+    const { selection } = try shelf.get()
+    try shelf.set(selection === undefined ? {} : { selection })
+    try forgetCommand(binding)
+  })
+  try sync(refresh)
+}
+
+function effects(refresh: () => void) {
+  return (fx: Change.Effect): Job<Change.Event, Inputs | Attempts, []> => match (fx) {
+    when { tag: "AskQuote", let ticket, let revision }: answer("review subscription quote", quote(ticket, revision), { type: "quoted", ticket, ok: false, quote: 0, ends: 0 });
+    when { tag: "ConfirmChange", let attempt }: answer("send plan change", submit(attempt), { type: "concluded", attempt, result: "NotKnown" });
+    when { tag: "CancelAtEnd", let attempt }: answer("send plan cancellation", submit(attempt), { type: "concluded", attempt, result: "NotKnown" });
+    when { tag: "KeepGoing", let attempt }: answer("send plan continuation", submit(attempt), { type: "concluded", attempt, result: "NotKnown" });
+    when { tag: "PayInvoice" }: run("open exact Stripe invoice", payInvoice());
+    when { tag: "VerifyOwner" }: run("show owner verification", Effect.void);
+    when { tag: "CheckPlan" }: run("refresh subscription", effect { try sync(refresh); try checkPlanChange(refresh) });
+  }
+}
+
+export function managePlan(refresh: () => void) {
+  return Layer.provideMerge(reacting(Change, {
+    keep: 1,
+    open: [{ type: "restart" }],
+    timers: (state) => state.step === "Quoted"
+      ? [due<Change.Event, []>("quote-expiry", state.quoteEnds, { type: "notNow" })]
+      : [],
+    carry: effects(refresh),
+  }), Layer.merge(changeWords, billingSession))
+}

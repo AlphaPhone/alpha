@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
-import { Clock, SlidersHorizontal, Smartphone } from "lucide-react";
+import { Clock, SlidersHorizontal } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { Mark } from "../Mark.tsx";
-import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsFactRow } from "./SettingsFactRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
@@ -15,12 +14,8 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
     alphaVersion: Reading;
     /** Android's version, as the phone last said. */
     androidVersion: Reading;
-    /** The storage used, as the phone last said. */
-    storage?: Reading;
     /** Alpha runs on the phone, where it has an agent and an Android Settings page. */
     onPhone?: boolean;
-    /** What the resident agent last reported. */
-    agent?: "running" | "starting" | "needs-you" | "stopped";
     /** What Alpha tells about the last start of an Android page. */
     told?: AndroidTold;
     /** Goes back to the first page. */
@@ -32,10 +27,11 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
   };
 
 /**
- * About: Alpha and its version, Android's version, Agent activity, the licences, and the way into Android's About phone.
+ * About as Alpha's earlier build drew it: Alpha's mark, name and version, then on a phone Android's version, Agent
+ * activity and the licences.
  * @model spec/app/settings/index.md
  */
-export function SettingsAboutPage({ alphaVersion, androidVersion, storage, onPhone = true, agent, told, onBack, onOpen, starting, onAndroid, place, onPlace, children }: SettingsAboutPageProps) {
+export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true, told, onBack, onOpen, place, onPlace, children }: SettingsAboutPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
     <SettingsPage title="About" told={told} onBack={onBack} backLabel="Back to Settings">
@@ -43,19 +39,19 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, storage, onPho
         <span className="flex size-16 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground">
           <Mark aria-hidden className="size-[118%] shrink-0" />
         </span>
-        <h2 className="font-display text-title font-light">Alpha Phone</h2>
-        <p className="text-caption text-muted-foreground">
-          {alphaVersion.word === "reported" ? `Version ${alphaVersion.value}` : <SettingsReading reading={alphaVersion} />}
+        <h2 className="font-display text-title font-light [font-variation-settings:'opsz'_144]">Alpha Phone</h2>
+        <p className="text-caption leading-normal text-muted-foreground">
+          {alphaVersion.word === "reported" ? (onPhone ? alphaVersion.value : `Version ${alphaVersion.value}`) : !onPhone && alphaVersion.word === "unavailable" ? "Development preview" : <SettingsReading reading={alphaVersion} />}
         </p>
       </div>
+      {onPhone && androidVersion.word === "reported" ? (
+        <ListGroup>
+          <SettingsFactRow title="Android version" reading={androidVersion} />
+        </ListGroup>
+      ) : null}
       <ListGroup>
-        <SettingsFactRow title="Android" reading={androidVersion} />
-        {storage ? <SettingsFactRow title="Storage" reading={storage} /> : null}
-      </ListGroup>
-      <ListGroup>
-        {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<Clock />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
+        {onPhone ? <SettingsNavRow title="Agent activity" icon={<Clock />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
         <SettingsNavRow title="Licenses" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
-        {onPhone ? <SettingsAndroidRow target="about-phone" title="About phone" icon={<Smartphone />} starting={starting} onAndroid={onAndroid} {...at(2)} /> : null}
       </ListGroup>
       {children}
     </SettingsPage>

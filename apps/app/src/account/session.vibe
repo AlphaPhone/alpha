@@ -12,7 +12,7 @@ import * as SignIn from "../../gen/app__account__signIn.effect.vibe"
 import { Cloud, Device } from "../platform/index.vibe"
 import { type Job, type Time, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { AccountShelf, identityFromSignInAccount, productionEnvironment, readSignInReadiness, readSignInStatus, signInBridge, verdictFromNative } from "./bridge.vibe"
-import { accountIdNumber, nowSeconds, secondsTime, toSeconds } from "./clock.vibe"
+import { accountIdNumber, nowMillis, toMillis } from "./clock.vibe"
 import { normalizePhoneNumber } from "./phone.ts"
 
 SignIn.opaque.international = normalizePhoneNumber
@@ -71,7 +71,7 @@ effect function readStoredSignIn(check: number): Session.Event!!(Cloud | Account
 effect function storeVerifiedSignIn(ticket: number): Session.Event!!(Cloud | AccountShelf | Time) {
   const shelf = try AccountShelf
   const pending = try shelf.pendingSignIn()
-  const nowSec = try nowSeconds()
+  const nowMs = try nowMillis()
   if (pending === undefined) {
     return { type: "signInStored", ticket, ok: false, revoked: true, endsAt: 0 }
   }
@@ -86,9 +86,9 @@ effect function storeVerifiedSignIn(ticket: number): Session.Event!!(Cloud | Acc
   }
   const status = try readSignInStatus()
   const nativeEnds = Option.isSome(status) && status.value.account.kind === "signedIn"
-    ? toSeconds(status.value.account.keyExpiresAt)
+    ? toMillis(status.value.account.keyExpiresAt)
     : 0
-  const endsAt = pending.endsAt > 0 ? pending.endsAt : nativeEnds > 0 ? nativeEnds : nowSec + 30 * 86400
+  const endsAt = pending.endsAt > 0 ? pending.endsAt : nativeEnds > 0 ? nativeEnds : nowMs + 30 * 86_400_000
   try shelf.update((now) => ({
     ...now,
     identity: {
@@ -126,7 +126,8 @@ effect function removeStoredSignIn(ticket: number): Session.Event!!(Cloud | Acco
   return { type: "signedOut", ticket, removed }
 }
 
-effect function notifyNewSignIn(signIn: number): void!!(Plan.Machine | Billing.Machine | Change.Machine | Codes.Machine | Google.Machine | Access.Machine) {
+effect function notifyNewSignIn(signIn: number): void!!(AccountShelf | Plan.Machine | Billing.Machine | Change.Machine | Codes.Machine | Google.Machine | Access.Machine) {
+  const shelf = try AccountShelf
   const plan = try Plan.Machine
   const billing = try Billing.Machine
   const change = try Change.Machine
@@ -136,7 +137,12 @@ effect function notifyNewSignIn(signIn: number): void!!(Plan.Machine | Billing.M
   try contained(plan.send({ type: "reset", signIn, now: untimed }), "plan reset")
   try contained(billing.send({ type: "reset", signIn }), "billing reset")
   try contained(change.send({ type: "reset", signIn }), "change reset")
-  try contained(codes.send({ type: "reset", signIn }), "codes reset")
+  if (signIn > 0) {
+    const authority = shelf.snapshot().identity?.credentialId || String(signIn)
+    try contained(codes.send({ type: "bind", authority }), "codes bind")
+  } else {
+    try contained(codes.send({ type: "reset", signIn }), "codes reset")
+  }
   try contained(google.send({ type: "reset", signIn }), "google reset")
   try contained(access.send({ type: "reset", signIn }), "access reset")
 }
@@ -181,12 +187,9 @@ const adoptOfflineSignIn = started(effect {
 }, "offline sign-in adoption")
 
 /** Account session machine managing custody, agent hold on change/sign-out, and offline sign-in adoption. */
-export const sessionMachine = Layer.provide(
-  together(
-    reacting(Session, { keep: 1, open: [{ type: "restart" }], carry: carrySession, timers: sessionTimers }),
-    adoptOfflineSignIn,
-  ),
-  secondsTime,
+export const sessionMachine = together(
+  reacting(Session, { keep: 1, open: [{ type: "restart" }], carry: carrySession, timers: sessionTimers }),
+  adoptOfflineSignIn,
 )
 
 type SignInPorts = AccountShelf | Session.Machine | SignIn.Machine | Time
@@ -274,8 +277,8 @@ effect function verifyOtpCode(ticket: number, attempt: number, code: string): Si
   const verifiedCode = parsed.value
   if (bridge === undefined) {
     const acct = accountIdNumber(state.address || "owner@alpha.test")
-    const nowSec = try nowSeconds()
-    try storePendingSignIn(acct, `cred-${acct}`, state.method, state.address, false, nowSec + 30 * 86400)
+    const nowMs = try nowMillis()
+    try storePendingSignIn(acct, `cred-${acct}`, state.method, state.address, false, nowMs + 30 * 86_400_000)
     return { type: "verified", ticket, verdict: "Passed", account: acct, factor: state.factor, free, now: untimed }
   }
   const nativeId = try shelf.nativeAttempt(attempt)
@@ -384,10 +387,7 @@ const watchSignInSettled = started(effect {
 }, "sign-in settled watcher")
 
 /** Interactive sign-in flow machine supporting email OTP, E.164 phone OTP, Google browser tab, 2FA, and Back interruption. */
-export const signInMachine = Layer.provide(
-  together(
-    reacting(SignIn, { keep: 1, open: [{ type: "restart" }], carry: carrySignIn, timers: signInTimers }),
-    watchSignInSettled,
-  ),
-  secondsTime,
+export const signInMachine = together(
+  reacting(SignIn, { keep: 1, open: [{ type: "restart" }], carry: carrySignIn, timers: signInTimers }),
+  watchSignInSettled,
 )

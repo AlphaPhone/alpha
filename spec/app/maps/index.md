@@ -8,10 +8,7 @@ location) and one [trip](./navigation.md) (the route and the guidance
 along it). The map's [credits and camera](./credits.md) follow the
 connection's surface. What the phone must do outside, the screen asks for as an
 effect; the answer comes back as an event naming its ticket. The
-[shell](../shell/) decides when Maps is on screen, and the agent brings it
-forward only as [admission](./admission.md) allows. The agent's Maps
-requests reach the phone as [delivery](./delivery.md) says, and its replies
-carry [cards](./cards.md) into the conversation.
+[shell](../shell/) decides when Maps is on screen.
 
 ## Story: Move between the screen's modes
 
@@ -29,9 +26,11 @@ follows the phone, what the owner was last told of guidance, and whether a
 number was copied. It also keeps whether the name field is open, whether
 the location being found is the quiet fix on opening and whether that was
 taken this visit, whether the owner's own locate found nothing, whether a
-locate waits for Android's answer, whether a search waits for a provider,
-whether the last fix of guidance could not guide, and whether this build has
-Phone.
+locate waits for Android's answer, whether the location disclosure is
+showing, whether a search waits for a provider, whether another app
+handed the search over, whether the last fix of guidance could not guide,
+whether this build has Phone, and the pin dropped last with the name the
+owner gave it before it is saved.
 
 ```quint
 import read as R from "../../kit/read"
@@ -45,9 +44,9 @@ import places as S from "./places"
 type Mode = Browse | Search | Place | Directions | Navigating
 type Sheet = Peek | Half | Full
 type Question = NoQuestion | ReadPlace | StartTrip
-type HandOff = SharePlace | EmailPlace | CopyLink | EtaShare | Website | MapsApp | Call | CopyNumber
-type Change = Added | Renamed | Removed | Adopted
-type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept
+type HandOff = SharePlace | EtaShare | Website | MapsApp | Call | CopyNumber
+type Change = Added | Renamed | Removed
+type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept | PinNamed
 type GuideNotice = Quiet | StoppedFromNotification | PausedAway | AccountChanged | RerouteKept
 type CopyNotice = Uncopied | NumberCopied | CopyFailed
 type Maps = {
@@ -62,7 +61,8 @@ type Maps = {
   startPlace: int, origins: R::Read, originsFound: int,
   following: bool, guideNotice: GuideNotice, copyNotice: CopyNotice,
   typingChars: int, copying: bool, renaming: bool, quiet: bool, quietDone: bool, missedFix: bool,
-  owedLocate: bool, waitingProvider: bool, imprecise: bool, dialer: bool,
+  owedLocate: bool, waitingProvider: bool, imprecise: bool, dialer: bool, pin: int, pinName: str, explaining: bool,
+  handedOver: bool,
 }
 
 pure val initial: Maps = {
@@ -77,7 +77,8 @@ pure val initial: Maps = {
   startPlace: 0, origins: R::unread, originsFound: 0,
   following: false, guideNotice: Quiet, copyNotice: Uncopied,
   typingChars: 0, copying: false, renaming: false, quiet: false, quietDone: false, missedFix: false,
-  owedLocate: false, waitingProvider: false, imprecise: false, dialer: false,
+  owedLocate: false, waitingProvider: false, imprecise: false, dialer: false, pin: 0, pinName: "", explaining: false,
+  handedOver: false,
 }
 
 pure def onScreen(m: Maps): bool = not(m.trip.away)
@@ -129,7 +130,6 @@ pure val weight_pressMap = 5
 pure val weight_liftPress = 5
 pure val weight_pressHeld = 10
 pure val weight_pinAt = 5
-pure val weight_menuPin = 5
 pure val weight_clearRecent = 5
 pure val weight_savedKept = 10
 pure val weight_savedUnreadable = 2
@@ -223,12 +223,14 @@ pure def layers(m: Maps): int =
 ```quint
 pure def voided(r: V::Review): V::Review = V::revise(V::dismiss(r))
 
+pure def unnamed(n: SavedNotice): SavedNotice = if (n == PinNamed) NoNotice else n
+
 pure def chosen(place: int, m: Maps): Maps =
   if (place == m.place) m
   else { ...m, place: place, directions: false, sheet: Half, trip: N::forgetRoute(m.trip),
     question: NoQuestion, review: voided(m.review), details: cleared(m.details),
     startPlace: 0, origins: cleared(m.origins), originsFound: 0, copyNotice: Uncopied, guideNotice: Quiet,
-    copying: false, renaming: false, missedFix: false, waitingProvider: false }
+    copying: false, renaming: false, missedFix: false, waitingProvider: false, handedOver: false, notice: unnamed(m.notice) }
 
 pure def cleared(r: R::Read): R::Read = { ...N::withdrawn(r), status: R::Idle }
 
@@ -243,7 +245,7 @@ Leaving navigation ends guidance and keeps the route; an open name field
 closes, then the starting places listed, before the directions; leaving a
 place forgets its route; leaving the search clears it. Back from the place
 a Calendar event opened goes back to that event. The agent's question is
-dropped.
+dropped, and the location disclosure closes unread.
 
 ```quint
 pure def withoutFinder(c: C::Connection): C::Connection =
@@ -255,7 +257,7 @@ pure def finderStops(c: C::Connection): List[Effect] =
 pure def canGoBack(m: Maps): bool = layers(m) > 0
 
 pure def goBack(m: Maps): Stepped =
-  val dropped = { ...m, question: NoQuestion, review: V::dismiss(m.review) }
+  val dropped = { ...m, question: NoQuestion, review: V::dismiss(m.review), explaining: false, notice: unnamed(m.notice) }
   if (m.trip.guidance != N::Stopped) endGuidance(dropped)
   else if (m.renaming) { state: { ...dropped, renaming: false }, out: List() }
   else if (choosingStart(m)) { state: { ...dropped, origins: cleared(m.origins), originsFound: 0 }, out: List() }
@@ -264,13 +266,14 @@ pure def goBack(m: Maps): Stepped =
         copyNotice: Uncopied, copying: false, fromEvent: 0, startPlace: 0, origins: cleared(m.origins), originsFound: 0 },
       out: List(OpenEvent({ meeting: m.fromEvent })) }
   else if (m.directions)
-    { state: { ...dropped, directions: false, link: withoutFinder(m.link), origins: cleared(m.origins), originsFound: 0, guideNotice: Quiet, quiet: false },
+    { state: { ...dropped, directions: false, link: withoutFinder(m.link),
+        trip: { ...m.trip, plan: N::withdrawn(m.trip.plan) },
+        origins: cleared(m.origins), originsFound: 0, guideNotice: Quiet, quiet: false },
       out: finderStops(m.link) }
   else if (m.place != 0)
-    { state: { ...dropped, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Full else Peek,
+    { state: { ...dropped, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Half else Peek,
         review: voided(m.review), copyNotice: Uncopied, copying: false, startPlace: 0, origins: cleared(m.origins), originsFound: 0 }, out: List() }
-  else { state: { ...dropped, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek, waitingProvider: false, pausing: false, fromEvent: 0 },
-    out: if (m.fromEvent > 0) List(OpenEvent({ meeting: m.fromEvent })) else List() }
+  else { state: { ...dropped, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek, waitingProvider: false, handedOver: false, pausing: false }, out: List() }
 ```
 
 ### Back never leaves more than one mode
@@ -336,7 +339,7 @@ input.
 ```quint
 pure def canOpenSearch(m: Maps): bool = mode(m) == Browse and onScreen(m)
 
-pure def openSearch(m: Maps): Maps = { ...m, searching: true, sheet: Full }
+pure def openSearch(m: Maps): Maps = { ...m, searching: true, sheet: Half }
 
 pure def canSearch(m: Maps, query: str, chars: int): bool =
   mode(m) == Search and onScreen(m) and (query == "" or (fits(chars) and not(C::holding(m.link))))
@@ -350,7 +353,7 @@ pure def answering(m: Maps, query: str): bool =
 
 pure def search(m: Maps, query: str, chars: int): Stepped =
   val asked = R::ask(m.search)
-  val unpaused = { ...m, pausing: false, quiet: false }
+  val unpaused = { ...m, pausing: false, quiet: false, handedOver: false }
   val reading = C::canConnect(m.link)
   if (query == "") { state: { ...unpaused, query: "", search: cleared(m.search), results: 0, waitingProvider: false }, out: List() }
   else if (answering(m, query)) { state: unpaused, out: List() }
@@ -457,7 +460,7 @@ pure def pinAt(m: Maps, lat: int, lng: int): Stepped =
 pure def canDropPin(m: Maps, place: int): bool =
   m.pinning and place > 0 and m.trip.guidance == N::Stopped and not(m.trip.away) and not(m.directions)
 
-pure def dropPin(m: Maps, place: int): Maps = { ...chosen(place, m), pinning: false }
+pure def dropPin(m: Maps, place: int): Maps = { ...chosen(place, m), pinning: false, pin: place, pinName: "", notice: unnamed(m.notice) }
 
 pure def stepAPinIsAPlaceOfTheGlobe(before: Maps, after: Maps, out: List[Effect]): bool =
   out.every(e => match e { | MakePin(p) => coordinatesValid(p.lat, p.lng) | _ => true })
@@ -496,38 +499,29 @@ pure def stepAPressPinsOnce(before: Maps, via: str, after: Maps, out: List[Effec
 pure def sometimesPinnedByHand(m: Maps): bool = m.pinning and m.presses > 0
 ```
 
-### A secondary click, or a menu opened with no finger down, drops a pin there at once
-
-On a desktop there is no finger to hold: its secondary click asks for the
-same pin at once, under the same limits as a held finger.
-
-```quint
-pure def canMenuPin(m: Maps, lat: int, lng: int): bool =
-  canPressMap(m, lat, lng, 0) and not(m.pressing)
-
-pure def menuPin(m: Maps, lat: int, lng: int): Stepped =
-  { state: { ...m, pinning: true }, out: List(MakePin({ lat: lat, lng: lng })) }
-
-pure def stepAMenuPinsOnlyWithNoFingerDown(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
-  via == "menuPin" implies (not(before.pressing) and before.trip.guidance == N::Stopped and not(before.directions))
-```
-
 ### A query another app hands to Maps opens as a search, never over navigation
 
 A query handed over while no provider works waits for one, as a search
-does, and the owner's next action drops it before it is sent. A Calendar
-event hands over its place's words with its own number (other apps with
-none), and Back from that search goes back to the event.
+does, and the owner's next action drops it before it is sent. Another
+account never drops it before it is answered: Maps reads the account as it
+opens, often just after the query arrives, so the query waits through the
+change and is sent, again if the last account's provider had it, once the
+new account's provider works.
 
 ```quint
-pure def canHandOver(m: Maps, query: str, chars: int, meeting: int): bool =
-  query != "" and fits(chars) and not(C::holding(m.link)) and m.trip.guidance == N::Stopped and onScreen(m) and meeting >= 0
+pure def canHandOver(m: Maps, query: str, chars: int): bool =
+  query != "" and fits(chars) and not(C::holding(m.link)) and m.trip.guidance == N::Stopped and onScreen(m)
 
-pure def handOver(m: Maps, query: str, chars: int, meeting: int): Stepped =
-  val opened = { ...m, searching: true, query: "", search: cleared(m.search), place: 0, directions: false, sheet: Full, fromEvent: meeting,
+pure def handOver(m: Maps, query: str, chars: int): Stepped =
+  val opened = { ...m, searching: true, query: "", search: cleared(m.search), place: 0, directions: false, sheet: Half,
       trip: N::forgetRoute(m.trip), copyNotice: Uncopied, copying: false, renaming: false, startPlace: 0,
-      origins: cleared(m.origins), originsFound: 0, question: NoQuestion, review: voided(m.review), details: cleared(m.details) }
-  search(opened, query, chars)
+      origins: cleared(m.origins), originsFound: 0, question: NoQuestion, review: voided(m.review), details: cleared(m.details),
+      notice: unnamed(m.notice) }
+  val searched = search(opened, query, chars)
+  { ...searched, state: { ...searched.state, handedOver: true } }
+
+pure def handedUnanswered(m: Maps): bool =
+  m.handedOver and m.searching and m.place == 0 and m.query != "" and (m.search.status == R::Idle or m.search.status == R::Loading)
 
 pure def stepAHandedQueryNeverInterruptsGuidance(before: Maps, via: str, after: Maps): bool =
   via == "handOver" implies (before.trip.guidance == N::Stopped and after.searching and after.place == 0)
@@ -576,10 +570,12 @@ pure def sometimesSearchFailed(m: Maps): bool = mode(m) == Search and m.search.s
 
 The [saved places](./places.md) keep one entry per place, at most 200. A
 place Google served is never saved or renamed; one already saved can be
-forgotten.
+forgotten. The pin dropped last is the owner's own coordinates, not
+Google's, so it is saved, renamed and shared on any map, as v119's live
+Maps treated a pin as a local place (prototype/maps-adapter.ts:378, 489).
 
 ```quint
-pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place))
+pure def googleShown(m: Maps): bool = m.link.google and m.place > 0 and not(S::isSaved(m.saved, m.place)) and m.place != m.pin
 
 pure def canNamePlace(m: Maps, name: str): bool =
   m.place > 0 and name != "" and S::hasRoom(m.saved, m.place) and not(googleShown(m)) and m.keepable and onScreen(m)
@@ -593,15 +589,38 @@ pure def canForgetPlace(m: Maps): bool = S::isSaved(m.saved, m.place) and m.keep
 
 pure def forgetPlace(m: Maps): Stepped =
   val saved = S::forgotten(m.saved, m.place)
-  { state: { ...m, saved: saved, notice: NoNotice }, out: List(KeepSaved({ saved: saved, change: Removed })) }
+  { state: { ...m, saved: saved, notice: NoNotice, copying: false, renaming: false }, out: List(KeepSaved({ saved: saved, change: Removed })) }
 ```
 
 ### A saved place is renamed in a name field the owner opens on its card
 
+The pin dropped last offers the same field while it is the place on the
+card, as v119 did, while there is room, on Google's map as on any other; any
+other place not saved, such as a place found by search, offers none. Its
+name only names the pin, and the owner reads "Name updated. Tap Save to
+keep this place." on the pin's card only: choosing another place, Back,
+another search, Directions or another account clear it, as v119 cleared its
+message there (ui/maps/maps-screen.ts:600, 649, 727, 823, 838, 995). Save
+then keeps the pin under that name, as v119's applyName did
+(ui/maps/maps-screen.ts:880-893).
+
 ```quint
-pure def canStartRenaming(m: Maps): bool = mode(m) == Place and S::isSaved(m.saved, m.place) and not(m.renaming) and m.keepable and onScreen(m)
+pure def isThePin(m: Maps): bool = m.place > 0 and m.place == m.pin
+
+pure def canStartRenaming(m: Maps): bool =
+  mode(m) == Place and (S::isSaved(m.saved, m.place) or (isThePin(m) and S::hasRoom(m.saved, m.place) and not(googleShown(m)))) and not(m.renaming) and m.keepable and onScreen(m)
 
 pure def startRenaming(m: Maps): Maps = { ...m, renaming: true }
+
+pure def canNamePin(m: Maps, name: str): bool =
+  m.renaming and isThePin(m) and not(S::isSaved(m.saved, m.place)) and name != "" and onScreen(m)
+
+pure def namePin(m: Maps, name: str): Maps = { ...m, pinName: name, renaming: false, notice: PinNamed }
+
+pure def alwaysThePinsNameIsToldOnItsCard(m: Maps): bool = m.notice == PinNamed implies (isThePin(m) and mode(m) == Place)
+
+pure def stepNamingThePinSavesNothing(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
+  via == "namePin" implies (after.saved == before.saved and out == List())
 
 pure def alwaysTheNameFieldIsOnAPlace(m: Maps): bool = m.renaming implies (mode(m) == Place)
 
@@ -642,25 +661,6 @@ pure def stepSavedPlacesAreKeptOnThePhone(before: Maps, via: str, after: Maps, o
   after.saved != before.saved implies (via == "restoreSaved" or kept(out, after.saved))
 ```
 
-### A list this version never wrote takes the previous Alpha's places once, and keeps them
-
-When the shell finds no list of this version's own, it gives back the
-previous Alpha's places as [saved places](./places.md) adopt them, and
-the list they make is written at once, so the previous list is never taken
-again. A previous list that cannot be read gives back nothing.
-
-```quint
-pure def canAdoptPrevious(m: Maps, saved: List[S::Saved]): bool =
-  m.saved == List() and m.keepable and S::adopted(saved).length() > 0
-
-pure def adoptPrevious(m: Maps, saved: List[S::Saved]): Stepped =
-  val taken = S::adopted(saved)
-  { state: { ...m, saved: taken, notice: NoNotice }, out: List(KeepSaved({ saved: taken, change: Adopted })) }
-
-pure def stepThePreviousListIsTakenOnlyByAnUnusedList(before: Maps, via: str, after: Maps): bool =
-  via == "adoptPrevious" implies (before.saved == List() and before.keepable and S::distinctAndNamed(after.saved))
-```
-
 ### A saved list that cannot be read is never written over, and a change is told only once it reads back
 
 The owner reads "Saved places could not be read. Existing data has not been
@@ -677,7 +677,7 @@ pure def savedUnreadable(m: Maps): Maps = { ...m, keepable: false }
 
 pure def noticeOf(change: Change, ok: bool): SavedNotice =
   if (not(ok)) NotKept
-  else match change { | Added => PlaceSaved | Renamed => PlaceRenamed | Removed => PlaceRemoved | Adopted => NoNotice }
+  else match change { | Added => PlaceSaved | Renamed => PlaceRenamed | Removed => PlaceRemoved }
 
 pure def canSavedKept(m: Maps, change: Change, ok: bool): bool = m.keepable
 
@@ -687,7 +687,8 @@ pure def stepAnUnreadableListIsNeverWrittenOver(before: Maps, after: Maps, out: 
   not(before.keepable) implies out.every(e => match e { | KeepSaved(k) => false | _ => true })
 
 pure def stepAChangeIsToldOnlyOnceItReadsBack(before: Maps, via: str, after: Maps): bool =
-  (after.notice != before.notice and after.notice != NoNotice and after.notice != NotKept) implies via == "savedKept"
+  (after.notice != before.notice and after.notice != NoNotice and after.notice != NotKept)
+    implies (via == "savedKept" or (via == "namePin" and after.notice == PinNamed))
 
 pure def sometimesSavedUnreadable(m: Maps): bool = not(m.keepable)
 ```
@@ -715,7 +716,7 @@ and, where the phone has none, copies the text.
 ```quint
 pure def canHandOn(m: Maps, kind: HandOff): bool =
   m.place > 0 and onScreen(m) and (kind == EtaShare implies (m.trip.route != 0 and (mode(m) == Directions or mode(m) == Navigating)))
-    and ((kind == SharePlace or kind == EmailPlace or kind == CopyLink or kind == CopyNumber) implies not(googleShown(m)))
+    and ((kind == SharePlace or kind == CopyNumber) implies not(googleShown(m)))
     and (kind == Call implies m.dialer)
     and (kind == CopyNumber implies not(m.copying))
 
@@ -759,7 +760,7 @@ only while Maps shows it: leaving Maps or another account forgets them.
 
 ```quint
 pure def canReadDetails(m: Maps, place: int): bool =
-  place > 0 and place == m.place and C::working(m.link) and not(C::holding(m.link)) and m.details.status == R::Idle
+  place > 0 and place == m.place and onScreen(m) and C::working(m.link) and not(C::holding(m.link)) and m.details.status == R::Idle
 
 pure def readDetails(m: Maps, place: int): Stepped =
   val asked = R::ask(m.details)
@@ -812,7 +813,7 @@ pure def canOpenDirections(m: Maps): bool =
     and m.details.status != R::Loading and m.details.status != R::Failed
 
 pure def openDirections(m: Maps): Stepped =
-  val opened = { ...m, directions: true, sheet: Half, renaming: false }
+  val opened = { ...m, directions: true, sheet: Half, renaming: false, notice: unnamed(m.notice) }
   if (m.trip.route == 0 and P::allows(m.link.location) and C::canLocate(m.link, C::Finder))
     { state: { ...opened, link: C::locate(m.link, C::Finder), quiet: false, missedFix: false },
       out: List(StartLocation({ session: m.link.session + 1, once: true })) }
@@ -826,11 +827,8 @@ pure def stepDirectionsOpenOnlyFromACard(before: Maps, via: str, after: Maps): b
 ### A route is asked from coordinates or another place, which ends a pending "Use my location"
 
 From my location, the route is asked when the fix arrives; from coordinates
-or another place, from the coordinates the screen keeps for it. No control
-of Maps prompts the owner for coordinates: a starting point is the phone, a
-saved place or a place found by its name, and only coordinates typed into
-Search drop a pin. Coordinates come only with the agent's proposal, and
-never on Google's map.
+or another place, from the coordinates the screen keeps for it. On Google's
+map no prompt for coordinates is offered.
 
 ```quint
 pure def canPlanFrom(m: Maps, origin: N::Origin, lat: int, lng: int): bool =
@@ -877,7 +875,10 @@ pure def answerRoute(m: Maps, ticket: int, ok: bool, turns: int, routes: int): M
   val trip = N::answerRoute(m.trip, ticket, ok, turns)
   val review = if (trip.route != m.trip.route) V::revise(m.review) else m.review
   val answered = if (ok) { ...m, alternatives: routes, chosen: 0 } else m
-  { ...answered, trip: trip, review: if (m.question == StartTrip and ok) V::present(review) else review }
+  val clearQuestion = not(ok) and m.question == StartTrip
+  { ...answered, trip: trip,
+    question: if (clearQuestion) NoQuestion else m.question,
+    review: if (m.question == StartTrip and ok) V::present(review) else if (clearQuestion) V::dismiss(review) else review }
 ```
 
 ### The provider's routes are listed in order, and choosing one shows it and sends no new request
@@ -967,7 +968,7 @@ pure def canSwapEnds(m: Maps, lat: int, lng: int): bool =
 
 pure def swapEnds(m: Maps, lat: int, lng: int): Stepped =
   val turned = { ...m, place: m.startPlace, details: cleared(m.details), question: NoQuestion, review: voided(m.review),
-    copyNotice: Uncopied, trip: N::forgetRoute(m.trip) }
+    copyNotice: Uncopied, copying: false, trip: N::forgetRoute(m.trip) }
   val planned = planFrom(turned, N::SomePlace, lat, lng)
   { ...planned, state: { ...planned.state, startPlace: m.place } }
 
@@ -996,7 +997,7 @@ pure def startGuidance(m: Maps): Stepped =
   val trip = N::startGuidance(m.trip)
   { state: { ...m, link: link, trip: trip, sheet: Peek, question: NoQuestion, review: V::dismiss(m.review),
       following: true, guideNotice: Quiet, origins: cleared(m.origins), originsFound: 0, imprecise: false, quiet: false },
-    out: List(StartLocation({ session: link.session, once: false }), GuideWithScreenOff({ journey: trip.journey })) }
+    out: finderStops(m.link).concat(List(StartLocation({ session: link.session, once: false }), GuideWithScreenOff({ journey: trip.journey }))) }
 
 pure def stepGuidanceStartsOnTheRouteShown(before: Maps, via: str, after: Maps): bool =
   (before.trip.guidance == N::Stopped and after.trip.guidance == N::Going) implies
@@ -1110,7 +1111,10 @@ failure says nothing.
 pure def canFindTimedOut(m: Maps, session: int): bool = C::canGiveUp(m.link, session)
 
 pure def findTimedOut(m: Maps, session: int): Stepped =
-  { state: { ...m, link: C::giveUp(m.link, session), quiet: false, missedFix: not(m.quiet) }, out: List(StopLocation) }
+  val clearQuestion = m.question == StartTrip
+  { state: { ...m, link: C::giveUp(m.link, session), quiet: false, missedFix: not(m.quiet),
+      question: if (clearQuestion) NoQuestion else m.question,
+      review: if (clearQuestion) V::dismiss(m.review) else m.review }, out: List(StopLocation) }
 
 pure def stepTheQuietFixFailsSilently(before: Maps, via: str, after: Maps): bool =
   (via == "findTimedOut" and before.quiet) implies not(after.missedFix)
@@ -1128,8 +1132,11 @@ pure def canLocationLost(m: Maps, session: int): bool = C::canTakeFix(m.link, se
 
 pure def locationLost(m: Maps, session: int): Stepped =
   val guided = m.link.locator == C::Guide
+  val clearQuestion = m.question == StartTrip
   { state: { ...m, link: C::stopLocating(m.link), trip: if (guided) N::endGuidance(m.trip) else m.trip,
-      sheet: if (guided) Half else m.sheet, quiet: false, imprecise: false },
+      sheet: if (guided) Half else m.sheet, quiet: false, imprecise: false,
+      question: if (clearQuestion) NoQuestion else m.question,
+      review: if (clearQuestion) V::dismiss(m.review) else m.review },
     out: if (guided) List(StopGuidance) else List() }
 
 pure def stepLosingTheLocationEndsWhatHeldIt(before: Maps, via: str, after: Maps): bool =
@@ -1197,8 +1204,8 @@ pure def sometimesRerouting(m: Maps): bool = m.trip.rerouting
 Maps is left when another view is shown, when the page is hidden, and when
 the phone locks over it: what the agent may read follows the same. Leaving
 withdraws the search, details, starting places and route still on their
-way and keeps what had arrived; the typing pause ends, and the map's
-surface is released. Coming back asks again for the search leaving
+way and keeps what had arrived; the typing pause ends, the location
+disclosure closes unread, and the map's surface is released. Coming back asks again for the search leaving
 withdrew, and for a locate Android allowed while Maps was away.
 
 ```quint
@@ -1211,8 +1218,8 @@ pure def leaveMaps(m: Maps): Stepped =
   val link = C::releaseMap(if (ended) C::stopLocating(m.link) else withoutFinder(m.link))
   { state: { ...m, trip: kept, link: link,
       fromEvent: 0, sheet: if (ended) Half else m.sheet, guideNotice: if (ended) PausedAway else m.guideNotice,
-      search: N::withdrawn(m.search), details: N::withdrawn(m.details), origins: N::withdrawn(m.origins),
-      pausing: false, quiet: false, quietDone: false, imprecise: false },
+      search: N::withdrawn(m.search), details: cleared(m.details), origins: N::withdrawn(m.origins),
+      pausing: false, quiet: false, quietDone: false, imprecise: false, explaining: false },
     out: (if (ended) List(StopGuidance) else finderStops(m.link)).concat(drawn(m.link, link)) }
 
 pure def canComeBack(m: Maps): bool = N::canComeBack(m.trip)
@@ -1340,25 +1347,35 @@ pure def canChangeAccount(m: Maps, account: int): bool = C::canChangeAccount(m.l
 
 pure def changeAccount(m: Maps, account: int): Stepped =
   val guided = m.link.locator == C::Guide
-  val link = C::changeAccount(if (guided) C::stopLocating(m.link) else m.link, account)
-  { state: { ...m, link: link, trip: N::retireTrip(m.trip), searching: false, query: "",
-      search: cleared(m.search), results: 0, recent: List(), place: 0, details: cleared(m.details), directions: false, sheet: Peek,
+  val finder = m.link.locator == C::Finder
+  val link = C::changeAccount(if (guided or finder) C::stopLocating(m.link) else m.link, account)
+  val handed = handedUnanswered(m)
+  { state: { ...m, link: link, trip: N::retireTrip(m.trip), searching: handed, query: if (handed) m.query else "",
+      search: cleared(m.search), results: 0, recent: List(), place: 0, details: cleared(m.details), directions: false,
+      sheet: if (handed) m.sheet else Peek, handedOver: handed,
       copyNotice: Uncopied, startPlace: 0, origins: cleared(m.origins), originsFound: 0, typing: "", pausing: false,
-      following: false, guideNotice: if (guided) AccountChanged else Quiet, waitingProvider: false, copying: false,
+      following: false, guideNotice: if (guided) AccountChanged else Quiet, waitingProvider: handed, copying: false,
       renaming: false, imprecise: false, quiet: false,
-      question: NoQuestion, review: voided(m.review), pinning: false, pressing: false },
-    out: (if (guided) List(StopGuidance) else List())
+      question: NoQuestion, review: voided(m.review), pinning: false, pressing: false, notice: unnamed(m.notice) },
+    out: (if (guided) List(StopGuidance) else if (finder) List(StopLocation) else List())
       .concat(if (link.account != 0) List(ReadCoverage({ ticket: link.coverage.ticket })) else List())
       .concat(drawn(m.link, link)) }
 ```
 
 ### Another account hides every route, place and search of the last one, and ends its guidance
 
+A query another app handed over and not yet answered belongs to no
+account, so it stays, waiting for the new account's provider.
+
 ```quint
 pure def stepAnotherAccountHidesTheLast(before: Maps, via: str, after: Maps): bool =
   via == "changeAccount" implies
     (after.trip.route == 0 and after.trip.guidance == N::Stopped and after.place == 0
-      and not(after.searching) and after.results == 0)
+      and (not(after.searching) or handedUnanswered(before)) and after.results == 0)
+
+pure def stepAHandedQuerySurvivesAnotherAccount(before: Maps, via: str, after: Maps): bool =
+  (via == "changeAccount" and handedUnanswered(before)) implies
+    (after.searching and after.query == before.query and after.waitingProvider)
 ```
 
 ### Opening Maps, the network returning or Retry reads the coverage when no provider works, and leaves a working one alone
@@ -1451,15 +1468,43 @@ pure def sometimesBrokenMapWhileGuiding(m: Maps): bool =
 > location, to be sent to Settings once I have said no, and my location
 > used only for what I asked.
 
-### Continuing past the disclosure asks Android, once
+### Maps opens without the disclosure, and the owner's tap for their location shows it
+
+Recenter or "Use my location", tapped while Android has not allowed
+location and the disclosure is unread, shows the disclosure and nothing
+else. A search needs no location, so the disclosure never holds one back,
+nor a query another app hands to Maps. Recenter stays on the map whenever
+Maps is neither guiding nor showing directions, where v119 left "Use my
+location" on the directions card instead; while Maps is locating or
+Android's prompt is open, tapping it does nothing. The disclosure belongs
+to the tap that showed it: it closes unread when the owner leaves Maps or
+presses Back, and once Android allows location, so Maps never opens on it.
 
 ```quint
-pure def canContinueDisclosure(m: Maps): bool = C::canDisclose(m.link)
+pure def alwaysExplainingOnlyBeforeTheDisclosure(m: Maps): bool = m.explaining implies not(m.link.disclosed)
+
+pure def alwaysExplainingOnlyWhileLocationIsNotAllowed(m: Maps): bool = m.explaining implies not(P::allows(m.link.location))
+
+pure def stepTheDisclosureClosesWithTheVisit(before: Maps, via: str, after: Maps): bool =
+  Set("leaveMaps", "goBack").contains(via) implies not(after.explaining)
+```
+
+### Continuing past the disclosure asks Android, once, and then locates
+
+Android is asked for the tap that showed the disclosure, so the answer
+that allows location locates, as "Use my location" does.
+
+```quint
+pure def canContinueDisclosure(m: Maps): bool = m.explaining and C::canDisclose(m.link)
 
 pure def continueDisclosure(m: Maps): Stepped =
   val shown = C::disclose(m.link)
-  if (C::canAskLocation(shown)) { state: { ...m, link: C::askLocation(shown) }, out: List(AskLocation) }
-  else { state: { ...m, link: shown }, out: List() }
+  val told = { ...m, explaining: false }
+  if (C::canAskLocation(shown)) { state: { ...told, link: C::askLocation(shown), owedLocate: true, missedFix: false }, out: List(AskLocation) }
+  else { state: { ...told, link: shown }, out: List() }
+
+pure def stepContinuingOwesTheLocate(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
+  (via == "continueDisclosure" and out == List(AskLocation)) implies (after.owedLocate and not(after.explaining))
 ```
 
 ### "Use my location" locates once when allowed, asks when it may, and otherwise opens Settings
@@ -1479,7 +1524,6 @@ pure def reusesTheFix(m: Maps): bool =
 pure def canUseMyLocation(m: Maps): bool =
   m.trip.guidance == N::Stopped and onScreen(m) and not(m.link.prompting)
     and (m.link.locator == C::Nobody or (m.link.locator == C::Finder and m.quiet))
-    and (P::allows(m.link.location) or m.link.disclosed)
 
 pure def useMyLocation(m: Maps): Stepped =
   val idle = C::stopLocating(m.link)
@@ -1489,6 +1533,7 @@ pure def useMyLocation(m: Maps): Stepped =
   else if (P::allows(m.link.location))
     { state: { ...m, link: found, quiet: false, missedFix: false }, out: ended.concat(List(StartLocation({ session: found.session, once: true }))) }
   else if (C::canAskLocation(m.link)) { state: { ...m, link: C::askLocation(m.link), owedLocate: true, missedFix: false }, out: List(AskLocation) }
+  else if (C::canDisclose(m.link)) { state: { ...m, explaining: true }, out: List() }
   else { state: m, out: List(OpenLocationSettings) }
 
 pure def stepYourLocationIsReused(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
@@ -1527,13 +1572,14 @@ pure def stepSettingsOnlyAfterNo(before: Maps, after: Maps, out: List[Effect]): 
 pure def observeLocation(m: Maps, grant: P::Grant): Stepped =
   val link = C::observeLocation(m.link, grant)
   val lost = m.link.locator == C::Guide and link.locator == C::Nobody
+  val finderLost = m.link.locator == C::Finder and link.locator == C::Nobody
   val allowed = m.owedLocate and P::allows(link.location)
   val now = allowed and onScreen(m) and not(lost) and C::canLocate(link, C::Finder)
   val found = C::locate(link, C::Finder)
   { state: { ...m, link: if (now) found else link, trip: if (lost) N::endGuidance(m.trip) else m.trip,
       sheet: if (lost) Half else m.sheet, owedLocate: allowed and not(now), quiet: if (now) false else m.quiet and link.locator == C::Finder,
-      imprecise: if (lost) false else m.imprecise },
-    out: (if (lost) List(StopGuidance) else List())
+      imprecise: if (lost) false else m.imprecise, explaining: m.explaining and not(P::allows(link.location)) },
+    out: (if (lost) List(StopGuidance) else if (finderLost) List(StopLocation) else List())
       .concat(if (now) List(StartLocation({ session: found.session, once: true })) else List()) }
 
 pure def alwaysALocateOwedWasAsked(m: Maps): bool = m.owedLocate implies m.link.disclosed
@@ -1658,7 +1704,7 @@ pure def canProposeRoute(m: Maps, place: int, origin: N::Origin, lat: int, lng: 
 pure def proposeRoute(m: Maps, place: int, origin: N::Origin, lat: int, lng: int): Stepped =
   val there = chosen(place, m)
   val trip = N::plan(there.trip, origin)
-  val proposed = { ...there, directions: true, sheet: Half, trip: trip, link: withoutFinder(m.link), renaming: false, quiet: false,
+  val proposed = { ...there, directions: true, sheet: Half, trip: trip, link: withoutFinder(m.link), renaming: false, quiet: false, notice: unnamed(there.notice),
       question: StartTrip, review: voided(there.review), startLat: lat, startLng: lng, startPlace: 0 }
   val found = C::locate(C::stopLocating(m.link), C::Finder)
   if (origin == N::MyLocation)

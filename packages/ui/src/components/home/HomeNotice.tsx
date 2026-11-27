@@ -1,3 +1,4 @@
+import { cn } from "../../lib/cn.ts";
 import { Alert } from "../Alert.tsx";
 import { Toast } from "../Toast.tsx";
 
@@ -35,18 +36,22 @@ const reasons: Record<HomeWhy, string> = {
   Unable: "Android couldn't do it.",
 };
 
+const shadeGesture = "Swipe down from the top edge of the screen for Android notifications.";
+const shadeUnavailable = "Android did not open its notifications from Alpha. Swipe down from the top edge of the screen instead.";
+
 /** What Home says of `notice`, in the owner's words. */
 export const homeNoticeWords = (notice: HomeNoticeMessage): string => {
   switch (notice.tag) {
     case "TellNotOpened": {
       const { ask } = notice;
-      const lead = ask.tag === "Shade" ? "Couldn't open notifications" : ask.tag === "AppInfo" ? `Couldn't open info for ${ask.label}` : `Couldn't open ${ask.label}`;
+      if (ask.tag === "Shade") return notice.why === "NotInFront" ? `Alpha is not in front. ${shadeGesture}` : shadeUnavailable;
+      const lead = ask.tag === "AppInfo" ? `Couldn't open info for ${ask.label}` : `Couldn't open ${ask.label}`;
       return `${lead}. ${reasons[notice.why]}`;
     }
     case "TellNoAnswer":
-      return "Android didn't answer about notifications";
+      return `Android didn't answer about notifications. ${shadeGesture}`;
     case "TellUnlockFirst":
-      return "Unlock your phone first";
+      return "Unlock to see notifications";
     case "TellNotSaved":
       return "Couldn't save your change to Home";
     case "TellSavedUnreadable":
@@ -61,12 +66,20 @@ export const homeNoticeWords = (notice: HomeNoticeMessage): string => {
 };
 
 /**
- * A failure told where the owner is looking: a toast on bare Home, put in the shell's `ToastRegion`, or a warning in
- * place in the edit bar.
+ * A failure told where the owner is looking: a toast on bare Home, put in the shell's `ToastRegion`; a short line in
+ * the edit bar when a change was not saved; or a warning in place.
  * @model spec/app/home/index.md
  */
 export function HomeNotice({ notice, place, className }: HomeNoticeProps) {
-  return place === "AsToast"
-    ? <Toast className={className}>{homeNoticeWords(notice)}</Toast>
-    : <Alert variant="warn" className={className}>{homeNoticeWords(notice)}</Alert>;
+  if (place === "AsToast") return <Toast className={className}>{homeNoticeWords(notice)}</Toast>;
+  if (place === "InEditBar" && notice.tag === "TellNotSaved") {
+    return (
+      <p role="alert" className={cn("flex items-center gap-2 text-sm", className)}>
+        <span aria-hidden className="mr-1.5 size-2 shrink-0 rounded-full bg-destructive" />
+        <span aria-hidden>Couldn’t save</span>
+        <span className="sr-only">{homeNoticeWords(notice)}</span>
+      </p>
+    );
+  }
+  return <Alert variant="warn" className={className}>{homeNoticeWords(notice)}</Alert>;
 }

@@ -3,6 +3,7 @@
   "globalPassThroughEnv": ["QUINT_HOME"],
   "globalDependencies": [
     ".nvmrc",
+    "eliza.lock.json",
     "pnpm-workspace.yaml",
     "tsconfig.base.json",
     "vibestack/*.ts",
@@ -42,6 +43,10 @@
         "gen",
         "//#gen",
         "^build"
+      ],
+      "env": [
+        "ELIZA_DEV_ALLOW_TEST_MOCKS",
+        "ALPHA_FAKES"
       ],
       "outputs": [
         "dist/**",
@@ -202,7 +207,6 @@
         ".agents/**",
         "AGENTS.md",
         "SPEC.md",
-        "LICENSE",
         "package.json",
         "pnpm-lock.yaml",
         "turbo.json",
@@ -232,7 +236,6 @@
         ".agents/**",
         "AGENTS.md",
         "SPEC.md",
-        "LICENSE",
         "package.json",
         "pnpm-lock.yaml",
         "turbo.json",
@@ -268,7 +271,6 @@
         "AGENTS.md",
         "SPEC.md",
         "README.md",
-        "LICENSE",
         "spec/**",
         "package.json",
         "pnpm-lock.yaml",
@@ -300,7 +302,8 @@
         "!**/{node_modules,dist,.vibe,.cache,.spec-cache,.turbo,generated,storybook-static,__traces__}/**",
         "!**/.DS_Store",
         "!{apps,packages,vibestack/studio,vibestack/examples}/**/gen/**",
-        "package.json"
+        "package.json",
+        "pnpm-lock.yaml"
       ],
       "outputs": [
         "vibestack/examples/*/.spec-cache/tests-*.json.{gz,zst}"
@@ -337,6 +340,40 @@
         ".cache/test-result-*.json"
       ]
     },
+    "@repo/app#build": {
+      "dependsOn": [
+        "gen",
+        "//#gen",
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/eliza.lock.json"
+      ],
+      "env": [
+        "ELIZA_DEV_ALLOW_TEST_MOCKS",
+        "ALPHA_FAKES"
+      ],
+      "outputs": [
+        "dist/**",
+        "generated/**",
+        "storybook-static/**"
+      ]
+    },
+    "@repo/app#typecheck": {
+      "dependsOn": [
+        "gen",
+        "//#gen",
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/eliza.lock.json"
+      ],
+      "outputs": [
+        ".vibe/declarations/**"
+      ]
+    },
     "@repo/app#test": {
       "dependsOn": [
         "gen",
@@ -344,9 +381,28 @@
         "^build",
         "@repo/agent#build"
       ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/eliza.lock.json"
+      ],
       "outputs": [
         ".cache/test-result-*.json"
       ],
+      "env": [
+        "VIBESTACK_QUINT_EVALUATOR"
+      ]
+    },
+    "@repo/app#test:browser": {
+      "dependsOn": [
+        "gen",
+        "//#gen",
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/eliza.lock.json"
+      ],
+      "outputs": [],
       "env": [
         "VIBESTACK_QUINT_EVALUATOR"
       ]
@@ -427,7 +483,7 @@
       "outputs": []
     },
     "//#analyze": {
-      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/ui#gen", "vibestack-studio#gen"],
+      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
       "inputs": [
         "apps/**",
         "packages/**",
@@ -437,6 +493,7 @@
         "!**/.DS_Store",
         "!{apps,packages,vibestack/studio}/**/gen/**",
         "package.json",
+        "eliza.lock.json",
         "pnpm-workspace.yaml",
         "tsconfig.json",
         "*.config.js",
@@ -532,9 +589,7 @@
       "dependsOn": [
         "^build"
       ],
-      "outputs": [
-        ".vibe/declarations/**"
-      ]
+      "outputs": []
     },
     "@repo/design-system#build": {
       "dependsOn": [
@@ -543,6 +598,20 @@
       "outputs": [
         "generated/**",
         "design.md"
+      ]
+    },
+    "@repo/cli#typecheck": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": []
+    },
+    "@repo/cli#test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".cache/test-result-*.json"
       ]
     }
   },

@@ -1,6 +1,7 @@
 import { type ComponentProps, type ReactNode, useState } from "react";
-import { ChevronLeft, ChevronRight, Ellipsis } from "lucide-react";
+import { ChevronLeft, ChevronRight, Ellipsis, Repeat } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { CalendarHeaderAction } from "./CalendarHeader.tsx";
 
 export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
@@ -15,6 +16,8 @@ export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
   day: string;
   /** Which calendar it is in, after its calendar's dot. */
   source?: string;
+  /** How it repeats, such as "Repeats every weekday", under its calendar. */
+  repeat?: string;
   /** The color of its calendar's dot. */
   dot?: "primary" | "foreground";
   /** Its notes, under a rule at the end. */
@@ -23,21 +26,22 @@ export type CalendarEventPageProps = Omit<ComponentProps<"div">, "title"> & {
   children?: ReactNode;
 };
 
-/** An event, over the days: Back and its actions, its title, time, day and calendar, then what it holds. */
-export function CalendarEventPage({ title, onBack, actions, when, day, source, dot = "primary", notes, className, children, ...props }: CalendarEventPageProps) {
+/** An event, rising over the days as Alpha's earlier build drew it (v119 45f6bed30 template.html:1277 `class="enter"`): Back and its actions, its title, time, day and calendar, then what it holds. */
+export function CalendarEventPage({ title, onBack, actions, when, day, source, repeat, dot = "primary", notes, className, children, ...props }: CalendarEventPageProps) {
   const dotClass = cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : "bg-foreground");
   return (
-    <div data-alpha-subview="calendar-detail" className={cn("absolute inset-0 z-20 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
+    <div data-alpha-subview="calendar-detail" className={cn("absolute inset-0 z-20 flex flex-col bg-background motion-safe:animate-rise", className)} {...props}>
       <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 px-2">
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />
         {actions}
       </div>
-      <div className="min-w-0 grow touch-pan-y overflow-y-auto px-6 pt-1 pb-32.5 wrap-anywhere [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className={cn(dockClearance, "min-w-0 grow touch-pan-y overflow-y-auto px-6 pt-1 wrap-anywhere [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}>
         <h1 className="m-0 font-display text-display font-light">{title}</h1>
         <div className="mt-3.5 text-lg leading-plain">{when}</div>
         <div className="mt-1 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{day}</div>
-        <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{source}</div>
+        {source ? <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><span aria-hidden className={dotClass} />{source}</div> : null}
+        {repeat ? <div className="mt-2 flex items-center gap-2 text-sm leading-plain text-muted-foreground"><Repeat aria-hidden className="size-4.5 shrink-0" />{repeat}</div> : null}
         {children}
         {notes ? <div className="mt-4.5 border-t border-border pt-4.5 text-prose whitespace-pre-wrap">{notes}</div> : null}
       </div>
@@ -72,13 +76,13 @@ export function CalendarEventRow({ icon, text, trailing, onOpen, openLabel, clas
       {onOpen ? <ChevronRight aria-hidden className="size-4.5 shrink-0 text-muted-foreground" /> : trailing}
     </>
   );
-  if (onOpen) return <button type="button" aria-label={openLabel} onClick={onOpen} className={cn(focusRing, "flex min-h-14 items-center gap-4 rounded-lg text-left", className)}>{inside}</button>;
+  if (onOpen) return <button type="button" aria-label={openLabel} onClick={onOpen} className={cn(focusRing, "flex min-h-14 items-center gap-4 rounded-lg text-left", className)} {...(props as ComponentProps<"button">)}>{inside}</button>;
   return <div className={cn("flex min-h-14 items-center gap-4", className)} {...props}>{inside}</div>;
 }
 
 /** The Join button of an event's video call. */
 export function CalendarJoin({ className, ...props }: ComponentProps<"button">) {
-  return <button type="button" className={cn(focusRing, "h-10 shrink-0 rounded-full bg-alpha px-4.5 text-sm leading-plain font-semibold text-alpha-foreground", className)} {...props} />;
+  return <button type="button" className={cn(focusRing, "min-h-11 min-w-11 shrink-0 rounded-full bg-alpha px-4.5 text-sm leading-plain font-semibold text-alpha-foreground", className)} {...props} />;
 }
 
 export type CalendarPersonProps = Omit<ComponentProps<"div">, "children"> & {
@@ -91,7 +95,7 @@ export type CalendarPersonProps = Omit<ComponentProps<"div">, "children"> & {
 /** One of an event's people: their initials, name and reply. */
 export function CalendarPerson({ initials, name, status, className, ...props }: CalendarPersonProps) {
   return (
-    <div aria-label={name} className={cn("flex min-h-13 items-center gap-3", className)} {...props}>
+    <div className={cn("flex min-h-13 items-center gap-3", className)} {...props}>
       <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs leading-plain font-bold whitespace-nowrap">{initials}</span>
       <span className="grow text-base leading-plain">{name}</span>
       {status ? <span className="text-meta leading-plain text-muted-foreground">{status}</span> : null}
@@ -122,7 +126,7 @@ export type CalendarAnswerProps = ComponentProps<"button"> & {
 /** One answer to an invitation. */
 export function CalendarAnswer({ chosen, className, ...props }: CalendarAnswerProps) {
   return (
-    <button type="button" className={cn(focusRing, "flex h-11 grow basis-0 items-center justify-center rounded-full text-sm leading-plain font-semibold disabled:opacity-50",
+    <button type="button" aria-pressed={Boolean(chosen)} className={cn(focusRing, "flex h-11 grow basis-0 items-center justify-center rounded-full text-sm leading-plain font-semibold disabled:opacity-50",
       chosen === "going" ? "bg-alpha text-alpha-foreground" : chosen === "declined" ? "bg-foreground text-background" : "bg-secondary", className)} {...props} />
   );
 }
@@ -141,18 +145,32 @@ export interface CalendarEventMenuItem {
 }
 
 /** The event's actions, behind the "…" at the top end: a small list that opens under it. */
-export function CalendarEventMenu({ items, className, ...props }: Omit<ComponentProps<"div">, "children"> & { items: ReadonlyArray<CalendarEventMenuItem> }) {
+export function CalendarEventMenu({ items, className, onKeyDown, ...props }: Omit<ComponentProps<"div">, "children"> & { items: ReadonlyArray<CalendarEventMenuItem> }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={cn("relative z-10", className)} {...props}>
-      <CalendarHeaderAction aria-label="Event actions" aria-expanded={open} className="size-11" onClick={() => setOpen(!open)}><Ellipsis aria-hidden /></CalendarHeaderAction>
+    <div
+      className={cn("relative z-10", className)}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (open && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+      {...props}
+    >
+      <CalendarHeaderAction aria-label="Event actions" aria-haspopup="menu" aria-expanded={open} className="size-11" onClick={() => setOpen(!open)}><Ellipsis aria-hidden /></CalendarHeaderAction>
       {open ? (
-        <div role="menu" className="absolute top-full right-0 w-max rounded-lg bg-background p-1 text-foreground shadow-md">
-          {items.map((item) => (
-            <button key={item.label} type="button" role="menuitem" aria-label={item.name} onClick={() => { setOpen(false); item.onSelect(); }}
-              className={cn(focusRing, "block min-h-11 w-full px-3.5 text-start active:bg-accent")}>{item.label}</button>
-          ))}
-        </div>
+        <>
+          <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 cursor-default" />
+          <div role="menu" className="absolute top-full right-0 w-max rounded-lg border border-border/60 bg-popover p-1 text-popover-foreground shadow-md dark:border-border">
+            {items.map((item) => (
+              <button key={item.label} type="button" role="menuitem" aria-label={item.name} onClick={() => { setOpen(false); item.onSelect(); }}
+                className={cn(focusRing, "block min-h-11 w-full px-3.5 text-start active:bg-accent")}>{item.label}</button>
+            ))}
+          </div>
+        </>
       ) : null}
     </div>
   );

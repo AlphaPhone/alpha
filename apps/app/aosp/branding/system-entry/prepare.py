@@ -2,31 +2,39 @@
 """Deterministic, task-local preparation. Does not touch a checkout or a VM."""
 from pathlib import Path
 import argparse, difflib, hashlib, json, xml.etree.ElementTree as ET
+from portable_tools import find_repo_root, reject_symlinks, require, safe_relative_path
 
 ROOT = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--inputs-root', type=Path, default=ROOT / '.cache')
+parser.add_argument('--write-manifest', action='store_true',
+                    help='Write regenerated patch and manifest.json instead of checking against existing manifest')
 args = parser.parse_args()
 DATA = args.inputs_root.resolve()
-REPO = next(path for path in ROOT.parents if (path / 'app.config.json').is_file())
+REPO = find_repo_root(ROOT)
 BASE = DATA / 'baseline'
 OUT = DATA / 'staged'
 INPUTS = json.loads((ROOT / 'SOURCE-INPUTS.json').read_text())
 PREFIX = 'packages/SystemUI/'
+IDENTITY_SOURCE = 'packages/design-system/brand/mark.svg'
 changes = {}
 
 def sha(data): return hashlib.sha256(data).hexdigest()
 def original(path):
-    data = (BASE / path).read_bytes()
+    relative = safe_relative_path(path, 'baseline path')
+    target = BASE / relative
+    reject_symlinks(target, DATA, 'baseline path')
+    data = target.read_bytes()
     row = next(x for x in INPUTS['files'] if x['path'] == path)
-    assert sha(data) == row['beforeSha256'], path
+    require(sha(data) == row['beforeSha256'], 'Pinned source drift: ' + path)
     return data.decode()
 def replace_once(text, old, new):
-    assert text.count(old) == 1, old
+    require(text.count(old) == 1, 'Source anchor drift: ' + old)
     return text.replace(old, new, 1)
 def edit(path, text): changes[path] = (original(path), text)
 def add(path, text):
-    assert not (BASE / path).exists(), path
+    relative = safe_relative_path(path, 'new file path')
+    require(not (BASE / relative).exists(), 'Added path already exists in baseline: ' + path)
     changes[path] = (None, text)
 
 config = PREFIX + 'src/com/android/systemui/keyguard/data/quickaffordance/'
@@ -66,28 +74,35 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.os.UserHandle
 import com.android.systemui.ActivityIntentHelper
 import com.android.systemui.animation.Expandable
+import com.android.systemui.broadcast.BroadcastDispatcher
 import com.android.systemui.common.shared.model.ContentDescription
 import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.dagger.SysUISingleton
-import com.android.systemui.dagger.qualifiers.Main
+import com.android.systemui.dagger.qualifiers.Background
 import com.android.systemui.res.R
 import com.android.systemui.settings.UserTracker
 import com.android.systemui.shade.ShadeDisplayAware
 import java.util.concurrent.Executor
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Optional picker choice. Existing slots, defaults, selections and secure-camera paths stay intact. */
 @SysUISingleton
 class AlphaAssistantQuickAffordanceConfig @Inject constructor(
     @ShadeDisplayAware private val context: Context,
     private val activityIntentHelper: ActivityIntentHelper,
+    private val broadcastDispatcher: BroadcastDispatcher,
     private val userTracker: UserTracker,
-    @Main private val mainExecutor: Executor,
+    @Background private val backgroundDispatcher: CoroutineDispatcher,
+    @Background private val backgroundExecutor: Executor,
 ) : KeyguardQuickAffordanceConfig {
     override val key = "alpha_assistant"
     override val pickerIconResourceId = R.drawable.ic_alpha_system_mark
@@ -111,13 +126,15 @@ class AlphaAssistantQuickAffordanceConfig @Inject constructor(
             context.resources.getBoolean(R.bool.config_alpha_system_entry_enabled),
             user, userTracker.isUserSwitching || user != userTracker.userId,
             target.packageName, target.name, target.enabled, target.exported, app.enabled,
-            app.flags and ApplicationInfo.FLAG_SYSTEM != 0,
+            app.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0,
             app.flags and ApplicationInfo.FLAG_SUSPENDED != 0,
         )
     }
 
-    private fun state(): KeyguardQuickAffordanceConfig.LockScreenState =
-        if (available()) KeyguardQuickAffordanceConfig.LockScreenState.Visible(
+    private suspend fun availableAsync(): Boolean = withContext(backgroundDispatcher) { available() }
+
+    private suspend fun stateAsync(): KeyguardQuickAffordanceConfig.LockScreenState =
+        if (availableAsync()) KeyguardQuickAffordanceConfig.LockScreenState.Visible(
             icon = Icon.Resource(R.drawable.ic_alpha_system_mark,
                 ContentDescription.Resource(R.string.alpha_system_unlock_assistant)),
         ) else KeyguardQuickAffordanceConfig.LockScreenState.Hidden
@@ -127,34 +144,58 @@ class AlphaAssistantQuickAffordanceConfig @Inject constructor(
             override fun onBeforeUserSwitching(newUser: Int) {
                 trySend(KeyguardQuickAffordanceConfig.LockScreenState.Hidden)
             }
-            override fun onUserChanged(newUser: Int, userContext: Context) { trySend(state()) }
+            override fun onUserChanged(newUser: Int, userContext: Context) {
+                launch { trySend(stateAsync()) }
+            }
         }
         val packages = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (intent.data?.schemeSpecificPart == AlphaSystemEntryPolicy.PACKAGE) trySend(state())
+                if (intent.data?.schemeSpecificPart == AlphaSystemEntryPolicy.PACKAGE) {
+                    launch { trySend(stateAsync()) }
+                }
             }
         }
-        val filter = IntentFilter().apply {
+        val suspension = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val changed = intent.getStringArrayExtra(Intent.EXTRA_CHANGED_PACKAGE_LIST)
+                if (changed != null && AlphaSystemEntryPolicy.PACKAGE in changed) {
+                    launch { trySend(stateAsync()) }
+                }
+            }
+        }
+        val packageFilter = IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
             addAction(Intent.ACTION_PACKAGE_CHANGED)
             addAction(Intent.ACTION_PACKAGE_REMOVED)
             addDataScheme("package")
         }
-        userTracker.addCallback(users, mainExecutor)
-        var registered = false
+        val suspendFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGES_SUSPENDED)
+            addAction(Intent.ACTION_PACKAGES_UNSUSPENDED)
+        }
+        userTracker.addCallback(users, backgroundExecutor)
+        var packageRegistered = false
+        var suspendRegistered = false
         try {
-            context.registerReceiver(packages, filter, Context.RECEIVER_NOT_EXPORTED)
-            registered = true
-            trySend(state())
+            broadcastDispatcher.registerReceiver(
+                packages, packageFilter, executor = backgroundExecutor, user = UserHandle.ALL,
+            )
+            packageRegistered = true
+            broadcastDispatcher.registerReceiver(
+                suspension, suspendFilter, executor = backgroundExecutor, user = UserHandle.ALL,
+            )
+            suspendRegistered = true
+            trySend(stateAsync())
             awaitClose { }
         } finally {
             userTracker.removeCallback(users)
-            if (registered) context.unregisterReceiver(packages)
+            if (packageRegistered) broadcastDispatcher.unregisterReceiver(packages)
+            if (suspendRegistered) broadcastDispatcher.unregisterReceiver(suspension)
         }
     }
 
     override suspend fun getPickerScreenState(): KeyguardQuickAffordanceConfig.PickerScreenState =
-        if (available()) KeyguardQuickAffordanceConfig.PickerScreenState.Default()
+        if (availableAsync()) KeyguardQuickAffordanceConfig.PickerScreenState.Default()
         else KeyguardQuickAffordanceConfig.PickerScreenState.UnavailableOnDevice
 
     override fun onTriggered(expandable: Expandable?): KeyguardQuickAffordanceConfig.OnTriggeredResult {
@@ -189,9 +230,11 @@ add(view_path, '''/* Copyright (C) 2026 The Android Open Source Project
 package com.android.systemui.shade;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
-import android.graphics.Typeface;
+import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.Typeface;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -207,6 +250,10 @@ import com.android.systemui.privacy.AbstractOngoingPrivacyChip;
 public final class AlphaShadeWordmarkView extends TextView {
     private final Rect brandBounds = new Rect();
     private final Rect otherBounds = new Rect();
+    private final Paint.FontMetrics fontMetrics = new Paint.FontMetrics();
+    private float cachedRequiredWidth = -1f;
+    private float cachedRequiredHeight = -1f;
+
     public AlphaShadeWordmarkView(Context context) { this(context, null); }
     public AlphaShadeWordmarkView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -222,22 +269,49 @@ public final class AlphaShadeWordmarkView extends TextView {
         // of END-aligned text in a wide constraint slot. The picker keeps Alpha's exact mark.
     }
 
+    @Override protected void onTextChanged(CharSequence text, int start, int lengthBefore, int lengthAfter) {
+        super.onTextChanged(text, start, lengthBefore, lengthAfter);
+        cachedRequiredWidth = -1f;
+        cachedRequiredHeight = -1f;
+    }
+
+    @Override protected void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        cachedRequiredWidth = -1f;
+        cachedRequiredHeight = -1f;
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        cachedRequiredWidth = -1f;
+        cachedRequiredHeight = -1f;
+    }
+
+    private void ensureMeasuredMetrics() {
+        if (cachedRequiredWidth >= 0f && cachedRequiredHeight >= 0f) return;
+        CharSequence label = getText();
+        float textWidth = label == null ? 0f : getPaint().measureText(label, 0, label.length());
+        getPaint().getFontMetrics(fontMetrics);
+        cachedRequiredWidth = textWidth + getCompoundPaddingLeft() + getCompoundPaddingRight();
+        cachedRequiredHeight = (fontMetrics.bottom - fontMetrics.top)
+                + getCompoundPaddingTop() + getCompoundPaddingBottom();
+    }
+
     /** Text scales normally. If the reserved slot cannot contain it, omit decoration, not controls. */
     @Override protected void onDraw(Canvas canvas) {
-        float requiredWidth = getPaint().measureText(getText().toString())
-                + getCompoundPaddingLeft() + getCompoundPaddingRight();
-        float requiredHeight = getPaint().getFontMetrics().bottom - getPaint().getFontMetrics().top
-                + getCompoundPaddingTop() + getCompoundPaddingBottom();
+        ensureMeasuredMetrics();
         boolean enabled = getResources().getBoolean(R.bool.config_alpha_system_entry_enabled);
         if (!AlphaShadeWordmarkPolicy.fits(enabled, getWidth(), getHeight(),
-                requiredWidth, requiredHeight, false) || !getGlobalVisibleRect(brandBounds)) return;
+                cachedRequiredWidth, cachedRequiredHeight, false)
+                || !getGlobalVisibleRect(brandBounds)) return;
         // Crop to the actual END-aligned wordmark, not its wider match-constraint slot.
-        int contentWidth = (int) Math.ceil(requiredWidth);
+        int contentWidth = (int) Math.ceil(cachedRequiredWidth);
         if (getLayoutDirection() == LAYOUT_DIRECTION_RTL) brandBounds.right = brandBounds.left + contentWidth;
         else brandBounds.left = brandBounds.right - contentWidth;
         // Clock rendering is transformed during expansion. Measured layout slots alone do not
-        // establish non-overlap. A positive visual collision drops decoration for this frame.
-        if (collides(getRootView())) return;
+        // establish non-overlap. Scope collision checks to the shade header parent, not full root DFS.
+        ViewParent parent = getParent();
+        if (parent instanceof View && collides((View) parent)) return;
         super.onDraw(canvas);
     }
 
@@ -266,24 +340,97 @@ public final class AlphaShadeWordmarkView extends TextView {
 
 compose = PREFIX + 'compose/features/src/com/android/systemui/shade/ui/composable/ShadeHeader.kt'
 text = original(compose)
+text = replace_once(text,
+    'import androidx.compose.foundation.layout.Box\n',
+    'import androidx.compose.foundation.layout.Box\nimport androidx.compose.foundation.layout.BoxWithConstraints\n')
+text = replace_once(text,
+    'import androidx.compose.runtime.getValue\n',
+    'import androidx.compose.runtime.getValue\nimport androidx.compose.runtime.mutableStateOf\nimport androidx.compose.runtime.setValue\n')
+text = replace_once(text,
+    'import androidx.compose.ui.graphics.Color\n',
+    'import androidx.compose.ui.geometry.Rect\nimport androidx.compose.ui.graphics.Color\n')
+text = replace_once(text,
+    'import androidx.compose.ui.layout.onGloballyPositioned\n',
+    'import androidx.compose.ui.layout.boundsInWindow\nimport androidx.compose.ui.layout.onGloballyPositioned\n')
+text = replace_once(text,
+    'import androidx.compose.ui.platform.LocalLayoutDirection\n',
+    'import androidx.compose.ui.platform.LocalLayoutDirection\nimport androidx.compose.ui.res.stringResource\nimport androidx.compose.ui.semantics.clearAndSetSemantics\n')
+text = replace_once(text,
+    'import com.android.systemui.scene.shared.model.Scenes\n',
+    'import com.android.systemui.scene.shared.model.Scenes\nimport com.android.systemui.shade.AlphaShadeWordmarkPolicy\n')
 start = text.index('fun ContentScope.ExpandedShadeHeader(')
 end = text.index('/**\n * The status bar that appears above both', start)
 body = text[start:end]
 body = replace_once(body,
-    '    Box(modifier = modifier.sysuiResTag(ShadeHeader.TestTags.Root)) {\n',
-    '''    Box(modifier = modifier.sysuiResTag(ShadeHeader.TestTags.Root)) {
-        // The reserved privacy band is otherwise empty. Decorative identity yields to privacy.
-        if (LocalContext.current.resources.getBoolean(R.bool.config_alpha_system_entry_enabled) &&
-            !viewModel.isPrivacyChipVisible) {
-            AndroidView(
-                factory = { com.android.systemui.shade.AlphaShadeWordmarkView(it) },
-                update = { it.setTextColor(textColor.toArgb()) },
-                modifier = Modifier.align(Alignment.TopEnd)
-                    .height(viewModel.statusBarHeightPx.toDp(LocalContext.current).dp)
-                    .widthIn(max = 180.dp),
-            )
+    '    val textColor = ShadeHeader.Colors.textColor\n\n    Box(modifier = modifier.sysuiResTag(ShadeHeader.TestTags.Root)) {\n',
+    '''    val textColor = ShadeHeader.Colors.textColor
+    var clockBounds by remember { mutableStateOf<Rect?>(null) }
+
+    Box(modifier = modifier.sysuiResTag(ShadeHeader.TestTags.Root)) {
+        // The reserved privacy band is otherwise empty. Decorative identity yields to privacy and clock bounds.
+        val alphaEntryEnabled =
+            LocalContext.current.resources.getBoolean(R.bool.config_alpha_system_entry_enabled)
+        if (alphaEntryEnabled && !viewModel.isPrivacyChipVisible) {
+            val density = LocalDensity.current
+            var wordmarkBounds by remember { mutableStateOf<Rect?>(null) }
+            var textWidthPx by remember { mutableStateOf(0f) }
+            var textHeightPx by remember { mutableStateOf(0f) }
+            var textOverflowed by remember { mutableStateOf(false) }
+            BoxWithConstraints(
+                contentAlignment = Alignment.CenterEnd,
+                modifier =
+                    Modifier.align(Alignment.TopEnd)
+                        .height(viewModel.statusBarHeightPx.toDp(LocalContext.current).dp)
+                        .widthIn(max = 180.dp)
+                        .padding(end = 8.dp)
+                        .clearAndSetSemantics {},
+            ) {
+                val availableWidthPx = with(density) { maxWidth.toPx() }
+                val availableHeightPx = with(density) { maxHeight.toPx() }
+                val collides =
+                    textOverflowed ||
+                        (clockBounds != null &&
+                            wordmarkBounds != null &&
+                            wordmarkBounds!!.overlaps(clockBounds!!))
+                val visible =
+                    AlphaShadeWordmarkPolicy.fits(
+                        alphaEntryEnabled,
+                        availableWidthPx,
+                        availableHeightPx,
+                        textWidthPx,
+                        textHeightPx,
+                        collides,
+                    )
+                Text(
+                    text = stringResource(R.string.alpha_system_brand),
+                    color = textColor,
+                    fontSize = 16.sp,
+                    fontFamily = FontFamily.Serif,
+                    maxLines = 1,
+                    softWrap = false,
+                    onTextLayout = { layoutResult ->
+                        textWidthPx = layoutResult.size.width.toFloat()
+                        textHeightPx = layoutResult.size.height.toFloat()
+                        textOverflowed =
+                            layoutResult.didOverflowWidth || layoutResult.didOverflowHeight
+                    },
+                    modifier =
+                        Modifier.onGloballyPositioned { wordmarkBounds = it.boundsInWindow() }
+                            .graphicsLayer { alpha = if (visible) 1f else 0f },
+                )
+            }
         }
 ''')
+body = replace_once(body,
+    '''                    modifier =
+                        Modifier.sysuiResTag("expanded_header_clock")
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .wrapContentSize(Alignment.CenterStart),''',
+    '''                    modifier =
+                        Modifier.sysuiResTag("expanded_header_clock")
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .wrapContentSize(Alignment.CenterStart)
+                            .onGloballyPositioned { clockBounds = it.boundsInWindow() },''')
 text = text[:start] + body + text[end:]
 edit(compose, text)
 
@@ -308,8 +455,8 @@ text = replace_once(text, '\n    <androidx.constraintlayout.widget.Guideline\n  
 edit(layout, text)
 
 # Each constraint set adds only our view. Existing IDs, rules and privacy/clock transitions stay exact.
-for filename, alpha, expanded in [('qs_header.xml', '1', True), ('qqs_header.xml', '0', False),
-                                   ('large_screen_shade_header.xml', '0', False)]:
+for filename, alpha in [('qs_header.xml', '1'), ('qqs_header.xml', '0'),
+                        ('large_screen_shade_header.xml', '0')]:
     path = PREFIX + 'res/xml/' + filename
     text = original(path)
     node = '''
@@ -336,13 +483,13 @@ add(PREFIX + 'res/values/alpha_system_entry.xml', '''<?xml version="1.0" encodin
     <string name="alpha_system_unlock_assistant">Unlock to open Alpha</string>
 </resources>
 ''')
-logo = REPO / 'apps/app/public/logo-mark.svg'
+logo = REPO / IDENTITY_SOURCE
 svg = ET.fromstring(logo.read_text())
-assert svg.attrib['viewBox'] == '0 0 120 120'
+require(svg.attrib.get('viewBox') == '0 0 120 120', 'Unexpected brand mark viewBox')
 paths = [x.attrib['d'] for x in svg if x.tag.endswith('path')]
-assert len(paths) == 1
+require(len(paths) == 1, 'Expected single emblem path in brand mark SVG')
 add(PREFIX + 'res/drawable/ic_alpha_system_mark.xml', '''<?xml version="1.0" encoding="utf-8"?>
-<!-- Exact path from Alpha's existing logo-mark.svg; tint is supplied by the native surface. -->
+<!-- Exact emblem-only path from packages/design-system/brand/mark.svg; tint is supplied by the native surface. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="120" android:viewportHeight="120">
     <path android:fillColor="#FFFFFFFF" android:pathData="''' + paths[0] + '''" />
@@ -351,19 +498,41 @@ add(PREFIX + 'res/drawable/ic_alpha_system_mark.xml', '''<?xml version="1.0" enc
 
 OUT.mkdir(parents=True, exist_ok=True)
 for row in INPUTS['files']:
-    target = OUT / row['path']; target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes((BASE / row['path']).read_bytes())
+    relative = safe_relative_path(row['path'], 'input path')
+    target = OUT / relative
+    reject_symlinks(target, DATA, 'staged path')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes((BASE / relative).read_bytes())
 patch = []
+manifest_files = []
 for path, (before, after) in sorted(changes.items()):
-    target = OUT / path; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(after)
+    relative = safe_relative_path(path, 'staged path')
+    target = OUT / relative
+    reject_symlinks(target, DATA, 'staged path')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(after)
     patch.extend(difflib.unified_diff((before or '').splitlines(True), after.splitlines(True),
-        fromfile='a/'+path if before is not None else '/dev/null', tofile='b/'+path))
+        fromfile='a/' + path if before is not None else '/dev/null', tofile='b/' + path))
+    manifest_files.append({
+        'path': path,
+        'beforeSha256': sha(before.encode()) if before is not None else None,
+        'afterSha256': sha(after.encode()),
+    })
 # Unified patches need explicit markers for upstream XML that intentionally lacks an EOF newline.
-patch_bytes=''.join(line if line.endswith('\n') else line+'\n\\ No newline at end of file\n'
-                    for line in patch).encode()
-reviewed = json.loads((ROOT/'manifest.json').read_text())
-assert sha(patch_bytes) == reviewed['patchSha256'], 'Generated patch differs from reviewed manifest'
-overlay=DATA/'product-overlay/values/alpha-system-entry.xml';overlay.parent.mkdir(parents=True,exist_ok=True)
+patch_bytes = ''.join(line if line.endswith('\n') else line + '\n\\ No newline at end of file\n'
+                      for line in patch).encode()
+reviewed = json.loads((ROOT / 'manifest.json').read_text())
+if args.write_manifest:
+    (ROOT / reviewed['patch']).write_bytes(patch_bytes)
+    reviewed['patchSha256'] = sha(patch_bytes)
+    reviewed['files'] = manifest_files
+    reviewed['identity'] = {'source': IDENTITY_SOURCE}
+    (ROOT / 'manifest.json').write_text(json.dumps(reviewed, indent=2) + '\n')
+else:
+    require(sha(patch_bytes) == reviewed['patchSha256'], 'Generated patch differs from reviewed manifest')
+overlay = DATA / 'product-overlay/values/alpha-system-entry.xml'
+reject_symlinks(overlay, DATA, 'product overlay path')
+overlay.parent.mkdir(parents=True, exist_ok=True)
 overlay.write_text('''<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <bool name="config_alpha_system_entry_enabled">true</bool>
@@ -374,4 +543,4 @@ overlay.write_text('''<?xml version="1.0" encoding="utf-8"?>
     </string-array>
 </resources>
 ''')
-print(json.dumps({'files':len(changes),'patchSHA256':sha(patch_bytes),'compilation':'pending'}))
+print(json.dumps({'files': len(changes), 'patchSHA256': sha(patch_bytes), 'compilation': 'pending'}))

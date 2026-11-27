@@ -11,19 +11,26 @@ it could not; Alpha says which.
 
 ### Each Android page is offered on the Settings page it belongs to
 
-Android's settings home and accounts and sync are on the first page.
-General offers Wi-Fi, Bluetooth, mobile networks, airplane mode, the
-screen lock and default apps; Display offers Android's display and
+Android's settings home is offered on the first page, and the warning
+that its microphone may still be on can open it from Privacy.
+On a phone, General offers Wi-Fi, Bluetooth, mobile networks, airplane
+mode, the screen lock and default apps; Display offers Android's display and
 brightness; Sound its sound and Do Not Disturb; Battery the battery saver;
 the Phone page default apps. Notifications offers Alpha's alerts, each of
 its channels and notification access; the Workflows page its own alerts.
-Permissions offers Alpha's permissions, its access to all files and
-location; Network offers Android's Internet panel and its Wi-Fi page;
+App permissions sends Camera, Microphone, Location and Calendar to
+Android's settings for Alpha. Photos opens photo access and Files opens
+all-files access. Notifications opens Alpha's Notifications page.
+Network offers Android's Internet panel and its Wi-Fi page;
 Carrier & SIM setup offers About phone, mobile networks, the SIMs, the
 access point names and default apps; the Calendar, Camera,
 Maps and Notes pages Alpha's permissions, and the Photos page Alpha's
-photo access. About offers Android's About phone, and Developer its
-developer options. The Passwords page opens Android's confirmation to use Alpha for autofill.
+photo access. Developer offers Android's developer options; About phone
+is on Carrier & SIM setup, not on About, as in Alpha's earlier build. The Passwords page opens Android's confirmation to use Alpha for autofill.
+The phone keeps Alpha's installed Autofill component and the native vault
+identity across an app update. The browser may fill only fields whose
+committed origin the native browser can attest. Typed or generated passwords
+stay in native password screens and never cross the page bridge.
 
 ```quint
 import index as I from "./index"
@@ -33,7 +40,7 @@ import timed as T from "./timed"
 type Target = AndroidHome | AccountsSync | WifiNetworks | BluetoothDevices | MobileNetworks | AirplaneMode | ScreenLock | DefaultApps | PasswordAutofill | DisplaySettings | Brightness | SoundSettings | DoNotDisturb | BatterySaver | AlphaAlerts | AlertChannel | NotificationAccess | WorkflowAlerts | AppPermissions | PhotoPermissions | AllFilesAccess | LocationSettings | InternetPanel | SimCards | AccessPointNames | AboutPhone | DeveloperOptions
 
 pure def offers(page: I::Page, target: Target): bool =
-  if (page == I::Top) target == AndroidHome or target == AccountsSync
+  if (page == I::Top or page == I::Privacy) target == AndroidHome
   else if (page == I::General)
     target == WifiNetworks or target == BluetoothDevices or target == MobileNetworks or target == AirplaneMode
       or target == ScreenLock or target == DefaultApps
@@ -41,16 +48,15 @@ pure def offers(page: I::Page, target: Target): bool =
   else if (page == I::Sound) target == SoundSettings or target == DoNotDisturb
   else if (page == I::Battery) target == BatterySaver
   else if (page == I::PhonePage) target == DefaultApps
-  else if (page == I::Notifications) target == AlphaAlerts or target == AlertChannel or target == NotificationAccess
+  else if (page == I::Notifications or page == I::PrivacyNotifications) target == AlphaAlerts or target == AlertChannel or target == NotificationAccess
   else if (page == I::WorkflowsApp) target == WorkflowAlerts
-  else if (page == I::Permissions) target == AppPermissions or target == AllFilesAccess or target == LocationSettings
+  else if (page == I::Permissions) target == AppPermissions or target == PhotoPermissions or target == AllFilesAccess
   else if (page == I::NetworkPage) target == InternetPanel or target == WifiNetworks
   else if (page == I::CarrierPage)
     target == AboutPhone or target == MobileNetworks or target == SimCards or target == AccessPointNames or target == DefaultApps
   else if (page == I::CalendarApp or page == I::CameraApp or page == I::MapsApp or page == I::NotesApp) target == AppPermissions
   else if (page == I::PhotosApp) target == PhotoPermissions
-  else if (page == I::PasswordsPage) target == PasswordAutofill
-  else if (page == I::About) target == AboutPhone
+  else if (I::passwordPage(page)) target == PasswordAutofill
   else if (page == I::Developer) target == DeveloperOptions
   else false
 ```
@@ -105,14 +111,14 @@ pure def handOff(s: Android, page: I::Page, target: Target, channel: str, at: in
 
 ### Android says whether it opened that page, a nearby one, or none
 
-Mobile networks, airplane mode, Do Not Disturb, screen lock, password autofill, and the SIM and access point pages may open a related Android page. Alpha says so when a nearby page opened, and says unavailable when none did.
+Mobile networks, airplane mode, Do Not Disturb, screen lock, SIM cards, access point names, and the password autofill picker may open a related Android page. Alpha says so when a nearby page opened, and says unavailable when none did.
 
 ```quint
 type Opened = Exactly | Nearby | NotAtAll
 
 pure val startValues = Set(1, 2, 3)
 
-pure def hasNearby(target: Target): bool = target == MobileNetworks or target == AirplaneMode or target == DoNotDisturb or target == ScreenLock or target == PasswordAutofill or target == SimCards or target == AccessPointNames
+pure def hasNearby(target: Target): bool = target == MobileNetworks or target == AirplaneMode or target == DoNotDisturb or target == ScreenLock or target == SimCards or target == AccessPointNames or target == PasswordAutofill
 
 pure def canAndroidAnswered(s: Android, start: int, opened: Opened): bool =
   T::canAnswer(s.start, start) and (opened == Nearby implies hasNearby(s.target))

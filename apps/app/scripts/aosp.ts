@@ -54,7 +54,7 @@ const PATCHES: Readonly<Record<string, { readonly patch: Patch; readonly manifes
   "chip": { patch: "Chip", manifest: "@elizaos/os/aosp/sense/systemui/chip/manifest.json", file: "@elizaos/os/aosp/sense/systemui/chip/listening-chip.patch" },
   "ops": { patch: "Ops", manifest: "@elizaos/os/aosp/sense/systemui/manifest.json", file: "@elizaos/os/aosp/sense/systemui/microphone-ops.patch" },
   "assist": { patch: "Assist", manifest: "@elizaos/os/aosp/sense/systemui/assist/manifest.json", file: "@elizaos/os/aosp/sense/systemui/assist/assist-identity.patch" },
-  "protected-power": { patch: "ProtectedPower", manifest: "aosp/branding/power-voice/manifest.json", file: "aosp/branding/power-voice/alpha-protected-power-voice.patch" },
+  "protected-power": { patch: "ProtectedPower", manifest: "@elizaos/os/aosp/sense/systemui/power/manifest.json", file: "@elizaos/os/aosp/sense/systemui/power/protected-power-voice.patch" },
   "soong-memory": { patch: "SoongMemory", manifest: "aosp/build-host/manifest.json", file: "aosp/build-host/soong-memory.patch" },
   "sense-policy": { patch: "SensePolicy", manifest: "aosp/branding/sense-policy/manifest.json", file: "aosp/branding/sense-policy/alpha-sense-policy.patch" },
 };
@@ -65,7 +65,7 @@ const OTA_COMMANDS: Readonly<Record<string, OtaCommand>> = {
 };
 
 const USAGE = [
-  "pnpm aosp stage --target cuttlefish|pixel10a --apk FILE --aosp-source DIR --output NEW_DIR [--development [--owner-telephony]] [--descriptor FILE] [--factory-image FILE (pixel10a)] [--listener-apk FILE --listener-descriptor FILE [--listener-qualification FILE]] [--patch chip|ops|assist|protected-power|soong-memory|sense-policy ...] [--aapt PATH] [--apksigner PATH]",
+  "pnpm aosp stage --target cuttlefish|pixel10a --apk FILE --aosp-source DIR --output NEW_DIR [--development [--owner-telephony]] [--descriptor FILE] [--factory-image FILE (pixel10a)] [--listener-apk FILE --listener-descriptor FILE [--listener-qualification FILE --listener-voice-host FILE --listener-voice-host-sha256 SHA256 --listener-models FILE --listener-models-sha256 SHA256]] [--patch chip|ops|assist|protected-power|soong-memory|sense-policy ...] [--aapt PATH] [--apksigner PATH]",
   "pnpm aosp ota check|apply|status|fallback|stock-archive|verify-stock|retain-known-good [eliza's operator options]",
   "pnpm aosp verify --target pixel10a|cuttlefish --serial SERIAL --user N --expected FILE [--adb PATH] [--out NEW_FILE]",
   "pnpm aosp sign --request FILE [--dry-run]",
@@ -127,7 +127,7 @@ const patchReference = (name: string, manifest: string, file: string) =>
 /** The stage a command line asks for, read before any APK, descriptor or source. */
 export function stageRequest(argv: readonly string[]) {
   const found = flags(argv, {
-    valued: ["target", "apk", "aosp-source", "output", "descriptor", "factory-image", "listener-apk", "listener-descriptor", "listener-qualification", "aapt", "apksigner"],
+    valued: ["target", "apk", "aosp-source", "output", "descriptor", "factory-image", "listener-apk", "listener-descriptor", "listener-qualification", "listener-voice-host", "listener-voice-host-sha256", "listener-models", "listener-models-sha256", "aapt", "apksigner"],
     switches: ["development", "owner-telephony"],
     repeated: ["patch"],
   });
@@ -137,6 +137,21 @@ export function stageRequest(argv: readonly string[]) {
   if (found.values["factory-image"] !== undefined && target !== "Pixel10a") throw new UsageError({ message: "--factory-image belongs to --target pixel10a" });
   if (target === "Pixel10a" && found.values["factory-image"] === undefined) throw new UsageError({ message: "--target pixel10a needs --factory-image" });
   if (found.values["listener-descriptor"] !== undefined && found.values["listener-apk"] === undefined) throw new UsageError({ message: "--listener-descriptor needs --listener-apk" });
+  if (found.values["listener-qualification"] !== undefined && found.values["listener-apk"] === undefined) throw new UsageError({ message: "--listener-qualification needs --listener-apk" });
+  if (found.values["listener-apk"] !== undefined && found.values["listener-descriptor"] === undefined && found.values["listener-qualification"] === undefined) {
+    throw new UsageError({ message: "--listener-apk needs --listener-descriptor" });
+  }
+  const voiceHost = found.values["listener-voice-host"];
+  const voiceHostHash = found.values["listener-voice-host-sha256"];
+  const models = found.values["listener-models"];
+  const modelsHash = found.values["listener-models-sha256"];
+  const speech = voiceHost !== undefined && voiceHostHash !== undefined && models !== undefined && modelsHash !== undefined
+    && /^[0-9a-f]{64}$/.test(voiceHostHash) && /^[0-9a-f]{64}$/.test(modelsHash)
+    ? { voiceHost: { file: voiceHost, sha256: voiceHostHash }, models: { file: models, sha256: modelsHash } }
+    : undefined;
+  if ([voiceHost, voiceHostHash, models, modelsHash].some((input) => input !== undefined)
+    && (speech === undefined || found.values["listener-apk"] === undefined))
+    throw new UsageError({ message: "Listener speech needs its APK, both reviewed files, and their SHA-256 digests" });
   const named = found.repeated.patch ?? [];
   const unknown = named.filter((name) => !Object.hasOwn(PATCHES, name));
   if (unknown.length) throw new UsageError({ message: `--patch takes ${Object.keys(PATCHES).join(", ")}, not ${unknown.join(", ")}` });
@@ -149,12 +164,13 @@ export function stageRequest(argv: readonly string[]) {
     ownerTelephony: found.switches.has("owner-telephony"),
     listener: found.values["listener-apk"] !== undefined && found.values["listener-descriptor"] !== undefined,
     qualified: found.values["listener-qualification"] !== undefined,
+    speechPinned: speech !== undefined,
     patches: named.flatMap((name) => PATCHES[name]?.patch ?? []),
     branding: false,
   };
   const problems = stageProblems(stage);
   if (problems.length) throw new StageRefused({ problems, message: `Refusing the ${stage.target} ${stage.mode} stage: ${problems.join(", ")}` });
-  return { found, stage, apk, source, output };
+  return { found, stage, apk, source, output, speech };
 }
 
 interface Launcher { readonly moduleName: string; readonly packageName: string }
@@ -176,7 +192,7 @@ const launcherDescriptor = (found: Flags, stage: Stage, apk: string, apksigner: 
 });
 
 const stage = (argv: readonly string[]) => Effect.gen(function* () {
-  const { found, stage, apk, source, output } = yield* attempt(() => stageRequest(argv));
+  const { found, stage, apk, source, output, speech } = yield* attempt(() => stageRequest(argv));
   const aapt = found.values.aapt ?? "aapt";
   const apksigner = found.values.apksigner ?? "apksigner";
   const { descriptor, launcher } = yield* launcherDescriptor(found, stage, apk, apksigner);
@@ -184,17 +200,22 @@ const stage = (argv: readonly string[]) => Effect.gen(function* () {
   const lockFile = place(stage.target === "Pixel10a" ? STOCK_SOURCE_LOCK : SHARED_SOURCE_LOCK);
   const profile = { name: stage.target === "Pixel10a" ? "pixel10a" : "cuttlefish", file: lockFile, sha256: yield* attempt(() => sha256File(lockFile)) };
   const patches = yield* attempt(() => [patchReference("soong-app-native", SOONG_APP_NATIVE.manifest, SOONG_APP_NATIVE.file),
-    ...(found.repeated.patch ?? []).flatMap((name) => { const known = PATCHES[name]; return known === undefined ? [] : [patchReference(name, known.manifest, known.file)]; })]);
+    ...(found.repeated.patch ?? []).flatMap((name) => { const known = PATCHES[name]; return known === undefined ? [] : [patchReference(known.patch === "ProtectedPower" ? "power" : name, known.manifest, known.file)]; })]);
   const factory = found.values["factory-image"];
   const sourceOptions = { profile, sourceRoot: source, ...(factory === undefined ? {} : { factory }), patches };
-  if (stage.target === "Pixel10a") yield* verifyDeviceSource(sourceOptions);
-  else yield* verifySource(sourceOptions);
+  yield* (stage.target === "Pixel10a" ? verifyDeviceSource(sourceOptions) : verifySource(sourceOptions));
   const provisioning = {
     assistant: listenerImage(stage) ? { tag: "ListenerAssistant" as const, power: true } : { tag: "NoAssistant" as const },
     requires: { autofill: true, allFilesAccess: true },
     telephonyRoles: true,
     lockScreen: "SystemOwnsLockScreen" as const,
   };
+  if (!imageTelephony(stage)) yield* provisioningComponents(yield* aaptManifestTree(apk, { aapt }), launcher.packageName, {
+    assistant: { tag: "NoAssistant" },
+    requires: { autofill: false, allFilesAccess: false },
+    telephonyRoles: false,
+    lockScreen: provisioning.lockScreen,
+  });
   const scratch = yield* attempt(() => mkdtempSync(join(tmpdir(), "alpha-aosp-")));
   return yield* Effect.ensuring(Effect.gen(function* () {
     const descriptorFile = join(scratch, "launcher.json");
@@ -216,9 +237,10 @@ const stage = (argv: readonly string[]) => Effect.gen(function* () {
     const listenerApk = found.values["listener-apk"];
     const listenerDescriptor = found.values["listener-descriptor"];
     const qualification = found.values["listener-qualification"];
-    if (listenerApk !== undefined) yield* stageListener({
+    if (stage.listener && listenerApk !== undefined && listenerDescriptor !== undefined) yield* stageListener({
       output, launcher: { apk: join(output, "Launcher.apk"), descriptor: descriptorFile }, apk: listenerApk,
-      ...(listenerDescriptor === undefined ? {} : { descriptor: listenerDescriptor }),
+      descriptor: listenerDescriptor,
+      ...(speech === undefined ? {} : { speech }),
       ...SENSE, policyCertificate: place(LISTENER_CERTIFICATE), sdkCommit: ((yield* attempt(() => json("../../eliza.lock.json"))) as { readonly commit: string }).commit,
       source: sourceOptions, production, aapt, apksigner,
       ...(qualification === undefined ? {} : { activation: provisioning, qualification: { file: qualification, sha256: yield* attempt(() => sha256File(qualification)) } }),
@@ -239,6 +261,9 @@ export function otaArguments(argv: readonly string[]): string[] {
 }
 
 const ota = (argv: readonly string[]) => Effect.gen(function* () {
+  if (argv.includes("--channel") || argv.includes("--source-lock")) {
+    return yield* new UsageError({ message: "--channel and --source-lock are pinned by Alpha and cannot be overridden" });
+  }
   const channel = (yield* attempt(() => json(CHANNEL))) as { readonly channel: string; readonly product: string; readonly device: string; readonly downgradeAllowed: boolean };
   if (!channelIsAlphas({ name: channel.channel, product: channel.product, device: channel.device, downgradeAllowed: channel.downgradeAllowed }))
     return yield* new UsageError({ message: `${CHANNEL} is not Alpha's channel ${JSON.stringify(alphaChannel)}` });
@@ -256,25 +281,33 @@ const verify = (argv: readonly string[]) => Effect.gen(function* () {
   return report;
 });
 
-function requestOf(argv: readonly string[], switches: readonly string[]) {
+function requestOf(argv: readonly string[], switches: readonly string[], reserved: readonly string[]) {
   const found = flags(argv, { valued: ["request"], switches });
   const [file = ""] = required(found, "request");
-  const request: unknown = JSON.parse(readFileSync(file, "utf8"));
-  return { request: typeof request === "object" && request !== null ? request : {}, switches: found.switches };
+  const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new UsageError({ message: `${file} must hold a JSON object` });
+  }
+  const request = parsed as Readonly<Record<string, unknown>>;
+  const overridden = reserved.filter((key) => Object.hasOwn(request, key));
+  if (overridden.length > 0) {
+    throw new UsageError({ message: `${file} must not set Alpha-pinned field(s): ${overridden.join(", ")}` });
+  }
+  return { request, switches: found.switches };
 }
 
 const sign = (argv: readonly string[]) => Effect.gen(function* () {
   const signer = yield* attempt(() => json(RELEASE_SIGNER));
   if (!signerRecordAdmitted({ rotation: typeof signer === "object" && signer !== null && Object.hasOwn(signer, "apkSigningRotation") }))
     return yield* new UsageError({ message: `${RELEASE_SIGNER} still has apkSigningRotation; Alpha signs with one key. Delete the apkSigningRotation object.` });
-  const { request, switches } = yield* attempt(() => requestOf(argv, ["dry-run"]));
   const alpha = { descriptor: place(RELEASE), product: place(PRODUCTS.Pixel10a), channel: place(CHANNEL), keyManifest: place(KEY_MANIFEST) };
-  return yield* signRelease(yield* signReleaseRequest({ ...alpha, ...request }, switches.has("dry-run")));
+  const { request, switches } = yield* attempt(() => requestOf(argv, ["dry-run"], Object.keys(alpha)));
+  return yield* signRelease(yield* signReleaseRequest({ ...request, ...alpha }, switches.has("dry-run")));
 });
 
 const record = (argv: readonly string[]) => Effect.gen(function* () {
-  const { request } = yield* attempt(() => requestOf(argv, []));
-  return yield* writeReleaseRecord({ channel: place(CHANNEL), ...request });
+  const { request } = yield* attempt(() => requestOf(argv, [], ["channel"]));
+  return yield* writeReleaseRecord({ ...request, channel: place(CHANNEL) });
 });
 
 const keys = (argv: readonly string[]) => Effect.gen(function* () {
@@ -297,6 +330,10 @@ const keys = (argv: readonly string[]) => Effect.gen(function* () {
 const enroll = (argv: readonly string[]) => Effect.gen(function* () {
   const found = yield* attempt(() => flags(argv, { valued: ["checkout", "certificate", "product-makefile-sha256", "receipt"], switches: ["execute"] }));
   const [checkout = "", certificate = "", productMakefileSha256 = "", receipt = ""] = yield* attempt(() => required(found, "checkout", "certificate", "product-makefile-sha256", "receipt"));
+  const profile = yield* attempt(() => enrolledProfile());
+  if (!Os.isPinned(profile)) {
+    return yield* new UsageError({ message: `${ENROLLMENT} does not match the OS spec's pinned profile` });
+  }
   const pilot = (yield* attempt(() => json(ENROLLMENT))) as { readonly manifestUrl: string; readonly hosts: readonly string[]; readonly product: string; readonly device: string; readonly otaCertificateSha256: string };
   const channel = { manifestUrl: pilot.manifestUrl, hosts: pilot.hosts, product: pilot.product, device: pilot.device, otaCertificateSha256: pilot.otaCertificateSha256 };
   return yield* enrollUpdater({ checkout, descriptor: place(PRODUCTS.Pixel10a), channel, certificate, productMakefileSha256, receipt, execute: found.switches.has("execute") });
@@ -312,12 +349,29 @@ const DRILLS: Readonly<Record<string, Os.Drill>> = {
 
 /** The profile the image's enrolment stages: the pilot enrolment's manifest, hosts, product, device and certificate, with the channel's verified-boot key. */
 function enrolledProfile(): Os.Profile {
-  const pilot = json(ENROLLMENT) as { readonly manifestUrl: string; readonly hosts: readonly string[]; readonly product: string; readonly device: string; readonly otaCertificateSha256: string; readonly rotatePlatformOrAVBKeys: boolean; readonly wipeData: boolean };
+  const pilot = json(ENROLLMENT) as { readonly manifestUrl: string; readonly hosts: readonly string[]; readonly product: string; readonly device: string; readonly otaCertificateSha256: string; readonly rotatePlatformOrAVBKeys: boolean; readonly wipeData: boolean; readonly allowDowngrade?: boolean };
   const channel = json(CHANNEL) as { readonly avbPublicKeySha256: string };
   return {
     manifest: pilot.manifestUrl, hosts: pilot.hosts.join(" "), product: pilot.product, device: pilot.device,
-    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData, downgrade: false,
+    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData,
+    downgrade: pilot.allowDowngrade ?? false,
   };
+}
+
+function parseBuildDate(raw: unknown, file: string): number {
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new UsageError({ message: `Invalid build.dateUtc in ${file}: expected a positive integer epoch timestamp` });
+  }
+  return value;
+}
+
+function parseOtaWipe(raw: unknown): boolean {
+  if (raw === undefined || raw === "") return false;
+  if (typeof raw !== "string") return true;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "no" || normalized === "false" || normalized === "0") return false;
+  return true;
 }
 
 /** A signed release record as the OS spec reads it, or the stock image. */
@@ -329,8 +383,8 @@ function imageRecord(file: string): Os.ImageRecord {
     readonly payload?: { readonly metadata?: Readonly<Record<string, string>> };
   };
   return {
-    build: Number(record.build.dateUtc), product: record.product, device: record.device, certificate: record.certificates.releasekey,
-    avb: record.verifiedBoot.publicKeySha256, wipe: record.payload?.metadata?.["ota-wipe"] === "yes",
+    build: parseBuildDate(record.build.dateUtc, file), product: record.product, device: record.device, certificate: record.certificates.releasekey,
+    avb: record.verifiedBoot.publicKeySha256, wipe: parseOtaWipe(record.payload?.metadata?.["ota-wipe"]),
   };
 }
 

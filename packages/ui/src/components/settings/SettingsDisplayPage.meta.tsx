@@ -10,6 +10,7 @@ export const meta: ComponentMeta<SettingsDisplayPageProps> = {
   args: { theme: "system", size: 100, onBack: fn(), onChooseTheme, onChooseSize, onAndroid: fn() },
   decorator: fullHeight,
   examples: {
+    Browser: { onPhone: false },
     Keeping: { theme: "dark", keeping: true },
     "Not saved": { notice: "not-saved" },
     "Size not confirmed": { notice: "size-not-confirmed", sizing: true },
@@ -17,6 +18,12 @@ export const meta: ComponentMeta<SettingsDisplayPageProps> = {
     Largest: { size: 150 },
   },
   play: {
+    Browser: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const canvas = within(canvasElement);
+      await expect(canvas.queryByRole("button", { name: "Manage brightness in Android" })).toBeNull();
+      await expect(canvas.queryByRole("button", { name: "Display settings" })).toBeNull();
+      await expect(canvas.getByRole("switch", { name: "Legible text" })).toBeTruthy();
+    },
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onChooseTheme.mockClear();
       onChooseSize.mockClear();

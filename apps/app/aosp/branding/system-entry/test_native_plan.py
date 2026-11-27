@@ -1,10 +1,10 @@
 from pathlib import Path
 import hashlib, json, os, shutil, subprocess, tempfile, unittest, xml.etree.ElementTree as ET
-from portable_tools import java_binary, android_api_jar
+from portable_tools import java_binary, android_api_jar, find_repo_root, require
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('ALPHA_SYSTEM_ENTRY_INPUTS', ROOT / '.cache')).resolve()
-REPO = next(path for path in ROOT.parents if (path / 'app.config.json').is_file())
+REPO = find_repo_root(ROOT)
 BASE = DATA / 'baseline'
 STAGED = DATA / 'staged'
 MANIFEST = json.loads((ROOT / 'manifest.json').read_text())
@@ -65,13 +65,43 @@ class NativePlanTest(unittest.TestCase):
             self.assertEqual(canonical(before), canonical(after), path)
         compose = PREFIX + 'compose/features/src/com/android/systemui/shade/ui/composable/ShadeHeader.kt'
         before, after = read(BASE, compose), read(STAGED, compose)
+        self.assertNotIn('AndroidView(\n                factory = { com.android.systemui.shade.AlphaShadeWordmarkView', after)
+        for required_import in [
+            'import androidx.compose.foundation.layout.BoxWithConstraints',
+            'import androidx.compose.runtime.mutableStateOf',
+            'import androidx.compose.runtime.setValue',
+            'import androidx.compose.ui.geometry.Rect',
+            'import androidx.compose.ui.layout.boundsInWindow',
+            'import androidx.compose.ui.res.stringResource',
+            'import androidx.compose.ui.semantics.clearAndSetSemantics',
+            'import com.android.systemui.shade.AlphaShadeWordmarkPolicy',
+        ]:
+            self.assertIn(required_import, after)
         start = after.index('        // The reserved privacy band is otherwise empty.')
         end = after.index('        if (viewModel.isPrivacyChipVisible)', start)
-        self.assertEqual(before, after[:start] + after[end:])
         addition = after[start:end]
         self.assertIn('!viewModel.isPrivacyChipVisible', addition)
+        self.assertIn('AlphaShadeWordmarkPolicy.fits(', addition)
+        self.assertIn('overlaps(clockBounds!!)', addition)
         self.assertNotIn('clickable', addition)
         self.assertIn('Alignment.TopEnd', addition)
+        self.assertIn('clearAndSetSemantics', addition)
+        # Verify original ExpandedShadeHeader structure stays intact outside the additive block, imports, and clock bounds hook.
+        stripped = after[:start] + after[end:]
+        stripped = stripped.replace('    var clockBounds by remember { mutableStateOf<Rect?>(null) }\n', '', 1)
+        stripped = stripped.replace('\n                            .onGloballyPositioned { clockBounds = it.boundsInWindow() },', ',', 1)
+        for added_import in [
+            'import androidx.compose.foundation.layout.BoxWithConstraints\n',
+            'import androidx.compose.runtime.mutableStateOf\n',
+            'import androidx.compose.runtime.setValue\n',
+            'import androidx.compose.ui.geometry.Rect\n',
+            'import androidx.compose.ui.layout.boundsInWindow\n',
+            'import androidx.compose.ui.res.stringResource\n',
+            'import androidx.compose.ui.semantics.clearAndSetSemantics\n',
+            'import com.android.systemui.shade.AlphaShadeWordmarkPolicy\n',
+        ]:
+            stripped = stripped.replace(added_import, '', 1)
+        self.assertEqual(before, stripped)
 
     def test_module_registration_adds_one_choice_without_removing_any_config(self):
         # Android's existing picker feature gate is independent from our product entry gate.
@@ -110,8 +140,12 @@ class NativePlanTest(unittest.TestCase):
         for fragment in ['Intent(Intent.ACTION_ASSIST)', 'component = ComponentName(', 'canShowWhileLocked = false',
                          'getBoolean(R.bool.config_alpha_system_entry_enabled)',
                          'getTargetActivityInfo(intent(), user, false)', 'user != userTracker.userId',
-                         'FLAG_SYSTEM', 'FLAG_SUSPENDED', 'target.exported', 'finally {', 'removeCallback(users)',
-                         'unregisterReceiver(packages)', 'if (!available()) return']:
+                         'FLAG_SYSTEM', 'FLAG_UPDATED_SYSTEM_APP', 'FLAG_SUSPENDED', 'target.exported',
+                         'broadcastDispatcher.registerReceiver(', 'user = UserHandle.ALL',
+                         'ACTION_PACKAGES_SUSPENDED', 'ACTION_PACKAGES_UNSUSPENDED',
+                         'withContext(backgroundDispatcher)', 'finally {', 'removeCallback(users)',
+                         'broadcastDispatcher.unregisterReceiver(packages)',
+                         'broadcastDispatcher.unregisterReceiver(suspension)', 'if (!available()) return']:
             self.assertIn(fragment, config)
         for forbidden in ['putExtra(', 'setData(', 'ACTION_VOICE_COMMAND', 'startActivity(', 'startService(',
                           'requestPermissions', 'getUserMedia', 'CloudProtocol', 'Settings.Secure', 'LISTENER']:
@@ -175,13 +209,23 @@ public class Test {
         self.assertEqual(vector.attrib[ANDROID+'viewportWidth'],'120')
         self.assertEqual(vector.attrib[ANDROID+'viewportHeight'],'120')
         self.assertEqual(vector.find('path').attrib[ANDROID+'pathData'],next(iter(svg)).attrib['d'])
+        # Ensure off-viewport wordmark glyphs (X > 120) are not embedded in the 120x120 mark icon.
+        self.assertNotIn('M226.53', vector.find('path').attrib[ANDROID+'pathData'])
         view=read(STAGED,PREFIX+'src/com/android/systemui/shade/AlphaShadeWordmarkView.java')
         self.assertIn('Typeface.create("serif", Typeface.NORMAL)',view)
         self.assertIn('COMPLEX_UNIT_SP',view)
+        self.assertIn('Paint.FontMetrics',view)
+        self.assertNotIn('getRootView()',view)
+        self.assertNotIn('getText().toString()',view)
         self.assertNotIn('setCompoundDrawablesRelative(',view)
         self.assertNotIn('setCompoundDrawablePadding(',view)
         self.assertIn('LAYOUT_DIRECTION_RTL',view)
         self.assertIn('Rect.intersects(brandBounds, otherBounds)',view)
         self.assertIn('setClickable(false)',view)
+
+    def test_require_enforced_under_optimize_flag(self):
+        with self.assertRaisesRegex(RuntimeError, 'unconditional guard'):
+            require(False, 'unconditional guard')
+        self.assertTrue((REPO / 'pnpm-workspace.yaml').is_file())
 
 if __name__ == '__main__': unittest.main(verbosity=2)

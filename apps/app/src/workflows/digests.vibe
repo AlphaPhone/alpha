@@ -1,17 +1,19 @@
-// spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"; spec/app/digests/sources.md, "Story: Consent to a source for a while"; spec/app/digests/sources.md, "Story: Choose the phone's calendars"; spec/app/digests/sources.md, "Story: Renew a source's access"; spec/app/digests/sources.md, "Story: Keep sources to their owner and through a restart"
-import type * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError, type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
+// spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type WorkflowRequest, WorkflowAdmissionRejected, WorkflowHttpError, WorkflowLifecycleRejected, WorkflowResponseInvalid, type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestSourceState, hostedDigestProtocol, missedRunNowOffers } from "@elizaos/plugin-workflow-client"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import * as Plan from "../../gen/app__digests__schedules.effect.vibe"
 import type { Change, Effect as Out, Event, Template } from "../../gen/app__digests__schedules.effect.vibe"
-import * as Sources from "../../gen/app__digests__sources.effect.vibe"
-import type { Effect as SourceEffect, Event as SourceEvent, Kind as SourceKind } from "../../gen/app__digests__sources.effect.vibe"
-import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { type Said, say } from "../notices/index.vibe"
-import { Agent, PhoneCalendar, launchOwnerAt, sameResidentOwner, SystemSettings } from "../platform/index.vibe"
-import { type Job, answer, applying, contained, due, following, reacting, run, together, Attempts, Time } from "../runtime/index.vibe"
-import { WorkflowsApi } from "./api.vibe"
-import { DigestHistory } from "./brief.vibe"
+import { canFile } from "../../gen/app__workflows__request.effect.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { launchOwnerAt, sameResidentOwner } from "../platform/index.vibe"
+import { type Job, answer, applying, following, reacting, started, together } from "../runtime/index.vibe"
+import { Attempts } from "../runtime/index.vibe"
+import { createShelf } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
+import { WorkflowsApi, checkedWorkflowRequest, localTimeZone } from "./api.vibe"
+import { DigestHistory, digestScope } from "./brief.vibe"
 import { Rows } from "./list.vibe"
 
 interface Numbered<T> { readonly number: number; readonly record: T }
@@ -25,27 +27,52 @@ export interface DigestView {
   readonly capable: boolean
 }
 
+export interface DigestWordsSnapshot {
+  readonly view: DigestView
+  readonly zoneOwner: number
+  readonly zone: string
+  readonly observedAt: number
+}
+
 const empty: DigestView = { owner: 0, loops: [], sources: [], results: [], partial: false, capable: false }
+const emptySnapshot: DigestWordsSnapshot = { view: empty, zoneOwner: 0, zone: "", observedAt: 0 }
 
 export service DigestWords {
   view(owner: number): DigestView!!
-  store(value: DigestView): void!!
+  store(value: DigestView, observedAt?: number): void!!
   number(owner: number, key: string): number!!
   zone(owner: number): string!!
   reviewZone(owner: number, zone: string): void!!
+  tick(now: number): void!!
+  snapshot(this: void): DigestWordsSnapshot
+  subscribe(this: void, listener: () => void): () => void
 }
 
 const words = Layer.sync(DigestWords, () => {
-  let shown = empty
+  const shelf = createShelf<DigestWordsSnapshot>(emptySnapshot)
   const numbers = new Map<string, number>()
   let known = 0
   let next = 0
-  let reviewed: { owner: number; zone: string } | undefined
   return {
-    view: (owner: number) => succeed(shown.owner === owner ? shown : empty),
-    store: (value: DigestView) => sync(() => { shown = value }),
-    zone: (owner: number) => succeed(reviewed?.owner === owner ? reviewed.zone : ""),
-    reviewZone: (owner: number, zone: string) => sync(() => { reviewed = { owner, zone } }),
+    view: (owner: number) => sync(() => {
+      const shown = shelf.get().view
+      return shown.owner === owner ? shown : empty
+    }),
+    store: (value: DigestView, observedAt?: number) => sync(() => {
+      shelf.update((cur) => ({ ...cur, view: value, ...(observedAt === undefined ? {} : { observedAt }) }))
+    }),
+    zone: (owner: number) => sync(() => {
+      const cur = shelf.get()
+      return cur.zoneOwner === owner ? cur.zone : ""
+    }),
+    reviewZone: (owner: number, zone: string) => sync(() => {
+      shelf.update((cur) => ({ ...cur, zoneOwner: owner, zone }))
+    }),
+    tick: (now: number) => sync(() => {
+      shelf.update((cur) => cur.observedAt === now ? cur : { ...cur, observedAt: now })
+    }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
     number: (owner: number, key: string) => sync(() => {
       if (owner !== known) { known = owner; numbers.clear() }
       const number = numbers.get(key) ?? ++next
@@ -55,7 +82,12 @@ const words = Layer.sync(DigestWords, () => {
   }
 })
 
-type Needs = Agent | Rows | WorkflowsApi | DigestWords | DigestHistory | List.Machine | Plan.Machine | KeyValueStore.KeyValueStore | Time
+/** Build a hosted digest protocol client that verifies `ownsRequest` before and after every request. */
+export function ownedDigestProtocol(request: WorkflowRequest, ownsRequest: boolean!!) {
+  return hostedDigestProtocol(checkedWorkflowRequest(request, ownsRequest))
+}
+
+type Needs = Agent | Device | Rows | WorkflowsApi | DigestWords | DigestHistory | List.Machine | Plan.Machine | KeyValueStore.KeyValueStore | Time
 
 effect function read(ticket: number, owner: number): Event!!Needs {
   const fail: Event = { type: "schedulesRead", ticket, ok: false, count: 0, standing: "NoSchedule", template: "Morning",
@@ -71,13 +103,7 @@ effect function read(ticket: number, owner: number): Event!!Needs {
     const confirmed = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
     return sameResidentOwner(identity, confirmed) && (try rows.sameDigestOwner(identity, owner))
   }
-  const checked: WorkflowRequest = effect (path: string, body: unknown) => {
-    if (!(try ownsRequest)) throw workflowHttpError(0, {})
-    const received = try request(path, body)
-    if (!(try ownsRequest)) throw workflowHttpError(0, {})
-    return received
-  }
-  const protocol = hostedDigestProtocol(checked)
+  const protocol = ownedDigestProtocol(request, ownsRequest)
   const supported = (protocol.capabilities() catch () => undefined)
   if (supported === undefined) return fallback
   const payload = effect {
@@ -104,42 +130,64 @@ effect function read(ticket: number, owner: number): Event!!Needs {
   }
   const current = try payload
   if (!(try ownsRequest)) return fallback
+  const now = try (try Time).now()
   const state = try plan.get()
   const listing = try (try List.Machine).get()
-  if (state.owner !== owner || listing.owner !== owner || listing.place.tag !== "ListingDigests" ||
-    !Plan.canSchedulesRead(state, ticket, current.loops.length, state.missed, 8, 0, 0)) return fallback
-  try (try DigestWords).store(current)
   const selected = current.loops.find((item) => item.number === state.row)?.record
+  const offers = missedRunNowOffers(current.results, current.loops.map((item) => item.record), current.sources.map((item) => item.record), now)
+  const newestMissed = selected === undefined ? state.missed : current.results.reduce((best, entry) =>
+    entry.workflowId === selected.id && offers.has(entry.runId) && entry.cursor > best ? entry.cursor : best, state.missed)
+  if (state.owner !== owner || listing.owner !== owner || listing.place.tag !== "ListingDigests" ||
+    !Plan.canSchedulesRead(state, ticket, current.loops.length, newestMissed, 8, 0, 0)) return fallback
+  try (try DigestWords).store(current, now)
   const source = current.sources.find((item) => item.record.id === selected?.spec.sourceId)
   const time = selected?.spec.localTime?.match(/^(\d{2}):(\d{2})$/)
   const hours = Number(time?.[1] ?? 8)
   const minutes = Number(time?.[2] ?? 0)
   return {
     ...fallback, ok: !current.partial || current.loops.length > 0, count: current.loops.length, template: selected?.spec.template === "evening" ? "Evening" : "Morning",
-    hour: hours <= 23 ? hours : 8, minute: minutes <= 59 ? minutes : 0, source: source?.number ?? 0,
+    hour: hours <= 23 ? hours : 8, minute: minutes <= 59 ? minutes : 0, source: source?.number ?? 0, missed: newestMissed,
     standing: selected === undefined ? "NoSchedule" : selected.sourceState === "expired" || selected.sourceState === "revoked" ? "SourceLapsed" : selected.active ? "Active" : "Paused",
     evening: supported.nativeEvening,
   }
 }
 
-module local {
-  /** @throws {never} */
-  export function digestZone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  }
-}
-import { digestZone } from local
-export { digestZone } from local
+const digestZone = localTimeZone
 
 const Saved = Schema.Struct({ receipt: Schema.Struct({
   mutationId: Schema.NonEmptyString, workflowId: Schema.NonEmptyString, versionId: Schema.NonEmptyString,
 }) })
+
+const HeldDigestChange = Schema.fromJsonString(Schema.Struct({
+  id: Schema.Int,
+  wanted: Schema.Literals(["Create", "Pause", "Resume", "Remove"]),
+  mutationId: Schema.NonEmptyString,
+  workflowId: Schema.optionalKey(Schema.NonEmptyString),
+  versionId: Schema.optionalKey(Schema.NonEmptyString),
+  template: Schema.optionalKey(Schema.Literals(["morning", "evening"])),
+  sourceId: Schema.optionalKey(Schema.NonEmptyString),
+  localTime: Schema.optionalKey(Schema.NonEmptyString),
+  timeZone: Schema.optionalKey(Schema.NonEmptyString),
+  existingLoopIds: Schema.optionalKey(Schema.Array(Schema.String)),
+}))
+
+const HeldDigestRun = Schema.fromJsonString(Schema.Struct({
+  id: Schema.Int,
+  occurrence: Schema.Int,
+  workflowId: Schema.NonEmptyString,
+  versionId: Schema.NonEmptyString,
+  submissionId: Schema.NonEmptyString,
+}))
+
+const digestChangeKey = (scope: string) => `${scope}/schedule-change`
+const digestRunKey = (scope: string) => `${scope}/schedule-run`
 
 effect function change(id: number, wanted: Change, template: Template, hour: number, minute: number, source: number): Event!!(Needs | Attempts) {
   const machine = try Plan.Machine
   const current = try machine.get()
   const identity = launchOwnerAt() catch () => undefined
   const { request, workflow } = try WorkflowsApi
+  const store = try KeyValueStore.KeyValueStore
   const failed: Event = { type: "changeAnswered", id, applied: false }
   if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, current.owner))) return failed
   const words = try DigestWords
@@ -148,13 +196,27 @@ effect function change(id: number, wanted: Change, template: Template, hour: num
   const grant = view.sources.find((item) => item.number === source)?.record
   const now = try (try Time).now()
   const zone = try words.zone(current.owner)
-  const mutationId = try (try Attempts).key(id)
+  const scope = digestScope(identity)
+  const key = digestChangeKey(scope)
+  const rawPrior = (store.get(key) catch () => "unreachable")
+  const prior = rawPrior === undefined || rawPrior === "unreachable"
+    ? undefined : (Schema.decodeUnknownEffect(HeldDigestChange)(rawPrior) catch () => undefined)
+  if (current.change.again && (prior === undefined || prior.id !== id || prior.wanted !== wanted)) return { type: "changeUnanswered" }
+  if (!current.change.again && rawPrior !== undefined) return { type: "changeUnanswered" }
+  const mutationId = prior?.mutationId ?? (try (try Attempts).key(id))
   const reaffirmed = launchOwnerAt() catch () => undefined
   if (!sameResidentOwner(identity, reaffirmed) || !(try (try Rows).sameDigestOwner(identity, current.owner))) return failed
+  let dispatched = current.change.again
   const applied = effect {
     if (wanted === "Remove") {
       if (selected === undefined) return false
-      const removed = try workflow.lifecycle(selected.id, selected.versionId, "remove", () => succeed(undefined))
+      const keep = effect (recordedMutation: string) => {
+        store.set(key, JSON.stringify({
+          id, wanted, mutationId: recordedMutation, workflowId: selected.id, versionId: selected.versionId,
+        })) catch effect () => { throw new WorkflowResponseInvalid({ message: "Could not retain digest removal" }) }
+        dispatched = true
+      }
+      const removed = try workflow.lifecycle(selected.id, selected.versionId, "remove", keep)
       return removed.workflowId === selected.id
     }
     if (wanted === "Create" && (grant === undefined || zone === "" || digestSourceState(grant, now) !== "current")) return false
@@ -164,17 +226,129 @@ effect function change(id: number, wanted: Change, template: Template, hour: num
           timeZone: zone, localTime: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, enabled: true }
       : selected === undefined ? undefined : { ...selected.spec, enabled: wanted === "Resume" }
     if (spec === undefined) return false
+    if (!current.change.again) {
+      store.set(key, JSON.stringify({
+        id, wanted, mutationId,
+        ...(selected === undefined ? {} : { workflowId: selected.id, versionId: selected.versionId }),
+        template: spec.template, sourceId: spec.sourceId, localTime: spec.localTime, timeZone: spec.timeZone,
+        ...(wanted === "Create" ? { existingLoopIds: view.loops.map((item) => item.record.id) } : {}),
+      })) catch effect () => { throw new WorkflowResponseInvalid({ message: "Could not retain digest change" }) }
+    }
+    dispatched = true
     const protocol = hostedDigestProtocol(request)
     const target = wanted === "Create" || selected === undefined ? {} : { id: selected.id, expectedVersionId: selected.versionId }
     const result = try protocol.mutate("loops", { ...target, mutationId, confirmed: true, spec })
     const reply = try Schema.decodeUnknownEffect(Saved)(result)
     return reply.receipt.mutationId === mutationId && (wanted === "Create" || reply.receipt.workflowId === selected?.id)
-  } catch (failure) => failure instanceof WorkflowLifecycleRejected ||
+  } catch (failure) => !dispatched || failure instanceof WorkflowLifecycleRejected ||
     (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status)) ? false : undefined
   const confirmed = launchOwnerAt() catch () => undefined
   if (applied === undefined || !sameResidentOwner(identity, confirmed) ||
     !(try (try Rows).sameDigestOwner(identity, current.owner))) return { type: "changeUnanswered" }
+  try ignore(store.remove(key))
   return { ...failed, applied }
+}
+
+effect function loadDigestCheck(keyOf: (scope: string) => string) {
+  const machine = try Plan.Machine
+  const current = try machine.get()
+  const identity = launchOwnerAt() catch () => undefined
+  if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, current.owner))) return undefined
+  const store = try KeyValueStore.KeyValueStore
+  const key = keyOf(digestScope(identity))
+  const raw = (store.get(key) catch () => undefined)
+  return { machine, current, identity, store, key, raw }
+}
+
+effect function checkChange(ticket: number, id: number): Event!!Needs {
+  const failed: Event = { type: "changeChecked", ticket, ok: false, found: false }
+  const ctx = try loadDigestCheck(digestChangeKey)
+  if (ctx === undefined) return failed
+  const { machine, current, identity, store, key, raw } = ctx
+  const held = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldDigestChange)(raw) catch () => undefined)
+  if (held === undefined || held.id !== id) return failed
+  const { request, workflow } = try WorkflowsApi
+  const found: boolean | undefined = effect {
+    if (held.wanted === "Remove") {
+      if (held.workflowId === undefined || held.versionId === undefined) return false
+      const receipt = try workflow.reconcileLifecycle(held.workflowId, held.versionId, held.mutationId, "remove")
+      return receipt !== null
+    }
+    const loops = try hostedDigestProtocol(request).loops()
+    if (held.wanted === "Create") {
+      const prior = new Set(held.existingLoopIds ?? [])
+      return loops.some((loop) => !loop.removed && !prior.has(loop.id) &&
+        (held.template === undefined || loop.spec.template === held.template) &&
+        (held.sourceId === undefined || loop.spec.sourceId === held.sourceId) &&
+        (held.localTime === undefined || loop.spec.localTime === held.localTime) &&
+        (held.timeZone === undefined || loop.spec.timeZone === held.timeZone))
+    }
+    const target = loops.find((loop) => loop.id === held.workflowId)
+    if (target === undefined || target.removed) return false
+    const wantEnabled = held.wanted === "Resume"
+    return target.versionId !== held.versionId && target.spec.enabled === wantEnabled
+  } catch () => undefined
+  const confirmed = launchOwnerAt() catch () => undefined
+  const live = try machine.get()
+  if (found === undefined || !sameResidentOwner(identity, confirmed) ||
+    !(try (try Rows).sameDigestOwner(identity, current.owner)) || !Plan.canChangeChecked(live, ticket)) return failed
+  if (found) try ignore(store.remove(key))
+  return { type: "changeChecked", ticket, ok: true, found }
+}
+
+effect function runDigest(id: number, occurrence: number): Event!!Needs {
+  const refused: Event = { type: "runNowAnswered", id, applied: false }
+  const lost: Event = { type: "runNowUnanswered" }
+  const machine = try Plan.Machine
+  const current = try machine.get()
+  const identity = launchOwnerAt() catch () => undefined
+  if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, current.owner))) return refused
+  const view = try (try DigestWords).view(current.owner)
+  const selected = view.loops.find((item) => item.number === current.row)?.record
+  if (selected === undefined || selected.removed || !selected.active) return refused
+  const store = try KeyValueStore.KeyValueStore
+  const { workflow } = try WorkflowsApi
+  const key = digestRunKey(digestScope(identity))
+  const rawPrior = (store.get(key) catch () => "unreachable")
+  const prior = rawPrior === undefined || rawPrior === "unreachable"
+    ? undefined : (Schema.decodeUnknownEffect(HeldDigestRun)(rawPrior) catch () => undefined)
+  if (current.runNow.again && (prior === undefined || prior.id !== id || prior.workflowId !== selected.id || prior.versionId !== selected.versionId)) return lost
+  if (!current.runNow.again && rawPrior !== undefined) return lost
+  let dispatched = current.runNow.again
+  const hold = effect (submissionId: string) => {
+    store.set(key, JSON.stringify({ id, occurrence, workflowId: selected.id, versionId: selected.versionId, submissionId }))
+      catch effect () => { throw new WorkflowResponseInvalid({ message: "Could not retain digest run" }) }
+    dispatched = true
+  }
+  const outcome = effect {
+    if (prior !== undefined) try workflow.resubmit(selected.id, selected.versionId, prior.submissionId)
+    else try workflow.run(selected.id, selected.versionId, hold)
+    return "accepted" as const
+  } catch (failure) => !dispatched || failure instanceof WorkflowAdmissionRejected ||
+    (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
+    ? "refused" as const : "unknown" as const
+  const confirmed = launchOwnerAt() catch () => undefined
+  if (!sameResidentOwner(identity, confirmed) || !(try (try Rows).sameDigestOwner(identity, current.owner)) || outcome === "unknown") return lost
+  if (outcome === "accepted" || !current.runNow.again) try ignore(store.remove(key))
+  return { type: "runNowAnswered", id, applied: outcome === "accepted" }
+}
+
+effect function checkRun(ticket: number, id: number): Event!!Needs {
+  const failed: Event = { type: "runNowChecked", ticket, ok: false, found: false }
+  const ctx = try loadDigestCheck(digestRunKey)
+  if (ctx === undefined) return failed
+  const { machine, current, identity, store, key, raw } = ctx
+  const held = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldDigestRun)(raw) catch () => undefined)
+  if (held === undefined || held.id !== id) return failed
+  const { workflow } = try WorkflowsApi
+  const answer = (workflow.reconcile(held.workflowId, held.versionId, held.submissionId) catch () => undefined)
+  const confirmed = launchOwnerAt() catch () => undefined
+  const live = try machine.get()
+  if (answer === undefined || !sameResidentOwner(identity, confirmed) ||
+    !(try (try Rows).sameDigestOwner(identity, current.owner)) || !Plan.canRunNowChecked(live, ticket)) return failed
+  const found = answer !== null
+  if (found) try ignore(store.remove(key))
+  return { type: "runNowChecked", ticket, ok: true, found }
 }
 
 function carry(fx: Out): Job<Event, Needs, []> {
@@ -184,9 +358,9 @@ function carry(fx: Out): Job<Event, Needs, []> {
     });
     when { tag: "AskAgent", let id, change: let wanted, let template, let hour, let minute, let source }:
       answer("change digest schedule", change(id, wanted, template, hour, minute, source), { type: "changeUnanswered" });
-    when { tag: "ReadChangeRecord", let ticket }: answer("check digest schedule", succeed<Event>({ type: "changeChecked", ticket, ok: false, found: false }), { type: "changeChecked", ticket, ok: false, found: false });
-    when { tag: "RunDigest", let id }: answer("run digest", succeed<Event>({ type: "runNowAnswered", id, applied: false }), { type: "runNowUnanswered" });
-    when { tag: "ReadRunRecord", let ticket }: answer("check digest result", succeed<Event>({ type: "runNowChecked", ticket, ok: false, found: false }), { type: "runNowChecked", ticket, ok: false, found: false });
+    when { tag: "ReadChangeRecord", let ticket, let id }: answer("check digest schedule", checkChange(ticket, id), { type: "changeChecked", ticket, ok: false, found: false });
+    when { tag: "RunDigest", let id, let occurrence }: answer("run digest", runDigest(id, occurrence), { type: "runNowUnanswered" });
+    when { tag: "ReadRunRecord", let ticket, let id }: answer("check digest result", checkRun(ticket, id), { type: "runNowChecked", ticket, ok: false, found: false });
   }
 }
 
@@ -202,6 +376,40 @@ const place = applying(List.Machine, (state) => ({ owner: state.owner, open: sta
 
 const saving = following(Plan.Machine, (state) => Plan.canSendChange(state), Plan.Machine,
   (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
+
+const sendingRunNow = following(Plan.Machine, (state) => Plan.canSendRunNow(state), Plan.Machine,
+  (ready): Event | undefined => ready ? { type: "sendRunNow" } : undefined)
+
+const clearReleased = applying(
+  Plan.Machine,
+  (state) => ({ owner: state.owner, changeFree: canFile(state.change), runFree: canFile(state.runNow) }),
+  effect ({ owner, changeFree, runFree }: { owner: number; changeFree: boolean; runFree: boolean }) => {
+    if (owner <= 0 || (!changeFree && !runFree)) return
+    const identity = launchOwnerAt() catch () => undefined
+    if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, owner))) return
+    const store = try KeyValueStore.KeyValueStore
+    const scope = digestScope(identity)
+    if (changeFree) try ignore(store.remove(digestChangeKey(scope)))
+    if (runFree) try ignore(store.remove(digestRunKey(scope)))
+  },
+)
+
+const digestClock = started(effect {
+  const plan = try Plan.Machine
+  const device = try Device
+  const time = try Time
+  const words = try DigestWords
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const open = Stream.map(plan.changes, (state) => state.open)
+  const active = Stream.changes(Stream.map(Stream.zipLatest(open, visible), ([isOpen, isShown]) => isOpen && isShown))
+  try Stream.runDrain(Stream.switchMap(active, (running) => running ? Stream.concat(
+    Stream.fromEffectDrain(effect { try words.tick(try time.now()) }),
+    Stream.fromEffectRepeat(effect {
+      try sleep("60 seconds")
+      try words.tick(try time.now())
+    }),
+  ) : Stream.empty))
+}, "updating digest freshness clock while panel is visible")
 
 export effect function newDigest(): void!!(Plan.Machine | DigestWords) {
   const plan = try Plan.Machine
@@ -220,193 +428,13 @@ export effect function pickDigestSource(source: number): void!!(Plan.Machine | D
   try ignore(plan.send({ type: "pickSource", source, fresh }))
 }
 
-export effect function backDigests(): boolean!!(Plan.Machine | Sources.Machine) {
-  const sources = try Sources.Machine
-  if (Sources.canCancelConsent(try sources.get())) { try ignore(sources.send({ type: "cancelConsent" })); return true }
+export effect function backDigests(): boolean!!Plan.Machine {
   const plan = try Plan.Machine
   const state = try plan.get()
+  if (Plan.canCancelRunNow(state)) { try ignore(plan.send({ type: "cancelRunNow" })); return true }
   if (Plan.canCancelReview(state)) { try ignore(plan.send({ type: "cancelReview" })); return true }
   if (Plan.canCloseEditor(state)) { try ignore(plan.send({ type: "closeEditor" })); return true }
   return false
 }
 
-const sourceKinds: readonly SourceKind[] = ["PhoneCalendars", "PhoneReminders", "Google", "Snapshot"]
-const hourMs = 3_600_000
-
-/** Converts a millisecond timestamp to whole hours for the digest sources clock. */
-export function digestHour(ms: number): number {
-  return Math.max(0, Math.floor(ms / hourMs))
-}
-
-/** Recorded digest source consents, renewals and answered reads kept beside Sources.Machine. */
-export interface DigestSourceRecord {
-  readonly kind: SourceKind
-  readonly until: number
-  readonly revision: number
-  readonly scope: number
-}
-
-/** Holds phone-side digest source grants, chosen calendars, renewal notices and answered read tickets. */
-export service DigestSourceShelf {
-  granted(kind: SourceKind): DigestSourceRecord | undefined
-  recordGrant(record: DigestSourceRecord): void
-  clearGrant(kind: SourceKind): void
-  recordAnswer(ticket: number, kind: SourceKind, items: number): void
-  answered(ticket: number): { readonly kind: SourceKind; readonly items: number } | undefined
-  setRenewal(kind: SourceKind, until: number | undefined): void
-  renewals(): ReadonlyMap<SourceKind, number>
-  setChosenCalendars(ids: readonly string[]): void
-  chosenCalendars(): readonly string[]
-}
-
-const sourceShelf = Layer.sync(DigestSourceShelf, () => {
-  const grants = new Map<SourceKind, DigestSourceRecord>()
-  const answers = new Map<number, { readonly kind: SourceKind; readonly items: number }>()
-  const activeRenewals = new Map<SourceKind, number>()
-  let chosen: readonly string[] = []
-  return {
-    granted: (kind: SourceKind) => grants.get(kind),
-    recordGrant: (record: DigestSourceRecord) => { grants.set(record.kind, record) },
-    clearGrant: (kind: SourceKind) => { grants.delete(kind) },
-    recordAnswer: (ticket: number, kind: SourceKind, items: number) => { answers.set(ticket, { kind, items }) },
-    answered: (ticket: number) => answers.get(ticket),
-    setRenewal: (kind: SourceKind, until: number | undefined) => {
-      if (until === undefined) activeRenewals.delete(kind)
-      else activeRenewals.set(kind, until)
-    },
-    renewals: () => new Map(activeRenewals),
-    setChosenCalendars: (ids: readonly string[]) => { chosen = [...ids] },
-    chosenCalendars: () => chosen,
-  }
-})
-
-type SourceNeeds = DigestSourceShelf | PhoneCalendar | SystemSettings | WorkflowsApi | Toasts | Said | Time
-
-effect function readSourceCalendars(ticket: number): SourceEvent!!(PhoneCalendar | DigestSourceShelf | Time) {
-  const calendar = try PhoneCalendar
-  const shelf = try DigestSourceShelf
-  const now = try (try Time).now()
-  const listed = calendar.list({ begin: now, end: now + 7 * 24 * hourMs }) catch () => undefined
-  if (listed === undefined || listed.status !== "ready") return { type: "calendarsListed", ticket, ok: false, count: 0, missing: false }
-  const seenIds = new Set(listed.events.map((ev) => ev.calendarId).filter((id): id is string => typeof id === "string" && id.length > 0))
-  const chosen = shelf.chosenCalendars()
-  const missing = chosen.some((id) => !seenIds.has(id))
-  const count = Math.max(seenIds.size, chosen.length > 0 && !missing ? chosen.length : 0)
-  return { type: "calendarsListed", ticket, ok: true, count, missing }
-}
-
-effect function requestSourceCalendarAccess(): SourceEvent!!PhoneCalendar {
-  const calendar = try PhoneCalendar
-  const granted = calendar.requestAccess() catch () => false
-  return { type: "calendarAccess", grant: granted ? "Granted" : "Denied" }
-}
-
-function carrySources(fx: SourceEffect): Job<SourceEvent, SourceNeeds, []> {
-  return match (fx) {
-    when { tag: "GrantSource", let kind, let until, let revision, let scope }: run(`source-grant-${kind}`, effect {
-      (try DigestSourceShelf).recordGrant({ kind, until, revision, scope })
-    });
-    when { tag: "RevokeSource", let kind }: run(`source-revoke-${kind}`, effect {
-      (try DigestSourceShelf).clearGrant(kind)
-    });
-    when { tag: "AnswerRead", let ticket, let kind, let items }: run(`source-answer-${ticket}`, effect {
-      (try DigestSourceShelf).recordAnswer(ticket, kind, items)
-    });
-    when { tag: "WantRenewal", let kind, let until }: run(`source-renew-${kind}`, effect {
-      (try DigestSourceShelf).setRenewal(kind, until)
-      try say(`Renew ${kind} access for digests`)
-    });
-    when { tag: "DropRenewal", let kind }: run(`source-drop-renew-${kind}`, effect {
-      (try DigestSourceShelf).setRenewal(kind, undefined)
-    });
-    when { tag: "ReadCalendars", let ticket }: answer(`source-calendars-${ticket}`, readSourceCalendars(ticket), { type: "calendarsListed", ticket, ok: false, count: 0, missing: false });
-    when { tag: "AskCalendarAccess" }: answer("source-calendar-access", requestSourceCalendarAccess(), { type: "calendarAccess", grant: "Denied" });
-    when { tag: "OpenSettings" }: run("source-open-settings", effect { try ignore((try SystemSettings).open("AppPermissions", "")) });
-  }
-}
-
-// spec/app/digests/sources.md, "When another owner signs in, the previous owner's consents no longer answer reads, and their renewal notices are dropped"
-const sourceOwner = applying(List.Machine, (state) => state.owner,
-  effect (owner: number) => {
-    const sources = try Sources.Machine
-    if (Sources.canOwnerChanged(try sources.get(), owner)) {
-      try contained(sources.send({ type: "ownerChanged", owner }), "updating digest source owner")
-    }
-  })
-
-/** Open the consent review for a digest source covering `hours` (1..720) and `scope`. */
-export effect function reviewDigestSource(kind: SourceKind, hours: number, scope: number): boolean!!Sources.Machine {
-  const sources = try Sources.Machine
-  if (!Sources.canReviewConsent(try sources.get(), kind, hours, scope)) return false
-  return try contained(sources.send({ type: "reviewConsent", kind, hours, scope }), "reviewing digest source consent")
-}
-
-/** Confirm the currently shown digest source consent review at the current clock hour. */
-export effect function confirmDigestSource(): boolean!!(Sources.Machine | Time) {
-  const sources = try Sources.Machine
-  const now = digestHour(try (try Time).now())
-  if (!Sources.canConfirmConsent(try sources.get(), now)) return false
-  return try contained(sources.send({ type: "confirmConsent", now }), "confirming digest source consent")
-}
-
-/** Cancel the currently shown digest source consent review. */
-export effect function cancelDigestSource(): boolean!!Sources.Machine {
-  const sources = try Sources.Machine
-  if (!Sources.canCancelConsent(try sources.get())) return false
-  return try contained(sources.send({ type: "cancelConsent" }), "cancelling digest source consent")
-}
-
-/** Revoke consent for a digest source immediately, dropping any renewal notice. */
-export effect function revokeDigestSource(kind: SourceKind): boolean!!Sources.Machine {
-  const sources = try Sources.Machine
-  if (!Sources.canRevoke(try sources.get(), kind)) return false
-  return try contained(sources.send({ type: "revoke", kind }), "revoking digest source consent")
-}
-
-/** Answer an agent read request for a digest source, capped at 12 items and refused without active consent. */
-export effect function answerDigestRead(ticket: number, kind: SourceKind, revision: number, items: number): boolean!!(Sources.Machine | Time) {
-  const sources = try Sources.Machine
-  const now = digestHour(try (try Time).now())
-  if (!Sources.canReadAsked(try sources.get(), ticket, kind, revision, items, now)) return false
-  return try contained(sources.send({ type: "readAsked", ticket, kind, revision, items, now }), "answering digest source read")
-}
-
-/** Open the renewal review for an expired source when tapped from its notice. */
-export effect function openSourceRenewal(kind: SourceKind): boolean!!Sources.Machine {
-  const sources = try Sources.Machine
-  if (!Sources.canRenewalOpened(try sources.get(), kind)) return false
-  return try contained(sources.send({ type: "renewalOpened", kind }), "opening digest source renewal")
-}
-
-/** Ask Android for phone calendar access once for digest source selection. */
-export effect function askDigestCalendarAccess(): boolean!!Sources.Machine {
-  const sources = try Sources.Machine
-  if (!Sources.canAskCalendarAccess(try sources.get())) return false
-  return try contained(sources.send({ type: "askCalendarAccess" }), "asking calendar access for digests")
-}
-
-/** List the phone's calendars for digest source selection. */
-export effect function listDigestCalendars(): boolean!!Sources.Machine {
-  const sources = try Sources.Machine
-  if (!Sources.canListCalendars(try sources.get())) return false
-  return try contained(sources.send({ type: "listCalendars" }), "listing calendars for digests")
-}
-
-/** Digest sources consent, calendar selection and renewal machine, persisted across restarts. */
-export const digestSources = together(
-  reacting(Sources, {
-    keep: 1,
-    open: [{ type: "restart" }],
-    carry: carrySources,
-    timers: (state) => sourceKinds.flatMap((kind) => {
-      const src = Sources.sourceOf(state, kind)
-      return src.consent === "Granted" && !src.renewal && src.until > 0
-        ? [due<SourceEvent, []>(`digest-source-expire-${kind}`, src.until * hourMs, { type: "expired", kind, now: src.until })]
-        : []
-    }),
-  }),
-  sourceShelf,
-  sourceOwner,
-)
-
-export const digests = together(reacting(Plan, { carry }), digestSources, words, place, saving)
+export const digests = together(reacting(Plan, { carry }), words, place, saving, sendingRunNow, clearReleased, digestClock)

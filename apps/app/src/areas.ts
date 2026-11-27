@@ -9,7 +9,7 @@ import home from "./home/index.tsx";
  * top. `<area>/<name>` is a place an area's screen offers the others, drawn with `alpha.slot`, such as
  * `settings/account` or `home/cards`.
  */
-export type Place = `view:${View}` | "home" | "assistant" | "overlay" | "notice" | `${string}/${string}`;
+export type Place = `view:${View}` | "home" | "assistant" | "overlay" | "notice" | `layer:${string}` | `${string}/${string}`;
 
 /** One screen at one place, loaded the first time it is drawn, so that Home ships no area's screen. */
 export interface Mount {
@@ -39,6 +39,8 @@ export const mounts: readonly Mount[] = [
   at("view:Maps", () => import("./maps/index.tsx")),
   at("view:Phone", () => import("./phone/index.tsx")),
   at("view:Messages", () => import("./messages/index.tsx")),
+  at("view:Telegram", () => import("./telegram/index.tsx")),
+  at("view:Slack", () => import("./slack/index.tsx")),
   at("view:Contacts", () => import("./contacts/index.tsx")),
   at("view:Clock", () => import("./clock/index.tsx")),
   at("view:Reminders", () => import("./reminders/index.tsx")),
@@ -61,4 +63,8 @@ export const mounts: readonly Mount[] = [
   at("overlay", () => import("./notices/Shade.tsx")),
   at("notice", () => import("./notices/UndoBar.tsx")),
   at("settings/account", () => import("./account/index.tsx").then((m) => ({ default: m.accountSettingsArea }))),
+  at("view:Wallet", () => import("./wallet/index.tsx")),
+  at("settings/voice", () => import("./assistant/settingsVoice.tsx")),
+  at("settings/notification-collection", () => import("./notices/SettingsCollection.tsx")),
+  at("assistant/calendar", () => import("./calendar/sheet.tsx")),
 ];

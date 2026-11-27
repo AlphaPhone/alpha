@@ -62,6 +62,7 @@ export interface SseEnvelope {
 interface SseClient {
   readonly res: ServerResponse;
   readonly filter?: (envelope: SseEnvelope) => boolean;
+  readonly meta?: Readonly<Record<string, string>>;
 }
 
 /** Shared context passed into provider route and control handlers. */
@@ -97,11 +98,35 @@ export interface ProviderServerConfig<S> {
 export const CORS_HEADERS: Readonly<Record<string, string>> = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "access-control-allow-headers": "Authorization, Content-Type, Idempotency-Key, X-Slack-Workspace",
+  "access-control-allow-headers": "Authorization, Content-Type, Idempotency-Key, X-Slack-Workspace, b3, traceparent, tracestate",
   "access-control-expose-headers": "Retry-After, Content-Type",
 };
 
 const MAX_REQUEST_LOG = 500;
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Error raised when an incoming HTTP body exceeds the provider size limit. */
+export class PayloadTooLargeError extends Error {
+  constructor() {
+    super("Request body exceeds maximum size");
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+/** Safe own-property lookup on plain object dictionaries, preventing prototype chain reads. */
+export function ownGet<T>(record: Readonly<Record<string, T>> | undefined, key: string | undefined): T | undefined {
+  if (record === undefined || key === undefined) return undefined;
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/** Evict the oldest keys from a mutable record once its size exceeds `max`. */
+export function pruneRecordCap(record: Record<string, unknown>, max: number): void {
+  const keys = Object.keys(record);
+  if (keys.length <= max) return;
+  for (const key of keys.slice(0, keys.length - max)) {
+    delete record[key];
+  }
+}
 
 /** Safe narrow to plain record. */
 export function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -264,6 +289,7 @@ export class SseHub {
     options?: {
       readonly filter?: (envelope: SseEnvelope) => boolean;
       readonly replay?: readonly SseEnvelope[];
+      readonly meta?: Readonly<Record<string, string>>;
     },
   ): void {
     res.writeHead(200, {
@@ -273,15 +299,20 @@ export class SseHub {
       connection: "keep-alive",
     });
     res.flushHeaders();
-    res.write(": connected\n\n");
-    if (options?.replay) {
-      for (const item of options.replay) {
-        if (!options.filter || options.filter(item)) {
-          res.write(formatSseFrame(item));
+    try {
+      res.write(": connected\n\n");
+      if (options?.replay) {
+        for (const item of options.replay) {
+          if (!options.filter || options.filter(item)) {
+            res.write(formatSseFrame(item));
+          }
         }
       }
+    } catch {
+      res.destroy();
+      return;
     }
-    const client: SseClient = { res, filter: options?.filter };
+    const client: SseClient = { res, filter: options?.filter, meta: options?.meta };
     this.#clients.add(client);
     res.on("close", () => {
       this.#clients.delete(client);
@@ -290,20 +321,45 @@ export class SseHub {
 
   broadcast(envelope: SseEnvelope): void {
     const wire = formatSseFrame(envelope);
-    for (const client of this.#clients) {
-      if (client.res.writableEnded) {
+    for (const client of [...this.#clients]) {
+      if (client.res.writableEnded || client.res.destroyed) {
         this.#clients.delete(client);
         continue;
       }
       if (!client.filter || client.filter(envelope)) {
-        client.res.write(wire);
+        try {
+          client.res.write(wire);
+        } catch {
+          this.#clients.delete(client);
+          client.res.destroy();
+        }
+      }
+    }
+  }
+
+  closeWhere(predicate: (meta: Readonly<Record<string, string>> | undefined) => boolean): void {
+    for (const client of [...this.#clients]) {
+      if (!predicate(client.meta)) continue;
+      this.#clients.delete(client);
+      if (!client.res.writableEnded && !client.res.destroyed) {
+        try {
+          client.res.end();
+        } catch {
+          client.res.destroy();
+        }
       }
     }
   }
 
   closeAll(): void {
-    for (const client of this.#clients) {
-      if (!client.res.writableEnded) client.res.end();
+    for (const client of [...this.#clients]) {
+      if (!client.res.writableEnded && !client.res.destroyed) {
+        try {
+          client.res.end();
+        } catch {
+          client.res.destroy();
+        }
+      }
     }
     this.#clients.clear();
   }
@@ -357,31 +413,36 @@ export class FaultArmory {
   readonly #rules: FaultRule[] = [];
 
   arm(rule: Omit<FaultRule, "remaining"> & { readonly remaining?: number }): FaultRule {
+    const remaining = rule.remaining ?? 1;
     const normalized: FaultRule = {
       method: rule.method?.toUpperCase(),
       path: rule.path,
       status: rule.status,
       retryAfter: rule.retryAfter,
       body: rule.body,
-      remaining: rule.remaining ?? 1,
+      remaining: Math.max(0, remaining),
       stall: rule.stall,
     };
-    this.#rules.push(normalized);
+    if (normalized.remaining > 0) this.#rules.push(normalized);
     return normalized;
   }
 
   consume(method: string, pathname: string): FaultRule | undefined {
     const upper = method.toUpperCase();
-    const index = this.#rules.findIndex(
-      (rule) => (!rule.method || rule.method === upper) && matchesFaultPath(rule.path, pathname),
-    );
-    if (index < 0) return undefined;
-    const matched = this.#rules[index];
-    if (matched.remaining > 0) {
-      matched.remaining -= 1;
-      if (matched.remaining === 0) this.#rules.splice(index, 1);
+    for (let index = 0; index < this.#rules.length; index += 1) {
+      const rule = this.#rules[index];
+      if (rule.remaining <= 0) {
+        this.#rules.splice(index, 1);
+        index -= 1;
+        continue;
+      }
+      if ((!rule.method || rule.method === upper) && matchesFaultPath(rule.path, pathname)) {
+        rule.remaining -= 1;
+        if (rule.remaining <= 0) this.#rules.splice(index, 1);
+        return rule;
+      }
     }
-    return matched;
+    return undefined;
   }
 
   list(): readonly FaultRule[] {
@@ -408,6 +469,7 @@ function parseRawBody(rawBody: string, contentType: string): unknown {
   if (lower.includes("application/x-www-form-urlencoded")) {
     const form: Record<string, string> = {};
     for (const [key, value] of new URLSearchParams(rawBody)) {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
       form[key] = value;
     }
     return form;
@@ -427,16 +489,28 @@ export async function parseRequest(req: IncomingMessage): Promise<ParsedRequest>
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const query: Record<string, string> = {};
   for (const [key, value] of url.searchParams) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
     query[key] = value;
   }
   const headers = normalizeHeaders(req.headers);
-  let rawBody = "";
-  for await (const chunk of req.setEncoding("utf8")) {
-    rawBody += chunk as string;
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
+    totalBytes += buffer.byteLength;
+    if (totalBytes > MAX_BODY_BYTES) throw new PayloadTooLargeError();
+    chunks.push(buffer);
   }
+  const rawBody = Buffer.concat(chunks).toString("utf8");
   const body = parseRawBody(rawBody, headers["content-type"] ?? "");
   const bodyRecord = asRecord(body);
-  const params: Record<string, unknown> = { ...query, ...(bodyRecord ?? {}) };
+  const params: Record<string, unknown> = { ...query };
+  if (bodyRecord !== undefined) {
+    for (const [key, value] of Object.entries(bodyRecord)) {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+      params[key] = value;
+    }
+  }
   return {
     method: (req.method ?? "GET").toUpperCase(),
     url,
@@ -452,7 +526,9 @@ export async function parseRequest(req: IncomingMessage): Promise<ParsedRequest>
 function loadStateFile<S>(stateFile: string | undefined, createInitial: () => S): S {
   if (!stateFile) return createInitial();
   if (fs.existsSync(stateFile)) {
-    return JSON.parse(fs.readFileSync(stateFile, "utf8")) as S;
+    const parsed: unknown = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    if (asRecord(parsed) === undefined) throw new Error(`Invalid provider state file: ${stateFile}`);
+    return parsed as S;
   }
   const initial = createInitial();
   saveStateFile(stateFile, initial);
@@ -462,9 +538,14 @@ function loadStateFile<S>(stateFile: string | undefined, createInitial: () => S)
 function saveStateFile<S>(stateFile: string | undefined, state: S): void {
   if (!stateFile) return;
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
-  const temp = `${stateFile}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(state, null, 2), "utf8");
-  fs.renameSync(temp, stateFile);
+  const temp = `${stateFile}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    fs.writeFileSync(temp, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(temp, stateFile);
+  } catch (cause) {
+    fs.rmSync(temp, { force: true });
+    throw cause;
+  }
 }
 
 function armFaultsFromParams(params: Readonly<Record<string, unknown>>, faults: FaultArmory): void {
@@ -547,7 +628,11 @@ export async function createProviderServer<S>(config: ProviderServerConfig<S>): 
   const server = http.createServer((incoming, outgoing) => {
     void (async () => {
       if ((incoming.method ?? "GET").toUpperCase() === "OPTIONS") {
-        outgoing.writeHead(204, CORS_HEADERS);
+        const requested = incoming.headers["access-control-request-headers"];
+        const headers = typeof requested === "string" && requested.trim() !== ""
+          ? { ...CORS_HEADERS, "access-control-allow-headers": requested }
+          : CORS_HEADERS;
+        outgoing.writeHead(204, headers);
         outgoing.end();
         return;
       }
@@ -568,6 +653,10 @@ export async function createProviderServer<S>(config: ProviderServerConfig<S>): 
       }
       await config.onRequest(parsed, outgoing, ctx);
     })().catch((cause: unknown) => {
+      if (cause instanceof PayloadTooLargeError) {
+        sendJson(outgoing, 413, { ok: false, error: "payload_too_large" });
+        return;
+      }
       sendJson(outgoing, 500, { ok: false, error: "internal_error", detail: String(cause) });
     });
   });

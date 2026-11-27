@@ -112,21 +112,26 @@ module page {
       home.removeEventListener("click", click, true)
     }
   }
+  /** Whether the native host currently marks the phone as locked. @throws {never} */
+  export function phoneLocked(): boolean {
+    return typeof document !== "undefined" && document.documentElement.hasAttribute("data-alpha-locked")
+  }
 }
-import { watchHomePull } from page
-export { watchHomePull }
+import { phoneLocked, watchHomePull } from page
+export { phoneLocked, watchHomePull }
 
 // spec/app/home/index.md, "A pull on bare Home asks Android for its shade only when Alpha is the launcher; on a locked phone it asks nothing and says to unlock first"
 /** Ask for the shade only where this Home and this shell still admit the completed pull. */
 export effect function openNotifications(): void!!(Home.Machine | Shell) {
   const shell = try (try Shell).get()
   const home = try Home.Machine
-  if (Home.canPullDown(try home.get(), shell, false, "Owner")) {
-    try contained(home.send({ type: "pullDown", shell, locked: false, now: untimed }, "Owner"), "Android's notifications")
+  const locked = phoneLocked()
+  if (Home.canPullDown(try home.get(), shell, locked, "Owner")) {
+    try contained(home.send({ type: "pullDown", shell, locked, now: untimed }, "Owner"), "Android's notifications")
   }
 }
 
-// spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
+// spec/app/home/index.md, "A long press on bare Home or beside the quiet landscape Ask sheet starts editing, only on the phone and once the tiles are read"
 /** Wait for one physical long press. Its caller interrupts it when the pointer moves, releases or is canceled. */
 export effect function launcherHeld(held: () => void): void!! {
   try sleep("450 millis")

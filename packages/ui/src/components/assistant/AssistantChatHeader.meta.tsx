@@ -21,6 +21,9 @@ export const meta: ComponentMeta<AssistantChatHeaderProps> = {
       await userEvent.click(canvas.getByRole("button", { name: "Expand chat" }));
       await userEvent.click(canvas.getByRole("button", { name: "Minimize chat" }));
       await expect([onHome.mock.calls.length, onResize.mock.calls.length, onClose.mock.calls.length]).toEqual([1, 1, 1]);
+      // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": Alpha's mark is tapped in v119's 46 point box
+      const goHomeWidth = canvas.getByRole("button", { name: "Go Home" }).getBoundingClientRect().width;
+      if (goHomeWidth > 0) await expect(goHomeWidth).toBe(46);
     },
     Full: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);

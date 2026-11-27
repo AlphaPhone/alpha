@@ -1,13 +1,15 @@
 // spec/kit/attempt.md, "Story: Do something outside, once"
-import type { ElizaSecureStoreError, ElizaSecureStoreReadError } from "@elizaos/os-bridges"
+import { BridgeUnavailable, type ElizaSecureStoreError, type ElizaSecureStoreReadError } from "@elizaos/os-bridges"
+import { registered } from "./device.vibe"
 
 module held {
-  import { secureStoreClient } from "@elizaos/os-bridges"
+  import { secureStoreClient, type ElizaSecureStorePlugin } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   let made: ReturnType<typeof secureStoreClient> | undefined
   /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function client(): ReturnType<typeof secureStoreClient> {
-    return (made ??= secureStoreClient())
+    return (made ??= secureStoreClient(capacitorPlugin<ElizaSecureStorePlugin>("ElizaSecureStore")))
   }
 }
 import { client } from held
@@ -17,7 +19,9 @@ import { client } from held
  * `.eliza/spec/os/android/secureStore.md`), and it opens none to the page until the `android` area lists one here and
  * there: an area that needs one reports it, and never writes a secret anywhere else.
  */
-export type Slot = `notes-${"draft" | "folders"}:${number}`
+export type SmsDraftSlot = "sms-draft:v2:new" | `sms-draft:v2:thread:${number}` | `sms-draft:v2:recipients:${string}`
+export type SmsOutgoingSlot = "sms-outgoing:v2:device"
+export type Slot = `notes-${"draft" | "folders"}:${number}` | "inbox-saved-bodies" | SmsDraftSlot | SmsOutgoingSlot
 
 /** The secure store refused, or there is none, as in a browser. `code` is the store's own word for why, such as `denied`. */
 export error VaultFailed { slot: string; code: ElizaSecureStoreError | ElizaSecureStoreReadError | "malformed" | "absent"; cause: unknown }
@@ -31,19 +35,27 @@ export service Vault {
   /** Kept once the store has read it back; `unconfirmed` leaves it unknown, and the next `read` settles it. */
   write(slot: Slot, secret: Redacted.Redacted<string>): void!VaultFailed
   remove(slot: Slot): void!VaultFailed
+  /** Save over the exact value read, or report a conflict. A null expectation means absent and a null value removes the slot. */
+  compareAndExchange(slot: Slot, expected: Redacted.Redacted<string> | null, value: Redacted.Redacted<string> | null): ("saved" | "conflict")!VaultFailed
 }
+
+const secureStoreName = "ElizaSecureStore"
 
 /**
  * The phone's secure store, through the `ElizaSecureStore` plugin of eliza's Android package: eliza's
  * `secureStoreClient()` of `@elizaos/os-bridges`, which decodes each answer. A value is one JSON text.
  */
 export const relayedVault = Layer.sync(Vault, () => {
-  const store = client()
-  const asked = <A>(slot: string, call: () => Promise<A>) => tryPromise({ try: call, catch: (cause) => new VaultFailed({ slot, code: "malformed", cause }) })
+  const present = registered(secureStoreName)
+  const store = present ? client() : undefined
+  const asked = <A>(slot: string, call: (secure: ReturnType<typeof client>) => Promise<A>) => store === undefined
+    ? Effect.fail(new VaultFailed({ slot, code: "absent", cause: "no secure store plugin" }))
+    : tryPromise({ try: () => call(store), catch: (cause) => new VaultFailed({ slot, code: cause instanceof BridgeUnavailable ? "absent" : "unavailable", cause }) })
+  const encode = (secret: Redacted.Redacted<string>): string => JSON.stringify(Redacted.value(secret))
   return {
     effect read(slot: Slot) {
       const key: string = slot
-      const answer = try asked(key, () => store.get({ key }))
+      const answer = try asked(key, (secure) => secure.get({ key }))
       if (answer.ok) {
         const value = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.String))(answer.value)
         if (Option.isNone(value)) throw new VaultFailed({ slot: key, code: "malformed", cause: "the slot holds no text" })
@@ -54,13 +66,22 @@ export const relayedVault = Layer.sync(Vault, () => {
     },
     effect write(slot: Slot, secret: Redacted.Redacted<string>) {
       const key: string = slot
-      const answer = try asked(key, () => store.set({ key, value: JSON.stringify(Redacted.value(secret)) }))
+      const answer = try asked(key, (secure) => secure.set({ key, value: encode(secret) }))
       if (!answer.ok) throw new VaultFailed({ slot: key, code: answer.error, cause: answer.outcome })
     },
     effect remove(slot: Slot) {
       const key: string = slot
-      const answer = try asked(key, () => store.remove({ key }))
+      const answer = try asked(key, (secure) => secure.remove({ key }))
       if (!answer.ok) throw new VaultFailed({ slot: key, code: answer.error, cause: answer.outcome })
+    },
+    effect compareAndExchange(slot: Slot, expected: Redacted.Redacted<string> | null, value: Redacted.Redacted<string> | null): ("saved" | "conflict")!VaultFailed {
+      const key: string = slot
+      const answer = try asked(key, (secure) => secure.compareAndExchange({
+        key, expected: expected === null ? null : encode(expected), value: value === null ? null : encode(value),
+      }))
+      if (answer.ok) return "saved"
+      if (answer.error === "conflict") return "conflict"
+      throw new VaultFailed({ slot: key, code: answer.error, cause: answer.outcome })
     },
   }
 })
@@ -68,4 +89,4 @@ export const relayedVault = Layer.sync(Vault, () => {
 const none = (slot: Slot) => Effect.fail(new VaultFailed({ slot, code: "absent", cause: "no secure store in a browser" }))
 
 /** A browser keeps no secrets: every slot is refused, and the area shows that it cannot. */
-export const browserVault = Layer.succeed(Vault, { read: none, write: none, remove: none })
+export const browserVault = Layer.succeed(Vault, { read: none, write: none, remove: none, compareAndExchange: none })

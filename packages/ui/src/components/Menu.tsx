@@ -1,11 +1,15 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, useRef } from "react";
 import * as MenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "../lib/cn.ts";
+import { useLayerSurface } from "../lib/layers.tsx";
 import { floatingPanel, floatingRow } from "../lib/styles.ts";
 
 export type MenuProps = ComponentProps<typeof MenuPrimitive.Root>;
 export type MenuTriggerProps = ComponentProps<typeof MenuPrimitive.Trigger>;
-export type MenuContentProps = ComponentProps<typeof MenuPrimitive.Content>;
+export type MenuContentProps = ComponentProps<typeof MenuPrimitive.Content> & {
+  /** An enclosing container for the menu's portal. */
+  container?: HTMLElement;
+};
 export type MenuItemProps = ComponentProps<typeof MenuPrimitive.Item> & {
   /** Marks an action that cannot be taken back, such as Delete. */
   destructive?: boolean;
@@ -20,15 +24,51 @@ export function Menu(props: MenuProps) {
 export const MenuTrigger = MenuPrimitive.Trigger;
 
 /** The floating list of `MenuItem`s. Escape, a press outside and choosing an item close it. */
-export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 8, className, ...props }: MenuContentProps) {
+export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 8, container, className, ref, onPointerDownOutside, onInteractOutside, ...props }: MenuContentProps) {
+  const surface = useLayerSurface("MenuLayer", { container, ref, onPointerDownOutside, onInteractOutside });
   return (
-    <MenuPrimitive.Portal>
-      <MenuPrimitive.Content align={align} sideOffset={sideOffset} collisionPadding={collisionPadding} className={cn(floatingPanel, "flex min-w-50 flex-col", className)} {...props} />
+    <MenuPrimitive.Portal container={surface.container}>
+      <MenuPrimitive.Content
+        align={align}
+        sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
+        className={cn(floatingPanel, "flex min-w-54 flex-col", className)}
+        {...surface.contentProps}
+        {...props}
+      />
     </MenuPrimitive.Portal>
   );
 }
 
-/** One action of a menu; an icon before its words is decorative. */
-export function MenuItem({ destructive = false, className, ...props }: MenuItemProps) {
-  return <MenuPrimitive.Item className={cn(floatingRow, "[&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5.5", destructive && "text-destructive", className)} {...props} />;
+/**
+ * One action of a menu; an icon before its words is decorative. A pointer release can choose the action only if
+ * the press began on that item. The menu may open before the pointer that pressed its trigger is released.
+ */
+export function MenuItem({ destructive = false, className, onPointerDown, onPointerUp, onPointerCancel, onClick, ...props }: MenuItemProps) {
+  const pressedRef = useRef(false);
+  return (
+    <MenuPrimitive.Item
+      className={cn(floatingRow, "rounded-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5", destructive && "text-destructive", className)}
+      onPointerDown={(event) => {
+        pressedRef.current = true;
+        onPointerDown?.(event);
+      }}
+      onPointerUp={(event) => {
+        if (!pressedRef.current) event.preventDefault();
+        onPointerUp?.(event);
+      }}
+      onPointerCancel={(event) => {
+        pressedRef.current = false;
+        onPointerCancel?.(event);
+      }}
+      onClick={(event) => {
+        const touched = "pointerType" in event.nativeEvent && (event.nativeEvent.pointerType === "touch" || event.nativeEvent.pointerType === "pen");
+        const began = pressedRef.current;
+        pressedRef.current = false;
+        if (touched && !began) event.preventDefault();
+        else onClick?.(event);
+      }}
+      {...props}
+    />
+  );
 }

@@ -32,22 +32,22 @@ system screens.
 type Target = Cuttlefish | Pixel10a
 type Mode = Development | Production
 type Patch = Chip | Ops | Assist | ProtectedPower | SoongMemory | SensePolicy
-type Stage = { target: Target, mode: Mode, descriptorReviewed: bool, productComplete: bool, ownerTelephony: bool, listener: bool, qualified: bool, patches: List[Patch], branding: bool }
+type Stage = { target: Target, mode: Mode, descriptorReviewed: bool, productComplete: bool, ownerTelephony: bool, listener: bool, qualified: bool, speechPinned: bool, patches: List[Patch], branding: bool }
 type StageProblem = NoReviewedDescriptor | ProductIncomplete | OwnerTelephonyOutsideDevelopment | OwnerTelephonyOnAListenerImage | ListenerImageOffThePixel
   | ListenerImageIncomplete | SensePolicyWithoutAListenerImage | PowerAndAssistTogether | BrandingOutsideAPixelProduction
 
 pure def listenerImage(s: Stage): bool = s.qualified or (s.mode == Production and s.listener)
 pure def problemIf(found: bool, problem: StageProblem): Set[StageProblem] = if (found) Set(problem) else Set()
 
-pure val developmentStage: Stage = { target: Cuttlefish, mode: Development, descriptorReviewed: false, productComplete: false, ownerTelephony: false, listener: false, qualified: false, patches: List(), branding: false }
-pure val listenerStage: Stage = { target: Pixel10a, mode: Production, descriptorReviewed: true, productComplete: true, ownerTelephony: false, listener: true, qualified: true,
+pure val developmentStage: Stage = { target: Cuttlefish, mode: Development, descriptorReviewed: false, productComplete: false, ownerTelephony: false, listener: false, qualified: false, speechPinned: false, patches: List(), branding: false }
+pure val listenerStage: Stage = { target: Pixel10a, mode: Production, descriptorReviewed: true, productComplete: true, ownerTelephony: false, listener: true, qualified: true, speechPinned: true,
   patches: List(Chip, Ops, ProtectedPower, SensePolicy), branding: false }
 pure val sValues = Set(developmentStage, { ...developmentStage, ownerTelephony: true }, { ...developmentStage, target: Pixel10a, ownerTelephony: true },
   { ...developmentStage, mode: Production }, { ...developmentStage, mode: Production, descriptorReviewed: true, productComplete: true },
   { ...developmentStage, mode: Production, descriptorReviewed: true, productComplete: true, ownerTelephony: true },
   listenerStage, { ...listenerStage, mode: Development }, { ...listenerStage, target: Cuttlefish }, { ...listenerStage, patches: List(Chip, Ops, SensePolicy) },
   { ...listenerStage, ownerTelephony: true }, { ...listenerStage, patches: List(Chip, Ops, ProtectedPower, SensePolicy, Assist) },
-  { ...developmentStage, patches: List(SensePolicy) }, { ...listenerStage, qualified: false, branding: true },
+  { ...listenerStage, speechPinned: false }, { ...developmentStage, patches: List(SensePolicy) }, { ...listenerStage, qualified: false, branding: true },
   { ...developmentStage, branding: true }, { ...developmentStage, target: Pixel10a, patches: List(SoongMemory, Assist) })
 ```
 
@@ -77,13 +77,18 @@ pure def ownerTelephonyProblems(s: Stage): Set[StageProblem] =
 
 ### A listener image is a Pixel 10a stage with the listener, its qualification record and the chip, ops, protected power and Sense policy patches
 
+Alpha also requires the reviewed voice host and model digests. Eliza
+verifies the listener APK's packaged speech bytes against those inputs
+before qualifying the image. Android activates only the disabled plain
+assist entry and the permission-protected Power child it admitted.
+
 ```quint
 pure val listenerPatches: List[Patch] = List(Chip, Ops, ProtectedPower, SensePolicy)
 pure def carriesListenerPatches(s: Stage): bool = listenerPatches.every(p => s.patches.includes(p))
 
 pure def listenerProblems(s: Stage): Set[StageProblem] =
   problemIf(listenerImage(s) and s.target != Pixel10a, ListenerImageOffThePixel)
-    .union(problemIf(listenerImage(s) and not(s.listener and s.qualified and carriesListenerPatches(s)), ListenerImageIncomplete))
+    .union(problemIf(listenerImage(s) and not(s.listener and s.qualified and s.speechPinned and carriesListenerPatches(s)), ListenerImageIncomplete))
 ```
 
 ### The Sense policy patch belongs only to a listener image, and the protected power and generic assist patches never come together
@@ -116,7 +121,7 @@ pure def lawAnAdmittedProductionStageWasReviewed(s: Stage): bool =
   (stageAdmitted(s) and s.mode == Production) implies (s.descriptorReviewed and s.productComplete and not(s.ownerTelephony))
 
 pure def lawAnAdmittedListenerImageIsAQualifiedPixel(s: Stage): bool =
-  (stageAdmitted(s) and listenerImage(s)) implies (s.target == Pixel10a and s.qualified and carriesListenerPatches(s))
+  (stageAdmitted(s) and listenerImage(s)) implies (s.target == Pixel10a and s.qualified and s.speechPinned and carriesListenerPatches(s))
 ```
 
 ## Story: Keep the phone and messages on Alpha's phone

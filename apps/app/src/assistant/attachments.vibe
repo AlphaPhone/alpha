@@ -1,15 +1,21 @@
 // spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"; spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
 import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
 import type { SelectionId } from "@elizaos/os-bridges"
-import { Agent, Documents, type NoteStore, launchOwnerAt } from "../platform/index.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Documents, type DocumentAttachment } from "../platform/index.vibe"
+import type { NoteStore } from "../platform/index.vibe"
+import { launchOwnerAt } from "../platform/index.vibe"
 import { batchFits, fileBase64Cap, fits, imageBase64Cap, nameLimit, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
 import { type NoteTranscript, type NotesSelection, transcriptCurrent } from "../notes/selection.vibe"
-import { fresh, contained } from "../runtime/index.vibe"
+import { fresh } from "../runtime/index.vibe"
+import { contained } from "../runtime/index.vibe"
+import type { PageSpeech } from "../voice/voice.vibe"
 import { reencodeImage } from "./image-encode.ts"
-import { type Attached, type TranscriptAttachment, Talk } from "./talk.vibe"
+import { type ContactAttachmentScope, contactFileTargetCurrent, sameContactFileTarget } from "./contact-attachments.vibe"
+import { type Attached, type ContactFileTarget, type TranscriptAttachment, Talk } from "./talk.vibe"
 
 const images = ["image/jpeg", "image/png", "image/gif", "image/webp"]
 const documents = ["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"]
@@ -17,14 +23,24 @@ export const acceptedPhotos = [...images, "image/heic", "image/tiff", "image/svg
 export const acceptedFiles = [acceptedPhotos, ...documents].join(",")
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
+type PhotoRead = (Attached | undefined)!!
+export type AttachmentSource = Attached | { readonly kind: "ViewedPhoto"; readonly read: PhotoRead; readonly close: void!! }
+type ComposingSource = AttachmentSource | { readonly kind: "CapturedPhoto"; readonly read: PhotoRead; readonly seat: FileSeat }
+export type CapturedPhotoOffer = (read: PhotoRead, current: boolean!!) => boolean!!
+
+export type ReviewedDraft = (text: string, current: Effect.Effect<boolean>) => Effect.Effect<boolean>
+
 /** The owner sends a file reviewed in another app to the existing Ask Alpha draft. */
 export service MediaHandoff {
-  attach(file: Attached): boolean!!
+  attach(source: AttachmentSource, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!
   offerTranscript(transcript: NoteTranscript): boolean!!
+  reviewedDraft(): (ReviewedDraft | undefined)!!
+  offerPageSpeech(speech: PageSpeech): boolean!!
+  stopPageSpeech(item: number, source?: PageSpeech["source"]): void!!
 }
 
-export effect function attachToAlpha(file: Attached): boolean!!MediaHandoff {
-  return try (try MediaHandoff).attach(file)
+export effect function attachToAlpha(source: AttachmentSource, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!MediaHandoff {
+  return try (try MediaHandoff).attach(source, current, suggestion)
 }
 
 module web {
@@ -91,10 +107,17 @@ module web {
 }
 import { read, selected, store, stored } from web
 
+/** Whether the selected file's name, type and declared size can go through Ask Alpha intake. */
+export function supportedAttachment(name: string, mime: string, bytes: number): boolean {
+  const kind = mime.toLowerCase()
+  const image = kind.startsWith("image/")
+  return (image || documents.includes(kind)) && fits(image ? "Image" : "Document", bytes, name.length)
+}
+
 effect function encoded(file: File, id: string): (Attached | undefined)!! {
   const mimeType = file.type.toLowerCase()
   const image = mimeType.startsWith("image/")
-  if ((!image && !documents.includes(mimeType)) || !fits(image ? "Image" : "Document", file.size, file.name.length)) return undefined
+  if (!supportedAttachment(file.name, mimeType, file.size)) return undefined
   const convert = reencoded(image ? "Image" : "Document", file.size, images.includes(mimeType))
   return effect {
     const data = convert ? try tryPromise(() => reencodeImage(file, [2048, 1600, 1280, 1024], [85, 72, 60], imageBase64Cap)) : try tryPromise(() => read(file))
@@ -116,44 +139,82 @@ export effect function previewFile(file: Attached): void!!(Talk | Picker.Machine
   try ignore(picker.send({ type: "preview", attachment: board.previewFile(file) }))
 }
 
-export interface FileTarget { readonly binding: Composer.Binding; readonly slot: number; readonly revision: number }
+export interface FileTarget {
+  readonly binding: Composer.Binding
+  readonly slot: number
+  readonly revision: number
+  readonly authority: Picker.ArchiveAuthority
+}
 
-effect function added(target: FileTarget, candidates: readonly { readonly name: string; readonly file: Attached | undefined }[], active: Effect.Effect<boolean> = succeed(true)): boolean!!(Talk | Composer.Machine | Conversation) {
+type FileSeat = Omit<FileTarget, "revision">
+type AttachmentNeeds = Talk | Composer.Machine | Conversation | Shell | Agent
+type Candidate = { readonly name: string; readonly file: Attached | undefined }
+export type PickerTarget = FileTarget | ContactFileTarget
+
+function fitFiles(before: readonly Attached[], candidates: readonly Candidate[], room: number) {
+  const chosen = [...before]
+  const refused: string[] = []
+  let bytes = chosen.reduce((size, file) => size + file.data.length, 0)
+  for (const { name, file } of candidates) {
+    if (file !== undefined && chosen.some((current) => current.id === file.id)) continue
+    if (file === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + file.data.length)) refused.push(name)
+    else {
+      chosen.push(file)
+      bytes += file.data.length
+    }
+  }
+  return { chosen, refused }
+}
+
+effect function added(target: FileTarget, candidates: readonly Candidate[], active: Effect.Effect<boolean> = succeed(true), suggestion?: string): number!!(Talk | Composer.Machine | Conversation | Agent) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
   const conversation = try Conversation
   return try attachmentLock.withPermits(1)(effect {
+    const authority = try attachmentAuthority()
+    if (authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority) || !(try active)) return 0
     const current = try composer.get()
     const context = (try conversation.get()).context
-    if (!(try active) || context.sensitive || context.revision !== target.revision || !sameBinding(current.binding, target.binding) || current.read.ticket !== target.slot || current.slot !== "Open" || current.away !== "Free") return false
+    if (context.sensitive || context.revision !== target.revision || !sameBinding(current.binding, target.binding) || current.read.ticket !== target.slot || current.slot !== "Open" || current.away !== "Free") return 0
     const prior = board.snapshot()
     const before = sameBinding(prior.filesBinding, target.binding) ? prior.files : []
-    const chosen: Attached[] = [...before]
-    const room = Composer.maxFiles - Composer.attachments(current.editor)
-    let bytes = before.reduce((size, file) => size + file.data.length, 0)
-    const refused: string[] = []
-    for (const candidate of candidates) {
-      const next = candidate.file
-      if (next !== undefined && chosen.some((file) => file.id === next.id)) continue
-      if (next === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + next.data.length)) refused.push(candidate.name)
-      else {
-        chosen.push(next)
-        bytes += next.data.length
+    if (before.length > 0 && (prior.filesAuthority === undefined || !Picker.sameArchiveAuthority(prior.filesAuthority, authority))) return 0
+    const room = Composer.maxFiles - current.editor.files
+    const bytes = before.reduce((size, file) => size + file.data.length, 0)
+    const viewed = candidates.length === 1 ? candidates[0]?.file : undefined
+    const captured = viewed?.origin?.kind === "CapturedPhoto"
+    if (captured && (room < 1 || current.unsettled || current.editor.editing > 0 || before.some((file) => file.origin !== undefined)
+      || !batchFits(before.length + 1, bytes + viewed.data.length))) return 0
+    const replaceAt = viewed?.origin?.kind === "ViewedPhoto" ? before.findIndex((file) => file.origin !== undefined) : -1
+    const previous = before[replaceAt]
+    const { chosen, refused } = fitFiles(before, previous === undefined ? candidates : [], room)
+    if (viewed !== undefined && previous !== undefined) {
+      const duplicate = before.some((file, index) => index !== replaceAt && file.id === viewed.id)
+      if (duplicate || before.length !== current.editor.files || !batchFits(chosen.length, bytes - previous.data.length + viewed.data.length)) {
+        board.change({ attachmentNotice: `Could not attach ${viewed.name}` })
+        return 0
       }
+      chosen[replaceAt] = viewed
     }
     const count = chosen.length - before.length
-    if (count > 0) {
-      const event: Composer.Event = { type: "attach", count }
-      if (!Composer.enabled(current, event)) return false
-      board.change({ files: chosen, filesBinding: target.binding })
+    if (count > 0 || previous !== undefined) {
+      const seeded = previous === undefined && suggestion !== undefined && prior.typed === "" && !current.editor.text ? suggestion : undefined
+      const event: Composer.Event = previous !== undefined
+        ? { type: "replaceReviewedPhoto", owner: target.binding.owner, conversation: target.binding.conversation, ticket: target.slot }
+        : suggestion === undefined ? { type: "attach", count }
+          : { type: "attachQuestion", owner: target.binding.owner, conversation: target.binding.conversation, ticket: target.slot, seed: seeded !== undefined }
+      if (!Composer.enabled(current, event) || !(try active)) return 0
+      board.change({ files: chosen, filesBinding: target.binding, filesAuthority: authority, ...(seeded === undefined ? {} : { typed: seeded }) })
       const taken = composer.send(event) catch () => undefined
       if (taken === undefined) {
-        if (board.snapshot().files === chosen) board.change({ files: prior.files, filesBinding: prior.filesBinding })
-        return false
+        const live = board.snapshot()
+        if (live.files === chosen) board.change({ files: prior.files, filesBinding: prior.filesBinding, filesAuthority: prior.filesAuthority,
+          ...(seeded !== undefined && live.typed === seeded ? { typed: prior.typed } : {}) })
+        return 0
       }
     }
     board.change({ attachmentNotice: refused.length === 0 ? "" : `Could not attach ${refused.join(", ")}` })
-    return refused.length < candidates.length
+    return previous === undefined ? count : 1
   })
 }
 
@@ -165,39 +226,140 @@ export effect function chooseDocument(): ({ id: SelectionId; name: string; bytes
   const chosen = try documents.pick()
   if (Option.isNone(chosen)) return undefined
   const description = tryPromise(() => client.value.describe(chosen.value)) catch () => undefined
-  return description?.name === undefined ? undefined : { id: chosen.value, name: description.name, bytes: description.size }
+  if (description?.name !== undefined) return { id: chosen.value, name: description.name, bytes: description.size }
+  try ignore(tryPromise(() => client.value.forget(chosen.value)))
+  return undefined
 }
 
 export effect function readChosenDocument(id: SelectionId): (File | undefined)!!Documents {
   const value = try (try Documents).attachment(id)
-  if (Option.isNone(value)) return undefined
-  const item = value.value
+  return Option.isNone(value) ? undefined : try documentAttachmentFile(value.value)
+}
+
+export effect function documentAttachmentFile(item: DocumentAttachment): (File | undefined)!! {
   if (item.dataBase64.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(item.dataBase64)) return undefined
   return Effect.try(() => selected(item.dataBase64, item.name, item.mimeType)) catch () => undefined
 }
 
-// spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
-export effect function insertFiles(target: FileTarget, files: readonly File[], active: () => boolean): boolean!!(Talk | Composer.Machine | Conversation | Picker.Machine) {
-  const picker = try Picker.Machine
-  if (!active() || !(try picker.get()).open) return false
-  const context = (try (try Conversation).get()).context
-  if (context.sensitive || context.revision !== target.revision) return false
-  const picked = try Effect.forEach(files.slice(0, Composer.maxFiles), (file) => encoded(file, fresh()))
-  const admitted = Effect.map(picker.get(), (state) => state.open && active())
-  return try added(target, files.map((file, index) => ({ name: file.name, file: picked[index] })), admitted)
+effect function addedToContact(target: ContactFileTarget, candidates: readonly Candidate[], active: boolean!!): number!!(ContactAttachmentScope | Agent) {
+  const { board, attachmentLock } = try Talk
+  return try attachmentLock.withPermits(1)(effect {
+    const authority = try attachmentAuthority()
+    if (authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority) || !(try active) || !(try contactFileTargetCurrent(target))) return 0
+    const draft = board.snapshot().contactDraft
+    const before = draft !== undefined && sameContactFileTarget(draft.target, target) ? draft.files : []
+    const { chosen } = fitFiles(before, candidates, Composer.maxFiles - before.length)
+    const count = chosen.length - before.length
+    if (count > 0) board.change({ contactDraft: { target, files: chosen } })
+    return count
+  })
 }
 
-export effect function stageAttachment(file: Attached): boolean!!(Talk | Composer.Machine | Conversation | Shell) {
+/** A removal from the Contact sheet never touches the ordinary draft. */
+export effect function removeContactFile(target: ContactFileTarget, id: string): void!!(ContactAttachmentScope | Agent) {
+  const { board, attachmentLock } = try Talk
+  try attachmentLock.withPermits(1)(effect {
+    const authority = try attachmentAuthority()
+    const draft = board.snapshot().contactDraft
+    if (draft === undefined || authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority)
+      || !sameContactFileTarget(draft.target, target) || !(try contactFileTargetCurrent(target))) return
+    const files = draft.files.filter((file) => file.id !== id)
+    if (files.length !== draft.files.length) board.change({ contactDraft: files.length === 0 ? undefined : { target, files } })
+  })
+}
+
+// spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
+export effect function insertPickedFiles(
+  target: PickerTarget,
+  files: readonly { readonly name: string; readonly file: File | undefined }[],
+  active: Effect.Effect<boolean>,
+): number!!(ContactAttachmentScope | Composer.Machine | Agent) {
+  if (!(try active)) return 0
+  const authority = try attachmentAuthority()
+  if (authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority)) return 0
+  const context = (try (try Conversation).get()).context
+  if (context.sensitive || context.revision !== target.revision) return 0
+  const candidates = try Effect.forEach(files.slice(0, Composer.maxFiles), effect ({ name, file }) => {
+    return { name, file: file === undefined ? undefined : try encoded(file, fresh()) }
+  })
+  return "about" in target ? try addedToContact(target, candidates, active) : try added(target, candidates, active)
+}
+
+// spec/app/assistant/composer.md, "A shared result adds its file and leaves the owner's draft as written"; spec/app/assistant/composer.md, "A later reviewed photo replaces the chosen draft photo"
+export effect function stageAttachment(source: AttachmentSource, active: Effect.Effect<boolean> = succeed(true), suggestion?: string): boolean!!AttachmentNeeds {
+  return try stageInDraft(source, active, suggestion)
+}
+
+effect function stageInDraft(source: ComposingSource, active: boolean!!, suggestion?: string): boolean!!AttachmentNeeds {
+  if (suggestion !== undefined && (suggestion.trim() === "" || suggestion.length > Composer.textLimit)) return false
+  const authority = try attachmentAuthority()
+  if (authority === undefined) return false
   const composer = try (try Composer.Machine).get()
   const context = (try (try Conversation).get()).context
-  if (context.sensitive || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
+  if (context.sensitive || composer.slot !== "Open" || composer.away !== "Free" || !(try active)) return false
+  const seat = "kind" in source && source.kind === "CapturedPhoto" ? source.seat : undefined
+  if (seat !== undefined && (!sameBinding(seat.binding, composer.binding) || seat.slot !== composer.read.ticket ||
+    !Picker.sameArchiveAuthority(seat.authority, authority))) return false
+  const origin = "kind" in source
+    ? source.kind === "ViewedPhoto" ? { kind: source.kind, close: source.close } : { kind: source.kind }
+    : undefined
+  const file = "kind" in source ? try source.read : source
+  if (file === undefined || !(try active) || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
   const given = Effect.try(() => selected(file.data, file.name, file.mimeType)) catch () => undefined
   if (given === undefined) return false
-  const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision }, [{ name: file.name, file: try encoded(given, file.id) }])
-  if (!accepted) return false
+  const encodedFile = try encoded(given, file.id)
+  const candidate: Attached | undefined = encodedFile !== undefined && origin !== undefined ? { ...encodedFile, origin } : encodedFile
+  const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision, authority }, [{ name: file.name, file: candidate }], active, suggestion)
+  if (accepted === 0) return false
   const shell = try Shell
-  if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
+  if ((try shell.get()).assistant === "Bar" && (origin?.kind !== "CapturedPhoto" || (try active))) try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
   return true
+}
+
+// spec/app/camera/agent.md, "A confirmed capture can be offered in the same draft for the owner to send"
+export effect function capturePhotoDraft(): (CapturedPhotoOffer | undefined)!!AttachmentNeeds {
+  const authority = try attachmentAuthority()
+  if (authority === undefined) return undefined
+  const state = try (try Composer.Machine).get()
+  const { board } = try Talk
+  const draft = board.snapshot()
+  if (state.slot !== "Open" || state.away !== "Free" || state.unsettled || state.editor.editing > 0 ||
+    !Composer.canAttach(state, 1) || Composer.attachments(state.editor) >= Composer.maxFiles || (try (try Conversation).get()).context.sensitive ||
+    (sameBinding(draft.filesBinding, state.binding) && draft.files.some((file) => file.origin !== undefined))) return undefined
+  const seat: FileSeat = { binding: state.binding, slot: state.read.ticket, authority }
+  const scope = try Effect.context<AttachmentNeeds>()
+  let pending = true
+  return (read, current) => effect {
+    if (!pending) return false
+    pending = false
+    return try Effect.provideContext(stageInDraft({ kind: "CapturedPhoto", read, seat }, current), scope)
+  }
+}
+
+// spec/app/browser/reading.md, "Confirming hands over the reviewed words as shown"
+export effect function captureReviewedDraft(): (ReviewedDraft | undefined)!!(Talk | Composer.Machine | Conversation | Shell) {
+  const { board, attachmentLock } = try Talk
+  const composer = try Composer.Machine
+  const conversation = try Conversation
+  const shell = try Shell
+  const starting = try composer.get()
+  const previous = board.snapshot().typed
+  if (starting.slot !== "Open" || starting.away !== "Free" || starting.unsettled || starting.editor.editing > 0 || (try conversation.get()).context.sensitive) return undefined
+  return (text, active) => attachmentLock.withPermits(1)(effect {
+    if (!(try active)) return false
+    const here = try composer.get()
+    const event: Composer.Event = { type: "edit", blank: text.trim() === "", long: text.length > Composer.textLimit }
+    if (!sameBinding(starting.binding, here.binding) || starting.read.ticket !== here.read.ticket || starting.draft.edits !== here.draft.edits ||
+      board.snapshot().typed !== previous || here.away !== "Free" || here.unsettled || here.editor.editing > 0 ||
+      (try conversation.get()).context.sensitive || event.blank || event.long || !Composer.enabled(here, event)) return false
+    board.type(text)
+    if (!(try contained(composer.send(event), "putting the reviewed question in Ask Alpha"))) {
+      if (board.snapshot().typed === text) board.type(previous)
+      return false
+    }
+    if (canRaise(try shell.get(), "Sheet")) try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
+    return true
+  })
 }
 
 // spec/app/assistant/composer.md, "Story: Attach, quote and edit again"
@@ -237,24 +399,29 @@ export effect function retireTranscript(expected?: TranscriptAttachment): void!!
   if (Composer.enabled(try composer.get(), event)) try contained(composer.send(event), "detaching the transcript")
 }
 
+// spec/app/photos/viewer.md, "Removing its draft attachment closes only the exact photo still showing"
 export effect function removeFile(id: string): void!!(Talk | Composer.Machine) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
-  try attachmentLock.withPermits(1)(effect {
+  const removed = try attachmentLock.withPermits(1)(effect {
     const current = try composer.get()
     const shown = board.snapshot()
-    if (!sameBinding(shown.filesBinding, current.binding) || !Composer.canRemoveFile(current)) return
+    if (!sameBinding(shown.filesBinding, current.binding) || !Composer.canRemoveFile(current)) return undefined
     const before = shown.files
+    const attachment = before.find((file) => file.id === id)
+    if (attachment === undefined) return undefined
     const files = before.filter((file) => file.id !== id)
-    if (files.length === before.length) return
     board.change({ files, attachmentNotice: "" })
     const taken = composer.send({ type: "removeFile" }) catch () => undefined
-    if (taken === undefined && board.snapshot().files === files) board.change({ files: before })
+    if (taken !== undefined) return attachment.origin
+    if (board.snapshot().files === files) board.change({ files: before })
+    return undefined
   })
+  if (removed?.kind === "ViewedPhoto") try removed.close
 }
 
 export effect function stageFiles(key: string, files: readonly Attached[]): boolean!! {
-  return effect { try tryPromise(() => store(key, files)); return true } catch () => false
+  return effect { try tryPromise(() => store(key, files.map(({ id, name, mimeType, data }) => ({ id, name, mimeType, data })))); return true } catch () => false
 }
 
 export const dropFiles = (key: string) => ignore(tryPromise(() => store(key)))

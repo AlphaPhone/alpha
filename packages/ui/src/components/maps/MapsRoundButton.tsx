@@ -3,11 +3,11 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn, focusRing } from "../../lib/cn.ts";
 
 const round = cva(
-  [focusRing, "inline-flex shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-35 aria-disabled:opacity-35 [&_svg:not([class*='size-'])]:size-5.5"],
+  [focusRing, "inline-flex shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-35 aria-disabled:opacity-35 [&_svg:not([class*='size-'])]:size-5.5"],
   {
     variants: {
       tone: {
-        float: "bg-background text-foreground shadow-md ring-1 ring-border active:bg-accent",
+        float: "bg-background text-foreground shadow-float ring-1 ring-border active:bg-accent dark:shadow-float-dark",
         fill: "bg-secondary text-foreground active:bg-accent",
         plain: "text-foreground active:bg-accent",
         // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class.
