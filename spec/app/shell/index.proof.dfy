@@ -175,6 +175,33 @@ lemma returnCommsView_ensures(s: Shell, previous: View)
   }
 }
 
+lemma openCommsView_ensures(s: Shell, view: View)
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> alwaysHomeDrawsAskAlpha(openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> alwaysTrailIsBounded(openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> alwaysTrailIsAdmitted(openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> alwaysTextAskIsFull(openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepRouteHasItsOwnNumber(s, openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepACommsReturnPreservesTheSheet(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepACommsOpeningPreservesTheSheet(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepAgentNavigationKeepsAssistant(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepAgentNavigationLeavesItsViewInSight(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepAPageInsideAViewKeepsASheet(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepAnAgentsPageLowersAskAlpha(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepSpokenRouteMarksTheWriter(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepBackClosesOneLayer(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepHomeIsBare(s, "openCommsView", openCommsView(s, view)))
+  ensures (inv(s) ==> canOpenCommsView(s, view) ==> stepClosedTextAskKeepsTheAdmittedTicket(s, "openCommsView", openCommsView(s, view)))
+{
+  if inv(s) && canOpenCommsView(s, view) {
+    var after := openCommsView(s, view);
+    forall v | v in after.trail ensures available(after, v) {
+      assert v in s.trail + [view];
+      assert v in s.trail || v == view;
+      assert available(after, v) == available(s, v);
+    }
+  }
+}
+
 lemma agentOpenFilesFrom_ensures(s: Shell, source: seq<View>, panel: Detent, route: int, spoken: bool)
   ensures (inv(s) ==> canAgentOpenFilesFrom(s, source, panel, route, spoken) ==> alwaysHomeDrawsAskAlpha(agentOpenFilesFrom(s, source, panel, route, spoken)))
   ensures (inv(s) ==> canAgentOpenFilesFrom(s, source, panel, route, spoken) ==> alwaysTrailIsBounded(agentOpenFilesFrom(s, source, panel, route, spoken)))
