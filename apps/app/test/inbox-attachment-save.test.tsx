@@ -18,15 +18,24 @@ const confirm = (name: string) => drawn(() => {
   found.click();
 });
 const told = () => document.querySelector("[role=dialog]")?.textContent ?? "";
-
-// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"
-it("Save an attachment from inside its review, with one button per attachment", async () => {
+const openTermSheetRow = () => drawn(() => {
+  const row = [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")].find((one) => one.querySelector("[data-inbox-subject]")?.textContent === "Revised term sheet");
+  if (!row) throw new Error("no message Revised term sheet");
+  row.click();
+});
+const withAgendaAttachment = (text: string) => {
   const world = { ...scene(), phone: true };
-  const text = "Review agenda";
   const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
   if (!termSheet) throw new Error("Missing mailbox fixture");
   termSheet.files = [{ partId: "2", name: "agenda.txt", mimeType: "text/plain", size: new TextEncoder().encode(text).byteLength, supported: true }];
   termSheet.attachmentData = { "2": new TextEncoder().encode(text) };
+  return world;
+};
+
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"
+it("Save an attachment from inside its review, with one button per attachment", async () => {
+  const text = "Review agenda";
+  const world = withAgendaAttachment(text);
   const { alpha } = await open(world, only("home", "view:Inbox"));
   const runtime = inbox.runtime(alpha);
   await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
@@ -36,11 +45,7 @@ it("Save an attachment from inside its review, with one button per attachment", 
     tile.click();
   });
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
-  await drawn(() => {
-    const row = [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")].find((one) => one.querySelector("[data-inbox-subject]")?.textContent === "Revised term sheet");
-    if (!row) throw new Error("no message Revised term sheet");
-    row.click();
-  });
+  await openTermSheetRow();
   await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
 
   // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time": the attachment is one button, with no separate save beside it
@@ -68,4 +73,79 @@ it("Save an attachment from inside its review, with one button per attachment", 
     .toEqual([text, text, [true]]);
   await confirm("Close");
   await until(alpha, runtime, Shown, (s) => s.attachment === 0);
+});
+
+// spec/app/inbox/message.md, "Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer"
+it("Migrates a pre-cancelled persisted reader record across restart without losing unsure saves", async () => {
+  const kept = "alpha/app/inbox/message@1";
+  const world = withAgendaAttachment("Review agenda");
+  const first = await open(world, only("home", "view:Inbox"));
+  const firstRuntime = inbox.runtime(first.alpha);
+  await until(first.alpha, home.runtime(first.alpha), Home, (s) => s.tiles.load.status === "Loaded");
+  await drawn(() => {
+    const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+    if (!tile) throw new Error("no Inbox tile on Home");
+    tile.click();
+  });
+  await until(first.alpha, firstRuntime, List, (s) => s.list.status === "Loaded");
+  await openTermSheetRow();
+  await until(first.alpha, firstRuntime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
+  const openView = await firstRuntime.runPromise(Shown.use((machine) => machine.get()));
+  const held = { account: openView.account, message: openView.message, attachment: 1 };
+  await first.close();
+
+  const storedRaw = localStorage.getItem(kept);
+  if (!storedRaw) throw new Error("Missing persisted reader record");
+  const preCancel = JSON.parse(storedRaw) as Record<string, unknown>;
+  delete preCancel.cancelled;
+  // A record kept before an unsupported attachment's tap was remembered has no `unsupported` either.
+  delete preCancel.unsupported;
+  expect("pdf" in preCancel && "keep" in preCancel && !("cancelled" in preCancel) && !("unsupported" in preCancel)).toBe(true);
+  localStorage.setItem(kept, JSON.stringify({ ...preCancel, unsure: [held] }));
+
+  const second = await open(world, only("home", "view:Inbox"));
+  const secondRuntime = inbox.runtime(second.alpha);
+  await until(second.alpha, secondRuntime, List, (s) => s.list.status === "Loaded");
+  const migrated = await secondRuntime.runPromise(Shown.use((machine) => machine.get()));
+  expect([migrated.unsure, migrated.cancelled, migrated.unsupported, localStorage.getItem(kept + ".unreadable")]).toEqual([[held], 0, 0, null]);
+
+  await openTermSheetRow();
+  await until(second.alpha, secondRuntime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
+  await press(/^Open\s*agenda\.txt/);
+  await until(second.alpha, secondRuntime, Shown, (s) => s.attachment === 1 && s.handling === "Opening");
+  expect(inDialog("Save as…")).toEqual([]);
+});
+
+// spec/app/inbox/message.md, "An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail"
+it("An attachment Alpha can neither show nor save reads Unsupported type or size, and a tap says Open in Gmail on the message, as v119 did", async () => {
+  const world = { ...scene(), phone: true };
+  const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
+  if (!termSheet) throw new Error("Missing mailbox fixture");
+  termSheet.files = [{ partId: "2", name: "archive.zip", mimeType: "application/zip", size: 6 * 1024 * 1024, supported: false }];
+  const { alpha } = await open(world, only("home", "view:Inbox"));
+  const runtime = inbox.runtime(alpha);
+  await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
+  await drawn(() => {
+    const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+    if (!tile) throw new Error("no Inbox tile on Home");
+    tile.click();
+  });
+  await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
+  await openTermSheetRow();
+  await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
+
+  const notes = () => [...document.querySelectorAll("[role=note]")].map((one) => one.textContent);
+  const tile = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find((one) => one.textContent?.startsWith("archive.zip"));
+  await drawn(() => expect([tile()?.textContent, tile()?.disabled]).toEqual(["archive.zip 6.3 MB · Unsupported type or size", false]));
+  expect(notes()).not.toContain("Open in Gmail");
+  await drawn(() => tile()?.click());
+  await until(alpha, runtime, Shown, (s) => s.unsupported === 1);
+  await drawn(() => expect(notes()).toContain("Open in Gmail"));
+  // Nothing is fetched or put under review, and no review opens.
+  const shown = await runtime.runPromise(Shown.use((machine) => machine.get()));
+  expect([shown.attachment, shown.file.outcome, world.inbox.savedAttachments.size, document.querySelector("[role=dialog]")]).toEqual([0, "Planned", 0, null]);
+
+  // Leaving the message lets the notice go.
+  await press("Back to the list");
+  await until(alpha, runtime, Shown, (s) => s.message === 0 && s.unsupported === 0);
 });

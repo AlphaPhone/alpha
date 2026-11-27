@@ -60,7 +60,11 @@ type Moved = { state: Card, out: List[Effect] }
 A notice, a summary, a generic card, plain text, map choices, retry, a
 proposal and a calendar change open nothing. Map choices, retry and the
 plan-action cards answer the latest reply only. A proposal and a calendar
-change are decided elsewhere.
+change are decided elsewhere. A phone step's proposal is drawn as v119
+drew it: its title, what it does and its button, then a last row "Keep
+things as they are." with Decline at its end. How the owner's decision on
+it ended shows under it as v119's result chip, a quiet line with an Alpha
+blue bar at its start, which is never spoken.
 
 ```quint
 pure def opens(kind: Kind): bool =

@@ -15,15 +15,21 @@ export type AssistantDecisionCardProps = Pick<AssistantCardFrameProps, "settled"
   waiting?: boolean;
   /** Hands the card to the area that decides it: the card never decides. */
   onHandOn?: () => void;
+  /** Declines the proposal, offered on the card's last row beside "Keep things as they are." */
+  onDecline?: () => void;
+  /** Decline is shown but can't be pressed, such as while the decision is being made. */
+  declineDisabled?: boolean;
 };
 
 const icons = { proposal: <ClipboardCheck />, review: <CalendarClock /> };
 
 /**
  * A proposal or a calendar change in a reply. It is handed to approvals or to Calendar and settles on what they decide.
+ * Given `onDecline`, its last row is v119's second review row: "Keep things as they are." with a grey Decline at its end
+ * (Sunday's v119, Alpha 45f6bed30: `prototype/agent-adapter.ts:1993-1994`, `prototype/template.html:4581-4590`).
  * @model spec/app/assistant/cards.md
  */
-export function AssistantDecisionCard({ variant, title, detail, action = "Review", waiting = false, onHandOn, settled }: AssistantDecisionCardProps) {
+export function AssistantDecisionCard({ variant, title, detail, action = "Review", waiting = false, onHandOn, onDecline, declineDisabled = false, settled }: AssistantDecisionCardProps) {
   return (
     <AssistantCardFrame
       icon={icons[variant]}
@@ -31,6 +37,13 @@ export function AssistantDecisionCard({ variant, title, detail, action = "Review
       detail={detail}
       settled={settled}
       actions={onHandOn ? <Button variant="primary" loading={waiting} onClick={onHandOn}>{action}</Button> : null}
+      foot={onDecline ? (
+        <div className="flex min-h-14 w-full items-center gap-3 border-t border-border px-3.5 py-3">
+          <span className="min-w-0 grow text-meta leading-details text-muted-foreground">Keep things as they are.</span>
+          <button type="button" disabled={declineDisabled} onClick={onDecline}
+            className="inline-flex min-h-9 shrink-0 items-center rounded-action bg-accent px-4 text-sm font-semibold text-foreground disabled:cursor-default disabled:opacity-50">Decline</button>
+        </div>
+      ) : null}
     />
   );
 }

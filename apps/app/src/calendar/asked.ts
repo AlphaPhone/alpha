@@ -36,6 +36,12 @@ export function boundIn(now: Asked, conversation: number): string | undefined {
   return now.holds !== "" && now.filed.some((one) => one.conversation === conversation && one.request === now.holds) ? now.holds : undefined;
 }
 
+/** The reply of `conversation` that filed the request its Calendar card is bound to: how that request ended draws under it. @throws {never} */
+export function filedBy(now: Asked, conversation: number): string | undefined {
+  const request = boundIn(now, conversation);
+  return request === undefined ? undefined : now.filed.find((one) => one.conversation === conversation && one.request === request)?.message;
+}
+
 /** The request the Calendar card in Ask Alpha is bound to: it shows, and decides, that request only. */
 export const AskedRequest = createContext<string | undefined>(undefined);
 

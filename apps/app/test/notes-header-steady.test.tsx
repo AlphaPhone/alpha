@@ -185,3 +185,99 @@ describe(`More over a new note offers v119's Share, Pin and Delete (${fresh})`, 
     } finally { copy.mockRestore(); }
   });
 });
+
+const waits = "spec/app/notes/editor.md, \"More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did\"";
+
+async function openRadiator(world: Scene) {
+  const opened = await openNotes(world);
+  await rendered(() => expect(button("Open Radiator")).toBeDefined());
+  await press("Open Radiator");
+  await until(opened.alpha, opened.runtime, Editor, (state) => state.showing && state.note > 0 && !state.fresh && !waiting(state));
+  return opened;
+}
+
+const edited = "Call the landlord Friday. Bedroom radiator clanks all night. Bleed it first.";
+
+describe(`More over a saved note waits for its save, as v119's did (${waits})`, () => {
+  it("keeps More and its Share and Delete enabled during a second edit and its save, and deletes only once the save lands, at the revision saved", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openRadiator(world);
+    await fill("Note", "Call the landlord Friday. Bedroom radiator clanks all night. Bleed it");
+    await later(alpha, 800);
+    await until(alpha, runtime, Editor, (state) => state.showing && !waiting(state) && state.draft.base > 0);
+    const before = world.notes.revision;
+
+    let release: (() => void) | undefined;
+    world.notes.interactGate = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      await fill("Note", edited);
+      await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Edited");
+      await rendered(() => expect(header()).toEqual([["Back to notes", true], ["Turn into checklist", true], ["More", true], ["Done", true]]));
+      await later(alpha, 800);
+      await until(alpha, runtime, Editor, (state) => state.draft.sync === "Saving");
+      await rendered(() => expect(header()).toContainEqual(["More", true]));
+      await choose("Delete");
+      await until(alpha, runtime, Editor, (state) => state.binning && state.draft.sync === "Saving");
+      await later(alpha, 1_000);
+      const waitingNow = await runtime.runPromise(Editor.use((machine) => machine.get()));
+      expect([waitingNow.showing, waitingNow.deleting, world.notes.trash.length, world.notes.revision]).toEqual([true, false, 0, before]);
+    } finally {
+      delete world.notes.interactGate;
+      release?.();
+    }
+    await until(alpha, runtime, Editor, (state) => !state.showing && !waiting(state));
+    expect(world.notes.notes.some((row) => row.title === "Radiator")).toBe(false);
+    expect(world.notes.trash.map((entry) => [entry.note.title, entry.note.body.trim()])).toEqual([["Radiator", edited]]);
+    expect(world.notes.revision).toBe(before + 2);
+  });
+
+  it("Share during an edit saves it first, then reviews the saved text in the share panel", async () => {
+    const world = scene();
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    let release: (() => void) | undefined;
+    try {
+      const { alpha, runtime } = await openRadiator(world);
+      world.notes.interactGate = new Promise<void>((resolve) => { release = resolve; });
+      await fill("Note", edited);
+      await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Edited");
+      await choose("Share");
+      await until(alpha, runtime, Editor, (state) => state.asked && state.draft.sync === "Saving");
+      await later(alpha, 1_000);
+      expect(button("Close share")).toBeUndefined();
+      delete world.notes.interactGate;
+      release?.();
+      await until(alpha, runtime, Editor, (state) => state.showing && !waiting(state) && !state.asked);
+      await rendered(() => expect(button("Close share")).toBeDefined());
+      await pressOnTop("Copy text");
+      await rendered(() => expect(copy).toHaveBeenCalledWith(`Radiator\n\n${edited}`));
+    } finally {
+      delete world.notes.interactGate;
+      release?.();
+      copy.mockRestore();
+    }
+  });
+});
+
+describe(`An editor kept before a Delete could wait on a save is read back (${waits})`, () => {
+  it("reads a kept editor record without binning as asking for no deletion, and sets nothing aside", async () => {
+    const kept = "alpha/app/notes/editor@1";
+    const world = scene();
+    const first = await openRadiator(world);
+    await fill("Note", edited);
+    await until(first.alpha, first.runtime, Editor, (state) => state.showing && waiting(state));
+    const stored = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key) ?? ""]));
+    await closeAll();
+    for (const [key, value] of Object.entries(stored)) localStorage.setItem(key, value);
+    const raw = localStorage.getItem(kept);
+    if (!raw) throw new Error("Missing kept editor record");
+    const earlier = JSON.parse(raw) as Record<string, unknown>;
+    delete earlier.binning;
+    localStorage.setItem(kept, JSON.stringify(earlier));
+
+    const second = await open(world, only("home", "view:Notes", "notice"));
+    const runtime = notes.runtime(second.alpha);
+    await until(second.alpha, runtime, Editor, (state) => state.note > 0);
+    const read = await runtime.runPromise(Editor.use((machine) => machine.get()));
+    expect([read.note > 0, waiting(read), read.binning, localStorage.getItem(kept + ".unreadable")]).toEqual([true, true, false, null]);
+  });
+});

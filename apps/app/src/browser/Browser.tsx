@@ -16,6 +16,7 @@ import type { Machine as ReaderMachine } from "../../gen/app__browser__reading.e
 import type { Machine as ShareMachine } from "../../gen/app__browser__share.effect.vibe";
 import type { Machine as SiteMachine } from "../../gen/app__browser__site.effect.vibe";
 import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
@@ -24,7 +25,7 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
-import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openFindFromMenu, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";
+import { Pages, type PageRuntime, addressOf, overPageChrome, idOf, inputOf, openDownloads, openFindFromMenu, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";
 import { LibraryRows, cancelHistory, editHistory, markPage, setMark } from "./library.vibe";
 import { reviewPage, cancelReading, confirmQuestion, editPageExcerpt, editQuestion, PageReading, readPageExcerpt, sensitiveReadingText, READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE } from "./reading.vibe";
 import { SharePages, cancelExternal, confirmExternal, mailTarget, offerNativeHandoff, offerShare } from "./share.vibe";
@@ -64,6 +65,8 @@ export function Browser({ runtime, alpha }: BrowserProps) {
 function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
   // spec/app/browser/index.md, "Story: Open, pick and close tabs"
   useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
+  // spec/app/browser/address.md, "The find bar opens over a shown page": Ask Alpha rising or resting changes what of a page below Alpha is Alpha's to touch, so the page is placed again.
+  const { state: assistant } = useShell(runtime, (shell) => shell?.assistant);
   const attach = useCallback((place: HTMLDivElement | null) => {
     if (!place) return;
     const notify = () => { void runtime.runPromise(placed); };
@@ -74,15 +77,35 @@ function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
     viewport?.addEventListener("resize", notify);
     viewport?.addEventListener("scroll", notify);
     if (typeof window !== "undefined") window.addEventListener("resize", notify);
+    const root = place.ownerDocument;
+    const below = () => root.documentElement.dataset.alphaBrowserUnder !== undefined;
+    const sized = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => { if (below()) notify(); });
+    const measureChrome = () => {
+      sized?.disconnect();
+      for (const element of root.querySelectorAll(overPageChrome)) sized?.observe(element);
+    };
+    const chromeIn = (node: Node) => node instanceof Element && (node.closest(overPageChrome) !== null || node.querySelector(overPageChrome) !== null);
+    const changed = typeof MutationObserver === "undefined" ? undefined : new MutationObserver((records) => {
+      if (!records.some((record) => record.type === "attributes" ? chromeIn(record.target) : [...record.addedNodes, ...record.removedNodes].some(chromeIn))) return;
+      measureChrome();
+      if (below()) notify();
+    });
+    changed?.observe(root.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "hidden", "inert", "aria-hidden"] });
+    measureChrome();
+    const settled = (event: Event) => { if (below() && event.target instanceof Node && chromeIn(event.target)) notify(); };
+    for (const type of ["transitionend", "animationend"]) root.addEventListener(type, settled, true);
     return () => {
       observer?.disconnect();
+      sized?.disconnect();
+      changed?.disconnect();
+      for (const type of ["transitionend", "animationend"]) root.removeEventListener(type, settled, true);
       viewport?.removeEventListener("resize", notify);
       viewport?.removeEventListener("scroll", notify);
       if (typeof window !== "undefined") window.removeEventListener("resize", notify);
     };
   }, [runtime]);
   // spec/app/browser/address.md, "The find bar opens over a shown page": the page keeps its full place and the find bar is drawn over it.
-  return <div data-alpha-browser-page="" aria-hidden ref={attach} className="absolute inset-x-0 top-0 bottom-0" />;
+  return <div key={assistant} data-alpha-browser-page="" aria-hidden ref={attach} className="absolute inset-x-0 top-0 bottom-0" />;
 }
 
 function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page: PageRuntime }) {

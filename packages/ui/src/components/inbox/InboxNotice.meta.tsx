@@ -16,6 +16,7 @@ export const meta: ComponentMeta<InboxNoticeProps> = {
     "Not editable": { kind: "notEditable" },
     Dismissable: { kind: "markUnconfirmed", onDismiss },
     "Select again": { kind: "selectAgain", onAction: undefined },
+    "Open in Gmail": { kind: "openInGmail", onAction: undefined },
     "File too big": { kind: "fileTooBig", onAction: undefined, onDismiss },
     "Contacts in Settings": { kind: "contactsInSettings" },
   },

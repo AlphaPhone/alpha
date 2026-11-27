@@ -2519,22 +2519,27 @@ function eachCheck() {
     assert.equal(json(customInstall, "package.json").scripts["pnpm:devPreinstall"], "my-preinstall");
     assert.equal(json(customInstall, "package.json").scripts.postinstall, "vibestack link");
     assert.deepEqual(init(customInstall), []);
-    if (fs.existsSync(path.join(project, "template/package.json"))) {
-      const workspace = scratch({
-        "package.json": read("template/package.json"),
-        "pnpm-workspace.yaml": read("template/pnpm-workspace.yaml"),
-        ".gitignore": read("template/.gitignore"),
-        "tsconfig.json": read("template/tsconfig.json"),
-        "vitest.config.ts": read("template/vitest.config.ts"),
-        "spec/index.md": read("template/spec/index.md"),
-      });
-      const templatePkgBefore = read("package.json", workspace);
-      init(workspace);
-      assert.equal(read("package.json", workspace), templatePkgBefore, "workspace root init leaves template package.json intact");
-      assert.equal(json(workspace, "package.json").scripts.build, undefined, "workspace root init does not add a root vibelang build script");
-      assert.equal(read(".agents/skills/bug-review/SKILL.md", workspace), read(".agents/skills/bug-review/SKILL.md"));
-      assert.deepEqual(init(workspace), []);
-    }
+    const workspace = scratch({
+      "package.json": JSON.stringify({
+        name: "workspace-root",
+        private: true,
+        type: "module",
+        packageManager: "pnpm@10.24.0",
+        engines: { node: `>=${NODE}` },
+        scripts: { dev: "spec studio", studio: "spec studio", check: "spec check", gen: "spec gen", accept: "spec accept", new: "spec new", test: "vitest run", postinstall: "vibestack link" },
+      }, null, 2) + "\n",
+      "pnpm-workspace.yaml": "packages:\n  - apps/*\ncatalog:\n  vibelang: 0.0.13\n",
+      ".gitignore": "dist/\n",
+      "tsconfig.json": "{}\n",
+      "vitest.config.ts": 'import { project } from "vibestack/testing/vitest";\n\nexport default project({ root: import.meta.dirname });\n',
+      "spec/index.md": "# Workspace\n",
+    });
+    const templatePkgBefore = read("package.json", workspace);
+    init(workspace);
+    assert.equal(read("package.json", workspace), templatePkgBefore, "workspace root init leaves template package.json intact");
+    assert.equal(json(workspace, "package.json").scripts.build, undefined, "workspace root init does not add a root vibelang build script");
+    assert.equal(read(".agents/skills/bug-review/SKILL.md", workspace), read(".agents/skills/bug-review/SKILL.md"));
+    assert.deepEqual(init(workspace), []);
   });
 
   test("nested specs link to children and reuse a machine through its directory index", async () => {
