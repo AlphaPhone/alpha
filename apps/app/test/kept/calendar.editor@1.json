@@ -4,16 +4,16 @@
   "shape": "42364efc15700d7c",
   "sealed": {
     "shape": "42364efc15700d7c",
-    "state": "faa39d1d27fce9fe"
+    "state": "768199af2f99e6f1"
   },
   "state": {
     "owner": 1,
-    "form": "NoForm",
+    "form": "EditEvent",
     "shown": false,
-    "target": 0,
-    "day": 0,
-    "revision": 0,
-    "titled": false,
+    "target": 41,
+    "day": 20000,
+    "revision": 3,
+    "titled": true,
     "allDay": false,
     "start": 0,
     "end": 1,
@@ -21,13 +21,13 @@
     "scope": "Unchosen",
     "extras": false,
     "draft": {
-      "sync": "Kept",
-      "edits": 0,
+      "sync": "Edited",
+      "edits": 2,
       "carried": 0,
-      "base": 0
+      "base": 3
     },
-    "kept": false,
-    "banner": "NoBanner",
+    "kept": true,
+    "banner": "Available",
     "confirming": "NoConfirm",
     "write": {
       "id": 0,
@@ -49,7 +49,14 @@
   },
   "kept": [
     "owner",
+    "form",
+    "target",
+    "day",
+    "revision",
+    "titled",
     "draft",
+    "kept",
+    "banner",
     "latched",
     "unknownCreate"
   ],
@@ -59,12 +66,12 @@
       "until": "897db85aa1",
       "state": {
         "owner": 1,
-        "form": "NoForm",
+        "form": "EditEvent",
         "shown": false,
-        "target": 0,
-        "day": 0,
-        "revision": 0,
-        "titled": false,
+        "target": 41,
+        "day": 20000,
+        "revision": 3,
+        "titled": true,
         "allDay": false,
         "start": 0,
         "end": 1,
@@ -72,13 +79,13 @@
         "scope": "Unchosen",
         "extras": false,
         "draft": {
-          "sync": "Kept",
-          "edits": 0,
+          "sync": "Edited",
+          "edits": 2,
           "carried": 0,
-          "base": 0
+          "base": 3
         },
-        "kept": false,
-        "banner": "NoBanner",
+        "kept": true,
+        "banner": "Available",
         "confirming": "NoConfirm",
         "write": {
           "id": 0,
