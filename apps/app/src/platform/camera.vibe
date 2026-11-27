@@ -2,7 +2,7 @@
 import type { Grant } from "../../gen/kit__permission.ts"
 import type { Lens, Mode } from "../../gen/app__camera.ts"
 import type { CameraDevice, CameraPreviewResult } from "@elizaos/os-bridges"
-import { fresh } from "../runtime/attempts.vibe"
+import { fresh } from "../runtime/index.vibe"
 import { registered } from "./device.vibe"
 import { readVideoSize } from "./videoCanvas.vibe"
 

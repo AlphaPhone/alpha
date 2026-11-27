@@ -1,0 +1,34 @@
+// spec/app/account/index.md, "Story: Have the agent running"; spec/app/account/session.md, "Story: Hold the account signed in"; spec/app/account/signIn.md, "Story: Choose how to sign in"; spec/app/account/provider.md, "Story: See where my requests go"; spec/app/account/binding.md, "Story: Use Cloud AI only under the current sign-in and plan"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/codes.md, "Story: Redeem a code"; spec/app/account/google.md, "Story: See my Google accounts"; spec/app/account/access.md, "Story: Decide what the agent may change in Google"; spec/app/account/records.md, "Story: Restart after a failure that kept records"
+import { together } from "../runtime/index.vibe"
+import { billingMachine, changeMachine, codesMachine, planMachine } from "./machines.vibe"
+import { accountShelfLive } from "./bridge.vibe"
+import { accessMachine, googleMachine } from "./google.vibe"
+import { providerMachine } from "./provider.vibe"
+import { bindingMachine, recordsMachine, residentMachine } from "./resident.vibe"
+import { sessionMachine, signInMachine } from "./session.vibe"
+
+/**
+ * Resident account machines ready to be added to `resident.vibe` by `@areas-builder`:
+ * Resident agent, Session, SignIn, Provider, Binding, Plan, Billing, Change, Codes, Google, Access, and AccountShelf.
+ * Excludes `Records.Machine` so Settings's own `recovery` layer never collides on its durable KeyValueStore key.
+ */
+const accountResident = together(
+  accountShelfLive,
+  residentMachine,
+  sessionMachine,
+  signInMachine,
+  providerMachine,
+  bindingMachine,
+  planMachine,
+  billingMachine,
+  changeMachine,
+  codesMachine,
+  googleMachine,
+  accessMachine,
+)
+
+/** Complete account area layer including Account's own kept-records review machine. */
+export const accountMachines = together(
+  accountResident,
+  recordsMachine,
+)

@@ -11,6 +11,8 @@ export type InboxAttachmentRowProps = {
   onOpen?: () => void;
   /** Reviews saving it where it has no preview; left out where a save may already have happened, which Files shows. */
   onSave?: () => void;
+  /** Tells the owner to open it in Gmail, where Alpha can neither show nor save it, as live v119's tile did. */
+  onUnsupported?: () => void;
   /** A save of it may have happened and could not be confirmed: it is not offered again, and the owner is pointed to Files. */
   saveUnconfirmed?: boolean;
   /** The save used the browser's downloads instead of Files. */
@@ -21,19 +23,21 @@ export type InboxAttachmentRowProps = {
 
 /**
  * One attachment of a message: one button, its name and size on a rounded tile that reviews opening it, or saving it
- * where it has no preview. The review for opening saves it too, as live v119 did.
+ * where it has no preview. The review for opening saves it too, as live v119 did. One Alpha can neither show nor save
+ * reads "Unsupported type or size" and still answers a tap, as v119's tile did.
  *
  * @model spec/app/inbox/message.md
  */
-export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false, browserDownload = false, picker = false }: InboxAttachmentRowProps) {
+export function InboxAttachmentRow({ name, size, onOpen, onSave, onUnsupported, saveUnconfirmed = false, browserDownload = false, picker = false }: InboxAttachmentRowProps) {
   const saveLabel = picker ? "Save as…" : browserDownload ? "Download" : "Save to Files";
-  const detail = onOpen ? `${size} · Review attachment` : onSave && !saveUnconfirmed ? `${size} · No preview · ${saveLabel}` : size;
+  const unsupported = !onOpen && !onSave && onUnsupported !== undefined;
+  const detail = onOpen ? `${size} · Review attachment` : onSave && !saveUnconfirmed ? `${size} · No preview · ${saveLabel}` : unsupported ? `${size} · Unsupported type or size` : size;
   return (
     <div className="flex max-w-full items-center gap-2">
       <button
         type="button"
-        disabled={!onOpen && !onSave}
-        onClick={onOpen ?? onSave}
+        disabled={!onOpen && !onSave && !unsupported}
+        onClick={onOpen ?? onSave ?? onUnsupported}
         className={cn(focusRing, "flex max-w-full min-w-0 items-center gap-3 rounded-tile bg-secondary py-3 pr-4.5 pl-3.5 text-left text-secondary-foreground")}
       >
         {onOpen || onSave ? <span className="sr-only">{onOpen ? "Open " : "Save "}</span> : null}

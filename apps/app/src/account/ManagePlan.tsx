@@ -5,7 +5,7 @@ import { Effect, type Layer } from "effect";
 import { useState } from "react";
 import { useMachine } from "../../gen/app__account__change.react.ts";
 import * as Change from "../../gen/app__account__change.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import type { AccountWrites } from "./profile.vibe";
 import type { checkout } from "./billing.vibe";
 import type { codes } from "./codes.vibe";

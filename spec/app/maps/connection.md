@@ -53,6 +53,7 @@ pure val ticketValues = Set(1, 2, 3)
 pure val planeValues = Set(1, 2, 3)
 pure val sessionValues = Set(1, 2)
 pure val offerValues = Set(
+  N::noOffer,
   { drive: true, transit: true, walk: true, bicycle: true },
   { drive: true, transit: false, walk: true, bicycle: false },
   { drive: false, transit: false, walk: false, bicycle: false },
@@ -92,7 +93,7 @@ alone. The coverage is metadata: a wait Cloud named never holds it back.
 pure def canConnect(c: Connection): bool =
   c.account != 0 and not(working(c)) and c.coverage.status != R::Loading
 
-pure def connect(c: Connection): Connection = { ...c, coverage: R::ask(c.coverage) }
+pure def connect(c: Connection): Connection = { ...c, unoffered: false, coverage: R::ask(c.coverage) }
 ```
 
 ### Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account
@@ -231,9 +232,12 @@ pure def stepOnlyAnAccountChangeRetiresAProvider(before: Connection, via: str, a
 
 ### A failed read is tried again
 
-Alpha retries on its own while the account is signed in.
+Alpha retries on its own, 30 seconds after the failure, while the account
+is signed in.
 
 ```quint
+pure val retryMs = 30000
+
 pure def leadsToAFailedReadIsTriedAgain(c: Connection, later: Connection): bool =
   (c.account != 0 and c.coverage.status == R::Failed) implies
     (later.coverage.status != R::Failed or later.account != c.account)

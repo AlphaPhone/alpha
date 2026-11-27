@@ -1,4 +1,4 @@
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { Machine } from "../../gen/app__workflows__list.effect.vibe";
 import { Machine as DigestSchedules } from "../../gen/app__digests__schedules.effect.vibe";
 import { Machine as ClockState } from "../../gen/app__workflows__clock.effect.vibe";
@@ -11,7 +11,7 @@ import { backRuns, runs } from "./runs.vibe";
 import { approvals } from "./approvals.vibe";
 import { authoring, backDraft } from "./authoring.vibe";
 import { backList } from "./list.vibe";
-import { applying, contained, started, together } from "../runtime/reactor.vibe";
+import { applying, contained, started, together } from "../runtime/index.vibe";
 import { automations, backAutomations } from "./automations.vibe";
 import { backClock, clock } from "./clock.vibe";
 import { backDigests, digests } from "./digests.vibe";

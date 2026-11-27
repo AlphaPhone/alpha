@@ -1,6 +1,6 @@
 // spec/app/inbox/index.md, "Story: Connect Gmail and keep to its grant"
-import { openGoogleAuthorization } from "../platform/cloud.vibe"
-import { native } from "../platform/device.vibe"
+import { openGoogleAuthorization } from "../platform/index.vibe"
+import { native } from "../platform/index.vibe"
 
 module web {
   /** Reserve the new tab while the owner's button press still has browser activation. @throws {never} */

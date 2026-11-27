@@ -13,10 +13,12 @@ export type MapsSearchBarProps = Omit<ComponentProps<"input">, "children" | "dan
   onSubmit?: () => void;
   /** Clears what was typed; the clear button shows only while it is given. */
   onClear?: () => void;
+  /** The way out of Maps before the search glyph while browsing, as v121 put Back inside the pill. */
+  back?: ReactNode;
 };
 
 /** The search field that floats over the top of the map. */
-export function MapsSearchBar({ leading, lead, onLead, onSubmit, onClear, className, ...props }: MapsSearchBarProps) {
+export function MapsSearchBar({ leading, back, lead, onLead, onSubmit, onClear, className, ...props }: MapsSearchBarProps) {
   return (
     <form
       role="search"
@@ -24,7 +26,7 @@ export function MapsSearchBar({ leading, lead, onLead, onSubmit, onClear, classN
       onSubmit={(event) => { event.preventDefault(); onSubmit?.(); }}
       className={cn("flex h-13 items-center gap-0.5 rounded-full bg-background px-2 text-foreground shadow-float ring-1 ring-border has-[>input:focus-visible]:outline-solid has-[>input:focus-visible]:outline-focus has-[>input:focus-visible]:outline-offset-focus has-[>input:focus-visible]:outline-ring in-data-[alpha-launcher]:h-13.5 in-data-[alpha-launcher]:gap-0 in-data-[alpha-launcher]:px-1.25 dark:shadow-float-dark", className)}
     >
-      {leading ? <div className="contents in-data-[alpha-launcher]:hidden [&>button]:size-13">{leading}</div> : null}
+      {leading ? <div className="contents in-data-[alpha-launcher]:hidden [&>button]:size-13">{leading}</div> : back}
       <button type="button" aria-label={lead === "search" ? "Search" : "Back"} onClick={onLead} className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-full active:bg-accent in-data-[alpha-launcher]:size-11 [&_svg]:size-5.5")}>
         {lead === "search" ? <Search aria-hidden /> : <ChevronLeft aria-hidden />}
       </button>

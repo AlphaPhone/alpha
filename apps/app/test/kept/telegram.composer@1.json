@@ -1,0 +1,44 @@
+{
+  "key": "alpha/app/telegram/composer@1",
+  "spec": "spec/app/telegram/composer.md",
+  "shape": "866bdf984a29ac80",
+  "state": {
+    "authenticated": true,
+    "chat": 5,
+    "canPost": true,
+    "slot": {
+      "author": "Nobody",
+      "draft": {
+        "sync": "Kept",
+        "edits": 0,
+        "carried": 0,
+        "base": 0
+      }
+    },
+    "saved": {
+      "5": "OwnerWrote"
+    },
+    "alphaUndo": {
+      "holding": "Free",
+      "until": 0
+    },
+    "clock": 0,
+    "sendChat": 0,
+    "sendOp": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "readback": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "barTarget": "ChatTarget",
+    "sheet": "SheetClosed",
+    "alphaRequests": [
+      {
+        "chat": 5,
+        "text": "Tell Sam I will call after six"
+      }
+    ]
+  }
+}

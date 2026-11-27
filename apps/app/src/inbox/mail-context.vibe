@@ -2,7 +2,7 @@
 import { decodeReviewedEmail, type ReviewedEmail } from "@elizaos/agent"
 import type { MailMessage } from "@elizaos/cloud"
 import { MailContextRefused, reviewMailContext, validateMailContext, type MailContextDestination, type MailContextSource, type ReviewedMailContext } from "@elizaos/plugin-inbox-client"
-import { externalStore } from "../runtime/store.ts"
+import { externalStore } from "../runtime/index.vibe"
 
 export interface MailQuestion {
   readonly review: ReviewedMailContext

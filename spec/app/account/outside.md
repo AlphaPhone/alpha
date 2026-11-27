@@ -1,11 +1,12 @@
 # Outside
 
-What the account's machines share about the world beyond the page: shared
-account vocabulary (`Method`, `Tier`, `Standing`), a browser visit whose return
-is taken once and which never keeps the owner waiting, and who may start
-something in the account. [Sign-in](./signIn.md) and [Billing](./billing.md)
-each hold a visit; every machine of the account takes the same origins and
-retires reads with [Read](../../kit/read.md).
+What the account's machines share about the world beyond the page: a
+browser visit whose return is taken once and which never keeps the owner
+waiting, a read that stops mattering, and who may start something in the
+account. [Sign-in](./signIn.md), [Billing](./billing.md) and
+[Google & email](./google.md) each hold a visit; every machine of the
+account retires reads with the same rule and takes the same origins. All
+three belong in the [kit](../../kit/index.md) once another area needs them.
 
 ## Story: Visit the browser and come back
 
@@ -16,9 +17,7 @@ retires reads with [Read](../../kit/read.md).
 ### A visit is closed, open under its number since the time it opened, or orphaned by a restart
 
 ```quint
-type Method = Email | Phone | Google
-type Tier = Plus | Pro
-type Standing = Checking | Member | Funded | Unfunded | Grace | Lapsed | Unavailable | Rejected | Declined
+import read as R from "../../kit/read"
 
 type Visit = { open: bool, number: int, orphan: bool, at: int }
 
@@ -80,6 +79,21 @@ pure def lawAnOlderVisitIsNeverReturned(number: int, earlier: int, now: int): bo
 pure def lawVisitsStayWellFormed(open: bool, number: int, orphan: bool, now: int): bool =
   val v = { open: open, number: number, orphan: orphan, at: 0 }
   valid(v) implies (valid(go(v, now)) and valid(back(v)) and valid(orphaned(v)) and valid(coldBack(v)) and valid(ended(v)))
+```
+
+## Story: Stop waiting for an answer
+
+> As the owner, I want what I see never to change because of an answer
+> to a question that no longer matters.
+
+### A read in flight that no longer matters is answered as failed, and takes no answer after
+
+```quint
+pure def retire(r: R::Read): R::Read = if (r.status == R::Loading) R::answer(r, false) else r
+
+pure def lawARetiredReadTakesNoAnswer(ticket: int): bool =
+  not(R::canAnswer(retire(R::ask({ status: R::Idle, ticket: ticket })), ticket + 1))
+    and retire(R::ask({ status: R::Idle, ticket: ticket })).ticket == ticket + 1
 ```
 
 ## Story: Keep the agent out of my account

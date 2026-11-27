@@ -2,7 +2,7 @@
 import { Effect } from "effect";
 import { Machine } from "../../gen/app__maps.effect.vibe";
 import { Machine as Credits } from "../../gen/app__maps__credits.effect.vibe";
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { Maps } from "./Maps.tsx";
 import { maps } from "./maps.vibe";
 

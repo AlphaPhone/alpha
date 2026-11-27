@@ -9,7 +9,7 @@ beneath it, focus goes to Reload, and Switch Home is offered where Alpha is
 Android's Home. A page whose process is lost is rebuilt by Alpha, at once a
 few times a minute and then more slowly, or, where Alpha is Home, by the
 owner from that screen; the budget is the process's, counted once for
-both surfaces. Every failure shown is recorded by its kind.
+both surfaces. Every failure shown goes into the [Journal](./journal.md).
 The owner's drafts are kept on the phone by the areas that own them (the
 kit's [Draft](../../kit/draft.md)); a Reload first asks those areas to put
 every draft on the phone, and rebuilds over drafts that could not be
@@ -34,20 +34,20 @@ the newest it has seen, and each surface the one its page was built
 after.
 
 ```quint
+import journal as J from "./journal"
 import read as R from "../../kit/read"
-import actor as A from "../../kit/actor"
+import actor as A from "./actor"
 
-type Kind = FailedToStart | FailedToDraw | Uncaught | KeptFailing | Crashed | StoppedAnswering
 type Page = Starting | Running | Broken | Rebuilding | Unbuildable
 type Wait = AtOnce | Backoff | NextStart | Asked | Anyway
 type Route = Chooser | DefaultApps | AndroidSettings
 type Side = HomeSide | AssistantSide
 type Effect =
-  Record({ kind: Kind }) | CancelDialogs({ side: Side }) | Rebuild({ side: Side, page: int, at: int })
+  Record({ kind: J::Kind }) | CancelDialogs({ side: Side }) | Rebuild({ side: Side, page: int, at: int })
   | Flush({ side: Side, ticket: int }) | SwitchHome({ route: Route, ticket: int })
 
 type Surface = {
-  page: Page, number: int, failure: Kind, visible: bool, closed: bool, built: int, wait: Wait, due: int,
+  page: Page, number: int, failure: J::Kind, visible: bool, closed: bool, built: int, wait: Wait, due: int,
   flush: R::Read, flushedAt: int, flushAsked: bool,
 }
 
@@ -58,12 +58,8 @@ type Recovery = {
 
 type Recovered = { state: Recovery, out: List[Effect] }
 
-pure def fromThePage(kind: Kind): bool = kind == FailedToStart or kind == FailedToDraw or kind == Uncaught
-
-pure def fromAlpha(kind: Kind): bool = fromThePage(kind) or kind == KeptFailing
-
 pure val fresh: Surface = {
-  page: Starting, number: 1, failure: FailedToStart, visible: true, closed: false, built: 0, wait: AtOnce, due: 0,
+  page: Starting, number: 1, failure: J::FailedToStart, visible: true, closed: false, built: 0, wait: AtOnce, due: 0,
   flush: R::unread, flushedAt: 0, flushAsked: false,
 }
 
@@ -97,7 +93,7 @@ changes nothing. A dialog is cancelled the way its own Cancel does: nothing
 it asked for is ever confirmed.
 
 ```quint
-pure def screen(kind: Kind, side: Side, s: Recovery): Recovered =
+pure def screen(kind: J::Kind, side: Side, s: Recovery): Recovered =
   val x = { ...sideOf(s, side), page: Broken, failure: kind, flushAsked: false }
   val shown = onto(side, x, s)
   {
@@ -105,10 +101,10 @@ pure def screen(kind: Kind, side: Side, s: Recovery): Recovered =
     out: List(Record({ kind: kind }), CancelDialogs({ side: side })),
   }
 
-pure def canBreaks(s: Recovery, side: Side, kind: Kind): bool =
-  (sideOf(s, side).page == Starting and fromThePage(kind)) or (sideOf(s, side).page == Running and kind == FailedToDraw)
+pure def canBreaks(s: Recovery, side: Side, kind: J::Kind): bool =
+  (sideOf(s, side).page == Starting and J::fromThePage(kind)) or (sideOf(s, side).page == Running and kind == J::FailedToDraw)
 
-pure def breaks(s: Recovery, side: Side, kind: Kind): Recovered = screen(kind, side, s)
+pure def breaks(s: Recovery, side: Side, kind: J::Kind): Recovered = screen(kind, side, s)
 ```
 
 ### A phone without Android's WebView says so, is recorded, and is never rebuilt
@@ -118,8 +114,8 @@ pure def canUnbuildable(s: Recovery, side: Side): bool = sideOf(s, side).page ==
 
 pure def unbuildable(s: Recovery, side: Side): Recovered =
   {
-    state: onto(side, { ...sideOf(s, side), page: Unbuildable, failure: FailedToStart }, s),
-    out: List(Record({ kind: FailedToStart })),
+    state: onto(side, { ...sideOf(s, side), page: Unbuildable, failure: J::FailedToStart }, s),
+    out: List(Record({ kind: J::FailedToStart })),
   }
 ```
 
@@ -135,7 +131,7 @@ pure def fallback(route: Route): Route = if (route == Chooser) DefaultApps else 
 pure def stuck(s: Recovery): bool = s.home.page == Broken or s.home.page == Unbuildable
 
 pure def canSwitchHome(s: Recovery, by: A::Actor, launcher: bool): bool =
-  A::answers(by, A::Owner) and stuck(s) and launcher and not(s.switchOn and s.switch.status == R::Loading)
+  A::answers(by, stuck(s) and launcher and not(s.switchOn and s.switch.status == R::Loading))
 
 pure def switchHome(s: Recovery, by: A::Actor, launcher: bool): Recovered =
   val asking = R::ask(s.switch)
@@ -195,7 +191,7 @@ pure def stepSwitchHomeOpensOnlyAndroidsScreens(before: Recovery, via: str, afte
 
 ```quint
 pure def knowsItsFailure(x: Surface): bool =
-  (x.page == Broken implies fromAlpha(x.failure)) and (x.page == Unbuildable implies x.failure == FailedToStart)
+  (x.page == Broken implies J::fromAlpha(x.failure)) and (x.page == Unbuildable implies x.failure == J::FailedToStart)
 
 pure def alwaysTheScreenKnowsItsFailure(s: Recovery): bool = knowsItsFailure(s.home) and knowsItsFailure(s.assistant)
 ```
@@ -203,7 +199,7 @@ pure def alwaysTheScreenKnowsItsFailure(s: Recovery): bool = knowsItsFailure(s.h
 ### A page can fail to draw
 
 ```quint
-pure def sometimesAPageFailsToDraw(s: Recovery): bool = s.home.page == Broken and s.home.failure == FailedToDraw
+pure def sometimesAPageFailsToDraw(s: Recovery): bool = s.home.page == Broken and s.home.failure == J::FailedToDraw
 ```
 
 ### A phone can lack WebView, and Alpha as Home then still offers Switch Home
@@ -257,7 +253,7 @@ choice is the failure screen, recorded as a page that kept failing.
 ```quint
 pure def decided(now: int, side: Side, launcher: bool, s: Recovery): Recovered =
   val x = sideOf(s, side)
-  if (spent(s) and launcher and side == HomeSide) screen(KeptFailing, side, onto(side, { ...x, built: s.deaths }, s))
+  if (spent(s) and launcher and side == HomeSide) screen(J::KeptFailing, side, onto(side, { ...x, built: s.deaths }, s))
   else if (not(x.visible)) still(onto(side, { ...x, page: Rebuilding, wait: NextStart }, s))
   else if (spent(s))
     { state: onto(side, { ...x, page: Rebuilding, wait: Backoff, due: now + 5000 }, s), out: List(Rebuild({ side: side, page: x.number, at: now + 5000 })) }
@@ -363,7 +359,7 @@ pure def stepRebuildsKeepToTheBudget(before: Recovery, via: str, after: Recovery
   sides.forall(side =>
     (turned(before, after, side, AtOnce) implies ((via == "lost" or via == "shown") and after.quick >= 1 and after.losses <= 3))
       and (turned(before, after, side, Backoff) implies spent(after))
-      and ((sideOf(after, side).page == Broken and sideOf(after, side).failure == KeptFailing and sideOf(before, side).page != Broken) implies spent(after)))
+      and ((sideOf(after, side).page == Broken and sideOf(after, side).failure == J::KeptFailing and sideOf(before, side).page != Broken) implies spent(after)))
 ```
 
 ### A death is counted once, however many surfaces report it
@@ -400,7 +396,7 @@ pure val fair_rebuilt = "weak"
 ### Past the budget, Alpha as Home asks the owner
 
 ```quint
-pure def sometimesHomeAsksTheOwner(s: Recovery): bool = s.home.page == Broken and s.home.failure == KeptFailing
+pure def sometimesHomeAsksTheOwner(s: Recovery): bool = s.home.page == Broken and s.home.failure == J::KeptFailing
 ```
 
 ### Past the budget, another surface waits before rebuilding
@@ -431,7 +427,7 @@ pure def sometimesTheQuickRebuildsAreSpent(s: Recovery): bool = s.quick == 3
 
 ```quint
 pure def sometimesALostFailureScreenIsRebuilt(s: Recovery): bool =
-  s.home.number == 1 and s.home.failure == FailedToDraw and s.home.page == Rebuilding and s.home.wait == AtOnce
+  s.home.number == 1 and s.home.failure == J::FailedToDraw and s.home.page == Rebuilding and s.home.wait == AtOnce
 ```
 
 ### The assistant surface can be closed
@@ -458,7 +454,7 @@ pure def rebuildAsked(wait: Wait, now: int, side: Side, s: Recovery): Recovered 
 
 pure def canReload(s: Recovery, side: Side, by: A::Actor, now: int): bool =
   val x = sideOf(s, side)
-  A::answers(by, A::Owner) and x.page == Broken and not(x.closed) and (x.flush.status != R::Loading or now >= x.flushedAt + 5000)
+  A::answers(by, x.page == Broken and not(x.closed) and (x.flush.status != R::Loading or now >= x.flushedAt + 5000))
 
 pure def reload(s: Recovery, side: Side, by: A::Actor, now: int): Recovered =
   val x = sideOf(s, side)
@@ -481,7 +477,7 @@ pure def risky(x: Surface, now: int): bool =
     and (x.flush.status == R::Failed or (x.flush.status == R::Loading and now >= x.flushedAt + 5000))
 
 pure def canReloadAnyway(s: Recovery, side: Side, by: A::Actor, now: int): bool =
-  A::answers(by, A::Owner) and risky(sideOf(s, side), now) and not(sideOf(s, side).closed)
+  A::answers(by, risky(sideOf(s, side), now) and not(sideOf(s, side).closed))
 
 pure def reloadAnyway(s: Recovery, side: Side, by: A::Actor, now: int): Recovered = rebuildAsked(Anyway, now, side, s)
 ```
@@ -542,7 +538,7 @@ five seconds' wait and a time long after it.
 ```quint
 pure val numberValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val deathValues = Set(1, 2, 3, 4, 5)
-pure val ticketValues = Set(1, 2, 3, 4)
+pure val ticketValues = 1.to(20)
 pure val nowValues = Set(0, 1000, 5001, 60001, 70000)
 pure val atValues = Set(5000, 1000000)
 pure val weight_lost = 6

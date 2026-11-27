@@ -2,9 +2,8 @@
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__notices__toasts.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { Device } from "../platform/index.vibe"
+import { type Job, answer, contained, following, reacting, run, started, together, Time } from "../runtime/index.vibe"
 
 /** What a toast says, which the rules never hold: its sentence, and whether it reports a failure, to be announced at once. */
 export interface Words {

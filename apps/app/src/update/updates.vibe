@@ -5,11 +5,11 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import * as Updates from "../../gen/app__update.effect.vibe"
 import type { Activity, Effect as Out, Event, Feed, Release } from "../../gen/app__update.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { LauncherUpdates } from "../platform/launcherUpdates.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
-import { type Engagement, Engagements, engagements } from "./activity.vibe"
+import { Device } from "../platform/index.vibe"
+import { LauncherUpdates } from "../platform/index.vibe"
+import { type Job, answer, contained, filledStore, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
+import { type Engagement, Engagements, engagements, notesReported } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
 
 const hex64 = /^[0-9a-f]{64}$/
@@ -128,8 +128,15 @@ function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStor
   }
 }
 
-// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
-const machine = reacting(Updates, { keep: 1, open: [{ type: "restart" }], carry })
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
+/** Updates kept before the failed checks were counted: read with one if the last check failed, and none otherwise. */
+function storedUpdates(key: string, start = Updates.initial) {
+  return Layer.provide(Updates.stored(key, start), filledStore(key, (kept) => ({ misses: kept.checked === "Missed" ? 1 : Updates.initial.misses, ...kept }), Updates.parseState))
+}
+
+// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
+const machine = reacting({ ...Updates, stored: storedUpdates }, { keep: 1, open: [{ type: "restart" }], carry })
 
 // spec/app/update/index.md, "The installed version never goes down, the signing root never changes, and a phone past its first 30 seconds is never starting again"
 effect function observed(): void!!(LauncherUpdates | Names | Updates.Machine) {
@@ -191,7 +198,7 @@ const activity = started(effect {
 /** The earliest future time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
 function nextWake(state: Updates.Updates, now: number): Option.Option<number> {
   if (!state.visible || !Updates.free(state)) return Option.none()
-  const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.retry : Updates.interval)
+  const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.backoff(state.misses) : Updates.interval)
   const candidates = [check, ...(state.deferrals > 0 ? [state.retryAt] : [])].filter((at) => at > now)
   return candidates.length > 0 ? Option.some(Math.min(...candidates)) : Option.none()
 }
@@ -200,22 +207,27 @@ function nextWake(state: Updates.Updates, now: number): Option.Option<number> {
 const schedule = started(effect {
   const updates = try Updates.Machine
   const time = try Time
+  let handed: { readonly version: number; readonly manifest: number } | undefined
   for (;;) {
     const state = try updates.get()
     const now = try time.now()
-    const due: Event | undefined = Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
+    if ((!state.installing && state.deferrals > 0) || state.offer.release.version !== handed?.version || state.offer.manifest !== handed?.manifest) {
+      handed = undefined
+    }
+    const alreadyHanded = handed !== undefined && state.offer.release.version === handed.version && state.offer.manifest === handed.manifest
+    const due: Event | undefined = !alreadyHanded && Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
       : Updates.canPoll(state, now) ? { type: "poll", now: untimed } : undefined
     const taken = due !== undefined && (try contained(updates.send(due), "the update schedule"))
-    if (taken) continue
+    if (taken) {
+      if (due?.type === "startAutomatically") handed = { version: state.offer.release.version, manifest: state.offer.manifest }
+      continue
+    }
     const next = nextWake(state, now)
-    const changed = Effect.flatMap(
-      Stream.runHead(Stream.filter(updates.changes, (current) => current !== state)),
-      (found) => (Option.isSome(found) ? Effect.void : Effect.never),
-    )
-    if (Option.isSome(next)) try race(changed, time.until(next.value))
+    const changed = Stream.runHead(Stream.drop(updates.changes, 1))
+    if (Option.isSome(next)) try race(Effect.asVoid(changed), time.until(next.value))
     else try changed
   }
 }, "the update schedule")
 
 /** Alpha's launcher updates, from launch: checks and automatic updates run whether or not Settings was ever opened. */
-export const updating = together(names, engagements, machine, phone, shown, activity, schedule)
+export const updating = together(names, engagements, machine, phone, shown, activity, schedule, notesReported)

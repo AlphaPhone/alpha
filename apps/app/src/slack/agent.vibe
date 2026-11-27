@@ -6,9 +6,9 @@ import * as Composer from "../../gen/app__slack__composer.effect.vibe"
 import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
 import * as Notices from "../../gen/app__slack__notices.effect.vibe"
 import * as Workspaces from "../../gen/app__slack.effect.vibe"
-import type { MessagingSessions } from "../platform/messaging.vibe"
-import type { Slack } from "../platform/slack.vibe"
-import { type Job, answer, contained, reacting, run, untimed } from "../runtime/reactor.vibe"
+import type { MessagingSessions } from "../platform/index.vibe"
+import type { Slack } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, untimed } from "../runtime/index.vibe"
 import {
   SlackLedger,
   channelTitleOf,

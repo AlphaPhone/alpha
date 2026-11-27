@@ -91,6 +91,7 @@ export default {
       "entry": [
         "src/index.ts",
         "src/providers/cli.ts",
+        "scripts/no-bun.ts",
         "test/**/*.test.{ts,vibe}"
       ],
       "project": [

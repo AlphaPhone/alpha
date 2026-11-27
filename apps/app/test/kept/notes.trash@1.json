@@ -1,0 +1,53 @@
+{
+  "key": "alpha/app/notes/trash@1",
+  "spec": "spec/app/notes/trash.md",
+  "shape": "9747edee59ef7b5f",
+  "state": {
+    "owner": 1,
+    "showing": false,
+    "read": {
+      "status": "Loaded",
+      "ticket": 1
+    },
+    "entries": [
+      {
+        "id": 61,
+        "at": 1794827200000,
+        "revision": 3,
+        "recording": 0
+      }
+    ],
+    "opened": 0,
+    "clock": 0,
+    "question": "NoQuestion",
+    "target": 0,
+    "refused": 0,
+    "loose": 0,
+    "review": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "holding": 0,
+    "asked": 0,
+    "act": "Sweep",
+    "subject": 0,
+    "revision": 0,
+    "asOf": 0,
+    "recordings": [
+      8
+    ],
+    "actor": "Phone",
+    "attempt": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "pending": false,
+    "audio": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "failed": false,
+    "unsure": false
+  }
+}

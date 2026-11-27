@@ -9,10 +9,7 @@ import { Machine as Trash } from "../../gen/app__notes__trash.effect.vibe"
 import { Machine as Recorder, unfinished } from "../../gen/app__notes__recording.effect.vibe"
 import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import type { Agent } from "../platform/agent.vibe"
-import { Device } from "../platform/device.vibe"
-import { NoteStore } from "../platform/notes.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import { type Agent, Device, NoteStore, ownerAt } from "../platform/index.vibe"
 import { NoteContent, numberOf, savedVoice } from "./content.vibe"
 
 export type RendererNote = { readonly kind: "canonical-note" | "canonical-note-source"; readonly id: string; readonly revision: string }

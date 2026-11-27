@@ -381,11 +381,16 @@ pure def alwaysAnUnseenUnknownIsOfThisSession(s: Operations): bool =
 ### A draft already sent, or whose send is unknown, is never sent again without the owner choosing to
 
 Discovered by the proof: the owner's choice holds for the whole
-operation, through a refusal and a review again.
+operation, through a refusal and a review again. So does a draft the
+earlier Alpha sent, or whose send it could not confirm.
 
 ```quint
 pure def alwaysASendAgainIsChosen(s: Operations): bool =
   (s.kind == Send and s.repeat) implies s.again
+
+pure def lawAnEarlierSendIsSentAgainOnlyByChoice(access: Access, before: L::Before): bool =
+  before != L::NotSent implies
+    not(canPrepare(initial, Send, access, L::earlier(1, 0, L::Fresh, 1, 1, 0, 0, 0, false, 0, before), true, false, Owner))
 ```
 
 ### Only the operation in flight tells how it ended, once: the draft is cleared only after a fresh confirmation of its send, and a stopped operation tells its draft nothing went out
@@ -563,9 +568,12 @@ pure def sessionChanged(s: Operations): Operations = {
 
 ### Each operation takes a new number and names its account and what it acts on, and a review open is of an operation of this session not yet recorded
 
+Discovered by the proof: an operation moves past planned only after taking a number.
+
 ```quint
 pure def alwaysEachOperationHasANewNumber(s: Operations): bool =
   0 <= s.attempt.id and s.attempt.id <= s.attempts and s.of <= s.session
+    and (s.attempt.outcome != A::Planned implies s.attempt.id != 0)
     and (s.attempt.id != 0 implies (
       s.account != 0
         and (if (ofDraft(s.kind)) (s.draft != 0 and s.messages.size() == 0) else (s.draft == 0 and s.messages.size() >= 1))

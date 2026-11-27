@@ -3,13 +3,14 @@
 The steps of signing in to Alpha Cloud on Alpha's own screens: a code
 sent by email or text, or Google in a browser tab, then a second check
 when the account asks for one. The phone checks each code and keeps what
-it verified until the phone has the agent held and asks it
+it verified until [Session](./session.md) has the agent held and asks it
 to store the sign-in; this page hands over only the account, the way it
 was made and whether it created the account, and never sees the sign-in
 itself. Renewing a sign-in near its end starts here too. Whether a
-sign-in is required, whether the session can take one, whether the
-owner's own key is in use, and whether startup has resolved arrive from
-startup and the phone's account runtime.
+sign-in is required and whether the session can take one come from
+[Session](./session.md), whether the owner's own key is in use from
+[AI provider](./provider.md), and whether startup has resolved from
+startup.
 
 ## Story: Choose how to sign in
 
@@ -28,6 +29,7 @@ and how the page last ended.
 ```quint
 import read as R from "../../kit/read"
 import outside as O from "./outside"
+import session as S from "./session"
 
 type Entry = OwnerOpened | Required
 type Ended = NotEnded | HandedOver | OwnKeyInstead
@@ -39,7 +41,7 @@ type Trouble = Fine | WrongCode | CodeSpent | NotSent | NotResent | NoAnswer | N
 type SignIn = {
   entry: Entry, waiting: bool, step: Step, work: Work, ticket: int,
   readiness: R::Read, google: bool, sms: bool, tab: O::Visit,
-  method: O::Method, address: str, prefill: bool,
+  method: S::Method, address: str, prefill: bool,
   attempt: int, factor: Factor, wrong: int, spent: bool, expiresAt: int,
   sentTo: str, resendAt: int, trouble: Trouble, ended: Ended,
 }
@@ -47,7 +49,7 @@ type SignIn = {
 pure val initial: SignIn = {
   entry: OwnerOpened, waiting: false, step: Closed, work: Resting, ticket: 0,
   readiness: R::unread, google: false, sms: false, tab: O::novisit,
-  method: O::Email, address: "", prefill: false,
+  method: S::Email, address: "", prefill: false,
   attempt: 0, factor: Totp, wrong: 0, spent: false, expiresAt: 0,
   sentTo: "", resendAt: 0, trouble: Fine, ended: NotEnded,
 }
@@ -58,25 +60,26 @@ pure val accountValues = Set(-1, 1, 2)
 pure val nowValues = Set(0, 30000, 100000, 1000000)
 pure val addressValues = Set("", "owner@example.com", "+14155550100", "415-555-0100", "+442079460958", " ()- . ")
 pure val codeValues = Set("123456")
+pure val weight_methods = 3
+pure val weight_chooseGoogle = 4
+pure val weight_returned = 6
 pure val weight_sent = 10
 pure val weight_verified = 10
-pure val weight_returned = 6
-pure val weight_expire = 3
 ```
 
 ### A typed code is secret, and what the page asks of the phone never carries the sign-in back
 
 The code goes to the phone to be checked and is kept nowhere on the page.
-A verified sign-in is handed to the phone's session store as the account
+A verified sign-in is handed to [Session](./session.md) as the account
 and the way it was made.
 
 ```quint
 type SecretCode = str
 type Effect =
-  CheckMethods({ check: int }) | OpenBrowser({ tab: int }) | SendCode({ ticket: int, method: O::Method, address: str, keeps: int })
+  CheckMethods({ check: int }) | OpenBrowser({ tab: int }) | SendCode({ ticket: int, method: S::Method, address: str, keeps: int })
   | Verify({ ticket: int, attempt: int, code: SecretCode }) | AskPasskey({ ticket: int, attempt: int })
   | Withdraw({ ticket: int, tab: int }) | Abandon({ attempt: int }) | DropSignIn
-  | Admit({ account: int, method: O::Method, created: bool })
+  | Admit({ account: int, method: S::Method, created: bool })
 type Moved = { state: SignIn, out: List[Effect] }
 ```
 
@@ -111,12 +114,12 @@ pure def canMethods(s: SignIn, ticket: int): bool = R::canAnswer(s.readiness, ti
 pure def methods(s: SignIn, ticket: int, ok: bool, google: bool, sms: bool): SignIn =
   { ...s, readiness: R::answer(s.readiness, ok), google: ok and google, sms: ok and sms }
 
-pure def offered(s: SignIn, method: O::Method): bool =
-  method == O::Email or (s.readiness.status == R::Loaded and (if (method == O::Google) s.google else s.sms))
+pure def offered(s: SignIn, method: S::Method): bool =
+  method == S::Email or (s.readiness.status == R::Loaded and (if (method == S::Google) s.google else s.sms))
 
 pure def lawEmailIsOfferedBeforeThePhoneAnswers(ticket: int): bool =
   val asking = { ...initial, readiness: R::ask({ status: R::Idle, ticket: ticket }) }
-  offered(asking, O::Email) and not(offered(asking, O::Google)) and not(offered(asking, O::Phone))
+  offered(asking, S::Email) and not(offered(asking, S::Google)) and not(offered(asking, S::Phone))
 ```
 
 ### Offline, sign-in offers nothing that needs Cloud, and says so
@@ -125,7 +128,7 @@ The phone says whether it is online. Back and the choice itself still
 work.
 
 ```quint
-pure def lawOfflineOffersNothingThatNeedsCloud(method: O::Method, address: str, now: int): bool =
+pure def lawOfflineOffersNothingThatNeedsCloud(method: S::Method, address: str, now: int): bool =
   val choosing = { ...initial, step: Choose, readiness: { status: R::Loaded, ticket: 1 }, google: true, sms: true }
   val atCode = { ...initial, step: Code, attempt: 1, address: "owner@example.com", expiresAt: now + 1 }
   not(canSendCode(choosing, method, address, now, false)) and not(canChooseGoogle(choosing, false))
@@ -166,7 +169,7 @@ pure def alwaysTheRequestFitsTheStep(s: SignIn): bool = and {
 ### Google can be offered
 
 ```quint
-pure def sometimesGoogleIsOffered(s: SignIn): bool = s.step == Choose and offered(s, O::Google)
+pure def sometimesGoogleIsOffered(s: SignIn): bool = s.step == Choose and offered(s, S::Google)
 ```
 
 ## Story: Sign in when Alpha needs it
@@ -177,7 +180,7 @@ pure def sometimesGoogleIsOffered(s: SignIn): bool = s.step == Choose and offere
 
 ### A required sign-in opens by itself once startup has resolved, and waits for startup until then
 
-The phone's session state says whether a sign-in is required.
+[Session](./session.md) says whether a sign-in is required.
 
 ```quint
 pure def canRequire(s: SignIn, required: bool, ready: bool): bool =
@@ -244,19 +247,19 @@ pure def sometimesOwnKeyEndsTheRequiredSignIn(s: SignIn): bool = s.ended == OwnK
 ### A code is sent to an address by a way this phone offers, and a code to the same address waits its minute even from the choice
 
 ```quint
-pure def canSendCode(s: SignIn, method: O::Method, address: str, now: int, online: bool): bool =
+pure def canSendCode(s: SignIn, method: S::Method, address: str, now: int, online: bool): bool =
   val destination = sentAs(method, address)
-  s.step == Choose and s.work == Resting and online and method != O::Google and offered(s, method)
+  s.step == Choose and s.work == Resting and online and method != S::Google and offered(s, method)
     and address != "" and destination != "" and (destination != s.sentTo or now >= s.resendAt)
 
-pure def sendCode(s: SignIn, method: O::Method, address: str, now: int, online: bool): Moved =
+pure def sendCode(s: SignIn, method: S::Method, address: str, now: int, online: bool): Moved =
   val destination = sentAs(method, address)
   { state: { ...s, work: Sending, ticket: s.ticket + 1, method: method, address: destination, trouble: Fine, prefill: false },
     out: List(SendCode({ ticket: s.ticket + 1, method: method, address: destination, keeps: 0 })) }
 
 pure def lawTheChoiceKeepsTheMinute(now: int): bool =
   val back = { ...initial, step: Choose, sentTo: "owner@example.com", resendAt: now + 1 }
-  not(canSendCode(back, O::Email, "owner@example.com", now, true)) and canSendCode(back, O::Email, "+15550100", now, true)
+  not(canSendCode(back, S::Email, "owner@example.com", now, true)) and canSendCode(back, S::Email, "+15550100", now, true)
 ```
 
 ### The phone writes a typed number in international form, and leaves a number already in that form as it is
@@ -290,12 +293,12 @@ The address kept on screen, for another code or to fill in again, is the
 one the code went to.
 
 ```quint
-pure def sentAs(method: O::Method, address: str): str = if (method == O::Phone) international(address) else address
+pure def sentAs(method: S::Method, address: str): str = if (method == S::Phone) international(address) else address
 
 pure def lawATextGoesToTheNumberInInternationalForm(address: str, now: int): bool =
   val choosing = { ...initial, step: Choose, readiness: { status: R::Loaded, ticket: 1 }, sms: true }
-  sendCode(choosing, O::Phone, address, now, true).out == List(SendCode({ ticket: 1, method: O::Phone, address: international(address), keeps: 0 }))
-    and sendCode(choosing, O::Email, address, now, true).out == List(SendCode({ ticket: 1, method: O::Email, address: address, keeps: 0 }))
+  sendCode(choosing, S::Phone, address, now, true).out == List(SendCode({ ticket: 1, method: S::Phone, address: international(address), keeps: 0 }))
+    and sendCode(choosing, S::Email, address, now, true).out == List(SendCode({ ticket: 1, method: S::Email, address: address, keeps: 0 }))
 
 pure val otherAddressValues = addressValues
 pure def lawTheMinuteFollowsTheDestination(address: str, otherAddress: str, now: int): bool =
@@ -303,8 +306,8 @@ pure def lawTheMinuteFollowsTheDestination(address: str, otherAddress: str, now:
   val back = { ...choosing, sentTo: international(address), resendAt: now + 1 }
   val destination = international(otherAddress)
   val somethingToSend = otherAddress != "" and destination != ""
-  (canSendCode(back, O::Phone, otherAddress, now, true) iff (somethingToSend and destination != back.sentTo))
-    and (canSendCode(back, O::Phone, otherAddress, now + 1, true) iff somethingToSend)
+  (canSendCode(back, S::Phone, otherAddress, now, true) iff (somethingToSend and destination != back.sentTo))
+    and (canSendCode(back, S::Phone, otherAddress, now + 1, true) iff somethingToSend)
 ```
 
 ### A code that went out starts a new attempt, good for ten minutes, with another offered after a minute
@@ -435,7 +438,7 @@ pure def lawAVerifiedSignInIsHandedOverOrDropped(account: int, free: bool): bool
   val checking = { ...initial, step: Code, work: Verifying, ticket: 1, attempt: 1, address: "owner@example.com", expiresAt: 10 }
   val answer = verified(checking, 1, Created, account, Totp, free, 0)
   account > 0 implies (answer.out.length() == 1 and answer.out.every(e => match e {
-    | Admit(a) => free and a.account == account and a.method == O::Email and a.created
+    | Admit(a) => free and a.account == account and a.method == S::Email and a.created
     | DropSignIn => not(free)
     | _ => false
   }))
@@ -491,7 +494,7 @@ pure def alwaysACodeHasAnAddress(s: SignIn): bool =
 ### A code can be handed over as a sign-in
 
 ```quint
-pure def sometimesHandedOverWithACode(s: SignIn): bool = s.ended == HandedOver and s.method == O::Email and s.attempt > 0
+pure def sometimesHandedOverWithACode(s: SignIn): bool = s.ended == HandedOver and s.method == S::Email and s.attempt > 0
 ```
 
 ### A sign-in verified while the session was busy is dropped, and the owner chooses again
@@ -545,10 +548,10 @@ pure def sometimesTheChoiceWaitsItsMinute(s: SignIn): bool = s.step == Choose an
 ### Google opens a new browser visit, each with its own number, and opening it again retires the one open
 
 ```quint
-pure def canChooseGoogle(s: SignIn, online: bool): bool = s.step == Choose and s.work == Resting and online and offered(s, O::Google)
+pure def canChooseGoogle(s: SignIn, online: bool): bool = s.step == Choose and s.work == Resting and online and offered(s, S::Google)
 
 pure def chooseGoogle(s: SignIn, now: int, online: bool): Moved =
-  { state: { ...s, step: Browser, method: O::Google, tab: O::go(s.tab, now), address: "", prefill: false, trouble: Fine },
+  { state: { ...s, step: Browser, method: S::Google, tab: O::go(s.tab, now), address: "", prefill: false, trouble: Fine },
     out: List(OpenBrowser({ tab: s.tab.number + 1 })) }
 
 pure def canReopenGoogle(s: SignIn, online: bool): bool = s.step == Browser and s.work == Resting and online
@@ -596,7 +599,7 @@ pure def browserTimedOut(s: SignIn, now: int): SignIn = chooser(TabExpired, s)
 ### A Google sign-in can be handed over
 
 ```quint
-pure def sometimesHandedOverWithGoogle(s: SignIn): bool = s.ended == HandedOver and s.method == O::Google
+pure def sometimesHandedOverWithGoogle(s: SignIn): bool = s.ended == HandedOver and s.method == S::Google
 ```
 
 ### A browser visit can time out
@@ -639,7 +642,7 @@ pure def sometimesAnAuthenticatorCodeIsAsked(s: SignIn): bool = s.step == Second
 
 pure def sometimesATextedCodeIsAsked(s: SignIn): bool = s.step == Second and s.factor == Sms
 
-pure def sometimesAPasskeyIsAsked(s: SignIn): bool = s.step == Second and s.factor == Passkey and s.method == O::Google
+pure def sometimesAPasskeyIsAsked(s: SignIn): bool = s.step == Second and s.factor == Passkey and s.method == S::Google
 ```
 
 ### A second check that ran out returns to the choice
@@ -717,7 +720,7 @@ before the restart is never taken for a new one.
 
 ```quint
 pure def restart(s: SignIn): SignIn =
-  { ...s, waiting: false, step: Closed, work: Resting, tab: O::orphaned(s.tab), readiness: R::retire(s.readiness),
+  { ...s, waiting: false, step: Closed, work: Resting, tab: O::orphaned(s.tab), readiness: O::retire(s.readiness),
     google: false, sms: false, wrong: 0, spent: false, address: "", prefill: false, trouble: Fine, ended: NotEnded }
 ```
 
@@ -739,7 +742,7 @@ pure def sometimesToldARestartEndedSignIn(s: SignIn): bool = s.trouble == Restar
 
 ```quint
 pure def erase(s: SignIn): SignIn =
-  { ...restart(s), tab: O::ended(s.tab), method: O::Email, sentTo: "", resendAt: 0, expiresAt: 0 }
+  { ...restart(s), tab: O::ended(s.tab), method: S::Email, sentTo: "", resendAt: 0, expiresAt: 0 }
 
 pure def stepErasingLeavesNoAddress(before: SignIn, via: str, after: SignIn): bool =
   via == "erase" implies (after.sentTo == "" and after.address == "" and after.step == Closed and not(after.tab.open or after.tab.orphan))

@@ -1,5 +1,5 @@
 // spec/app/assistant/search.md, "Search from a closed Contact remembers the card that opened it"
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 
 /** Ask the existing Assistant search owner to open over this card. */
 export function searchFromContact(alpha: Alpha, route: number, person: string): void {

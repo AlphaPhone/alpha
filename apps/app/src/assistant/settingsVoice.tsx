@@ -2,8 +2,8 @@
 import { ListGroup, SettingsFactRow } from "@repo/ui";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { chosen, type Way } from "../../gen/app__voice__route.ts";
-import { native } from "../platform/device.vibe";
-import type { Area } from "../runtime/area.tsx";
+import { native } from "../platform/index.vibe";
+import type { Area } from "../runtime/ui.tsx";
 import assistant from "./index.tsx";
 
 const ways: Record<Way, string> = {

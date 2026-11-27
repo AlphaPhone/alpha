@@ -1,0 +1,19 @@
+{
+  "key": "alpha/app/startup/journal@1",
+  "spec": "spec/app/startup/journal.md",
+  "shape": "5cf69cbaf1b3e127",
+  "state": {
+    "entries": [
+      {
+        "at": 1794913600000,
+        "kind": "Crashed"
+      },
+      {
+        "at": 1794996400000,
+        "kind": "StoppedAnswering"
+      }
+    ],
+    "seen": 1,
+    "dropped": 0
+  }
+}

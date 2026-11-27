@@ -12,13 +12,13 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import { Letters, begin } from "../inbox/composer.vibe"
 import type { Mail } from "../inbox/gmail.vibe"
-import { type Said, say } from "../notices/toasts.vibe"
-import { Device, native, shareSystemText } from "../platform/device.vibe"
-import { downloadText } from "../platform/noteDocuments.vibe"
-import type { Agent } from "../platform/agent.vibe"
-import { NoteStore } from "../platform/notes.vibe"
-import { launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
-import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Said, say } from "../notices/index.vibe"
+import { Device, native, shareSystemText } from "../platform/index.vibe"
+import { downloadText } from "../platform/index.vibe"
+import type { Agent } from "../platform/index.vibe"
+import { NoteStore } from "../platform/index.vibe"
+import { launchOwnerAt, sameResidentOwner } from "../platform/index.vibe"
+import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { type NotesSelection, savedVoiceRecord } from "./selection.vibe"
 import { NoteContent, numberOf } from "./content.vibe"
 
@@ -126,6 +126,14 @@ function carry(fx: Actions.Effect): Job<Actions.Event, Scope | Actions.Machine |
     when { tag: "Presents" }: answer("share the reviewed note", shareText(fx), textShared(fx.ticket, "ShareUnavailable"), phone);
     when { tag: "ReportShare" }: run("report the note share", reportShare(fx), phone);
   }
+}
+
+// spec/app/notes/actions.md, "Share reviews the saved note before an explicit destination receives its text"
+/** Share chosen in a More drawn before the note's save landed, once it has: the menu opens over the saved note as the owner's own More opens it, and its share is reviewed. */
+export effect function reviewSaved(opening: Extract<Actions.Event, { readonly type: "openMenu" }>): void!!Actions.Machine {
+  const menu = try Actions.Machine
+  const opened = menu.send(opening, "Owner") catch () => undefined
+  if (opened !== undefined) try ignore(menu.send({ type: "reviewShare" }, "Owner"))
 }
 
 const retire = started(effect {

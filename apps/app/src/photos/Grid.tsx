@@ -4,7 +4,7 @@ import { Check, Heart, Image, Play } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type TouchEvent, type UIEvent } from "react";
 import { Button, cn, dockClearance, focusRing } from "@repo/ui";
 import type { Density } from "../../gen/app__photos.ts";
-import { headingOf } from "../runtime/dateHeading.ts";
+import { headingOf } from "../runtime/ui.tsx";
 import { taken, type Row } from "./catalog.vibe";
 import { thumbnailBatch, viewportThumbnails } from "./photos.vibe";
 

@@ -88,6 +88,7 @@ pure def runsRead(s: Sheet, ticket: int, ok: bool, count: int, more: bool): Shee
 ```quint
 pure def alwaysTheHistoryIsPaged(s: Sheet): bool = and {
   s.shown >= 0, s.owner >= 0,
+  s.shown >= 1 implies s.owner >= 1,
   s.more implies (s.shown >= maxPage and s.history.status == R::Loaded),
   s.history.status == R::Loading implies s.owner >= 1,
 }
@@ -163,7 +164,8 @@ pure def sometimesTheSheetNotesANewerVersion(s: Sheet): bool = newerVersion(s) a
 
 ```quint
 pure def canReadAloud(s: Sheet): bool =
-  s.runId >= 1 and U::ended(s.status) and (s.text == Text or s.text == Truncated) and s.speech.outcome != A::Sent
+  s.runId >= 1 and U::ended(s.status) and (s.text == Text or s.text == Truncated)
+    and s.output.status != R::Loading and s.speech.outcome != A::Sent
 
 pure def readAloud(s: Sheet): Moved =
   val asked = A::dispatch(A::record(A::plan(s.speech.id + 1)))
@@ -202,11 +204,12 @@ pure def closeRun(s: Sheet): Moved =
 
 ```quint
 pure def alwaysSpeechIsOfTheOpenRun(s: Sheet): bool = and {
-  s.speech.outcome == A::Sent implies (s.runId >= 1 and U::ended(s.status) and (s.text == Text or s.text == Truncated)),
+  s.speech.outcome == A::Sent implies (s.runId >= 1 and U::ended(s.status) and (s.text == Text or s.text == Truncated) and s.output.status != R::Loading),
   s.speech.outcome != A::Recorded, s.speech.id >= 0,
+  s.output.ticket >= 0, s.output.status == R::Loading implies s.output.ticket >= 1,
   s.runId >= 1 implies (s.version >= 1 and s.newest >= s.version and s.status != U::NoRun),
   s.runId == 0 implies (s.text == NoOutput and s.output.status != R::Loading),
-  s.text != NoOutput implies s.output.status == R::Loaded,
+  s.text != NoOutput implies (s.output.status != R::Idle and s.output.ticket >= 1),
 }
 ```
 

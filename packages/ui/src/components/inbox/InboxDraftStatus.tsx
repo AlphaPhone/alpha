@@ -20,10 +20,11 @@ const gmail: Record<"none" | "saved" | "unsaved" | "saving" | "clash" | "unsure"
   unsure: { status: "warn", label: "Not sure of Gmail's copy" },
 };
 
-const sent: Record<"none" | "already" | "earlier", Mark | undefined> = {
+const sent: Record<"none" | "already" | "earlier" | "maybe", Mark | undefined> = {
   none: undefined,
   already: { status: "ok", label: "Already sent" },
   earlier: { status: "warn", label: "Earlier version sent" },
+  maybe: { status: "warn", label: "May have been sent" },
 };
 
 export type InboxDraftStatusProps = {
@@ -31,8 +32,8 @@ export type InboxDraftStatusProps = {
   keeping: "kept" | "writing" | "notKept" | "full";
   /** Where the copy in Gmail's Drafts stands. */
   gmail: "none" | "saved" | "unsaved" | "saving" | "clash" | "unsure";
-  /** Whether a send of it went, and whether it was changed after. */
-  sent: "none" | "already" | "earlier";
+  /** Whether a send of it went, whether it was changed after, or whether one before the update may have gone. */
+  sent: "none" | "already" | "earlier" | "maybe";
   /** Tries to keep the draft on the phone again; offered while it is not kept. */
   onRetry?: () => void;
 };

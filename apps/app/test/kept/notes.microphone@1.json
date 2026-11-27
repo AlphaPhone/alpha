@@ -1,0 +1,34 @@
+{
+  "key": "alpha/app/notes/microphone@1",
+  "spec": "spec/app/notes/microphone.md",
+  "shape": "bcfeca87c063cd2b",
+  "state": {
+    "owner": 0,
+    "mic": {
+      "grant": "Unasked",
+      "asked": false
+    },
+    "asking": false,
+    "queued": false,
+    "folder": 0,
+    "started": false,
+    "browserDenied": false
+  },
+  "earlier": [
+    {
+      "from": "299b554681",
+      "until": "031ee58372",
+      "state": {
+        "owner": 0,
+        "mic": {
+          "grant": "Unasked",
+          "asked": false
+        },
+        "asking": false,
+        "queued": false,
+        "folder": 0,
+        "started": false
+      }
+    }
+  ]
+}

@@ -292,7 +292,7 @@ describe("Calendar without a connected account", () => {
     await press("New event");
     await until(alpha, runtime, Editor, (state) => state.shown && state.form === "NewEvent" && state.receipts.status === "Loaded");
     await fill("Title", "Piano");
-    if (checkInitialCalendar) expect([Boolean(button("Your agent's calendar")), button("This phone's calendar")?.getAttribute("aria-pressed")]).toEqual([false, "true"]);
+    if (checkInitialCalendar) expect([Boolean(button("Eliza Calendar")), button("This phone's calendar")?.getAttribute("aria-pressed")]).toEqual([false, "true"]);
     await press("Weekly");
     await until(alpha, runtime, Editor, (state) => state.titled && state.kept);
     await press("Back to calendar");
@@ -316,7 +316,7 @@ describe("Calendar without a connected account", () => {
     // spec/app/calendar/editor.md, "Story: Keep my draft through a restart": Google connects while the draft waits; Calendar reads it when it comes forward again.
     await reconnectAndResumeDraft(world, alpha, runtime);
     const pressed = (name: string) => button(name)?.getAttribute("aria-pressed");
-    expect([pressed("This phone's calendar"), pressed("Your agent's calendar"), pressed("Weekly")]).toEqual(["true", "false", "true"]);
+    expect([pressed("This phone's calendar"), pressed("Eliza Calendar"), pressed("Weekly")]).toEqual(["true", "false", "true"]);
     await press("Save event");
     await until(alpha, runtime, Editor, (state) => state.form === "NoForm" && state.write.outcome === "Confirmed");
     expect(world.calendar.phoneEvents.find(({ title }) => title === "Piano")).toMatchObject({ recurring: true });
@@ -337,7 +337,7 @@ describe("Calendar without a connected account", () => {
     await reconnectAndResumeDraft(world, alpha, runtime);
     const drawnOptions = () => ["Once", "No repeat", "Daily", "Weekdays", "Weekly", "Video link", "None", "10 min"].filter((name) => button(name) !== undefined);
     // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/agent-calendar-adapter.ts:328 kept only a No repeat chip that sets the repeat back.
-    expect([button("Your agent's calendar")?.getAttribute("aria-pressed"), drawnOptions(), button("No repeat")?.getAttribute("aria-pressed")]).toEqual(["true", ["No repeat"], "false"]);
+    expect([button("Eliza Calendar")?.getAttribute("aria-pressed"), drawnOptions(), button("No repeat")?.getAttribute("aria-pressed")]).toEqual(["true", ["No repeat"], "false"]);
     await press("No repeat");
     await until(alpha, runtime, Editor, (state) => state.kept);
     expect(drawnOptions()).toEqual([]);
@@ -676,10 +676,13 @@ describe("on a phone", () => {
   it("Look at an event (spec/app/calendar/index.md, \"Story: Look at an event\")", async () => {
     const world = morning(true);
     world.calendar.granted = true;
+    world.calendar.summary = "Family";
     const { alpha, runtime } = await mountCalendar(world, only("view:Calendar"), (s) => s.googleRows === 2 && s.phoneRows === 1);
 
     // spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"; spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes"
     await tap("Team lunch");
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": v119 45f6bed30 prototype/agent-calendar-adapter.ts:273 named the event's calendar by its source's summary.
+    await vi.waitFor(() => expect(document.querySelector("[data-alpha-subview=calendar-detail]")?.textContent).toContain("Family"));
     await press("Open Cafe in Maps");
     await until(alpha, runtime, View, (s) => s.detail === "InMaps");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar", "Maps"]);
@@ -732,7 +735,7 @@ describe("on a phone", () => {
     await fill("Title", "Office closure");
     await press("All day");
     // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 shows Video link, Repeat and Alert on every new event of this phone's calendar, and the live adapter left them off the agent's calendar, not dimmed (45f6bed30 prototype/agent-calendar-adapter.ts:312, :328).
-    const agentChosen = () => button("Your agent's calendar")?.getAttribute("aria-pressed") === "true";
+    const agentChosen = () => button("Eliza Calendar")?.getAttribute("aria-pressed") === "true";
     const options = ["Once", "Daily", "Weekdays", "Weekly", "Video link", "None", "At start", "10 min", "1 hour"];
     const drawnOptions = () => options.filter((name) => button(name) !== undefined);
     const offered = () => options.map((name) => button(name)?.disabled);
@@ -746,7 +749,7 @@ describe("on a phone", () => {
     await press("Video link");
     await press("10 min");
     await until(alpha, runtime, Editor, (e) => e.extras);
-    await press("Your agent's calendar");
+    await press("Eliza Calendar");
     await until(alpha, runtime, Editor, (e) => !e.extras);
     expect([agentChosen(), drawnOptions()]).toEqual([true, []]);
     expect(button("Save event")?.getAttribute("aria-disabled")).toBe("false");
@@ -985,14 +988,14 @@ describe("on a phone", () => {
       await press("Send");
       await until(alpha, ask, Conversation, (c) => c.turn.reply === "Complete" && c.turn.send.id === turn);
     };
-    const request = (id: string, title: string, hours: number) => agentRequest(id, {
-      action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+    const request = (id: string, title: string, hours: number, calendarId = "eliza-calendar/primary") => agentRequest(id, {
+      action: "schedule_event", account: "owner", source: { calendarId }, recurrence: null,
       fields: { title, description: "", location: "", startAt: new Date(world.at(1, hours)).toISOString(), endAt: new Date(world.at(1, hours + 0.5)).toISOString(), isAllDay: false, timeZone: "UTC" },
     });
-    const file = async (id: string, title: string, hours: number) => {
+    const file = async (id: string, title: string, hours: number, calendarId?: string) => {
       world.ask.nextReplyChunks = [`I've proposed ${title} for tomorrow. It's waiting for your approval.`];
       world.ask.nextActions = () => {
-        world.calendar.approvals.push(request(id, title, hours));
+        world.calendar.approvals.push(request(id, title, hours, calendarId));
         return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: id } }];
       };
       await send(`Put ${title} on my calendar tomorrow.`);
@@ -1002,18 +1005,22 @@ describe("on a phone", () => {
       await agent.runPromise(Effect.flatMap(Changes, (machine) => Effect.flatMap(machine.get(), (a) => machine.send({ type: "decline", filing: a.filing }, "Owner"))));
       await until(alpha, agent, Changes, (a) => a.result === "Declined");
     };
-    return { alpha, agent, file, request, declineInCalendar };
+    return { alpha, agent, file, request, declineInCalendar, send };
   }
 
   const askedCard = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
 
-  it("Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
+  async function fileTwoCalendarRequests() {
     const world = morning(true);
     const { alpha, agent, file } = await askingCalendar(world);
     await file("approval-earlier-reply", "camera setup", 9);
     await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
-
     await file("approval-newer-reply", "lens check", 11);
+    return { world, alpha, agent };
+  }
+
+  it("Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
+    const { world, alpha, agent } = await fileTwoCalendarRequests();
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
     await drawn(() => {});
     expect(["camera setup", "lens check"].map((text) => askedCard().includes(text))).toEqual([true, false]);
@@ -1025,6 +1032,89 @@ describe("on a phone", () => {
     await press("Approve");
     await until(alpha, agent, Changes, (a) => a.result === "Done");
     expect(world.calendar.writes).toEqual(["reject approval-earlier-reply", "approve approval-newer-reply", "create ev-lens-check"]);
+  });
+
+  async function openPrimaryApproval(summary?: string) {
+    const world = morning(true);
+    if (summary !== undefined) world.calendar.summary = summary;
+    const { alpha, agent, file } = await askingCalendar(world);
+    await file("approval-primary", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    return { world, alpha, agent, file };
+  }
+
+  it("The card names the agent's own calendar as the Sunday demo build did (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": eliza files the agent calendar's requests for calendar "primary", which v119 45f6bed30 named "Eliza Calendar" (prototype/calendar-approval-fields.ts:48, agent-calendar-adapter.ts:166).
+    const { world } = await openPrimaryApproval();
+    expect(["Eliza Calendar", "Your agent's calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": v119 headed a new event's card "Add event" (prototype/calendar-approval-fields.ts:46)
+    expect(["Add event", "Create an event"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect(button("Approve")).toBeDefined();
+    expect(world.calendar.writes).toEqual([]);
+  });
+
+  it("The card names the calendar its request names by the summary the agent lists for it, as the Sunday demo build did (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": v119 45f6bed30 prototype/calendar-approval-fields.ts:17 and 48 printed the summary of the request's source, for "primary" and for the calendar the agent lists alike.
+    const { world, file } = await openPrimaryApproval("Family");
+    expect(["Family", "Eliza Calendar", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false, false]);
+    await press("Decline");
+    await file("approval-listed", "lens check", 11, "eliza-calendar/primary");
+    await vi.waitFor(() => expect(askedCard()).toContain("lens check"));
+    expect(["Family", "Calendar eliza-calendar/primary"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect(button("Approve")).toBeDefined();
+    expect(world.calendar.writes).toEqual(["reject approval-primary"]);
+  });
+
+  it("A card filed from Ask Alpha on Home names the calendar the agent lists though Calendar was never opened (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": signed out, Calendar reads no calendar list for an owner, as where Calendar was never opened, so only the card's own read names it
+    const world = { ...morning(true), signedIn: false };
+    const { alpha, agent, file } = await askingCalendar(world);
+    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).not.toContain("Calendar");
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": v119 45f6bed30 prototype/calendar-approval-fields.ts:17 printed the summary of the source it read for the card; demo frame v100-077 shows Eliza Calendar.
+    await file("approval-home", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect([
+      askedCard().includes("Eliza Calendar"),
+      askedCard().includes("Agent Calendar"),
+      Boolean(button("Approve")),
+      world.calendar.writes,
+    ]).toEqual([true, false, true, []]);
+  });
+
+  it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    const { world, alpha, agent } = await fileTwoCalendarRequests();
+    const earlier = world.calendar.approvals.find((one) => one.id === "approval-earlier-reply")?.payload.change["fields"];
+    if (typeof earlier !== "object" || earlier === null) throw new Error("no fields");
+    Object.assign(earlier, { title: "camera setup, moved" });
+    await press("Approve");
+    await until(alpha, agent, Changes, (a) => a.result === "NotFound");
+    await drawn(() => {});
+    const rows = () => Array.from(document.querySelectorAll("[data-alpha-message-id]"), (row) => row.textContent ?? "");
+    const at = (text: string) => rows().findIndex((row) => row.includes(text));
+    const ended = "Sent, but Calendar could not find the change.";
+    expect([at(ended) - at("I've proposed camera setup"), at("I've proposed lens check") > at(ended)]).toEqual([1, true]);
+  });
+
+  it("How a request ended stays at the foot when the reply that filed it draws no row (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    const world = morning(true);
+    const { alpha, agent, request, send } = await askingCalendar(world);
+    world.ask.nextReplyChunks = [""];
+    world.ask.nextActions = () => {
+      world.calendar.approvals.push(request("approval-blank", "camera setup", 9));
+      return [{ action: "CALENDAR", data: { subaction: "create_event", approvalRequestId: "approval-blank" } }];
+    };
+    await send("Put camera setup on my calendar tomorrow.");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    const fields = world.calendar.approvals.find((one) => one.id === "approval-blank")?.payload.change["fields"];
+    if (typeof fields !== "object" || fields === null) throw new Error("no fields");
+    Object.assign(fields, { title: "camera setup, moved" });
+    await press("Approve");
+    await until(alpha, agent, Changes, (a) => a.result === "NotFound");
+    await drawn(() => {});
+    const rows = Array.from(document.querySelectorAll("[data-alpha-message-id]"), (row) => row.textContent ?? "");
+    expect(rows.at(-1)).toContain("Sent, but Calendar could not find the change.");
   });
 
   it("A request filed before a reply is never approved from that reply's card (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
@@ -1072,6 +1162,8 @@ describe("in a browser", () => {
     // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"
     await fromMonth("Calendars");
     await until(alpha, runtime, View, (s) => s.overlay === "CalendarsSheet");
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": eliza lists its own calendar as Eliza Calendar, the name demo frame v100-077 shows.
+    expect(document.querySelector("[role=dialog]")?.textContent).toContain("Eliza Calendar");
     const agent = [...document.querySelectorAll("[role=switch]")][0] as HTMLElement | undefined;
     if (!agent) throw new Error("no switch");
     agent.click();
@@ -1324,7 +1416,7 @@ describe("Calendar Wave 1 regressions", () => {
     await press("Weekly");
     await until(alpha, runtime, Editor, (e) => e.repeats && !e.extras);
     expect(button("Open in Android Calendar")).toBeUndefined();
-    await press("Your agent's calendar");
+    await press("Eliza Calendar");
     await until(alpha, runtime, Editor, (e) => !e.repeats && !e.extras);
     await press("All day");
     expect(document.querySelector('input[aria-label="End date"]')).not.toBeNull();

@@ -52,6 +52,27 @@ pure def lawAFullListOnlyRenames(saved: List[Saved], place: int, name: str): boo
   (hasRoom(saved, place) and saved.length() <= maxSaved) implies named(saved, place, name).length() <= maxSaved
 ```
 
+### A phone updated from the previous Alpha keeps its saved places
+
+The previous Alpha kept its saved places in its own list on the phone. A
+list this version has never written takes that list once, in its order, as
+if each place were saved again: a place Google served, one without a name
+or valid coordinates, the same place twice and anything past 200 are
+skipped. A previous list that cannot be read leaves this version's list
+empty and usable, and the previous list is only read, never written or
+removed.
+
+```quint
+pure def adopted(saved: List[Saved]): List[Saved] =
+  saved.foldl(List(), (taken, s) => if (s.place > 0 and s.name != "" and not(isSaved(taken, s.place)) and taken.length() < maxSaved) taken.append(s) else taken)
+
+pure def lawAnAdoptedListIsSavedOncePerPlaceUnderAName(saved: List[Saved]): bool =
+  distinctAndNamed(adopted(saved)) and adopted(saved).length() <= maxSaved
+
+pure def lawAnAdoptedListKeepsTheFirstOfEachPlace(saved: List[Saved]): bool =
+  saved.every(s => (s.place > 0 and s.name != "" and saved.length() <= maxSaved) implies isSaved(adopted(saved), s.place))
+```
+
 ### Forgetting a place takes it out of the list
 
 ```quint
@@ -109,8 +130,9 @@ pure def lawAPlaceIsItself(one: Kept): bool = samePlace(one, one)
 
 A saved place of another provider, or of a Google provider, is shown under
 its name and can be removed, but is restricted as Google content is and is
-never a starting point: the owner reads "Enter a saved place or latitude,
-longitude as the starting point."
+never offered as a starting point. With no starting point the owner can
+use, the directions read "Choose your location, a saved place or a place by
+its name as the starting point."
 
 ```quint
 pure def servedHere(provider: str, serving: str, google: bool): bool =

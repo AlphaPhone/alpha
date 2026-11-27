@@ -4,11 +4,11 @@ import { type DigestResult, type HostedDigestProtocol, digestInbox, latestRetain
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as WorkflowList } from "../../gen/app__workflows__list.effect.vibe"
 import { fromAreas, type ToldBrief } from "../home/cards.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { Device } from "../platform/device.vibe"
-import { enableNativeDigestNotices, nativeDigestChanges, nativeDigestsAvailable, type NativeDigestSnapshot, readNativeDigests, syncNativeDigests, writeNativeDigestPreference } from "../platform/hosted-digests.vibe"
-import { type ResidentOwner, launchOwnerAt, residentOwnerKey, sameResidentOwner } from "../platform/owner.vibe"
-import { started, together } from "../runtime/reactor.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { enableNativeDigestNotices, nativeDigestChanges, nativeDigestsAvailable, type NativeDigestSnapshot, readNativeDigests, syncNativeDigests, writeNativeDigestPreference } from "../platform/index.vibe"
+import { type ResidentOwner, launchOwnerAt, residentOwnerKey, sameResidentOwner } from "../platform/index.vibe"
+import { started, together } from "../runtime/index.vibe"
 import { Rows } from "./list.vibe"
 
 /** Old agent-only keys carry no verified owner. Leave their results and consent sealed. */

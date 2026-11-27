@@ -1,0 +1,381 @@
+// spec/app/notices/collection.md, "Story: Let Alpha see my notifications"; spec/app/notices/collection.md, "Story: Act on another app's notification"; spec/app/notices/collection.md, "Story: See and dismiss Alpha's own notices"; spec/app/notices/collection.md, "Story: Change owner or restart while collecting"
+import type { Actor } from "../../gen/app__approvals__operation.ts"
+import * as Collection from "../../gen/app__notices__collection.effect.vibe"
+import type * as Notices from "../../gen/app__notices.effect.vibe"
+import type * as Posting from "../../gen/app__notices__posting.effect.vibe"
+import type { Grant } from "../../gen/kit__permission.ts"
+import { SystemSettings } from "../platform/index.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
+import { type NoticeDesk, askAboutWaitingTap, tapNotice } from "./notices.vibe"
+import { markNoticeSpent } from "./posting.vibe"
+
+/** A single notification row collected from another app. */
+export interface ShadeRow {
+  readonly id: string
+  readonly appLabel: string
+  readonly title: string
+  readonly text: string
+  readonly at: number
+  readonly owned: boolean
+  readonly secret: boolean
+  readonly clearable: boolean
+}
+
+/** One of Alpha's own active notice rows listed beside collected rows. */
+export interface OwnShadeRow {
+  readonly id: number
+  readonly title: string
+  readonly text: string
+  readonly at: number
+}
+
+/** A bounded history item retained while history consent is on (max 20 items). */
+export interface ShadeHistoryItem {
+  readonly id: string
+  readonly appLabel: string
+  readonly title: string
+  readonly at: number
+}
+
+/** Injectable hooks for Android NotificationListener listing and row actions. */
+export interface CollectionHooks {
+  list(ticket: number): { readonly ok: boolean; readonly rows: ReadonlyArray<ShadeRow> }!!
+  openRow(row: ShadeRow, ticket: number): void!!
+  dismissRow(row: ShadeRow, ticket: number): void!!
+  clearAll(ticket: number): void!!
+  openSettings(): void!!
+}
+
+/** Snapshot of active shade rows, Alpha's own rows, and bounded history. */
+export interface ShadeSnapshot {
+  readonly rows: ReadonlyArray<ShadeRow>
+  readonly ownRows: ReadonlyArray<OwnShadeRow>
+  readonly history: ReadonlyArray<ShadeHistoryItem>
+  readonly openedIds: ReadonlyArray<string>
+  readonly dismissedIds: ReadonlyArray<string>
+  readonly settingsOpened: number
+}
+
+export interface ShadeShelfService {
+  snapshot(): ShadeSnapshot
+  subscribe(listener: () => void): () => void
+  setHooks(hooks: Partial<CollectionHooks>): void
+  setSourceRows(rows: ReadonlyArray<ShadeRow>): void
+  setOwnRows(rows: ReadonlyArray<OwnShadeRow>): void
+  setPendingActionRow(row: ShadeRow | undefined): void
+  setPendingOwnDismiss(id: number | undefined): void
+  reset(): void
+  performListing(ticket: number): { readonly ok: boolean; readonly rows: number; readonly secret: boolean; readonly at: number }!!
+  performOpen(ticket: number): void!!
+  performDismiss(ticket: number): void!!
+  performClearAll(ticket: number): void!!
+  performOpenSettings(): void!!SystemSettings
+  performDismissOwn(): void!!Posting.Machine
+  syncFromState(state: Collection.Collection): void
+}
+
+export service ShadeShelf: ShadeShelfService {}
+
+const shadeShelf = Layer.sync(ShadeShelf, () => {
+  let sourceRows: ShadeRow[] = []
+  let shownRows: ShadeRow[] = []
+  let ownRows: OwnShadeRow[] = []
+  let history: ShadeHistoryItem[] = []
+  let openedIds: string[] = []
+  let dismissedIds: string[] = []
+  let settingsOpened = 0
+  let pendingRow: ShadeRow | undefined
+  let pendingOwnId: number | undefined
+  let hooks: Partial<CollectionHooks> = {}
+  const { snapshot, subscribe, emit } = createDeskStore((): ShadeSnapshot => ({
+    rows: [...shownRows],
+    ownRows: [...ownRows],
+    history: [...history],
+    openedIds: [...openedIds],
+    dismissedIds: [...dismissedIds],
+    settingsOpened,
+  }))
+  return {
+    snapshot,
+    subscribe,
+    setHooks(next: Partial<CollectionHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    setSourceRows(rows: ReadonlyArray<ShadeRow>): void {
+      sourceRows = [...rows]
+    },
+    setOwnRows(rows: ReadonlyArray<OwnShadeRow>): void {
+      ownRows = [...rows]
+      emit()
+    },
+    setPendingActionRow(row: ShadeRow | undefined): void {
+      pendingRow = row
+    },
+    setPendingOwnDismiss(id: number | undefined): void {
+      pendingOwnId = id
+    },
+    reset(): void {
+      sourceRows = []
+      shownRows = []
+      ownRows = []
+      history = []
+      openedIds = []
+      dismissedIds = []
+      settingsOpened = 0
+      pendingRow = undefined
+      pendingOwnId = undefined
+      hooks = {}
+      emit()
+    },
+    performListing: (ticket: number) => effect {
+      const result = hooks.list !== undefined ? try hooks.list(ticket) : { ok: true, rows: sourceRows }
+      if (!result.ok) {
+        shownRows = []
+        emit()
+        return { ok: false, rows: 0, secret: false, at: untimed }
+      }
+      shownRows = [...result.rows]
+      const combined = [
+        ...history,
+        ...result.rows.map((row) => ({ id: row.id, appLabel: row.appLabel, title: row.title, at: row.at })),
+      ]
+      history = combined.slice(-Collection.maxKept)
+      emit()
+      const hasSecret = result.rows.some((row) => row.secret)
+      return { ok: true, rows: result.rows.length, secret: hasSecret, at: untimed }
+    },
+    performOpen: (ticket: number) => effect {
+      const target = pendingRow ?? shownRows[0]
+      pendingRow = undefined
+      if (target === undefined) return
+      openedIds.push(target.id)
+      emit()
+      if (hooks.openRow !== undefined) try hooks.openRow(target, ticket)
+    },
+    performDismiss: (ticket: number) => effect {
+      const target = pendingRow ?? shownRows[0]
+      pendingRow = undefined
+      if (target === undefined) return
+      dismissedIds.push(target.id)
+      shownRows = shownRows.filter((row) => row.id !== target.id)
+      emit()
+      if (hooks.dismissRow !== undefined) try hooks.dismissRow(target, ticket)
+    },
+    performClearAll: (ticket: number) => effect {
+      dismissedIds.push(...shownRows.map((row) => row.id))
+      shownRows = []
+      emit()
+      if (hooks.clearAll !== undefined) try hooks.clearAll(ticket)
+    },
+    performOpenSettings: () => effect {
+      settingsOpened += 1
+      emit()
+      if (hooks.openSettings !== undefined) {
+        try hooks.openSettings()
+        return
+      }
+      try ignore((try SystemSettings).open("NotificationAccess", ""))
+    },
+    performDismissOwn: () => effect {
+      const targetId = pendingOwnId ?? ownRows[0]?.id
+      pendingOwnId = undefined
+      if (targetId === undefined) return
+      ownRows = ownRows.filter((row) => row.id !== targetId)
+      try ignore(markNoticeSpent(targetId))
+      emit()
+    },
+    syncFromState(state: Collection.Collection): void {
+      let changed = false
+      if (state.rows === 0 && shownRows.length > 0) {
+        shownRows = []
+        changed = true
+      }
+      if (state.kept === 0 && history.length > 0) {
+        history = []
+        changed = true
+      } else if (history.length > state.kept) {
+        history = history.slice(-state.kept)
+        changed = true
+      }
+      if (state.own === 0 && ownRows.length > 0) {
+        ownRows = []
+        changed = true
+      }
+      if (changed) emit()
+    },
+  }
+})
+
+function carry(fx: Collection.Effect): Job<Collection.Event, ShadeShelf | SystemSettings | Posting.Machine, [Actor]> {
+  return match (fx.act) {
+    when "Listing": answer(
+      `collection-list-${fx.ticket}`,
+      effect {
+        const res = try (try ShadeShelf).performListing(fx.ticket)
+        return { type: "listed", ticket: fx.ticket, ok: res.ok, rows: res.rows, secret: res.secret, at: untimed } as const
+      },
+      { type: "listed", ticket: fx.ticket, ok: false, rows: 0, secret: false, at: untimed } as const,
+      "Phone" as Actor,
+    );
+    when "Open": run("collection-open", effect { try (try ShadeShelf).performOpen(fx.ticket) }, "Phone" as Actor);
+    when "Dismiss": run("collection-dismiss", effect { try (try ShadeShelf).performDismiss(fx.ticket) }, "Phone" as Actor);
+    when "ClearAll": run("collection-clear-all", effect { try (try ShadeShelf).performClearAll(fx.ticket) }, "Phone" as Actor);
+    when "OpenSettings": run("collection-settings", effect { try (try ShadeShelf).performOpenSettings() }, "Phone" as Actor);
+    when "DismissOwn": run("collection-dismiss-own", effect { try (try ShadeShelf).performDismissOwn() }, "Phone" as Actor);
+    when "ApplyPolicy": run("collection-apply-policy", succeed(undefined), "Phone" as Actor);
+    when "ReadPolicy": run("collection-read-policy", succeed(undefined), "Phone" as Actor);
+    when "ReadPolicyApps": run("collection-read-policy-apps", succeed(undefined), "Phone" as Actor);
+    when "ReadPolicyHistory": run("collection-read-policy-history", succeed(undefined), "Phone" as Actor);
+  }
+}
+
+const collectionMachine = reacting(Collection, {
+  carry,
+  timers: (state) => {
+    const dueAt = state.keptSince + Collection.historyAge
+    return Collection.canForget(state, dueAt, "Phone")
+      ? [due<Collection.Event, [Actor]>("collection-forget-history", dueAt, { type: "forget", now: dueAt }, "Phone")]
+      : []
+  },
+})
+
+// spec/app/notices/collection.md, "When collection stops, nothing collected is kept"
+const syncingShelf = started(effect {
+  const machine = try Collection.Machine
+  const shelf = try ShadeShelf
+  try Stream.runForEach(machine.changes, (state) => sync(() => shelf.syncFromState(state)))
+}, "syncing notification shade shelf")
+
+// spec/app/notices/collection.md, "Changing owner forgets everything collected, the consent, which is the new owner's to give, and the own rows of the owner before"
+/** Switch the signed-in owner for notification shade collection, forgetting prior consent and history. */
+export effect function switchCollectionOwner(signedIn: number): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canSwitchOwner(try machine.get(), signedIn, "Phone")) return false
+  return try contained(machine.send({ type: "switchOwner", signedIn }, "Phone"), "switching collection owner")
+}
+
+// spec/app/notices/collection.md, "Only the owner signed in turns collection, previews and history on or off; previews and history need collection on"
+/** Update owner consent for collection, preview text, and bounded history. */
+export effect function setCollectionConsent(
+  on: boolean,
+  preview: boolean,
+  keep: boolean,
+  signedIn: number,
+  by: Actor = "Owner",
+): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canConsent(try machine.get(), on, preview, keep, signedIn, by)) return false
+  return try contained(machine.send({ type: "consent", on, preview, keep, signedIn }, by), "updating collection consent")
+}
+
+// spec/app/notices/collection.md, "The owner pauses and resumes collection, and chooses the app to collect from"
+/** Pause or resume notification collection. */
+export effect function pauseCollection(paused: boolean, by: Actor = "Owner"): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canPause(try machine.get(), paused, by)) return false
+  return try contained(machine.send({ type: "pause", paused }, by), "pausing collection")
+}
+
+// spec/app/notices/collection.md, "The owner pauses and resumes collection, and chooses the app to collect from"
+/** Choose the app to collect notifications from. */
+export effect function chooseCollectionApp(by: Actor = "Owner"): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canChoose(try machine.get(), by)) return false
+  return try contained(machine.send({ type: "choose" }, by), "choosing collection app")
+}
+
+// spec/app/notices/collection.md, "Listener access is granted only in Android's Settings, which Alpha opens for the owner"
+/** Open Android NotificationListener Settings for the owner. */
+export effect function openListenerSettings(by: Actor = "Owner"): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canOpenSettings(try machine.get(), by)) return false
+  return try contained(machine.send({ type: "openSettings" }, by), "opening notification listener settings")
+}
+
+// spec/app/notices/collection.md, "The phone says what Android allows, and whether the chosen app is still signed the same for this user; one that changed must be chosen again"
+/** Observe Android's listener permission grant and chosen app signer continuity. */
+export effect function observeListenerAccess(grant: Grant, sameSigner: boolean): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  return try contained(machine.send({ type: "observe", grant, sameSigner }, "Phone"), "observing listener access")
+}
+
+// spec/app/notices/collection.md, "The phone says when it locks, and a locked phone shows no rows"
+/** Notify collection whether the phone is locked. */
+export effect function setPhoneLocked(locked: boolean): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canLock(try machine.get(), locked, "Phone")) return false
+  return try contained(machine.send({ type: "lock", locked }, "Phone"), "updating phone lock state")
+}
+
+// spec/app/notices/collection.md, "The phone lists Alpha's own notices still out while their channel is on and the phone unlocked, whatever the listener consent"
+/** Update Alpha's own notice rows displayed in the shade when channel is on and phone is unlocked. */
+export effect function showOwnNotices(rows: ReadonlyArray<OwnShadeRow>, channel: boolean): boolean!!(Collection.Machine | ShadeShelf) {
+  ;(try ShadeShelf).setOwnRows(rows)
+  const machine = try Collection.Machine
+  if (!Collection.canShowOwn(try machine.get(), rows.length, "Phone")) return false
+  return try contained(machine.send({ type: "showOwn", rows: rows.length, channel }, "Phone"), "showing Alpha own notices")
+}
+
+// spec/app/notices/collection.md, "A row is opened only through its own app, never when it is secret, and only while the phone is unlocked"
+/** Open a collected notification row through its owning app. */
+export effect function openShadeRow(row: ShadeRow, by: Actor = "Owner"): boolean!!(Collection.Machine | ShadeShelf) {
+  const machine = try Collection.Machine
+  if (!Collection.canOpen(try machine.get(), row.owned, row.secret, by)) return false
+  ;(try ShadeShelf).setPendingActionRow(row)
+  return try contained(machine.send({ type: "open", owned: row.owned, secret: row.secret }, by), "opening shade row")
+}
+
+// spec/app/notices/collection.md, "A row its app lets be cleared can be dismissed, and Clear all dismisses every row, each against the listing shown, never while locked"
+/** Dismiss a single clearable notification row. */
+export effect function dismissShadeRow(row: ShadeRow, by: Actor = "Owner"): boolean!!(Collection.Machine | ShadeShelf) {
+  const machine = try Collection.Machine
+  if (!Collection.canDismiss(try machine.get(), row.clearable, by)) return false
+  ;(try ShadeShelf).setPendingActionRow(row)
+  return try contained(machine.send({ type: "dismiss", clearable: row.clearable }, by), "dismissing shade row")
+}
+
+// spec/app/notices/collection.md, "A row its app lets be cleared can be dismissed, and Clear all dismisses every row, each against the listing shown, never while locked"
+/** Dismiss all collected rows on an unlocked phone. */
+export effect function clearAllShadeRows(by: Actor = "Owner"): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canClearAll(try machine.get(), by)) return false
+  return try contained(machine.send({ type: "clearAll" }, by), "clearing all shade rows")
+}
+
+// spec/app/notices/collection.md, "The owner can clear the history"
+/** Clear retained shade history. */
+export effect function clearShadeHistory(by: Actor = "Owner"): boolean!!Collection.Machine {
+  const machine = try Collection.Machine
+  if (!Collection.canClearHistory(try machine.get(), by)) return false
+  return try contained(machine.send({ type: "clearHistory" }, by), "clearing shade history")
+}
+
+// spec/app/notices/collection.md, "An own notice is dismissed only on an unlocked phone, which withdraws its delivery"
+/** Dismiss one of Alpha's own notices from the shade, withdrawing its delivery. */
+export effect function dismissOwnRow(id: number, by: Actor = "Owner"): boolean!!(Collection.Machine | ShadeShelf) {
+  const machine = try Collection.Machine
+  if (!Collection.canDismissOwn(try machine.get(), by)) return false
+  ;(try ShadeShelf).setPendingOwnDismiss(id)
+  return try contained(machine.send({ type: "dismissOwn" }, by), "dismissing own notice")
+}
+
+// spec/app/notices/index.md, "Story: Ask Alpha about a notice"
+/** Hand a shade row to the notice tap router to review and ask Alpha about it. */
+export effect function askAboutShadeRow(row: ShadeRow, owner: number): number!!(Notices.Machine | NoticeDesk) {
+  const token = try tapNotice({
+    source: "Shade",
+    title: row.title,
+    appLabel: row.appLabel,
+    text: row.secret ? "" : row.text,
+    asks: true,
+    reviewable: !row.secret,
+    owner,
+    signedIn: owner,
+  })
+  if (token > 0) try ignore(askAboutWaitingTap())
+  return token
+}
+
+/** Notification shade collection coordinator (20-item bounded history, owner consent, sign-in scoping). */
+export const collection = together(shadeShelf, collectionMachine, syncingShelf)

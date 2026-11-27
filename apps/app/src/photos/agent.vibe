@@ -6,9 +6,9 @@ import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import * as Changes from "../../gen/app__photos__changes.effect.vibe"
-import { PhotosPort } from "../platform/photos.vibe"
-import { say } from "../notices/toasts.vibe"
-import { reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
+import { PhotosPort } from "../platform/index.vibe"
+import { say } from "../notices/index.vibe"
+import { reacting, run, started, together, type Job } from "../runtime/index.vibe"
 import { Catalog, type Row } from "./catalog.vibe"
 
 module mediaIds {

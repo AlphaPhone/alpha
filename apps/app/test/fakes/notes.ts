@@ -24,6 +24,11 @@ export interface NotesScene {
   deleteRequests?: Array<{ readonly id: string; readonly expectedRevision: number | undefined }>;
   /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
   target?: string;
+  interactGate?: Promise<void>;
+  /** Holds each deletion sent to the store, in place of `interactGate`, until it settles. */
+  discardGate?: Promise<void>;
+  /** Holds each read of the store until it settles. */
+  stateGate?: Promise<void>;
   viewClaimGate?: Promise<void>;
   /** Each claim and result a renderer sent eliza's views routes, in order. */
   readonly views: { readonly path: "claim" | "result"; readonly body: Record<string, unknown> }[];
@@ -219,11 +224,20 @@ export function notesRoutes(scene: NotesScene, now: () => number): Route[] {
           deviceActions: { protocol: 1, capabilities: [] } });
       }
       if (request.method === "GET" && url.pathname === "/api/notes/state") {
-        const advertised = scene.deleteAtRevision === false ? {} : { deleteAtRevision: true };
-        return scene.failing ? refused(503) : Response.json({ success: true, data: { ...snapshot(scene), ...advertised } });
+        const answer = () => {
+          const advertised = scene.deleteAtRevision === false ? {} : { deleteAtRevision: true };
+          return scene.failing ? refused(503) : Response.json({ success: true, data: { ...snapshot(scene), ...advertised } });
+        };
+        return scene.stateGate === undefined ? answer() : scene.stateGate.then(answer);
       }
       if (request.method === "GET" && url.pathname === "/api/notes/trash/recordings") return Response.json({ success: true, data: [] });
-      if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body, now));
+      if (request.method === "POST" && url.pathname === "/api/notes/interact") {
+        return request.json().then((body: unknown) => {
+          const found = decoded(body);
+          const gate = scene.discardGate !== undefined && found._tag === "Some" && found.value.capability === "delete-note" ? scene.discardGate : scene.interactGate;
+          return gate === undefined ? interact(scene, body, now) : gate.then(() => interact(scene, body, now));
+        });
+      }
       if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
         return request.json().then(async (body: Record<string, unknown>) => {
           const gate = scene.viewClaimGate;

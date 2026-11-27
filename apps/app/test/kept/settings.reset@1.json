@@ -1,0 +1,15 @@
+{
+  "key": "alpha/app/settings/reset@1",
+  "spec": "spec/app/settings/reset.md",
+  "shape": "5c3e28309793682e",
+  "state": {
+    "review": {
+      "read": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "due": 0
+    },
+    "said": "Quiet"
+  }
+}

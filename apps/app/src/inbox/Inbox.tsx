@@ -30,12 +30,12 @@ import type { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vi
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import { openInboxAccount } from "../account/profile.vibe";
-import { useTimed } from "../runtime/react.ts";
-import type { Cloud } from "../platform/cloud.vibe";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import type { Cloud } from "../platform/index.vibe";
+import { untimed } from "../runtime/index.vibe";
+import { Time } from "../runtime/index.vibe";
 import { Compose, FileOffer, Suggested } from "./Compose.tsx";
 import type { Offers } from "./suggestion.vibe";
 import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
@@ -47,8 +47,8 @@ import { gmailAuthorizationWindow } from "./authorization.vibe";
 import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
-import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
-import type { Telephony } from "../platform/telephony.vibe";
+import { InboxAttachmentFiles } from "../platform/index.vibe";
+import type { Telephony } from "../platform/index.vibe";
 import { ThreadPages } from "./thread.vibe";
 
 export interface InboxProps {
@@ -263,6 +263,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
     const event = { type: "reviewAttachment", attachment, handling } as const;
     return can(event) ? () => void send(event) : undefined;
   };
+  // spec/app/inbox/message.md, "An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail"
+  const unsupported = (attachment: number) => {
+    const event = { type: "unsupportedAttachment", attachment } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const outcomeOf = (attempt: typeof state.file) => attempt.outcome === "Planned" ? undefined
@@ -331,12 +336,13 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         fromPhone={state.fromPhone}
         imagesHidden={!imagesLoad(state) && (contents?.formatted?.remoteImages ?? 0) > 0}
         onShowImages={can({ type: "showImages" }) ? () => void send({ type: "showImages" }) : undefined}
-        notice={notice}
+        notice={notice ?? (state.unsupported > 0 ? "openInGmail" : undefined)}
         onNoticeAction={told === "Unconfirmed" && onRefresh ? onRefresh : undefined}
         attachments={files.map((one, at) => ({
           id: `${one.partId}:${at}`, name: one.name, size: sizeOf(one.size),
           onOpen: state.revision > 0 && canPreviewAttachment(one) ? reviewing(at + 1, "Opening") : undefined,
           onSave: state.revision > 0 && destination !== "unavailable" && !canPreviewAttachment(one) && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
+          onUnsupported: !canPreviewAttachment(one) && (destination === "unavailable" || !canSaveAttachment(one)) ? unsupported(at + 1) : undefined,
           saveUnconfirmed: unsure(at + 1),
           browserDownload: destination === "download",
           picker: destination === "picker",

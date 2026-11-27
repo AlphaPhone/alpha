@@ -1,0 +1,148 @@
+{
+  "key": "alpha/app/notes/editor@1",
+  "spec": "spec/app/notes/editor.md",
+  "shape": "bfa4eac725464283",
+  "state": {
+    "owner": 1,
+    "note": 0,
+    "fresh": false,
+    "made": 0,
+    "issued": 0,
+    "folder": 0,
+    "kind": "Text",
+    "draft": {
+      "sync": "Kept",
+      "edits": 0,
+      "carried": 0,
+      "base": 0
+    },
+    "showing": false,
+    "ticket": 0,
+    "failed": false,
+    "gone": false,
+    "full": false,
+    "unreadable": false,
+    "link": {
+      "tie": "NoLink",
+      "id": 0,
+      "mark": 0
+    },
+    "deleting": false,
+    "told": "NotTold",
+    "rescued": false,
+    "dropping": false,
+    "asked": false,
+    "binning": false,
+    "pinning": "Unasked"
+  },
+  "kept": [
+    "owner"
+  ],
+  "earlier": [
+    {
+      "from": "299b554681",
+      "until": "b5628c2c1b (#1809)",
+      "state": {
+        "owner": 1,
+        "note": 0,
+        "fresh": false,
+        "made": 0,
+        "issued": 0,
+        "folder": 0,
+        "kind": "Text",
+        "draft": {
+          "sync": "Kept",
+          "edits": 0,
+          "carried": 0,
+          "base": 0
+        },
+        "showing": false,
+        "ticket": 0,
+        "failed": false,
+        "gone": false,
+        "full": false,
+        "unreadable": false,
+        "link": {
+          "tie": "NoLink",
+          "id": 0,
+          "mark": 0
+        },
+        "deleting": false,
+        "told": "NotTold",
+        "rescued": false,
+        "dropping": false
+      }
+    },
+    {
+      "from": "b5628c2c1b",
+      "until": "ccbce718f8 (#1845)",
+      "state": {
+        "owner": 1,
+        "note": 0,
+        "fresh": false,
+        "made": 0,
+        "issued": 0,
+        "folder": 0,
+        "kind": "Text",
+        "draft": {
+          "sync": "Kept",
+          "edits": 0,
+          "carried": 0,
+          "base": 0
+        },
+        "showing": false,
+        "ticket": 0,
+        "failed": false,
+        "gone": false,
+        "full": false,
+        "unreadable": false,
+        "link": {
+          "tie": "NoLink",
+          "id": 0,
+          "mark": 0
+        },
+        "deleting": false,
+        "told": "NotTold",
+        "rescued": false,
+        "dropping": false,
+        "asked": false
+      }
+    },
+    {
+      "from": "ccbce718f8",
+      "until": "bc285dbb5 (#1851)",
+      "state": {
+        "owner": 1,
+        "note": 0,
+        "fresh": false,
+        "made": 0,
+        "issued": 0,
+        "folder": 0,
+        "kind": "Text",
+        "draft": {
+          "sync": "Kept",
+          "edits": 0,
+          "carried": 0,
+          "base": 0
+        },
+        "showing": false,
+        "ticket": 0,
+        "failed": false,
+        "gone": false,
+        "full": false,
+        "unreadable": false,
+        "link": {
+          "tie": "NoLink",
+          "id": 0,
+          "mark": 0
+        },
+        "deleting": false,
+        "told": "NotTold",
+        "rescued": false,
+        "dropping": false,
+        "asked": false,
+        "binning": false
+      }
+    }
+  ]
+}

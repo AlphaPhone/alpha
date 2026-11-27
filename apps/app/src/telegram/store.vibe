@@ -11,8 +11,8 @@ import {
   ProviderError,
   RateLimited,
   tokenValue,
-} from "../platform/messaging.vibe"
-import { Garbled, type Outcome, Refused, Unreachable, Unsent, outcomeOf } from "../platform/remote.vibe"
+} from "../platform/index.vibe"
+import { Garbled, type Outcome, Refused, Unreachable, Unsent, outcomeOf } from "../platform/index.vibe"
 import type {
   TelegramChat,
   TelegramDialogSummary,
@@ -21,7 +21,7 @@ import type {
   TelegramNotifySettings,
   TelegramUpdate,
   TelegramUser,
-} from "../platform/telegram.vibe"
+} from "../platform/index.vibe"
 
 /** Isolated key under `MessagingSessions` for the signed-in Telegram user-account session. */
 export const TELEGRAM_SESSION_KEY = "telegram:user"

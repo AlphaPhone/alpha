@@ -4,9 +4,9 @@ import type { Event, Target } from "../../gen/app__shell__focus.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Shell as Shown } from "../../gen/app__shell.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { applying, following, reacting, started, together } from "../runtime/reactor.vibe"
-import { createShelf } from "../runtime/shelf.vibe"
+import { Device } from "../platform/index.vibe"
+import { applying, following, reacting, started, together } from "../runtime/index.vibe"
+import { createShelf } from "../runtime/index.vibe"
 
 module page {
   import type { Target } from "../../gen/app__shell__focus.ts"

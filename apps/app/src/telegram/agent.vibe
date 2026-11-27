@@ -5,9 +5,9 @@ import type { Actor, Effect as Out, Event, MutationTool, Pane, ReadTool, Told } 
 import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
 import * as Composer from "../../gen/app__telegram__composer.effect.vibe"
 import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
-import type { MessagingFailure, MessagingSessions } from "../platform/messaging.vibe"
-import { Telegram, type TelegramMessage } from "../platform/telegram.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import type { MessagingFailure, MessagingSessions } from "../platform/index.vibe"
+import { Telegram, type TelegramMessage } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { reportSessionRevoked, resolveAuthedPeer, runPeerMutation } from "./auth.vibe"
 import {
   type TelegramAgentMutationPayload,

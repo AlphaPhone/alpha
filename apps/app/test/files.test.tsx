@@ -50,6 +50,10 @@ const choose = async (name: string, menu = "Files options") => {
     item.click();
   });
 };
+/** The text the preview shows: the lines of its paper cards, in order. */
+const shownText = () => [...document.querySelectorAll("[data-alpha-subview=files-preview] ol li")].map((line) => line.lastElementChild?.textContent).join("\n") || undefined;
+/** Each paper card of the preview: its heading and its line numbers. */
+const textCards = () => [...document.querySelectorAll("[data-alpha-subview=files-preview] ol")].map((card) => [card.previousElementSibling?.textContent, [...card.querySelectorAll("li")].map((line) => line.firstElementChild?.textContent).join(" ")]);
 const paths = (world: ReturnType<typeof scene>) => world.files.stored.map((one) => `${one.volume}:${one.path}`).sort();
 /** Choose `name`: its checkbox before anything is chosen, the row itself once choosing. */
 const select = (name: string) => (button(`Select ${name}`) ? press(`Select ${name}`) : openRow(name));
@@ -488,7 +492,7 @@ describe("Files on a phone", () => {
     // spec/app/files/preview.md, "What was read of a file is shown only in its own viewer, while it can be read"
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
-    expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
+    expect(shownText()).toBe("The words of notes.txt");
     // spec/app/files/preview.md, "The caption and Details show facts for the exact document held": v119's live facts line (selection-adapter.ts:282, files-browser-adapter.ts:1797-1804) with the 18px slot before the facts empty.
     const facts = document.querySelector("[data-facts-slot]")?.parentElement;
     expect([facts?.querySelector("svg"), facts?.querySelector("[data-facts-slot]")?.childNodes.length, facts?.textContent]).toEqual([null, 0, "text/plain · selected on this device · Internal storage › Documents"]);
@@ -504,23 +508,25 @@ describe("Files on a phone", () => {
 
     const updated = world.files.stored.find((file) => file.path === "Documents/notes.txt");
     if (updated === undefined) throw new Error("the fixture lost the previewed notes");
-    world.files.texts[updated.path] = "These are the revised notes";
+    const revised = "Alpha shoot brief\n1. Voice checklist\n2. Calendar hold\n3. Files\n4. Inbox draft\n5. Text reminder\n6. Alpha Compute site\nBring a charged Pixel, tripod, and notebook.\n";
+    world.files.texts[updated.path] = revised;
     world.files.stored.splice(world.files.stored.indexOf(updated), 1, {
       ...updated, modified: 11, size: new TextEncoder().encode(world.files.texts[updated.path]).length,
     });
     world.files.changed();
     await until(alpha, runtime, Shown, (s) => s.revision === 11 && s.content.status === "Loaded");
-    expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
+    // spec/app/files/preview.md, "Story: Look at a file": v119's live paper cards (selection-adapter.ts:272-283), eight numbered lines a card, as the demo's brief showed (wn-057, v100-15)
+    expect([shownText(), textCards()]).toEqual([revised, [["notes.txt", "1 2 3 4 5 6 7 8"], ["notes.txt (continued)", "9"]]]);
 
     // spec/app/files/preview.md, "Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here"
     world.files.texts[updated.path] = "These are the altered notes";
     await choose("Ask Alpha", "File actions");
     await vi.waitFor(() => expect(document.body.textContent).toContain("Alpha could not attach this file"));
-    expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
-    world.files.texts[updated.path] = "These are the revised notes";
+    expect(shownText()).toBe(revised);
+    world.files.texts[updated.path] = revised;
     await choose("Ask Alpha", "File actions");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
-    expect([document.querySelector("[data-alpha-subview=files-preview]") !== null, document.querySelector("pre")?.textContent]).toEqual([true, "These are the revised notes"]);
+    expect([document.querySelector("[data-alpha-subview=files-preview]") !== null, shownText()]).toEqual([true, revised]);
     await press("Remove notes.txt");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
@@ -575,7 +581,7 @@ describe("Files on a phone", () => {
     world.files.selectedByPicker = "Download/restored.txt";
     await press("Select again: notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
-    expect(document.querySelector("pre")?.textContent).toBe("The words of restored.txt");
+    expect(shownText()).toBe("The words of restored.txt");
 
     // spec/app/files/preview.md, "A picked document is renamed through its provider using the access held for the viewer"
     const pickedViewer = runtime.runSync(Shown.use((machine) => machine.get())).viewer;
@@ -583,7 +589,7 @@ describe("Files on a phone", () => {
     await fill("Name", "retained.txt");
     await pressOnTop("Rename");
     await until(alpha, runtime, Shown, (s) => s.viewer > pickedViewer && s.renaming === 0 && s.content.status === "Loaded");
-    expect(document.querySelector("pre")?.textContent).toBe("The words of retained.txt");
+    expect(shownText()).toBe("The words of retained.txt");
 
     world.files.pickerRenameNeedsReselection = true;
     await choose("Rename", "File actions");
@@ -594,7 +600,7 @@ describe("Files on a phone", () => {
     world.files.selectedByPicker = "Download/reselect.txt";
     await press("Select again");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.reachable);
-    expect(document.querySelector("pre")?.textContent).toBe("The words of reselect.txt");
+    expect(shownText()).toBe("The words of reselect.txt");
     await hardware("back");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
     // spec/app/files/recent.md, "A file selected again takes the place of its lapsed row": restored.txt stands where notes.txt was, ahead of code.txt, which still holds its access
@@ -740,7 +746,7 @@ describe("Files on a phone", () => {
     const openedFile = await ask(elsewhere, "open-another-folder-file");
     expect(await runtime.runPromise(fileAction(elsewhere, openedFile.call, openedFile.review))).toEqual({ kind: "applied" });
     await until(alpha, runtime, Shown, (state) => state.content.status === "Loaded" && state.kind === "Text");
-    expect([document.querySelector("pre")?.textContent, now().trail.at(-1)]).toEqual(["The words of notes.txt", folder]);
+    expect([shownText(), now().trail.at(-1)]).toEqual(["The words of notes.txt", folder]);
     await press("Close");
     await until(alpha, runtime, Shown, (state) => state.viewer === 0);
 

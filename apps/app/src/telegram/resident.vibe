@@ -3,7 +3,7 @@ import * as ChatList from "../../gen/app__telegram.effect.vibe"
 import type { Standing } from "../../gen/app__telegram.effect.vibe"
 import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
 import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
-import { contained, together } from "../runtime/reactor.vibe"
+import { contained, together } from "../runtime/index.vibe"
 import {
   executeTelegramAgentRequest,
   readTelegramAmbientSnapshot,

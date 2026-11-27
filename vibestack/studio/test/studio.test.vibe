@@ -490,12 +490,12 @@ describe.concurrent("Studio through its server, its files and a browser", () => 
     const fs = try FileSystem.FileSystem
     const path = try Path.Path
     const spawner = try ChildProcessSpawner
-    const repo = try scratch({ "spec/index.md": "", "vibestack/examples/order/spec/index.md": "# Order\n" })
+    const repo = try scratch({ "spec/index.md": "", "examples/order/spec/index.md": "# Order\n" })
     const outside = try scratch({ "a project/spec/index.md": "# Outside\n", "a project/package.json": '{"name":"order"}' })
-    const example = path.join(repo, "vibestack/examples/order")
+    const example = path.join(repo, "examples/order")
     const external = path.join(outside, "a project")
     const cases: [string, string | undefined, string][] = [
-      [repo, undefined, repo], [repo, ".", repo], [repo, "vibestack/examples/order", example], [repo, example, example],
+      [repo, undefined, repo], [repo, ".", repo], [repo, "examples/order", example], [repo, example, example],
       [repo, external, external], [repo, path.relative(repo, external), external], [REPO_ROOT, "vibestack/studio", STUDIO_ROOT],
     ]
     effect function opensProject([cwd, target, expected]: [string, string | undefined, string]) { try scoped(effect {
@@ -511,7 +511,7 @@ describe.concurrent("Studio through its server, its files and a browser", () => 
       const current = try page.project()
       const specs: string[][] = []
       for (const s of try Effect.try(() => readSpecs(root))) if (s.file.startsWith("spec/")) specs.push([s.file, try fs.readFileString(path.join(root, s.file))])
-      const other = (try page.get("/api/project?project=vibestack/examples/order")).status
+      const other = (try page.get("/api/project?project=examples/order")).status
       try check(() => assert.deepStrictEqual(
         { projects, current: current.project, specs: current.specs.map((s) => [s.file, s.text]).sort(), other },
         { projects: { projects: [{ id: ".", name }], open: "." }, current: { id: ".", name, root }, specs: specs.sort(), other: 404 },

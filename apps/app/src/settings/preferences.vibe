@@ -4,8 +4,8 @@ import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import type { AgentGoogle, Effect as Out, Event, Look, Sender, Share, Theme } from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Due, type Job, answer, applying, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { Device } from "../platform/index.vibe"
+import { type Due, type Job, answer, applying, due, following, hearing, reacting, run, together, untimed } from "../runtime/index.vibe"
 
 module web {
   /** @throws {never} */

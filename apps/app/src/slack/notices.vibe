@@ -1,9 +1,9 @@
 // spec/app/slack/notices.md, "Story: Hear about Slack DMs, mentions and thread replies per workspace"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
-import { Said, say } from "../notices/toasts.vibe"
-import type { MessagingSessions } from "../platform/messaging.vibe"
-import { type SlackEventEnvelope, type SlackMessage, Slack } from "../platform/slack.vibe"
-import { type Job, answer, contained, reacting, run, stop } from "../runtime/reactor.vibe"
+import { Said, say } from "../notices/index.vibe"
+import type { MessagingSessions } from "../platform/index.vibe"
+import { type SlackEventEnvelope, type SlackMessage, Slack } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, stop } from "../runtime/index.vibe"
 import {
   SlackLedger,
   channelTitleOf,

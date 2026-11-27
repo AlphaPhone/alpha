@@ -2,9 +2,8 @@
 import { ConversationRecord, TurnController, type TurnResult } from "@elizaos/agent"
 import * as Ask from "../../gen/app__ask.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__ask.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { ask, outcomeOf } from "../platform/remote.vibe"
-import { type Job, answer, reacting, run, stream } from "../runtime/reactor.vibe"
+import { Agent, ask, outcomeOf } from "../platform/index.vibe"
+import { type Job, answer, reacting, run, stream } from "../runtime/index.vibe"
 
 /**
  * The conversation's turns, in eliza's own protocol: its `TurnController` over the platform's agent. It posts each

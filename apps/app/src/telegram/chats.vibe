@@ -4,9 +4,9 @@ import type { Effect as Out, Event, Filter } from "../../gen/app__telegram.effec
 import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
 import * as Notices from "../../gen/app__telegram__notices.effect.vibe"
 import { waiting } from "../home/waiting.vibe"
-import type { MessagingSessions } from "../platform/messaging.vibe"
-import { Telegram } from "../platform/telegram.vibe"
-import { type Job, answer, contained, following, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import type { MessagingSessions } from "../platform/index.vibe"
+import { Telegram } from "../platform/index.vibe"
+import { type Job, answer, contained, following, reacting, started, together, untimed } from "../runtime/index.vibe"
 import { reportSessionRevoked, runPeerMutation } from "./auth.vibe"
 import {
   TelegramStore,

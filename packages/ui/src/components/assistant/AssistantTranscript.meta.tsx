@@ -8,6 +8,12 @@ const onRetry = fn();
 const long = Array.from({ length: 12 }, (_, at) => ({ id: `long-${at}`, author: at % 2 === 0 ? "owner" as const : "alpha" as const, text: `Message ${at + 1}: what was said, long enough to wrap onto a second line in a narrow sheet.` }));
 /** The scroll of the log, `below` how far its end is out of view. */
 const scrollOf = (log: HTMLElement) => ({ top: log.scrollTop, below: log.scrollHeight - log.scrollTop - log.clientHeight });
+/** Move the log to `top` and wait for Chromium to deliver the resulting scroll event. */
+const moveScroll = async (log: HTMLElement, top: number) => {
+  const scrolled = new Promise<void>((done) => log.addEventListener("scroll", () => done(), { once: true }));
+  log.scrollTop = top;
+  await scrolled;
+};
 /** More text arriving at the end of the log, as a reply growing does. */
 const arrive = (log: HTMLElement) => log.firstElementChild?.append(Object.assign(document.createElement("div"), { style: "height: 300px; flex-shrink: 0" }));
 const onReturnToOriginal = fn();
@@ -24,7 +30,7 @@ function finishingReply(canvasElement: HTMLElement) {
   const host = canvasElement.appendChild(Object.assign(document.createElement("div"), { style: "height: 160px; display: flex; flex-direction: column" }));
   const root = createRoot(host);
   const draw = (props: Partial<AssistantTranscriptProps>) => root.render(<AssistantTranscript messages={asked} className="h-full" {...props} />);
-  draw({ liveMessages: [{ id: "reply", author: "alpha", text: replyText, streaming: true }] });
+  draw({ liveMessages: [{ id: "reply", author: "alpha", text: replyText }] });
   return {
     host,
     async finish(log: HTMLElement) {
@@ -77,13 +83,13 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
       arrive(log);
       log.dispatchEvent(new Event("scroll"));
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
-      log.scrollTop -= 200;
+      await moveScroll(log, log.scrollTop - 200);
       await waitFor(() => expect(scrollOf(log).below).toBeGreaterThan(150));
       const reading = scrollOf(log).top;
       arrive(log);
       await waitFor(() => expect(scrollOf(log).below).toBeGreaterThan(400));
       await expect(scrollOf(log).top).toBe(reading);
-      log.scrollTop = log.scrollHeight;
+      await moveScroll(log, log.scrollHeight);
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
       arrive(log);
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
@@ -103,7 +109,7 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
       const reading = finishingReply(canvasElement);
       const readingLog = await within(reading.host).findByRole("log");
       await waitFor(() => expect(scrollOf(readingLog).below).toBeLessThan(2));
-      readingLog.scrollTop -= 200;
+      await moveScroll(readingLog, readingLog.scrollTop - 200);
       await waitFor(() => expect(scrollOf(readingLog).below).toBeGreaterThan(150));
       const place = readingLog.scrollTop;
       await reading.finish(readingLog);

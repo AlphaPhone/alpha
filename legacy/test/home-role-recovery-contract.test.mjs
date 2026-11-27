@@ -1,8 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {runJvm} from './fixtures/jvm-tools.mjs';
-const base=path.resolve('.');
-function run(name,source,files=[]){const temp=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-home-contract-'));try{const file=path.join(temp,name+'.java');fs.writeFileSync(file,source);return runJvm([file,...files],`ai.alphacompute.alphaphone.${name}`);}finally{fs.rmSync(temp,{recursive:true,force:true});}}
-test('background renderer reclaim defers recreation without consuming crash budget',()=>{
- const file=path.join(base,'android/app/src/main/java/ai/alphacompute/alphaphone/RendererRecoveryBudget.java');
- assert.match(run('BackgroundReclaimContract',`package ai.alphacompute.alphaphone;import java.lang.reflect.*;
-public class BackgroundReclaimContract{public static void main(String[]a)throws Exception{RendererRecoveryBudget b=new RendererRecoveryBudget();Method loss;try{loss=RendererRecoveryBudget.class.getDeclaredMethod("onLoss",long.class,boolean.class,boolean.class,boolean.class);}catch(NoSuchMethodException old){loss=RendererRecoveryBudget.class.getDeclaredMethod("onLoss",long.class,boolean.class);}loss.setAccessible(true);for(int i=0;i<10;i++){Object value=loss.getParameterCount()==4?loss.invoke(b,(long)i,true,false,false):loss.invoke(b,(long)i,true);if(!value.toString().equals("REBUILD_ON_START"))throw new AssertionError("background reclaim recreated renderer: "+value);}System.out.println("PASS background reclaim waits");}}`,[file]),/PASS background reclaim waits/);
-});

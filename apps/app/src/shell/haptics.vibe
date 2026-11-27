@@ -1,8 +1,8 @@
 // spec/app/shell/haptics.md, "Story: Feel the changes I make"
 import * as Haptics from "../../gen/app__shell__haptics.effect.vibe"
 import type { Haptic, Role } from "../../gen/app__shell__haptics.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { contained, reacting, started, untimed, together } from "../runtime/reactor.vibe"
+import { Device } from "../platform/index.vibe"
+import { contained, reacting, started, untimed, together } from "../runtime/index.vibe"
 
 module page {
   /** What a click on the page lands on, read before the control's own handler changes it. */

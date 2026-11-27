@@ -1,0 +1,18 @@
+{
+  "key": "alpha/app/account/records@1",
+  "spec": "spec/app/account/records.md",
+  "shape": "1d98cdf8466e1bc5",
+  "state": {
+    "review": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "kept": 0,
+    "attempt": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "showing": false,
+    "boot": 0
+  }
+}

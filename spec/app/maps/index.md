@@ -295,7 +295,8 @@ Discovered by the proof: nothing said so, and directions opened from a
 card could then name no place.
 
 ```quint
-pure def alwaysTheCardShowsARealPlace(m: Maps): bool = m.place >= 0
+pure def alwaysTheCardShowsARealPlace(m: Maps): bool =
+  m.place >= 0 and (m.pressing implies coordinatesValid(m.pressLat, m.pressLng))
 ```
 
 ### Navigation always shows its directions
@@ -495,9 +496,10 @@ pure def canHandOver(m: Maps, query: str, chars: int): bool =
   query != "" and fits(chars) and not(C::holding(m.link)) and m.trip.guidance == N::Stopped and onScreen(m)
 
 pure def handOver(m: Maps, query: str, chars: int): Stepped =
+  val changed = m.place != 0 or m.trip.route != 0 or m.directions or not(m.searching)
   val opened = { ...m, searching: true, query: "", search: R::drop(m.search), place: 0, directions: false, sheet: Half,
       trip: N::forgetRoute(m.trip), copyNotice: Uncopied, copying: false, renaming: false, startPlace: 0,
-      origins: R::drop(m.origins), originsFound: 0, review: voided(m.review), details: R::drop(m.details),
+      origins: R::drop(m.origins), originsFound: 0, review: if (changed) voided(m.review) else V::dismiss(m.review), details: R::drop(m.details),
       notice: unnamed(m.notice) }
   val searched = search(opened, query, chars)
   { ...searched, state: { ...searched.state, handedOver: true } }
@@ -1199,7 +1201,7 @@ pure def comeBack(m: Maps): Stepped =
   val asked = R::ask(m.search)
   val again = m.searching and m.query != "" and m.place == 0 and m.search.status == R::Idle and not(m.waitingProvider)
     and C::working(m.link) and not(C::holding(m.link))
-  val locating = m.owedLocate and C::canLocate(m.link, C::Finder)
+  val locating = m.owedLocate and m.trip.guidance == N::Stopped and C::canLocate(m.link, C::Finder)
   val found = if (locating) { ...back, link: C::locate(m.link, C::Finder), owedLocate: false } else back
   { state: if (again) { ...found, search: asked } else found,
     out: (if (again) List(FindPlaces({ ticket: asked.ticket, query: m.query })) else List())
@@ -1296,13 +1298,14 @@ pure def changeAccount(m: Maps, account: int): Stepped =
   val finder = m.link.locator == C::Finder
   val link = C::changeAccount(if (guided or finder) C::stopLocating(m.link) else m.link, account)
   val handed = handedUnanswered(m)
+  val changed = m.place != 0 or m.trip.route != 0 or m.directions or (m.searching and not(handed) and not(m.trip.away))
   { state: { ...m, link: link, trip: N::retireTrip(m.trip), searching: handed, query: if (handed) m.query else "",
       search: R::drop(m.search), results: 0, recent: List(), place: 0, details: R::drop(m.details), directions: false,
       sheet: if (handed) m.sheet else Peek, handedOver: handed,
       copyNotice: Uncopied, startPlace: 0, origins: R::drop(m.origins), originsFound: 0, typing: "", pausing: false,
       following: false, guideNotice: if (guided) AccountChanged else Quiet, waitingProvider: handed, copying: false,
       renaming: false, imprecise: false, quiet: false,
-      review: voided(m.review), pinning: false, pressing: false, notice: unnamed(m.notice) },
+      review: if (changed) voided(m.review) else V::dismiss(m.review), pinning: false, pressing: false, notice: unnamed(m.notice) },
     out: (if (guided) List(StopGuidance) else if (finder) List(StopLocation) else List())
       .concat(if (link.account != 0) List(ReadCoverage({ ticket: link.coverage.ticket })) else List()) }
 ```
@@ -1342,10 +1345,11 @@ pure def answerCoverage(m: Maps, ticket: int, ok: bool, covered: bool, google: b
   val link = C::answerCoverage(m.link, ticket, ok, covered, google, offer)
   val asked = R::ask(m.search)
   val resent = m.waitingProvider and C::working(link) and not(C::holding(link)) and m.place == 0
+  val copying = if (link.google and not(S::isSaved(m.saved, m.place)) and m.place != m.pin) false else m.copying
   if (resent)
-    { state: { ...m, link: link, search: asked, waitingProvider: false },
+    { state: { ...m, link: link, search: asked, waitingProvider: false, copying: copying },
       out: List(FindPlaces({ ticket: asked.ticket, query: m.query })) }
-  else { state: { ...m, link: link }, out: List() }
+  else { state: { ...m, link: link, copying: copying }, out: List() }
 
 pure def stepAWaitingSearchIsSentOnceAProviderWorks(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
   (before.waitingProvider and not(C::working(before.link)) and C::working(after.link) and not(C::holding(after.link)) and after.place == 0)
@@ -1380,7 +1384,7 @@ pure def asksCloud(e: Effect): bool =
   }
 
 pure def stepNothingIsAskedWhileAWaitHolds(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
-  (C::holding(before.link) and via != "locationFix") implies out.every(e => not(asksCloud(e)) or via == "changeAccount")
+  (C::holding(before.link) and via != "locationFix") implies out.every(e => not(asksCloud(e)) or via == "changeAccount" or via == "waitEnded")
 
 pure def sometimesHeld(m: Maps): bool = C::holding(m.link) and mode(m) == Search
 ```
@@ -1518,7 +1522,7 @@ pure def observeLocation(m: Maps, grant: P::Grant): Stepped =
   val lost = m.link.locator == C::Guide and link.locator == C::Nobody
   val finderLost = m.link.locator == C::Finder and link.locator == C::Nobody
   val allowed = m.owedLocate and P::allows(link.location)
-  val now = allowed and onScreen(m) and not(lost) and C::canLocate(link, C::Finder)
+  val now = allowed and onScreen(m) and m.trip.guidance == N::Stopped and not(lost) and C::canLocate(link, C::Finder)
   val found = C::locate(link, C::Finder)
   { state: { ...m, link: if (now) found else link, trip: if (lost) N::endGuidance(m.trip) else m.trip,
       sheet: if (lost) Half else m.sheet, owedLocate: allowed and not(now), quiet: if (now) false else m.quiet and link.locator == C::Finder,

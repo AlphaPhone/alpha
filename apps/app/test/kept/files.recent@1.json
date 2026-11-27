@@ -1,0 +1,35 @@
+{
+  "key": "alpha/app/files/recent@1",
+  "spec": "spec/app/files/recent.md",
+  "shape": "54a47ab3b7653661",
+  "state": {
+    "rows": [
+      {
+        "origin": "Picked",
+        "key": 7,
+        "grant": 1
+      }
+    ],
+    "issued": 1,
+    "reaching": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "asked": {
+      "origin": "Picked",
+      "key": 0,
+      "grant": 0
+    },
+    "pickers": [
+      1
+    ],
+    "opened": 1,
+    "live": 0,
+    "replacing": 0,
+    "shown": {
+      "origin": "Picked",
+      "key": 0,
+      "grant": 0
+    }
+  }
+}

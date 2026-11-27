@@ -31,3 +31,6 @@ export type StartupPresentation = "Launcher" | "AssistantOnly" | "Plain";
 
 /** What a failure screen is about: the journal's kinds Alpha sees itself. */
 export type StartupFailure = "FailedToStart" | "FailedToDraw" | "Uncaught" | "KeptFailing";
+
+/** Every kind the journal holds, those Android reports too. */
+export type StartupJournalKind = StartupFailure | "Crashed" | "StoppedAnswering";

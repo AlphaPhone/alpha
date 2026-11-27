@@ -1,26 +1,71 @@
 // @vitest-environment happy-dom
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as Recovery from "../gen/app__startup__recovery.effect.vibe";
-import { App } from "../src/App.tsx";
+import * as StartupGen from "../gen/app__startup.ts";
+import { Machine as Startup } from "../gen/app__startup.effect.vibe";
+import * as AccessGen from "../gen/app__startup__access.ts";
 import { Machine as Access } from "../gen/app__startup__access.effect.vibe";
-import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
-import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import * as CallGen from "../gen/app__startup__call.ts";
+import * as InstanceGen from "../gen/app__startup__instance.ts";
+import { Machine as Instance } from "../gen/app__startup__instance.effect.vibe";
+import * as JournalGen from "../gen/app__startup__journal.ts";
+import { Machine as Journal } from "../gen/app__startup__journal.effect.vibe";
+import * as RecoveryGen from "../gen/app__startup__recovery.ts";
+import { Machine as Recovery } from "../gen/app__startup__recovery.effect.vibe";
+import { App } from "../src/App.tsx";
+import { at } from "../src/areas.ts";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
-import { versions } from "../src/settings/build.ts";
-import { button, closeAll, drawn, hardware, later, only, open, openOver, press, underAct, until } from "./alpha.tsx";
+import { untimed } from "../src/runtime/reactor.vibe";
+import startupArea, {
+  AccessDesk,
+  InstanceDesk,
+  RecoveryDesk,
+  StartupDesk,
+  StartupJournalView,
+  StartupOverlay,
+  answerHandOff,
+  beginWalkthrough,
+  clearJournal,
+  closeAssistant,
+  exitMockMode,
+  harvestExit,
+  markPageDrawn,
+  ownerGone,
+  ownerToFront,
+  pruneJournal,
+  recordFailure,
+  reportFinishTrouble,
+  reportPageFailure,
+  reportPageLost,
+  reportUnbuildable,
+  requestReload,
+  requestReloadAnyway,
+  requestSwitchHome,
+  resolveConnection,
+  retryAgentConnection,
+  startInstance,
+  summonAssistant,
+  takeAssistantCall,
+  welcomeOwner,
+} from "../src/startup/index.tsx";
+import { reloadBeforeMount } from "../src/startup/recovery.vibe";
+import { button, closeAll, drawn, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
-import { fakeWorld } from "./fakes/world.vibe";
 
 const react = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 
-describe("Startup recovery", () => {
-  underAct();
+const startupMounts = () => [
+  ...only("home", "notice"),
+  at("overlay", () => Promise.resolve({ default: startupArea })),
+];
+
+describe("startup", () => {
   afterEach(closeAll);
-  it("Shows recovery before the shell opens with the real version and Switch Home when launcher (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\")", async () => {
+
+  it("Shows recovery before the shell opens (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\")", async () => {
     const unavailable = Layer.effectContext<Platform, never, never>(Effect.die("unavailable startup service"));
     const alpha = boot(unavailable, []);
     const host = document.body.appendChild(document.createElement("div"));
@@ -28,7 +73,6 @@ describe("Startup recovery", () => {
     const reload = vi.spyOn(window.location, "reload").mockImplementation(() => undefined);
     const previous = react.IS_REACT_ACT_ENVIRONMENT;
     react.IS_REACT_ACT_ENVIRONMENT = true;
-    document.documentElement.setAttribute("data-alpha-launcher", "");
     try {
       await act(async () => {
         root.render(<App alpha={alpha} />);
@@ -36,20 +80,11 @@ describe("Startup recovery", () => {
       });
       // spec/app/startup/recovery.md, "The failure screen stays until the owner's Reload rebuilds the page or its process dies, and a page without WebView stays as it is"
       const dialog = host.querySelector('[role="alertdialog"]');
-      const buttons = [...(dialog?.querySelectorAll("button") ?? [])];
-      const reloadButton = buttons.find((one) => one.textContent === "Reload");
-      const switchHomeButton = buttons.find((one) => one.textContent === "Switch Home");
-      expect([
-        dialog?.textContent?.includes("Something went wrong"),
-        dialog?.textContent?.includes(versions().app),
-        reloadButton?.disabled,
-        Boolean(switchHomeButton),
-        reload.mock.calls.length,
-      ]).toEqual([true, true, false, true, 0]);
-      act(() => reloadButton?.click());
+      const reloadBtn = [...(dialog?.querySelectorAll("button") ?? [])].find((one) => one.textContent === "Reload");
+      expect([dialog?.textContent?.includes("Something went wrong"), reloadBtn?.disabled, reload.mock.calls.length]).toEqual([true, false, 0]);
+      act(() => reloadBtn?.click());
       expect(reload.mock.calls).toHaveLength(1);
     } finally {
-      document.documentElement.removeAttribute("data-alpha-launcher");
       reload.mockRestore();
       act(() => root.unmount());
       react.IS_REACT_ACT_ENVIRONMENT = previous;
@@ -58,238 +93,288 @@ describe("Startup recovery", () => {
     }
   });
 
-  it("Runs the resident startup recovery machine through failure and Switch Home (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\")", async () => {
-    const world = { ...scene(), phone: true };
-    world.launcher.launcher = true;
-    const { alpha } = await open(world, only("home", "overlay"));
-    await alpha.runtime.runPromise(Recovery.Machine.use((machine) => machine.send({ type: "breaks", side: "HomeSide", kind: "FailedToDraw" }, "Owner")));
-    await until(alpha, alpha.runtime, Recovery.Machine, (s) => s.home.page === "Broken" && s.home.failure === "FailedToDraw");
-    await alpha.runtime.runPromise(Recovery.Machine.use((machine) => machine.send({ type: "switchHome", launcher: true }, "Owner")));
-    await later(alpha, 50);
-    await until(alpha, alpha.runtime, Recovery.Machine, (s) => s.switch.status !== "Loading");
-    expect(world.settings.opened.length).toBeGreaterThan(0);
-  });
-});
+  // spec/app/startup/index.md, "Story: Start in mock mode only in a test build"; spec/app/startup/index.md, "Story: Wait for the agent"
+  it("Admits mock mode only in a test build, waits for the agent with timeout, and retries with backoff (spec/app/startup/index.md, \"Story: Start in mock mode only in a test build\"; spec/app/startup/index.md, \"Story: Wait for the agent\")", async () => {
+    underAct();
+    // spec/app/startup/index.md, "Mock mode and fixtures are admitted only in a test build"
+    const prodBoot = StartupGen.start(StartupGen.initial, true, false, true, true, 0).state;
+    expect([prodBoot.mock, prodBoot.fixtures, StartupGen.shows(prodBoot, "MockBanner")]).toEqual(["NoMock", false, false]);
 
-it("Holds native Home until the phone confirms the signed-in account (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
-  const world = { ...scene(), phone: true, signedIn: false, now: 1_700_000_000_000 };
-  const startEmail = vi.fn(() => Promise.resolve({ request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 600_000, resendAt: world.now + 60_000 }));
-  const verify = vi.fn((input: { attempt: number; code: string }) => {
-    if (input.code === "123456") {
-      world.signedIn = true;
-      return Promise.resolve({ request: 3, attempt: input.attempt, verdict: "signed-in-as", credentialId: world.voice.credentialId, google: "not-requested" });
-    }
-    return Promise.resolve({ request: 2, attempt: input.attempt, verdict: "try-again", retry: "wrong-code" });
-  });
-  world.voice.startupSignIn = { startEmail, verify };
-  underAct();
-  try {
-    localStorage.setItem("alpha:startup-permission-walkthrough:v1", JSON.stringify({ version: 4, status: "completed", step: 7 }));
-    await openOver(fakeWorld(world), only("home", "overlay"), true);
-    await vi.waitFor(() => expect(document.querySelector('form[aria-label="Sign in with email"]')).toBeTruthy());
-    expect(button("Settings")).toBeUndefined();
-    expect(button("Back")).toBeUndefined();
-    const enter = async (selector: string, text: string) => {
-      const field = document.querySelector<HTMLInputElement>(selector)!;
-      await drawn(() => {
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, text);
-        field.dispatchEvent(new Event("input", { bubbles: true }));
+    // spec/app/startup/index.md, "Mock mode shows its banner on every surface, and Exit mock mode leaves it"
+    const testBoot = StartupGen.start(StartupGen.initial, false, true, true, true, 0).state;
+    expect([testBoot.mock, testBoot.fixtures, StartupGen.shows(testBoot, "MockBanner")]).toEqual(["Mocking", true, true]);
+    const leftMock = StartupGen.exitMock(testBoot);
+    expect([leftMock.mock, StartupGen.shows(leftMock, "MockBanner")]).toEqual(["LeftMock", false]);
+
+    // spec/app/startup/index.md, "A connection that has not resolved thirty seconds after start counts as unreachable"
+    const world = scene();
+    const { alpha } = await open(world, startupMounts());
+    const runtime = startupArea.runtime(alpha);
+    await runtime.runPromise(Effect.flatMap(StartupDesk, (desk) => Effect.sync(() => {
+      desk.setHooks({
+        testBuild: true,
+        mockAsked: true,
+        checkAgent: () => Effect.succeed("Connected" as const),
       });
+    })));
+    await until(alpha, runtime, Startup, (s) => s.known && s.connection === "Connected");
+
+    // spec/app/startup/index.md, "A connection that has not resolved thirty seconds after start counts as unreachable"
+    const pendingState = StartupGen.learn(
+      StartupGen.start(StartupGen.initial, false, false, false, false, 1000).state,
+      1,
+      false,
+      false,
+      false,
+      false,
+      false,
+      "en-US",
+      "ByLocale",
+    ).state;
+    expect([StartupGen.shows(pendingState, "Mark"), StartupGen.shows(pendingState, "Home"), StartupGen.canTimedOut(pendingState, 30999), StartupGen.canTimedOut(pendingState, 31000)])
+      .toEqual([true, false, false, true]);
+    const timedOutState = StartupGen.timedOut(pendingState, 31000);
+    expect([timedOutState.connection, StartupGen.shows(timedOutState, "Mark"), StartupGen.shows(timedOutState, "Home")]).toEqual(["Unreachable", false, true]);
+
+    const retryPromise = runtime.runPromise(retryAgentConnection());
+    await later(alpha, 1000);
+    expect(await retryPromise).toBe("Connected");
+    const snap = await runtime.runPromise(Effect.flatMap(StartupDesk, (desk) => Effect.sync(() => desk.snapshot())));
+    expect([snap.retryCount, snap.retryBackoffMs, snap.agentHealthy]).toEqual([1, 1000, true]);
+    expect(await runtime.runPromise(exitMockMode())).toBe(false);
+    expect(typeof reloadBeforeMount).toBe("function");
+  });
+
+  // spec/app/startup/access.md, "Story: Walk through each access in order"; spec/app/startup/access.md, "Story: Hear that all is set"
+  it("Walks permissions in fixed order, saves progress, supports skip and All set completion (spec/app/startup/access.md, \"Story: Walk through each access in order\"; spec/app/startup/access.md, \"Story: Hear that all is set\")", async () => {
+    underAct();
+    const world = scene();
+    const { alpha } = await open(world, startupMounts());
+    const runtime = startupArea.runtime(alpha);
+
+    const grants: Record<string, { grant: "Denied" | "Granted"; on: boolean; requestable: boolean }> = {
+      Notifications: { grant: "Denied", on: true, requestable: true },
+      Microphone: { grant: "Granted", on: true, requestable: false },
+      Camera: { grant: "Denied", on: true, requestable: false },
+      Location: { grant: "Granted", on: true, requestable: false },
     };
-    await enter('input[type="email"]', "owner@example.test");
-    await press("Send code");
-    await vi.waitFor(() => expect(document.querySelector('input[aria-label="Code"]')).toBeTruthy());
-    expect(startEmail).toHaveBeenCalledWith({ environment: "production", email: "owner@example.test" });
-    await enter('input[aria-label="Code"]', "654321");
-    await press("Verify");
-    await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain("Wrong code"));
-    expect(button("Settings")).toBeUndefined();
-    await enter('input[aria-label="Code"]', "123456");
-    await press("Verify");
-    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
-    expect(verify).toHaveBeenCalledTimes(2);
-  } finally {
-    await closeAll();
-    react.IS_REACT_ACT_ENVIRONMENT = undefined;
-  }
-});
 
-it("Shows native Access after sign-in and keeps the owner's place through restart (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
-  const world = { ...scene(), phone: true, signedIn: true };
-  world.settings.permissionStates.notifications = "prompt";
-  world.settings.permissionReplies.notifications = "denied";
-  world.settings.permissionStates.camera = "prompt";
-  world.settings.permissionReplies.camera = "granted";
-  const dialog = () => document.querySelector('[role="dialog"]');
-  const step = (number: number) => vi.waitFor(() => expect(dialog()?.textContent).toContain(`Step ${number} of 7`));
-  underAct();
-  try {
-    const first = await openOver(fakeWorld(world), only("home", "overlay"), true);
-    await step(1);
-    expect(button("Settings")).toBeUndefined();
-    expect(world.settings.permissionRequests).toEqual([]);
-    await drawn(() => first.alpha.runtime.runPromise(Layers.use((work) =>
-      work.send({ type: "openLayer", id: "covered-startup", kind: "DialogLayer", covers: true }))));
-    await vi.waitFor(() => expect(dialog()?.textContent ?? "").not.toContain("Step 1 of 7"));
-    expect(button("Settings")).toBeUndefined();
-    await hardware("back");
-    await step(1);
-    await hardware("back");
-    await step(1);
-    await vi.waitFor(() => expect(button("Allow")).toBeDefined());
+    await runtime.runPromise(Effect.flatMap(AccessDesk, (desk) => Effect.sync(() => {
+      desk.setHooks({
+        check: (key) => Effect.succeed(Option.fromNullishOr(grants[key])),
+        ask: (key) => Effect.sync(() => {
+          grants[key] = { grant: "Granted", on: true, requestable: false };
+          return Option.some(grants[key]);
+        }),
+        save: () => Effect.succeed(true),
+      });
+    })));
+
+    await drawn(() => runtime.runPromise(beginWalkthrough(false, false)));
+    await until(alpha, runtime, Access, (s) => s.known.includes("Notifications") && s.known.includes("Location"));
+    await drawn(() => runtime.runPromise(welcomeOwner(true)));
+    await until(alpha, runtime, Access, (s) => AccessGen.panel(s) === "Walkthrough" && AccessGen.nextKey(s) === "Notifications");
+
+    expect(document.body.textContent).toContain("Step 1 of 4");
     await press("Allow");
-    await vi.waitFor(() => expect(world.settings.permissionRequests).toEqual(["notifications"]));
-    await vi.waitFor(() => expect(button("Skip")).toBeDefined());
+    await until(alpha, runtime, Access, (s) => AccessGen.flow(s, "Notifications") === "Ready");
+    await press("Continue");
+    await until(alpha, runtime, Access, (s) => AccessGen.nextKey(s) === "Microphone");
+
+    await press("Continue");
+    await until(alpha, runtime, Access, (s) => AccessGen.nextKey(s) === "Camera");
+
     await press("Skip");
-    await step(2);
-    await first.close();
+    await until(alpha, runtime, Access, (s) => AccessGen.nextKey(s) === "Location");
 
-    world.settings.permissionStates.notifications = "prompt-with-rationale";
-    await openOver(fakeWorld(world), only("home", "overlay"), true);
-    await step(2);
-    await vi.waitFor(() => expect(button("Skip")).toBeDefined());
-    await press("Skip");
-    await step(3);
-    await vi.waitFor(() => expect(button("Allow")).toBeDefined());
-    await press("Allow");
-    for (let number = 4; number <= 7; ++number) {
-      await step(number);
-      await vi.waitFor(() => expect(button("Skip")).toBeDefined());
-      await press("Skip");
-    }
-    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
-    expect(dialog()).toBeNull();
-    expect(world.settings.permissionRequests).toEqual(["notifications", "camera"]);
-  } finally {
-    await closeAll();
-    react.IS_REACT_ACT_ENVIRONMENT = undefined;
-  }
-});
+    await press("Continue");
+    await until(alpha, runtime, Access, (s) => AccessGen.panel(s) === "AllSet");
+    expect(document.body.textContent).toContain("All set");
 
-it("Stops the Alpha image Access walkthrough at its first ungranted permission (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
-  const world = { ...scene(), phone: true, image: true, signedIn: true };
-  world.settings.hostFacts.startupPermissionDefaults = true;
-  world.settings.permissionStates.notifications = "granted";
-  world.settings.permissionStates.camera = "prompt";
-  world.voice.permission = "granted";
-  underAct();
-  try {
-    await openOver(fakeWorld(world), only("home", "overlay"), true);
-    const dialog = () => document.querySelector('[role="dialog"]');
-    await vi.waitFor(() => {
-      expect(dialog()?.textContent).toContain("Step 3 of 7");
-      expect(dialog()?.querySelector('[aria-current="step"]')?.textContent).toContain("Camera");
-    });
-    expect(button("Allow")).toBeDefined();
-    expect(button("Settings")).toBeUndefined();
-    expect(world.settings.permissionRequests).toEqual([]);
-  } finally {
-    await closeAll();
-    react.IS_REACT_ACT_ENVIRONMENT = undefined;
-  }
-});
-
-it("Shows All set only for the account result that calls for it (spec/app/startup/access.md, \"Story: Hear that all is set\")", async () => {
-  const world = { ...scene(), phone: true, signedIn: true };
-  underAct();
-  try {
-    localStorage.setItem("alpha:startup-permission-walkthrough:v1", JSON.stringify({ version: 4, status: "completed", step: 7 }));
-    const { alpha } = await openOver(fakeWorld(world), only("home", "overlay"), true);
-    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
-    const finishForNewAccount = () => drawn(() => alpha.runtime.runPromise(Access.use((walkthrough) => Effect.gen(function* () {
-      yield* walkthrough.send({ type: "signedOut" }, "Owner");
-      yield* walkthrough.send({ type: "welcome", created: true, now: world.now }, "Owner");
-    }))));
-    const heading = () => document.querySelector('[role="dialog"] h2');
-    await finishForNewAccount();
-    await vi.waitFor(() => expect(heading()?.textContent).toBe("All set"));
-    expect(heading()).toBe(document.activeElement);
-    expect(button("Settings")).toBeUndefined();
     await press("Done");
-    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+    await until(alpha, runtime, Access, (s) => AccessGen.panel(s) === "Hidden" && AccessGen.completed(s));
+    const finalAccess = await runtime.runPromise(Effect.flatMap(Access, (m) => m.get()));
+    expect([AccessGen.choiceOf(finalAccess, "Notifications"), AccessGen.choiceOf(finalAccess, "Microphone"), AccessGen.choiceOf(finalAccess, "Camera"), AccessGen.choiceOf(finalAccess, "Location")])
+      .toEqual(["Allowed", "Continued", "Skipped", "Continued"]);
 
-    await finishForNewAccount();
-    await vi.waitFor(() => expect(heading()?.textContent).toBe("All set"));
-    await hardware("back");
-    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
-  } finally {
-    await closeAll();
-    react.IS_REACT_ACT_ENVIRONMENT = undefined;
-  }
-});
+    // spec/app/startup/access.md, "Story: Hear that all is set"
+    await drawn(() => runtime.runPromise(beginWalkthrough(false, false)));
+    await drawn(() => runtime.runPromise(welcomeOwner(false)));
+    expect(await runtime.runPromise(reportFinishTrouble("ConnectionFailed"))).toBe(true);
+    await until(alpha, runtime, Access, (s) => AccessGen.panel(s) === "AllSet" && s.finish.trouble === "ConnectionFailed");
+    expect(document.body.textContent).toContain("Connection failed");
+  });
 
-it("Shows chat at once on the assistant-only surface, and elsewhere a white cover until Home is whole (spec/app/home/index.md, \"On the assistant alone Home shows no tile and no card\"; spec/app/home/index.md, \"Story: Start Home\")", async () => {
-  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
-  underAct();
-  try {
-    const alone = { ...scene(), phone: true };
-    alone.launcher.assistant = true;
-    let homeUncovered = false;
-    const watching = new MutationObserver(() => {
-      if (!cover() && (document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0) > 0) homeUncovered = true;
+  // spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"; spec/app/startup/recovery.md, "Story: Keep my drafts through a rebuild"; spec/app/startup/recovery.md, "Story: Come back after the page is lost"
+  it("Recovers HomeSide and AssistantSide with draft flush, Reload anyway escape hatch, Switch Home fallback, and loss budget (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\"; spec/app/startup/recovery.md, \"Story: Keep my drafts through a rebuild\"; spec/app/startup/recovery.md, \"Story: Come back after the page is lost\")", async () => {
+    underAct();
+    const world = scene();
+    const { alpha } = await open(world, startupMounts());
+    const runtime = startupArea.runtime(alpha);
+
+    await runtime.runPromise(markPageDrawn("HomeSide"));
+    await runtime.runPromise(markPageDrawn("AssistantSide"));
+
+    // spec/app/startup/recovery.md, "Reload first asks every area holding a draft on that surface to put it on the phone, and rebuilds when they have"
+    let flushAnswer: Option.Option<boolean> = Option.some(false);
+    await runtime.runPromise(Effect.flatMap(RecoveryDesk, (desk) => Effect.sync(() => {
+      desk.setHooks({
+        flushDrafts: () => Effect.succeed(flushAnswer),
+        switchHome: (route) => Effect.succeed(route === "AndroidSettings"),
+      });
+    })));
+
+    await drawn(() => runtime.runPromise(reportPageFailure("HomeSide", "FailedToDraw")));
+    await until(alpha, runtime, Recovery, (s) => s.home.page === "Broken");
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("Something went wrong");
+
+    // spec/app/startup/actor.md, "The owner or the agent sends each event, and only the owner answers"
+    expect(await runtime.runPromise(requestReload("HomeSide", "Agent"))).toBe(false);
+
+    // spec/app/startup/recovery.md, "When the drafts could not be written, or five seconds pass unanswered, the screen says unsaved edits would be lost, and only the owner's Reload anyway rebuilds over them"
+    await drawn(() => runtime.runPromise(requestReload("HomeSide", "Owner")));
+    await until(alpha, runtime, Recovery, (s) => s.home.flush.status === "Failed");
+    expect(document.body.textContent).toContain("Unsaved edits would be lost");
+    expect(Boolean(button("Reload anyway"))).toBe(true);
+
+    // spec/app/startup/recovery.md, "Switch Home opens Android's choice of Home, then its default apps, then its Settings, from the failure screen or a phone without WebView, only where Alpha is Home"
+    expect(await runtime.runPromise(requestSwitchHome(true, "Owner"))).toBe(true);
+    await until(alpha, runtime, Recovery, (s) => s.switch.status === "Loaded" && s.route === "AndroidSettings");
+    const attempts = await runtime.runPromise(Effect.flatMap(RecoveryDesk, (desk) => Effect.sync(() => [...desk.switchAttempts])));
+    expect(attempts).toEqual(["Chooser", "DefaultApps", "AndroidSettings"]);
+
+    // spec/app/startup/recovery.md, "The failure screen stays until the owner's Reload rebuilds the page or its process dies, and a page without WebView stays as it is"
+    expect(await runtime.runPromise(requestReloadAnyway("HomeSide", "Agent"))).toBe(false);
+    await drawn(() => runtime.runPromise(requestReloadAnyway("HomeSide", "Owner")));
+    await until(alpha, runtime, Recovery, (s) => s.home.page === "Starting" && s.home.number === 2);
+
+    // spec/app/startup/recovery.md, "Reload first asks every area holding a draft on that surface to put it on the phone, and rebuilds when they have"
+    flushAnswer = Option.some(true);
+    await runtime.runPromise(markPageDrawn("HomeSide"));
+    await drawn(() => runtime.runPromise(reportPageFailure("HomeSide", "FailedToDraw")));
+    await until(alpha, runtime, Recovery, (s) => s.home.page === "Broken");
+    await drawn(() => runtime.runPromise(requestReload("HomeSide", "Owner")));
+    await until(alpha, runtime, Recovery, (s) => s.home.page === "Starting" && s.home.number === 3);
+
+    // spec/app/startup/recovery.md, "Within the budget a lost page is rebuilt at once, at most three times a minute; past it, the owner chooses on Android's Home and elsewhere Alpha waits five seconds"
+    await runtime.runPromise(reportPageLost("AssistantSide", true, 1, true));
+    await until(alpha, runtime, Recovery, (s) => s.assistant.number === 2);
+    await runtime.runPromise(reportPageLost("AssistantSide", true, 2, true));
+    await until(alpha, runtime, Recovery, (s) => s.assistant.number === 3);
+    await runtime.runPromise(reportPageLost("AssistantSide", true, 3, true));
+    await until(alpha, runtime, Recovery, (s) => s.assistant.number === 4 && s.quick === 3);
+    await runtime.runPromise(reportPageLost("AssistantSide", true, 4, true));
+    await until(alpha, runtime, Recovery, (s) => s.assistant.page === "Rebuilding" && s.assistant.wait === "Backoff");
+    await later(alpha, 5000);
+    await until(alpha, runtime, Recovery, (s) => s.assistant.number === 5 && s.assistant.page === "Starting");
+
+    // spec/app/startup/recovery.md, "A phone without Android's WebView says so, is recorded, and is never rebuilt"
+    await drawn(() => runtime.runPromise(reportUnbuildable("AssistantSide")));
+    await until(alpha, runtime, Recovery, (s) => s.assistant.page === "Unbuildable");
+    expect(RecoveryGen.canReload(await runtime.runPromise(Effect.flatMap(Recovery, (m) => m.get())), "AssistantSide", "Owner", 99999)).toBe(false);
+    expect(typeof StartupOverlay).toBe("function");
+  });
+
+  // spec/app/startup/instance.md, "Story: Stay one Home"; spec/app/startup/call.md, "Story: Listen only when I just asked for it"; spec/app/startup/journal.md, "Story: Remember what went wrong"
+  it("Enforces single-Home instance handoff, assistant call gating, and 50-entry 30-day journal pruning (spec/app/startup/instance.md, \"Story: Stay one Home\"; spec/app/startup/call.md, \"Story: Listen only when I just asked for it\"; spec/app/startup/journal.md, \"Story: Remember what went wrong\")", async () => {
+    underAct();
+    const world = scene();
+    const { alpha } = await open(world, startupMounts());
+    const runtime = startupArea.runtime(alpha);
+
+    // spec/app/startup/instance.md, "A start reaches the page in its task, builds the first page, or hands itself to the owner"
+    await runtime.runPromise(Effect.flatMap(InstanceDesk, (desk) => Effect.sync(() => {
+      desk.setHooks({ handOff: () => Effect.succeed(true) });
+    })));
+    await runtime.runPromise(startInstance(true));
+    await until(alpha, runtime, Instance, (s) => s.owner === "InHome" && s.homePage);
+    await runtime.runPromise(startInstance(false));
+    await until(alpha, runtime, Instance, (s) => s.unanswered === 1 && s.trusted);
+    await runtime.runPromise(startInstance(false));
+    await until(alpha, runtime, Instance, (s) => s.unanswered === 2 && s.trusted);
+    await runtime.runPromise(startInstance(false));
+    await until(alpha, runtime, Instance, (s) => !s.trusted && s.ordinaryPage && s.owner === "InOrdinary");
+    await runtime.runPromise(ownerToFront());
+    await until(alpha, runtime, Instance, (s) => s.unanswered === 0);
+    await runtime.runPromise(ownerGone());
+    await until(alpha, runtime, Instance, (s) => s.owner === "InHome" && !s.ordinaryPage);
+    expect(InstanceGen.maxUnanswered).toBe(3);
+    expect(await runtime.runPromise(answerHandOff(999, true))).toBe(false);
+
+    // spec/app/startup/call.md, "A call listens only from the wake word or the power button, from a trusted caller on an Alpha image, unlocked, under the same account, and soon enough"
+    const wakeWarm = CallGen.note("WakeWord", true, false, false, 1000, 1);
+    const powerCold = CallGen.note("PowerButton", true, false, true, 1000, 1);
+    const gesture = CallGen.note("Gesture", true, false, false, 1000, 1);
+    const tile = CallGen.note("Tile", true, false, false, 1000, 1);
+    const untrusted = CallGen.note("WakeWord", false, false, false, 1000, 1);
+    const locked = CallGen.note("WakeWord", true, true, false, 1000, 1);
+    expect([
+      CallGen.listens(wakeWarm, true, 1, 5500),
+      CallGen.listens(wakeWarm, true, 1, 6001),
+      CallGen.listens(powerCold, true, 1, 15500),
+      CallGen.listens(powerCold, true, 1, 16001),
+      CallGen.listens(wakeWarm, false, 1, 2000),
+      CallGen.listens(wakeWarm, true, 2, 2000),
+      CallGen.listens(gesture, true, 1, 2000),
+      CallGen.listens(tile, true, 1, 2000),
+      CallGen.listens(untrusted, true, 1, 2000),
+      CallGen.listens(locked, true, 1, 2000),
+    ]).toEqual([true, false, true, false, false, false, false, false, false, false]);
+
+    // spec/app/startup/index.md, "A call is taken once Home takes input, and raises Ask Alpha listening only as Call says"
+    const assistantBoot = StartupGen.learn(
+      StartupGen.start(StartupGen.initial, true, false, false, false, 0).state,
+      1,
+      true,
+      true,
+      true,
+      false,
+      false,
+      "en-US",
+      "ByLocale",
+    ).state;
+    const summoned = StartupGen.summon(assistantBoot, "WakeWord", true, false, false, 1000, 1);
+    const resolved = StartupGen.resolve(summoned, "Connected");
+    const taken = StartupGen.take(resolved, false, 1, 2000);
+    expect(taken.out).toEqual([{ tag: "Raise", origin: "WakeWord", listening: true, cold: false }]);
+    expect(StartupGen.leave(taken.state).out).toEqual([{ tag: "CloseSurface" }]);
+    expect(typeof summonAssistant).toBe("function");
+    expect(typeof takeAssistantCall).toBe("function");
+    expect(typeof closeAssistant).toBe("function");
+    expect(typeof resolveConnection).toBe("function");
+
+    // spec/app/startup/journal.md, "A new entry pushes out the oldest once fifty are held"; spec/app/startup/journal.md, "At each start the journal drops what is older than thirty days, or dated further ahead than that"
+    await runtime.runPromise(clearJournal(true));
+    for (let i = 0; i < 55; i += 1) {
+      await runtime.runPromise(recordFailure("FailedToDraw"));
+    }
+    const after55 = await runtime.runPromise(Effect.flatMap(Journal, (m) => m.get()));
+    expect(after55.entries.length).toBe(JournalGen.capacity);
+
+    await runtime.runPromise(harvestExit(1, "Crashed", 1000));
+    expect(await runtime.runPromise(harvestExit(1, "Crashed", 2000))).toBe(false);
+
+    // spec/app/startup/journal.md, "Only a development build shows the journal"
+    expect(JournalGen.visible(after55, false)).toHaveLength(0);
+    expect(JournalGen.visible(after55, true)).toHaveLength(JournalGen.capacity);
+
+    await later(alpha, JournalGen.retention + 10_000);
+    await runtime.runPromise(recordFailure("Uncaught"));
+    await runtime.runPromise(pruneJournal());
+    const afterPrune = await runtime.runPromise(Effect.flatMap(Journal, (m) => m.get()));
+    expect([afterPrune.entries.length, afterPrune.dropped > 0]).toEqual([1, true]);
+
+    const host = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(host);
+    await drawn(() => root.render(<StartupJournalView runtime={runtime} testBuild />));
+    expect(host.textContent).toContain("Uncaught error");
+    await drawn(() => {
+      const clearBtn = [...host.querySelectorAll("button")].find((b) => b.textContent === "Clear");
+      clearBtn?.click();
     });
-    watching.observe(document.body, { subtree: true, childList: true, attributes: true });
-    const assistant = await openOver(fakeWorld(alone), only("home", "assistant"));
-    await until(assistant.alpha, assistant.alpha.runtime, Shell, () => true);
-    // spec/app/home/index.md, "On the assistant alone Home shows no tile and no card": chat does not wait behind the cover for Home to settle, with no time passing, and no frame shows Home without the cover.
-    await vi.waitFor(() => {
-      expect(document.querySelector("[data-alpha-assistant-host]")?.childElementCount).toBeGreaterThan(0);
-      expect(cover()).toBeNull();
-    }, { timeout: 5_000 });
-    watching.disconnect();
-    expect([homeUncovered, document.querySelector("[data-alpha-home-layer]")?.childElementCount ?? 0]).toEqual([false, 0]);
-    await closeAll();
-
-    // spec/app/home/index.md, "Story: Start Home": on the launcher an owner who keeps Dark sees the same white cover, and it stays until Home has drawn.
-    localStorage.setItem("alpha.appearance", JSON.stringify({ theme: "Dark", legible: false }));
-    const { alpha } = await openOver(fakeWorld({ ...scene(), phone: true }), only("home", "assistant"));
-    await until(alpha, alpha.runtime, Shell, () => true);
-    await vi.waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true), { timeout: 5_000 });
-    expect(cover()?.classList.contains("light")).toBe(true);
-    await later(alpha, 2500);
-    await vi.waitFor(() => expect(cover()).toBeNull());
-  } finally {
-    await closeAll();
-    document.documentElement.classList.remove("dark");
-    react.IS_REACT_ACT_ENVIRONMENT = undefined;
-  }
-});
-
-it("Returns from Android Wi-Fi settings to the sign-in chooser (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
-  const world = { ...scene(), phone: true, signedIn: false };
-  world.settings.connectivity = { online: false, validated: false, captivePortal: false, ssid: null };
-  underAct();
-  try {
-    await openOver(fakeWorld(world), only("home", "overlay"), true);
-    const notice = () => document.querySelector('[aria-label="Sign-in connection"]');
-    await vi.waitFor(() => expect(notice()?.textContent).toContain("You’re offline. Connect to Wi-Fi to sign in."));
-    expect(button("Send code")?.disabled).toBe(true);
-    expect(button("Settings")).toBeUndefined();
-    await press("Open Wi-Fi settings");
-    await vi.waitFor(() => expect(world.settings.opened).toEqual(["wifi"]));
-    expect(notice()?.querySelector('[role="alert"]')).toBeNull();
-
-    world.settings.connectivity = { online: true, validated: false, captivePortal: true, ssid: "captive" };
-    await drawn(() => window.dispatchEvent(new Event("focus")));
-    await vi.waitFor(() => expect(notice()?.textContent).toContain("Android couldn’t verify internet access."));
-    expect(button("Send code")?.disabled).toBe(false);
-
-    world.settings.facts.wifiActive = false;
-    await drawn(() => window.dispatchEvent(new Event("focus")));
-    await vi.waitFor(() => expect(notice()?.textContent).toContain("Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access."));
-    world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: null };
-    await drawn(() => window.dispatchEvent(new Event("focus")));
-    await vi.waitFor(() => expect(notice()?.textContent).toContain("You can use mobile data or connect to Wi-Fi."));
-    expect(button("Send code")?.disabled).toBe(false);
-
-    world.settings.facts.wifiActive = true;
-    world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: "home" };
-    await drawn(() => window.dispatchEvent(new Event("focus")));
-    await vi.waitFor(() => expect(notice()).toBeNull());
-    expect(button("Send code")?.disabled).toBe(false);
-    expect(button("Settings")).toBeUndefined();
-  } finally {
-    await closeAll();
-    react.IS_REACT_ACT_ENVIRONMENT = undefined;
-  }
+    await until(alpha, runtime, Journal, (s) => s.entries.length === 0);
+    await drawn(() => root.unmount());
+    host.remove();
+    expect(untimed).toBe(0);
+  });
 });

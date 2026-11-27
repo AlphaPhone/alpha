@@ -29,7 +29,31 @@ pure val initial: Card = {
 pure def nextTry(a: A::Attempt): A::Attempt = A::dispatch(A::record(if (a.outcome == A::Planned) A::plan(a.id + 1) else a))
 
 pure def live(c: Card): bool = c.shown and not(c.settled)
+```
 
+### A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it
+
+Once the owner's decision has ended and the card has gone, its result chip
+shows under the reply that offered the card, before any answer that
+followed, and stays there for the rest of the conversation. A reply that
+did nothing but offer that one review gives way to the chip; while the
+card is still shown, or when the reply carried more than that one review,
+the reply stays.
+
+```quint
+pure def offerShown(onlyOffered: bool, cardShown: bool, ended: bool): bool =
+  not(onlyOffered and ended and not(cardShown))
+
+pure def lawAShownReviewKeepsTheReplyThatOfferedIt(onlyOffered: bool, ended: bool): bool = offerShown(onlyOffered, true, ended)
+
+pure def lawAReplyThatSaidMoreStays(cardShown: bool, ended: bool): bool = offerShown(false, cardShown, ended)
+
+pure def lawAPendingReviewKeepsItsReply(onlyOffered: bool, cardShown: bool): bool = offerShown(onlyOffered, cardShown, false)
+```
+
+### What the simulator tries
+
+```quint
 pure val ticketValues = Set(1, 2, 3)
 pure val kindValues = Set(Summary, Plain)
 pure val weight_noteSaved = 3

@@ -99,6 +99,8 @@ lemma sentAway_ensures(s: Composer, draft: int, attempt: int, revision: int)
   ensures (inv(s) ==> canSentAway(s, draft, attempt, revision) ==> stepAnUnknownSendIsCheckedOnce(s, sentAway(s, draft, attempt, revision).state, sentAway(s, draft, attempt, revision).out))
   ensures (inv(s) ==> canSentAway(s, draft, attempt, revision) ==> stepEditingASavedDraftReplacesNone(s, "sentAway", sentAway(s, draft, attempt, revision).state))
   ensures (inv(s) ==> canSentAway(s, draft, attempt, revision) ==> stepADraftComesBackAsItWasSetAside(s, "sentAway", sentAway(s, draft, attempt, revision).state))
+  ensures (inv(s) ==> canSentAway(s, draft, attempt, revision) ==> stepAnEarlierDraftIsOnlySetAside(s, "sentAway", sentAway(s, draft, attempt, revision).state, sentAway(s, draft, attempt, revision).out))
+
 {
   if inv(s) && canSentAway(s, draft, attempt, revision) {
     var l := letterNamed(s, draft);
@@ -130,6 +132,8 @@ lemma checkSent_ensures(s: Composer, draft: int, access: app__inbox__access_Acce
   ensures (inv(s) ==> canCheckSent(s, draft, access) ==> stepAnUnknownSendIsCheckedOnce(s, checkSent(s, draft, access).state, checkSent(s, draft, access).out))
   ensures (inv(s) ==> canCheckSent(s, draft, access) ==> stepEditingASavedDraftReplacesNone(s, "checkSent", checkSent(s, draft, access).state))
   ensures (inv(s) ==> canCheckSent(s, draft, access) ==> stepADraftComesBackAsItWasSetAside(s, "checkSent", checkSent(s, draft, access).state))
+  ensures (inv(s) ==> canCheckSent(s, draft, access) ==> stepAnEarlierDraftIsOnlySetAside(s, "checkSent", checkSent(s, draft, access).state, checkSent(s, draft, access).out))
+
 {
   if inv(s) && canCheckSent(s, draft, access) {
     CheckSentChecked(s, draft, access);
@@ -140,8 +144,8 @@ lemma checkSent_ensures(s: Composer, draft: int, access: app__inbox__access_Acce
   }
 }
 
-lemma checkedSentNoOp(s: Composer, ticket: int, ok: bool, found: bool)
-  requires inv(s) && canCheckedSent(s, ticket) && (!ok || !named(s, s.checking) || letterNamed(s, s.checking).doubt.attempt == 0)
+lemma checkedSentOpenNotSent(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && s.open && s.letter.id == s.checking && !found
   ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
   ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
   ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
@@ -159,8 +163,8 @@ lemma checkedSentNoOp(s: Composer, ticket: int, ok: bool, found: bool)
 {
 }
 
-lemma checkedSentOpen(s: Composer, ticket: int, ok: bool, found: bool)
-  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && (s.open && s.letter.id == s.checking)
+lemma checkedSentOpenForgotten(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && s.open && s.letter.id == s.checking && found && app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0 && !s.write.status.Loading?
   ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
   ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
   ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
@@ -178,7 +182,26 @@ lemma checkedSentOpen(s: Composer, ticket: int, ok: bool, found: bool)
 {
 }
 
-lemma checkedSentAsideNotFound(s: Composer, ticket: int, ok: bool, found: bool)
+lemma checkedSentOpenFound(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && s.open && s.letter.id == s.checking && found && !(app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0 && !s.write.status.Loading?)
+  ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysOneCheckRunsAtATime(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(checkedSent(s, ticket, ok, found).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepOneWriteAtATime(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAHandedDraftStaysPut(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+{
+}
+
+lemma checkedSentAsideNotSent(s: Composer, ticket: int, ok: bool, found: bool)
   requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && !(s.open && s.letter.id == s.checking) && !found
   ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
   ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
@@ -195,13 +218,11 @@ lemma checkedSentAsideNotFound(s: Composer, ticket: int, ok: bool, found: bool)
   ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
   ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
 {
-  var told := s.(check := kit__read_answer(s.check, ok), checking := 0);
-  var l := letterNamed(s, s.checking);
   ShelfLetter(s, s.checking);
-  AmendKeepsTheShelf(told, app__inbox__letter_notSent(l));
+  AmendKeepsTheShelf(s.(check := kit__read_answer(s.check, ok), checking := 0), app__inbox__letter_notSent(letterNamed(s, s.checking)));
 }
 
-lemma checkedSentAsideForget(s: Composer, ticket: int, ok: bool, found: bool)
+lemma checkedSentAsideForgotten(s: Composer, ticket: int, ok: bool, found: bool)
   requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && !(s.open && s.letter.id == s.checking) && found && app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0
   ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
   ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
@@ -218,12 +239,11 @@ lemma checkedSentAsideForget(s: Composer, ticket: int, ok: bool, found: bool)
   ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
   ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
 {
-  var told := s.(check := kit__read_answer(s.check, ok), checking := 0);
   ShelfLetter(s, s.checking);
-  TakeKeepsTheShelf(told, s.checking);
+  TakeKeepsTheShelf(s.(check := kit__read_answer(s.check, ok), checking := 0), s.checking);
 }
 
-lemma checkedSentAsideMarked(s: Composer, ticket: int, ok: bool, found: bool)
+lemma checkedSentAsideFound(s: Composer, ticket: int, ok: bool, found: bool)
   requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && !(s.open && s.letter.id == s.checking) && found && !(app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0)
   ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
   ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
@@ -240,10 +260,8 @@ lemma checkedSentAsideMarked(s: Composer, ticket: int, ok: bool, found: bool)
   ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
   ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
 {
-  var told := s.(check := kit__read_answer(s.check, ok), checking := 0);
-  var l := letterNamed(s, s.checking);
   ShelfLetter(s, s.checking);
-  AmendKeepsTheShelf(told, app__inbox__letter_foundSent(l));
+  AmendKeepsTheShelf(s.(check := kit__read_answer(s.check, ok), checking := 0), app__inbox__letter_foundSent(letterNamed(s, s.checking)));
 }
 
 lemma checkedSent_ensures(s: Composer, ticket: int, ok: bool, found: bool)
@@ -261,18 +279,24 @@ lemma checkedSent_ensures(s: Composer, ticket: int, ok: bool, found: bool)
   ensures (inv(s) ==> canCheckedSent(s, ticket) ==> stepAnUnknownSendIsCheckedOnce(s, checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out))
   ensures (inv(s) ==> canCheckedSent(s, ticket) ==> stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state))
   ensures (inv(s) ==> canCheckedSent(s, ticket) ==> stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state))
+  ensures (inv(s) ==> canCheckedSent(s, ticket) ==> stepAnEarlierDraftIsOnlySetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out))
+
 {
-  if inv(s) && canCheckedSent(s, ticket) {
-    if !ok || !named(s, s.checking) || letterNamed(s, s.checking).doubt.attempt == 0 {
-      checkedSentNoOp(s, ticket, ok, found);
-    } else if s.open && s.letter.id == s.checking {
-      checkedSentOpen(s, ticket, ok, found);
+  if inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 {
+    if s.open && s.letter.id == s.checking {
+      if !found {
+        checkedSentOpenNotSent(s, ticket, ok, found);
+      } else if app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0 && !s.write.status.Loading? {
+        checkedSentOpenForgotten(s, ticket, ok, found);
+      } else {
+        checkedSentOpenFound(s, ticket, ok, found);
+      }
     } else if !found {
-      checkedSentAsideNotFound(s, ticket, ok, found);
+      checkedSentAsideNotSent(s, ticket, ok, found);
     } else if app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0 {
-      checkedSentAsideForget(s, ticket, ok, found);
+      checkedSentAsideForgotten(s, ticket, ok, found);
     } else {
-      checkedSentAsideMarked(s, ticket, ok, found);
+      checkedSentAsideFound(s, ticket, ok, found);
     }
   }
 }
@@ -292,6 +316,8 @@ lemma setAside_ensures(s: Composer)
   ensures (inv(s) ==> canSetAside(s) ==> stepAnUnknownSendIsCheckedOnce(s, setAside(s), []))
   ensures (inv(s) ==> canSetAside(s) ==> stepEditingASavedDraftReplacesNone(s, "setAside", setAside(s)))
   ensures (inv(s) ==> canSetAside(s) ==> stepADraftComesBackAsItWasSetAside(s, "setAside", setAside(s)))
+  ensures (inv(s) ==> canSetAside(s) ==> stepAnEarlierDraftIsOnlySetAside(s, "setAside", setAside(s), []))
+
 {
   if inv(s) && canSetAside(s) {
     ShelfPlaced(s.shelf, s.letter);
@@ -313,6 +339,8 @@ lemma resume_ensures(s: Composer, draft: int)
   ensures (inv(s) ==> canResume(s, draft) ==> stepAnUnknownSendIsCheckedOnce(s, resume(s, draft), []))
   ensures (inv(s) ==> canResume(s, draft) ==> stepEditingASavedDraftReplacesNone(s, "resume", resume(s, draft)))
   ensures (inv(s) ==> canResume(s, draft) ==> stepADraftComesBackAsItWasSetAside(s, "resume", resume(s, draft)))
+  ensures (inv(s) ==> canResume(s, draft) ==> stepAnEarlierDraftIsOnlySetAside(s, "resume", resume(s, draft), []))
+
 {
   if inv(s) && canResume(s, draft) {
     ShelfLetter(s, draft);
@@ -377,6 +405,44 @@ lemma endedOpenDeleteLost(s: Composer, draft: int, attempt: int, result: kit__at
 {
 }
 
+lemma endedOpenDeletedWhileWriting(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
+  requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && !result.Refused? && letterNamed(s, draft).use.ToDelete? && !result.Unknown? && s.write.status.Loading?
+  ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAWaitingEditHasItsDeadline(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheCopyIsTheDraft(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysOneCheckRunsAtATime(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepOneWriteAtATime(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAHandedDraftStaysPut(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+{
+}
+
+lemma endedOpenDeletedIdle(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
+  requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && !result.Refused? && letterNamed(s, draft).use.ToDelete? && !result.Unknown? && !s.write.status.Loading?
+  ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAWaitingEditHasItsDeadline(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheCopyIsTheDraft(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysOneCheckRunsAtATime(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepOneWriteAtATime(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAHandedDraftStaysPut(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+{
+}
+
 lemma endedOpenDeleted(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
   requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && !result.Refused? && letterNamed(s, draft).use.ToDelete? && !result.Unknown?
   ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
@@ -394,6 +460,11 @@ lemma endedOpenDeleted(s: Composer, draft: int, attempt: int, result: kit__attem
   ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
   ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
 {
+  if (s.write.status.Loading?) {
+    endedOpenDeletedWhileWriting(s, draft, attempt, result, revision, gmail);
+  } else {
+    endedOpenDeletedIdle(s, draft, attempt, result, revision, gmail);
+  }
 }
 
 lemma endedOpenSendUnknown(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
@@ -586,6 +657,8 @@ lemma ended_ensures(s: Composer, draft: int, attempt: int, result: kit__attempt_
   ensures (inv(s) ==> canEnded(s, draft, attempt, result, revision, gmail) ==> stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out))
   ensures (inv(s) ==> canEnded(s, draft, attempt, result, revision, gmail) ==> stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state))
   ensures (inv(s) ==> canEnded(s, draft, attempt, result, revision, gmail) ==> stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state))
+  ensures (inv(s) ==> canEnded(s, draft, attempt, result, revision, gmail) ==> stepAnEarlierDraftIsOnlySetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out))
+
 {
   if inv(s) && canEnded(s, draft, attempt, result, revision, gmail) {
     if ((s.open && s.letter.id == draft)) {
@@ -716,6 +789,8 @@ lemma copyRead_ensures(s: Composer, ticket: int, ok: bool, found: bool, held: in
   ensures (inv(s) ==> canCopyRead(s, ticket, found, held, gmail) ==> stepAnUnknownSendIsCheckedOnce(s, copyRead(s, ticket, ok, found, held, gmail).state, copyRead(s, ticket, ok, found, held, gmail).out))
   ensures (inv(s) ==> canCopyRead(s, ticket, found, held, gmail) ==> stepEditingASavedDraftReplacesNone(s, "copyRead", copyRead(s, ticket, ok, found, held, gmail).state))
   ensures (inv(s) ==> canCopyRead(s, ticket, found, held, gmail) ==> stepADraftComesBackAsItWasSetAside(s, "copyRead", copyRead(s, ticket, ok, found, held, gmail).state))
+  ensures (inv(s) ==> canCopyRead(s, ticket, found, held, gmail) ==> stepAnEarlierDraftIsOnlySetAside(s, "copyRead", copyRead(s, ticket, ok, found, held, gmail).state, copyRead(s, ticket, ok, found, held, gmail).out))
+
 {
   if inv(s) && canCopyRead(s, ticket, found, held, gmail) {
     if ((!ok || s.letter.sending != 0)) {
@@ -728,6 +803,91 @@ lemma copyRead_ensures(s: Composer, ticket: int, ok: bool, found: bool, held: in
       copyReadCopy(s, ticket, ok, found, held, gmail);
     } else if (ok && s.letter.sending == 0 && !s.letter.unsure && !(s.letter.draft.sync.Edited? && s.letter.gmail != 0)) {
       copyReadOther(s, ticket, ok, found, held, gmail);
+    }
+  }
+}
+
+lemma FoldTakeKeepsTheShelf(s: Composer, picks: seq<ShelfPick>)
+  requires alwaysTheShelfHoldsOtherDraftsOfThisSession(s) && alwaysAnUnsureDraftIsHandedToNothing(s)
+  ensures var sh := Std.Collections.Seq.FoldLeft((shelf: app__inbox__shelf_Shelf, pick: ShelfPick) => app__inbox__shelf_take(shelf, pick.draft), s.shelf, picks); alwaysTheShelfHoldsOtherDraftsOfThisSession(s.(shelf := sh)) && alwaysAnUnsureDraftIsHandedToNothing(s.(shelf := sh)) && (forall k :: k in sh.shelved ==> k in s.shelf.shelved) && (forall p :: p in picks ==> p.draft !in sh.shelved)
+  decreases |picks|
+{
+  if |picks| > 0 {
+    TakeKeepsTheShelf(s, picks[0].draft);
+    ShelfTaken(s.shelf, picks[0].draft);
+    var next := s.(shelf := app__inbox__shelf_take(s.shelf, picks[0].draft));
+    FoldTakeKeepsTheShelf(next, picks[1..]);
+  }
+}
+
+lemma FoldPickDrafts(acc: seq<int>, picks: seq<ShelfPick>)
+  ensures var ids := Std.Collections.Seq.FoldLeft((ids: seq<int>, pick: ShelfPick) => (ids + [pick.draft]), acc, picks); |ids| == |acc| + |picks| && (forall d :: d in ids ==> d in acc || exists p :: p in picks && p.draft == d)
+  decreases |picks|
+{
+  if |picks| > 0 {
+    FoldPickDrafts(acc + [picks[0].draft], picks[1..]);
+    var ids := Std.Collections.Seq.FoldLeft((ids: seq<int>, pick: ShelfPick) => (ids + [pick.draft]), acc, picks);
+    forall d | d in ids ensures d in acc || exists p :: p in picks && p.draft == d {
+      if d == picks[0].draft {
+        assert picks[0] in picks && picks[0].draft == d;
+      } else if d !in acc {
+        var p :| p in picks[1..] && p.draft == d;
+        assert p in picks && p.draft == d;
+      }
+    }
+  }
+}
+
+lemma discardShelfSelection_ensures(s: Composer, by_: app__inbox__access_Actor)
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysAnOpenDraftIsWhole(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysAWaitingEditHasItsDeadline(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysTheCopyIsTheDraft(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysOneCheckRunsAtATime(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysAnUnsureDraftIsHandedToNothing(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysTheShelfHoldsOtherDraftsOfThisSession(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepAWriteIsDueOnlyAfterItsPause(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepOneWriteAtATime(s, "discardShelfSelection", discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepAHandedDraftStaysPut(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "discardShelfSelection", discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepASentDraftIsForgottenOrMarked(s, "discardShelfSelection", discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepAnUnknownSendIsCheckedOnce(s, discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepEditingASavedDraftReplacesNone(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepADraftComesBackAsItWasSetAside(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepAnEarlierDraftIsOnlySetAside(s, "discardShelfSelection", discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+
+{
+  if inv(s) && canDiscardShelfSelection(s, by_) {
+    var picks := s.shelfSelection.picks;
+    var base := s.(shelfSelection := noShelfSelection);
+    FoldTakeKeepsTheShelf(base, picks);
+    FoldPickDrafts([], picks);
+  }
+}
+
+lemma adopt_ensures(s: Composer, account: int, kind: app__inbox__letter_Kind, recipients: int, invalid: int, files: int, megabytes: int, textOnly: bool, copy: int, before: app__inbox__letter_Before)
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> alwaysAnOpenDraftIsWhole(adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> alwaysAWaitingEditHasItsDeadline(adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> alwaysTheCopyIsTheDraft(adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> alwaysOneCheckRunsAtATime(adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> alwaysAnUnsureDraftIsHandedToNothing(adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> alwaysTheShelfHoldsOtherDraftsOfThisSession(adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepAWriteIsDueOnlyAfterItsPause(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepOneWriteAtATime(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state, adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).out))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepAHandedDraftStaysPut(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state, adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).out))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepASentDraftIsForgottenOrMarked(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state, adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).out))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepAnUnknownSendIsCheckedOnce(s, adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state, adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).out))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepEditingASavedDraftReplacesNone(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepADraftComesBackAsItWasSetAside(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state))
+  ensures (inv(s) ==> canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) ==> stepAnEarlierDraftIsOnlySetAside(s, "adopt", adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).state, adopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before).out))
+{
+  if inv(s) && canAdopt(s, account, kind, recipients, invalid, files, megabytes, textOnly, copy, before) {
+    var l := app__inbox__letter_earlier(s.made + 1, s.session, kind, account, recipients, invalid, files, megabytes, textOnly, copy, before);
+    ShelfPlaced(s.shelf, l);
+    forall k | k in s.shelf.shelved
+      ensures k != l.id
+    {
+      ShelfLetter(s, k);
     }
   }
 }

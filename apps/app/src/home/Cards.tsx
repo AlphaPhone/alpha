@@ -10,10 +10,10 @@ import { useMachine } from "../../gen/app__home__cards.react.ts";
 import { dayStart } from "../calendar/time.ts";
 import { openCalls, openUnread } from "../phone/reports.vibe";
 import { MessagingBridge } from "../messaging/bridge.vibe";
-import { shortWhen } from "../phone/words.ts";
-import type { Resident } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { shortWhen } from "../comms/index.vibe";
+import type { Resident } from "../runtime/ui.tsx";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import { fromAreas, latestTime, named, openRoutedCard, others } from "./cards.vibe";
 import { messagingStateOf, renderMessagingCard } from "./MessagingCards.tsx";
 

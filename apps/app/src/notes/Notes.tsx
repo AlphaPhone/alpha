@@ -16,18 +16,19 @@ import { useMachine as useRecorder } from "../../gen/app__notes__recording.react
 import { useMachine as usePrevious } from "../../gen/app__notes__previous.react.ts";
 import { useMachine as useTransfer } from "../../gen/app__notes__transfer.react.ts";
 import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
-import { NoteDocuments } from "../platform/noteDocuments.vibe";
-import { native } from "../platform/device.vibe";
-import { NoteDevice } from "../platform/noteDevice.vibe";
+import { NoteDocuments } from "../platform/index.vibe";
+import { native } from "../platform/index.vibe";
+import { NoteDevice } from "../platform/index.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
-import type { Alpha } from "../runtime/area.tsx";
-import { fresh } from "../runtime/attempts.vibe";
-import { untimed } from "../runtime/reactor.vibe";
-import { AppBack } from "../shell/AppBack.tsx";
-import { Layers, Over, Under } from "../shell/Layers.tsx";
-import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
-import { desktopPreview } from "../shell/canvas.vibe";
+import type { Alpha } from "../runtime/ui.tsx";
+import { fresh } from "../runtime/index.vibe";
+import { untimed } from "../runtime/index.vibe";
+import { AppBack } from "../shell/ui.tsx";
+import { Layers, Over, Under } from "../shell/ui.tsx";
+import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/ui.tsx";
+import { desktopPreview } from "../shell/index.vibe";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, numberOf, savedVoice, sourced } from "./content.vibe";
+import { reviewSaved } from "./actions.vibe";
 import { NoteEditor } from "./editor.vibe";
 import { deleteSelection, discardNote, enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
@@ -117,8 +118,12 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     void runtime.runPromise(writer[kind]());
   const close = owner({ type: "close" }) ? () => action("close") : undefined;
   const checklist = saved.kind === "Checklist";
-  const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
+  const ready = bin !== undefined && Trash.ready(bin);
+  const deletion: Editor.Event = { type: "deleteNote", ready };
   const deletable = owner(deletion);
+  // spec/app/notes/editor.md, "More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did"
+  const deleteWhenSaved = !deletable && owner({ type: "deleteWhenSaved", ready });
+  const shareWhenSaved = owner({ type: "shareWhenSaved" });
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
   const linkedExport = current.link.tie !== "NoLink" && hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const sharing = { type: "openMenu", note: current.note, revision: current.draft.base, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
@@ -137,9 +142,23 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
   const discarding = owner({ type: "discardDraft" });
-  const pinningNew = isFresh && editable && current.draft.sync !== "Saving";
+  const pinningNew = owner({ type: "pinNew", kept: true });
   const sharingNew = owner({ type: "shareNew", kept: true });
-  const menu = (isFresh || deletable || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
+  const staying = (act: () => void) => (event: Event) => { event.preventDefault(); act(); };
+  const run = (act: Parameters<Runtime["runPromise"]>[0]) => () => void runtime.runPromise(act);
+  // spec/app/notes/editor.md, "Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did"
+  const pinAsked = current.pinning !== "Unasked";
+  const pinned = isFresh ? saved.pinned === true : pinAsked ? current.pinning === "ToPin" : organised.pinned;
+  const pinWhenSaved = !isFresh && owner({ type: "pinWhenSaved", pinned: !organised.pinned });
+  const shareChoice = isFresh ? sharingNew ? run(writer.shareNew()) : undefined
+    : menuBound ? actions.can(reviewShare, "Owner") ? staying(() => void actions.send(reviewShare, "Owner")) : undefined
+      : shareWhenSaved ? run(writer.shareWhenSaved())
+        : actions.can(sharing, "Owner") ? staying(run(reviewSaved(sharing))) : undefined;
+  const pinChoice = isFresh ? pinningNew ? run(writer.pinNew(saved.pinned !== true)) : undefined
+    : pinAsked ? undefined : organised.pin ?? (pinWhenSaved ? run(writer.pinWhenSaved(!organised.pinned)) : undefined);
+  const deleteChoice = isFresh ? discarding ? run(writer.discard()) : undefined
+    : deletable ? () => send(deletion) : deleteWhenSaved ? run(writer.deleteWhenSaved(ready)) : undefined;
+  const menu = (isFresh || current.note > 0) &&
     <Menu open={menuBound && actionsState.open || unboundMenu} onOpenChange={(open) => {
       if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
       else setUnboundMenu(open);
@@ -147,19 +166,13 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     }}>
       <MenuTrigger ref={moreRef} aria-label="More" className={cn(focusRing, "flex h-13 w-11 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
       <MenuContent aria-label="Note actions" aria-labelledby={undefined} align="end" alignOffset={-61} sideOffset={4} className={noteMenuPanel}>
-        {isFresh && <>
-          <MenuItem aria-label="Share note" className={noteMenuItem} disabled={!sharingNew} onSelect={() => void runtime.runPromise(writer.shareNew())}><Share2 /> Share</MenuItem>
-          <MenuItem className={noteMenuItem} disabled={!pinningNew} onSelect={() => void runtime.runPromise(writer.pinNew(saved.pinned !== true))}><Pin /> {saved.pinned === true ? "Unpin" : "Pin"}</MenuItem>
-          <div role="separator" className="my-1 border-t border-border" />
-          <MenuItem className={noteMenuItem} disabled={!discarding} onSelect={() => void runtime.runPromise(writer.discard())}><Trash2 /> Delete</MenuItem>
-        </>}
-        {menuBound && current.link.tie === "NoLink" && <MenuItem ref={shareRef} aria-label="Share note" className={noteMenuItem}
-          onSelect={(event) => { event.preventDefault(); if (actions.can(reviewShare, "Owner")) void actions.send(reviewShare, "Owner"); }}><Share2 /> Share</MenuItem>}
-        {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
+        {current.link.tie === "NoLink" && <MenuItem ref={shareRef} aria-label="Share note" className={noteMenuItem} disabled={shareChoice === undefined} onSelect={shareChoice}><Share2 /> Share</MenuItem>}
+        <MenuItem className={noteMenuItem} disabled={pinChoice === undefined} onSelect={pinChoice}><Pin /> {pinned ? "Unpin" : "Pin"}</MenuItem>
+        <div role="separator" className="my-1 border-t border-border" />
+        <MenuItem className={noteMenuItem} disabled={deleteChoice === undefined} onSelect={deleteChoice}><Trash2 /> Delete</MenuItem>
+        {(organised.moves.length > 0 || linkedExport) && <div role="separator" className="my-1 border-t border-border" />}
         {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
         {linkedExport && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-        {deletable && (menuBound || linkedExport || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
-        {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
       </MenuContent>
     </Menu>;
   return (

@@ -1,6 +1,6 @@
 // Proof of the sign-in machine: Dafny is shown the request each step sends.
 
-lemma sendCode_ensures(s: SignIn, method_: app__account__outside_Method, address: string, now: int, online: bool)
+lemma sendCode_ensures(s: SignIn, method_: app__account__session_Method, address: string, now: int, online: bool)
   ensures (inv(s) ==> canSendCode(s, method_, address, now, online) ==> alwaysTheRequestFitsTheStep(sendCode(s, method_, address, now, online).state))
   ensures (inv(s) ==> canSendCode(s, method_, address, now, online) ==> alwaysOnlyARequiredPageWaits(sendCode(s, method_, address, now, online).state))
   ensures (inv(s) ==> canSendCode(s, method_, address, now, online) ==> alwaysWrongCodesAreBounded(sendCode(s, method_, address, now, online).state))

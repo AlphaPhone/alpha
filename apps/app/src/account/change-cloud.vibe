@@ -3,10 +3,10 @@ import {
   commandFromResponse, type PlanChangeReview, pathOf, paymentFromResponse, reviewFromResponse,
   routesByName, type SnapshotSubscription, type SubscriptionCommand,
 } from "@elizaos/cloud"
-import type { Tier } from "../../gen/app__account__outside.ts"
+import type { Tier } from "../../gen/app__account__plan.effect.vibe"
 import type { Result } from "../../gen/app__account__change.effect.vibe"
-import { type Account } from "../platform/cloud.vibe"
-import { type Failure, outcomeOf, type Remote } from "../platform/remote.vibe"
+import { type Account } from "../platform/index.vibe"
+import { type Failure, outcomeOf, type Remote } from "../platform/index.vibe"
 import type { Buyer } from "./profile.vibe"
 
 module commandIdentity {

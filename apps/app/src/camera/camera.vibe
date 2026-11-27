@@ -6,12 +6,12 @@ import { offeringPhoto } from "../../gen/app__camera__agent.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { allows } from "../../gen/kit__permission.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
-import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
+import { Device } from "../platform/index.vibe"
+import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts, type Point } from "../platform/index.vibe"
+import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/index.vibe"
 import type { CapturedPhotoOffer } from "../assistant/attachments.vibe"
-import { SystemSettings } from "../platform/systemSettings.vibe"
-import { answer, applying, contained, due, reacting, run, started, stream, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
+import { SystemSettings } from "../platform/index.vibe"
+import { answer, applying, contained, due, reacting, run, started, stream, together, untimed, type Due, type Job } from "../runtime/index.vibe"
 
 type Phone = ["Phone"]
 type CameraJob = Job<Camera.Event, CameraPort | Camera.Machine | CameraAssets | Shell.Machine | SystemSettings | PhotosPort, Phone>

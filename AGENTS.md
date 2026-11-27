@@ -16,11 +16,6 @@ Alpha is one independent product: a personal agent phone, with Home, the
 built-in apps and Ask Alpha in `apps/app`, on a resident agent that runs on
 the device. This branch rebuilds it on the stack below.
 
-- **`legacy/` is the implementation being replaced.** Read it as the guide to
-  what each area does: its renderer, Quint models, tests, scripts and Android
-  packaging, with the requirements in `legacy/docs/prd.md`. Nothing in the
-  workspace imports from it. Change it only to delete an area, in the change
-  that checks in its rebuild.
 - **The app is built area by area.** An area's requirements are
   `spec/app/<area>/`: `index.md`, and a child spec for each further machine.
   Its screens and shell are `apps/app/src/<area>/`, its journeys
@@ -55,17 +50,15 @@ the device. This branch rebuilds it on the stack below.
   through `useMachine`, offers each control exactly when `can` allows its
   event, and sends events.
 - **Node 26, no Bun.** Everything here runs on Node 26 with pnpm: the
-  application, its tests, every build, release and device script. What
-  `legacy/` runs with Bun is rebuilt for Node when its area is rebuilt; no
-  Bun command, lock file or runtime comes across.
+  application, its tests, every build, release and device script. No
+  Bun command, lock file or runtime is used.
 - **Alpha is built on Eliza's own Vibestack line.** The on-device agent,
   the Android device package and the hosted services are
   [elizaOS/eliza](https://github.com/elizaOS/eliza) on its `develop`
   branch, eliza's Vibestack line: `@elizaos/agent`, `@elizaos/os`,
   `@elizaos/cloud` and the plugins, at a pinned commit. Use what they export,
   and never restate their state or wire shapes here. Never edit their
-  checkout: make shared changes upstream and advance the pin. `legacy/` still
-  records the older pin it was built on, for reading only.
+  checkout: make shared changes upstream and advance the pin.
 - **Do not import another product's interface or identity.**
 - **The pin is `eliza.lock.json`.** `pnpm eliza` builds that commit outside
   the repository, once, and links it as `.eliza`. Stay on the newest commit

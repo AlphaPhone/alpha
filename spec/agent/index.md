@@ -354,7 +354,7 @@ type Route = { method: Method, path: str, stream: bool }
 pure val browserNotesCleanup = "/api/alpha/notes/browser-cleanup"
 pure val browserNotesTranscription = "/api/alpha/notes/transcription"
 pure val browserNotesTranscriptionLimit = 1100000
-pure val pageRoutes: List[Route] = List(
+pure val pageCoreRoutes: List[Route] = List(
   { method: Get, path: "/api/health", stream: false },
   { method: Get, path: "/api/status", stream: false },
   { method: Post, path: "/api/conversations", stream: false },
@@ -381,6 +381,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/client-devices/proposals/{id}/reconciliation", stream: false },
   { method: Get, path: "/api/approvals", stream: false },
   { method: Post, path: "/api/approvals/{id}/resolve", stream: false },
+)
+pure val pageCalendarClockRoutes: List[Route] = List(
   { method: Get, path: "/api/lifeops/calendar/feed", stream: false },
   { method: Get, path: "/api/lifeops/calendar/calendars", stream: false },
   { method: Post, path: "/api/lifeops/calendar/events", stream: false },
@@ -406,6 +408,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Delete, path: "/api/alpha/clock/timers/{id}", stream: false },
   { method: Post, path: "/api/alpha/clock/world", stream: false },
   { method: Delete, path: "/api/alpha/clock/world/{id}", stream: false },
+)
+pure val pageReminderNotesRoutes: List[Route] = List(
   { method: Get, path: "/api/alpha/reminders", stream: false },
   { method: Post, path: "/api/alpha/reminders/lists", stream: false },
   { method: Patch, path: "/api/alpha/reminders/lists/{id}", stream: false },
@@ -429,6 +433,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Get, path: browserNotesTranscription, stream: false },
   { method: Post, path: browserNotesTranscription, stream: false },
   { method: Post, path: browserNotesCleanup, stream: false },
+)
+pure val pageWorkflowRoutes: List[Route] = List(
   { method: Get, path: "/api/workflow/status", stream: false },
   { method: Get, path: "/api/workflow/hosted/loops", stream: false },
   { method: Post, path: "/api/workflow/hosted/loops", stream: false },
@@ -456,6 +462,8 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/workflow/phone/validate", stream: false },
   { method: Post, path: "/api/workflow/phone/workflows", stream: false },
   { method: Post, path: "/api/workflow/workflows/{id}/phone-spec", stream: false },
+)
+pure val pageTaskWalletRoutes: List[Route] = List(
   { method: Get, path: "/api/scheduled-tasks/{id}", stream: false },
   { method: Get, path: "/api/triggers/{id}", stream: false },
   { method: Post, path: "/api/triggers", stream: false },
@@ -478,6 +486,9 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/wallet/requests/{id}/review", stream: false },
   { method: Post, path: "/api/wallet/requests/{id}/decide", stream: false },
 )
+pure def joinRoutes(a: List[Route], b: List[Route]): List[Route] = a.concat(b)
+pure val pageRoutes: List[Route] =
+  joinRoutes(joinRoutes(joinRoutes(joinRoutes(pageCoreRoutes, pageCalendarClockRoutes), pageReminderNotesRoutes), pageWorkflowRoutes), pageTaskWalletRoutes)
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =
   listed.length() == pageRoutes.length() and listed.every(r => pageRoutes.includes(r)) and pageRoutes.every(r => listed.includes(r))

@@ -18,7 +18,6 @@ const commands = [
 ].join("|");
 
 const excluded = [
-  ":(top,exclude)legacy",
   ":(top,exclude,glob)**/pnpm-lock.yaml",
   ":(top,exclude)packages/eliza-harness/scripts/no-bun.ts",
   ":(top,exclude)packages/eliza-harness/test/fixtures/bun",
@@ -33,13 +32,13 @@ function git(args: readonly string[], emptyMatches = false): string {
   return result.stdout;
 }
 
-const files = git(["ls-files", "-z", "--", ".", ":(top,exclude)legacy"]).split("\0");
+const files = git(["ls-files", "-z", "--", "."]).split("\0");
 const findings = [
   ...files.filter((file) => bunFiles.has(basename(file))).map((file) => `${file}: Bun lock or config`),
   ...git(["grep", "-nIE", "-e", commands, "--", ".", ...excluded], true).trimEnd().split("\n").filter(Boolean),
 ];
 if (findings.length === 0) {
-  process.stdout.write("No Bun commands, runtime APIs, setup, or lockfiles found in tracked files outside legacy/.\n");
+  process.stdout.write("No Bun commands, runtime APIs, setup, or lockfiles found in tracked files.\n");
 } else {
   process.stderr.write(`Bun usage found. Use Node 26 and pnpm (AGENTS.md, "This project"):\n${findings.join("\n")}\n`);
   process.exitCode = 1;

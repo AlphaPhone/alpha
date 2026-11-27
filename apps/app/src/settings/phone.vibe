@@ -2,11 +2,11 @@
 import * as Carrier from "../../gen/app__settings__carrier.effect.vibe"
 import * as Network from "../../gen/app__settings__network.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
-import { CarrierSetup } from "../platform/carrier.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Nearby, WiFi } from "../platform/wifi.vibe"
-import { type Due, type Job, answer, applying, due, following, hearing, reacting, together, untimed } from "../runtime/reactor.vibe"
-import { type Shelf, createShelf } from "../runtime/shelf.vibe"
+import { CarrierSetup } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { type Nearby, WiFi } from "../platform/index.vibe"
+import { type Due, type Job, answer, applying, due, following, hearing, reacting, together, untimed } from "../runtime/index.vibe"
+import { type Shelf, createShelf } from "../runtime/index.vibe"
 
 /** The networks the last scan found, kept beside the machine that counts them: the rows of the Network page. */
 export service Found {

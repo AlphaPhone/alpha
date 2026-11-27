@@ -1,0 +1,30 @@
+{
+  "key": "alpha/app/phone/comms@1",
+  "spec": "spec/app/phone/comms.md",
+  "shape": "3d2159f3f0bf363e",
+  "state": {
+    "app": "MessagesApp",
+    "subject": "ListSubject",
+    "key": "messages:list:",
+    "target": "AlphaTarget",
+    "height": "SheetOpen",
+    "voice": false,
+    "stage": [
+      {
+        "app": "MessagesApp",
+        "subject": "ThreadSubject",
+        "key": "messages:thread:9"
+      }
+    ],
+    "callLive": false,
+    "emergency": false,
+    "ring": "",
+    "briefed": "",
+    "requests": [
+      {
+        "about": "messages:thread:9",
+        "request": "Reply that I am running late"
+      }
+    ]
+  }
+}

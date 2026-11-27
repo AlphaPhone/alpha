@@ -1,0 +1,106 @@
+{
+  "key": "alpha/app/update/index@1",
+  "spec": "spec/app/update/index.md",
+  "shape": "ee6185a2c5b41da1",
+  "state": {
+    "installed": 0,
+    "signer": 0,
+    "permission": "Unsupported",
+    "visible": false,
+    "activity": {
+      "home": false,
+      "open": false,
+      "typing": false,
+      "voice": false,
+      "dialog": false,
+      "busy": false,
+      "recording": false,
+      "front": false,
+      "call": false,
+      "audio": false
+    },
+    "check": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "asked": false,
+    "checked": "Missed",
+    "checkedAt": 1000,
+    "misses": 1,
+    "offer": {
+      "release": {
+        "variant": "OtherVariant",
+        "signer": 0,
+        "version": 0,
+        "digest": 0,
+        "bytes": 0,
+        "https": false,
+        "credentials": false,
+        "url": 0,
+        "name": 0,
+        "notes": 0,
+        "versionName": "",
+        "releaseNotes": ""
+      },
+      "manifest": 0
+    },
+    "installing": false,
+    "automatic": false,
+    "note": "Silent",
+    "deferrals": 0,
+    "retryAt": 0
+  },
+  "earlier": [
+    {
+      "from": "baed86444f",
+      "until": "07b099be3",
+      "state": {
+        "installed": 0,
+        "signer": 0,
+        "permission": "Unsupported",
+        "visible": false,
+        "activity": {
+          "home": false,
+          "open": false,
+          "typing": false,
+          "voice": false,
+          "dialog": false,
+          "busy": false,
+          "recording": false,
+          "front": false,
+          "call": false,
+          "audio": false
+        },
+        "check": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "asked": false,
+        "checked": "Missed",
+        "checkedAt": 1000,
+        "offer": {
+          "release": {
+            "variant": "OtherVariant",
+            "signer": 0,
+            "version": 0,
+            "digest": 0,
+            "bytes": 0,
+            "https": false,
+            "credentials": false,
+            "url": 0,
+            "name": 0,
+            "notes": 0,
+            "versionName": "",
+            "releaseNotes": ""
+          },
+          "manifest": 0
+        },
+        "installing": false,
+        "automatic": false,
+        "note": "Silent",
+        "deferrals": 0,
+        "retryAt": 0
+      }
+    }
+  ]
+}

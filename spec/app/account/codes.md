@@ -6,8 +6,8 @@ friend's code to apply. Each code is sent once and its outcome told as
 Cloud gives it; Alpha keeps an opaque receipt of the submitted code so a lost response
 cannot cause a second submission. The raw code stays in memory until the
 request is sent. What it granted is read back by a check of the
-plan, which this machine asks for with `CheckPlan`. The
-current sign-in arrives from the account runtime, and `elsewhere`,
+[Plan](./plan.md), which this machine asks for with `CheckPlan`. The
+current sign-in arrives from [Session](./session.md), and `elsewhere`,
 whether a payment or a plan change is under way or has an unknown
 outcome, from [Billing](./billing.md) and [Plan changes](./change.md).
 
@@ -223,7 +223,7 @@ pure def canReset(c: Codes, signIn: int): bool = signIn >= 0
 
 pure def reset(c: Codes, signIn: int): Codes =
   { ...c, authority: "", redeem: A::plan(c.redeem.id + 1), apply: A::plan(c.apply.id + 1), redeemCode: "", applyCode: "", unknown: Set(),
-    referral: R::retire(c.referral), unsettled: false, notice: Quiet }
+    referral: O::retire(c.referral), unsettled: false, notice: Quiet }
 
 pure def stepANewSignInLeavesNothingUnderWay(before: Codes, via: str, after: Codes): bool =
   via == "reset" implies and {
@@ -262,7 +262,7 @@ pure def ending(a: A::Attempt): A::Attempt = if (a.outcome == A::Sent) A::conclu
 pure def restart(c: Codes): Moved =
   val lostRedeem = c.redeem.outcome == A::Sent
   val lostApply = c.apply.outcome == A::Sent
-  { state: { ...c, redeem: ending(c.redeem), apply: ending(c.apply), referral: R::retire(c.referral),
+  { state: { ...c, redeem: ending(c.redeem), apply: ending(c.apply), referral: O::retire(c.referral),
       unknown: c.unknown.union(if (lostRedeem) Set(c.redeemCode) else Set()).union(if (lostApply) Set(c.applyCode) else Set()),
       unsettled: c.unsettled or lostRedeem or lostApply, notice: if (lostRedeem or lostApply) OutcomeUnknown else c.notice },
     out: List(CheckPlan) }
@@ -273,5 +273,5 @@ pure def restart(c: Codes): Moved =
 ```quint
 pure def erase(c: Codes): Codes =
   { ...c, authority: "", redeem: A::plan(c.redeem.id + 1), apply: A::plan(c.apply.id + 1), redeemCode: "", applyCode: "", unknown: Set(),
-    referral: R::retire(c.referral), unsettled: false, notice: Quiet }
+    referral: O::retire(c.referral), unsettled: false, notice: Quiet }
 ```

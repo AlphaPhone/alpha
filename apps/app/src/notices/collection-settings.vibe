@@ -1,14 +1,14 @@
 // spec/app/notices/collection.md, "Story: Manage collection in Settings"
 import type { MirrorStatus, NoticesClient } from "@elizaos/os-bridges"
 import * as Collection from "../../gen/app__notices__collection.effect.vibe"
-import type { Actor } from "../../gen/app__notices__collection.ts"
+import type { Actor } from "../../gen/app__approvals__operation.ts"
 import * as Settings from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
-import { Device, registered } from "../platform/device.vibe"
-import { CLOUD_ENVIRONMENT, signInAccounts, VoiceBridge } from "../platform/voice.vibe"
-import { noticesOf } from "../platform/systemSettings.vibe"
-import { type Job, answer, contained, reacting, started, together } from "../runtime/reactor.vibe"
+import { Device, registered } from "../platform/index.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts, VoiceBridge } from "../platform/index.vibe"
+import { noticesOf } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, started, stop, together } from "../runtime/index.vibe"
 
 type Surroundings = Device | Settings.Machine | Shell.Machine | Layers.Machine
 
@@ -137,6 +137,7 @@ function carry(fx: Collection.Effect): Job<Collection.Event, ReadWork, [Actor]> 
     case "ApplyPolicy": return answer("apply notification policy", policy(ticket, true), answerPolicy(ticket, undefined, true), "Phone")
     case "ReadPolicyApps": return answer("read notification choices", choices(ticket), { type: "policyApps", ticket, failed: true, choices: [] }, "Phone")
     case "ReadPolicyHistory": return answer("read notification history", history(ticket), { type: "policyHistory", ticket, failed: true, history: [] }, "Phone")
+    default: return stop("notification listing")
   }
 }
 

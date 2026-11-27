@@ -1,9 +1,11 @@
 import type { Layer } from "effect";
-import { say } from "../notices/toasts.vibe";
-import { registered } from "../platform/device.vibe";
-import { messagesBack } from "../phone/back.vibe";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
-import { useFirstPageBack } from "../shell/AppBack.tsx";
+import { say } from "../notices/index.vibe";
+import { registered } from "../platform/index.vibe";
+import { messagesBack } from "../comms/index.vibe";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
+import { together } from "../runtime/index.vibe";
+import { useFirstPageBack } from "../shell/ui.tsx";
+import { voiceReported } from "../update/activity.vibe";
 import { voiceArea } from "./dictation.vibe";
 import { Messages } from "./Messages.tsx";
 
@@ -19,4 +21,4 @@ function MessagesView({ runtime, alpha }: Shown<Resident | Layer.Success<typeof 
 }
 
 /** Messages, at its view: its machine and the composer's are resident. */
-export default area(voiceArea, MessagesView, { back: messagesBack });
+export default area(together(voiceArea, voiceReported("messages")), MessagesView, { back: messagesBack });

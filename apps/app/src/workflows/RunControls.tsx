@@ -6,7 +6,7 @@ import { useMachine as useWorkflow } from "../../gen/app__workflows.react.ts";
 import type { Event } from "../../gen/app__workflows__runs.ts";
 import type { Machine } from "../../gen/app__workflows__runs.effect.vibe";
 import type { Machine as WorkflowMachine } from "../../gen/app__workflows.effect.vibe";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 
 interface RunControlsProps extends Pick<Shown<Resident | Machine | WorkflowMachine>, "runtime"> {
   readonly row: number;

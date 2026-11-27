@@ -28,26 +28,26 @@ import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
 import { CalendarReviews } from "../calendar/reviews.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
-import type { NoteStore } from "../platform/notes.vibe"
+import type { NoteStore } from "../platform/index.vibe"
 import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import { Conversations } from "../messages/messages.vibe"
-import type { Telephony } from "../platform/telephony.vibe"
+import type { Telephony } from "../platform/index.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
-import { Device, native } from "../platform/device.vibe"
-import { Location } from "../platform/location.vibe"
-import { type PageInFront, type TabHost, pageInFront } from "../platform/browser.vibe"
-import type { VoiceBridge } from "../platform/voice.vibe"
-import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
-import { Attempts, fresh } from "../runtime/attempts.vibe"
-import { CommsPrompts, commsViewOf } from "../phone/comms.vibe"
+import { Agent, isCloudFundsRefusal } from "../platform/index.vibe"
+import { Device, native } from "../platform/index.vibe"
+import { Location } from "../platform/index.vibe"
+import { type PageInFront, type TabHost, pageInFront } from "../platform/index.vibe"
+import type { VoiceBridge } from "../platform/index.vibe"
+import { Refused, ask, outcomeOf } from "../platform/index.vibe"
+import { Attempts, fresh } from "../runtime/index.vibe"
+import { CommsPrompts, commsViewOf } from "../comms/index.vibe"
 import { MailQuestions, reviewedMail, type MailQuestion } from "../inbox/mail-context.vibe"
 import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
-import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { type Job, answer, applying, contained, filledStore, following, reacting, run, started, stream, together, untimed, withFields } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
-import { MediaReview, mediaReview, ranDirect } from "./media-review.vibe"
+import { MediaReview, mediaReview, noted, ranDirect, standing } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type ContactAttachmentScope, contactFileSendCurrent, contactFileTargetCurrent } from "./contact-attachments.vibe"
 import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, Talk, talk } from "./talk.vibe"
@@ -516,7 +516,7 @@ effect function settleReplied(input: {
         && !now.context.sensitive && now.context.revision === context.revision
     }
     const report = (note: string) => {
-      if (board.draftSeat === seat) board.change({ mediaNote: { conversation: chosen, text: note } })
+      if (board.draftSeat === seat) board.change({ mediaNotes: noted(board.snapshot().mediaNotes, { conversation: chosen, text: note }) })
     }
     const eligible = replied && result.reply.failureKind === undefined
     const inFiles = !directFiles || requestedFiles === undefined || !eligible
@@ -529,7 +529,7 @@ effect function settleReplied(input: {
       ? undefined : { origin: outsideOrigin, ticket, current: continued, report,
         hold: (work: Effect.Effect<void>) => { continueFiles = work } }
     const media = try review.pending(enrolled, result.reply.userMessageId, chosen, context.revision, messageTarget,
-      { clientMessageId: result.clientMessageId, conversationId, pageTicket,
+      { messageId: result.reply.messageId, clientMessageId: result.clientMessageId, conversationId, pageTicket,
         actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
         ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
         ...(outsideFiles === undefined ? {} : { outsideFiles }) })
@@ -732,7 +732,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": the reply the agent stored is settled text, shown at once, so Stop keeps it.
       onReady: (fullText: string) => { if (fullText !== "") preview(fullText, false) },
     }
-    board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNote: undefined })
+    board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNotes: standing(board.snapshot().mediaNotes) })
     const views = try Views
     const asked = try views.begin()
     // spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"
@@ -782,6 +782,9 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     show(ending)
     const pendingShow = shown
     if (pendingShow !== undefined) try promise(() => pendingShow)
+    // spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays"
+    const stoppedAt = try reply.get()
+    if (result?.kind === "StoppedByOwner" && stoppedAt.turn === ticket && stoppedAt.stopped) board.ownerStops.set(result.clientMessageId, !Reply.stoppedBeforeSettled(stoppedAt))
     if (request !== undefined && (heard || event.type === "finish")) {
       const comms = try Comms.Machine
       const current = (try comms.get()).requests.find((one) => one.about === request.about)
@@ -1176,16 +1179,20 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       { conversation, message: Chats.making(reading) ? reading.forkAt : 0 },
       { conversation, message: speaker.text === "Message" && (speaker.stage === "Waiting" || speaker.stage === "Preparing") ? speaker.item : 0 },
     ].filter(({ conversation, message }) => conversation > 0 && message > 0)
-    const recorded = messages.map((one): Line => {
-      // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": eliza stores a reply stopped before any of its text settled as aborted, with the provisional text it had, which is never shown.
-      if (one.role === "assistant" && one.failureKind === "aborted" && (one.abortCause === "stop" || one.abortCause === "client_left")) return { id: one.id, mine: false, text: "" }
+    const recorded = messages.map((one, at): Line => {
+      // spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays"
+      const aborted = one.role === "assistant" && one.failureKind === "aborted"
+      const asked = aborted ? messages.slice(0, at).findLast((row) => row.role === "user")?.clientMessageId : undefined
+      const settledHere = asked === undefined ? undefined : board.ownerStops.get(asked)
+      const line = aborted ? Reply.readAgainAborted(one.abortCause ?? "", settledHere !== undefined, settledHere === true) : "TextAndNotice"
+      if (line === "NoBubble") return { id: one.id, mine: false, text: "" }
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
         Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", redacted.has(one.id), key) ? saved?.get(key) : undefined
       const failure = one.role !== "assistant" || one.failureKind === undefined ? undefined
         : Reply.readAgain(failures[one.failureKind] ?? "OtherFailure", one.cloudCode !== undefined)
       return {
-        id: one.id, mine: one.role === "user", text: one.text,
+        id: one.id, mine: one.role === "user", text: line === "NoticeOnly" ? "" : one.text,
         ...(failure === undefined ? {} : { failure }),
         ...(attachments === undefined ? {} : { attachments }),
       }
@@ -1927,11 +1934,24 @@ export const assistantBack = effect {
   return false
 }
 
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** A conversation kept before its context named the section shown: read as at the top. */
+function storedConversation(key: string, start = Conversation.initial) {
+  const { section } = Conversation.initial.context
+  return Layer.provide(Conversation.stored(key, start), filledStore(key, (kept) => ({ ...kept, context: withFields(kept.context, { section }) }), Conversation.parseState))
+}
+
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** Chats kept before a fresh chat was remembered: read as none being fresh. */
+function storedChats(key: string, start = Chats.initial) {
+  return Layer.provide(Chats.stored(key, start), filledStore(key, (kept) => ({ fresh: Chats.initial.fresh, ...kept }), Chats.parseState))
+}
+
 export const assisting = Layer.provideMerge(
   together(
     mediaReview,
-    reacting(Conversation, { keep: 1, open: [{ type: "restart" }], carry: carryTurn }),
-    reacting(Chats, { keep: 1, open: [{ type: "restart" }], carry: carryChats }),
+    reacting({ ...Conversation, stored: storedConversation }, { keep: 1, open: [{ type: "restart" }], carry: carryTurn }),
+    reacting({ ...Chats, stored: storedChats }, { keep: 1, open: [{ type: "restart" }], carry: carryChats }),
     reacting(Composer, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),

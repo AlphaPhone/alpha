@@ -1,11 +1,11 @@
 // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
 import { Machine as Conversation, asksWarmUp, raisedFromTheBar, type WarmTrigger } from "../../gen/app__assistant.effect.vibe"
 import { type Detent, Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { Device } from "../platform/device.vibe"
-import { ask } from "../platform/remote.vibe"
-import { VoiceBridge } from "../platform/voice.vibe"
-import { started } from "../runtime/reactor.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { ask } from "../platform/index.vibe"
+import { VoiceBridge } from "../platform/index.vibe"
+import { started } from "../runtime/index.vibe"
 import { MediaReview } from "./media-review.vibe"
 
 schema Answering { readonly canRespond: boolean }

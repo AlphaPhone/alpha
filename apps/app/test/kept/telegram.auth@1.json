@@ -1,0 +1,17 @@
+{
+  "key": "alpha/app/telegram/auth@1",
+  "spec": "spec/app/telegram/auth.md",
+  "shape": "1059c8d66a8cdbaf",
+  "state": {
+    "step": "SignedOut",
+    "work": "Idle",
+    "ticket": 0,
+    "account": 0,
+    "kind": "UserAccount",
+    "credentialRev": 0,
+    "floodUntil": 0,
+    "qrExpiresAt": 0,
+    "clock": 0,
+    "trouble": "Fine"
+  }
+}

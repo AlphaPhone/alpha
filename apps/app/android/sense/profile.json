@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "target": "pixel10a",
+  "releaseQualified": false,
+  "launcher": {
+    "moduleName": "AlphaPhone",
+    "packageName": "ai.alphacompute.alphaphone"
+  },
+  "sense": {
+    "moduleName": "AlphaSense",
+    "appName": "Alpha",
+    "wakeNames": [
+      "alpha"
+    ],
+    "componentPackage": "ai.alphacompute.alphaphone.sense",
+    "assistActivity": "ai.alphacompute.alphaphone.AlphaAssistActivity",
+    "storageName": "listener-settings"
+  }
+}

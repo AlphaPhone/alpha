@@ -1,0 +1,27 @@
+// spec/app/account/plan.md, "Time only moves on, and a member's or funded answer, or a kept record, runs out when its time comes"; spec/app/account/session.md, "The current sign-in is its number while an account is known to be signed in, and none otherwise"
+import { Time } from "../runtime/index.vibe"
+
+module pure {
+  /** Converts a timestamp in milliseconds or seconds into whole Unix milliseconds. @throws {never} */
+  export function toMillis(timestamp: number): number {
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return 0
+    return timestamp >= 1e11 ? Math.floor(timestamp) : Math.floor(timestamp * 1000)
+  }
+
+  /** Deterministic positive integer identifier for mapping string Cloud account and grant IDs into spec machine IDs. @throws {never} */
+  export function accountIdNumber(identity: string): number {
+    if (identity === "") return 0
+    let hash = 0x811c9dc5
+    for (let at = 0; at < identity.length; at += 1) {
+      hash = Math.imul(hash ^ identity.charCodeAt(at), 0x01000193)
+    }
+    return ((hash >>> 1) % 1_000_000_000) + 1
+  }
+}
+import { accountIdNumber, toMillis } from pure
+export { accountIdNumber, toMillis }
+
+/** Current time in whole milliseconds from the root Time service. */
+export effect function nowMillis(): number!!Time {
+  return try (try Time).now()
+}

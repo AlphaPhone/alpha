@@ -4,9 +4,9 @@ import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Site from "../../gen/app__browser__site.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { type Said, say } from "../notices/toasts.vibe"
-import { TabHost, hosted } from "../platform/browser.vibe"
-import { answer, contained, reacting } from "../runtime/reactor.vibe"
+import { type Said, say } from "../notices/index.vibe"
+import { TabHost, hosted } from "../platform/index.vibe"
+import { answer, contained, reacting } from "../runtime/index.vibe"
 import { browserInFront, idOf } from "./browser.vibe"
 
 export type SitePage = BrowserPageBinding & { readonly host: string }

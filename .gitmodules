@@ -1,3 +1,0 @@
-[submodule "vendor/eliza"]
-	path = legacy/vendor/eliza
-	url = https://github.com/elizaOS/eliza.git

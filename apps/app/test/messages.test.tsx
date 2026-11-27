@@ -733,9 +733,9 @@ describe("Messages on an Alpha image", () => {
     expect(document.body.textContent).toContain(`To: ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
     // spec/app/contacts/agent.md, "A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it"
-    const sendRow = button("Send this text")?.textContent ?? "";
+    const sendRow = button("Send this text")?.parentElement?.textContent ?? "";
     expect([sendRow.startsWith(`Review SMSTo: ${displayNumber(sms.recipients[0])}${sms.body}`), sendRow.endsWith("Send")]).toEqual([true, true]);
-    expect(button("Decline Keep things as they are.")?.textContent).toBe("Keep things as they are.Decline");
+    expect(button("Decline Keep things as they are.")?.parentElement?.textContent).toBe("Keep things as they are.Decline");
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
     await press("Send this text");
     try {
@@ -1019,6 +1019,12 @@ describe("Messages on an Alpha image", () => {
       expect([card.includes("Read latest text sender"), card.includes(scope === "whole number"
         ? "Read the phone number of your latest incoming text." : "Share the last four digits of the newest incoming SMS sender."), card.includes("thread ID")]).toEqual([true, true, false]);
     }
+    // spec/app/assistant/cards.md, "A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it": v119's first row is the title and what it does, with a compact Approve at its end and no picture, and the reply that offered the card stays while it shows
+    const offers = () => (document.body.textContent ?? "").split("Review this read on your phone.").length - 1;
+    const offered = offers();
+    const firstRow = button("Approve")?.parentElement;
+    expect([firstRow?.textContent?.includes(selected ? "Share open messages" : "Read latest text sender"), firstRow?.parentElement?.querySelectorAll("svg").length, offered > 0])
+      .toEqual([true, 0, true]);
     if (!selected) {
       world.telephony.texts.push({ id: 2, thread: 12, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Keep this out of the receipt", read: false });
     }
@@ -1031,6 +1037,15 @@ describe("Messages on an Alpha image", () => {
     expect(review.senderReads).toEqual(selected ? [] : [scope === "whole number"]);
     expect(world.telephony.sent).toEqual([]);
     await vi.waitFor(() => expect(document.body.textContent).toContain("The reviewed read answered the original request."));
+    // spec/app/assistant/cards.md, "A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it": v119's chip says what the phone read, in that reply's place, before the answer
+    const chip = await vi.waitFor(() => {
+      const shown = document.querySelector("[data-alpha-device-receipt]")?.textContent;
+      if (!shown) throw new Error("No result chip after Approve");
+      return shown;
+    });
+    const page = document.body.textContent ?? "";
+    expect([chip, offers(), page.lastIndexOf(prompt) < page.indexOf(chip), page.indexOf(chip) < page.indexOf("The reviewed read answered the original request.")])
+      .toEqual([selected ? "Shared the open thread." : scope === "whole number" ? "+14155550122" : "Latest incoming SMS sender ends in 0122.", offered - 1, true, true]);
   });
 
   it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {

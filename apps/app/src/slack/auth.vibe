@@ -13,9 +13,9 @@ import {
   randomState,
   secretOf,
   tokenValue,
-} from "../platform/messaging.vibe"
-import { SLACK_DEFAULT_USER_SCOPES, Slack, assertSlackUserToken } from "../platform/slack.vibe"
-import { type Job, answer, contained, reacting, run } from "../runtime/reactor.vibe"
+} from "../platform/index.vibe"
+import { SLACK_DEFAULT_USER_SCOPES, Slack, assertSlackUserToken } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run } from "../runtime/index.vibe"
 import { SlackLedger, slackSessionKey } from "./ledger.vibe"
 
 const OAUTH_CLIENT_ID = "alpha-slack-user"

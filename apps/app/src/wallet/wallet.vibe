@@ -2,11 +2,11 @@
 import * as Wallet from "../../gen/app__wallet.effect.vibe"
 import type { Account, Custody, Effect as Out, Event, Family, Fate } from "../../gen/app__wallet.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { Device } from "../platform/device.vibe"
-import { ask, attemptedWith } from "../platform/remote.vibe"
-import type { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { ask, attemptedWith } from "../platform/index.vibe"
+import type { Attempts } from "../runtime/index.vibe"
+import { type Job, answer, following, reacting, started, together } from "../runtime/index.vibe"
 import { type WalletFamilyName, WalletActivity, WalletHoldings, WalletRequests, WalletStatus, type WalletSwitch, walletPaths } from "@elizaos/plugin-wallet-client"
 
 const custodies = { none: "NoWallet", ready: "Ready", off: "Off", unavailable: "Unavailable" } as const satisfies Record<WalletStatus["custody"], Custody>

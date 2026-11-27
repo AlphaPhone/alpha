@@ -9,8 +9,8 @@ import { useMachine as useAgent } from "../../gen/app__contacts__agent.react.ts"
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
-import type { Telephony } from "../platform/telephony.vibe";
-import { callerInitials, displayNumber } from "../phone/words.ts";
+import type { Telephony } from "../platform/index.vibe";
+import { callerInitials, displayNumber } from "../comms/index.vibe";
 import { type Lines, Requested, afterOf, chooseNumber, choicesOf, linesOf, unchangedBy } from "./requests.vibe";
 
 export interface ReviewProps {

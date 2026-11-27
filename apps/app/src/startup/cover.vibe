@@ -1,5 +1,5 @@
-// spec/app/home/index.md, "Story: Start Home"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"
-import { Launcher } from "../platform/launcher.vibe"
+// spec/app/startup/index.md, "Until the connection has resolved, Home shows only the Alpha mark"; spec/app/startup/index.md, "The assistant-only surface shows chat and close, and mock mode's banner, and nothing of Home"
+import { Launcher } from "../platform/index.vibe"
 import { homeFrame } from "../home/firstFrame.ts"
 
 module page {

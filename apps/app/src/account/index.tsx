@@ -3,7 +3,7 @@ import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Input, Sheet,
 import { ChevronDown, RotateCw, Ticket, X } from "lucide-react";
 import { normalizeSubscriptionCode, type SnapshotSubscription } from "@elizaos/cloud";
 import { Layer } from "effect";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type * as Billing from "../../gen/app__account__billing.effect.vibe";
 import { useMachine as useCodes } from "../../gen/app__account__codes.react.ts";
 import { useMachine as useBilling } from "../../gen/app__account__billing.react.ts";
@@ -12,7 +12,9 @@ import { useMachine } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { showing } from "../../gen/app__shell.ts";
-import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
+import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/ui.tsx";
+import { AccountPanel } from "./AccountPanel.tsx";
+import { accountMachines } from "./account.vibe";
 import { checkout, choosePurchase, recheckPlan, tierOf } from "./billing.vibe";
 import { accountAccess, checkCodePlan, codes, readReferral, referralCode, submitCode } from "./codes.vibe";
 import { managePlan } from "./change.vibe";
@@ -270,6 +272,22 @@ function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeR
   );
 }
 
+function AccountSheetFrame({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+  return (
+    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <SheetContent
+        title="Account"
+        className="max-h-dvh max-w-105 gap-2.5 before:hidden bg-background px-6.5 pt-9 pb-[max(--spacing(7),var(--alpha-safe-bottom))] text-foreground [&_h2]:flex [&_h2]:min-h-12 [&_h2]:items-center [&_h2]:text-title"
+        actions={<Button variant="secondary" className="mt-2 rounded-lg" onClick={onClose}>Done</Button>}
+      >
+        <span aria-hidden className="absolute inset-x-0 top-3 mx-auto h-1 w-8 rounded-full bg-border" />
+        <Button variant="ghost" size="icon" aria-label="Close Account" className="absolute top-9 right-6.5 size-12" onClick={onClose}><X /></Button>
+        {children}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 /** The account sheet above Settings or Inbox, drawing the details the account read returned. */
 export default {
   open(alpha, place) {
@@ -288,26 +306,64 @@ export default {
         return <BrowserAccount open={open} reading={shown.tag === "Reading"} inbox={shell !== undefined && showing(shell, "Inbox")} retry={profile.refresh} close={onClose} />;
       }
       return (
-        <Sheet open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
-          <SheetContent
-            title="Account"
-            className="max-h-dvh max-w-105 gap-2.5 before:hidden bg-background px-6.5 pt-9 pb-[max(--spacing(7),var(--alpha-safe-bottom))] text-foreground [&_h2]:flex [&_h2]:min-h-12 [&_h2]:items-center [&_h2]:text-title"
-            actions={<Button variant="secondary" className="mt-2 rounded-lg" onClick={onClose}>Done</Button>}
-          >
-            <span aria-hidden className="absolute inset-x-0 top-3 mx-auto h-1 w-8 rounded-full bg-border" />
-            <Button variant="ghost" size="icon" aria-label="Close Account" className="absolute top-9 right-6.5 size-12" onClick={onClose}><X /></Button>
-            <AccountDetails profile={shown} />
-            {settingsAccount && shown.tag === "Read" && shown.purchase === "Matches" ? <PurchaseStatus runtime={runtime} /> : null}
-            {settingsAccount && shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile}
-              canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"}
-              subscription={shown.plan?.tag === "PlanRead" ? shown.plan.subscription : undefined}
-            /> : null}
-            {settingsAccount && shown.tag === "Read" && shown.codesAvailable ? <AccountCodes runtime={runtime} /> : null}
-          </SheetContent>
-        </Sheet>
+        <AccountSheetFrame open={open} onClose={onClose}>
+          <AccountDetails profile={shown} />
+          {settingsAccount && shown.tag === "Read" && shown.purchase === "Matches" ? <PurchaseStatus runtime={runtime} /> : null}
+          {settingsAccount && shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile}
+            canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"}
+            subscription={shown.plan?.tag === "PlanRead" ? shown.plan.subscription : undefined}
+          /> : null}
+          {settingsAccount && shown.tag === "Read" && shown.codesAvailable ? <AccountCodes runtime={runtime} /> : null}
+        </AccountSheetFrame>
       );
     }
     return area(Layer.provideMerge(profileLive(profile.publish, profile.publishCatalog, profile.refreshed, accountAccess),
       Layer.mergeAll(accountWrites, managePlan(profile.refresh), Layer.provideMerge(codes(profile.refresh), checkout(profile.refresh, profile.publishCatalog)))), AccountSheet).open(alpha, place);
   },
 } satisfies Area;
+
+const accountAreaMap = new WeakMap<Alpha, ReturnType<typeof area<Layer.Success<typeof accountMachines>, never>>>();
+
+function accountAreaFor(alpha: Alpha) {
+  let held = accountAreaMap.get(alpha);
+  if (!held) {
+    const profile = alpha.runtime.runSync(profileShelf);
+    held = area(accountMachines, ({ runtime }) => {
+      const layers = useMachine(runtime);
+      const shown = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
+      if (!layers.state || !listed(layers.state, accountLayer)) return null;
+      const close = { type: "closeLayer", id: accountLayer } as const;
+      return (
+        <AccountSheetFrame open={top(layers.state).id === accountLayer} onClose={() => { if (layers.can(close)) void layers.send(close); }}>
+          <AccountPanel runtime={runtime} profile={shown} />
+        </AccountSheetFrame>
+      );
+    });
+    accountAreaMap.set(alpha, held);
+  }
+  return held;
+}
+
+/** Exposes the account area's managed runtime for tests and Settings embedding. */
+export function accountRuntime(alpha: Alpha) {
+  return accountAreaFor(alpha).runtime(alpha);
+}
+
+/** Overlay Account area rendering the full Account panel inside a sheet. */
+export const accountPanelOverlay: Area = {
+  open(alpha, place) {
+    return accountAreaFor(alpha).open(alpha, place);
+  },
+};
+
+/** Settings-embedded Account area rendered at the `settings/account` slot. */
+export const accountSettingsArea: Area = {
+  open(alpha) {
+    const profile = alpha.runtime.runSync(profileShelf);
+    const runtime = accountRuntime(alpha);
+    return function AccountEmbedded() {
+      const shown = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
+      return <AccountPanel runtime={runtime} profile={shown} />;
+    };
+  },
+};

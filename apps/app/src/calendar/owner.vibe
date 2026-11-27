@@ -7,10 +7,10 @@ import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import { inFlight } from "../../gen/app__calendar__editor.ts"
 import * as Link from "../../gen/app__calendar__link.effect.vibe"
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Refused, ask } from "../platform/remote.vibe"
-import { contained, started, together } from "../runtime/reactor.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Cloud } from "../platform/index.vibe"
+import { Refused, ask } from "../platform/index.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
 import { LinkCache } from "./link.vibe"
 import { Requests, Shown } from "./stores.vibe"
 
@@ -24,8 +24,8 @@ function hiddenKey(owner: number): string {
 const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)))
 const decodeHidden = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.Number)))
 
-/** Lightweight calendar list response used to determine whether the agent's calendar is connected. */
-schema Calendars { readonly calendars: ReadonlyArray<{ readonly calendarId: string }> }
+/** The agent's calendar list, which says whether its calendar is connected and the summary each calendar goes by (eliza's `LifeOpsCalendarSummary`). */
+export schema Calendars { readonly calendars: ReadonlyArray<{ readonly calendarId: string; readonly summary?: string; readonly primary?: boolean }> }
 
 /** The number `account` keeps on this phone across restarts, which names its draft and hidden-calendar slots: 0 for no account. */
 effect function numberOf(account: string): number!!KeyValueStore.KeyValueStore {
@@ -55,9 +55,11 @@ effect function account(): (string | undefined)!!Cloud {
 }
 
 /** Whether the agent has a connected calendar: `undefined` on transient overload/network errors so `connected` is preserved. */
-effect function probeConnected(): (boolean | undefined)!!Agent {
+effect function probeConnected(): (boolean | undefined)!!(Agent | Shown) {
   return effect {
     const listed = try ask(Agent, HttpClientRequest.get("/api/lifeops/calendar/calendars"), Calendars)
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it"
+    ;(try Shown).listed(listed.calendars)
     return listed.calendars.length > 0
   } catch (failure) => (failure instanceof Refused && !Link.cloudRetryable(failure.status) ? false : undefined)
 }

@@ -2,11 +2,11 @@
 import { SettingsProtonPass, type SettingsFactReading } from "@repo/ui";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { useMachine as useFacts } from "../../gen/app__settings__facts.react.ts";
-import { say } from "../notices/toasts.vibe";
-import type { PasswordProvider, PasswordProviderAction } from "../platform/systemSettings.vibe";
-import type { Alpha } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { say } from "../notices/index.vibe";
+import type { PasswordProvider, PasswordProviderAction } from "../platform/index.vibe";
+import type { Alpha } from "../runtime/ui.tsx";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import { handPasswordProvider, passwordPageVisible, passwordProviderShelf } from "./passwords.vibe";
 import type { SettingsRuntime } from "./Settings.tsx";
 

@@ -1,0 +1,339 @@
+// spec/app/notices/index.md, "Story: Open what I tapped"; spec/app/notices/index.md, "Story: Ask Alpha about a notice"; spec/app/notices/index.md, "Story: Change owner or restart with a tap in hand"
+import type { Actor } from "../../gen/app__approvals__operation.ts"
+import * as Notices from "../../gen/app__notices.effect.vibe"
+import type * as Posting from "../../gen/app__notices__posting.effect.vibe"
+import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { type Job, answer, contained, reacting, run, together } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
+import { markNoticeSpent } from "./posting.vibe"
+import { type Said, say } from "./toasts.vibe"
+
+/** Metadata carried alongside a notice tap token. */
+export interface TapDetail {
+  readonly token: number
+  readonly source: Notices.Source
+  readonly noticeId?: number
+  readonly title: string
+  readonly appLabel: string
+  readonly text: string
+  readonly asks: boolean
+  readonly reviewable: boolean
+  readonly owner: number
+}
+
+/** Excerpt shown in the "Ask Alpha about this notice" review dialog. */
+export interface NoticeExcerpt {
+  readonly token: number
+  readonly source: Notices.Source
+  readonly appLabel: string
+  readonly title: string
+  readonly text: string
+}
+
+/** Drafted assistant question produced after a single-use tap token is spent. */
+export interface NoticeQuestionDraft {
+  readonly token: number
+  readonly source: Notices.Source
+  readonly prompt: string
+}
+
+/** Injectable hooks for notice opening, single-use token spending, excerpt reading, and drafting. */
+export interface NoticeTapHooks {
+  open(detail: TapDetail): Notices.Showed!!
+  spend(detail: TapDetail): boolean!!
+  checkSpend(detail: TapDetail): boolean!!
+  readExcerpt(detail: TapDetail): { readonly excerpt: Notices.Excerpt; readonly title?: string; readonly text?: string; readonly appLabel?: string }!!
+  draft(detail: TapDetail, prompt: string): void!!
+  onClosed(detail: TapDetail): void!!
+}
+
+/** Observable state for notice taps, excerpts, and drafted questions. */
+export interface NoticeDeskSnapshot {
+  readonly signedIn: number
+  readonly blocked: boolean
+  readonly composerAvailable: boolean
+  readonly currentExcerpt: NoticeExcerpt | undefined
+  readonly opened: ReadonlyArray<number>
+  readonly spentTokens: ReadonlyArray<number>
+  readonly drafts: ReadonlyArray<NoticeQuestionDraft>
+  readonly closedCount: number
+}
+
+export interface NoticeDeskService {
+  snapshot(): NoticeDeskSnapshot
+  subscribe(listener: () => void): () => void
+  setHooks(hooks: Partial<NoticeTapHooks>): void
+  setContext(context: Partial<{ readonly signedIn: number; readonly blocked: boolean; readonly composerAvailable: boolean }>): void
+  registerTap(detail: TapDetail): void
+  detailOf(token: number): TapDetail | undefined
+  reset(): void
+  performOpen(token: number, source: Notices.Source): Notices.Showed!!
+  performSpend(token: number, source: Notices.Source): boolean!!Posting.Machine
+  performCheckSpend(token: number, source: Notices.Source): boolean!!
+  performReadExcerpt(token: number, source: Notices.Source): Notices.Excerpt!!
+  performDraft(token: number, source: Notices.Source): void!!
+  performClosed(token: number, source: Notices.Source): void!!
+}
+
+export service NoticeDesk: NoticeDeskService {}
+
+/** Build the default "Ask Alpha about this notice" prompt from a reviewed notice detail. */
+function questionPromptFor(detail: Pick<TapDetail, "appLabel" | "title" | "text">): string {
+  const parts = [detail.appLabel, detail.title, detail.text].map((part) => part.trim()).filter((part) => part !== "")
+  return parts.length > 0 ? `Ask Alpha about this notice: ${parts.join(" — ")}` : "Ask Alpha about this notice"
+}
+
+const noticeDesk = Layer.sync(NoticeDesk, () => {
+  const details = new Map<number, TapDetail>()
+  const spent = new Set<number>()
+  let signedIn = 1
+  let blocked = false
+  let composerAvailable = true
+  let currentExcerpt: NoticeExcerpt | undefined
+  let opened: number[] = []
+  let spentTokens: number[] = []
+  let drafts: NoticeQuestionDraft[] = []
+  let closedCount = 0
+  let hooks: Partial<NoticeTapHooks> = {}
+  const { snapshot, subscribe, emit } = createDeskStore((): NoticeDeskSnapshot => ({
+    signedIn,
+    blocked,
+    composerAvailable,
+    currentExcerpt,
+    opened: [...opened],
+    spentTokens: [...spentTokens],
+    drafts: [...drafts],
+    closedCount,
+  }))
+  const fallback = (token: number, source: Notices.Source): TapDetail =>
+    details.get(token) ?? { token, source, title: "Notice", appLabel: "Alpha", text: "", asks: false, reviewable: true, owner: signedIn }
+  return {
+    snapshot,
+    subscribe,
+    setHooks(next: Partial<NoticeTapHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    setContext(context): void {
+      if (context.signedIn !== undefined) signedIn = context.signedIn
+      if (context.blocked !== undefined) blocked = context.blocked
+      if (context.composerAvailable !== undefined) composerAvailable = context.composerAvailable
+      emit()
+    },
+    registerTap(detail: TapDetail): void {
+      details.set(detail.token, detail)
+      emit()
+    },
+    detailOf: (token: number) => details.get(token),
+    reset(): void {
+      details.clear()
+      spent.clear()
+      signedIn = 1
+      blocked = false
+      composerAvailable = true
+      currentExcerpt = undefined
+      opened = []
+      spentTokens = []
+      drafts = []
+      closedCount = 0
+      hooks = {}
+      emit()
+    },
+    performOpen: (token: number, source: Notices.Source) => effect {
+      const detail = fallback(token, source)
+      opened.push(token)
+      emit()
+      if (hooks.open !== undefined) return try hooks.open(detail)
+      return "Seen" as const
+    },
+    performSpend: (token: number, source: Notices.Source) => effect {
+      const detail = fallback(token, source)
+      if (spent.has(token)) return false
+      const ok = hooks.spend !== undefined ? try hooks.spend(detail) : true
+      if (ok) {
+        spent.add(token)
+        spentTokens.push(token)
+        if (detail.source === "Own" && detail.noticeId !== undefined) {
+          try ignore(markNoticeSpent(detail.noticeId))
+        }
+        emit()
+      }
+      return ok
+    },
+    performCheckSpend: (token: number, source: Notices.Source) => effect {
+      const detail = fallback(token, source)
+      if (hooks.checkSpend !== undefined) return try hooks.checkSpend(detail)
+      return spent.has(token)
+    },
+    performReadExcerpt: (token: number, source: Notices.Source) => effect {
+      const detail = fallback(token, source)
+      if (hooks.readExcerpt !== undefined) {
+        const res = try hooks.readExcerpt(detail)
+        if (res.excerpt === "Found") {
+          currentExcerpt = {
+            token,
+            source,
+            appLabel: res.appLabel ?? detail.appLabel,
+            title: res.title ?? detail.title,
+            text: res.text ?? detail.text,
+          }
+          emit()
+        }
+        return res.excerpt
+      }
+      currentExcerpt = { token, source, appLabel: detail.appLabel, title: detail.title, text: detail.text }
+      emit()
+      return "Found" as const
+    },
+    performDraft: (token: number, source: Notices.Source) => effect {
+      const detail = fallback(token, source)
+      const prompt = questionPromptFor(currentExcerpt?.token === token ? currentExcerpt : detail)
+      drafts.push({ token, source, prompt })
+      currentExcerpt = undefined
+      emit()
+      if (hooks.draft !== undefined) try hooks.draft(detail, prompt)
+    },
+    performClosed: (token: number, source: Notices.Source) => effect {
+      const detail = fallback(token, source)
+      currentExcerpt = undefined
+      closedCount += 1
+      emit()
+      if (hooks.onClosed !== undefined) try hooks.onClosed(detail)
+    },
+  }
+})
+
+function spendNoticeAnswer(
+  label: string,
+  token: number,
+  work: (desk: NoticeDeskService) => boolean!!Posting.Machine,
+) {
+  return answer(
+    label,
+    effect {
+      const desk = try NoticeDesk
+      const ok = try work(desk)
+      const ctx = desk.snapshot()
+      return { type: "spent", token, ok, signedIn: ctx.signedIn, composer: ctx.composerAvailable } as const
+    },
+    { type: "spent", token, ok: false, signedIn: 0, composer: false } as const,
+    "Phone" as Actor,
+  )
+}
+
+function carry(fx: Notices.Effect): Job<Notices.Event, NoticeDesk | Posting.Machine | Toasts.Machine | Said, [Actor]> {
+  return match (fx.does) {
+    when "Open": answer(
+      `notice-open-${fx.token}`,
+      effect {
+        const showed = try (try NoticeDesk).performOpen(fx.token, fx.source)
+        return { type: "shown", token: fx.token, showed } as const
+      },
+      { type: "shown", token: fx.token, showed: "Unreadable" } as const,
+      "Phone" as Actor,
+    );
+    when "Spend": spendNoticeAnswer(`notice-spend-${fx.token}`, fx.token, (desk) => desk.performSpend(fx.token, fx.source));
+    when "CheckSpend": spendNoticeAnswer(`notice-check-spend-${fx.token}`, fx.token, (desk) => desk.performCheckSpend(fx.token, fx.source));
+    when "ReadExcerpt": answer(
+      `notice-excerpt-${fx.ticket}`,
+      effect {
+        const excerpt = try (try NoticeDesk).performReadExcerpt(fx.token, fx.source)
+        return { type: "excerpted", ticket: fx.ticket, excerpt } as const
+      },
+      { type: "excerpted", ticket: fx.ticket, excerpt: "Unread" } as const,
+      "Phone" as Actor,
+    );
+    when "Draft": run(`notice-draft-${fx.token}`, effect { try (try NoticeDesk).performDraft(fx.token, fx.source) }, "Phone" as Actor);
+    when "Closed": run(`notice-closed-${fx.token}`, effect { try (try NoticeDesk).performClosed(fx.token, fx.source) }, "Phone" as Actor);
+    when "NotKept": run(`notice-not-kept-${fx.token}`, ignore(say("Couldn't add that notice to Ask Alpha", true)), "Phone" as Actor);
+    when "CannotAsk": run(`notice-cannot-ask-${fx.token}`, ignore(say("Alpha can't preview this notice to ask about it", true)), "Phone" as Actor);
+    when "Unavailable": run(`notice-unavailable-${fx.token}`, ignore(say("That notice is no longer available", true)), "Phone" as Actor);
+  }
+}
+
+// spec/app/notices/index.md, "A new tap for the owner signed in replaces the one waiting, and closes a question still under review"
+/** Record a new notice tap for the signed-in owner and return its allocated single-use token (0 if refused). */
+export effect function tapNotice(
+  input: Omit<TapDetail, "token"> & { readonly signedIn?: number },
+): number!!(Notices.Machine | NoticeDesk) {
+  const machine = try Notices.Machine
+  const desk = try NoticeDesk
+  const signedIn = input.signedIn ?? desk.snapshot().signedIn
+  const before = try machine.get()
+  if (!Notices.canTap(before, input.owner, signedIn, "Phone")) return 0
+  const token = before.issued + 1
+  desk.registerTap({ ...input, token })
+  const ok = try contained(
+    machine.send({ type: "tap", source: input.source, asks: input.asks, reviewable: input.reviewable, owner: input.owner, signedIn }, "Phone"),
+    "recording notice tap",
+  )
+  return ok ? token : 0
+}
+
+// spec/app/notices/index.md, "Only the waiting tap is opened, for its own owner, one at a time, and never while taps are blocked"
+/** Open the waiting direct notice tap for the current owner if taps are not blocked. */
+export effect function openWaitingTap(): boolean!!(Notices.Machine | NoticeDesk) {
+  const machine = try Notices.Machine
+  const { signedIn, blocked } = (try NoticeDesk).snapshot()
+  if (!Notices.canOpen(try machine.get(), signedIn, blocked, "Phone")) return false
+  return try contained(machine.send({ type: "open", signedIn, blocked }, "Phone"), "opening waiting notice tap")
+}
+
+// spec/app/notices/index.md, "For the question about the waiting tap Alpha reads the notice's excerpt, for its own owner, one at a time, when the notice is of a kind it can show, and again when the notice changed under review"
+/** Begin reading the excerpt (or refuse non-reviewable) for a waiting "Ask Alpha" tap. */
+export effect function askAboutWaitingTap(): boolean!!(Notices.Machine | NoticeDesk) {
+  const machine = try Notices.Machine
+  const { signedIn, blocked } = (try NoticeDesk).snapshot()
+  const state = try machine.get()
+  if (Notices.canRefuse(state, "Phone")) {
+    return try contained(machine.send({ type: "refuse" }, "Phone"), "refusing non-reviewable notice question")
+  }
+  if (!Notices.canAsk(state, signedIn, blocked, "Phone")) return false
+  return try contained(machine.send({ type: "ask", signedIn, blocked }, "Phone"), "reading notice excerpt")
+}
+
+// spec/app/notices/index.md, "The owner confirming the question as shown, while the message composer can take it, asks Android to spend its tap"
+/** Confirm the reviewed "Ask Alpha about this notice" prompt as the Owner. */
+export effect function confirmNoticeQuestion(by: Actor = "Owner"): boolean!!(Notices.Machine | NoticeDesk) {
+  const machine = try Notices.Machine
+  const { signedIn, blocked, composerAvailable } = (try NoticeDesk).snapshot()
+  if (!Notices.canConfirmQuestion(try machine.get(), signedIn, blocked, composerAvailable, by)) return false
+  return try contained(machine.send({ type: "confirmQuestion", signedIn, blocked, composer: composerAvailable }, by), "confirming notice question")
+}
+
+// spec/app/notices/index.md, "The owner closing the review gives the tap back: nothing is drafted, the notice can be tapped again, and the publisher is told once"
+/** Close the question review dialog without drafting or spending the tap. */
+export effect function closeNoticeQuestion(by: Actor = "Owner"): boolean!!Notices.Machine {
+  const machine = try Notices.Machine
+  if (!Notices.canCloseQuestion(try machine.get(), by)) return false
+  return try contained(machine.send({ type: "closeQuestion" }, by), "closing notice question")
+}
+
+// spec/app/notices/index.md, "The notice can change while its question is under review, and the review then no longer counts until it is read again"
+/** Signal that the notice under review changed so its excerpt must be re-read before confirming. */
+export effect function markReviewedNoticeChanged(): boolean!!Notices.Machine {
+  const machine = try Notices.Machine
+  if (!Notices.canChange(try machine.get(), "Phone")) return false
+  return try contained(machine.send({ type: "change" }, "Phone"), "marking notice changed")
+}
+
+// spec/app/notices/index.md, "Changing owner drops the tap waiting for someone else, puts down the tap in hand and closes the question"
+/** Switch the signed-in owner for notice taps. */
+export effect function switchNoticeOwner(signedIn: number): boolean!!(Notices.Machine | NoticeDesk) {
+  ;(try NoticeDesk).setContext({ signedIn })
+  const machine = try Notices.Machine
+  if (!Notices.canSwitchOwner(try machine.get(), signedIn, "Phone")) return false
+  return try contained(machine.send({ type: "switchOwner", signedIn }, "Phone"), "switching notice owner")
+}
+
+// spec/app/notices/index.md, "A restart keeps the newest tap waiting, puts down what was in hand, and asks Android whether the tap being spent was spent"
+/** Restart notice tap routing, preserving the newest waiting tap and checking any spend in flight. */
+export effect function restartNotices(): boolean!!Notices.Machine {
+  const machine = try Notices.Machine
+  if (!Notices.canRestart(try machine.get(), "Phone")) return false
+  return try contained(machine.send({ type: "restart" }, "Phone"), "restarting notices")
+}
+
+const noticesMachine = reacting(Notices, { carry })
+
+/** Notice tap router and "Ask Alpha about this notice" review coordinator. */
+export const noticeTaps = together(noticeDesk, noticesMachine)

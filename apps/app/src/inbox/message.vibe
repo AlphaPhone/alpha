@@ -11,15 +11,15 @@ import { Machine as Preferences } from "../../gen/app__settings__preferences.eff
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { MailContextRefused } from "@elizaos/plugin-inbox-client"
-import { Agent } from "../platform/agent.vibe"
-import { InboxBrowserLinks } from "../platform/browser.vibe"
-import { Device, native, registered } from "../platform/device.vibe"
-import type { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe"
-import { say, type Said } from "../notices/toasts.vibe"
+import { Agent } from "../platform/index.vibe"
+import { InboxBrowserLinks } from "../platform/index.vibe"
+import { Device, native, registered } from "../platform/index.vibe"
+import type { InboxAttachmentFiles } from "../platform/index.vibe"
+import { say, type Said } from "../notices/index.vibe"
 import { MailQuestions, reviewMail, sourceOf, type MailQuestion } from "./mail-context.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import type { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together, migratedStore } from "../runtime/reactor.vibe"
+import { Cloud } from "../platform/index.vibe"
+import type { Attempts } from "../runtime/index.vibe"
+import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together, migratedStore } from "../runtime/index.vibe"
 import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
 import { backFromDraft } from "./composer.vibe"
 import { InboxAhead, aheadKey, bodyPart } from "./ahead.vibe"
@@ -277,8 +277,8 @@ const threadPosition = started(effect {
 effect function readerRecord(raw: string | undefined): (string | undefined)!! {
   if (raw === undefined) return undefined
   const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
-  if (fields === undefined || ("pdf" in fields && "keep" in fields)) return raw
-  const migrated = Message.decodeState({ pdf: Message.emptyPdf, keep: Message.initial.keep, ...fields }) catch () => undefined
+  if (fields === undefined || ("pdf" in fields && "keep" in fields && "cancelled" in fields && "unsupported" in fields)) return raw
+  const migrated = Message.decodeState({ pdf: Message.emptyPdf, keep: Message.initial.keep, cancelled: Message.initial.cancelled, unsupported: Message.initial.unsupported, ...fields }) catch () => undefined
   return migrated === undefined ? raw : JSON.stringify(migrated)
 }
 

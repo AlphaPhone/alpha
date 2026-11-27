@@ -5,9 +5,9 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useMachine } from "../../gen/app__startup__access.react.ts";
 import { busy, count, flow, grantOf, nextKey, offered, panel, place, shownKey } from "../../gen/app__startup__access.ts";
 import { word, type Key } from "../../gen/app__startup__steps.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
+import type { Time } from "../runtime/index.vibe";
 import { type AccessSurface, actOnAccess } from "./settingsAccess.vibe";
 
 const ordered: readonly Key[] = ["Notifications", "Microphone", "Camera", "Location", "Calendar", "Photos", "Files"];

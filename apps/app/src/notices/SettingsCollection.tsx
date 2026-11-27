@@ -4,7 +4,7 @@ import { ChevronUp, Play, Plus, SlidersHorizontal, Trash2, X } from "lucide-reac
 import { use } from "react";
 import type { PolicyCommand, PolicySelection } from "../../gen/app__notices__collection.ts";
 import { useMachine } from "../../gen/app__notices__collection.react.ts";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
 import type { Machine } from "../../gen/app__notices__collection.effect.vibe";
 import { collectionSettings } from "./collection-settings.vibe";
 

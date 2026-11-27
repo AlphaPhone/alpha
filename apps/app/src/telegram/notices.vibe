@@ -4,10 +4,10 @@ import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe
 import * as Notices from "../../gen/app__telegram__notices.effect.vibe"
 import type { Effect as Out, Event, Incoming } from "../../gen/app__telegram__notices.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { type Said, say } from "../notices/toasts.vibe"
-import type { MessagingSessions } from "../platform/messaging.vibe"
-import { Telegram, type TelegramUpdate } from "../platform/telegram.vibe"
-import { type Job, answer, contained, following, reacting, run, stop, together } from "../runtime/reactor.vibe"
+import { type Said, say } from "../notices/index.vibe"
+import type { MessagingSessions } from "../platform/index.vibe"
+import { Telegram, type TelegramUpdate } from "../platform/index.vibe"
+import { type Job, answer, contained, following, reacting, run, stop, together } from "../runtime/index.vibe"
 import { reportSessionRevoked } from "./auth.vibe"
 import {
   TelegramStore,

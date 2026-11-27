@@ -1,7 +1,7 @@
-// spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places and the Calendar event it came from"
-import type { CloudClient } from "../platform/cloud.vibe"
-import { fresh } from "../runtime/attempts.vibe"
-import { createShelf } from "../runtime/shelf.vibe"
+// spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places, the Calendar event it came from, the agent's question and the agent's last read"
+import type { CloudClient } from "../platform/index.vibe"
+import { fresh } from "../runtime/index.vibe"
+import { createShelf } from "../runtime/index.vibe"
 import type { Point } from "./geometry.ts"
 
 /** What Cloud answered about the account's Maps: its provider, coverage, tiles and credits. */

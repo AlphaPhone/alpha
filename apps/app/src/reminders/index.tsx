@@ -1,8 +1,8 @@
 // spec/app/reminders/index.md, "Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import { Effect } from "effect";
 import * as RemindersMachine from "../../gen/app__reminders.effect.vibe";
-import { area } from "../runtime/area.tsx";
-import { stepping } from "../shell/shell.vibe";
+import { area } from "../runtime/ui.tsx";
+import { stepping } from "../shell/index.vibe";
 import { closeReminderEditor } from "./editor.vibe";
 import { Reminders } from "./Reminders.tsx";
 

@@ -8,11 +8,11 @@ import { type Detent, Machine as Shell, type View, parseEvent } from "../../gen/
 import { opensWithoutCard } from "../../gen/app__browser.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import { readOperation } from "@elizaos/agent"
-import { Agent } from "../platform/agent.vibe"
-import { AgentPages, type AgentPage } from "../platform/browser.vibe"
-import { ask } from "../platform/remote.vibe"
+import { Agent } from "../platform/index.vibe"
+import { AgentPages, type AgentPage } from "../platform/index.vibe"
+import { ask } from "../platform/index.vibe"
 import { agentOpen, mayAgentOpen } from "../notes/agent.vibe"
-import { contained, started } from "../runtime/reactor.vibe"
+import { contained, started } from "../runtime/index.vibe"
 
 module web {
   /** A fresh id for this page as a renderer of the agent's views. @throws {never} */

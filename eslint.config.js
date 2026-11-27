@@ -23,6 +23,21 @@ const imports = {
     { regex: String.raw`^@elizaos/(?!os/(?:android|aosp|browser/(?:runtime|protection|chromium/component))/|core/(?:catalog/[\w-]+|restart-exit-code)\.json$)[^/]+/`, message: "Import an eliza package from its root barrel: only its declared asset exports take a subpath." },
   ],
 }
+const noNodeInBrowser = [
+  { regex: "^@elizaos/(?:os(?:/(?:build|image|browser(?!/address)|app-update|inference|android|aosp))?$|agent-host(?:/|$)|cloud-worker(?:/|$)|core-node(?:/|$)|plugin-workflow-worker(?:/|$))", message: "Browser code may only import browser-safe @elizaos barrels, never Node/host/worker packages." },
+  { regex: "^@repo/eliza-harness(?:/|$)", message: "Browser application code must not import @repo/eliza-harness." },
+]
+const intraAppBarrels = [
+  { regex: String.raw`^\.\./runtime/(?!index\.vibe$|ui\.tsx$|store\.ts$)`, message: "Import app runtime through ../runtime/index.vibe, ../runtime/ui.tsx, or ../runtime/store.ts." },
+  { regex: String.raw`^\.\./platform/(?!index\.vibe$)`, message: "Import app platform services through ../platform/index.vibe." },
+  { regex: String.raw`^\.\./shell/(?!index\.vibe$|ui\.tsx$|views\.tsx$)`, message: "Import app shell through ../shell/index.vibe or ../shell/ui.tsx." },
+  { regex: String.raw`^\.\./notices/(?!index\.vibe$)`, message: "Import app notices through ../notices/index.vibe." },
+  { regex: String.raw`^\.\./comms/(?!index\.vibe$|ui\.tsx$)`, message: "Import shared comms through ../comms/index.vibe or ../comms/ui.tsx." },
+]
+const noPhoneInternals = {
+  regex: String.raw`^\.\./phone/(?:back|visit|words|named-review|comms|phone|voicemail|CommsBar|PhoneTabs|CommsTarget|CallStrip)\.`,
+  message: "Import shared comms primitives through ../comms/index.vibe or ../comms/ui.tsx.",
+}
 // AGENTS.md, "Hard rules": an interface keeps its state in the spec's Machine and leaves effects and time to the shell.
 // AGENTS.md, "This project": fakes and fixtures live in tests and development only, never in what a build ships.
 const noTests = { regex: "(^|/)test/", message: 'An application never imports its tests or their fakes: AGENTS.md, "This project".' }
@@ -117,7 +132,7 @@ const loose = Object.fromEntries(["no-explicit-any", "no-unsafe-argument", "no-u
 
 export default withWorkspaceBarrels(defineConfig(
   // Generated or disposable, and .claude/worktrees holds other checkouts of this repository.
-  globalIgnores([".eliza/", "apps/app/android/", "apps/app/aosp/", "**/gen/", "!vibestack/gen/", "**/.vibe/", "**/dist/", "**/build/", "**/.cache/", "**/.spec-cache/", "**/generated/", "**/storybook-static/", "**/test/fixtures/", "vibestack/examples/", "vibestack/fixtures/", ".claude/", "legacy/", ".lemmascript/", ".studio/", ".turbo/", "_apalache-out/"]),
+  globalIgnores([".eliza/", "apps/app/android/", "apps/app/aosp/", "**/gen/", "!vibestack/gen/", "**/.vibe/", "**/dist/", "**/build/", "**/.cache/", "**/.spec-cache/", "**/generated/", "**/storybook-static/", "**/test/fixtures/", "vibestack/examples/", "vibestack/fixtures/", ".claude/", ".lemmascript/", ".studio/", ".turbo/", "_apalache-out/"]),
   { linterOptions: { reportUnusedDisableDirectives: "error", reportUnusedInlineConfigs: "error" } },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
@@ -209,9 +224,13 @@ export default withWorkspaceBarrels(defineConfig(
   },
   // The application and its components: no effect hooks and no timers.
   { files: ["apps/**/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers, ...dialogs], "no-restricted-properties": ["error", ...timersOf] } },
+  { files: ["apps/app/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", { ...noEffects, patterns: [...noEffects.patterns, ...noNodeInBrowser, ...intraAppBarrels] }] } },
+  { files: ["apps/app/src/*/**/*.{ts,tsx}"], ignores: ["apps/app/src/{comms,phone}/**"], rules: { "no-restricted-imports": ["error", { ...noEffects, patterns: [...noEffects.patterns, ...noNodeInBrowser, ...intraAppBarrels, noPhoneInternals] }] } },
   { files: ["apps/**/src/**/*.tsx"], rules: { "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name=/^(input|textarea)$/]", message: "Use Input, Textarea or Checkbox from @repo/ui." }, ...clocks] } },
   { files: ["apps/**/src/**/*.vibe"], rules: { "no-restricted-imports": ["error", { patterns: [...noReact.patterns, noTests] }] } },
-  { files: ["packages/ui/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers], "no-restricted-properties": ["error", ...timersOf] } },
+  { files: ["apps/app/src/**/*.vibe"], rules: { "no-restricted-imports": ["error", { patterns: [...noReact.patterns, noTests, ...noNodeInBrowser, ...intraAppBarrels] }] } },
+  { files: ["apps/app/src/*/**/*.vibe"], ignores: ["apps/app/src/{comms,phone}/**"], rules: { "no-restricted-imports": ["error", { patterns: [...noReact.patterns, noTests, ...noNodeInBrowser, ...intraAppBarrels, noPhoneInternals] }] } },
+  { files: ["packages/ui/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", { ...noEffects, patterns: [...noEffects.patterns, ...noNodeInBrowser] }], "no-restricted-globals": ["error", ...timers], "no-restricted-properties": ["error", ...timersOf] } },
   { files: own, ignores: ["**/*.{vibe,vibex}"], languageOptions: { parser: guarded(tseslint.parser) } },
   { files: ["{apps,packages}/**/*.{vibe,vibex}"], languageOptions: { parser: guarded(vibelang) } },
   { files: own, plugins: { code }, rules: { "no-console": "error", "code/comments": ["error", { jsdoc: true, left: commented }], "code/effects": ["error", { left: scheduled }] } },

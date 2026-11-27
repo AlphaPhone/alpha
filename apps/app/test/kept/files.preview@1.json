@@ -1,0 +1,128 @@
+{
+  "key": "alpha/app/files/preview@1",
+  "spec": "spec/app/files/preview.md",
+  "shape": "9088e9b3cc355cb1",
+  "state": {
+    "viewer": 0,
+    "viewers": 0,
+    "item": 0,
+    "kind": "Photo",
+    "revision": 0,
+    "reachable": false,
+    "siblings": [
+      "IMG_0411.jpg",
+      "IMG_0412.jpg",
+      "IMG_0413.jpg"
+    ],
+    "content": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "playing": false,
+    "secret": false,
+    "page": 0,
+    "pages": 0,
+    "drawing": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "drawnAt": 0,
+    "why": "Fine",
+    "attempt": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "offered": {
+      "item": 0,
+      "revision": 0
+    },
+    "renaming": 0
+  },
+  "earlier": [
+    {
+      "from": "b7b4c1cd94",
+      "until": "299b554681",
+      "state": {
+        "viewer": 0,
+        "viewers": 0,
+        "item": 0,
+        "kind": "Photo",
+        "revision": 0,
+        "reachable": false,
+        "siblings": [
+          "IMG_0411.jpg",
+          "IMG_0412.jpg",
+          "IMG_0413.jpg"
+        ],
+        "content": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "playing": false,
+        "secret": false,
+        "page": 0,
+        "pages": 0,
+        "drawing": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "drawnAt": 0,
+        "why": "Fine",
+        "attempt": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "inserted": {
+          "item": 0,
+          "revision": 0
+        },
+        "email": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "account": 0,
+        "draft": 0
+      }
+    },
+    {
+      "from": "299b554681",
+      "until": "173bd6f26b",
+      "state": {
+        "viewer": 0,
+        "viewers": 0,
+        "item": 0,
+        "kind": "Photo",
+        "revision": 0,
+        "reachable": false,
+        "siblings": [
+          "IMG_0411.jpg",
+          "IMG_0412.jpg",
+          "IMG_0413.jpg"
+        ],
+        "content": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "playing": false,
+        "secret": false,
+        "page": 0,
+        "pages": 0,
+        "drawing": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "drawnAt": 0,
+        "why": "Fine",
+        "attempt": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "offered": {
+          "item": 0,
+          "revision": 0
+        }
+      }
+    }
+  ]
+}

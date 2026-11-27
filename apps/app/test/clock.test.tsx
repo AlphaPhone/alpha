@@ -586,12 +586,15 @@ describe("Clock journeys", () => {
     expect(afterReopen.items[0]).toMatchObject({ enabled: true, phase: "Idle", missed: true });
     expect(afterReopen.items[0]?.fireAt).toBeGreaterThan(reopenMs);
 
+    await drawn(() => second.alpha.runtime.runPromise(Shell.Machine.use((m) => m.send({ type: "goHome" }))));
+    await until(second.alpha, second.alpha.runtime, Shell.Machine, (s) => !Shell.showing(s, "Clock"));
+
     const nextDue = afterReopen.items[0]?.fireAt ?? 0;
-    await drawn(() => second.runtime.runPromise(TestClock.setTime(nextDue)));
+    await drawn(() => second.alpha.runtime.runPromise(TestClock.setTime(nextDue)));
     await second.advance(1_000);
     await second.waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Ringing");
     const jumpedTo = nextDue + 30 * 3_600_000;
-    await drawn(() => second.runtime.runPromise(TestClock.setTime(jumpedTo)));
+    await drawn(() => second.alpha.runtime.runPromise(TestClock.setTime(jumpedTo)));
     await second.advance(1_000);
     await second.waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Idle" && s.items[0]?.missed === true);
     const afterJump = await second.runtime.runPromise(Alarms.Machine.use((m) => m.get()));

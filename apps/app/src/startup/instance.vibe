@@ -1,0 +1,110 @@
+// spec/app/startup/instance.md, "Story: Stay one Home"; spec/app/startup/instance.md, "A start reaches the page in its task, builds the first page, or hands itself to the owner"
+import * as Instance from "../../gen/app__startup__instance.effect.vibe"
+import { Device } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/index.vibe"
+
+/** Observable log of single-instance delivery, page builds and hand-off requests. */
+export interface InstanceHooks {
+  deliverHere(home: boolean): void!!
+  buildAndDeliver(home: boolean): void!!
+  handOff(ticket: number): boolean!!
+}
+
+/** Injectable host adapter for single-Home instance handoff. */
+export interface InstanceDeskService {
+  readonly delivered: ReadonlyArray<{ readonly home: boolean; readonly built: boolean }>
+  readonly handedOff: ReadonlyArray<number>
+  setHooks(hooks: Partial<InstanceHooks>): void
+  reset(): void
+  deliverHere(home: boolean): void!!
+  buildAndDeliver(home: boolean): void!!
+  handOff(ticket: number): boolean!!
+}
+
+export service InstanceDesk: InstanceDeskService {}
+
+const instanceDesk = Layer.sync(InstanceDesk, () => {
+  const delivered: Array<{ readonly home: boolean; readonly built: boolean }> = []
+  const handedOff: number[] = []
+  let hooks: Partial<InstanceHooks> = {}
+  return {
+    delivered,
+    handedOff,
+    setHooks(next: Partial<InstanceHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    reset(): void {
+      delivered.length = 0
+      handedOff.length = 0
+      hooks = {}
+    },
+    deliverHere: (home: boolean) => effect {
+      delivered.push({ home, built: false })
+      if (hooks.deliverHere !== undefined) try hooks.deliverHere(home)
+    },
+    buildAndDeliver: (home: boolean) => effect {
+      delivered.push({ home, built: true })
+      if (hooks.buildAndDeliver !== undefined) try hooks.buildAndDeliver(home)
+    },
+    handOff: (ticket: number) => effect {
+      handedOff.push(ticket)
+      if (hooks.handOff !== undefined) return try hooks.handOff(ticket)
+      return true
+    },
+  }
+})
+
+function carry(fx: Instance.Effect): Job<Instance.Event, InstanceDesk, []> {
+  return match (fx) {
+    when { tag: "DeliverHere", let home }: run("instance-deliver", effect { try (try InstanceDesk).deliverHere(home) });
+    when { tag: "BuildAndDeliver", let home }: run("instance-build", effect { try (try InstanceDesk).buildAndDeliver(home) });
+    when { tag: "HandOff", let ticket }: answer(
+      `instance-handoff-${ticket}`,
+      effect {
+        const brought = try (try InstanceDesk).handOff(ticket)
+        return { type: "forwarded", ticket, brought } as const
+      },
+      { type: "forwarded", ticket, brought: false } as const,
+    );
+  }
+}
+
+// spec/app/startup/instance.md, "A start reaches the page in its task, builds the first page, or hands itself to the owner"
+/** Notify the instance coordinator of a new start in the Home task (`home: true`) or an ordinary task. */
+export effect function startInstance(home: boolean): boolean!!Instance.Machine {
+  return try contained((try Instance.Machine).send({ type: "start", home }), "starting instance")
+}
+
+// spec/app/startup/instance.md, "When Android refuses to bring the owner forward, the start that asked builds its own page, and every start waiting on the owner is delivered to it"
+/** Deliver Android's answer for a pending hand-off ticket. */
+export effect function answerHandOff(ticket: number, brought: boolean): boolean!!Instance.Machine {
+  const machine = try Instance.Machine
+  if (!Instance.canForwarded(try machine.get(), ticket)) return false
+  return try contained(machine.send({ type: "forwarded", ticket, brought }), "answering hand-off")
+}
+
+// spec/app/startup/instance.md, "The owner coming to the front answers every hand-off, and so is delivered every start waiting on it"
+/** Report that the owning page came to the front, answering every waiting hand-off. */
+export effect function ownerToFront(): boolean!!Instance.Machine {
+  const machine = try Instance.Machine
+  if (!Instance.canFront(try machine.get())) return false
+  return try contained(machine.send({ type: "front" }), "bringing owner to front")
+}
+
+// spec/app/startup/instance.md, "When the owner's page goes, another page that is up owns Alpha, and the starts handed to it go with it"
+/** Report that the owning page is gone. */
+export effect function ownerGone(): boolean!!Instance.Machine {
+  const machine = try Instance.Machine
+  if (!Instance.canGone(try machine.get())) return false
+  return try contained(machine.send({ type: "gone" }), "owner page gone")
+}
+
+const instanceMachine = reacting(Instance, { carry })
+
+const foreground = started(effect {
+  const device = try Device
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), () => ignore(ownerToFront()))
+}, "instance owner front")
+
+/** Single-Home instance handoff coordinator. */
+export const startupInstance = together(instanceMachine, instanceDesk, foreground)

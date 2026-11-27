@@ -1,7 +1,7 @@
 // spec/app/messages/composer.md, "Story: Keep my draft"
 import type { Author } from "../../gen/app__messages__composer.effect.vibe"
-import type { Telephony } from "../platform/telephony.vibe"
-import type { Vault } from "../platform/vault.vibe"
+import type { Telephony } from "../platform/index.vibe"
+import type { Vault } from "../platform/index.vibe"
 import { encodeDraftRecord, sameDraftSource, type DraftPicture, type DraftRecord, type DraftSource } from "./draft-record.vibe"
 import { openDraftRecord, readLegacySmsDraft, recoverLegacySmsDraft, retireLegacySmsDraft, writeDraftRecord, type HeldDraft } from "./draft-store.vibe"
 

@@ -5,7 +5,7 @@ import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__workflows.react.ts";
 import { type Change, type Event } from "../../gen/app__workflows.ts";
 import type { Machine } from "../../gen/app__workflows.effect.vibe";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { DefinitionWords, reviewName } from "./lifecycle.vibe";
 
 interface LifecycleProps extends Pick<Shown<Resident | Machine | DefinitionWords>, "runtime"> {

@@ -12,13 +12,13 @@ import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing, type Shell as ShellState } from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import type { BrowserPageGuard } from "@elizaos/os-bridges"
-import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
-import { say } from "../notices/toasts.vibe"
-import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
-import { Device } from "../platform/device.vibe"
-import type { Install } from "../runtime/attempts.vibe"
-import { type Job, Whole, answer, contained, due, reacting, run, started, together, untimed, whole } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/index.vibe"
+import { say } from "../notices/index.vibe"
+import { readWebBrowsing, saveWebBrowsing } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import type { Install } from "../runtime/index.vibe"
+import { type Job, Whole, answer, contained, due, reacting, run, started, together, untimed, whole } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 
 /** Whether Browser is on the shell's active view. */
 export effect function browserInFront(): boolean!!Shell {
@@ -41,41 +41,68 @@ module page {
     const { left, top, width, height } = place.getBoundingClientRect()
     return width > 0 && height > 0 ? { x: left, y: top, width, height } : undefined
   }
-  /** How far an element's outer shadows, its ring among them, reach past its border box on each side, in CSS pixels. @throws {never} */
-  function shadowReach(boxShadow: string): { left: number; top: number; right: number; bottom: number } {
-    const reach = { left: 0, top: 0, right: 0, bottom: 0 }
-    for (const shadow of boxShadow.replace(/[a-z-]+\([^)]*\)/gi, "").split(",")) {
-      if (/\binset\b/.test(shadow)) continue
-      const [x = 0, y = 0, blur = 0, spread = 0] = (shadow.match(/-?[\d.]+(?=px)/g) ?? []).map(Number)
-      const out = blur + spread
-      reach.left = Math.max(reach.left, out - x)
-      reach.right = Math.max(reach.right, out + x)
-      reach.top = Math.max(reach.top, out - y)
-      reach.bottom = Math.max(reach.bottom, out + y)
-    }
-    return reach
+  type Place = { x: number; y: number; width: number; height: number }
+  type HostRect = Place & { cornerRadius: number }
+  const findBar = '[role="search"][aria-label="Find in page"]'
+  /** What of Alpha may be drawn over a page below it: the find bar and Alpha's marked chrome. */
+  export const overPageChrome = `${findBar}, [data-host-chrome]`
+  /** Whether `element` is drawn on screen. @throws {never} */
+  function drawn(element: HTMLElement): boolean {
+    const style = getComputedStyle(element)
+    const { width, height } = element.getBoundingClientRect()
+    return style.display !== "none" && style.visibility !== "hidden" && Number.parseFloat(style.opacity) !== 0 && width > 0 && height > 0
+  }
+  /** Whether `element` is drawn and takes touches. @throws {never} */
+  function touchable(element: HTMLElement): boolean {
+    return drawn(element) && element.closest('[inert],[aria-hidden="true"]') === null && getComputedStyle(element).pointerEvents !== "none"
+  }
+  /** Whether the find bar is drawn over the page, which the phone then draws below Alpha. @throws {never} */
+  export function findBarDrawn(): boolean {
+    return typeof document !== "undefined" && [...document.querySelectorAll<HTMLElement>(findBar)].some(drawn)
   }
   /**
-   * Alpha's controls drawn over the page, in the same pixels as `placeOfPage`, rounded as drawn: the find bar while it is open
-   * (spec/app/browser/address.md, "The find bar opens over a shown page"), with its ring and shadow, which v119 drew over the
-   * page it kept below Alpha. The phone leaves these places to Alpha.
+   * Alpha's controls drawn over the page below it, in the same pixels as `placeOfPage`, rounded as drawn: the find bar and each
+   * innermost piece of Alpha's chrome (`data-host-chrome`) over the page, such as Ask Alpha's bar
+   * (spec/app/browser/address.md, "The find bar opens over a shown page"). A touch there is Alpha's; anywhere else, the page's.
    * @throws {never}
    */
-  export function overPage(): { x: number; y: number; width: number; height: number; cornerRadius: number }[] {
+  export function overPage(page: Place): HostRect[] {
     if (typeof document === "undefined") return []
-    return [...document.querySelectorAll<HTMLElement>('[role="search"][aria-label="Find in page"]')].flatMap((element) => {
-      const { left, top, width, height } = element.getBoundingClientRect()
-      if (width <= 0 || height <= 0) return []
+    const shown = [...document.querySelectorAll<HTMLElement>(overPageChrome)].filter(touchable)
+    return shown.filter((element) => !shown.some((inner) => inner !== element && element.contains(inner))).flatMap((element) => {
+      const { left, top, right, bottom, width, height } = element.getBoundingClientRect()
+      if (right <= page.x || left >= page.x + page.width || bottom <= page.y || top >= page.y + page.height) return []
       const scale = element.offsetWidth > 0 ? width / element.offsetWidth : 1
-      const style = getComputedStyle(element)
-      const reach = shadowReach(style.boxShadow)
-      const radius = (Number.parseFloat(style.borderTopLeftRadius) || 0) + Math.min(reach.left, reach.top, reach.right, reach.bottom)
-      return [{
-        x: left - reach.left * scale, y: top - reach.top * scale,
-        width: width + (reach.left + reach.right) * scale, height: height + (reach.top + reach.bottom) * scale,
-        cornerRadius: radius * scale,
-      }]
+      return [{ x: left, y: top, width, height, cornerRadius: (Number.parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0) * scale }]
     })
+  }
+  const sides = ["top", "right", "bottom", "left"] as const
+  /** Clears Alpha's surface over `page`, so the page drawn below Alpha shows through it, or draws the surface whole again. @throws {never} */
+  function underlay(page: Place | undefined): void {
+    if (typeof document === "undefined") return
+    const root = document.documentElement
+    const frame = document.querySelector("[data-alpha-browser-page]")?.closest("main")
+    if (page === undefined || frame == null) {
+      delete root.dataset.alphaBrowserUnder
+      for (const side of sides) root.style.removeProperty(`--alpha-browser-under-${side}`)
+      return
+    }
+    const box = frame.getBoundingClientRect()
+    const scale = frame.offsetWidth > 0 ? box.width / frame.offsetWidth : 1
+    const clear = { top: page.y - box.top, right: page.x + page.width - box.left, bottom: page.y + page.height - box.top, left: page.x - box.left }
+    for (const side of sides) root.style.setProperty(`--alpha-browser-under-${side}`, `${Math.max(0, clear[side] / scale)}px`)
+    root.dataset.alphaBrowserUnder = ""
+  }
+  let presentations = 0
+  /** Begins a presentation of the page: one below Alpha clears Alpha's surface over it first. Its ticket. @throws {never} */
+  export function presenting(below: Place | undefined): number {
+    presentations += 1
+    if (below !== undefined) underlay(below)
+    return presentations
+  }
+  /** Ends presentation `ticket`: unless a later one began, Alpha's surface is whole again once the page is no longer below it. @throws {never} */
+  export function presented(ticket: number, below: boolean): void {
+    if (ticket === presentations && !below) underlay(undefined)
   }
   /** The facts of what was typed that the address bar's rules read. @throws {never} */
   export function inputOf(typed: string): Input {
@@ -111,8 +138,8 @@ module page {
     return address && address.hostname && (address.protocol === "http:" || address.protocol === "https:") && !address.username && !address.password ? address.href : undefined
   }
 }
-import { addressOf, inputOf, messageHref, overPage, placeOfPage, secure } from page
-export { addressOf, inputOf }
+import { addressOf, findBarDrawn, inputOf, messageHref, overPage, overPageChrome, placeOfPage, presented, presenting, secure } from page
+export { addressOf, inputOf, overPageChrome }
 
 /** The native tab of a tab number: numbers are never used twice, so neither is an id. */
 export const idOf = (tab: number): string => `tab${tab}`
@@ -606,6 +633,9 @@ const told = started(effect {
   })
 }, "the tab host")
 
+/** Whether Ask Alpha is raised over the app, where all of a page drawn below it is Alpha's to touch. */
+const raised = (view: { readonly assistant: string }): boolean => view.assistant !== "Bar"
+
 function presentable(s: Browser, where: ShellState, above: Layers.Layers, deviceShowing: boolean): number {
   return deviceShowing && showing(where, "Browser") && where.assistant !== "Full" && !Layers.pageInert(above) && Tabs.pageShown(s) && s.erasing === "Kept"
     ? s.selected
@@ -632,11 +662,11 @@ const shown = started(effect {
       const p = try pageOf(s.selected)
       if (p.phase === "Blank") try tellPage(s.selected, { type: "submit", i: inputOf(aimed.value) })
     }
-    try present(presentable(s, where, above, deviceShowing), host)
+    try present(presentable(s, where, above, deviceShowing), host, raised(where))
   })
 }, "showing the page")
 
-effect function present(tab: number, host: TabHost.Shape): void!! {
+effect function present(tab: number, host: TabHost.Shape, assistantRaised: boolean): void!! {
   const place = placeOfPage()
   if (host.web !== undefined) {
     try sync(() => host.web?.present(tab === 0 || place === undefined ? null : { id: idOf(tab), ...place }))
@@ -644,10 +674,29 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
   }
   const plugin = host.plugin
   if (Option.isNone(plugin)) return
-  const over = overPage()
-  try ignore(tryPromise(() => tab === 0 || place === undefined
-    ? plugin.value.present({ session: host.session.session, id: null })
-    : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place, ...(over.length > 0 ? { hostRects: over } : {}) })))
+  if (tab !== 0 && place !== undefined) {
+    try ignore(drawPage(host, idOf(tab), place, assistantRaised))
+    return
+  }
+  presented(presenting(undefined), false)
+  try ignore(tryPromise(() => plugin.value.present({ session: host.session.session, id: null })))
+}
+
+// spec/app/browser/address.md, "The find bar opens over a shown page"
+/**
+ * Draw tab `id`'s page at `place`: above Alpha, or below it while the find bar is drawn over it, leaving Alpha its controls
+ * over the page, or all of it while Ask Alpha is raised. Whether the tab host drew it.
+ */
+effect function drawPage(host: TabHost.Shape, id: string, place: { x: number; y: number; width: number; height: number }, assistantRaised: boolean): boolean!! {
+  const plugin = host.plugin
+  if (Option.isNone(plugin)) return false
+  const below = findBarDrawn()
+  const ticket = presenting(below ? place : undefined)
+  const drew = try contained(tryPromise(() => plugin.value.present(below
+    ? { session: host.session.session, id, ...place, layer: "below-host", hostRects: assistantRaised ? [{ ...place, cornerRadius: 0 }] : overPage(place) }
+    : { session: host.session.session, id, ...place })), "showing the Browser page")
+  presented(ticket, below && drew)
+  return drew
 }
 
 // spec/app/settings/index.md, "The owner can open Password manager from the Browser menu"
@@ -684,8 +733,9 @@ export effect function openFindFromMenu(tab: number) {
 export effect function presentForAction(id: string): boolean!!(TabHost | Tabs.Machine | Shell) {
   const tabs = try (try Tabs.Machine).get()
   const position = placeOfPage()
-  if (position === undefined || idOf(tabs.selected) !== id || !Tabs.pageShown(tabs) || !showing(try (try Shell).get(), "Browser")) return false
-  return try contained(hosted("present", (plugin, session) => plugin.present({ session, id, ...position })), "showing the Browser page")
+  const view = try (try Shell).get()
+  if (position === undefined || idOf(tabs.selected) !== id || !Tabs.pageShown(tabs) || !showing(view, "Browser")) return false
+  return try drawPage(try TabHost, id, position, raised(view))
 }
 
 // spec/app/files/index.md, "Story: Browse my storage"
@@ -721,7 +771,7 @@ export const placed: void!!(Tabs.Machine | Shell | Layers.Machine | Device | Tab
   const where = try (try Shell).get()
   const above = try (try Layers.Machine).get()
   const deviceShowing = try (try Device).showing()
-  try present(presentable(s, where, above, deviceShowing), try TabHost)
+  try present(presentable(s, where, above, deviceShowing), try TabHost, raised(where))
 }
 
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */

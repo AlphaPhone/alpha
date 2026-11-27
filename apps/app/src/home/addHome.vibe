@@ -4,10 +4,10 @@ import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { fresh } from "../runtime/attempts.vibe"
-import { contained, started, together } from "../runtime/reactor.vibe"
-import { homeEditFrame, landscapeHomeInput } from "../shell/canvas.vibe"
+import { Device } from "../platform/index.vibe"
+import { fresh } from "../runtime/index.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
+import { homeEditFrame, landscapeHomeInput } from "../shell/index.vibe"
 
 type AddVisit = { readonly id: string; readonly route: number; readonly beside: boolean; readonly mounted: () => boolean }
 const addPrefix = (route: number, beside: boolean) => `home-add:${route}:${beside}:`

@@ -1,0 +1,25 @@
+// Product identities stay here. Alpha owns the listener's components and UI in src/main (see below).
+def pkg = new groovy.json.JsonSlurper().parse(file('../../package.json'))
+def elizaRoot = project.hasProperty('elizaRootDir')
+    ? file(project.elizaRootDir)
+    : file('../../../../.eliza')
+ext.elizaSenseSourceDir = new File(elizaRoot, 'packages/os/android/sense')
+ext.elizaSenseProfile = file('profile.json')
+ext.elizaSenseSpeechProject = ':sense-speech'
+ext.elizaSenseVersionCode = project.hasProperty('elizaSenseVersionCode') ? project.elizaSenseVersionCode : 1
+ext.elizaSenseVersionName = pkg.version
+apply from: new File(elizaSenseSourceDir, 'consumer.gradle')
+// Alpha owns the listener's manifest, resources, components, consent screen, notifications and tile
+// (src/main, forked from elizaOS packages/os/android/sense, MIT).
+// consumer.gradle still supplies the build, signing, product BuildConfig fields and the speech
+// module. Of the shared listener sources only the pure policy classes compile: ListenerPolicy,
+// CrashLoopBreaker, SpeechGate, WakePhrase and IndicatorLease. The namespace stays ai.eliza.sense
+// because the shared WakePhrase reads ai.eliza.sense.BuildConfig; Alpha's classes import BuildConfig
+// and R from it.
+android.sourceSets.main {
+ manifest.srcFile file('src/main/AndroidManifest.xml')
+ res.srcDirs = [file('src/main/res')]
+ java.filter.exclude(['AssistantInvocation', 'ConsentActivity', 'IndicatorLeaseProvider', 'Listener', 'ListenerActionContract',
+  'ListenerActionReceiver', 'ListenerControlProvider', 'ListenerNotifications', 'ListenerStore', 'ListenerTileService',
+  'ListeningEpoch', 'ListeningService', 'SenseApplication', 'SenseConfig'].collect { "ai/eliza/sense/${it}.java" })
+}

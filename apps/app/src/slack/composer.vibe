@@ -2,11 +2,11 @@
 import type * as Auth from "../../gen/app__slack__auth.effect.vibe"
 import * as Composer from "../../gen/app__slack__composer.effect.vibe"
 import type { Actor, Effect as Out, Event, TargetKey } from "../../gen/app__slack__composer.effect.vibe"
-import type { MessagingSessions } from "../platform/messaging.vibe"
-import { Unreachable } from "../platform/remote.vibe"
-import { Slack } from "../platform/slack.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import type { MessagingSessions } from "../platform/index.vibe"
+import { Unreachable } from "../platform/index.vibe"
+import { Slack } from "../platform/index.vibe"
+import { Attempts } from "../runtime/index.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { SlackLedger, handleSlackFailure, tokenForWorkspace } from "./ledger.vibe"
 
 effect function recordSend(id: number, target: TargetKey): Event!!SlackLedger {

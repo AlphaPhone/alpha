@@ -1,9 +1,8 @@
 // spec/app/phone/call.md, "Story: See my live call over every view"
 import * as Bar from "../../gen/app__phone__call.effect.vibe"
 import type { CallBar, CallPhase, Effect as Out, Event, LiveCall } from "../../gen/app__phone__call.effect.vibe"
-import { Calls } from "../platform/calls.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, due, hearing, reacting, run, stream, together, untimed } from "../runtime/reactor.vibe"
+import { Calls, Device } from "../platform/index.vibe"
+import { type Job, answer, due, hearing, reacting, run, stream, together, untimed } from "../runtime/index.vibe"
 
 /** One call as the image's in-call service reports it, and the whole report: at most eight calls. */
 const Row = Schema.Struct({

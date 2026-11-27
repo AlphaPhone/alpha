@@ -1,0 +1,57 @@
+{
+  "key": "alpha/app/voice/index@3",
+  "spec": "spec/app/voice/index.md",
+  "shape": "86cfc0602e3e8c88",
+  "state": {
+    "phase": "Idle",
+    "session": 0,
+    "turn": 0,
+    "sent": 0,
+    "mic": "Off",
+    "muted": false,
+    "heard": false,
+    "speaker": "SpeakerUnknown",
+    "speakerTicket": 0,
+    "network": false,
+    "disclosing": false,
+    "retries": 0,
+    "retryAt": 0,
+    "queued": 0,
+    "played": 0,
+    "replied": false,
+    "playing": 0,
+    "failure": "NoFailure",
+    "latched": false,
+    "claim": 0,
+    "claimRoute": 0,
+    "followed": 0,
+    "warmed": false,
+    "engineHeld": false,
+    "reviewPending": false,
+    "callNotice": "NoCallNotice",
+    "prompting": false,
+    "recorder": {
+      "stage": "Closed",
+      "field": "ComposerField",
+      "ticket": 0,
+      "clip": false,
+      "failure": "NoFailure",
+      "words": false,
+      "filled": 0,
+      "preparation": "NotChecked"
+    },
+    "permission": {
+      "grant": "Unasked",
+      "asked": false
+    },
+    "route": {
+      "account": "SignedOut",
+      "key": 0,
+      "limited": false,
+      "consent": false,
+      "declined": false,
+      "holdKey": 0,
+      "holdUntil": 0
+    }
+  }
+}

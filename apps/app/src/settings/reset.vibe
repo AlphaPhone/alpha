@@ -1,7 +1,7 @@
 // spec/app/settings/reset.md, "Story: Erase all data"
 import * as Reset from "../../gen/app__settings__reset.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__settings__reset.effect.vibe"
-import { type Job, answer, due, reacting, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, due, reacting, untimed } from "../runtime/index.vibe"
 
 module held {
   import { resetPlugin, reviewDataReset } from "@elizaos/os-bridges"
