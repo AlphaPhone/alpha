@@ -282,6 +282,38 @@ pure def lawOnlyAStopOrALeftStreamLosesItsText(cause: str, stoppedHere: bool, se
 pure def lawSettledTextIsNeverRememberedAsUnsettled(r: Reply): bool = r.shown >= 1 implies not(stoppedBeforeSettled(r))
 ```
 
+### Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined
+
+eliza marks a failed step that its reply does not tell untold, with no
+words for it (eliza's agent-host conversation planning): the step's
+action result carries `untold`, and the reply's history row lists the
+actions of those steps as `untold`. Alpha draws, for each such step in
+order, its own notice that the step did not complete, in the conversation
+under that reply, as a failed reply's notice is drawn, and never beside
+the composer: live from the reply's action results, on the reply's body
+and on its last frame alike, and read again from its history row, the
+same way. A reply whose text is empty and that marks a step is answered:
+its bubble is those notices, never an empty bubble, a failed reply or one
+that did not finish. A reply whose text is empty and that marks nothing
+is declined as before. The settled empty text replaces any provisional
+text, which was never shown or spoken. Talk speaks the reply's text only,
+so it says nothing of a notice, and an empty reply that marks a step
+ends quietly.
+
+```quint
+type Ending = Answered | Declined
+
+pure def replyEnding(units: int, untold: int): Ending = if (units == 0 and untold == 0) Declined else Answered
+
+pure val untoldValues = Set(0, 1, 2)
+
+pure def lawAnEmptyReplyThatMarksAStepIsAnswered(untold: int): bool = untold >= 1 implies replyEnding(0, untold) == Answered
+
+pure def lawAnEmptyReplyThatMarksNothingIsDeclined(units: int): bool = replyEnding(units, 0) == Declined iff units == 0
+
+pure def lawAReplyWithTextIsAnswered(units: int, untold: int): bool = units >= 1 implies replyEnding(units, untold) == Answered
+```
+
 ### A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again
 
 Sign in offers Sign in, funding offers Manage plan, and retry offers Try

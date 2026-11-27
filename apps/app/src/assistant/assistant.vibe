@@ -90,7 +90,8 @@ const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({
   messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, role: Schema.Literals(["user", "assistant"]), text: Schema.String,
     timestamp: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))), clientMessageId: Schema.optionalKey(Schema.String),
-    failureKind: Schema.optionalKey(Schema.String), abortCause: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
+    failureKind: Schema.optionalKey(Schema.String), abortCause: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String),
+    untold: Schema.optionalKey(Schema.Array(Schema.String)) })),
   hasMore: Schema.optionalKey(Schema.Boolean), hasEarlier: Schema.optionalKey(Schema.Boolean), hasLater: Schema.optionalKey(Schema.Boolean),
 })
 const pageEdge = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) })
@@ -169,11 +170,26 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   no_provider: "NoProvider",
 }
 
-// spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
+const isUntoldStep = Schema.is(Schema.Struct({ untold: Schema.Literal(true) }))
+
+// spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
+/** The actions of the steps eliza marked untold in a reply's action results, in the order they ran. */
+function untoldSteps(ran: ReadonlyArray<Ran>): readonly string[] {
+  return ran.flatMap(({ action, data }) => isUntoldStep(data) ? [action] : [])
+}
+
+/** The fields of an agent's line that carry its untold steps, none when it marks none. */
+function untoldOf(untold: readonly string[] | undefined): Pick<Line, "untold"> {
+  return untold === undefined || untold.length === 0 ? {} : { untold }
+}
+
+// spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   const failed = (said: TurnReply | undefined, code: string): Reply.Event => ({ type: "failed", turn, kind: failures[said?.failureKind ?? code] ?? "OtherFailure" })
   if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
-  if (result.kind === "Replied") return result.reply.failureKind === undefined ? (result.reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: result.reply.text.length }) : failed(result.reply, result.reply.failureKind)
+  if (result.kind === "Replied") return result.reply.failureKind !== undefined ? failed(result.reply, result.reply.failureKind)
+    : Reply.replyEnding(result.reply.text.length, untoldSteps(result.reply.actionResults).length) === "Declined" ? { type: "decline", turn }
+    : { type: "done", turn, units: result.reply.text.length }
   if (result.kind === "AgentFailed") return isCloudFundsRefusal(result) || result.code === "allowance_exhausted" ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, result.code)
   if (result.kind === "StoppedByOwner") return { type: "stop", turn }
   return { type: "failed", turn, kind: "OtherFailure" }
@@ -413,12 +429,12 @@ effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, re
   if (live.chosen !== selected || live.around !== 0 || board.draftSeat !== seat
     || bound?.id !== record.id || bound?.roomId !== record.roomId) return
   const page = live.page.ticket
-  const { userMessageId, messageId, text, failureKind, cloudCode } = result.reply
+  const { userMessageId, messageId, text, failureKind, cloudCode, actionResults } = result.reply
   const lines: Line[] = []
   if (userMessageId !== undefined && userMessageId !== "") lines.push({ id: userMessageId, mine: true, text: spoken })
   if (messageId !== "" && messageId !== userMessageId) {
     const failure = failureKind === undefined ? undefined : Reply.readAgain(failures[failureKind] ?? "OtherFailure", cloudCode !== undefined)
-    lines.push({ id: messageId, mine: false, text, ...(failure === undefined ? {} : { failure }) })
+    lines.push({ id: messageId, mine: false, text, ...(failure === undefined ? {} : { failure }), ...untoldOf(untoldSteps(actionResults)) })
   }
   const prior = board.page(page)
   const added = lines.filter((line) => !prior.some((other) => other.id === line.id))
@@ -505,7 +521,7 @@ effect function settleReplied(input: {
     board.rename(pageTicket, mine, result.reply.userMessageId)
   }
   board.messageNumber(result.reply.messageId)
-  board.append(pageTicket, chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
+  board.append(pageTicket, chosen, { id: result.reply.messageId, mine: false, text: result.reply.text, ...untoldOf(untoldSteps(result.reply.actionResults)) })
   const recordingSummary = transcript === undefined || result.reply.failureKind !== undefined
     ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chosen,
       conversationId, message: result.reply.messageId }, result.reply.text)
@@ -707,7 +723,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const post: PostedMessage = { turn: ticket, seat, record: known.record }
     board.lastPost = post
     let heard = false
-    board.change({ reply: "", label: "", failure: undefined })
+    board.change({ reply: "", replyUntold: [], label: "", failure: undefined })
     const preview = (written: string, provisional: boolean) => {
       if (board.draftSeat !== seat) return
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
@@ -737,7 +753,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (labelled()) board.change({ label: label ?? `Using ${name}` })
       },
       // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": the reply the agent stored is settled text, shown at once, so Stop keeps it.
-      onReady: (fullText: string) => { if (fullText !== "") preview(fullText, false) },
+      // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the stored reply's announcement names its untold steps, drawn at once with its text.
+      onReady: (fullText: string, ran: ReadonlyArray<Ran>) => {
+        if (board.draftSeat === seat) board.change({ replyUntold: untoldSteps(ran) })
+        if (fullText !== "") preview(fullText, false)
+      },
     }
     board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNotes: standing(board.snapshot().mediaNotes) })
     const views = try Views
@@ -781,7 +801,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const ending = replied(ticket, result)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
     board.change({
-      ...(keepStreamed ? {} : { reply: "" }), label: "",
+      ...(keepStreamed ? {} : { reply: "", replyUntold: [] }), label: "",
       ...(ending.type === "failed" ? { failure: {
         kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result), ...(messageId === undefined ? {} : { messageId }),
       } } : {}),
@@ -1201,6 +1221,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       return {
         id: one.id, mine: one.role === "user", text: line === "NoticeOnly" ? "" : one.text,
         ...(failure === undefined ? {} : { failure }),
+        ...(one.role === "assistant" ? untoldOf(one.untold) : {}),
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
@@ -1609,7 +1630,7 @@ const bound = started(effect {
     }
     const here = writing.binding.conversation
     if (shown.chosen !== here) {
-      board.change({ reply: "", label: "", failure: undefined })
+      board.change({ reply: "", replyUntold: [], label: "", failure: undefined })
       const moving = here === 0 && shown.chosen > 0 && (Composer.content(writing.editor) || Composer.attached(writing.editor) || writing.draft.sync !== "Kept")
       const carrying = here > 0 && shown.chosen === 0 && !shown.ids.includes(here) && Composer.canCarry(writing)
       const event: Composer.Event = moving ? { type: "adopt", conversation: shown.chosen }
