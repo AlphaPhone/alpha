@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
+import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
@@ -28,15 +29,23 @@ import com.getcapacitor.WebViewListener;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 /** Base Capacitor activity for every standalone thin Alpha app, wiring IPC proxies, shared theme/textScale, and signed agent intents. */
 public abstract class AlphaBaseActivity extends BridgeActivity {
+    private static final String TAG = "AlphaThinApp";
     private static final String BACK_EVENT = "window.dispatchEvent(new Event('alpha-back'))";
 
     private final Map<String, IAlphaActionCallback> pendingActions = new ConcurrentHashMap<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService diagnosticWorker = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "AlphaThinAppDiag");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private ContentObserver preferencesObserver;
     private InsetsState insets;
@@ -94,6 +103,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         followWindowInsets();
         registerBackDispatcher();
         captureAgentIntent(getIntent());
+        logLaunchDiagnostics(getIntent());
     }
 
     @Override public void onResume() {
@@ -110,6 +120,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         clearForegroundContext();
         unregisterPreferencesObserver();
         failPendingActions("ActivityDestroyed");
+        diagnosticWorker.shutdownNow();
         super.onDestroy();
     }
 
@@ -117,6 +128,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         captureAgentIntent(intent);
+        logLaunchDiagnostics(intent);
     }
 
     /** Resolves a pending signed cross-app agent action callback identified by {@code claimId}. */
@@ -278,6 +290,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
     private void captureAgentIntent(Intent intent) {
         if (intent == null || !AlphaIpcContract.ACTION_AGENT_OPEN.equals(intent.getAction())) return;
         if (!isVerifiedCoreCaller()) {
+            Log.w(TAG, "event=agent_open_rejected app=" + alphaAppId() + " view=" + alphaViewName() + " reason=unverified_caller");
             rejectUnverifiedCallback(intent);
             return;
         }
@@ -286,9 +299,11 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         String nonce = intent.getStringExtra(AlphaIpcContract.EXTRA_NONCE);
         String payload = intent.getStringExtra(AlphaIpcContract.EXTRA_PAYLOAD);
         if (payload != null && payload.getBytes(StandardCharsets.UTF_8).length > AlphaIpcContract.MAX_INTENT_PAYLOAD_BYTES) {
+            Log.w(TAG, "event=agent_open_rejected app=" + alphaAppId() + " view=" + alphaViewName() + " reason=payload_too_large");
             rejectCallbackFromExtras(intent.getExtras(), claimId, AlphaIpcContract.FAIL_TOO_LARGE);
             return;
         }
+        Log.i(TAG, "event=agent_open app=" + alphaAppId() + " view=" + alphaViewName() + " verified=true claimId=" + (claimId == null ? "" : claimId));
         Bundle extras = intent.getExtras();
         if (extras != null && claimId != null && !claimId.isEmpty()) {
             IBinder binder = extras.getBinder(AlphaIpcContract.EXTRA_CALLBACK);
@@ -362,6 +377,54 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         if (handle != null && handle.getInstance() instanceof AlphaContextPlugin contextPlugin) {
             contextPlugin.clearViewContext(alphaViewName());
         }
+    }
+
+    private void logLaunchDiagnostics(Intent intent) {
+        String action = intent == null || intent.getAction() == null ? "none" : intent.getAction();
+        Uri data = intent == null ? null : intent.getData();
+        String uriSummary = data == null ? "none" : (data.getScheme() + "://" + data.getHost() + (data.getPath() == null ? "" : data.getPath()));
+        diagnosticWorker.execute(() -> {
+            boolean coreSignature = AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE);
+            boolean prefsConnected = false;
+            int prefsKeys = 0;
+            if (coreSignature) {
+                try {
+                    Bundle snapshot = getContentResolver().call(
+                        Uri.parse(AlphaIpcContract.PREFERENCES_URI_STRING),
+                        AlphaIpcContract.PREF_METHOD_SNAPSHOT,
+                        null,
+                        null
+                    );
+                    if (snapshot != null) {
+                        prefsConnected = true;
+                        Bundle values = snapshot.getBundle(AlphaIpcContract.PREF_RESULT_SNAPSHOT);
+                        prefsKeys = (values == null ? snapshot : values).keySet().size();
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            }
+            boolean brokerBound = false;
+            String agentState = "unavailable";
+            var bridge = getBridge();
+            if (bridge != null) {
+                PluginHandle handle = bridge.getPlugin("ElizaAgent");
+                if (handle != null && handle.getInstance() instanceof RemoteAgentPlugin agentPlugin) {
+                    RemoteAgentPlugin.BrokerProbe probe = agentPlugin.probeBroker();
+                    brokerBound = probe.bound();
+                    agentState = probe.state();
+                }
+            }
+            Log.i(TAG, "event=launch app=" + alphaAppId()
+                + " view=" + alphaViewName()
+                + " surface=" + alphaSurfaceMode()
+                + " action=" + action
+                + " uri=" + uriSummary
+                + " coreSignatureMatch=" + coreSignature
+                + " prefsConnected=" + prefsConnected
+                + " prefsKeys=" + prefsKeys
+                + " agentBrokerBound=" + brokerBound
+                + " agentState=" + agentState);
+        });
     }
 
     private void failPendingActions(String errorCode) {

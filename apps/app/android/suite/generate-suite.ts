@@ -48,6 +48,7 @@ export interface GeneratedOutput {
 const SUITE_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(SUITE_DIR, "apps.json");
 const DEFAULT_OUT_DIR = join(SUITE_DIR, "generated");
+const DEFAULT_IPC_POLICY_PATH = resolve(SUITE_DIR, "../alpha-ipc/src/main/assets/alpha-suite-policy.json");
 const EXPECTED_VIEWS = new Set([
   "Phone", "Messages", "Contacts", "Browser", "Inbox", "Telegram", "Slack",
   "Calendar", "Clock", "Reminders", "Camera", "Photos", "Maps", "Notes",
@@ -278,7 +279,7 @@ function renderFlavorsGradle(registry: SuiteRegistry): string {
   const sourceSetBlocks = thinApps.map((app) => [
     `        ${app.id} {`,
     `            manifest.srcFile file('../generated/flavors/${app.id}/AndroidManifest.xml')`,
-    `            assets.srcDirs += [file('../../../../dist-suite/${app.id}')]`,
+    `            assets.srcDirs += [file('src/${app.id}/assets')]`,
     `        }`,
   ].join("\n"));
 
@@ -387,6 +388,22 @@ function main(argv: readonly string[]): number {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, output.content, "utf8");
       written.push(output.relativePath);
+    }
+  }
+
+  const policyOutput = outputs.find((item) => item.relativePath === "alpha-suite-policy.json");
+  if (policyOutput !== undefined && outDir === DEFAULT_OUT_DIR) {
+    const currentIpcPolicy = existsSync(DEFAULT_IPC_POLICY_PATH)
+      ? readFileSync(DEFAULT_IPC_POLICY_PATH, "utf8")
+      : undefined;
+    if (currentIpcPolicy !== policyOutput.content) {
+      if (checkOnly) {
+        drifted.push("../alpha-ipc/src/main/assets/alpha-suite-policy.json");
+      } else {
+        mkdirSync(dirname(DEFAULT_IPC_POLICY_PATH), { recursive: true });
+        writeFileSync(DEFAULT_IPC_POLICY_PATH, policyOutput.content, "utf8");
+        written.push("../alpha-ipc/src/main/assets/alpha-suite-policy.json");
+      }
     }
   }
 

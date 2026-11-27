@@ -28,6 +28,9 @@ import org.json.JSONTokener;
 /** Drop-in Capacitor {@code ElizaAgent} proxy forwarding requests, streams, and feeds over {@link IAlphaAgentBroker}. */
 @CapacitorPlugin(name = "ElizaAgent")
 public final class RemoteAgentPlugin extends Plugin {
+    /** Non-sensitive diagnostic summary of {@link IAlphaAgentBroker} connectivity for launch verification. */
+    record BrokerProbe(boolean bound, String state) {}
+
     private final String owner = "remote-screen-" + UUID.randomUUID();
     private final Set<String> activeCalls = ConcurrentHashMap.newKeySet();
     private final Set<String> activeSubscriptions = ConcurrentHashMap.newKeySet();
@@ -311,6 +314,18 @@ public final class RemoteAgentPlugin extends Plugin {
             }
             call.resolve(new JSObject().put("aborted", removed));
         });
+    }
+
+    /** Probes whether {@link IAlphaAgentBroker} is bound and reports its non-sensitive lifecycle state string. */
+    BrokerProbe probeBroker() {
+        IAlphaAgentBroker broker = connector == null ? null : connector.connect(2_000L);
+        if (broker == null) return new BrokerProbe(false, "unavailable");
+        try {
+            JSObject parsed = parseObject(broker.getStatusJson(), unavailableStatus());
+            return new BrokerProbe(true, parsed.optString("state", "unknown"));
+        } catch (RemoteException lost) {
+            return new BrokerProbe(false, "disconnected");
+        }
     }
 
     private void subscribeStatusUpdates() {
