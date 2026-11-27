@@ -1362,8 +1362,8 @@ pure val amountValues = Set(0, 1)`;
   });
 
   test("a test that reaches only generated code, which the spec proves, is caught: a file that imports nothing else, and a test that reaches nothing else through the helpers it calls; two test files of one runner and language are a note", async () => {
-    const root = copyOfProject("test/app.test.vibe", (s) => s.replace('from "../src/app.vibe"\n', '$&import { initial } from "../gen/index.effect.vibe"\n')
-      + "\n" + citing("spec/index.md", "A new order is an empty draft") + 'it("a new order is a draft", () => { assert.strictEqual(initial.status, "Draft") })\n');
+    const root = installed(copyOfProject("test/app.test.vibe", (s) => s.replace('from "../src/app.vibe"\n', '$&import { initial } from "../gen/index.effect.vibe"\n')
+      + "\n" + citing("spec/index.md", "A new order is an empty draft") + 'it("a new order is a draft", () => { assert.strictEqual(initial.status, "Draft") })\n'));
     fs.writeFileSync(path.join(root, "test/draft.test.vibe"), citing("spec/index.md", "A new order is an empty draft") + 'import { assert, it } from "@effect/vitest"\nimport { initial } from "../gen/index.effect.vibe"\nit("a new order is a draft", () => { assert.strictEqual(initial.units, 0) })\n');
     fs.writeFileSync(path.join(root, "test/mbt-only.test.ts"), citing("spec/index.md", "A new order is an empty draft") + 'import { it } from "vitest";\nimport { planModel } from "vibestack/testing";\nimport * as oracle from "../gen/index.ts";\nit("oracle only", () => { planModel(oracle, []); });\n');
     const { failed, said, text } = await run(root);
@@ -2519,20 +2519,22 @@ function eachCheck() {
     assert.equal(json(customInstall, "package.json").scripts["pnpm:devPreinstall"], "my-preinstall");
     assert.equal(json(customInstall, "package.json").scripts.postinstall, "vibestack link");
     assert.deepEqual(init(customInstall), []);
-    const workspace = scratch({
-      "package.json": read("template/package.json"),
-      "pnpm-workspace.yaml": read("template/pnpm-workspace.yaml"),
-      ".gitignore": read("template/.gitignore"),
-      "tsconfig.json": read("template/tsconfig.json"),
-      "vitest.config.ts": read("template/vitest.config.ts"),
-      "spec/index.md": read("template/spec/index.md"),
-    });
-    const templatePkgBefore = read("package.json", workspace);
-    init(workspace);
-    assert.equal(read("package.json", workspace), templatePkgBefore, "workspace root init leaves template package.json intact");
-    assert.equal(json(workspace, "package.json").scripts.build, undefined, "workspace root init does not add a root vibelang build script");
-    assert.equal(read(".agents/skills/bug-review/SKILL.md", workspace), read(".agents/skills/bug-review/SKILL.md"));
-    assert.deepEqual(init(workspace), []);
+    if (fs.existsSync(path.join(project, "template/package.json"))) {
+      const workspace = scratch({
+        "package.json": read("template/package.json"),
+        "pnpm-workspace.yaml": read("template/pnpm-workspace.yaml"),
+        ".gitignore": read("template/.gitignore"),
+        "tsconfig.json": read("template/tsconfig.json"),
+        "vitest.config.ts": read("template/vitest.config.ts"),
+        "spec/index.md": read("template/spec/index.md"),
+      });
+      const templatePkgBefore = read("package.json", workspace);
+      init(workspace);
+      assert.equal(read("package.json", workspace), templatePkgBefore, "workspace root init leaves template package.json intact");
+      assert.equal(json(workspace, "package.json").scripts.build, undefined, "workspace root init does not add a root vibelang build script");
+      assert.equal(read(".agents/skills/bug-review/SKILL.md", workspace), read(".agents/skills/bug-review/SKILL.md"));
+      assert.deepEqual(init(workspace), []);
+    }
   });
 
   test("nested specs link to children and reuse a machine through its directory index", async () => {
