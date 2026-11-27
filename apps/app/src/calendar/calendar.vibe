@@ -25,7 +25,7 @@ import { type Job, Time, answer, contained, due, following, reacting, run, start
 import type { DeletionMeta } from "./deletions.vibe"
 import type { LinkCache } from "./link.vibe"
 import { datedReminders } from "./reminders.ts"
-import { type Person, type Read, androidWindowOf, onDay, repeatText } from "./shown.ts"
+import { type Person, type Read, androidWindowOf, occurrenceOf, onDay, repeatText } from "./shown.ts"
 import { type Requests, Shown } from "./stores.vibe"
 import { inspectShown } from "./subject.vibe"
 import { civilDay, dayStart, feedParams, localDate, openLink, plainHttps, readWindow } from "./time.ts"
@@ -41,7 +41,7 @@ function phoneRow(event: AndroidCalendarEvent): Read {
     key: event.id, calendarId: event.calendarId, title: event.title ?? "", place: event.location ?? "", notes: event.body ?? "",
     ...(event.creationId === undefined ? {} : { creationId: event.creationId }),
     begin, end, allDay: event.allDay, recurring: event.recurring, repeat: repeatText([], event.recurring), link: "", video: "",
-    people: [], answer: "NotInvited", answerable: false, managed: false, series: "", editable: true, cancel: "OrganizerCancel", version: "",
+    people: [], answer: "NotInvited", answerable: false, managed: false, series: event.recurring ? event.id : "", editable: true, cancel: "OrganizerCancel", version: "",
   }
 }
 
@@ -164,7 +164,7 @@ effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | A
         const listed = try (try PhoneCalendar).list(readWindow(day))
         return listed.status === "ready" && !listed.truncated ? Option.some(listed.events.map(phoneRow)) : Option.none<ReadonlyArray<Read>>()
       } catch () => Option.none<ReadonlyArray<Read>>())
-  const found = Option.isSome(again) ? again.value.find((candidate) => candidate.key === row.key) : undefined
+  const found = Option.isSome(again) ? again.value.find((candidate) => occurrenceOf(row.source, candidate) === occurrenceOf(row.source, row)) : undefined
   if (found === undefined || !sameAsLeft(row, found)) return gone
   if (row.source === "Phone" && !View.canEventFound(try (try View.Machine).get(), ticket, true)) return gone
   shown.mergeOne(row.source, found)

@@ -4,13 +4,13 @@
   "shape": "42364efc15700d7c",
   "sealed": {
     "shape": "42364efc15700d7c",
-    "state": "768199af2f99e6f1"
+    "state": "8808f0a60235f51a"
   },
   "state": {
     "owner": 1,
     "form": "EditEvent",
     "shown": false,
-    "target": 41,
+    "target": 4294967337,
     "day": 20000,
     "revision": 3,
     "titled": true,
@@ -30,20 +30,20 @@
     "banner": "Available",
     "confirming": "NoConfirm",
     "write": {
-      "id": 0,
-      "outcome": "Planned"
+      "id": 2,
+      "outcome": "Unknown"
     },
     "kind": "Create",
     "writing": 0,
     "filed": false,
-    "unknownCreate": false,
+    "unknownCreate": true,
     "separate": false,
     "receipts": {
-      "status": "Idle",
-      "ticket": 0
+      "status": "Loaded",
+      "ticket": 1
     },
     "latched": [
-      41
+      4294967337
     ],
     "unreadable": false
   },
@@ -58,7 +58,8 @@
     "kept",
     "banner",
     "latched",
-    "unknownCreate"
+    "unknownCreate",
+    "write"
   ],
   "earlier": [
     {
@@ -88,21 +89,62 @@
         "banner": "Available",
         "confirming": "NoConfirm",
         "write": {
-          "id": 0,
-          "outcome": "Planned"
+          "id": 2,
+          "outcome": "Unknown"
         },
         "kind": "Create",
         "writing": 0,
         "filed": false,
-        "unknownCreate": false,
+        "unknownCreate": true,
         "separate": false,
         "receipts": {
-          "status": "Idle",
-          "ticket": 0
+          "status": "Loaded",
+          "ticket": 1
         },
         "latched": [
           41
         ]
+      },
+      "reads": {
+        "owner": 1,
+        "form": "EditEvent",
+        "shown": false,
+        "target": 41,
+        "day": 20000,
+        "revision": 3,
+        "titled": true,
+        "allDay": false,
+        "start": 0,
+        "end": 1,
+        "repeats": false,
+        "scope": "Unchosen",
+        "extras": false,
+        "draft": {
+          "sync": "Edited",
+          "edits": 2,
+          "carried": 0,
+          "base": 3
+        },
+        "kept": true,
+        "banner": "Available",
+        "confirming": "NoConfirm",
+        "write": {
+          "id": 2,
+          "outcome": "Unknown"
+        },
+        "kind": "Create",
+        "writing": 0,
+        "filed": false,
+        "unknownCreate": true,
+        "separate": false,
+        "receipts": {
+          "status": "Loaded",
+          "ticket": 1
+        },
+        "latched": [
+          41
+        ],
+        "unreadable": false
       }
     }
   ]

@@ -14,17 +14,21 @@ The Undo notice belongs to the [notices](../notices/) area; the
 
 ### Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm
 
-An event is named by its number, and 0 is none. Alpha keeps each event's
-number on the phone with the event it names, so an event keeps its number
-across a restart and no other event is ever given it: a deletion, or a form
-of the [editor](./editor.md), kept across a restart is for the event it was
-for. A deletion reaches its event, the series from this occurrence on, or
-the whole series, as the owner chose, at the revision the owner confirmed
-it from. It also holds
-Android's timeout scale, a percentage never under a hundred, whether a
-restart paused it, and the event a deletion was dropped or refused for, and
-whether it was refused because the event changed, so the owner is told it
-was not deleted and why. Times are milliseconds, passed in by the shell.
+An event is named by its number, and 0 is none. An occurrence of a
+repeating event on the phone is an event of its own, named by its series
+and its start. Alpha keeps each event's number on the phone with the event
+it names, for the phone's events and the agent's alike, so an event keeps
+its number across a restart and no other event is ever given it: a
+deletion, or a form of the [editor](./editor.md), kept across a restart is
+for the event it was for. The number of an event long unseen may be let
+go, and then names no event. A deletion reaches its event, the series from
+this occurrence on, or the whole series, as the owner chose, at the
+revision the owner confirmed it from; the occurrences of a repeating event
+on the phone share one revision, which changes with the series and not with
+when they fall. It also holds Android's timeout scale, a percentage never
+under a hundred, whether a restart paused it, and the event a deletion was
+dropped or refused for, and whether it was refused because the event
+changed, so the owner is told it was not deleted and why. Times are milliseconds, passed in by the shell.
 
 ```quint
 import undo as U from "../../kit/undo"

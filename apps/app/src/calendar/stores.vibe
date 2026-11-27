@@ -9,7 +9,7 @@ export service Shown: ShownStore {}
 /** Scoped per-runtime store of agent Calendar approval requests. */
 export service Requests: RequestsStore {}
 
-/** Where the numbers Calendar gave events are kept, so that a deletion or a form kept across a restart names the event it was for. */
+/** Where the numbers Calendar gave events are kept, so that a deletion or a form kept across a restart names the event it was for; what is there and cannot be read is set aside beside it first. */
 const numbersKey = "alpha.calendar.numbers"
 const decodeNumbers = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({ last: Schema.Number, numbers: Schema.Array(Schema.Tuple([Schema.String, Schema.Number])) })))
 
@@ -17,7 +17,9 @@ const decodeNumbers = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.St
 const shownLayer = Layer.effect(Shown, effect {
   const kv = try KeyValueStore.KeyValueStore
   const stored = kv.get(numbersKey) catch () => undefined
-  const kept: KeptNumbers | undefined = stored === undefined ? undefined : decodeNumbers(stored) catch () => unreadableNumbers
+  const read: KeptNumbers | undefined = stored === undefined ? undefined : decodeNumbers(stored) catch () => undefined
+  if (stored !== undefined && read === undefined) try ignore(kv.set(`${numbersKey}.unreadable`, stored))
+  const kept = stored === undefined ? undefined : read ?? unreadableNumbers
   const store = createShownStore(kept, (numbers) => runFork(ignore(kv.set(numbersKey, JSON.stringify(numbers)))))
   try Effect.addFinalizer(() => sync(() => { store.reset() }))
   return store

@@ -48,7 +48,7 @@ export interface Row {
   readonly cancel: Cancellation;
   /** The provider's version of the event, which a write names, or "" where the calendar keeps none. */
   readonly version: string;
-  /** The revision the form builds on: the provider's change time where it has one, otherwise one more each time a read shows it different. */
+  /** The revision the form builds on: the provider's change time where it has one, otherwise one more each time a read shows it different; the occurrences of a repeating event on the phone share one, which their times leave out. */
   readonly revision: number;
 }
 
@@ -118,7 +118,7 @@ export interface ShownStore {
   readonly visible: (hidden: ReadonlyArray<number>, phone: boolean, google: boolean) => ReadonlyArray<Row>;
   /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
   readonly partial: (source: Source) => boolean;
-  /** Forget what `source` read, including seen titles, numbers, and revisions, but not the names the agent listed: an account changed, a permission went, or the feed came back unavailable. @throws {never} */
+  /** Forget what `source` read, including seen titles and revisions, but not the numbers its events were given or the names the agent listed: an account changed, a permission went, or the feed came back unavailable. @throws {never} */
   readonly drop: (source: Source) => void;
   /** Whether this phone has calendars of its own: a browser has none, and is never asked for access. @throws {never} */
   readonly present: () => boolean;
@@ -164,6 +164,17 @@ export const unreadableNumbers: KeptNumbers = { last: 2 ** 52, numbers: [] };
 /** How far numbering moves on at each start past the last number kept, so a number given after the last one kept is never given again. */
 const startGap = 2 ** 20;
 
+/** How many events' numbers are kept: those seen least lately go first, and a deletion or form that named one then names no event. */
+const keptNumbers = 10_000;
+
+/**
+ * What names an event of `source` among the others: its key, and for an occurrence of a repeating event on the phone, whose
+ * occurrences all share their event's key, its key and its start.
+ */
+export function occurrenceOf(source: Source, read: Pick<Read, "key" | "recurring" | "begin">): string {
+  return source === "Phone" && read.recurring ? `${read.key}@${read.begin}` : read.key;
+}
+
 /** The calendar eliza lists as its own, its resident calendar, where it writes a new event (plugin-calendar providers.vibe `residentCalendarId`, host.vibe `writeTarget`). */
 const ownCalendarId = "primary";
 
@@ -183,9 +194,18 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
   const version = createShelf(0);
   let nextNumber = keepNumbers === undefined ? 0 : kept === undefined ? unkeptFloor : kept.last + startGap;
   let present = false;
+  let unkept = keepNumbers !== undefined;
+  let open = true;
 
   /** @throws {never} */
-  function numbersChanged(): void {
+  function keepGiven(): void {
+    if (!unkept || !open) return;
+    unkept = false;
+    for (const [name, id] of numbers) {
+      if (numbers.size <= keptNumbers) break;
+      numbers.delete(name);
+      given.delete(id);
+    }
     keepNumbers?.({ last: nextNumber, numbers: [...numbers] });
   }
 
@@ -193,11 +213,15 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
   function numbered(source: Source, key: string): number {
     const name = `${source}:${key}`;
     const known = numbers.get(name);
-    if (known !== undefined) return known;
+    numbers.delete(name);
+    if (known !== undefined) {
+      numbers.set(name, known);
+      return known;
+    }
     const made = ++nextNumber;
     numbers.set(name, made);
     given.add(made);
-    numbersChanged();
+    unkept = keepNumbers !== undefined;
     return made;
   }
 
@@ -217,7 +241,8 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
   function revised(source: Source, row: Read): number {
     if (row.changedAt !== undefined && Number.isFinite(row.changedAt)) return Math.floor(row.changedAt / 1000);
     const name = `${source}:${row.key}`;
-    const content = JSON.stringify([row.title, row.place, row.notes, row.begin, row.end, row.allDay]);
+    const series = source === "Phone" && row.recurring;
+    const content = JSON.stringify(series ? [row.title, row.place, row.notes, row.allDay] : [row.title, row.place, row.notes, row.begin, row.end, row.allDay]);
     const before = seen.get(name);
     const revision = before === undefined ? 0 : before.content === content ? before.revision : before.revision + 1;
     seen.set(name, { content, revision });
@@ -230,7 +255,7 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
     return {
       ...rest,
       source,
-      id: numbered(source, read.key),
+      id: numbered(source, occurrenceOf(source, read)),
       calendar: calendarNumber(source, read.calendarId),
       revision: revised(source, { ...rest, changedAt }),
     };
@@ -250,22 +275,28 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
       const rows = read.map((one) => toRow(source, one));
       windows.set(source, [...rows].sort((a, b) => a.begin - b.begin));
       for (const row of rows) last.set(row.id, row);
+      keepGiven();
       told();
       return rows.filter((row) => onDay(row, day));
     },
     mergeOne(source, read) {
       const row = toRow(source, read);
       const existing = windows.get(source) ?? [];
-      const idx = existing.findIndex((candidate) => candidate.id === row.id || candidate.key === row.key);
+      const idx = existing.findIndex((candidate) => candidate.id === row.id);
       const next = idx >= 0
         ? existing.map((candidate, at) => (at === idx ? row : candidate))
         : [...existing, row];
       windows.set(source, [...next].sort((a, b) => a.begin - b.begin));
       last.set(row.id, row);
+      keepGiven();
       told();
       return row;
     },
-    toRow,
+    toRow(source, read) {
+      const row = toRow(source, read);
+      keepGiven();
+      return row;
+    },
     of(source, day) {
       return (windows.get(source) ?? []).filter((row) => onDay(row, day));
     },
@@ -282,11 +313,6 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
       cut.delete(source);
       const prefix = `${source}:`;
       for (const [id, row] of [...last]) if (row.source === source) last.delete(id);
-      for (const [key, id] of [...numbers]) if (key.startsWith(prefix)) {
-        numbers.delete(key);
-        given.delete(id);
-      }
-      numbersChanged();
       for (const key of [...seen.keys()]) if (key.startsWith(prefix)) seen.delete(key);
       if (source === "Phone") calendars.clear();
       told();
@@ -302,7 +328,11 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
     restore(kept) {
       for (const [name, content, revision] of kept) if (!seen.has(name)) seen.set(name, { content, revision });
     },
-    number: (source, key) => numbered(source, key),
+    number(source, key) {
+      const id = numbered(source, key);
+      keepGiven();
+      return id;
+    },
     known: (id) => given.has(id),
     lastSeen: (id) => last.get(id),
     find(id) {
@@ -323,6 +353,7 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
     listedName: (calendarId) => names.get(calendarId) ?? ownName,
     listedSummary: (calendarId) => names.get(calendarId) ?? "",
     reset() {
+      open = false;
       names.clear();
       ownName = "";
       numbers.clear();
@@ -338,7 +369,7 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
       onReset?.();
     },
   };
-  numbersChanged();
+  keepGiven();
   return store;
 }
 

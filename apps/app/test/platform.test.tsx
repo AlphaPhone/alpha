@@ -546,6 +546,7 @@ it("Keep my phone's state across restarts: every shape a durable record was ever
     })));
     for (const one of earlier) {
       const shape = `${one.key} as kept from ${one.from} until ${one.until}`;
+      if (one.reads !== undefined && (await machineOf(one.key)).parseState(one.reads) === undefined) problems.push(`${shape}: what it reads as is not today's shape`);
       if (restarted.held.has(`${one.key}.unreadable`)) problems.push(`${shape}: set aside`);
       else if (JSON.stringify(restarted.states.get(one.key)) !== JSON.stringify(one.reads ?? today.states.get(one.key))) problems.push(`${shape}: read as ${JSON.stringify(restarted.states.get(one.key))}, today's shape as ${JSON.stringify(one.reads ?? today.states.get(one.key))}`);
       for (const name of one.kept) if (JSON.stringify(valueAt(restarted.states.get(one.key), name)) !== JSON.stringify(valueAt(one.reads ?? one.today, name))) problems.push(`${shape}: ${name} was not kept`);

@@ -4,13 +4,13 @@
   "shape": "04646a632c0e73e9",
   "sealed": {
     "shape": "04646a632c0e73e9",
-    "state": "080bee2259fd09f3"
+    "state": "e6d952e5d333cd8f"
   },
   "state": {
     "owner": 1,
     "asked": 0,
-    "askedReach": "OneEvent",
-    "askedRevision": 0,
+    "askedReach": "FromThisOn",
+    "askedRevision": 5,
     "waiting": 4294967338,
     "reach": "FromThisOn",
     "revision": 5,
@@ -26,7 +26,7 @@
     "hiding": 0,
     "hidingReach": "OneEvent",
     "dropped": 0,
-    "failed": 0,
+    "failed": 4294967335,
     "changed": false
   },
   "kept": [
@@ -44,6 +44,10 @@
     "alpha.calendar.numbers": {
       "last": 4294967338,
       "numbers": [
+        [
+          "Phone:p39",
+          4294967335
+        ],
         [
           "Phone:p42",
           4294967338
@@ -70,7 +74,7 @@
         "sending": 0,
         "hiding": 0,
         "dropped": 0,
-        "failed": 0
+        "failed": 39
       },
       "reads": {
         "owner": 1,
@@ -92,7 +96,7 @@
         "hiding": 0,
         "hidingReach": "OneEvent",
         "dropped": 0,
-        "failed": 0,
+        "failed": 39,
         "changed": false
       }
     },
@@ -116,7 +120,7 @@
         "hiding": 0,
         "hidingReach": "OneEvent",
         "dropped": 0,
-        "failed": 0
+        "failed": 39
       },
       "reads": {
         "owner": 1,
@@ -138,7 +142,7 @@
         "hiding": 0,
         "hidingReach": "OneEvent",
         "dropped": 0,
-        "failed": 0,
+        "failed": 39,
         "changed": false
       }
     }
