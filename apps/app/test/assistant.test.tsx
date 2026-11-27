@@ -1347,6 +1347,15 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     expect(kept(world, dinner(world))).toMatchObject({ text, sending: true });
     await first.close();
   };
+  /** Write "Mine" until it is kept, then let another Alpha save `saved` over it as revision 5 before "Mine too" is written. */
+  const savedMeanwhile = async (world: ReturnType<typeof scene>, saved: { text: string; sending: boolean }) => {
+    const opened = await openAssistant(world);
+    write("Mine");
+    await until(opened.alpha, opened.runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
+    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 5, ...saved }));
+    write("Mine too");
+    return opened;
+  };
   /** Open Alpha again after `diesMidSend`, on the conversation it was sending in, once its slot is open. */
   const reopened = async (world: ReturnType<typeof scene>) => {
     const again = await open(world, mounts);
@@ -1481,11 +1490,7 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
   // spec/app/assistant/composer.md, "A conflict keeps the saved copy and the current text together, and saves them"
   it("A copy saved elsewhere meanwhile is kept with my text in the field, and both are saved, even where one holds the other's words", async () => {
     const world = { ...scene(), phone: true };
-    const { alpha, runtime } = await openAssistant(world);
-    write("Mine");
-    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
-    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 5, text: "From the other window", sending: false }));
-    write("Mine too");
+    const { alpha, runtime } = await savedMeanwhile(world, { text: "From the other window", sending: false });
     await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.draft.base === 6);
     expect([composerText(), kept(world), byTheField(), button("Restore saved")]).toEqual(["From the other window\nMine too", { revision: 6, text: "From the other window\nMine too", sending: false }, [], undefined]);
 
@@ -1503,11 +1508,7 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
   // spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept or the message it marks is checked"; spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
   it("A message another Alpha marked as sending in the same slot is held for review, never put in my field, and settled once that Alpha writes over its mark", async () => {
     const world = { ...scene(), phone: true };
-    const { alpha, runtime } = await openAssistant(world);
-    write("Mine");
-    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
-    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 5, text: "Book the table", sending: true }));
-    write("Mine too");
+    const { alpha, runtime } = await savedMeanwhile(world, { text: "Book the table", sending: true });
     await until(alpha, runtime, Composer, (s) => s.unsettled);
     expect([composerText(), kept(world), byTheField()]).toEqual(["Mine too", { revision: 5, text: "Book the table", sending: true }, []]);
 
